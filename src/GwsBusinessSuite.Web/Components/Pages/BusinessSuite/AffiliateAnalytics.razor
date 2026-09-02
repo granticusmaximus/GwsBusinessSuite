@@ -24,11 +24,17 @@
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
-    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
 }
 @if (!string.IsNullOrWhiteSpace(StatusMessage))
 {
-    <div class="alert alert-info" role="alert">@StatusMessage</div>
+    <div class="alert alert-success d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
 }
 
 <div class="alert alert-warning small">
@@ -41,7 +47,7 @@
 
 @if (!_loaded)
 {
-    <p class="text-secondary">Loading...</p>
+    <LoadingIndicator Message="Loading affiliate analytics…" />
 }
 else
 {
@@ -73,7 +79,7 @@ else
                 <div class="card-body p-0">
                     @if (Dashboard.ClicksByAdvertiser.Count == 0)
                     {
-                        <div class="p-3 text-secondary small">No clicks recorded yet.</div>
+                        <EmptyState Icon="bi-cursor" Message="No clicks recorded yet." CssClass="p-3 text-secondary small" />
                     }
                     else
                     {
@@ -103,7 +109,7 @@ else
                 <div class="card-body p-0">
                     @if (Dashboard.ClicksByArticle.Count == 0)
                     {
-                        <div class="p-3 text-secondary small">No clicks recorded yet.</div>
+                        <EmptyState Icon="bi-cursor" Message="No clicks recorded yet." CssClass="p-3 text-secondary small" />
                     }
                     else
                     {
@@ -143,7 +149,7 @@ else
                 <div class="card-body p-0">
                     @if (Dashboard.RevenueByAdvertiser.Count == 0)
                     {
-                        <div class="p-3 text-secondary small">No commission data imported yet. Click "Sync Commissions Now" above.</div>
+                        <EmptyState Icon="bi-cash-coin" Message="No commission data imported yet. Click &quot;Sync Commissions Now&quot; above." CssClass="p-3 text-secondary small" />
                     }
                     else
                     {
@@ -174,7 +180,7 @@ else
                 <div class="card-body p-0">
                     @if (Dashboard.RecentClicks.Count == 0)
                     {
-                        <div class="p-3 text-secondary small">No clicks recorded yet.</div>
+                        <EmptyState Icon="bi-cursor" Message="No clicks recorded yet." CssClass="p-3 text-secondary small" />
                     }
                     else
                     {

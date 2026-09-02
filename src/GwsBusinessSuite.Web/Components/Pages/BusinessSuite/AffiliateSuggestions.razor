@@ -18,11 +18,17 @@
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
-  <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+  <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+    <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+    <div>@ErrorMessage</div>
+  </div>
 }
 @if (!string.IsNullOrWhiteSpace(StatusMessage))
 {
-  <div class="alert alert-info" role="alert">@StatusMessage</div>
+  <div class="alert alert-success d-flex align-items-center gap-2 mb-4" role="alert">
+    <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+    <div>@StatusMessage</div>
+  </div>
 }
 @if (BulkFailures.Count > 0)
 {
@@ -52,13 +58,15 @@
 
 @if (!_loaded)
 {
-  <p class="text-secondary">Loading suggestions...</p>
+  <LoadingIndicator Message="Loading suggestions…" />
 }
 else if (Groups.Count == 0)
 {
   <div class="card border-0 shadow-sm">
-    <div class="card-body text-secondary">
-      No pending suggestions. Click "Generate for All Articles" above, or sync CJ links first if you haven't yet.
+    <div class="card-body">
+      <EmptyState Icon="bi-magic" Message="No pending suggestions." CssClass="text-secondary">
+        <p class="mb-0">Click "Generate for All Articles" above, or sync CJ links first if you haven't yet.</p>
+      </EmptyState>
     </div>
   </div>
 }

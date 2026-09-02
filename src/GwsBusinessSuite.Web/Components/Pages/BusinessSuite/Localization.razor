@@ -5,7 +5,6 @@
 @using GwsBusinessSuite.Domain.Entities
 @inject IContentLocalizationService LocalizationService
 @inject ICurrentUserAccessor CurrentUserAccessor
-@inject IJSRuntime JS
 
 <PageTitle>Content Localization</PageTitle>
 
@@ -13,6 +12,13 @@
     <h1><i class="bi bi-translate me-2 text-primary"></i>Content Localization</h1>
     <p>Create, review, and publish translated copies of articles and CMS pages.</p>
 </div>
+
+@if (IsLoading)
+{
+    <LoadingIndicator Message="Loading localization content…" />
+}
+else
+{
 
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
@@ -124,7 +130,7 @@
                 <tbody>
                     @if (_localizations.Count == 0)
                     {
-                        <tr><td colspan="5" class="text-secondary text-center py-4">No translations yet.</td></tr>
+                        <tr><td colspan="5"><EmptyState Icon="bi-translate" Message="No translations yet." CssClass="text-secondary text-center py-4" /></td></tr>
                     }
                     @foreach (var localization in _localizations)
                     {
@@ -158,6 +164,11 @@
     </div>
 }
 
+}
+
+<ConfirmModal Show="PendingDeleteId.HasValue" Title="Delete translation" Message="Delete this translation? This cannot be undone."
+              ConfirmText="Delete" Busy="_isBusy" OnConfirm="ConfirmDeleteAsync" OnCancel="() => PendingDeleteId = null" />
+
 @code {
     private List<LocalizableContent> _content = [];
     private List<ContentLocalizationSummary> _localizations = [];
@@ -170,6 +181,8 @@
     private bool _isBusy;
     private string _errorMessage = string.Empty;
     private string _statusMessage = string.Empty;
+    private bool IsLoading { get; set; } = true;
+    private Guid? PendingDeleteId { get; set; }
 
     private bool HasSelectedContent => TryGetSelectedContent(out _, out _);
     private bool IsArticleSelected => TryGetSelectedContent(out var type, out _)
@@ -177,7 +190,15 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _content = (await LocalizationService.ListLocalizableContentAsync()).ToList();
+        IsLoading = true;
+        try
+        {
+            _content = (await LocalizationService.ListLocalizableContentAsync()).ToList();
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
     private static string ContentKey(LocalizableContent item) => $"{item.ContentType}:{item.Id}";
@@ -303,9 +324,12 @@
         });
     }
 
-    private async Task DeleteAsync(Guid id)
+    private void DeleteAsync(Guid id) => PendingDeleteId = id;
+
+    private async Task ConfirmDeleteAsync()
     {
-        if (!await JS.InvokeAsync<bool>("confirm", "Delete this translation? This cannot be undone.")) return;
+        if (PendingDeleteId is not Guid id) return;
+        PendingDeleteId = null;
         await RunBusyAsync(async () =>
         {
             var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
