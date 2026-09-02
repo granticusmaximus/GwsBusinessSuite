@@ -36,7 +36,10 @@
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
-    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
 }
 
 <div class="card border-0 shadow-sm mb-4">
@@ -46,10 +49,7 @@
     <div class="card-body">
         @if (!_doLoaded)
         {
-            <div class="d-flex align-items-center gap-2 text-secondary">
-                <span class="spinner-border spinner-border-sm"></span>
-                <span>Loading...</span>
-            </div>
+            <LoadingIndicator Message="Loading…" CssClass="text-secondary" />
         }
         else
         {
@@ -150,10 +150,7 @@
 
 @if (!_loaded)
 {
-    <div class="d-flex align-items-center gap-2 text-secondary">
-        <span class="spinner-border spinner-border-sm"></span>
-        <span>Checking Docker...</span>
-    </div>
+    <LoadingIndicator Message="Checking Docker…" CssClass="text-secondary" />
 }
 else if (!_available)
 {
@@ -164,7 +161,7 @@ else if (!_available)
 }
 else if (Containers.Count == 0)
 {
-    <p class="text-secondary">No containers found.</p>
+    <EmptyState Icon="bi-box-seam" Message="No containers found." />
 }
 else
 {
@@ -210,6 +207,14 @@ else
     </div>
 }
 
+<ConfirmModal Show="ShowRebootConfirm"
+              Title="Reboot droplet"
+              Message="This restarts the entire droplet, taking every container (including this app and any other services running here) down for roughly a minute. Continue?"
+              ConfirmText="Reboot" Busy="IsDoActionBusy" OnConfirm="ConfirmRebootDropletAsync" OnCancel="() => ShowRebootConfirm = false" />
+<ConfirmModal Show="PendingStopContainerName is not null" Title="Stop container" Message="@($"Stop {PendingStopContainerName}?")"
+              ConfirmText="Stop" Busy="@(PendingStopContainerName is not null && IsContainerBusy(PendingStopContainerName))"
+              OnConfirm="ConfirmStopAsync" OnCancel="() => PendingStopContainerName = null" />
+
 @code {
     private List<ContainerHealthView> Containers { get; set; } = new();
     private bool _loaded;
@@ -237,6 +242,8 @@ else
     private string DoSaveMessage { get; set; } = string.Empty;
     private DropletInfoResult? DropletResult { get; set; }
     private List<DropletActionView> DropletActions { get; set; } = new();
+    private bool ShowRebootConfirm { get; set; }
+    private string? PendingStopContainerName { get; set; }
 
     private Task OpenTerminalWindowAsync() => JS.InvokeVoidAsync("gwsSshTerminal.openWindow").AsTask();
 
@@ -323,11 +330,11 @@ else
         }
     }
 
-    private async Task RebootDropletAsync()
+    private void RebootDropletAsync() => ShowRebootConfirm = true;
+
+    private async Task ConfirmRebootDropletAsync()
     {
-        var confirmed = await JS.InvokeAsync<bool>("confirm",
-            "This restarts the entire droplet, taking every container (including this app and any other services running here) down for roughly a minute. Continue?");
-        if (!confirmed) return;
+        ShowRebootConfirm = false;
 
         IsDoActionBusy = true;
         try
@@ -414,10 +421,12 @@ else
 
     private Task StartAsync(string name) => RunContainerActionAsync(name, DockerHealthService.StartContainerAsync);
 
-    private async Task StopAsync(string name)
+    private void StopAsync(string name) => PendingStopContainerName = name;
+
+    private async Task ConfirmStopAsync()
     {
-        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Stop {name}?");
-        if (!confirmed) return;
+        if (PendingStopContainerName is not { } name) return;
+        PendingStopContainerName = null;
         await RunContainerActionAsync(name, DockerHealthService.StopContainerAsync);
     }
 

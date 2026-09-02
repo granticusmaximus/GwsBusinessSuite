@@ -5,7 +5,6 @@
 @using GwsBusinessSuite.Application.DockerHealth
 @inject IDockerHealthService DockerHealthService
 @inject ICurrentUserAccessor CurrentUserAccessor
-@inject IJSRuntime JS
 @inject ILogger<DockerHealthDetail> Logger
 
 <PageTitle>@ContainerName - Docker Management</PageTitle>
@@ -27,14 +26,11 @@
 
 @if (!_loaded)
 {
-    <div class="d-flex align-items-center gap-2 text-secondary">
-        <span class="spinner-border spinner-border-sm"></span>
-        <span>Loading...</span>
-    </div>
+    <LoadingIndicator Message="Loading container…" />
 }
 else if (Detail?.Container is null)
 {
-    <p class="text-secondary">Container not found. It may have been removed or renamed.</p>
+    <EmptyState Icon="bi-question-circle" Message="Container not found. It may have been removed or renamed." />
 }
 else
 {
@@ -130,7 +126,7 @@ else
         <div class="card-body p-0">
             @if (ActionLogs.Count == 0)
             {
-                <p class="text-secondary p-3 mb-0">No management actions have been taken on this container yet.</p>
+                <EmptyState Icon="bi-clock-history" Message="No management actions have been taken on this container yet." CssClass="p-3 text-secondary" />
             }
             else
             {
@@ -186,7 +182,18 @@ else
     }
 }
 
+<ConfirmModal Show="PendingAction == DockerConfirmAction.Stop" Title="Stop container" Message="@($"Stop {ContainerName}?")"
+              ConfirmText="Stop" Busy="IsBusy" OnConfirm="ConfirmPendingActionAsync" OnCancel="CancelPendingAction" />
+<ConfirmModal Show="PendingAction == DockerConfirmAction.Recreate" Title="Recreate container"
+              Message="@($"Stop, remove, and recreate {ContainerName} from its current config and image? Any pulled-but-not-yet-applied image update will be applied now.")"
+              ConfirmText="Recreate" Busy="IsBusy" OnConfirm="ConfirmPendingActionAsync" OnCancel="CancelPendingAction" />
+<ConfirmModal Show="PendingAction == DockerConfirmAction.Remove" Title="Remove container"
+              Message="@($"This permanently removes {ContainerName}. This cannot be undone. Continue?")"
+              ConfirmText="Remove" Busy="IsBusy" OnConfirm="ConfirmPendingActionAsync" OnCancel="CancelPendingAction" />
+
 @code {
+    private enum DockerConfirmAction { None, Stop, Recreate, Remove }
+    private DockerConfirmAction PendingAction { get; set; } = DockerConfirmAction.None;
     [Parameter]
     public string ContainerName { get; set; } = string.Empty;
 
@@ -247,31 +254,35 @@ else
 
     private Task StartAsync() => RunActionAsync(DockerHealthService.StartContainerAsync);
 
-    private async Task StopAsync()
-    {
-        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Stop {ContainerName}?");
-        if (!confirmed) return;
-        await RunActionAsync(DockerHealthService.StopContainerAsync);
-    }
+    private void StopAsync() => PendingAction = DockerConfirmAction.Stop;
 
     private Task RestartAsync() => RunActionAsync(DockerHealthService.RestartContainerAsync);
 
     private Task PullAsync() => RunActionAsync(DockerHealthService.PullImageAsync);
 
-    private async Task RecreateAsync()
-    {
-        var confirmed = await JS.InvokeAsync<bool>("confirm",
-            $"Stop, remove, and recreate {ContainerName} from its current config and image? Any pulled-but-not-yet-applied image update will be applied now.");
-        if (!confirmed) return;
-        await RunActionAsync(DockerHealthService.RecreateContainerAsync);
-    }
+    private void RecreateAsync() => PendingAction = DockerConfirmAction.Recreate;
 
-    private async Task RemoveAsync()
+    private void RemoveAsync() => PendingAction = DockerConfirmAction.Remove;
+
+    private void CancelPendingAction() => PendingAction = DockerConfirmAction.None;
+
+    private async Task ConfirmPendingActionAsync()
     {
-        var confirmed = await JS.InvokeAsync<bool>("confirm",
-            $"This permanently removes {ContainerName}. This cannot be undone. Continue?");
-        if (!confirmed) return;
-        await RunActionAsync(DockerHealthService.RemoveContainerAsync);
+        var action = PendingAction;
+        PendingAction = DockerConfirmAction.None;
+
+        switch (action)
+        {
+            case DockerConfirmAction.Stop:
+                await RunActionAsync(DockerHealthService.StopContainerAsync);
+                break;
+            case DockerConfirmAction.Recreate:
+                await RunActionAsync(DockerHealthService.RecreateContainerAsync);
+                break;
+            case DockerConfirmAction.Remove:
+                await RunActionAsync(DockerHealthService.RemoveContainerAsync);
+                break;
+        }
     }
 
     private async Task RunExecAsync()
