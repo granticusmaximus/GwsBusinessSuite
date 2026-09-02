@@ -24,6 +24,13 @@
     </div>
 }
 
+@if (IsLoading)
+{
+    <LoadingIndicator Message="Loading requests…" />
+}
+else
+{
+
 <div class="row g-4">
     <div class="col-lg-4">
         <div class="card border-0 shadow-sm mb-4">
@@ -70,7 +77,7 @@
                 }
                 @if (Requests.Count == 0)
                 {
-                    <div class="list-group-item text-muted small">No requests yet.</div>
+                    <EmptyState Icon="bi-list-ul" Message="No requests yet." CssClass="list-group-item p-3 text-muted small" />
                 }
             </div>
         </div>
@@ -80,9 +87,8 @@
         @if (Selected is null)
         {
             <div class="card border-0 shadow-sm">
-                <div class="card-body text-center text-muted py-5">
-                    <i class="bi bi-chat-square-text display-6 d-block mb-2"></i>
-                    Select a request on the left, or start a new one.
+                <div class="card-body">
+                    <EmptyState Icon="bi-chat-square-text" Message="Select a request on the left, or start a new one." CssClass="p-5 text-center text-muted" />
                 </div>
             </div>
         }
@@ -153,6 +159,8 @@
     </div>
 </div>
 
+}
+
 @code {
     private List<CmsSite> Sites { get; set; } = [];
     private List<AppGenerationRequestView> Requests { get; set; } = [];
@@ -163,11 +171,20 @@
     private string ChatMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private bool IsBusy { get; set; }
+    private bool IsLoading { get; set; } = true;
 
     protected override async Task OnInitializedAsync()
     {
-        Sites = (await CmsBuilderService.ListSitesAsync()).ToList();
-        await RefreshListAsync();
+        IsLoading = true;
+        try
+        {
+            Sites = (await CmsBuilderService.ListSitesAsync()).ToList();
+            await RefreshListAsync();
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
     private async Task RefreshListAsync()

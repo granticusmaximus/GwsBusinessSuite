@@ -79,9 +79,13 @@
         <span class="badge text-bg-secondary ms-auto">@Users.Count</span>
     </div>
     <div class="card-body p-0">
-        @if (Users.Count == 0 && !IsBusy)
+        @if (IsLoading)
         {
-            <p class="text-secondary m-3">No users found.</p>
+            <LoadingIndicator Message="Loading users…" />
+        }
+        else if (Users.Count == 0)
+        {
+            <EmptyState Icon="bi-people" Message="No users found." />
         }
         else
         {
@@ -185,6 +189,7 @@
 @code {
     private List<UserView> Users { get; set; } = new();
     private bool IsBusy { get; set; }
+    private bool IsLoading { get; set; } = true;
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
 
@@ -202,7 +207,17 @@
     private Guid?  ResetPasswordForId  { get; set; }
     private string ResetPasswordValue  { get; set; } = string.Empty;
 
-    protected override async Task OnInitializedAsync() => await LoadUsers();
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await LoadUsers();
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
 
     private async Task LoadUsers()
     {

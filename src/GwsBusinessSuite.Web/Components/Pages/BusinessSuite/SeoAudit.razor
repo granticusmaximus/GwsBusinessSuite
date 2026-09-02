@@ -13,11 +13,21 @@
     <p>A deterministic SEO checklist, plus an optional AI-era readiness read from a local Ollama model on how likely an AI answer engine would cite this page.</p>
 </div>
 
+@if (IsLoading)
+{
+    <LoadingIndicator Message="Loading auditable content…" />
+}
+else
+{
+
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
         @if (!string.IsNullOrWhiteSpace(ErrorMessage))
         {
-            <div class="alert alert-danger py-2 px-3 small">@ErrorMessage</div>
+            <div class="alert alert-danger d-flex align-items-start gap-2 py-2 px-3 small" role="alert">
+                <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+                <div>@ErrorMessage</div>
+            </div>
         }
         <div class="row g-2 align-items-end">
             <div class="col-md-4">
@@ -124,19 +134,30 @@
     </div>
 }
 
+}
+
 @code {
     private List<SeoAuditableContent> Content { get; set; } = [];
     private string _selectedContentKey = string.Empty;
     private string _keyword = string.Empty;
     private string _model = string.Empty;
     private bool _isBusy;
+    private bool IsLoading { get; set; } = true;
     private string ErrorMessage { get; set; } = string.Empty;
     private SeoAuditResult? Result { get; set; }
     private IReadOnlyList<SeoAuditRunSummary> RunHistory { get; set; } = [];
 
     protected override async Task OnInitializedAsync()
     {
-        Content = (await AuditService.ListAuditableContentAsync()).ToList();
+        IsLoading = true;
+        try
+        {
+            Content = (await AuditService.ListAuditableContentAsync()).ToList();
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
     private static string ContentKey(SeoAuditableContent item) => $"{item.ContentType}:{item.Id}";
