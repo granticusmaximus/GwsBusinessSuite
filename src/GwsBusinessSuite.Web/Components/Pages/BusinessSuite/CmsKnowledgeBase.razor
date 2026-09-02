@@ -5,7 +5,6 @@
 @using GwsBusinessSuite.Application.CmsKnowledge
 @using GwsBusinessSuite.Domain.Entities
 @inject ICmsKnowledgeService KnowledgeService
-@inject IJSRuntime JS
 @inject ILogger<CmsKnowledgeBase> Logger
 
 <PageTitle>Builder Reference Library</PageTitle>
@@ -20,12 +19,25 @@
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
-    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
 }
 @if (!string.IsNullOrWhiteSpace(StatusMessage))
 {
-    <div class="alert alert-info" role="alert">@StatusMessage</div>
+    <div class="alert alert-success d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
 }
+
+@if (IsLoading)
+{
+    <LoadingIndicator Message="Loading builder reference library…" />
+}
+else
+{
 
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white border-bottom py-3">
@@ -61,7 +73,7 @@
         }
         else if (_searched)
         {
-            <p class="text-secondary mb-0">No matches.</p>
+            <EmptyState Icon="bi-search" Message="No matches." />
         }
     </div>
 </div>
@@ -138,7 +150,7 @@
                 <div class="card-body p-0">
                     @if (Entries.Count == 0)
                     {
-                        <div class="p-3 text-secondary small">No entries yet.</div>
+                        <EmptyState Icon="bi-journal-x" Message="No entries yet." CssClass="p-3 text-secondary small" />
                     }
                     else
                     {
@@ -197,6 +209,13 @@
     </div>
 </div>
 
+}
+
+<ConfirmModal Show="ShowDeleteSourceConfirm" Title="Delete source" Message="Delete this source and all of its entries? This cannot be undone."
+              ConfirmText="Delete" OnConfirm="ConfirmDeleteSourceAsync" OnCancel="() => ShowDeleteSourceConfirm = false" />
+<ConfirmModal Show="PendingDeleteEntryId.HasValue" Title="Delete entry" Message="Delete this entry? This cannot be undone."
+              ConfirmText="Delete" OnConfirm="ConfirmDeleteEntryAsync" OnCancel="() => PendingDeleteEntryId = null" />
+
 @code {
     private List<CmsKnowledgeSource> Sources { get; set; } = new();
     private List<CmsKnowledgeEntry> Entries { get; set; } = new();
@@ -208,10 +227,21 @@
     private bool _searched;
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
+    private bool IsLoading { get; set; } = true;
+    private bool ShowDeleteSourceConfirm { get; set; }
+    private Guid? PendingDeleteEntryId { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadSourcesAsync();
+        IsLoading = true;
+        try
+        {
+            await LoadSourcesAsync();
+        }
+        finally
+        {
+            IsLoading = false;
+        }
     }
 
     private async Task LoadSourcesAsync()
@@ -292,12 +322,16 @@
         }
     }
 
-    private async Task DeleteSourceAsync()
+    private void DeleteSourceAsync()
     {
         if (!SourceEditor.SourceId.HasValue) return;
+        ShowDeleteSourceConfirm = true;
+    }
 
-        var confirmed = await JS.InvokeAsync<bool>("confirm", "Delete this source and all of its entries? This cannot be undone.");
-        if (!confirmed) return;
+    private async Task ConfirmDeleteSourceAsync()
+    {
+        ShowDeleteSourceConfirm = false;
+        if (!SourceEditor.SourceId.HasValue) return;
 
         try
         {
@@ -334,10 +368,12 @@
         }
     }
 
-    private async Task DeleteEntryAsync(Guid entryId)
+    private void DeleteEntryAsync(Guid entryId) => PendingDeleteEntryId = entryId;
+
+    private async Task ConfirmDeleteEntryAsync()
     {
-        var confirmed = await JS.InvokeAsync<bool>("confirm", "Delete this entry? This cannot be undone.");
-        if (!confirmed) return;
+        if (PendingDeleteEntryId is not Guid entryId) return;
+        PendingDeleteEntryId = null;
 
         try
         {

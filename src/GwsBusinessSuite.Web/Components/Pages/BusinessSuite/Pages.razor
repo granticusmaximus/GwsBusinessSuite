@@ -7,7 +7,6 @@
 @inject ICmsBuilderService CmsBuilderService
 @inject NavigationManager Navigation
 @inject GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor CurrentCmsSiteAccessor
-@inject IJSRuntime JS
 @inject ILogger<Pages> Logger
 
 <PageTitle>Pages</PageTitle>
@@ -22,12 +21,25 @@
 
 @if (!string.IsNullOrWhiteSpace(CmsErrorMessage))
 {
-    <div class="alert alert-danger" role="alert">@CmsErrorMessage</div>
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@CmsErrorMessage</div>
+    </div>
 }
 @if (!string.IsNullOrWhiteSpace(CmsStatusMessage))
 {
-    <div class="alert alert-info" role="alert">@CmsStatusMessage</div>
+    <div class="alert alert-success d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@CmsStatusMessage</div>
+    </div>
 }
+
+@if (IsLoading)
+{
+    <LoadingIndicator Message="Loading pages…" />
+}
+else
+{
 
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
@@ -52,9 +64,7 @@
         {
             @if (TrashedPages.Count == 0)
             {
-                <div class="p-4">
-                    <p class="text-secondary mb-0">Trash is empty.</p>
-                </div>
+                <EmptyState Icon="bi-trash3" Message="Trash is empty." />
             }
             else
             {
@@ -79,9 +89,7 @@
         }
         else if (CmsPages.Count == 0)
         {
-            <div class="p-4">
-                <p class="text-secondary mb-0">No pages exist for this site yet.</p>
-            </div>
+            <EmptyState Icon="bi-layout-three-columns" Message="No pages exist for this site yet." />
         }
         else
         {
@@ -103,9 +111,7 @@
             </div>
             @if (VisiblePages().Count == 0)
             {
-                <div class="p-4">
-                    <p class="text-secondary mb-0">No pages match your search.</p>
-                </div>
+                <EmptyState Icon="bi-search" Message="No pages match your search." />
             }
             else
             {
@@ -145,6 +151,13 @@
     </div>
 </div>
 
+}
+
+<ConfirmModal Show="PendingBulkTrashCount.HasValue" Title="Move to Trash" Message="@($"Move {PendingBulkTrashCount} page(s) to Trash?")"
+              ConfirmText="Move to Trash" Busy="IsCmsBusy" OnConfirm="ConfirmBulkTrashSelectedPagesAsync" OnCancel="() => PendingBulkTrashCount = null" />
+<ConfirmModal Show="PendingDeletePageId.HasValue" Title="Delete page permanently" Message="Permanently delete this page? This cannot be undone."
+              ConfirmText="Delete Permanently" Busy="IsCmsBusy" OnConfirm="ConfirmPermanentlyDeleteTrashedPageAsync" OnCancel="() => PendingDeletePageId = null" />
+
 @code {
     private CmsSite? CurrentSite { get; set; }
     private List<CmsPage> CmsPages { get; set; } = new();
@@ -152,7 +165,10 @@
     private HashSet<Guid> SelectedPageIdsForBulk { get; set; } = new();
     private Guid? SelectedSiteId { get; set; }
     private bool ShowTrash { get; set; }
+    private bool IsLoading { get; set; } = true;
     private bool IsCmsBusy { get; set; }
+    private int? PendingBulkTrashCount { get; set; }
+    private Guid? PendingDeletePageId { get; set; }
     private string CmsStatusMessage { get; set; } = string.Empty;
     private string CmsErrorMessage { get; set; } = string.Empty;
     private string SearchText { get; set; } = string.Empty;
@@ -165,7 +181,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        IsCmsBusy = true;
+        IsLoading = true;
         CmsErrorMessage = string.Empty;
 
         try
@@ -179,7 +195,7 @@
         }
         finally
         {
-            IsCmsBusy = false;
+            IsLoading = false;
         }
     }
 
@@ -286,12 +302,16 @@
         else SelectedPageIdsForBulk.Remove(pageId);
     }
 
-    private async Task BulkTrashSelectedPagesAsync()
+    private void BulkTrashSelectedPagesAsync()
     {
         if (SelectedPageIdsForBulk.Count == 0 || !SelectedSiteId.HasValue) return;
+        PendingBulkTrashCount = SelectedPageIdsForBulk.Count;
+    }
 
-        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Move {SelectedPageIdsForBulk.Count} page(s) to Trash?");
-        if (!confirmed) return;
+    private async Task ConfirmBulkTrashSelectedPagesAsync()
+    {
+        PendingBulkTrashCount = null;
+        if (!SelectedSiteId.HasValue) return;
 
         var siteId = SelectedSiteId.Value;
         var ids = SelectedPageIdsForBulk.ToList();
@@ -378,12 +398,17 @@
         }
     }
 
-    private async Task PermanentlyDeleteTrashedPageAsync(Guid pageId)
+    private void PermanentlyDeleteTrashedPageAsync(Guid pageId)
     {
         if (!SelectedSiteId.HasValue) return;
+        PendingDeletePageId = pageId;
+    }
 
-        var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this page? This cannot be undone.");
-        if (!confirmed) return;
+    private async Task ConfirmPermanentlyDeleteTrashedPageAsync()
+    {
+        if (PendingDeletePageId is not Guid pageId) return;
+        PendingDeletePageId = null;
+        if (!SelectedSiteId.HasValue) return;
 
         IsCmsBusy = true;
         CmsErrorMessage = string.Empty;
