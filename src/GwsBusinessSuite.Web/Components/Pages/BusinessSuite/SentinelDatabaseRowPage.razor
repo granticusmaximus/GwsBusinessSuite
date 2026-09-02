@@ -230,6 +230,10 @@
     </section>
 </div>
 
+<ConfirmModal Show="PendingRevertRevisionId.HasValue" Title="Revert to this version"
+              Message="Revert to this version? This creates a new version with the old content - nothing is lost."
+              ConfirmText="Revert" Busy="IsHistoryBusy" OnConfirm="ConfirmRevertToRevisionAsync" OnCancel="() => PendingRevertRevisionId = null" />
+
 @code {
     private const int MaxHistoryDisplay = 20;
 
@@ -529,10 +533,14 @@
         }
     }
 
-    private async Task RevertToRevisionAsync(Guid revisionId)
+    private Guid? PendingRevertRevisionId { get; set; }
+
+    private void RevertToRevisionAsync(Guid revisionId) => PendingRevertRevisionId = revisionId;
+
+    private async Task ConfirmRevertToRevisionAsync()
     {
-        var confirmed = await JS.InvokeAsync<bool>("confirm", "Revert to this version? This creates a new version with the old content - nothing is lost.");
-        if (!confirmed) return;
+        if (PendingRevertRevisionId is not Guid revisionId) return;
+        PendingRevertRevisionId = null;
 
         // A pending autosave racing this revert could silently resurrect the pre-revert
         // content a moment later; cancel it first so the revert's result is the one that wins.

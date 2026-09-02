@@ -16,7 +16,6 @@
 @inject IAffiliateSuggestionService AffiliateSuggestionService
 @inject NavigationManager Navigation
 @inject ILogger<ArticleEditorDetail> Logger
-@inject IJSRuntime JS
 
 <PageTitle>@(CurrentArticle?.Title ?? "Article Editor")</PageTitle>
 
@@ -383,6 +382,10 @@ else
         </div>
     </div>
 }
+
+<ConfirmModal Show="PendingDeletePlacement is not null" Title="Remove ad placement"
+              Message="@($"Remove the {PendingDeletePlacement?.AdvertiserName} ad placement? Its token will be removed from the published article the next time it's served.")"
+              ConfirmText="Remove" Busy="IsBusy" OnConfirm="ConfirmDeletePlacementAsync" OnCancel="() => PendingDeletePlacement = null" />
 
 @code {
     [Parameter]
@@ -922,11 +925,14 @@ else
         }
     }
 
-    private async Task DeletePlacement(ArticleAffiliatePlacement placement)
+    private ArticleAffiliatePlacement? PendingDeletePlacement { get; set; }
+
+    private void DeletePlacement(ArticleAffiliatePlacement placement) => PendingDeletePlacement = placement;
+
+    private async Task ConfirmDeletePlacementAsync()
     {
-        var confirmed = await JS.InvokeAsync<bool>("confirm",
-            $"Remove the {placement.AdvertiserName} ad placement? Its token will be removed from the published article the next time it's served.");
-        if (!confirmed) return;
+        if (PendingDeletePlacement is not { } placement) return;
+        PendingDeletePlacement = null;
 
         IsBusy = true;
         try

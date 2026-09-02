@@ -5,7 +5,6 @@
 @using GwsBusinessSuite.Application.BusinessIntelligence
 @inject IBusinessIntelligenceService BusinessIntelligenceService
 @inject ICurrentUserAccessor CurrentUserAccessor
-@inject IJSRuntime JS
 
 <PageTitle>Business Intelligence</PageTitle>
 
@@ -159,6 +158,9 @@ else
     </div>
 }
 
+<ConfirmModal Show="PendingDeleteWidget is not null" Title="Remove chart" Message="@($"Remove '{PendingDeleteWidget?.Title}' from your dashboard?")"
+              ConfirmText="Remove" Busy="_isBusy" OnConfirm="ConfirmDeleteAsync" OnCancel="() => PendingDeleteWidget = null" />
+
 @code {
     private IReadOnlyList<BiQueryShapeDefinition> _queryShapes = [];
     private IReadOnlyList<int> _rangeOptions = [];
@@ -264,9 +266,14 @@ else
         });
     }
 
-    private async Task DeleteAsync(BiDashboardWidget widget)
+    private BiDashboardWidget? PendingDeleteWidget { get; set; }
+
+    private void DeleteAsync(BiDashboardWidget widget) => PendingDeleteWidget = widget;
+
+    private async Task ConfirmDeleteAsync()
     {
-        if (!await JS.InvokeAsync<bool>("confirm", $"Remove '{widget.Title}' from your dashboard?")) return;
+        if (PendingDeleteWidget is not { } widget) return;
+        PendingDeleteWidget = null;
         await RunBusyAsync(async () =>
         {
             await BusinessIntelligenceService.DeleteWidgetAsync(_owner, widget.Id);

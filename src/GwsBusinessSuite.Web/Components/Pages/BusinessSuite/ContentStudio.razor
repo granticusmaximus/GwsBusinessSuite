@@ -8,7 +8,6 @@
 @inject ITrendResearchService TrendResearchService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
-@inject IJSRuntime JS
 @inject ILogger<ContentStudio> Logger
 
 <PageTitle>Content Studio</PageTitle>
@@ -275,6 +274,9 @@
         </div>
     </div>
 
+<ConfirmModal Show="PendingDeleteDraft.HasValue" Title="Delete draft" Message="@($"Permanently delete draft '{PendingDeleteDraft?.Topic}'? This cannot be undone.")"
+              ConfirmText="Delete" OnConfirm="ConfirmDeleteDraftAsync" OnCancel="() => PendingDeleteDraft = null" />
+
 @code {
     private static readonly string[] DraftStatusOptions = ["All", "PendingReview", "Approved", "Rejected"];
 
@@ -375,10 +377,15 @@
         Navigation.NavigateTo($"/admin/content-studio/draft/{draftId}", forceLoad: true);
     }
 
-    private async Task DeleteDraft(Guid draftId, string topic)
+    private (Guid Id, string Topic)? PendingDeleteDraft { get; set; }
+
+    private void DeleteDraft(Guid draftId, string topic) => PendingDeleteDraft = (draftId, topic);
+
+    private async Task ConfirmDeleteDraftAsync()
     {
-        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Permanently delete draft '{topic}'? This cannot be undone.");
-        if (!confirmed) return;
+        if (PendingDeleteDraft is not { } pending) return;
+        var (draftId, topic) = pending;
+        PendingDeleteDraft = null;
 
         ErrorMessage = string.Empty;
         StatusMessage = string.Empty;

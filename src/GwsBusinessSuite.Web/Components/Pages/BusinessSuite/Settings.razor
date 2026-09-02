@@ -328,6 +328,9 @@ else
     </div>
 }
 
+<ConfirmModal Show="PendingRevokeApiKey is not null" Title="Revoke API key" Message="@($"Revoke API key '{PendingRevokeApiKey?.Name}'? Calls using it will stop immediately.")"
+              ConfirmText="Revoke" Busy="IsBusy" OnConfirm="ConfirmRevokeApiKeyAsync" OnCancel="() => PendingRevokeApiKey = null" />
+
 @code {
     private static readonly SettingsTab[] Tabs =
     [
@@ -531,9 +534,14 @@ else
         }, "API key issued. Copy it now; the plaintext is not stored.");
     }
 
-    private async Task RevokeApiKeyAsync(DeveloperApiKeyView key)
+    private DeveloperApiKeyView? PendingRevokeApiKey { get; set; }
+
+    private void RevokeApiKeyAsync(DeveloperApiKeyView key) => PendingRevokeApiKey = key;
+
+    private async Task ConfirmRevokeApiKeyAsync()
     {
-        if (!await JS.InvokeAsync<bool>("confirm", $"Revoke API key '{key.Name}'? Calls using it will stop immediately.")) return;
+        if (PendingRevokeApiKey is not { } key) return;
+        PendingRevokeApiKey = null;
         await RunSaveAsync(async () =>
         {
             var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
