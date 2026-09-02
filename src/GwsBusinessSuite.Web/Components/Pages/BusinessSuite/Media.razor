@@ -46,14 +46,11 @@
 
 @if (!_loaded)
 {
-    <div class="d-flex align-items-center gap-2 text-secondary">
-        <span class="spinner-border spinner-border-sm"></span>
-        <span>Loading media…</span>
-    </div>
+    <LoadingIndicator Message="Loading media…" />
 }
 else if (FilteredAssets.Count == 0)
 {
-    <p class="text-secondary">@(MediaAssets.Count == 0 ? "No media uploaded yet." : "No media matches your search.")</p>
+    <EmptyState Icon="bi-images" Message="@(MediaAssets.Count == 0 ? "No media uploaded yet." : "No media matches your search.")" />
 }
 else
 {
@@ -112,6 +109,13 @@ else
     </div>
 }
 
+<ConfirmModal Show="PendingReplaceAssetId.HasValue" Title="Replace existing image"
+              Message="@($"A file named '{_pendingUploadFileName}' already exists. Replace it everywhere it is currently used?")"
+              ConfirmText="Replace" Busy="IsBusy" OnConfirm="ConfirmReplaceUploadAsync" OnCancel="CancelReplaceUpload" />
+<ConfirmModal Show="ShowDeleteConfirm" Title="Delete media"
+              Message="Delete this media asset? If it's used on any page, that page's image will break. This cannot be undone."
+              ConfirmText="Delete" Busy="IsBusy" OnConfirm="ConfirmDeleteAsync" OnCancel="() => ShowDeleteConfirm = false" />
+
 @code {
     private List<MediaAssetSummary> MediaAssets { get; set; } = new();
     private MediaAssetSummary? SelectedAsset { get; set; }
@@ -123,6 +127,10 @@ else
     private bool IsBusy { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
+    private Guid? PendingReplaceAssetId { get; set; }
+    private byte[]? _pendingUploadBytes;
+    private string _pendingUploadFileName = string.Empty;
+    private bool ShowDeleteConfirm { get; set; }
 
     private IReadOnlyList<MediaAssetSummary> FilteredAssets =>
         string.IsNullOrWhiteSpace(SearchInput)
@@ -156,33 +164,14 @@ else
                 string.Equals(asset.FileName, e.File.Name.Trim(), StringComparison.OrdinalIgnoreCase));
             if (existing is not null)
             {
-                var confirmed = await JS.InvokeAsync<bool>(
-                    "confirm",
-                    $"A file named '{e.File.Name}' already exists. Replace it everywhere it is currently used?");
-                if (!confirmed)
-                {
-                    StatusMessage = "Upload cancelled; the existing image was not changed.";
-                    return;
-                }
-
-                var replaced = await MediaLibraryService.ReplaceAsync(
-                    existing.Id,
-                    e.File.Name,
-                    ms.ToArray(),
-                    UploadAltTextInput);
-                if (replaced is null)
-                {
-                    throw new InvalidOperationException("The existing media asset could not be found. Refresh the page and try again.");
-                }
-
-                StatusMessage = "Existing image replaced; its URL and page references were preserved.";
-            }
-            else
-            {
-                await MediaLibraryService.UploadAsync(e.File.Name, ms.ToArray(), UploadAltTextInput);
-                StatusMessage = "Image uploaded.";
+                _pendingUploadBytes = ms.ToArray();
+                _pendingUploadFileName = e.File.Name;
+                PendingReplaceAssetId = existing.Id;
+                return;
             }
 
+            await MediaLibraryService.UploadAsync(e.File.Name, ms.ToArray(), UploadAltTextInput);
+            StatusMessage = "Image uploaded.";
             UploadAltTextInput = string.Empty;
             await LoadAssetsAsync();
         }
@@ -195,6 +184,48 @@ else
         {
             IsBusy = false;
         }
+    }
+
+    private async Task ConfirmReplaceUploadAsync()
+    {
+        if (PendingReplaceAssetId is not Guid assetId || _pendingUploadBytes is null) return;
+        var fileName = _pendingUploadFileName;
+        var bytes = _pendingUploadBytes;
+        PendingReplaceAssetId = null;
+        _pendingUploadBytes = null;
+        _pendingUploadFileName = string.Empty;
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var replaced = await MediaLibraryService.ReplaceAsync(assetId, fileName, bytes, UploadAltTextInput);
+            if (replaced is null)
+            {
+                throw new InvalidOperationException("The existing media asset could not be found. Refresh the page and try again.");
+            }
+
+            StatusMessage = "Existing image replaced; its URL and page references were preserved.";
+            UploadAltTextInput = string.Empty;
+            await LoadAssetsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Media upload failed.");
+            ErrorMessage = $"Upload failed. {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void CancelReplaceUpload()
+    {
+        PendingReplaceAssetId = null;
+        _pendingUploadBytes = null;
+        _pendingUploadFileName = string.Empty;
+        StatusMessage = "Upload cancelled; the existing image was not changed.";
     }
 
     private void OpenDetails(MediaAssetSummary asset)
@@ -236,15 +267,17 @@ else
         }
     }
 
-    private async Task DeleteSelectedAsync()
+    private void DeleteSelectedAsync()
     {
         if (SelectedAsset is null) return;
-        var assetId = SelectedAsset.Id;
+        ShowDeleteConfirm = true;
+    }
 
-        var confirmed = await JS.InvokeAsync<bool>(
-            "confirm",
-            "Delete this media asset? If it's used on any page, that page's image will break. This cannot be undone.");
-        if (!confirmed) return;
+    private async Task ConfirmDeleteAsync()
+    {
+        ShowDeleteConfirm = false;
+        if (SelectedAsset is null) return;
+        var assetId = SelectedAsset.Id;
 
         IsBusy = true;
         try

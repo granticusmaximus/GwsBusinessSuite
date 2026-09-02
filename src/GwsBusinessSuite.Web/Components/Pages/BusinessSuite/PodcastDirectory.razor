@@ -41,10 +41,7 @@
 
 @if (_initialLoading)
 {
-    <div class="d-flex align-items-center gap-2 text-secondary">
-        <span class="spinner-border spinner-border-sm"></span>
-        <span>Loading podcast directory…</span>
-    </div>
+    <LoadingIndicator Message="Loading podcast directory…" />
 }
 else if (_activeTab == "discover")
 {
@@ -88,10 +85,7 @@ else if (_activeTab == "discover")
 
     @if (_discoverLoading)
     {
-        <div class="d-flex align-items-center gap-2 text-secondary">
-            <span class="spinner-border spinner-border-sm"></span>
-            <span>Loading podcasts…</span>
-        </div>
+        <LoadingIndicator Message="Loading podcasts…" />
     }
     else if (_showFeaturedSections)
     {
@@ -109,7 +103,7 @@ else if (_activeTab == "discover")
 
             @if (featuredSection.Podcasts.Count == 0)
             {
-                <p class="text-secondary small mb-0">No podcasts are available in this category right now.</p>
+                <EmptyState Icon="bi-broadcast" Message="No podcasts are available in this category right now." CssClass="text-secondary small" />
             }
             else
             {
@@ -125,10 +119,10 @@ else if (_activeTab == "discover")
     else if (_discoverResults.Count == 0)
     {
         <div class="card border-0 shadow-sm">
-            <div class="card-body text-center text-secondary py-5">
-                <i class="bi bi-broadcast display-6 d-block mb-2"></i>
-                <h2 class="h5">No podcasts found</h2>
-                <p class="mb-0">Try a different search term or switch to another category.</p>
+            <div class="card-body">
+                <EmptyState Icon="bi-broadcast" Message="No podcasts found" CssClass="p-4 text-center text-secondary">
+                    <p class="mb-0">Try a different search term or switch to another category.</p>
+                </EmptyState>
             </div>
         </div>
     }
@@ -191,20 +185,20 @@ else
     @if (_library.Count == 0)
     {
         <div class="card border-0 shadow-sm">
-            <div class="card-body text-center text-secondary py-5">
-                <i class="bi bi-journal-plus display-6 d-block mb-2"></i>
-                <h2 class="h5">Your library is empty</h2>
-                <p class="mb-0">Save a show from the Discover tab to start tracking episodes here.</p>
+            <div class="card-body">
+                <EmptyState Icon="bi-journal-plus" Message="Your library is empty" CssClass="p-4 text-center text-secondary">
+                    <p class="mb-0">Save a show from the Discover tab to start tracking episodes here.</p>
+                </EmptyState>
             </div>
         </div>
     }
     else if (FilteredLibrary.Count == 0)
     {
         <div class="card border-0 shadow-sm">
-            <div class="card-body text-center text-secondary py-5">
-                <i class="bi bi-funnel display-6 d-block mb-2"></i>
-                <h2 class="h5">No saved podcasts match</h2>
-                <p class="mb-0">Clear the current search or category filter to see the rest of your library.</p>
+            <div class="card-body">
+                <EmptyState Icon="bi-funnel" Message="No saved podcasts match" CssClass="p-4 text-center text-secondary">
+                    <p class="mb-0">Clear the current search or category filter to see the rest of your library.</p>
+                </EmptyState>
             </div>
         </div>
     }
@@ -270,10 +264,7 @@ else
                 <div class="modal-body">
                     @if (_detailLoading)
                     {
-                        <div class="d-flex align-items-center gap-2 text-secondary">
-                            <span class="spinner-border spinner-border-sm"></span>
-                            <span>Loading podcast detail…</span>
-                        </div>
+                        <LoadingIndicator Message="Loading podcast detail…" />
                     }
                     else if (_selectedDetail is { } detail)
                     {
@@ -332,11 +323,9 @@ else
 
                         @if (SortedEpisodes.Count == 0)
                         {
-                            <div class="text-center text-secondary py-4">
-                                <i class="bi bi-radioactive display-6 d-block mb-2"></i>
-                                <h2 class="h6">No episodes yet</h2>
+                            <EmptyState Icon="bi-radioactive" Message="No episodes yet" CssClass="py-4 text-center text-secondary">
                                 <p class="mb-0 small">This feed did not return any playable episodes. Try refreshing the feed.</p>
-                            </div>
+                            </EmptyState>
                         }
                         else
                         {
@@ -395,6 +384,9 @@ else
     </div>
 }
 
+<ConfirmModal Show="PendingRemove is not null" Title="Remove podcast" Message="@($"Remove \"{PendingRemove?.Title}\" from the library?")"
+              ConfirmText="Remove" OnConfirm="ConfirmRemoveSavedPodcastAsync" OnCancel="() => PendingRemove = null" />
+
 @code {
     private static readonly string[] DiscoverCategories =
     [
@@ -436,6 +428,7 @@ else
     private string _errorMessage = string.Empty;
 
     private PodcastDetailView? _selectedDetail;
+    private (Guid Id, string Title)? PendingRemove { get; set; }
 
     private DotNetObjectReference<PodcastDirectory>? _progressJsRef;
     private bool _progressJsInitialized;
@@ -740,12 +733,13 @@ else
         _statusMessage = "Episodes refreshed.";
     }
 
-    private async Task RemoveSavedPodcastAsync(Guid podcastId, string title)
+    private void RemoveSavedPodcastAsync(Guid podcastId, string title) => PendingRemove = (podcastId, title);
+
+    private async Task ConfirmRemoveSavedPodcastAsync()
     {
-        if (!await JS.InvokeAsync<bool>("confirm", $"Remove \"{title}\" from the library?"))
-        {
-            return;
-        }
+        if (PendingRemove is not { } pending) return;
+        var (podcastId, title) = pending;
+        PendingRemove = null;
 
         _errorMessage = string.Empty;
         _statusMessage = string.Empty;
