@@ -13,7 +13,7 @@
 
 @if (Result is null)
 {
-    <p class="text-secondary">Loading...</p>
+    <LoadingIndicator Message="Loading deal scores…" />
 }
 else
 {
@@ -39,7 +39,9 @@ else
     @if (Result.Deals.Count == 0)
     {
         <div class="card border-0 shadow-sm">
-            <div class="card-body text-secondary">No open deals to score.</div>
+            <div class="card-body">
+                <EmptyState Icon="bi-graph-up-arrow" Message="No open deals to score." CssClass="text-secondary" />
+            </div>
         </div>
     }
     else

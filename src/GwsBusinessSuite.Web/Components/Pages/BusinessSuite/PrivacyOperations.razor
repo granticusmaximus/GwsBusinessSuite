@@ -4,7 +4,6 @@
 @using GwsBusinessSuite.Application.Privacy
 @inject IPrivacyOperationsService PrivacyService
 @inject ILogger<PrivacyOperations> Logger
-@inject IJSRuntime JS
 
 <PageTitle>Privacy Operations · GWS Business Suite</PageTitle>
 
@@ -18,7 +17,7 @@
 
 @if (Dashboard is null)
 {
-    <div class="card card-body">Loading privacy operations…</div>
+    <LoadingIndicator Message="Loading privacy operations…" />
 }
 else
 {
@@ -148,6 +147,10 @@ else
     </section>
 }
 
+<ConfirmModal Show="PendingErasureId.HasValue" Title="Run erasure"
+              Message="This will permanently delete the subject's data across every table shown in the preview. This cannot be undone. Continue?"
+              ConfirmText="Run erasure" Busy="_busy" OnConfirm="ConfirmRunErasureAsync" OnCancel="() => PendingErasureId = null" />
+
 @code {
     private PrivacyDashboard? Dashboard;
     private bool _busy, _error; private string _message = "";
@@ -160,6 +163,7 @@ else
     private readonly Dictionary<Guid, string> _retentionBasis = [];
     private readonly Dictionary<Guid, bool> _retentionEnabled = [], _retentionAutomation = [];
     private readonly Dictionary<Guid, SubjectDeletionPreview> _previews = [];
+    private Guid? PendingErasureId;
 
     protected override Task OnInitializedAsync() => LoadAsync();
     private async Task LoadAsync() { try { Dashboard = await PrivacyService.GetDashboardAsync(); _error = false; } catch (Exception ex) { Fail(ex, "Privacy operations could not be loaded."); } }
@@ -176,11 +180,11 @@ else
         catch (Exception ex) { Fail(ex, ex is ArgumentException or InvalidOperationException ? ex.Message : "The preview could not be generated."); }
         finally { _busy = false; }
     }
-    private async Task RunErasureAsync(Guid id)
+    private void RunErasureAsync(Guid id) => PendingErasureId = id;
+    private async Task ConfirmRunErasureAsync()
     {
-        var confirmed = await JS.InvokeAsync<bool>("confirm",
-            "This will permanently delete the subject's data across every table shown in the preview. This cannot be undone. Continue?");
-        if (!confirmed) return;
+        if (PendingErasureId is not Guid id) return;
+        PendingErasureId = null;
         await RunAsync(async () => { await PrivacyService.DeleteSubjectDataAsync(id); _previews.Remove(id); }, "Subject data deleted.");
     }
     private async Task CreateIncidentAsync() => await RunAsync(async () => { await PrivacyService.CreateIncidentAsync(new(_incidentTitle, _incidentSummary, _incidentSeverity, DateTimeOffset.UtcNow, _personalData, _ephi, _personalData ? DateTimeOffset.UtcNow : null, _incidentOwner)); _incidentTitle = _incidentSummary = ""; _personalData = _ephi = false; }, "Security incident opened.");
