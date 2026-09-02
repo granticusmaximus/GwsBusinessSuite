@@ -5,7 +5,6 @@
 @using GwsBusinessSuite.Application.Comments
 @using GwsBusinessSuite.Domain.Entities
 @inject ICommentService CommentService
-@inject IJSRuntime JS
 @inject ILogger<Comments> Logger
 
 <PageTitle>Comments</PageTitle>
@@ -17,11 +16,17 @@
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
-    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
 }
 @if (!string.IsNullOrWhiteSpace(StatusMessage))
 {
-    <div class="alert alert-info" role="alert">@StatusMessage</div>
+    <div class="alert alert-success d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
 }
 
 <ul class="nav nav-tabs mb-3">
@@ -39,16 +44,11 @@
     <div class="card-body p-0">
         @if (!_loaded)
         {
-            <div class="p-4 d-flex align-items-center gap-2 text-secondary">
-                <span class="spinner-border spinner-border-sm"></span>
-                <span>Loading comments…</span>
-            </div>
+            <LoadingIndicator Message="Loading comments…" CssClass="p-4 text-secondary" />
         }
         else if (AllComments.Count == 0)
         {
-            <div class="p-4">
-                <p class="text-secondary mb-0">No comments here.</p>
-            </div>
+            <EmptyState Icon="bi-chat-left-text" Message="No comments here." />
         }
         else
         {
@@ -128,6 +128,11 @@
     </div>
 </div>
 
+<ConfirmModal Show="PendingDeleteId.HasValue" Title="Delete comment" Message="Permanently delete this comment? This cannot be undone."
+              ConfirmText="Delete" Busy="IsBusy" OnConfirm="ConfirmDeleteAsync" OnCancel="() => PendingDeleteId = null" />
+<ConfirmModal Show="ShowBulkDeleteConfirm" Title="Delete comments" Message="@($"Permanently delete {SelectedIds.Count} comment(s)? This cannot be undone.")"
+              ConfirmText="Delete" Busy="IsBusy" OnConfirm="ConfirmBulkDeleteAsync" OnCancel="() => ShowBulkDeleteConfirm = false" />
+
 @code {
     private static readonly (string Label, string? Value)[] Tabs =
     [
@@ -144,6 +149,8 @@
     private bool IsBusy { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
+    private Guid? PendingDeleteId { get; set; }
+    private bool ShowBulkDeleteConfirm { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
@@ -205,10 +212,12 @@
         }
     }
 
-    private async Task DeleteAsync(Guid commentId)
+    private void DeleteAsync(Guid commentId) => PendingDeleteId = commentId;
+
+    private async Task ConfirmDeleteAsync()
     {
-        var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this comment? This cannot be undone.");
-        if (!confirmed) return;
+        if (PendingDeleteId is not Guid commentId) return;
+        PendingDeleteId = null;
 
         IsBusy = true;
         ErrorMessage = string.Empty;
@@ -260,12 +269,16 @@
         }
     }
 
-    private async Task BulkDeleteAsync()
+    private void BulkDeleteAsync()
     {
         if (SelectedIds.Count == 0) return;
+        ShowBulkDeleteConfirm = true;
+    }
 
-        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Permanently delete {SelectedIds.Count} comment(s)? This cannot be undone.");
-        if (!confirmed) return;
+    private async Task ConfirmBulkDeleteAsync()
+    {
+        ShowBulkDeleteConfirm = false;
+        if (SelectedIds.Count == 0) return;
 
         IsBusy = true;
         StatusMessage = string.Empty;
