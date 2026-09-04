@@ -12,7 +12,6 @@
 @inject NavigationManager Navigation
 @inject IConfiguration Configuration
 @inject GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor CurrentCmsSiteAccessor
-@inject IJSRuntime JS
 @inject ILogger<EditPage> Logger
 
 <PageTitle>@(PageId.HasValue ? "Edit Page" : "New Page")</PageTitle>
@@ -29,11 +28,17 @@
 
 @if (!string.IsNullOrWhiteSpace(CmsErrorMessage))
 {
-    <div class="alert alert-danger" role="alert">@CmsErrorMessage</div>
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@CmsErrorMessage</div>
+    </div>
 }
 @if (!string.IsNullOrWhiteSpace(CmsStatusMessage))
 {
-    <div class="alert alert-info" role="alert">@CmsStatusMessage</div>
+    <div class="alert alert-success d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@CmsStatusMessage</div>
+    </div>
 }
 
 <div class="card border-0 shadow-sm mb-4">
@@ -54,7 +59,7 @@
     <div class="card-body">
         @if (!SelectedSiteId.HasValue)
         {
-            <p class="text-secondary mb-0">Loading site…</p>
+            <LoadingIndicator Message="Loading site…" />
         }
         else
         {
@@ -223,7 +228,7 @@
                     </button>
                 }
                 <button class="btn btn-outline-secondary" @onclick='() => Navigation.NavigateTo("/admin/pages/edit")' disabled="@IsCmsBusy">Reset</button>
-                <button class="btn btn-outline-danger" @onclick="TrashSelectedPageAsync" disabled="@(IsCmsBusy || !PageId.HasValue)">
+                <button class="btn btn-outline-danger" @onclick="TrashSelectedPage" disabled="@(IsCmsBusy || !PageId.HasValue)">
                     <i class="bi bi-trash3 me-1"></i>Move to Trash
                 </button>
             </div>
@@ -264,13 +269,14 @@
         <div class="card-body p-0">
             @if (!string.IsNullOrEmpty(SubmissionsErrorMessage))
             {
-                <div class="alert alert-danger m-3 mb-0 py-2 small">@SubmissionsErrorMessage</div>
+                <div class="alert alert-danger d-flex align-items-start gap-2 m-3 mb-0 py-2 small" role="alert">
+                    <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+                    <div>@SubmissionsErrorMessage</div>
+                </div>
             }
             @if (FormSubmissions.Count == 0)
             {
-                <div class="p-4">
-                    <p class="text-secondary mb-0">No submissions yet.</p>
-                </div>
+                <EmptyState Icon="bi-inbox" Message="No submissions yet." CssClass="p-4 text-secondary" />
             }
             else
             {
@@ -300,7 +306,7 @@
                                     {
                                         <button class="btn btn-xs btn-outline-secondary" @onclick="() => MarkSubmissionReadAsync(submission.Id)">Mark read</button>
                                     }
-                                    <button class="btn btn-xs btn-outline-danger" @onclick="() => DeleteSubmissionAsync(submission.Id)">Delete</button>
+                                    <button class="btn btn-xs btn-outline-danger" @onclick="() => DeleteSubmission(submission.Id)">Delete</button>
                                 </div>
                             </div>
                         </div>
@@ -321,13 +327,14 @@
         <div class="card-body p-0">
             @if (!string.IsNullOrEmpty(RevisionErrorMessage))
             {
-                <div class="alert alert-danger m-3 mb-0 py-2 small">@RevisionErrorMessage</div>
+                <div class="alert alert-danger d-flex align-items-start gap-2 m-3 mb-0 py-2 small" role="alert">
+                    <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+                    <div>@RevisionErrorMessage</div>
+                </div>
             }
             @if (PageRevisions.Count == 0)
             {
-                <div class="p-4">
-                    <p class="text-secondary mb-0">No revisions yet — a snapshot is captured automatically before each save.</p>
-                </div>
+                <EmptyState Icon="bi-clock-history" Message="No revisions yet — a snapshot is captured automatically before each save." CssClass="p-4 text-secondary" />
             }
             else
             {
@@ -374,7 +381,7 @@
                                             disabled="@IsRevisionBusy">
                                         Restore
                                     </button>
-                                    <button class="btn btn-xs btn-outline-danger" @onclick="() => DeleteRevisionAsync(rev.Id)"
+                                    <button class="btn btn-xs btn-outline-danger" @onclick="() => DeleteRevision(rev)"
                                             disabled="@IsRevisionBusy">
                                         Delete
                                     </button>
@@ -414,6 +421,18 @@
     </div>
 }
 
+<ConfirmModal Show="PendingTrashPage" Title="Move to Trash"
+              Message="@($"Move '{PageEditorModel.Title}' to Trash?")"
+              ConfirmText="Move to Trash" Busy="IsCmsBusy" OnConfirm="ConfirmTrashSelectedPageAsync" OnCancel="() => PendingTrashPage = false" />
+
+<ConfirmModal Show="PendingDeleteSubmissionId is not null" Title="Delete submission"
+              Message="Delete this form submission? This cannot be undone."
+              ConfirmText="Delete" Busy="IsSubmissionsBusy" OnConfirm="ConfirmDeleteSubmissionAsync" OnCancel="() => PendingDeleteSubmissionId = null" />
+
+<ConfirmModal Show="PendingDeleteRevision is not null" Title="Delete revision"
+              Message="@($"Delete revision #{PendingDeleteRevision?.RevisionNumber}? This cannot be undone.")"
+              ConfirmText="Delete" Busy="IsRevisionBusy" OnConfirm="ConfirmDeleteRevisionAsync" OnCancel="() => PendingDeleteRevision = null" />
+
 @code {
     private static readonly JsonSerializerOptions NavJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -452,6 +471,10 @@
     private Guid? PreviewedRevisionId { get; set; }
     private Guid? DiffRevisionKey { get; set; }
     private string? DiffText { get; set; }
+
+    private bool PendingTrashPage { get; set; }
+    private Guid? PendingDeleteSubmissionId { get; set; }
+    private CmsPageRevision? PendingDeleteRevision { get; set; }
 
     private Guid? _loadedForPageId;
     private bool _hasLoadedOnce;
@@ -720,8 +743,13 @@
         await LoadFormSubmissionsAsync();
     }
 
-    private async Task DeleteSubmissionAsync(Guid submissionId)
+    private void DeleteSubmission(Guid submissionId) => PendingDeleteSubmissionId = submissionId;
+
+    private async Task ConfirmDeleteSubmissionAsync()
     {
+        if (PendingDeleteSubmissionId is not { } submissionId) return;
+        PendingDeleteSubmissionId = null;
+
         await FormSubmissionService.DeleteAsync(submissionId);
         await LoadFormSubmissionsAsync();
     }
@@ -817,19 +845,24 @@
         }
     }
 
-    private async Task DeleteRevisionAsync(Guid revisionId)
+    private void DeleteRevision(CmsPageRevision revision) => PendingDeleteRevision = revision;
+
+    private async Task ConfirmDeleteRevisionAsync()
     {
+        if (PendingDeleteRevision is not { } revision) return;
+        PendingDeleteRevision = null;
+
         IsRevisionBusy = true;
         try
         {
-            await PageRevisionService.DeleteAsync(revisionId);
+            await PageRevisionService.DeleteAsync(revision.Id);
             await LoadRevisionsAsync();
             DiffRevisionKey = null;
             DiffText = null;
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Unable to delete revision {RevisionId}.", revisionId);
+            Logger.LogError(ex, "Unable to delete revision {RevisionId}.", revision.Id);
             RevisionErrorMessage = $"Unable to delete revision. {ex.Message}";
         }
         finally
@@ -895,8 +928,12 @@
         await SavePageAsync();
     }
 
-    private async Task TrashSelectedPageAsync()
+    private void TrashSelectedPage() => PendingTrashPage = true;
+
+    private async Task ConfirmTrashSelectedPageAsync()
     {
+        PendingTrashPage = false;
+
         if (!PageId.HasValue || !SelectedSiteId.HasValue)
         {
             return;

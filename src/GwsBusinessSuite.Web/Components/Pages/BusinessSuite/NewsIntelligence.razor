@@ -124,7 +124,7 @@
                                 <button class="btn btn-sm btn-link text-secondary p-1" title="Edit" @onclick="() => OpenEditForm(topic)">
                                     <i class="bi bi-pencil"></i>
                                 </button>
-                                <button class="btn btn-sm btn-link text-danger p-1" title="Delete" @onclick="() => DeleteTopicAsync(topic.Id)">
+                                <button class="btn btn-sm btn-link text-danger p-1" title="Delete" @onclick="() => DeleteTopic(topic.Id, topic.Name)">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </div>
@@ -176,12 +176,18 @@
 
         @if (!string.IsNullOrWhiteSpace(_statusMessage))
         {
-            <div class="alert alert-info" role="alert"><i class="bi bi-info-circle me-2"></i>@_statusMessage</div>
+            <div class="alert alert-success d-flex align-items-center gap-2 mb-4" role="alert">
+                <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+                <div>@_statusMessage</div>
+            </div>
         }
 
         @if (!string.IsNullOrWhiteSpace(_errorMessage))
         {
-            <div class="alert alert-danger" role="alert"><i class="bi bi-exclamation-triangle me-2"></i>@_errorMessage</div>
+            <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+                <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+                <div>@_errorMessage</div>
+            </div>
         }
 
         @if (_refreshStatus.IsRunning || _refreshStatus.Timings.Count > 0)
@@ -225,10 +231,7 @@
 
         @if (_loading)
         {
-            <div class="d-flex align-items-center gap-2 text-secondary">
-                <span class="spinner-border spinner-border-sm"></span>
-                <span>Loading feed…</span>
-            </div>
+            <LoadingIndicator Message="Loading feed…" />
         }
         else if (_activeFilter == "all")
         {
@@ -236,13 +239,10 @@
         }
         else if (_feed is null || CurrentItems().Count == 0)
         {
-            <div class="card border-0 shadow-sm">
-                <div class="card-body text-center text-secondary py-5">
-                    <i class="bi bi-newspaper display-6 d-block mb-2"></i>
-                    <p class="mb-0">No articles yet. Click <strong>Refresh All</strong> to fetch the latest news,
-                        or add keywords to a topic and click <strong>Refresh All</strong>.</p>
-                </div>
-            </div>
+            <EmptyState Icon="bi-newspaper" Message="No articles yet." CssClass="text-center py-5">
+                <p class="mb-0">Click <strong>Refresh All</strong> to fetch the latest news,
+                    or add keywords to a topic and click <strong>Refresh All</strong>.</p>
+            </EmptyState>
         }
         else
         {
@@ -257,6 +257,10 @@
 </div>
 </main>
 
+<ConfirmModal Show="_pendingDeleteTopic is not null" Title="Delete topic"
+              Message="@($"Delete the '{_pendingDeleteTopic?.Name}' topic? This cannot be undone.")"
+              ConfirmText="Delete" OnConfirm="ConfirmDeleteTopicAsync" OnCancel="() => _pendingDeleteTopic = null" />
+
 @code {
     // ── State ────────────────────────────────────────────────
     private List<WatchedTopicSummary> _topics = [];
@@ -268,6 +272,7 @@
     private string _statusMessage = string.Empty;
     private string _errorMessage = string.Empty;
     private NewsRefreshStatus _refreshStatus = NewsRefreshStatus.Idle;
+    private (Guid Id, string Name)? _pendingDeleteTopic;
 
     // Empty means "no filter" (show every source). Populated with the sources the user
     // has explicitly chosen to show - can combine any number of sources at once.
@@ -483,12 +488,17 @@
         _errorMessage = $"Refresh completed with errors: {_refreshStatus.LastError}";
     }
 
-    private async Task DeleteTopicAsync(Guid topicId)
+    private void DeleteTopic(Guid topicId, string name) => _pendingDeleteTopic = (topicId, name);
+
+    private async Task ConfirmDeleteTopicAsync()
     {
+        if (_pendingDeleteTopic is not { } pending) return;
+        _pendingDeleteTopic = null;
+
         try
         {
-            await NewsService.DeleteTopicAsync(topicId);
-            if (_activeFilter == topicId.ToString()) _activeFilter = "all";
+            await NewsService.DeleteTopicAsync(pending.Id);
+            if (_activeFilter == pending.Id.ToString()) _activeFilter = "all";
             await ReloadAsync();
         }
         catch (Exception ex)
@@ -639,21 +649,13 @@
         }
         @if (CurrentViewItems().Count == 0)
         {
-            <div class="card border-0 shadow-sm">
-                <div class="card-body text-center text-secondary py-5">
-                    <i class="bi bi-newspaper display-6 d-block mb-2"></i>
-                    <p class="mb-0">No articles yet. Click <strong>Refresh All</strong> to fetch the latest news.</p>
-                </div>
-            </div>
+            <EmptyState Icon="bi-newspaper" Message="No articles yet." CssClass="text-center py-5">
+                <p class="mb-0">Click <strong>Refresh All</strong> to fetch the latest news.</p>
+            </EmptyState>
         }
         else if (filteredItems.Count == 0)
         {
-            <div class="card border-0 shadow-sm">
-                <div class="card-body text-center text-secondary py-5">
-                    <i class="bi bi-funnel display-6 d-block mb-2"></i>
-                    <p class="mb-0">No articles match the selected source filter.</p>
-                </div>
-            </div>
+            <EmptyState Icon="bi-funnel" Message="No articles match the selected source filter." CssClass="text-center py-5" />
         }
         else
         {
