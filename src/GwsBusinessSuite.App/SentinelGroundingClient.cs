@@ -28,6 +28,10 @@ public sealed class SentinelGroundingClient(SecureApiKeyStore apiKeyStore)
 {
     private readonly HttpClient _http = new() { BaseAddress = new Uri(AppEndpoints.BaseUrl) };
 
+    // Lets a caller skip offering wiki tools at all when there's no key to authorize them with -
+    // a tool the model can't see is one it can't waste rounds retrying.
+    public bool IsConfigured => apiKeyStore.HasKey();
+
     public async Task<GroundingSearchOutcome> SearchWikiAsync(string query, CancellationToken cancellationToken)
     {
         if (await apiKeyStore.GetAsync() is not { Length: > 0 } apiKey)

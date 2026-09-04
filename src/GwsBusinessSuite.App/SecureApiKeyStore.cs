@@ -21,6 +21,10 @@ public sealed class SecureApiKeyStore(string filePath)
         return string.IsNullOrEmpty(value) ? null : value;
     }
 
+    // Sync and cheap (no file read) so callers on a hot path - NativeToolExecutor.Definitions is
+    // consulted once per tool-calling round - can decide whether a key exists without awaiting.
+    public bool HasKey() => File.Exists(filePath) && new FileInfo(filePath).Length > 0;
+
     public async Task SetAsync(string apiKey)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);

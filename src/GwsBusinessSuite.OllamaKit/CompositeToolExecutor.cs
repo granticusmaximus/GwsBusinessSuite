@@ -1,11 +1,12 @@
 using System.Text.Json;
-using GwsBusinessSuite.OllamaKit;
 
-namespace GwsBusinessSuite.App;
+namespace GwsBusinessSuite.OllamaKit;
 
-// Unions two or more tool sources (e.g. NativeToolExecutor's wiki tools + WorkspaceTools' file
-// tools) into one IOllamaToolExecutor, so SentinelGptPage can offer the model a single merged
-// toolset instead of switching between mutually-exclusive executors behind a mode flag.
+// Unions two or more tool sources (e.g. the native app's wiki tools + a workspace's file tools)
+// into one IOllamaToolExecutor, so a host can offer the model a single merged tool set instead of
+// switching between mutually-exclusive executors behind a mode flag. Definitions is read fresh on
+// every round by OllamaToolCallingAgent, so a source that varies its own Definitions (offering
+// nothing while it's unconfigured, say) stays live here without rebuilding the agent.
 public sealed class CompositeToolExecutor(IReadOnlyList<IOllamaToolExecutor> executors) : IOllamaToolExecutor
 {
     public IReadOnlyList<OllamaToolDefinition> Definitions =>

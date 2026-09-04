@@ -61,6 +61,14 @@ public sealed class OllamaToolCallingAgent
         ArgumentException.ThrowIfNullOrWhiteSpace(prompt);
         _messages.Add(new OllamaChatMessage("user", prompt.Trim()));
 
+        // Identical repeat calls within one turn are a small-model loop symptom, not progress: the
+        // same tool with the same arguments returns the same result, so re-running it can only burn
+        // rounds (and, for a tool reporting itself unavailable, burn all of them). Tracked per turn
+        // and answered with a corrective tool result instead, the same technique the malformed
+        // tool-call branch below already uses. Varied calls to the same tool are untouched - reading
+        // five different files in one turn is legitimate work.
+        var executedCalls = new HashSet<string>(StringComparer.Ordinal);
+
         for (var round = 1; round <= _maxRounds; round++)
         {
             var content = new StringBuilder();
@@ -123,6 +131,20 @@ public sealed class OllamaToolCallingAgent
 
             foreach (var toolCall in toolCalls)
             {
+                if (!executedCalls.Add(CallSignature(toolCall)))
+                {
+                    // No activity event: nothing actually ran, so there's no work for a UI to
+                    // narrate - only the model needs to hear about this.
+                    _messages.Add(new OllamaChatMessage("tool", JsonSerializer.Serialize(new
+                    {
+                        error = "You already made this exact tool call earlier in this turn and its result is " +
+                                "above. Repeating it returns the same thing and cannot get you anything new - " +
+                                "use the result you already have, try genuinely different arguments if that is " +
+                                "warranted, or answer in plain text saying what you couldn't find."
+                    })) { ToolName = toolCall.Name });
+                    continue;
+                }
+
                 yield return OllamaAgentEvent.Tool(toolCall.Name);
                 var result = await _tools.ExecuteAsync(toolCall, cancellationToken);
                 _messages.Add(new OllamaChatMessage("tool", result) { ToolName = toolCall.Name });
@@ -131,6 +153,36 @@ public sealed class OllamaToolCallingAgent
 
         throw new InvalidOperationException($"SentinelGPT did not finish within {_maxRounds} tool-call rounds.");
     }
+
+    // Re-serialized rather than compared raw so the same call doesn't slip through on incidental
+    // formatting differences (whitespace, property order) between one round and the next.
+    private static string CallSignature(OllamaToolCall call)
+    {
+        string arguments;
+        try
+        {
+            using var document = JsonDocument.Parse(call.ArgumentsJson);
+            arguments = JsonSerializer.Serialize(NormalizeJson(document.RootElement));
+        }
+        catch (JsonException)
+        {
+            arguments = call.ArgumentsJson;
+        }
+        return $"{call.Name} {arguments}";
+    }
+
+    private static object? NormalizeJson(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Object => element.EnumerateObject()
+            .OrderBy(property => property.Name, StringComparer.Ordinal)
+            .ToDictionary(property => property.Name, property => NormalizeJson(property.Value)),
+        JsonValueKind.Array => element.EnumerateArray().Select(NormalizeJson).ToArray(),
+        JsonValueKind.String => element.GetString(),
+        JsonValueKind.Number => element.GetRawText(),
+        JsonValueKind.True => true,
+        JsonValueKind.False => false,
+        _ => null
+    };
 
     private static OllamaApiToolCall ToApiToolCall(OllamaToolCall call)
     {

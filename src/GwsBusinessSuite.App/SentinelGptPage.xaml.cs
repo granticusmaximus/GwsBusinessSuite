@@ -158,8 +158,11 @@ public partial class SentinelGptPage : ContentPage
             it's unavailable or a search comes back empty, do not retry more than once - say so plainly and answer
             from your own knowledge instead of repeating the call.
 
-            Wiki search (search_wiki/get_page) looks up this Mac's Sentinel wiki - use it only when the question is
-            clearly about GWS Business Suite content, not for general knowledge questions.
+            If wiki search tools (search_wiki/get_page) are offered to you, they look up this Mac's Sentinel wiki -
+            use them only when the question is clearly about GWS Business Suite content, not for general knowledge
+            questions. They are only offered when the user has configured a grounding key, so if you don't see them,
+            wiki lookup simply isn't available on this Mac - answer from your own knowledge and say so if it matters,
+            rather than describing a search you can't run.
 
             """;
 

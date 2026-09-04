@@ -13,12 +13,8 @@ public sealed class NativeToolExecutor(SentinelGroundingClient grounding) : IOll
 {
     // Text matches SentinelAiService.BuildToolCallingTools()'s search_wiki/get_page definitions
     // verbatim, so the model gets the same descriptions whether it's talking to the hosted loop
-    // or this native one. If no grounding key is configured, or the request fails,
-    // SentinelGroundingClient reports that distinctly (GroundingOutcomeReason) rather than
-    // returning an empty/null result indistinguishable from a genuine zero-match search - offering
-    // these tools is safe either way, since the "unavailable"/"error" tool result explicitly tells
-    // the model not to retry and to answer from its own knowledge instead.
-    public IReadOnlyList<OllamaToolDefinition> Definitions { get; } =
+    // or this native one.
+    private static readonly OllamaToolDefinition[] WikiTools =
     [
         new OllamaToolDefinition(
             "search_wiki",
@@ -29,6 +25,16 @@ public sealed class NativeToolExecutor(SentinelGroundingClient grounding) : IOll
             "Fetch the full plain-text content of one Sentinel wiki page by its id (a GUID, usually taken from a prior search_wiki result).",
             """{"type":"object","properties":{"pageId":{"type":"string","description":"The page's GUID id"}},"required":["pageId"]}""")
     ];
+
+    // Offered only when a grounding key actually exists. Without one every call would come back
+    // "unavailable", and a small local model that can't tell "this tool is broken" from "try a
+    // different query" will happily burn its whole round budget rediscovering that - the observed
+    // bug this guards against. Not offering the tool removes the failure mode structurally rather
+    // than asking the model not to retry. Read fresh each round (OllamaToolCallingAgent re-reads
+    // Definitions per round), so saving a key mid-conversation takes effect on the next message
+    // with no agent rebuild. ExecuteAsync still handles the unavailable/error cases distinctly for
+    // the narrower window where a key exists but the request fails.
+    public IReadOnlyList<OllamaToolDefinition> Definitions => grounding.IsConfigured ? WikiTools : [];
 
     public async Task<string> ExecuteAsync(OllamaToolCall call, CancellationToken cancellationToken)
     {

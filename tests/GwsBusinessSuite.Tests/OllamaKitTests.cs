@@ -124,6 +124,129 @@ public sealed class OllamaKitTests : IDisposable
         agent.Messages[^1].Content.Should().Be("Here you go.");
     }
 
+    [Fact]
+    public async Task ToolCallingAgent_WithARepeatedIdenticalToolCall_ExecutesItOnceAndTellsTheModelToStop()
+    {
+        // The loop this guards against: a model that keeps re-issuing the same call because the
+        // result wasn't what it wanted. Rounds 1 and 2 make the identical call; only the first
+        // should reach the executor.
+        var round = 0;
+        using var client = CreateClient(_ =>
+        {
+            round++;
+            return round <= 2
+                ? NdjsonResponse("""{"message":{"content":"","tool_calls":[{"type":"function","function":{"name":"search_wiki","arguments":{"query":"deploy"}}}]},"done":true}""")
+                : NdjsonResponse(string.Join('\n',
+                    """{"message":{"content":"Nothing in the wiki about that."},"done":false}""",
+                    """{"message":{"content":""},"done":true}"""));
+        });
+        var executor = new FakeToolExecutor([new OllamaToolDefinition("search_wiki", "Search", """{"type":"object"}""")]);
+        var agent = new OllamaToolCallingAgent(client, executor, "sentinelgpt", "system prompt", maxRounds: 4);
+
+        var events = new List<OllamaAgentEvent>();
+        await foreach (var e in agent.RunTurnStreamingAsync("What does the wiki say about deploys?", default))
+            events.Add(e);
+
+        executor.Calls.Should().ContainSingle("the identical second call must be short-circuited, not re-run");
+        events.Count(e => e.ToolActivity == "search_wiki").Should().Be(1, "no activity should be reported for a call that never ran");
+        agent.Messages.Should().Contain(m =>
+            m.Role == "tool" && m.ToolName == "search_wiki" && m.Content.Contains("already made this exact tool call"));
+        string.Concat(events.Select(e => e.ContentDelta)).Should().Be("Nothing in the wiki about that.");
+    }
+
+    [Fact]
+    public async Task ToolCallingAgent_WithTheSameToolButDifferentArguments_RunsBothCalls()
+    {
+        // The guard must not punish legitimate work - reading two different files, or searching two
+        // genuinely different queries, is progress rather than a loop.
+        var round = 0;
+        using var client = CreateClient(_ =>
+        {
+            round++;
+            return round switch
+            {
+                1 => NdjsonResponse("""{"message":{"content":"","tool_calls":[{"type":"function","function":{"name":"read_file","arguments":{"path":"a.cs"}}}]},"done":true}"""),
+                2 => NdjsonResponse("""{"message":{"content":"","tool_calls":[{"type":"function","function":{"name":"read_file","arguments":{"path":"b.cs"}}}]},"done":true}"""),
+                _ => NdjsonResponse(string.Join('\n',
+                    """{"message":{"content":"Both files look fine."},"done":false}""",
+                    """{"message":{"content":""},"done":true}"""))
+            };
+        });
+        var executor = new FakeToolExecutor([new OllamaToolDefinition("read_file", "Read", """{"type":"object"}""")]);
+        var agent = new OllamaToolCallingAgent(client, executor, "sentinelgpt", "system prompt", maxRounds: 4);
+
+        await foreach (var _ in agent.RunTurnStreamingAsync("Review a.cs and b.cs", default)) { }
+
+        executor.Calls.Should().HaveCount(2);
+        executor.Calls.Select(call => call.ArgumentsJson).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
+    public async Task ToolCallingAgent_TreatsReorderedOrReformattedArgumentsAsTheSameCall()
+    {
+        // Same call, different JSON spelling (property order and whitespace) - a raw string compare
+        // would miss this and let the loop through.
+        var round = 0;
+        using var client = CreateClient(_ =>
+        {
+            round++;
+            return round switch
+            {
+                1 => NdjsonResponse("""{"message":{"content":"","tool_calls":[{"type":"function","function":{"name":"search_text","arguments":{"query":"deploy","path":"src"}}}]},"done":true}"""),
+                2 => NdjsonResponse("""{"message":{"content":"","tool_calls":[{"type":"function","function":{"name":"search_text","arguments":{"path":"src","query":"deploy"}}}]},"done":true}"""),
+                _ => NdjsonResponse(string.Join('\n',
+                    """{"message":{"content":"No matches."},"done":false}""",
+                    """{"message":{"content":""},"done":true}"""))
+            };
+        });
+        var executor = new FakeToolExecutor([new OllamaToolDefinition("search_text", "Search", """{"type":"object"}""")]);
+        var agent = new OllamaToolCallingAgent(client, executor, "sentinelgpt", "system prompt", maxRounds: 4);
+
+        await foreach (var _ in agent.RunTurnStreamingAsync("Search for deploy", default)) { }
+
+        executor.Calls.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void CompositeToolExecutor_OffersEveryUnderlyingExecutorsDefinitions()
+    {
+        var wiki = new FakeToolExecutor([new OllamaToolDefinition("search_wiki", "Search", """{"type":"object"}""")]);
+        var files = new FakeToolExecutor([
+            new OllamaToolDefinition("read_file", "Read", """{"type":"object"}"""),
+            new OllamaToolDefinition("write_file", "Write", """{"type":"object"}""")
+        ]);
+
+        var composite = new CompositeToolExecutor([wiki, files]);
+
+        composite.Definitions.Select(definition => definition.Name)
+            .Should().BeEquivalentTo(["search_wiki", "read_file", "write_file"]);
+    }
+
+    [Fact]
+    public async Task CompositeToolExecutor_RoutesEachCallToTheExecutorThatDeclaresIt()
+    {
+        var wiki = new FakeToolExecutor([new OllamaToolDefinition("search_wiki", "Search", """{"type":"object"}""")]);
+        var files = new FakeToolExecutor([new OllamaToolDefinition("read_file", "Read", """{"type":"object"}""")]);
+        var composite = new CompositeToolExecutor([wiki, files]);
+
+        await composite.ExecuteAsync(new OllamaToolCall("read_file", """{"path":"a.cs"}"""), default);
+
+        files.Calls.Should().ContainSingle(call => call.Name == "read_file");
+        wiki.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CompositeToolExecutor_ReturnsAnErrorWhenNoExecutorDeclaresTheTool()
+    {
+        // Reachable in the real app: the wiki tools disappear from Definitions the moment the
+        // grounding key is removed, so an in-flight call can name a tool nothing owns any more.
+        var composite = new CompositeToolExecutor([new FakeToolExecutor([])]);
+
+        var result = await composite.ExecuteAsync(new OllamaToolCall("search_wiki", "{}"), default);
+
+        result.Should().Contain("Unknown tool: search_wiki");
+    }
+
     [Theory]
     [InlineData("""{"name":"search_wiki","parameters":{"query":"x"}}""", true)]
     [InlineData("""{"name":"read_file","arguments":{"path":"x","bad":undefined}}""", true)]
