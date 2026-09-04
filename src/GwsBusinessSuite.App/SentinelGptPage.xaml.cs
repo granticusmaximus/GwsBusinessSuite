@@ -354,7 +354,16 @@ public partial class SentinelGptPage : ContentPage
 
         _messages.Add(new ChatMessageViewModel(isUser: true) { Text = prompt, IsComplete = true });
         var answer = new ChatMessageViewModel(isUser: false);
+        // One subscription covers every way this turn's answer can update (deep-analysis status,
+        // each streamed delta, a fallback message, or an error) - simpler than scrolling from each
+        // call site individually, and keeps the transcript pinned to the bottom while it streams in.
+        answer.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ChatMessageViewModel.Text))
+                ScrollToLatestMessage();
+        };
         _messages.Add(answer);
+        ScrollToLatestMessage();
 
         try
         {
@@ -558,6 +567,13 @@ public partial class SentinelGptPage : ContentPage
                 IsComplete = true
             });
         }
+        ScrollToLatestMessage();
+    }
+
+    private void ScrollToLatestMessage()
+    {
+        if (_messages.Count == 0) return;
+        Transcript.ScrollTo(_messages.Count - 1, position: ScrollToPosition.End, animate: false);
     }
 
     private void OnDeleteConversationClicked(object? sender, EventArgs e)
