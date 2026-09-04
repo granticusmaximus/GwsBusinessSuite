@@ -6,6 +6,14 @@ namespace GwsBusinessSuite.App;
 public sealed record GroundingSearchResult(Guid Id, bool IsDatabase, string Title, string Preview);
 public sealed record GroundingPage(Guid Id, string Title, string Content);
 
+// Distinguishes "grounding isn't usable right now" (no key configured, or the request failed)
+// from a genuine zero-result search/lookup - callers (NativeToolExecutor) need this to tell a
+// tool-calling model "don't retry" versus "this legitimately came back empty," which an empty
+// list/null alone can't express.
+public enum GroundingOutcomeReason { Success, NotConfigured, RequestFailed }
+public sealed record GroundingSearchOutcome(GroundingOutcomeReason Reason, IReadOnlyList<GroundingSearchResult> Results);
+public sealed record GroundingPageOutcome(GroundingOutcomeReason Reason, GroundingPage? Page);
+
 // Calls the hosted admin backend's read-only "sentinel:read" developer-API endpoints for wiki
 // search/page content - the grounding *data* the native tab's tools need, while inference itself
 // stays entirely local (this client never touches Ollama). Native DTOs here rather than
@@ -20,26 +28,32 @@ public sealed class SentinelGroundingClient(SecureApiKeyStore apiKeyStore)
 {
     private readonly HttpClient _http = new() { BaseAddress = new Uri(AppEndpoints.BaseUrl) };
 
-    public async Task<IReadOnlyList<GroundingSearchResult>> SearchWikiAsync(string query, CancellationToken cancellationToken)
+    public async Task<GroundingSearchOutcome> SearchWikiAsync(string query, CancellationToken cancellationToken)
     {
-        if (await apiKeyStore.GetAsync() is not { Length: > 0 } apiKey) return [];
+        if (await apiKeyStore.GetAsync() is not { Length: > 0 } apiKey)
+            return new(GroundingOutcomeReason.NotConfigured, []);
 
         using var request = new HttpRequestMessage(
             HttpMethod.Get, $"/api/v1/sentinel/search?query={Uri.EscapeDataString(query)}");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         using var response = await _http.SendAsync(request, cancellationToken);
-        if (!response.IsSuccessStatusCode) return [];
-        return await response.Content.ReadFromJsonAsync<IReadOnlyList<GroundingSearchResult>>(cancellationToken) ?? [];
+        if (!response.IsSuccessStatusCode)
+            return new(GroundingOutcomeReason.RequestFailed, []);
+        var results = await response.Content.ReadFromJsonAsync<IReadOnlyList<GroundingSearchResult>>(cancellationToken) ?? [];
+        return new(GroundingOutcomeReason.Success, results);
     }
 
-    public async Task<GroundingPage?> GetPageAsync(Guid pageId, CancellationToken cancellationToken)
+    public async Task<GroundingPageOutcome> GetPageAsync(Guid pageId, CancellationToken cancellationToken)
     {
-        if (await apiKeyStore.GetAsync() is not { Length: > 0 } apiKey) return null;
+        if (await apiKeyStore.GetAsync() is not { Length: > 0 } apiKey)
+            return new(GroundingOutcomeReason.NotConfigured, null);
 
         using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/v1/sentinel/pages/{pageId}");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
         using var response = await _http.SendAsync(request, cancellationToken);
-        if (!response.IsSuccessStatusCode) return null;
-        return await response.Content.ReadFromJsonAsync<GroundingPage>(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            return new(GroundingOutcomeReason.RequestFailed, null);
+        var page = await response.Content.ReadFromJsonAsync<GroundingPage>(cancellationToken);
+        return new(GroundingOutcomeReason.Success, page);
     }
 }

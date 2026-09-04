@@ -39,10 +39,8 @@
                     <Label Text="Deep analysis" TextColor="#A8A29E" FontSize="12" VerticalOptions="Center" />
                     <Switch x:Name="DeepAnalysisSwitch" Toggled="OnDeepAnalysisToggled" />
                 </HorizontalStackLayout>
-                <HorizontalStackLayout Grid.Column="2" Spacing="6" VerticalOptions="Center">
-                    <Label Text="Developer mode" TextColor="#A8A29E" FontSize="12" VerticalOptions="Center" />
-                    <Switch x:Name="DeveloperModeSwitch" Toggled="OnDeveloperModeToggled" />
-                </HorizontalStackLayout>
+                <Button Grid.Column="2" Text="&#x1F4C1;" FontSize="16" Padding="8,4" BackgroundColor="Transparent"
+                        TextColor="#A8A29E" ToolTipProperties.Text="Project folder" Clicked="OnToggleWorkspaceRowClicked" />
                 <Picker x:Name="ModelPicker" Grid.Column="3" TextColor="#FAFAF9" VerticalOptions="Center" WidthRequest="150"
                         SelectedIndexChanged="OnModelChanged" />
                 <Button Grid.Column="4" Text="&#x2699;" FontSize="16" Padding="8,4" BackgroundColor="Transparent"
@@ -62,15 +60,17 @@
                         FontAttributes="Bold" CornerRadius="6" Clicked="OnSaveApiKeyClicked" />
             </Grid>
 
-            <Grid x:Name="DeveloperRow" Grid.Row="2" Padding="16,10" ColumnDefinitions="*,Auto" ColumnSpacing="8"
+            <Grid x:Name="WorkspaceRow" Grid.Row="2" Padding="16,10" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8"
                   BackgroundColor="#231F1D" IsVisible="False">
                 <VerticalStackLayout Grid.Column="0" Spacing="4">
-                    <Label Text="Developer mode workspace" TextColor="#D6D3D1" FontSize="12" FontAttributes="Bold" />
+                    <Label Text="Project folder (optional)" TextColor="#D6D3D1" FontSize="12" FontAttributes="Bold" />
                     <Label x:Name="WorkspacePathLabel" Text="No folder chosen yet." TextColor="#FAFAF9" FontSize="13" LineBreakMode="TailTruncation" />
-                    <Label Text="SentinelGPT can read, edit (with your approval), and describe files in the chosen folder. It cannot run commands from this tab. Inference stays local either way."
+                    <Label Text="SentinelGPT can read and, with your approval, edit files in this folder when a message calls for it. It cannot run commands from this tab. Inference stays local either way."
                            TextColor="#78716C" FontSize="11" />
                 </VerticalStackLayout>
-                <Button Grid.Column="1" Text="Choose Folder..." VerticalOptions="Start" BackgroundColor="#F59E0B" TextColor="#1C1917"
+                <Button x:Name="ClearFolderButton" Grid.Column="1" Text="Clear" VerticalOptions="Start" BackgroundColor="Transparent"
+                        TextColor="#A8A29E" IsVisible="False" Clicked="OnClearFolderClicked" />
+                <Button Grid.Column="2" Text="Choose Folder..." VerticalOptions="Start" BackgroundColor="#F59E0B" TextColor="#1C1917"
                         FontAttributes="Bold" CornerRadius="6" Clicked="OnChooseFolderClicked" />
             </Grid>
 
