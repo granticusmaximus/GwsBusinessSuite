@@ -40,7 +40,7 @@
          cards) render their event data client-side, so plain HttpClient + regex (this
          file's usual pattern for GovernmentIntelligenceService) can't see it at all. -->
     <PackageReference Include="Microsoft.Playwright" Version="1.62.0" />
-    <PackageReference Include="Stripe.net" Version="52.3.0" />
+    <PackageReference Include="Stripe.net" Version="52.4.0" />
   </ItemGroup>
 
   <PropertyGroup>
