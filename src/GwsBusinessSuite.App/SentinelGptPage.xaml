@@ -151,7 +151,19 @@
                                 <Border Padding="12,8" HorizontalOptions="Start" MaximumWidthRequest="560"
                                         BackgroundColor="{Binding BubbleColor}"
                                         Stroke="#292524" StrokeShape="RoundRectangle 10">
-                                    <Label Text="{Binding Text}" TextColor="#FAFAF9" FontSize="14" />
+                                    <Grid>
+                                        <!-- The empty-answer window only. TypingIndicatorView
+                                             starts and stops itself with IsVisible, so it never
+                                             animates behind a finished message. -->
+                                        <local:TypingIndicatorView IsVisible="{Binding ShowTypingIndicator}" />
+                                        <HorizontalStackLayout IsVisible="{Binding HasText}" Spacing="1">
+                                            <Label Text="{Binding Text}" TextColor="#FAFAF9" FontSize="14"
+                                                   FontFamily="{Binding TextFontFamily}" />
+                                            <!-- Blinking caret while tokens are still arriving. -->
+                                            <local:StreamingCaretView IsVisible="{Binding ShowStreamingCaret}"
+                                                                      VerticalOptions="End" />
+                                        </HorizontalStackLayout>
+                                    </Grid>
                                 </Border>
                                 <HorizontalStackLayout IsVisible="{Binding IsComplete}" Spacing="10" Margin="4,0,0,0">
                                     <Button Text="&#x1F50A;" FontSize="12" Padding="4" BackgroundColor="Transparent"
@@ -171,8 +183,8 @@
             </CollectionView>
 
             <Grid Grid.Row="5" Padding="12" ColumnDefinitions="*,Auto" BackgroundColor="#1C1917">
-                <Editor x:Name="PromptEditor" Grid.Column="0"
-                        Placeholder="Ask SentinelGPT..." PlaceholderColor="#78716C"
+                <local:ChatEditor x:Name="PromptEditor" Grid.Column="0"
+                        Placeholder="Ask SentinelGPT, or type / for commands" PlaceholderColor="#78716C"
                         TextColor="#FAFAF9" BackgroundColor="#231F1D"
                         AutoSize="TextChanges" MaxLength="8000" HeightRequest="42" />
                 <Button x:Name="SendButton" Grid.Column="1" Text="Send" Margin="8,0,0,0"

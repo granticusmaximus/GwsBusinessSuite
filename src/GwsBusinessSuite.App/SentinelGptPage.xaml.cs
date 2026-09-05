@@ -96,6 +96,9 @@ public partial class SentinelGptPage : ContentPage
         ModelLibrary.ItemsSource = _modelLibrary;
         PersonaPicker.ItemsSource = AgentPersonas.All.Select(persona => persona.Name).ToList();
         PersonaPicker.SelectedIndex = AgentPersonas.All.ToList().IndexOf(AgentPersonas.Default);
+        // Enter sends, Shift+Enter inserts a newline. OnSendClicked already guards re-entry via
+        // _sending, so a fast double Enter can't start two turns.
+        PromptEditor.SendRequested += (_, _) => OnSendClicked(this, EventArgs.Empty);
     }
 
     protected override async void OnAppearing()
@@ -208,7 +211,8 @@ public partial class SentinelGptPage : ContentPage
         // Only sent for models that report the capability, so the payload stays honest.
         var think = model.SupportsThinking ? false : (bool?)null;
         return new(_ollama, executor, model.Name,
-            BuildSystemPrompt(model.SupportsTools ? _devTools : null, model.SupportsTools, _persona),
+            BuildSystemPrompt(model.SupportsTools ? _devTools : null, model.SupportsTools, _persona)
+                + DescribeSkillsForPrompt(),
             maxRounds: 6, think: think);
     }
 
@@ -306,6 +310,20 @@ public partial class SentinelGptPage : ContentPage
 
             """;
         return prompt + devTools.DescribeWorkspace();
+    }
+
+    // Named in the system prompt so "what skills do you have?" is answerable in conversation,
+    // not only through /skills. Only the names are listed - a skill's full instructions can run
+    // to pages, and injecting all of them into every turn would crowd out the conversation for
+    // no benefit until one is actually applied.
+    private string DescribeSkillsForPrompt()
+    {
+        var names = _skills.List();
+        return names.Count == 0
+            ? "\nYou currently have no skills installed. If asked, say the user can add one by putting a " +
+              "Markdown file in the skills folder shown by the /skills command.\n"
+            : $"\nSkills available to apply to a message: {string.Join(", ", names)}. The user applies one with " +
+              "\"/skills <name> <request>\" or the Skill dropdown in Settings; you cannot invoke one yourself.\n";
     }
 
     private WorkspaceTools CreateDeveloperTools(string workspaceRoot) =>
@@ -572,7 +590,128 @@ public partial class SentinelGptPage : ContentPage
         // rather than blocking the user from sending at all.
 
         PromptEditor.Text = string.Empty;
+
+        // Commands are answered by the app itself and never reach the model - see SlashCommands
+        // for why the app speaks SentinelCLI's vocabulary rather than shelling out to it.
+        if (SlashCommands.LooksLikeCommand(prompt))
+        {
+            HandleSlashCommand(prompt);
+            return;
+        }
+
         await RunTurnAsync(ApplyPendingSkill(prompt), displayText: prompt);
+    }
+
+    private void HandleSlashCommand(string prompt)
+    {
+        _messages.Add(new ChatMessageViewModel(isUser: true) { Text = prompt, IsComplete = true });
+        SlashCommands.TryParse(prompt, out var name, out var argument);
+
+        // /skills with both a name and a request is the one command that still runs a turn -
+        // it's SentinelCLI's "apply this skill for one message" behaviour.
+        if (name == SlashCommands.Skills && argument.Length > 0)
+        {
+            var space = argument.IndexOf(' ');
+            var skillName = space < 0 ? argument : argument[..space];
+            var request = space < 0 ? string.Empty : argument[(space + 1)..].Trim();
+            if (_skills.Load(skillName) is not { } instructions)
+                Notice($"No skill named '{skillName}'. Run /skills to see what's available.");
+            else if (request.Length == 0)
+                Notice($"Usage: /skills {skillName} <your request>");
+            else
+                _ = RunTurnAsync(SkillLibrary.BuildTurnPrompt(skillName, instructions, request), displayText: request);
+            return;
+        }
+
+        Notice(name switch
+        {
+            SlashCommands.Help => SlashCommands.BuildHelp(),
+            SlashCommands.Skills => DescribeSkills(),
+            SlashCommands.Agent => SetOrDescribePersona(argument),
+            SlashCommands.Models => DescribeModels(),
+            SlashCommands.Workspace => _workspaceRoot is { } root
+                ? $"Attached project folder:\n  {root}\n\nFile tools are folded into the model's tool set while a folder is attached."
+                : "No project folder attached. Use the folder button in the toolbar to choose one.",
+            SlashCommands.Clear => ClearForCommand(),
+            _ => SlashCommands.SuggestFor(name) is { } suggestion
+                ? $"Unknown command: /{name}. Did you mean {suggestion.Usage}?\n\n{SlashCommands.BuildHelp()}"
+                : $"Unknown command: /{name}\n\n{SlashCommands.BuildHelp()}"
+        });
+        ScrollToLatestMessage();
+    }
+
+    private void Notice(string text) =>
+        _messages.Add(new ChatMessageViewModel(isUser: false)
+        {
+            Text = text,
+            IsComplete = true,
+            IsSystemNotice = true
+        });
+
+    private string ClearForCommand()
+    {
+        // Everything except the notice this returns, which is added by the caller afterwards.
+        _messages.Clear();
+        _currentSessionPath = null;
+        HistoryList.SelectedItem = null;
+        if (SelectedModel is { } model) _agent = CreateAgent(model);
+        RefreshHistory();
+        return "Started a new conversation.";
+    }
+
+    private string DescribeSkills()
+    {
+        RefreshSkills();
+        var names = _skills.List();
+        var where = _workspaceRoot is null
+            ? $"Skills are read from:\n  {AppSkillsDirectory()}\n\nAttach a project folder and its .sentinel/skills are read too."
+            : $"Skills are read from:\n  {AppSkillsDirectory()}\n  {WorkspaceSkillsDirectory()}";
+
+        var listing = names.Count == 0
+            ? "You have no skills yet."
+            : "Your skills:\n" + string.Join('\n', names.Select(name => $"  {name}"));
+
+        return $"""
+            {listing}
+
+            A skill is one Markdown file; its filename is the skill's name, and its contents are
+            extra instructions applied to a single message. Add one by dropping a .md file into
+            either folder below - nothing to rebuild or restart.
+
+            {where}
+
+            Apply one with:  /skills <name> <your request>
+            Or pick one from the Skill dropdown in Settings to apply it to your next message.
+            """;
+    }
+
+    private string SetOrDescribePersona(string argument)
+    {
+        if (argument.Length == 0)
+        {
+            var lines = AgentPersonas.All.Select(persona =>
+                $"  {persona.Name,-13}{persona.Description}{(persona == _persona ? "   [active]" : string.Empty)}");
+            return "Personas:\n" + string.Join('\n', lines) + "\n\nSwitch with:  /agent <name>";
+        }
+
+        if (AgentPersonas.Find(argument) is not { } selected)
+            return $"Unknown persona: {argument}. Run /agent to see the list.";
+
+        var index = AgentPersonas.All.ToList().IndexOf(selected);
+        PersonaPicker.SelectedIndex = index;   // fires OnPersonaChanged, which rebuilds the agent
+        return $"Persona set to '{selected.Name}'. It applies from your next message.";
+    }
+
+    private string DescribeModels()
+    {
+        if (_models.Count == 0) return "No local chat models are installed. Open the model library to install one.";
+        var lines = _models.Select(model =>
+        {
+            var active = model.Name == PickerModel() ? "   [active]" : string.Empty;
+            return $"  {model.Name,-26}{model.ParameterSize,-9}{(model.SupportsTools ? "tools" : "no tools")}{active}";
+        });
+        return "Installed local chat models:\n" + string.Join('\n', lines)
+            + "\n\nA model without tool support can talk, but can't search the wiki or read files.";
     }
 
     // Wraps one message in the chosen skill's instructions, then clears the selection - a skill

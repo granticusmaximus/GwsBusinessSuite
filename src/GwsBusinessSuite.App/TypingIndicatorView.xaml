@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentView xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="GwsBusinessSuite.App.TypingIndicatorView">
+
+    <!-- Three dots rising and fading in sequence - the settled convention for "a reply is
+         coming", and legible at a glance in a way a spinner is not: a spinner says "busy",
+         this says "composing". Driven from code-behind rather than XAML triggers so the
+         staggered phase offset between dots is exact, and so the loop can be stopped
+         deterministically when the answer arrives instead of being left running forever. -->
+    <HorizontalStackLayout Spacing="5" VerticalOptions="Center" Padding="2,4">
+        <Ellipse x:Name="Dot1" WidthRequest="7" HeightRequest="7" Fill="#A8A29E" Opacity="0.35" />
+        <Ellipse x:Name="Dot2" WidthRequest="7" HeightRequest="7" Fill="#A8A29E" Opacity="0.35" />
+        <Ellipse x:Name="Dot3" WidthRequest="7" HeightRequest="7" Fill="#A8A29E" Opacity="0.35" />
+    </HorizontalStackLayout>
+
+</ContentView>

@@ -20,8 +20,28 @@ public sealed class ChatMessageViewModel(bool isUser) : INotifyPropertyChanged
     public string Text
     {
         get => _text;
-        set { _text = value; OnPropertyChanged(); }
+        set
+        {
+            _text = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HasText));
+            OnPropertyChanged(nameof(ShowTypingIndicator));
+        }
     }
+
+    public bool HasText => _text.Length > 0;
+
+    // The dots show only in the genuinely empty window - request sent, nothing streamed back
+    // yet. Once the first token lands the text itself is the progress signal, and leaving the
+    // dots up alongside it would be two indicators saying the same thing. Transient status the
+    // page writes into Text (tool activity, "Thinking...") also counts as text and dismisses
+    // them, which is correct: something more specific is now being said.
+    public bool ShowTypingIndicator => IsAssistant && !IsComplete && !HasText;
+
+    // A caret while tokens are still arriving, so a paused stream is visibly distinguishable
+    // from a finished answer - without it, a model that stalls mid-sentence looks like a model
+    // that simply ended mid-sentence.
+    public bool ShowStreamingCaret => IsAssistant && !IsComplete && HasText && !IsSystemNotice;
 
     public bool IsError
     {
@@ -34,7 +54,19 @@ public sealed class ChatMessageViewModel(bool isUser) : INotifyPropertyChanged
         }
     }
 
-    public Color BubbleColor => IsError ? Color.FromArgb("#2B1515") : Color.FromArgb("#1C1917");
+    public Color BubbleColor => IsError ? Color.FromArgb("#2B1515")
+        : IsSystemNotice ? Color.FromArgb("#161B22")
+        : Color.FromArgb("#1C1917");
+
+    // Local output from a slash command, not something the model said. Styled and labelled
+    // differently on purpose: presenting the app's own answer in an identical bubble would let a
+    // user believe the assistant knows things it was never told.
+    public bool IsSystemNotice { get; init; }
+
+    public bool IsModelAnswer => IsAssistant && !IsSystemNotice;
+
+    // Command output is a list of names and usages; a proportional font ruins the alignment.
+    public string TextFontFamily => IsSystemNotice ? "Menlo" : string.Empty;
 
     public bool IsApproved
     {
@@ -54,7 +86,13 @@ public sealed class ChatMessageViewModel(bool isUser) : INotifyPropertyChanged
     public bool IsComplete
     {
         get => _isComplete;
-        set { _isComplete = value; OnPropertyChanged(); }
+        set
+        {
+            _isComplete = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ShowTypingIndicator));
+            OnPropertyChanged(nameof(ShowStreamingCaret));
+        }
     }
 
     // Only meaningful on the most recent assistant message; the page clears this on every other

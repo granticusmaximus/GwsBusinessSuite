@@ -13,6 +13,10 @@ public static class MauiProgram
 		builder
 			.UseMauiApp<App>()
 			.UseMauiCommunityToolkit()
+			// ChatEditor needs its own platform view on UIKit to declare a Shift+Return key
+			// command - see ChatEditorHandler. Scoped to this control so every other Editor in
+			// the app keeps stock behaviour.
+			.ConfigureMauiHandlers(handlers => handlers.AddHandler<ChatEditor, ChatEditorHandler>())
 			.ConfigureFonts(fonts =>
 			{
 				fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
@@ -72,6 +76,10 @@ public static class MauiProgram
 			"TrustedWindowsDownloads",
 			(handler, _) => TrustedWindowsDownloads.Configure(handler.PlatformView));
 #endif
+
+		// Enter sends / Shift+Enter newlines in the SentinelGPT composer. Registered once here
+		// because handler mappings are static and global, not per-page.
+		SendOnEnterBehavior.Configure();
 
 #if DEBUG
 		builder.Logging.AddDebug();

@@ -125,6 +125,113 @@ public sealed class OllamaKitTests : IDisposable
         agent.Messages[^1].Content.Should().Be("Here you go.");
     }
 
+    [Theory]
+    [InlineData("/skills", true)]
+    [InlineData("/Skills", true)]
+    [InlineData("/help me understand this", true)]
+    // A message that merely opens with a path must stay a normal prompt - this is a developer's
+    // assistant, so "/app/data is full" and "/usr/bin isn't on PATH" are ordinary things to type.
+    [InlineData("/app/data is full, what should I prune?", false)]
+    [InlineData("/ ", false)]
+    [InlineData("/", false)]
+    [InlineData("what does /skills do?", false)]
+    [InlineData("/usr/bin isn't on PATH", false)]
+    // A near miss is still a command attempt - it gets corrected, not forwarded to the model.
+    [InlineData("/skill", true)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void SlashCommands_TreatsOnlyRealCommandAttemptsAsCommands(string? input, bool expected) =>
+        SlashCommands.LooksLikeCommand(input).Should().Be(expected);
+
+    [Theory]
+    [InlineData("/skills", "skills", "")]
+    [InlineData("  /skills  ", "skills", "")]
+    [InlineData("/SKILLS", "skills", "")]
+    [InlineData("/agent reviewer", "agent", "reviewer")]
+    // The argument keeps its own casing and inner spacing - it is usually a prompt for the model.
+    [InlineData("/skills review Check THIS file for bugs", "skills", "review Check THIS file for bugs")]
+    public void SlashCommands_SplitsTheNameFromItsArgument(string input, string name, string argument)
+    {
+        SlashCommands.TryParse(input, out var parsedName, out var parsedArgument).Should().BeTrue();
+        parsedName.Should().Be(name);
+        parsedArgument.Should().Be(argument);
+    }
+
+    [Fact]
+    public void SlashCommands_HelpListsEveryCommandSoNoneCanBeSilentlyUndiscoverable()
+    {
+        // The whole point of the help text is discoverability; a command missing from it is
+        // invisible, which is exactly the state /skills was in before it existed at all.
+        var help = SlashCommands.BuildHelp();
+
+        SlashCommands.All.Should().NotBeEmpty();
+        foreach (var command in SlashCommands.All)
+        {
+            help.Should().Contain(command.Usage);
+            help.Should().Contain(command.Description);
+            SlashCommands.Find(command.Name).Should().BeSameAs(command);
+        }
+    }
+
+    [Fact]
+    public void SlashCommands_SuggestsTheIntendedCommandForANearMiss()
+    {
+        // The reported symptom that started this: typing "/skill" did nothing at all.
+        SlashCommands.SuggestFor("skill")!.Name.Should().Be(SlashCommands.Skills);
+        SlashCommands.SuggestFor("model")!.Name.Should().Be(SlashCommands.Models);
+        SlashCommands.SuggestFor("helpme")!.Name.Should().Be(SlashCommands.Help);
+        SlashCommands.SuggestFor("zzz").Should().BeNull();
+    }
+
+    [Fact]
+    public void SlashCommands_FindIsCaseInsensitiveAndRejectsUnknownNames()
+    {
+        SlashCommands.Find("SKILLS").Should().NotBeNull();
+        SlashCommands.Find("nope").Should().BeNull();
+    }
+
+    [Fact]
+    public void SkillLibrary_ReadsSeveralDirectoriesWithEarlierOnesWinningACollision()
+    {
+        // The app reads its own container plus the attached project folder, so a repository can
+        // carry skills alongside its code - and a host-level skill must be overridable by one.
+        var appSkills = Path.Combine(_root, "app-skills");
+        var repoSkills = Path.Combine(_root, "repo-skills");
+        Directory.CreateDirectory(appSkills);
+        Directory.CreateDirectory(repoSkills);
+        File.WriteAllText(Path.Combine(appSkills, "review.md"), "app version");
+        File.WriteAllText(Path.Combine(repoSkills, "review.md"), "repo version");
+        File.WriteAllText(Path.Combine(repoSkills, "deploy.md"), "repo only");
+
+        var skills = new SkillLibrary(appSkills, repoSkills);
+
+        skills.List().Should().BeEquivalentTo(["deploy", "review"]);
+        skills.Load("review").Should().Be("app version", "earlier directories win");
+        skills.Load("deploy").Should().Be("repo only");
+    }
+
+    [Theory]
+    [InlineData("../escape")]
+    [InlineData("nested/name")]
+    [InlineData("back\\slash")]
+    [InlineData("")]
+    public void SkillLibrary_RefusesToLoadAnythingOutsideItsOwnDirectories(string name)
+    {
+        var skills = new SkillLibrary(_root);
+
+        skills.Load(name).Should().BeNull();
+    }
+
+    [Fact]
+    public void SkillLibrary_IgnoresADirectoryThatDoesNotExist()
+    {
+        // A workspace folder can be detached, or a remembered bookmark can point somewhere gone.
+        var skills = new SkillLibrary(Path.Combine(_root, "not-created"), null);
+
+        skills.List().Should().BeEmpty();
+        skills.Load("anything").Should().BeNull();
+    }
+
     [Fact]
     public void ModelfileParser_SplitsTheRealSentinelProfileIntoApiCreateFields()
     {
