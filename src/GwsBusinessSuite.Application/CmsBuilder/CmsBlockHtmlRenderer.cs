@@ -144,6 +144,39 @@ public static class CmsBlockHtmlRenderer
           .gws-editable:hover { outline: 1px dashed rgba(37, 99, 235, 0.45); outline-offset: -1px; cursor: pointer; }
           .gws-editor-selected { outline: 2px solid #2563eb !important; outline-offset: -2px; }
           [data-gws-section-id]:hover { outline: 1px dashed rgba(148, 163, 184, 0.5); outline-offset: -1px; }
+          /* Sections previously had only a hover outline, so clicking one produced no lasting
+             visual change and the click read as dead. This is the section equivalent of
+             .gws-editor-selected. */
+          .gws-section-selected { outline: 2px solid #2563eb !important; outline-offset: -2px; }
+          [data-gws-section-id] { position: relative; }
+          .gws-section-handle {
+            position: absolute; top: 0; left: 0; z-index: 2147482000;
+            appearance: none; border: 0; cursor: pointer;
+            background: rgba(100, 116, 139, 0.85); color: #fff;
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+            font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+            padding: 3px 8px; border-radius: 0 0 6px 0; opacity: 0; transition: opacity .12s ease;
+          }
+          [data-gws-section-id]:hover .gws-section-handle,
+          .gws-section-selected .gws-section-handle { opacity: 1; }
+          .gws-section-selected .gws-section-handle { background: #2563eb; }
+          /* Anchored to the section's top-RIGHT: the section's name chip sits at top-left, and
+             at top-left the two overlapped each other. */
+          .gws-section-toolbar {
+            position: absolute; z-index: 2147483000; display: flex; gap: 2px;
+            transform: translateY(-100%);
+            background: #1e293b; border-radius: 8px 8px 0 0; padding: 4px;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.28);
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+          }
+          .gws-section-toolbar button {
+            appearance: none; border: 0; background: transparent; color: #e2e8f0;
+            font-size: 12px; line-height: 1; padding: 6px 9px; border-radius: 5px; cursor: pointer;
+          }
+          .gws-section-toolbar button:hover { background: rgba(148, 163, 184, 0.25); color: #fff; }
+          .gws-section-toolbar button.is-primary { background: #2563eb; color: #fff; font-weight: 600; }
+          .gws-section-toolbar button.is-primary:hover { background: #1d4ed8; }
+          .gws-section-toolbar button.is-danger:hover { background: #b91c1c; color: #fff; }
           [data-gws-inline-prop]:focus { outline: 2px solid #16a34a !important; outline-offset: 2px; cursor: text; }
           .gws-column { position: relative; min-height: 24px; }
           .gws-column.is-drop-target { outline: 1px dashed rgba(37, 99, 235, 0.45); outline-offset: 6px; border-radius: 14px; }
@@ -535,8 +568,70 @@ public static class CmsBlockHtmlRenderer
             }
           }
 
+          var sectionToolbar = null;
+
+          function removeSectionToolbar() {
+            if (sectionToolbar && sectionToolbar.parentNode) {
+              sectionToolbar.parentNode.removeChild(sectionToolbar);
+            }
+            sectionToolbar = null;
+          }
+
+          // Controls live on the canvas, anchored to the section you just clicked, rather than
+          // only in a side panel - selecting something should offer its actions where you are
+          // looking. Mirrors the Add Block control Squarespace anchors to a selected section.
+          function buildSectionToolbar(sectionEl, sectionId) {
+            removeSectionToolbar();
+            var bar = document.createElement('div');
+            bar.className = 'gws-section-toolbar';
+            bar.setAttribute('data-gws-toolbar', '1');
+
+            [
+              { command: 'add',       label: '+ Add block', cls: 'is-primary' },
+              { command: 'duplicate', label: 'Duplicate',   cls: '' },
+              { command: 'move-up',   label: '\u2191',      cls: '' },
+              { command: 'move-down', label: '\u2193',      cls: '' },
+              { command: 'delete',    label: 'Delete',      cls: 'is-danger' }
+            ].forEach(function (action) {
+              var button = document.createElement('button');
+              button.type = 'button';
+              button.className = action.cls;
+              button.textContent = action.label;
+              button.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                send({ type: 'cms:section-command', sectionId: sectionId, command: action.command });
+              }, true);
+              bar.appendChild(button);
+            });
+
+            // The section is the offset parent so the bar tracks it through scrolling and
+            // reflow without any position bookkeeping.
+            var previousPosition = window.getComputedStyle(sectionEl).position;
+            if (previousPosition === 'static') sectionEl.style.position = 'relative';
+            bar.style.top = '0px';
+            bar.style.right = '0px';
+            sectionEl.appendChild(bar);
+            sectionToolbar = bar;
+          }
+
+          function highlightSection(sectionId) {
+            var prev = document.querySelector('.gws-section-selected');
+            if (prev) prev.classList.remove('gws-section-selected');
+            removeSectionToolbar();
+            if (!sectionId) return;
+            var el = document.querySelector('[data-gws-section-id="' + sectionId + '"]');
+            if (!el) return;
+            el.classList.add('gws-section-selected');
+            buildSectionToolbar(el, sectionId);
+          }
+
           document.addEventListener('click', function (e) {
-            var widgetEl = e.target.closest('[data-gws-widget-id]');
+            // The toolbar lives inside the section it controls, so without this its own
+            // buttons would re-trigger a section select underneath them.
+            if (e.target.closest('[data-gws-toolbar]')) return;
+            var handleEl = e.target.closest('[data-gws-section-handle]');
+            var widgetEl = handleEl ? null : e.target.closest('[data-gws-widget-id]');
             var sectionEl = e.target.closest('[data-gws-section-id]');
             if (widgetEl) {
               // Focus/cursor placement for a contenteditable target already happened on
@@ -545,10 +640,12 @@ public static class CmsBlockHtmlRenderer
               // focus that's already landed.
               e.preventDefault();
               highlight(widgetEl.getAttribute('data-gws-widget-id'));
+              highlightSection(null);
               send({ type: 'cms:select', sectionId: sectionEl ? sectionEl.getAttribute('data-gws-section-id') : '', widgetId: widgetEl.getAttribute('data-gws-widget-id') });
             } else if (sectionEl) {
               e.preventDefault();
               highlight(null);
+              highlightSection(sectionEl.getAttribute('data-gws-section-id'));
               send({ type: 'cms:select-section', sectionId: sectionEl.getAttribute('data-gws-section-id') });
             }
           }, true);
@@ -583,6 +680,7 @@ public static class CmsBlockHtmlRenderer
             if (e.origin !== ORIGIN || !e.data || typeof e.data !== 'object') return;
             if (e.data.type === 'cms:sync-selection') {
               highlight(e.data.widgetId || null);
+              highlightSection(e.data.widgetId ? null : (e.data.sectionId || null));
             } else if (e.data.type === 'cms:prop-changed') {
               var el = document.querySelector('[data-gws-widget-id="' + e.data.widgetId + '"] [data-gws-inline-prop="' + e.data.prop + '"], [data-gws-widget-id="' + e.data.widgetId + '"][data-gws-inline-prop="' + e.data.prop + '"]');
               // Don't clobber an in-progress edit - only patch elements the user isn't
@@ -618,7 +716,7 @@ public static class CmsBlockHtmlRenderer
 
         var columnsClass = ColsClass(section.ColumnLayout);
         var sb = new StringBuilder();
-        sb.Append($"""<section class="{Html(sectionClass)}"{sectionAttrs}><div class="{Html(columnsClass)}">""");
+        sb.Append($"""<section class="{Html(sectionClass)}"{sectionAttrs}>{SectionHandle(section, editMode)}<div class="{Html(columnsClass)}">""");
 
         foreach (var column in section.Columns)
         {
@@ -1046,6 +1144,16 @@ public static class CmsBlockHtmlRenderer
     // the edit-mode script's capture-phase click listener runs its e.preventDefault() -
     // so preventDefault (needed to stop a real <a>/<form>'s own default action) never
     // interferes with the native "click to place cursor and type" behavior here.
+    // A section's widgets fill it edge to edge, so in practice there was nowhere to click the
+    // section itself - a click almost always landed on a widget and selecting a section was
+    // effectively impossible. This gives every section an explicit, always-present target in edit
+    // mode (the label chip both WordPress and Squarespace put on a section), instead of asking
+    // people to find a few pixels of padding.
+    private static string SectionHandle(LayoutSection section, bool editMode) =>
+        editMode
+            ? $"""<button type="button" class="gws-section-handle" data-gws-section-handle="{Html(section.Id)}">{Html(string.IsNullOrWhiteSpace(section.Label) ? "Section" : section.Label)}</button>"""
+            : string.Empty;
+
     private static string InlineEditAttrs(bool editMode, string propKey) =>
         editMode ? $" contenteditable=\"plaintext-only\" data-gws-inline-prop=\"{propKey}\"" : "";
 

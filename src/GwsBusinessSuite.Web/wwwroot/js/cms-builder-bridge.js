@@ -167,6 +167,11 @@ window.gwsCmsBuilderBridge = (function () {
             case 'cms:select-section':
                 _dotNetRef.invokeMethodAsync('OnSectionSelectedFromIframe', data.sectionId || '');
                 break;
+            case 'cms:section-command':
+                // Add block / duplicate / move / delete, issued from the toolbar the canvas
+                // anchors to the selected section.
+                _dotNetRef.invokeMethodAsync('OnSectionCommandFromIframe', data.sectionId || '', data.command || '');
+                break;
             case 'cms:edit':
                 _dotNetRef.invokeMethodAsync('OnWidgetPropEditedFromIframe', data.sectionId || '', data.widgetId || '', data.prop || '', data.value || '');
                 break;

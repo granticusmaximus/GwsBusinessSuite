@@ -1601,7 +1601,7 @@ else
             try
             {
                 await JS.InvokeVoidAsync("gwsCmsBuilderBridge.sendToIframe",
-                    new { type = "cms:sync-selection", widgetId = _selectedWidgetId });
+                    new { type = "cms:sync-selection", widgetId = _selectedWidgetId, sectionId = _selectedSectionId });
             }
             catch (JSDisconnectedException)
             {
@@ -1610,12 +1610,53 @@ else
     }
 
     [JSInvokable]
-    public Task OnIframeReady() => Task.CompletedTask;
+    // A structural edit reloads the preview, which throws away the canvas's outline and the
+    // section toolbar. Clearing the synced key makes the next render push the current selection
+    // back in, so the section you were working on stays visibly selected across the reload
+    // instead of the canvas going blank on you after every action.
+    public Task OnIframeReady()
+    {
+        _lastSyncedSelectionKey = string.Empty;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
 
     [JSInvokable]
     public Task OnSectionSelectedFromIframe(string sectionId)
     {
         SelectSection(sectionId);
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    // Toolbar actions issued from the canvas itself (see CmsBlockHtmlRenderer's
+    // buildSectionToolbar). These reuse the same section operations the Layers panel calls, so
+    // there is one implementation per action regardless of where it was triggered.
+    [JSInvokable]
+    public Task OnSectionCommandFromIframe(string sectionId, string command)
+    {
+        switch (command)
+        {
+            case "add":
+                // Select the section and open the palette - the block then lands in the section
+                // the user was pointing at rather than wherever selection happened to be.
+                SelectSection(sectionId);
+                _leftTab = "widgets";
+                break;
+            case "duplicate":
+                DuplicateSection(sectionId);
+                break;
+            case "move-up":
+                MoveSection(sectionId, -1);
+                break;
+            case "move-down":
+                MoveSection(sectionId, 1);
+                break;
+            case "delete":
+                DeleteSection(sectionId);
+                break;
+        }
+
         StateHasChanged();
         return Task.CompletedTask;
     }
@@ -2333,16 +2374,21 @@ else
     }
 
     // ── Selection ─────────────────────────────────────────────────────────
+    // Selecting anything on the canvas has to bring the Block tab forward, or the click looks
+    // like it did nothing: the inspector is hidden while the Page tab is showing, so the
+    // selection would land silently in a panel the user can't see.
     private void SelectSection(string sectionId)
     {
         _selectedSectionId = sectionId;
         _selectedWidgetId = string.Empty;
+        _rightTab = "block";
     }
 
     private void SelectWidget(string sectionId, string widgetId)
     {
         _selectedSectionId = sectionId;
         _selectedWidgetId = widgetId;
+        _rightTab = "block";
     }
 
     private void ClearSelection()
