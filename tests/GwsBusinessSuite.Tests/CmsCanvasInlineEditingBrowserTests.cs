@@ -22,15 +22,41 @@ public sealed class CmsCanvasInlineEditingBrowserTests(PlaywrightBrowserFixture 
         Sections = [ new LayoutSection { Id = "s1", Columns = [ new LayoutColumn { Widgets = [.. widgets] } ] } ]
     };
 
+
+    // The edit-mode behaviour ships as /js/cms-edit-mode.js (it cannot be inline - see
+    // CmsEditModeScriptCspTests), so the stub has to serve the real file for these to exercise
+    // anything. Reading the shipped asset rather than a copy also means these tests fail if that
+    // file goes missing or its path changes.
+    private static string EditModeScriptPath => Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory,
+        "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/cms-edit-mode.js"));
+
+    private static async Task ServeCanvasAsync(IPage page, string html)
+    {
+        var script = await File.ReadAllTextAsync(EditModeScriptPath);
+        // Playwright matches handlers in REVERSE registration order, so the broad HTML catch-all
+        // has to be registered first or it swallows the script request and returns HTML for it.
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = html
+        }));
+        await page.RouteAsync("**/js/cms-edit-mode.js", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "application/javascript",
+            Body = script
+        }));
+    }
+
     private async Task<IPage> OpenAsync(PageLayout layout)
     {
         var page = await fixture.Browser.NewPageAsync();
-        var html = Page(layout);
-        await page.RouteAsync("http://localhost/**", r => r.FulfillAsync(new()
-        {
-            Status = 200, ContentType = "text/html", Body = html
-        }));
+        await ServeCanvasAsync(page, Page(layout));
         await page.GotoAsync("http://localhost/canvas");
+        await page.WaitForFunctionAsync("() => window.__gwsCanvasReady === true", null,
+            new() { Timeout = 5000 });
         // Capture what the canvas posts to the parent so the assertions see the real payload.
         await page.EvaluateAsync(
             "() => { window.__msgs = []; const p = window.parent.postMessage.bind(window.parent);" +

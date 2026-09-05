@@ -215,7 +215,15 @@ public sealed class CmsBlockHtmlRendererTests
     [Fact]
     public void EditModeScript_ShouldReportCrossFrameDragTargetsAndCommittedDrops()
     {
-        var script = CmsBlockHtmlRenderer.BuildEditModeScript();
+        // The behaviour moved out of an inline <script> and into /js/cms-edit-mode.js, because
+        // the app's CSP forbids inline scripts and was silently blocking the whole canvas (see
+        // CmsEditModeScriptCspTests). The drag protocol assertions still belong - they just have
+        // to read the shipped file now.
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/cms-edit-mode.js"));
+        Assert.True(File.Exists(scriptPath), $"Edit-mode script is missing: {scriptPath}");
+        var script = File.ReadAllText(scriptPath);
 
         Assert.Contains("cms:external-drag-target", script);
         Assert.Contains("cms:external-drag-committed", script);

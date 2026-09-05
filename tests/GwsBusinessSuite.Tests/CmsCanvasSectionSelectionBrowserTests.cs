@@ -48,17 +48,41 @@ public sealed class CmsCanvasSectionSelectionBrowserTests(PlaywrightBrowserFixtu
         return $"<!doctype html><html><body>{body}{CmsBlockHtmlRenderer.BuildEditModeScript()}</body></html>";
     }
 
-    private static async Task<IPage> OpenCanvasAsync(IBrowser browser)
+
+    // The edit-mode behaviour ships as /js/cms-edit-mode.js (it cannot be inline - see
+    // CmsEditModeScriptCspTests), so the stub has to serve the real file for these to exercise
+    // anything. Reading the shipped asset rather than a copy also means these tests fail if that
+    // file goes missing or its path changes.
+    private static string EditModeScriptPath => Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory,
+        "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/cms-edit-mode.js"));
+
+    private static async Task ServeCanvasAsync(IPage page, string html)
     {
-        var page = await browser.NewPageAsync();
-        var html = BuildEditModePage();
+        var script = await File.ReadAllTextAsync(EditModeScriptPath);
+        // Playwright matches handlers in REVERSE registration order, so the broad HTML catch-all
+        // has to be registered first or it swallows the script request and returns HTML for it.
         await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
         {
             Status = 200,
             ContentType = "text/html",
             Body = html
         }));
+        await page.RouteAsync("**/js/cms-edit-mode.js", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "application/javascript",
+            Body = script
+        }));
+    }
+
+    private static async Task<IPage> OpenCanvasAsync(IBrowser browser)
+    {
+        var page = await browser.NewPageAsync();
+        await ServeCanvasAsync(page, BuildEditModePage());
         await page.GotoAsync("http://localhost/canvas");
+        await page.WaitForFunctionAsync("() => window.__gwsCanvasReady === true", null,
+            new() { Timeout = 5000 });
         return page;
     }
 
