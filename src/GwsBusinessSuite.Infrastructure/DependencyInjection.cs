@@ -339,6 +339,16 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddHostedService<GovernmentIntelligenceRefreshBackgroundService>();
+        services.AddHttpClient(nameof(EventbriteEventsSource), client =>
+        {
+            // Eventbrite serves a challenge page to clients with no recognisable User-Agent, so
+            // this identifies as a normal desktop browser; the pages it reads are the public,
+            // unauthenticated browse pages whose schema.org markup exists to be machine-read.
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36");
+        });
+        services.AddSingleton<IEventbriteEventsSource, EventbriteEventsSource>();
         services.AddSingleton<ILocalEventsScraperService, LocalEventsScraperService>();
         services.AddHostedService<LocalEventsRefreshBackgroundService>();
         var congressApiKey = configuration["CongressApi:ApiKey"] is { Length: > 0 } key ? key : "DEMO_KEY";

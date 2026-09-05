@@ -160,3 +160,76 @@
     .civic-panel { padding: .9rem; }
     .date-list span small { white-space: normal; }
 }
+
+/* ── Local event filters ─────────────────────────────────────────────────── */
+/* Town chips read as a row of quick toggles; date and distance are selects because
+   they are ranges rather than a pick-one-of-a-few. */
+
+.event-filters {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	margin-bottom: 0.85rem;
+}
+
+.event-filter-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.event-chip {
+	appearance: none;
+	border: 1px solid var(--gws-panel-border);
+	background: rgba(255, 255, 255, 0.04);
+	color: var(--gws-text-soft);
+	border-radius: 999px;
+	padding: 0.3rem 0.7rem;
+	font-size: 0.76rem;
+	font-weight: 600;
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+}
+
+.event-chip:hover {
+	color: var(--gws-text-strong);
+	border-color: rgba(148, 163, 184, 0.55);
+}
+
+.event-chip.is-on {
+	background: rgba(37, 99, 235, 0.22);
+	border-color: rgba(96, 165, 250, 0.6);
+	color: #bfdbfe;
+}
+
+.event-chip-count {
+	font-size: 0.68rem;
+	font-weight: 700;
+	opacity: 0.7;
+	font-variant-numeric: tabular-nums;
+}
+
+.event-select {
+	background: rgba(255, 255, 255, 0.04);
+	border: 1px solid var(--gws-panel-border);
+	color: var(--gws-text-soft);
+	border-radius: 8px;
+	padding: 0.3rem 0.5rem;
+	font-size: 0.76rem;
+}
+
+.event-clear {
+	appearance: none;
+	background: none;
+	border: 0;
+	color: var(--gws-text-soft);
+	font-size: 0.74rem;
+	text-decoration: underline;
+	cursor: pointer;
+	padding: 0.3rem 0.2rem;
+}
+
+.event-clear:hover { color: var(--gws-text-strong); }

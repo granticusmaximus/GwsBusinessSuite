@@ -42,6 +42,40 @@ to that document.
 
 ---
 
+## Scraping a local events calendar
+
+**Extract Events** (`civic.extractEvents`, in the **Data** category) turns a fetched web page into
+a list of events. Pair it with **HTTP Request** and you can add any public calendar to Civic Watch
+without writing code.
+
+The quickest way in is **New from template → Local events: scrape a calendar**, which arrives
+wired up: a 6-hour schedule → HTTP Request → Extract Events. Change the URL and you have a new
+source.
+
+**How it finds events.** It reads *structured data* rather than guessing at page layout. Most
+venue, chamber and city calendars publish their listings as schema.org `Event` markup for search
+engines - either in a `<script type="application/ld+json">` block or inside a React state blob
+(`window.__SERVER_DATA__`). Both are supported. Because it reads the published contract rather
+than CSS selectors, a site redesign usually does not break it.
+
+**Settings.**
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `html` | `{{ $json.body }}` | Where the page came from - the default reads HTTP Request's body |
+| `includeOnline` | `false` | Webinars are tagged to a town but happen nowhere near it, so they are dropped unless you want them |
+| `maxMiles` | `0` (off) | Straight-line miles from Kathleen; an event whose location cannot be resolved is excluded rather than assumed near |
+| `limit` | `50` | Maximum events returned |
+
+**Output** is `{ count, events[] }`, each event carrying `title`, `url`, `startAt`, `endAt`,
+`venue`, `city`, `latitude`, `longitude`, `milesFromHome`, `isOnline`, `imageUrl` and
+`description` - ready to hand to **Add Database Row**.
+
+**If a page returns nothing**, it does not publish schema.org markup. Some sites also refuse
+non-browser clients: set a normal `User-Agent` header on the HTTP Request node (the starter
+template already does). A few - Warner Robins' city site among them - actively block automated
+clients entirely and cannot be read this way.
+
 ## Core concepts
 
 A **workflow** is a directed graph of **nodes** connected by **connections**. Every workflow has

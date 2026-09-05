@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.Crm;
+using GwsBusinessSuite.Application.GovernmentIntelligence;
 using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
@@ -45,6 +46,10 @@ public sealed partial class AutomationNodeRegistry(
         new("growth.publishSocialPost", 1, "Growth: Publish Social Post", "Publishes an already-drafted social post (see Growth Studio's post composer for creating the draft). postId supports {{ $json.path }} expressions.", "Actions", "bi-send-fill", false, ["main"], "{\"postId\":\"{{ $json.postId }}\"}", IsIdempotent: false),
         new("core.set", 1, "Set Fields", "Adds or replaces JSON fields using literal values or expressions.", "Data", "bi-braces", false, ["main"], "{\"values\":{\"message\":\"Hello from GWS\"}}"),
         new("core.if", 1, "If", "Routes an item to the true or false output.", "Flow", "bi-signpost-split-fill", false, ["true", "false"], "{\"left\":\"{{ $json.enabled }}\",\"operator\":\"equals\",\"right\":\"true\"}"),
+        new("civic.extractEvents", 1, "Extract Events",
+            "Pulls schema.org Event listings out of fetched HTML - point HTTP Request at any public events page and feed its body in here.",
+            "Data", "bi-calendar-range", false, ["main"],
+            "{\"html\":\"{{ $json.body }}\",\"includeOnline\":false,\"maxMiles\":0,\"limit\":50}"),
         new("core.httpRequest", 1, "HTTP Request", "Calls an HTTP API and returns status, headers, and response data.", "Actions", "bi-globe2", false, ["main"], "{\"method\":\"GET\",\"url\":\"https://example.com\",\"headers\":{},\"body\":\"\"}", IsIdempotent: false),
         new("core.splitOut", 1, "Split Out", "Emits one item for each value in an array field.", "Data", "bi-distribute-vertical", false, ["main"], "{\"field\":\"items\",\"includeSource\":false}"),
         new("core.batch", 1, "Batch Items", "Groups an input array into smaller batches.", "Flow", "bi-collection", false, ["main"], "{\"field\":\"items\",\"batchSize\":10}"),
@@ -202,6 +207,7 @@ public sealed partial class AutomationNodeRegistry(
             "core.set" => ExecuteSet(node, input, nodeOutputsByName),
             "core.if" => ExecuteIf(node, input, nodeOutputsByName),
             "core.httpRequest" => await ExecuteHttpAsync(node, input, credentialJson, nodeOutputsByName, cancellationToken),
+            "civic.extractEvents" => ExecuteExtractEvents(node, input, nodeOutputsByName),
             "core.splitOut" => ExecuteSplitOut(node, input),
             "core.batch" => ExecuteBatch(node, input),
             "core.merge" => SingleOutput("main", input),
@@ -1004,6 +1010,71 @@ public sealed partial class AutomationNodeRegistry(
         foreach (var pair in source)
             if (pair.Value is JsonValue value && value.TryGetValue<string>(out var text))
                 destination[pair.Key] = ResolveText(text, input, nodeOutputsByName);
+    }
+
+    // Turns a fetched page into a list of events. Pair it with core.httpRequest ("html" defaults
+    // to that node's body) and then database.addRow, and a scheduled workflow becomes a working
+    // event scraper for any site that publishes schema.org markup - without new C# per source,
+    // which is the whole point of it being a node rather than another hard-coded service.
+    private static AutomationNodeRunResult ExecuteExtractEvents(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName)
+    {
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+
+        // The body arrives as a JSON string when the fetched page was HTML (core.httpRequest only
+        // parses it when it is valid JSON), so resolve the expression and take the text either way.
+        var htmlParameter = parameters["html"] is JsonValue htmlValue && htmlValue.TryGetValue<string>(out var htmlText)
+            ? ResolveText(htmlText, input, nodeOutputsByName)
+            : parameters["html"]?.ToJsonString() ?? string.Empty;
+
+        var includeOnline = parameters["includeOnline"]?.GetValue<bool>() ?? false;
+        var maxMiles = parameters["maxMiles"]?.GetValue<double>() ?? 0;
+        var limit = parameters["limit"]?.GetValue<int>() ?? 50;
+
+        var extracted = SchemaOrgEventExtractor.Extract(htmlParameter).AsEnumerable();
+
+        if (!includeOnline)
+        {
+            // Webinars are listed under a town but happen nowhere near it - excluded by default so
+            // a "what is on near me" feed stays about places you could actually drive to.
+            extracted = extracted.Where(e => !e.IsOnline);
+        }
+
+        if (maxMiles > 0)
+        {
+            // An event with no resolvable distance is excluded rather than assumed nearby.
+            extracted = extracted.Where(e => e.MilesFromHome is { } miles && miles <= maxMiles);
+        }
+
+        var results = extracted.Take(Math.Clamp(limit, 1, 500)).ToList();
+
+        var items = new JsonArray();
+        foreach (var e in results)
+        {
+            items.Add(new JsonObject
+            {
+                ["title"] = e.Title,
+                ["url"] = e.Url,
+                ["startAt"] = e.StartAt?.ToString("o"),
+                ["endAt"] = e.EndAt?.ToString("o"),
+                ["venue"] = e.Venue,
+                ["city"] = e.City,
+                ["latitude"] = e.Latitude,
+                ["longitude"] = e.Longitude,
+                ["milesFromHome"] = e.MilesFromHome,
+                ["isOnline"] = e.IsOnline,
+                ["imageUrl"] = e.ImageUrl,
+                ["description"] = e.Description
+            });
+        }
+
+        var output = new JsonObject { ["count"] = results.Count, ["events"] = items };
+        var cloned = JsonSerializer.SerializeToElement(output).Clone();
+        return new AutomationNodeRunResult(
+            new Dictionary<string, IReadOnlyList<JsonElement>>(StringComparer.OrdinalIgnoreCase) { ["main"] = [cloned] },
+            cloned.GetRawText());
     }
 
     private static AutomationNodeRunResult SingleOutput(string port, JsonElement value)

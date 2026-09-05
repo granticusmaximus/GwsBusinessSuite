@@ -21,11 +21,34 @@ public static class AutomationStarterWorkflows
             ScheduledDigestGraph()),
         new("webhook-relay", "bi-arrow-left-right",
             "Receives a webhook and forwards its payload to another URL - a starting point for connecting two external systems.",
-            WebhookRelayGraph())
+            WebhookRelayGraph()),
+        new("local-events-scrape", "bi-calendar-range",
+            "Every 6 hours, fetches a public events page and pulls out its listings - change the URL to add any venue, chamber or city calendar to your local watch. Add a Database Row node to keep them.",
+            LocalEventsScrapeGraph())
     ];
 
     public static AutomationStarterWorkflow? Find(string key) =>
         All.FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));
+
+    // The point of shipping this one is that adding a new event source becomes "copy this, change
+    // the URL" instead of new C# per site. Any page publishing schema.org Event markup works,
+    // which is most venue, chamber and city calendars.
+    private static AutomationWorkflowGraphPackage LocalEventsScrapeGraph()
+    {
+        var trigger = NewNode("Every 6 hours", "core.scheduleTrigger", 120, 160,
+            "{\"intervalMinutes\":360,\"cronExpression\":\"\"}");
+        var fetch = NewNode("Fetch events page", "core.httpRequest", 400, 160,
+            "{\"method\":\"GET\",\"url\":\"https://www.eventbrite.com/d/ga--warner-robins/events/\",\"headers\":{\"User-Agent\":\"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36\"},\"body\":\"\"}");
+        // maxMiles 25 keeps it to things worth driving to from Kathleen; online listings are
+        // dropped by default because they are tagged to a town but happen nowhere near it.
+        var extract = NewNode("Extract events", "civic.extractEvents", 680, 160,
+            "{\"html\":\"{{ $json.body }}\",\"includeOnline\":false,\"maxMiles\":25,\"limit\":50}");
+        return new AutomationWorkflowGraphPackage(
+            "Local events: scrape a calendar",
+            "Fetches a public events page every 6 hours and extracts its schema.org listings. Change the URL to point at any venue, chamber or city calendar, then add a Database Row node to store what it finds.",
+            [trigger, fetch, extract],
+            [Connect(trigger, "main", fetch, "main"), Connect(fetch, "main", extract, "main")]);
+    }
 
     private static AutomationWorkflowGraphPackage CrmDealWonNotifyGraph()
     {

@@ -142,15 +142,61 @@
                     </section>
 
                     <section class="civic-panel">
-                        <CivicWatchPanelHeader Eyebrow="Around town" Title="Local events" Count="@_snapshot.Community.LocalEvents.Count" Icon="bi-calendar-event" />
+                        <CivicWatchPanelHeader Eyebrow="Around town" Title="Local events" Count="@FilteredEvents.Count" Icon="bi-calendar-event" />
+
+                        @* Filters sit above the list rather than behind a menu: with events from
+                           several towns arriving in one feed, narrowing to "this weekend, within
+                           10 miles" is the normal way to read this panel, not an edge case. *@
+                        <div class="event-filters">
+                            <div class="event-filter-row" role="group" aria-label="Filter events by town">
+                                <button type="button" class="event-chip @(_cityFilter == AllCities ? "is-on" : "")"
+                                        @onclick="() => _cityFilter = AllCities">
+                                    All towns
+                                </button>
+                                @foreach (var city in AvailableCities)
+                                {
+                                    var count = _snapshot.Community.LocalEvents.Count(e => e.City == city);
+                                    <button type="button" class="event-chip @(_cityFilter == city ? "is-on" : "")"
+                                            @onclick="() => _cityFilter = city">
+                                        @city <span class="event-chip-count">@count</span>
+                                    </button>
+                                }
+                            </div>
+                            <div class="event-filter-row">
+                                <select class="event-select" value="@_whenFilter" @onchange="OnWhenFilterChanged"
+                                        aria-label="Filter events by date">
+                                    <option value="all">Any date</option>
+                                    <option value="week">Next 7 days</option>
+                                    <option value="weekend">This weekend</option>
+                                    <option value="month">Next 30 days</option>
+                                </select>
+                                <select class="event-select" value="@_radiusFilter" @onchange="OnRadiusFilterChanged"
+                                        aria-label="Filter events by distance from Kathleen">
+                                    <option value="0">Any distance</option>
+                                    <option value="5">Within 5 mi</option>
+                                    <option value="10">Within 10 mi</option>
+                                    <option value="15">Within 15 mi</option>
+                                    <option value="25">Within 25 mi</option>
+                                </select>
+                                @if (IsFiltered)
+                                {
+                                    <button type="button" class="event-clear" @onclick="ClearEventFilters">Clear</button>
+                                }
+                            </div>
+                        </div>
+
                         @if (_snapshot.Community.LocalEvents.Count == 0)
                         {
                             <CivicWatchEmptyState Icon="bi-calendar2-x" Message="No local events were returned." />
                         }
+                        else if (FilteredEvents.Count == 0)
+                        {
+                            <CivicWatchEmptyState Icon="bi-funnel" Message="No events match these filters. Try widening the date range or distance." />
+                        }
                         else
                         {
                             <div class="date-list">
-                                @foreach (var localEvent in _snapshot.Community.LocalEvents)
+                                @foreach (var localEvent in FilteredEvents)
                                 {
                                     <a href="@localEvent.Url" target="_blank" rel="noopener noreferrer">
                                         <time><strong>@EventDay(localEvent)</strong><small>@EventMonth(localEvent)</small></time>
@@ -368,6 +414,83 @@
         value is null ? "Date unavailable" : value.Value.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
     private static string DateDay(DateOnly? value) => value?.Day.ToString("00", CultureInfo.InvariantCulture) ?? "—";
     private static string DateMonth(DateOnly? value) => value?.ToString("MMM", CultureInfo.InvariantCulture) ?? "TBD";
+    // ── Local event filters ───────────────────────────────────────────────
+    private const string AllCities = "All";
+    private string _cityFilter = AllCities;
+    private string _whenFilter = "all";
+    private int _radiusFilter;
+
+    private void OnWhenFilterChanged(ChangeEventArgs e) => _whenFilter = e.Value?.ToString() ?? "all";
+
+    private void OnRadiusFilterChanged(ChangeEventArgs e) =>
+        _radiusFilter = int.TryParse(e.Value?.ToString(), out var miles) ? miles : 0;
+
+    private bool IsFiltered => _cityFilter != AllCities || _whenFilter != "all" || _radiusFilter > 0;
+
+    private void ClearEventFilters()
+    {
+        _cityFilter = AllCities;
+        _whenFilter = "all";
+        _radiusFilter = 0;
+    }
+
+    // Only towns that actually have events right now get a chip - a filter for a town with
+    // nothing on is just noise. Nearest-first so the closest options are the easiest to reach.
+    private IReadOnlyList<string> AvailableCities =>
+        _snapshot is null
+            ? []
+            : _snapshot.Community.LocalEvents
+                .Select(e => e.City)
+                .Where(c => !string.IsNullOrWhiteSpace(c) && c != CivicPlaces.Unknown)
+                .Distinct()
+                .OrderBy(c => CivicPlaces.MilesFor(c) ?? double.MaxValue)
+                .ThenBy(c => c)
+                .ToList();
+
+    private IReadOnlyList<CivicEvent> FilteredEvents
+    {
+        get
+        {
+            if (_snapshot is null) return [];
+            var events = _snapshot.Community.LocalEvents.AsEnumerable();
+
+            if (_cityFilter != AllCities)
+            {
+                events = events.Where(e => e.City == _cityFilter);
+            }
+
+            if (_radiusFilter > 0)
+            {
+                // An event whose town could not be resolved has no distance, so it is excluded
+                // from a distance filter rather than silently treated as nearby.
+                events = events.Where(e => e.MilesFromHome is { } miles && miles <= _radiusFilter);
+            }
+
+            if (_whenFilter != "all")
+            {
+                var now = DateTimeOffset.Now;
+                events = _whenFilter switch
+                {
+                    "week" => events.Where(e => e.StartAt is { } d && d >= now && d <= now.AddDays(7)),
+                    "month" => events.Where(e => e.StartAt is { } d && d >= now && d <= now.AddDays(30)),
+                    "weekend" => events.Where(e => e.StartAt is { } d && d >= now && d <= NextWeekendEnd(now)
+                                                   && d.DayOfWeek is DayOfWeek.Friday or DayOfWeek.Saturday or DayOfWeek.Sunday),
+                    _ => events
+                };
+            }
+
+            return events.OrderBy(e => e.StartAt ?? DateTimeOffset.MaxValue).ToList();
+        }
+    }
+
+    // End of the coming weekend: Sunday 23:59 of the current week, or of next week if today is
+    // already past it. Keeps "this weekend" meaningful on a Monday as well as a Saturday.
+    private static DateTimeOffset NextWeekendEnd(DateTimeOffset now)
+    {
+        var daysUntilSunday = ((int)DayOfWeek.Sunday - (int)now.DayOfWeek + 7) % 7;
+        return now.Date.AddDays(daysUntilSunday).AddDays(1).AddTicks(-1);
+    }
+
     private static string EventDay(CivicEvent item) => item.StartAt?.Day.ToString("00", CultureInfo.InvariantCulture) ?? "—";
     private static string EventMonth(CivicEvent item) => item.StartAt?.ToString("MMM", CultureInfo.InvariantCulture) ?? "TBD";
     private static string MeetingMeta(CivicMeeting meeting) =>
@@ -375,8 +498,16 @@
     private static string EventMeta(CivicEvent item)
     {
         var when = item.StartAt?.ToString("h:mm tt", CultureInfo.InvariantCulture) ?? "Time unavailable";
-        return string.IsNullOrWhiteSpace(item.Location)
-            ? $"{when} · {item.Source}"
-            : $"{when} · {item.Location} · {item.Source}";
+        // Town first after the time: with several towns in one feed, "where" is the thing being
+        // scanned for. Distance rides along with it so "is that worth the drive" is answerable
+        // without opening the listing.
+        var where = item.City != CivicPlaces.Unknown && !string.IsNullOrWhiteSpace(item.City)
+            ? item.MilesFromHome is { } miles && miles > 0
+                ? $"{item.City} · {miles:0.#} mi"
+                : item.City
+            : null;
+
+        var parts = new[] { when, where, string.IsNullOrWhiteSpace(item.Location) ? null : item.Location, item.Source };
+        return string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
     }
 }

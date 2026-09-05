@@ -28,6 +28,7 @@ public interface ILocalEventsScraperService
 // client-only app shells with no discoverable public event data - neither is scraped here.
 public sealed class LocalEventsScraperService(
     IMemoryCache cache,
+    IEventbriteEventsSource eventbrite,
     ILogger<LocalEventsScraperService> logger) : ILocalEventsScraperService
 {
     private const string CacheKey = "government-intelligence:local-events";
@@ -62,8 +63,31 @@ public sealed class LocalEventsScraperService(
             events = GetCachedEventsOrEmpty();
         }
 
-        cache.Set(CacheKey, events, CacheDuration);
-        return events;
+        // Eventbrite is a plain HTTP + JSON pull, so it is fetched separately from the two
+        // Playwright scrapes and merged: a browser failure must not take out the source that
+        // supplies most of the volume, and vice versa.
+        IReadOnlyList<CivicEvent> eventbriteEvents = [];
+        try
+        {
+            eventbriteEvents = await eventbrite.FetchAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Local Events: Eventbrite pull failed");
+        }
+
+        var merged = events
+            .Concat(eventbriteEvents)
+            .GroupBy(e => e.Url, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .OrderBy(e => e.StartAt ?? DateTimeOffset.MaxValue)
+            .ToList();
+
+        cache.Set(CacheKey, merged, CacheDuration);
+        logger.LogInformation(
+            "Local Events: {Scraped} scraped + {Eventbrite} Eventbrite = {Total} after de-duplication",
+            events.Count, eventbriteEvents.Count, merged.Count);
+        return merged;
     }
 
     private async Task<IReadOnlyList<CivicEvent>> ScrapeAsync(CancellationToken ct)
@@ -153,7 +177,10 @@ public sealed class LocalEventsScraperService(
                 null,
                 string.Empty,
                 "Perry, GA City Calendar",
-                null));
+                null,
+                // The city calendar only ever lists Perry events, so this needs no resolving.
+                CivicPlaces.Perry,
+                CivicPlaces.MilesFor(CivicPlaces.Perry)));
         }
 
         return results;
@@ -186,14 +213,29 @@ public sealed class LocalEventsScraperService(
             var imgEl = await card.QuerySelectorAsync(".gz-events-img");
             var imageUrl = imgEl is null ? null : await imgEl.GetAttributeAsync("src");
 
+            // GrowthZone renders the venue in a couple of different slots depending on whether
+            // the listing has a mapped address, so try both and fall back to the card text - the
+            // city name usually appears somewhere in it even when there is no address block.
+            var locationEl = await card.QuerySelectorAsync(".gz-card-address, .gz-event-location");
+            var location = locationEl is null ? string.Empty : CleanText(await locationEl.InnerTextAsync());
+            var cityHaystack = string.IsNullOrWhiteSpace(location)
+                ? CleanText(await card.InnerTextAsync())
+                : location;
+            var chamberCity = CivicPlaces.Resolve("Robins Region Chamber of Commerce", cityHaystack);
+
             results.Add(new CivicEvent(
                 title,
                 url!,
                 startAt,
                 endAt,
-                string.Empty,
+                location,
                 "Robins Region Chamber of Commerce",
-                imageUrl));
+                imageUrl,
+                // The chamber covers the whole Robins region (Warner Robins, Centerville,
+                // Bonaire, Perry...), so the city has to be recovered from the listing itself
+                // rather than assumed from the source.
+                chamberCity,
+                CivicPlaces.MilesFor(chamberCity)));
         }
 
         return results;

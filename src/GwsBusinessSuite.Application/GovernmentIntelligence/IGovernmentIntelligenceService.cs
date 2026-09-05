@@ -91,7 +91,83 @@ public sealed record CivicEvent(
     DateTimeOffset? EndAt,
     string Location,
     string Source,
-    string? ImageUrl);
+    string? ImageUrl,
+    // Which of the surrounding communities this event belongs to, so the Local events panel can
+    // be filtered down to the ones worth driving to. Derived from the source and the free-text
+    // Location by CivicPlaces.Resolve - the upstream calendars do not publish a city field.
+    string City = CivicPlaces.Unknown,
+    // Rough straight-line miles from Kathleen, for "within 15 minutes of me" style filtering.
+    // Null when the city could not be resolved.
+    double? MilesFromHome = null);
+
+// The communities this watch covers, centred on Kathleen in unincorporated Houston County.
+// Distances are straight-line miles from Kathleen and are for sorting/filtering only - they are
+// not driving distances.
+public static class CivicPlaces
+{
+    public const string Unknown = "Unknown";
+    public const string Kathleen = "Kathleen";
+    public const string Bonaire = "Bonaire";
+    public const string WarnerRobins = "Warner Robins";
+    public const string Perry = "Perry";
+    public const string Centerville = "Centerville";
+    public const string Byron = "Byron";
+    public const string Macon = "Macon";
+    public const string HoustonCounty = "Houston County";
+
+    // Ordered nearest-first from Kathleen so a "closest to me" sort needs no extra data.
+    public static readonly IReadOnlyDictionary<string, double> MilesFromKathleen =
+        new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase)
+        {
+            [Kathleen] = 0,
+            [Bonaire] = 3.5,
+            [WarnerRobins] = 7,
+            [HoustonCounty] = 7,
+            [Perry] = 9,
+            [Centerville] = 10,
+            [Byron] = 12,
+            [Macon] = 22,
+        };
+
+    public static double? MilesFor(string city) =>
+        MilesFromKathleen.TryGetValue(city ?? string.Empty, out var miles) ? miles : null;
+
+    // Kathleen, GA. Sources that publish venue coordinates (Eventbrite's schema.org markup does)
+    // get a real per-venue distance instead of the coarse per-town figure above - the difference
+    // is real, e.g. two Warner Robins venues 7.5 and 11.1 miles out.
+    public const double HomeLatitude = 32.4610;
+    public const double HomeLongitude = -83.6152;
+
+    public static double MilesFromHomeTo(double latitude, double longitude)
+    {
+        const double earthRadiusMiles = 3958.8;
+        var dLat = DegreesToRadians(latitude - HomeLatitude);
+        var dLon = DegreesToRadians(longitude - HomeLongitude);
+        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2)
+                + Math.Cos(DegreesToRadians(HomeLatitude)) * Math.Cos(DegreesToRadians(latitude))
+                * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        return 2 * earthRadiusMiles * Math.Asin(Math.Sqrt(a));
+    }
+
+    private static double DegreesToRadians(double degrees) => degrees * Math.PI / 180d;
+
+    // Source name and free-text location are all the upstream calendars give us, so the city is
+    // recovered by matching known place names in either. Order matters: "Warner Robins" has to be
+    // tested before "Robins" so the Robins Region Chamber's own name does not swallow it.
+    public static string Resolve(string source, string location)
+    {
+        var haystack = $"{location} {source}";
+        foreach (var candidate in new[]
+                 { WarnerRobins, Kathleen, Bonaire, Centerville, Byron, Perry, Macon })
+        {
+            if (haystack.Contains(candidate, StringComparison.OrdinalIgnoreCase)) return candidate;
+        }
+
+        return haystack.Contains("Houston County", StringComparison.OrdinalIgnoreCase)
+            ? HoustonCounty
+            : Unknown;
+    }
+}
 
 public sealed record CivicResourceSection(
     string Title,
