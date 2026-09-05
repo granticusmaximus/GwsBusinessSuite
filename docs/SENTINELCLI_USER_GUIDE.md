@@ -55,7 +55,8 @@ Ollama container and this CLI. That prevents the Mac and server bootstrap lists 
 
 | Model | GWS purpose |
 | --- | --- |
-| `llama3.2` | Base weights for the customized `sentinelgpt` profile |
+| `gemma4` | Base weights for the customized `sentinelgpt` profile |
+| `llama3.2` | Small, fast general model (was the `sentinelgpt` base before 2026-09-04) |
 | `qwen2.5-coder` | Default CLI coding model and Deep-mode engineering adviser |
 | `deepseek-r1` | Deep-mode reasoning adviser |
 | `embeddinggemma` | Semantic-search embeddings |
@@ -116,7 +117,9 @@ current session's tool results and model context.
 - `/help` lists every session command.
 - `/models` lists the Ollama models already installed locally (same data as
   `sentinelcli models list`, without leaving the session).
-- `/availablemodels` shows a curated starting list of free Ollama models — marking which are
+- `/availablemodels` shows a curated starting list of free Ollama models, each with its
+  approximate download size and whether it supports tool-calling (a model without tool support
+  can converse but can never search the wiki or read a file) — marking which are
   already installed — and prompts for a number (or any model name, including ones not on the
   list) to download. Downloads still go through the same confirmation prompt as everything else.
 - `/clear` starts a fresh conversation while keeping the same directory and model.

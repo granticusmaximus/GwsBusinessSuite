@@ -111,8 +111,15 @@ public sealed class SentinelCLIToolTests : IDisposable
     [Fact]
     public void ModelCatalog_MatchesTheGwsRuntimeSet()
     {
-        Assert.Equal(["llama3.2", "qwen2.5-coder", "deepseek-r1", "embeddinggemma"], ModelCatalog.RequiredModels);
-        Assert.Contains("FROM llama3.2", ModelCatalog.SentinelProfile);
+        // gemma4 became the sentinelgpt base on 2026-09-04 (llama3.2's 3.2B was reaching for a
+        // tool on nearly every message); llama3.2 stays in the set as a small, fast option.
+        Assert.Equal(["gemma4", "llama3.2", "qwen2.5-coder", "deepseek-r1", "embeddinggemma"], ModelCatalog.RequiredModels);
+        Assert.Contains("FROM gemma4", ModelCatalog.SentinelProfile);
+        // The profile's base must be a model the sync actually installs, or `models sync` builds
+        // sentinelgpt from weights that aren't there.
+        Assert.Contains(
+            OllamaModelfileParser.Parse(ModelCatalog.SentinelProfile).From,
+            ModelCatalog.RequiredModels);
         Assert.True(OllamaModelManager.HasModel(["sentinelgpt:latest"], "sentinelgpt"));
         Assert.False(OllamaModelManager.HasModel(["deepseek-r1:14b"], "deepseek-r1"));
     }

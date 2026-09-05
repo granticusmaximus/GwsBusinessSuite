@@ -68,13 +68,31 @@ public sealed class OllamaApiFunctionCall
     public JsonElement Arguments { get; init; }
 }
 
+// One progress line from a long-running model operation (pull/create). Total is 0 on the status
+// lines that carry no byte counts at all ("verifying sha256 digest"), which is why Fraction is
+// nullable rather than defaulting to zero - a UI showing 0% for those would look stuck.
+public sealed record OllamaProgress(string Status, long Completed, long Total)
+{
+    public double? Fraction => Total > 0 ? Math.Clamp((double)Completed / Total, 0, 1) : null;
+}
+
 public sealed record OllamaChatResult(
     string Content,
     IReadOnlyList<OllamaToolCall> ToolCalls,
-    OllamaChatMessage AssistantMessage);
+    OllamaChatMessage AssistantMessage,
+    string Thinking = "");
 
 // One item per streamed /api/chat line. ToolCalls is populated on the (typically final) chunk
 // that carries them - Ollama does not interleave tool_calls across multiple chunks - and Done
 // marks the terminal chunk, mirroring OllamaChatResult's shape closely enough that a caller can
 // accumulate ContentDelta into the same Content a non-streaming ChatAsync would have returned.
-public sealed record OllamaChatStreamChunk(string ContentDelta, IReadOnlyList<OllamaToolCall>? ToolCalls, bool Done);
+//
+// ThinkingDelta is kept separate from ContentDelta rather than concatenated into it: a reasoning
+// model's deliberation is not part of its answer, and a caller that appended both would show the
+// user the model talking itself through the problem. Hosts that want a "thinking..." indicator
+// read this; hosts that don't can ignore it and lose nothing.
+public sealed record OllamaChatStreamChunk(
+    string ContentDelta,
+    IReadOnlyList<OllamaToolCall>? ToolCalls,
+    bool Done,
+    string ThinkingDelta = "");

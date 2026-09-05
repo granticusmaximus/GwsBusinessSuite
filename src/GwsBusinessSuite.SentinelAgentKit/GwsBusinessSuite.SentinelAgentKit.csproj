@@ -6,6 +6,17 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- The canonical model set and the SentinelGPT profile live with the agent kit rather than
+       with SentinelCLI, because the sandboxed Mac app needs them too: it cannot spawn the ollama
+       binary, so it builds the same profile over Ollama's HTTP API from this same text. One
+       source of truth, two very different installation routes. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\ollama\required-models.txt"
+                      LogicalName="GwsBusinessSuite.SentinelAgentKit.required-models.txt" />
+    <EmbeddedResource Include="..\..\ollama\SentinelGPT.Modelfile"
+                      LogicalName="GwsBusinessSuite.SentinelAgentKit.SentinelGPT.Modelfile" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\GwsBusinessSuite.OllamaKit\GwsBusinessSuite.OllamaKit.csproj" />
   </ItemGroup>

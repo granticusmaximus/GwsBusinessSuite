@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using FluentAssertions;
 using GwsBusinessSuite.OllamaKit;
+using GwsBusinessSuite.SentinelAgentKit;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -122,6 +123,225 @@ public sealed class OllamaKitTests : IDisposable
         string.Concat(events.Skip(lastToolActivityIndex + 1).Select(e => e.ContentDelta)).Should().Be("Here you go.");
         agent.Messages.Should().Contain(m => m.Role == "tool" && m.ToolName == "invalid_tool_call");
         agent.Messages[^1].Content.Should().Be("Here you go.");
+    }
+
+    [Fact]
+    public void ModelfileParser_SplitsTheRealSentinelProfileIntoApiCreateFields()
+    {
+        // The shipped profile's own shape: a comment block, FROM, PARAMETERs, a triple-quoted
+        // multi-line SYSTEM, then MESSAGE pairs. /api/create needs each of these as a separate
+        // field since the whole-file "modelfile" field was removed.
+        var profile = ModelCatalog.SentinelProfile;
+
+        var parsed = OllamaModelfileParser.Parse(profile);
+
+        parsed.From.Should().Be("gemma4");
+        parsed.Parameters.Should().Contain(new KeyValuePair<string, string>("temperature", "0.2"));
+        parsed.Parameters.Should().Contain(new KeyValuePair<string, string>("num_ctx", "16384"));
+        parsed.System.Should().StartWith("You are SentinelGPT");
+        parsed.System.Should().Contain("Never invent a source");
+        parsed.System.Should().NotContain("\"\"\"", "the fences delimit the block, they aren't part of it");
+        parsed.Messages.Should().HaveCount(4);
+        parsed.Messages[0].Role.Should().Be("user");
+        parsed.Messages[1].Role.Should().Be("assistant");
+    }
+
+    [Fact]
+    public void ModelfileParser_IgnoresCommentsAndUnknownDirectives()
+    {
+        var parsed = OllamaModelfileParser.Parse("""
+            # a leading comment
+            FROM llama3.2
+            TEMPLATE {{ .Prompt }}
+            PARAMETER temperature 0.7
+            SYSTEM "One line only."
+            """);
+
+        parsed.From.Should().Be("llama3.2");
+        parsed.System.Should().Be("One line only.", "a quoted single-line SYSTEM keeps no quotes");
+        parsed.Parameters.Should().ContainSingle();
+        parsed.Messages.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ModelfileParser_RejectsAProfileWithNoBaseModel()
+    {
+        var act = () => OllamaModelfileParser.Parse("PARAMETER temperature 0.2");
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*FROM*");
+    }
+
+    [Fact]
+    public async Task PullModelAsync_StreamsProgressAndSurfacesAMidStreamFailure()
+    {
+        // Ollama sends HTTP 200 and only then reports failure inside the body, so a caller that
+        // checks the status code alone would report a broken download as a success.
+        var body = string.Join('\n',
+            """{"status":"pulling manifest"}""",
+            """{"status":"pulling 4c27e0f5","completed":50,"total":200}""",
+            """{"error":"model 'nope' not found"}""");
+        using var client = CreateClient(_ => NdjsonResponse(body));
+
+        var seen = new List<OllamaProgress>();
+        var act = async () =>
+        {
+            await foreach (var progress in client.PullModelAsync("nope", default))
+                seen.Add(progress);
+        };
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*model 'nope' not found*");
+        seen.Should().HaveCount(2);
+        seen[0].Fraction.Should().BeNull("a status line with no byte counts must not read as 0%");
+        seen[1].Fraction.Should().Be(0.25);
+    }
+
+    [Fact]
+    public async Task CreateModelAsync_SendsTypedParametersRatherThanStrings()
+    {
+        // num_ctx has to arrive as a number; sent as "16384" Ollama would not apply it the way
+        // the Modelfile means it.
+        string? payload = null;
+        using var client = CreateClient(request =>
+        {
+            payload = request.Content!.ReadAsStringAsync().Result;
+            return NdjsonResponse("""{"status":"success"}""");
+        });
+        var profile = OllamaModelfileParser.Parse("""
+            FROM gemma4
+            PARAMETER num_ctx 16384
+            PARAMETER temperature 0.2
+            SYSTEM "Be terse."
+            MESSAGE user Hello
+            """);
+
+        await foreach (var _ in client.CreateModelAsync("sentinelgpt", profile, default)) { }
+
+        payload.Should().Contain("\"num_ctx\":16384").And.NotContain("\"num_ctx\":\"16384\"");
+        payload.Should().Contain("\"temperature\":0.2");
+        payload.Should().Contain("\"from\":\"gemma4\"");
+        payload.Should().Contain("\"system\":\"Be terse.\"");
+    }
+
+    [Fact]
+    public async Task ListModelDetailsAsync_SurfacesEachModelsCapabilitiesAndSize()
+    {
+        // Shape copied from a real /api/tags response (Ollama 0.33.3). Capabilities are the
+        // whole point: Ollama rejects chat outright for an embedding model and rejects a
+        // populated tools array for a model without "tools", so a host that lets a human pick
+        // has to filter on these rather than discover them from a failed turn.
+        var body = """
+            {"models":[
+              {"name":"embeddinggemma:latest","details":{"parameter_size":"307.58M"},"capabilities":["embedding"]},
+              {"name":"gemma3:12b","details":{"parameter_size":"12.2B"},"capabilities":["completion"]},
+              {"name":"gemma4:latest","details":{"parameter_size":"8.0B"},"capabilities":["completion","tools","thinking"]}
+            ]}
+            """;
+        using var client = CreateClient(_ => JsonResponse(body));
+
+        var models = await client.ListModelDetailsAsync(default);
+
+        models.Should().HaveCount(3);
+        var embedding = models.Single(model => model.Name == "embeddinggemma:latest");
+        embedding.SupportsChat.Should().BeFalse();
+        var chatOnly = models.Single(model => model.Name == "gemma3:12b");
+        chatOnly.SupportsChat.Should().BeTrue();
+        chatOnly.SupportsTools.Should().BeFalse();
+        var full = models.Single(model => model.Name == "gemma4:latest");
+        full.SupportsChat.Should().BeTrue();
+        full.SupportsTools.Should().BeTrue();
+        full.SupportsThinking.Should().BeTrue();
+        full.ParameterSize.Should().Be("8.0B");
+    }
+
+    [Fact]
+    public async Task ListModelDetailsAsync_TreatsAModelReportingNoCapabilitiesAsUnusableForChat()
+    {
+        // Older daemons omit the field entirely. Defaulting to "no capabilities" keeps such a
+        // model out of a picker rather than letting it through to fail on first use.
+        using var client = CreateClient(_ => JsonResponse("""{"models":[{"name":"mystery:latest"}]}"""));
+
+        var models = await client.ListModelDetailsAsync(default);
+
+        models.Should().ContainSingle();
+        models[0].SupportsChat.Should().BeFalse();
+        models[0].ParameterSize.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ChatStreamAsync_OmitsThinkUnlessTheCallerAsksForIt()
+    {
+        var payloads = new List<string>();
+        using var client = CreateClient(request =>
+        {
+            payloads.Add(request.Content!.ReadAsStringAsync().Result);
+            return NdjsonResponse("""{"message":{"content":"hi"},"done":true}""");
+        });
+
+        await foreach (var _ in client.ChatStreamAsync("m", [new OllamaChatMessage("user", "hi")], [], default)) { }
+        await foreach (var _ in client.ChatStreamAsync("m", [new OllamaChatMessage("user", "hi")], [], default, think: false)) { }
+
+        payloads[0].Should().NotContain("\"think\"", "a caller with no opinion must leave the model on its own default");
+        payloads[1].Should().Contain("\"think\":false");
+    }
+
+    [Fact]
+    public async Task ChatStreamAsync_AlwaysSendsAToolsArrayEvenWhenEmpty()
+    {
+        // An empty array is how a model without the "tools" capability stays usable for plain
+        // chat - Ollama accepts it and rejects only a populated one - so it must not be dropped.
+        var payloads = new List<string>();
+        using var client = CreateClient(request =>
+        {
+            payloads.Add(request.Content!.ReadAsStringAsync().Result);
+            return NdjsonResponse("""{"message":{"content":"hi"},"done":true}""");
+        });
+
+        await foreach (var _ in client.ChatStreamAsync("m", [new OllamaChatMessage("user", "hi")], [], default)) { }
+
+        payloads[0].Should().Contain("\"tools\":[]");
+    }
+
+    [Fact]
+    public async Task ToolCallingAgent_ReportsThinkingSeparatelyAndKeepsItOutOfTheAnswer()
+    {
+        // A reasoning model streams deliberation in a "thinking" field with content still empty.
+        // Concatenating the two would show the user the model talking itself through the problem
+        // as though it were the answer.
+        var body = string.Join('\n',
+            """{"message":{"content":"","thinking":"Let me work through this."},"done":false}""",
+            """{"message":{"content":"391"},"done":false}""",
+            """{"message":{"content":""},"done":true}""");
+        using var client = CreateClient(_ => NdjsonResponse(body));
+        var agent = new OllamaToolCallingAgent(client, new FakeToolExecutor([]), "deepseek-r1", "system prompt");
+
+        var events = new List<OllamaAgentEvent>();
+        await foreach (var e in agent.RunTurnStreamingAsync("What is 17 * 23?", default))
+            events.Add(e);
+
+        string.Concat(events.Select(e => e.ContentDelta)).Should().Be("391");
+        events.Should().ContainSingle(e => e.ThinkingDelta == "Let me work through this.");
+        agent.Messages[^1].Content.Should().Be("391");
+    }
+
+    [Fact]
+    public async Task ToolCallingAgent_WhenAModelOnlyEverThinks_SaysSoInsteadOfReportingAnEmptyResponse()
+    {
+        // deepseek-r1 answers with content:"" and a populated thinking field even when asked not
+        // to think. That used to surface as the generic "Ollama returned an empty response",
+        // which pointed at the daemon rather than at the model choice that actually caused it.
+        var body = string.Join('\n',
+            """{"message":{"content":"","thinking":"Okay, the user just said"},"done":false}""",
+            """{"message":{"content":""},"done":true}""");
+        using var client = CreateClient(_ => NdjsonResponse(body));
+        var agent = new OllamaToolCallingAgent(client, new FakeToolExecutor([]), "deepseek-r1", "system prompt");
+
+        var act = async () =>
+        {
+            await foreach (var _ in agent.RunTurnStreamingAsync("say hi", default)) { }
+        };
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*deepseek-r1*only produced reasoning*");
     }
 
     [Fact]
@@ -400,6 +620,11 @@ public sealed class OllamaKitTests : IDisposable
     private static HttpResponseMessage NdjsonResponse(string body) => new(HttpStatusCode.OK)
     {
         Content = new StringContent(body, Encoding.UTF8, "application/x-ndjson")
+    };
+
+    private static HttpResponseMessage JsonResponse(string body) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(body, Encoding.UTF8, "application/json")
     };
 
     private sealed class FakeToolExecutor(IReadOnlyList<OllamaToolDefinition> definitions) : IOllamaToolExecutor

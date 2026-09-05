@@ -257,7 +257,7 @@ public static class Program
             Console.Error.WriteLine("Usage: /skills <name> <prompt>");
             return null;
         }
-        return $"Follow this skill's instructions for this request.\n\nSkill '{skillName}':\n{instructions}\n\nRequest: {skillPrompt}";
+        return SkillLibrary.BuildTurnPrompt(skillName, instructions, skillPrompt);
     }
 
     private static async Task<string?> ResumeAsync(
@@ -386,9 +386,13 @@ public static class Program
             "https://ollama.com/library for everything available):\n");
         for (var i = 0; i < suggestions.Count; i++)
         {
-            var (name, description) = suggestions[i];
-            var installedMark = OllamaModelManager.HasModel(installed, name) ? "  [installed]" : "";
-            Console.WriteLine($"  {i + 1,2}. {name,-18}{description}{installedMark}");
+            var suggestion = suggestions[i];
+            var installedMark = OllamaModelManager.HasModel(installed, suggestion.Name) ? "  [installed]" : "";
+            // Tool support is called out because it decides whether a model can do anything
+            // beyond talk - a model without it can never search the wiki or read a file.
+            var tools = suggestion.SupportsTools ? "tools" : "no tools";
+            Console.WriteLine(
+                $"  {i + 1,2}. {suggestion.Name,-18}{suggestion.ApproximateSize,-9}{tools,-9}{suggestion.Description}{installedMark}");
         }
 
         Console.Write("\nEnter a number, or any Ollama model name, to download (blank to cancel): ");

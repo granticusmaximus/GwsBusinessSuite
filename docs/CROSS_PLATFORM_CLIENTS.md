@@ -107,6 +107,53 @@ login. Any answer that came from this fallback is visibly labeled "via server" i
 since the whole point of the local-first design is that the exception stays visible rather than
 silently blending in.
 
+### Choosing a local model
+
+Ollama gates chat and tool-calling per model and rejects the whole request rather than degrading
+(`"embeddinggemma" does not support chat`, `gemma3:12b does not support tools`). The tab's model
+picker therefore lists only chat-capable models, and annotates each with its parameter size and
+`no tools` where applicable. A model without tool support still works for conversation - the tab
+simply offers it no tools and tells it so - but it cannot search the wiki or read an attached
+folder. Thinking is disabled (`think: false`) for models that support it, because it costs real
+latency for no accuracy gain on ordinary messages; Deep analysis remains the deliberate opt-in
+for depth.
+
+The `sentinelgpt` profile is based on `gemma4` as of 2026-09-04, replacing `llama3.2`. Measured
+on an M3 Pro over 7 prompts with this tab's own tool set, the 3.2B llama3.2 base scored 2/7 -
+it called `search_wiki` for "are you running locally?", invented a filename to `read_file` for a
+plain C# question, and answered "17 * 23" with the literal text `{"name":"multiply",...}`. The
+8B gemma4 base scored 7/7 on the same prompts. Rationale and figures are in
+`ollama/SentinelGPT.Modelfile` itself.
+
+### Model library and CLI parity
+
+App Sandbox denies process execution outright, so the tab cannot shell out to `ollama` or to
+`sentinelcli`. Instead, the capabilities that make sense in a GUI are available in-process
+against Ollama's loopback HTTP API:
+
+- **Model library** (down-arrow in the toolbar) browses curated free models with sizes and
+  tool-support flags, installs any of them (or any name from ollama.com/library) via
+  `POST /api/pull`, and rebuilds the whole canonical set plus the `sentinelgpt` profile via
+  `POST /api/create`. Ollama removed the whole-file `modelfile` field, so `OllamaModelfileParser`
+  splits `ollama/SentinelGPT.Modelfile` into the structured fields the API now wants - the same
+  version-controlled text still drives both `ollama create -f` in the CLI and the API here.
+- **Personas** (`/agent` in the CLI) shape tone and priorities through an extra system-prompt
+  paragraph, and are advisory rather than enforcing.
+- **Skills** (`/skills` in the CLI) apply one markdown file's instructions to a single message.
+  The CLI's `~/.config/sentinelcli/skills` is unreachable from the sandbox, so the tab reads its
+  own app container plus `.sentinel/skills` inside the attached project folder - which lets a
+  repository carry its own skills alongside its code.
+
+### GWS business data
+
+Beyond the wiki, the tab can read live business data over the same `sentinel:read` developer-API
+key: `search_crm` (contacts and deals), `get_pipeline` (deal counts and value by stage),
+`search_cms_pages` (public site pages and publish status), and `get_system_health` (unread
+container alerts). Every one of these is read-only by construction - there is no `sentinel:write`
+scope for any of them to pair with, and no mutating tool exists in `NativeToolExecutor`. The
+tools are offered only when a grounding key is configured, so an unconfigured Mac degrades to
+plain local chat rather than to a model describing lookups it cannot perform.
+
 ## Sentinel menu-bar companion (macOS)
 
 `src/GwsBusinessSuite.SentinelMenuBar` is a small, separate `net10.0-macos` app (not part of the

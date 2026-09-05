@@ -20,6 +20,26 @@ public static class DeveloperApiSentinelEndpointExtensions
             await service.GetPageAsync(id, Owner(user), ct) is { } page ? Results.Ok(page) : Results.NotFound())
             .RequireAuthorization(DeveloperApiPolicies.ForScope(DeveloperApiScopes.SentinelRead));
 
+        // The business-data reads below take no owner: unlike wiki pages, none of these records
+        // carry a per-record ACL, and the sentinel:read scope is itself the gate. See the
+        // interface for the full reasoning. All are read-only - there is no sentinel:write scope
+        // for any of them to pair with.
+        api.MapGet("/crm/search", async (string query, IDeveloperApiSentinelReadService service, CancellationToken ct) =>
+            Results.Ok(await service.SearchCrmAsync(query, ct)))
+            .RequireAuthorization(DeveloperApiPolicies.ForScope(DeveloperApiScopes.SentinelRead));
+
+        api.MapGet("/crm/pipeline", async (IDeveloperApiSentinelReadService service, CancellationToken ct) =>
+            Results.Ok(await service.GetPipelineAsync(ct)))
+            .RequireAuthorization(DeveloperApiPolicies.ForScope(DeveloperApiScopes.SentinelRead));
+
+        api.MapGet("/cms/search", async (string query, IDeveloperApiSentinelReadService service, CancellationToken ct) =>
+            Results.Ok(await service.SearchCmsPagesAsync(query, ct)))
+            .RequireAuthorization(DeveloperApiPolicies.ForScope(DeveloperApiScopes.SentinelRead));
+
+        api.MapGet("/health", async (IDeveloperApiSentinelReadService service, CancellationToken ct) =>
+            Results.Ok(await service.GetSystemHealthAsync(ct)))
+            .RequireAuthorization(DeveloperApiPolicies.ForScope(DeveloperApiScopes.SentinelRead));
+
         return app;
     }
 

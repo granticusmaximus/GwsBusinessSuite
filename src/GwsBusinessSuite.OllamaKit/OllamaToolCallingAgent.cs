@@ -8,10 +8,15 @@ namespace GwsBusinessSuite.OllamaKit;
 // model called a tool and is waiting on its result) - never both on the same event. UI callers
 // distinguish them by which property is non-null: append ContentDelta to a transcript bubble,
 // show ToolActivity as a transient "Searching..."-style indicator.
-public sealed record OllamaAgentEvent(string? ContentDelta, string? ToolActivity)
+public sealed record OllamaAgentEvent(string? ContentDelta, string? ToolActivity, string? ThinkingDelta = null)
 {
     public static OllamaAgentEvent Content(string delta) => new(delta, null);
     public static OllamaAgentEvent Tool(string toolName) => new(null, toolName);
+
+    // Deliberately a third channel rather than more ContentDelta: a reasoning model's thinking
+    // is transient status, not answer text, so a UI shows it the way it shows tool activity -
+    // replaced when the real answer starts - instead of leaving it in the transcript.
+    public static OllamaAgentEvent Thinking(string delta) => new(null, null, delta);
 }
 
 // A generic ReAct-style tool-calling loop: stream a response, dispatch any tool calls the model
@@ -26,16 +31,23 @@ public sealed class OllamaToolCallingAgent
     private readonly string _model;
     private readonly string _systemPrompt;
     private readonly int _maxRounds;
+    private readonly bool? _think;
     private readonly List<OllamaChatMessage> _messages;
 
     public OllamaToolCallingAgent(
-        OllamaClient ollama, IOllamaToolExecutor tools, string model, string systemPrompt, int maxRounds = 6)
+        OllamaClient ollama,
+        IOllamaToolExecutor tools,
+        string model,
+        string systemPrompt,
+        int maxRounds = 6,
+        bool? think = null)
     {
         _ollama = ollama;
         _tools = tools;
         _model = model;
         _systemPrompt = systemPrompt;
         _maxRounds = maxRounds;
+        _think = think;
         _messages = [new OllamaChatMessage("system", systemPrompt)];
     }
 
@@ -55,6 +67,20 @@ public sealed class OllamaToolCallingAgent
         _messages.Add(new OllamaChatMessage("system", _systemPrompt));
     }
 
+    // Swaps the standing system message without disturbing the conversation under it, for a host
+    // that changes how the assistant should behave (a persona, an attached folder appearing)
+    // mid-conversation. Needed because LoadConversation restores whatever system message the
+    // history was saved with, which is not necessarily the one this agent was built with.
+    public void ReplaceSystemPrompt(string systemPrompt)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(systemPrompt);
+        var message = new OllamaChatMessage("system", systemPrompt);
+        if (_messages.Count > 0 && _messages[0].Role == "system")
+            _messages[0] = message;
+        else
+            _messages.Insert(0, message);
+    }
+
     public async IAsyncEnumerable<OllamaAgentEvent> RunTurnStreamingAsync(
         string prompt, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -72,14 +98,21 @@ public sealed class OllamaToolCallingAgent
         for (var round = 1; round <= _maxRounds; round++)
         {
             var content = new StringBuilder();
+            var thoughtOnly = false;
             IReadOnlyList<OllamaToolCall>? toolCalls = null;
 
-            await foreach (var chunk in _ollama.ChatStreamAsync(_model, _messages, _tools.Definitions, cancellationToken))
+            await foreach (var chunk in _ollama.ChatStreamAsync(
+                _model, _messages, _tools.Definitions, cancellationToken, _think))
             {
                 if (!string.IsNullOrEmpty(chunk.ContentDelta))
                 {
                     content.Append(chunk.ContentDelta);
                     yield return OllamaAgentEvent.Content(chunk.ContentDelta);
+                }
+                if (!string.IsNullOrEmpty(chunk.ThinkingDelta))
+                {
+                    thoughtOnly = true;
+                    yield return OllamaAgentEvent.Thinking(chunk.ThinkingDelta);
                 }
                 if (chunk.ToolCalls is { Count: > 0 } calls)
                     toolCalls = calls;
@@ -125,7 +158,14 @@ public sealed class OllamaToolCallingAgent
             if (toolCalls.Count == 0)
             {
                 if (content.Length == 0)
-                    throw new InvalidOperationException("Ollama returned an empty response.");
+                    // Distinguished so this is diagnosable rather than a generic dead end: a
+                    // reasoning model that spent the whole response deliberating and never
+                    // committed to an answer is a different (and model-specific) failure from a
+                    // model that emitted nothing at all.
+                    throw new InvalidOperationException(thoughtOnly
+                        ? $"'{_model}' only produced reasoning and never committed to an answer. " +
+                          "Try a model that reports the \"tools\" capability, or turn thinking off."
+                        : "Ollama returned an empty response.");
                 yield break;
             }
 

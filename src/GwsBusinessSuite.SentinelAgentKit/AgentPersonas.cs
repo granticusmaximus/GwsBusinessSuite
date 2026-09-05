@@ -1,4 +1,4 @@
-namespace GwsBusinessSuite.SentinelCLI;
+namespace GwsBusinessSuite.SentinelAgentKit;
 
 // Personas shape tone and priorities via an extra system-prompt paragraph - they are advisory,
 // not enforcement. Unlike /plan (which actually removes mutation tools via WorkspaceTools),

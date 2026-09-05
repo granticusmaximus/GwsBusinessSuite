@@ -28,9 +28,9 @@
             </CollectionView>
         </Grid>
 
-        <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto,*,Auto">
+        <Grid Grid.Column="1" RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
 
-            <Grid Grid.Row="0" Padding="16,12" ColumnDefinitions="*,Auto,Auto,Auto,Auto" ColumnSpacing="10" BackgroundColor="#1C1917">
+            <Grid Grid.Row="0" Padding="16,12" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto" ColumnSpacing="10" BackgroundColor="#1C1917">
                 <VerticalStackLayout Grid.Column="0" Spacing="2" VerticalOptions="Center">
                     <Label Text="SentinelGPT (local)" TextColor="#FAFAF9" FontAttributes="Bold" FontSize="16" />
                     <Label x:Name="StatusLabel" Text="Connecting to local Ollama..." TextColor="#A8A29E" FontSize="12" />
@@ -41,14 +41,16 @@
                 </HorizontalStackLayout>
                 <Button Grid.Column="2" Text="&#x1F4C1;" FontSize="16" Padding="8,4" BackgroundColor="Transparent"
                         TextColor="#A8A29E" ToolTipProperties.Text="Project folder" Clicked="OnToggleWorkspaceRowClicked" />
-                <Picker x:Name="ModelPicker" Grid.Column="3" TextColor="#FAFAF9" VerticalOptions="Center" WidthRequest="150"
+                <Picker x:Name="ModelPicker" Grid.Column="3" TextColor="#FAFAF9" VerticalOptions="Center" WidthRequest="170"
                         SelectedIndexChanged="OnModelChanged" />
-                <Button Grid.Column="4" Text="&#x2699;" FontSize="16" Padding="8,4" BackgroundColor="Transparent"
+                <Button Grid.Column="4" Text="&#x2B07;" FontSize="16" Padding="8,4" BackgroundColor="Transparent"
+                        TextColor="#A8A29E" ToolTipProperties.Text="Model library" Clicked="OnToggleModelsClicked" />
+                <Button Grid.Column="5" Text="&#x2699;" FontSize="16" Padding="8,4" BackgroundColor="Transparent"
                         TextColor="#A8A29E" Clicked="OnToggleSettingsClicked" />
             </Grid>
 
             <Grid x:Name="SettingsRow" Grid.Row="1" Padding="16,10" ColumnDefinitions="*,Auto" ColumnSpacing="8"
-                  BackgroundColor="#231F1D" IsVisible="False">
+                  RowDefinitions="Auto,Auto,Auto" BackgroundColor="#231F1D" IsVisible="False">
                 <VerticalStackLayout Grid.Column="0" Spacing="4">
                     <Label Text="Sentinel grounding key (optional)" TextColor="#D6D3D1" FontSize="12" FontAttributes="Bold" />
                     <Entry x:Name="ApiKeyEntry" Placeholder="Paste a sentinel:read developer API key from Settings"
@@ -58,6 +60,20 @@
                 </VerticalStackLayout>
                 <Button Grid.Column="1" Text="Save" VerticalOptions="Start" BackgroundColor="#F59E0B" TextColor="#1C1917"
                         FontAttributes="Bold" CornerRadius="6" Clicked="OnSaveApiKeyClicked" />
+
+                <!-- Personas and skills, the two SentinelCLI session controls that carry over to a
+                     GUI. Persona is sticky (it shapes every turn); a skill applies to the next
+                     message only, matching /skills' one-turn semantics. -->
+                <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,10,0,0"
+                      ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="8">
+                    <Label Grid.Column="0" Text="Persona" TextColor="#D6D3D1" FontSize="12" VerticalOptions="Center" />
+                    <Picker x:Name="PersonaPicker" Grid.Column="1" TextColor="#FAFAF9" VerticalOptions="Center"
+                            SelectedIndexChanged="OnPersonaChanged" />
+                    <Label Grid.Column="2" Text="Skill (next message)" TextColor="#D6D3D1" FontSize="12" VerticalOptions="Center" />
+                    <Picker x:Name="SkillPicker" Grid.Column="3" TextColor="#FAFAF9" VerticalOptions="Center" />
+                </Grid>
+                <Label x:Name="SkillsHintLabel" Grid.Row="2" Grid.ColumnSpan="2" Margin="0,6,0,0" FontSize="11" TextColor="#78716C"
+                       Text="Add skills as .md files - one file is one skill." />
             </Grid>
 
             <Grid x:Name="WorkspaceRow" Grid.Row="2" Padding="16,10" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8"
@@ -74,7 +90,52 @@
                         FontAttributes="Bold" CornerRadius="6" Clicked="OnChooseFolderClicked" />
             </Grid>
 
-            <CollectionView x:Name="Transcript" Grid.Row="3" Margin="16">
+            <!-- Model library. The app cannot spawn `ollama` (App Sandbox), so installing happens
+                 over Ollama's HTTP API - see OllamaModelInstaller. Tool support is shown per row
+                 because it decides whether a model can search the wiki at all. -->
+            <Grid x:Name="ModelsRow" Grid.Row="3" Padding="16,10" RowDefinitions="Auto,Auto,Auto,Auto"
+                  BackgroundColor="#231F1D" IsVisible="False">
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                    <VerticalStackLayout Grid.Column="0" Spacing="2">
+                        <Label Text="Model library" TextColor="#D6D3D1" FontSize="12" FontAttributes="Bold" />
+                        <Label x:Name="ModelsStatusLabel" Text="Free models you can install on this Mac."
+                               TextColor="#78716C" FontSize="11" />
+                    </VerticalStackLayout>
+                    <Button x:Name="SyncModelsButton" Grid.Column="1" Text="Sync GWS set" VerticalOptions="Start"
+                            BackgroundColor="Transparent" TextColor="#A8A29E" Clicked="OnSyncModelsClicked" />
+                    <Button x:Name="RefreshModelsButton" Grid.Column="2" Text="Refresh" VerticalOptions="Start"
+                            BackgroundColor="Transparent" TextColor="#A8A29E" Clicked="OnRefreshModelLibraryClicked" />
+                </Grid>
+
+                <CollectionView x:Name="ModelLibrary" Grid.Row="1" HeightRequest="220" Margin="0,8,0,0">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="local:BrowsableModelViewModel">
+                            <Grid Padding="0,5" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                <VerticalStackLayout Grid.Column="0" Spacing="1">
+                                    <Label Text="{Binding Headline}" TextColor="#FAFAF9" FontSize="13" />
+                                    <Label Text="{Binding Description}" TextColor="#78716C" FontSize="11" />
+                                </VerticalStackLayout>
+                                <Button Grid.Column="1" Text="{Binding ActionText}" IsEnabled="{Binding CanInstall}"
+                                        FontSize="12" Padding="10,4" CornerRadius="6" VerticalOptions="Center"
+                                        BackgroundColor="#F59E0B" TextColor="#1C1917"
+                                        Clicked="OnInstallModelClicked" />
+                            </Grid>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+
+                <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,8,0,0">
+                    <Entry x:Name="CustomModelEntry" Grid.Column="0" Placeholder="...or any other Ollama model name, e.g. mistral-small"
+                           PlaceholderColor="#78716C" TextColor="#FAFAF9" />
+                    <Button Grid.Column="1" Text="Install" BackgroundColor="#F59E0B" TextColor="#1C1917"
+                            FontAttributes="Bold" CornerRadius="6" Clicked="OnInstallCustomModelClicked" />
+                </Grid>
+
+                <Label Grid.Row="3" Margin="0,6,0,0" FontSize="11" TextColor="#78716C"
+                       Text="This list is a starting point - ollama.com/library has the full catalogue, and any name from it works in the box above. Downloads are several GB." />
+            </Grid>
+
+            <CollectionView x:Name="Transcript" Grid.Row="4" Margin="16">
                 <CollectionView.ItemTemplate>
                     <DataTemplate x:DataType="local:ChatMessageViewModel">
                         <Grid Padding="0,6">
@@ -109,7 +170,7 @@
                 </CollectionView.ItemTemplate>
             </CollectionView>
 
-            <Grid Grid.Row="4" Padding="12" ColumnDefinitions="*,Auto" BackgroundColor="#1C1917">
+            <Grid Grid.Row="5" Padding="12" ColumnDefinitions="*,Auto" BackgroundColor="#1C1917">
                 <Editor x:Name="PromptEditor" Grid.Column="0"
                         Placeholder="Ask SentinelGPT..." PlaceholderColor="#78716C"
                         TextColor="#FAFAF9" BackgroundColor="#231F1D"

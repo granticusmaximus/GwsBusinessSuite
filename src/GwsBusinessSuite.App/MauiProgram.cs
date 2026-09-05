@@ -36,6 +36,10 @@ public static class MauiProgram
 		builder.Services.AddSingleton(_ =>
 			new WorkspaceBookmarkStore(Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-workspace-bookmark.dat")));
 		builder.Services.AddSingleton<SentinelGroundingClient>();
+		// Installs models over Ollama's HTTP API. The sandbox denies process execution, so this
+		// is the only route by which the app can install a model itself instead of telling the
+		// user to run sentinelcli in a Terminal.
+		builder.Services.AddSingleton<GwsBusinessSuite.SentinelAgentKit.OllamaModelInstaller>();
 		builder.Services.AddSingleton<NativeToolExecutor>();
 		builder.Services.AddSingleton<SentinelVoiceService>();
 		builder.Services.AddSingleton<DeepAnalysisAdvisor>();

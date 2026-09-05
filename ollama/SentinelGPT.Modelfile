@@ -1,4 +1,22 @@
-FROM llama3.2
+# Base model chosen for tool-calling discipline, not size. Measured on an M3 Pro against this
+# exact profile and tool set (search_wiki/get_page/read_file), 7 prompts, temperature 0.2:
+#
+#   llama3.2 (3.2B)  2/7 - called search_wiki for "are you running locally?", invented a
+#                          filename and called read_file for a plain C# language question,
+#                          answered "17 * 23" with the literal text {"name":"multiply",...},
+#                          and invented the placeholder page id "your_sentinel_wiki_page_id"
+#                          rather than asking which page was meant.
+#   gemma4   (8.0B)  7/7 - answered all four conversational prompts directly with no tool call,
+#                          called the right tool on both prompts that needed one, and asked
+#                          which page was meant instead of inventing an id.
+#
+# The 3B model was not under-prompted - it reached for a tool on nearly every message, which is
+# what made the assistant feel incompetent regardless of what this SYSTEM block said. Generation
+# is slower (35 t/s vs 56 t/s) but total time-to-answer is better in practice, because a wrong
+# tool call costs a whole extra round trip. Callers should send think:false (see OllamaClient) -
+# gemma4 reports the "thinking" capability, and left on it spends ~230 extra tokens deliberating
+# over arithmetic.
+FROM gemma4
 
 # Favor careful, reproducible answers over creative improvisation. The larger context
 # window leaves room for GWS records, conversation history, and retrieved documentation.

@@ -21,6 +21,7 @@ public partial class SentinelGptPage : ContentPage
     private readonly DeepAnalysisAdvisor _deepAnalysis;
     private readonly NativeFallbackChatService _fallbackChat;
     private readonly DeviceSecretStore _deviceSecretStore;
+    private readonly OllamaModelInstaller _modelInstaller;
 
     // A few minutes, not DeepAnalysisAdvisor's 2-minute sub-advisor bound - this is the primary
     // chat turn, and CPU-bound local inference can legitimately take longer on slower hardware
@@ -32,13 +33,28 @@ public partial class SentinelGptPage : ContentPage
 
     private readonly ObservableCollection<ChatMessageViewModel> _messages = [];
     private readonly ObservableCollection<ConversationSummary> _history = [];
+    private readonly ObservableCollection<BrowsableModelViewModel> _modelLibrary = [];
 
-    private List<string> _models = [];
+    // Only models this Mac can actually hold a tool-calling chat with - see LoadModelsAsync.
+    // Index-aligned with ModelPicker.ItemsSource, which shows a decorated label rather than the
+    // bare name, so SelectedModel reads through this list instead of casting SelectedItem.
+    private List<OllamaModelInfo> _models = [];
     private OllamaToolCallingAgent? _agent;
     private CancellationTokenSource? _turnCts;
     private string? _currentSessionPath;
     private bool _sending;
     private bool _useDeepAnalysis;
+
+    // Set while a resumed conversation's recorded model is being restored into the picker, so
+    // OnModelChanged can tell that programmatic selection apart from a human switching models.
+    private bool _restoringModelSelection;
+
+    // SentinelCLI's /agent and /skills, carried into the app. The persona is sticky and folded
+    // into the system prompt; a skill wraps one message and then clears itself, matching
+    // /skills' one-turn semantics.
+    private const string NoSkill = "(none)";
+    private AgentPersona _persona = AgentPersonas.Default;
+    private SkillLibrary _skills = new();
 
     // An optional attached project folder - not a "mode": when set, its file tools (read/write/
     // replace, no run_command - the App Sandbox denies process execution outright even with a
@@ -59,7 +75,8 @@ public partial class SentinelGptPage : ContentPage
         SentinelVoiceService voice,
         DeepAnalysisAdvisor deepAnalysis,
         NativeFallbackChatService fallbackChat,
-        DeviceSecretStore deviceSecretStore)
+        DeviceSecretStore deviceSecretStore,
+        OllamaModelInstaller modelInstaller)
     {
         _ollama = ollama;
         _toolExecutor = toolExecutor;
@@ -71,10 +88,14 @@ public partial class SentinelGptPage : ContentPage
         _deepAnalysis = deepAnalysis;
         _fallbackChat = fallbackChat;
         _deviceSecretStore = deviceSecretStore;
+        _modelInstaller = modelInstaller;
 
         InitializeComponent();
         Transcript.ItemsSource = _messages;
         HistoryList.ItemsSource = _history;
+        ModelLibrary.ItemsSource = _modelLibrary;
+        PersonaPicker.ItemsSource = AgentPersonas.All.Select(persona => persona.Name).ToList();
+        PersonaPicker.SelectedIndex = AgentPersonas.All.ToList().IndexOf(AgentPersonas.Default);
     }
 
     protected override async void OnAppearing()
@@ -110,16 +131,26 @@ public partial class SentinelGptPage : ContentPage
         StatusLabel.Text = "Connecting to local Ollama...";
         try
         {
-            _models = (await _ollama.ListModelsAsync(CancellationToken.None)).ToList();
+            var installed = await _ollama.ListModelDetailsAsync(CancellationToken.None);
+
+            // Chat-capable only. Ollama answers HTTP 400 ("does not support chat") for an
+            // embedding or image model, and the resulting exception used to be swallowed by
+            // TryRunLocalTurnAsync and quietly routed to the hosted server - so picking
+            // embeddinggemma from this list silently stopped the feature being local at all.
+            // Keeping them out of the list removes the choice rather than handling its fallout.
+            _models = installed.Where(model => model.SupportsChat).ToList();
             if (_models.Count == 0)
             {
-                StatusLabel.Text = "No local models installed. Run 'sentinelcli models sync' in Terminal.";
+                // The model library can fix both of these from inside the app now, so point at
+                // it rather than sending the user to a Terminal the sandbox can't reach anyway.
+                StatusLabel.Text = installed.Count == 0
+                    ? "No local models installed - open the model library (down-arrow) to install one."
+                    : "Only embedding/image models installed - open the model library to install a chat model.";
                 return;
             }
 
-            ModelPicker.ItemsSource = _models;
-            var preferredIndex = _models.FindIndex(model => NormalizeModel(model) == PreferredModel);
-            ModelPicker.SelectedIndex = preferredIndex >= 0 ? preferredIndex : 0;
+            ModelPicker.ItemsSource = _models.Select(DescribeModel).ToList();
+            ModelPicker.SelectedIndex = PreferredModelIndex();
             StatusLabel.Text = "Local Ollama - conversations never leave this Mac.";
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
@@ -128,12 +159,57 @@ public partial class SentinelGptPage : ContentPage
         }
     }
 
-    private OllamaToolCallingAgent CreateAgent(string model)
+    // Prefer the purpose-built profile, then anything that can actually use tools - a chat-only
+    // model still works here (the agent simply offers it no tools) but can't search the wiki or
+    // touch an attached folder, so it's a poor thing to land on by default.
+    private int PreferredModelIndex()
     {
-        var executors = new List<IOllamaToolExecutor> { _toolExecutor };
-        if (_devTools is not null) executors.Add(_devTools);
+        var preferred = _models.FindIndex(model => NormalizeModel(model.Name) == PreferredModel);
+        if (preferred >= 0) return preferred;
+        var toolCapable = _models.FindIndex(model => model.SupportsTools);
+        return toolCapable >= 0 ? toolCapable : 0;
+    }
+
+    // "gemma4 (8.0B)" / "gemma3:12b (12.2B, no tools)" - the size helps predict speed, and the
+    // suffix explains up front why a model that's listed still can't search the wiki, instead of
+    // leaving the user to infer it from tools never firing.
+    private static string DescribeModel(OllamaModelInfo model)
+    {
+        var size = string.IsNullOrWhiteSpace(model.ParameterSize) ? null : model.ParameterSize;
+        var suffix = model.SupportsTools ? null : "no tools";
+        var annotations = string.Join(", ", new[] { size, suffix }.Where(part => part is not null));
+        return annotations.Length == 0 ? model.Name : $"{model.Name} ({annotations})";
+    }
+
+    private OllamaModelInfo? SelectedModel =>
+        ModelPicker.SelectedIndex >= 0 && ModelPicker.SelectedIndex < _models.Count
+            ? _models[ModelPicker.SelectedIndex]
+            : null;
+
+    private OllamaToolCallingAgent CreateAgent(OllamaModelInfo model)
+    {
+        // A model without the "tools" capability gets an executor offering nothing at all.
+        // Ollama rejects the *whole request* with HTTP 400 when a populated tools array reaches
+        // such a model ("does not support tools"), but accepts an empty one, so this is the
+        // difference between plain local chat still working and the turn dying and falling
+        // through to the server.
+        var executors = new List<IOllamaToolExecutor>();
+        if (model.SupportsTools)
+        {
+            executors.Add(_toolExecutor);
+            if (_devTools is not null) executors.Add(_devTools);
+        }
         IOllamaToolExecutor executor = executors.Count == 1 ? executors[0] : new CompositeToolExecutor(executors);
-        return new(_ollama, executor, model, BuildSystemPrompt(_devTools), maxRounds: 6);
+
+        // Thinking off for latency. Measured on an M3 Pro, gemma4 spends ~230 generated tokens
+        // deliberating over "what is 17 * 23?" with it on and 15 with it off, for the same
+        // answer. Deep analysis is the deliberate opt-in for depth (DeepAnalysisAdvisor), so
+        // this doesn't remove the capability - it stops paying for it on every casual message.
+        // Only sent for models that report the capability, so the payload stays honest.
+        var think = model.SupportsThinking ? false : (bool?)null;
+        return new(_ollama, executor, model.Name,
+            BuildSystemPrompt(model.SupportsTools ? _devTools : null, model.SupportsTools, _persona),
+            maxRounds: 6, think: think);
     }
 
     // One assistant, one prompt - the wiki tools (search_wiki/get_page) are always offered, and the
@@ -144,8 +220,28 @@ public partial class SentinelGptPage : ContentPage
     // (out of scope for v1). Whether run_command is mentioned as available depends on the actual
     // tool set WorkspaceTools is offering, not a hardcoded assumption, so this can never contradict
     // DescribeWorkspace()'s own mode line below it.
-    private static string BuildSystemPrompt(WorkspaceTools? devTools)
+    private static string BuildSystemPrompt(
+        WorkspaceTools? devTools, bool supportsTools = true, AgentPersona? persona = null)
     {
+        var personaParagraph = string.IsNullOrWhiteSpace(persona?.Instructions)
+            ? string.Empty
+            : persona!.Instructions + "\n\n";
+
+        if (!supportsTools)
+            // Said plainly rather than left implicit: a model with no tools that still reads
+            // instructions about search_wiki/read_file will describe searches it cannot run.
+            return """
+                You are SentinelGPT, Grant Watson's private local AI assistant running entirely via Ollama on this Mac -
+                nothing in this conversation is sent to any hosted server. You are a general-purpose assistant for
+                conversation, brainstorming, and coding help.
+
+                This model has no tools available - you cannot search the wiki, read files, or run anything. Answer
+                from your own knowledge. If a request genuinely needs a lookup you can't perform, say so plainly and
+                suggest the user switch to a tool-capable model from the picker rather than describing a search you
+                can't run.
+
+                """ + personaParagraph;
+
         var prompt = """
             You are SentinelGPT, Grant Watson's private local AI assistant running entirely via Ollama on this Mac -
             nothing in this conversation is sent to any hosted server. You are a general-purpose assistant for
@@ -158,14 +254,23 @@ public partial class SentinelGptPage : ContentPage
             it's unavailable or a search comes back empty, do not retry more than once - say so plainly and answer
             from your own knowledge instead of repeating the call.
 
-            If wiki search tools (search_wiki/get_page) are offered to you, they look up this Mac's Sentinel wiki -
-            use them only when the question is clearly about GWS Business Suite content, not for general knowledge
-            questions. They are only offered when the user has configured a grounding key, so if you don't see them,
-            wiki lookup simply isn't available on this Mac - answer from your own knowledge and say so if it matters,
-            rather than describing a search you can't run.
+            When GWS tools are offered to you they read Grant's live GWS Business Suite data, and each one covers a
+            different part of it - pick by what the question is actually about:
+              - search_wiki / get_page: internal Sentinel wiki notes and databases.
+              - search_crm: contacts, leads and individual deals.
+              - get_pipeline: sales totals by stage - use this for "how much", "how many deals", "pipeline value".
+              - search_cms_pages: pages on the public website, their slugs and publish status.
+              - get_system_health: container alerts, for "is anything down/broken".
+            Use them only when the question is clearly about Grant's own business data, never for general knowledge.
+            These are read-only - you cannot change any record, so never claim you have.
+
+            They are only offered when the user has configured a grounding key, so if you don't see them, that data
+            simply isn't reachable from this Mac - answer from your own knowledge and say so if it matters, rather
+            than describing a lookup you can't run or inventing figures.
 
             """;
 
+        prompt += personaParagraph;
         if (devTools is null)
             return prompt;
 
@@ -211,14 +316,21 @@ public partial class SentinelGptPage : ContentPage
         if (_sending) return;
         _messages.Clear();
         _currentSessionPath = null;
-        if (ModelPicker.SelectedItem is string model)
+        if (SelectedModel is { } model)
             _agent = CreateAgent(model);
         HistoryList.SelectedItem = null;
     }
 
+    // Switching models deliberately starts a fresh conversation - a half-finished tool-calling
+    // exchange doesn't transfer meaningfully to a different model. But this fires for *any*
+    // index change, including the programmatic one that restores a resumed conversation's
+    // recorded model, which used to wipe the conversation being restored: the transcript was
+    // repopulated afterwards and looked right, while the agent held no history and
+    // _currentSessionPath had been nulled, so the next reply answered with no context and saved
+    // itself to a new file. Only a human changing the picker should reset anything.
     private void OnModelChanged(object? sender, EventArgs e)
     {
-        if (ModelPicker.SelectedItem is not string model) return;
+        if (_restoringModelSelection || SelectedModel is not { } model) return;
         _messages.Clear();
         _currentSessionPath = null;
         _agent = CreateAgent(model);
@@ -272,16 +384,142 @@ public partial class SentinelGptPage : ContentPage
         _messages.Clear();
         _currentSessionPath = null;
         HistoryList.SelectedItem = null;
-        if (ModelPicker.SelectedItem is string model)
+        if (SelectedModel is { } model)
             _agent = CreateAgent(model);
         RefreshHistory();
+        // Attaching or clearing a folder changes which skills are reachable - a repo's own
+        // .sentinel/skills appear or disappear with it.
+        RefreshSkills();
+    }
+
+    private async void OnToggleModelsClicked(object? sender, EventArgs e)
+    {
+        ModelsRow.IsVisible = !ModelsRow.IsVisible;
+        if (ModelsRow.IsVisible && _modelLibrary.Count == 0)
+            await RefreshModelLibraryAsync();
+    }
+
+    private async void OnRefreshModelLibraryClicked(object? sender, EventArgs e) => await RefreshModelLibraryAsync();
+
+    private async Task RefreshModelLibraryAsync()
+    {
+        var browsable = await _modelInstaller.BrowseAsync(CancellationToken.None);
+        _modelLibrary.Clear();
+        foreach (var entry in browsable)
+            _modelLibrary.Add(new BrowsableModelViewModel(entry.Model, entry.IsInstalled));
+    }
+
+    private async void OnInstallModelClicked(object? sender, EventArgs e)
+    {
+        if ((sender as Button)?.BindingContext is not BrowsableModelViewModel row || !row.CanInstall) return;
+        await InstallModelAsync(row.Name, row);
+    }
+
+    private async void OnInstallCustomModelClicked(object? sender, EventArgs e)
+    {
+        var name = CustomModelEntry.Text?.Trim();
+        if (string.IsNullOrWhiteSpace(name)) return;
+        CustomModelEntry.Text = string.Empty;
+        // Any name from ollama.com/library is valid here, so there's usually no row to update -
+        // progress goes to the panel's status line instead.
+        await InstallModelAsync(name, _modelLibrary.FirstOrDefault(row =>
+            string.Equals(row.Name, name, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private async Task InstallModelAsync(string name, BrowsableModelViewModel? row)
+    {
+        if (row is not null) row.Progress = "0%";
+        ModelsStatusLabel.Text = $"Downloading {name}...";
+        try
+        {
+            await foreach (var progress in _modelInstaller.InstallAsync(name, CancellationToken.None))
+            {
+                if (progress.Fraction is not { } fraction) continue;
+                if (row is not null) row.Progress = $"{fraction:P0}";
+                ModelsStatusLabel.Text = $"Downloading {name}... {fraction:P0}";
+            }
+
+            if (row is not null) row.IsInstalled = true;
+            ModelsStatusLabel.Text = $"{name} installed.";
+            // The new model has to reach the picker for this to have accomplished anything.
+            await LoadModelsAsync();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException)
+        {
+            ModelsStatusLabel.Text = $"Couldn't install {name}: {ex.Message}";
+        }
+        finally
+        {
+            if (row is not null) row.Progress = null;
+        }
+    }
+
+    private async void OnSyncModelsClicked(object? sender, EventArgs e)
+    {
+        SyncModelsButton.IsEnabled = false;
+        try
+        {
+            await foreach (var step in _modelInstaller.SyncAsync(CancellationToken.None))
+                ModelsStatusLabel.Text = step;
+            await RefreshModelLibraryAsync();
+            await LoadModelsAsync();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException)
+        {
+            ModelsStatusLabel.Text = $"Model sync failed: {ex.Message}";
+        }
+        finally
+        {
+            SyncModelsButton.IsEnabled = true;
+        }
     }
 
     private void OnToggleSettingsClicked(object? sender, EventArgs e)
     {
         SettingsRow.IsVisible = !SettingsRow.IsVisible;
-        if (SettingsRow.IsVisible)
-            _ = LoadApiKeyIntoFieldAsync();
+        if (!SettingsRow.IsVisible) return;
+        _ = LoadApiKeyIntoFieldAsync();
+        RefreshSkills();
+    }
+
+    // Rebuilt on open and whenever the attached folder changes, so a repo's own skills appear
+    // as soon as it's attached without needing the tab reopened.
+    private void RefreshSkills()
+    {
+        _skills = new SkillLibrary(AppSkillsDirectory(), WorkspaceSkillsDirectory());
+        var names = _skills.List();
+        // "(none)" is a real entry rather than an empty selection so a chosen skill can be
+        // cleared again without hunting for a deselect gesture.
+        SkillPicker.ItemsSource = new List<string> { NoSkill }.Concat(names).ToList();
+        SkillPicker.SelectedIndex = 0;
+        SkillsHintLabel.Text = _workspaceRoot is null
+            ? $"Add skills as .md files in {AppSkillsDirectory()} - or attach a project folder to use its .sentinel/skills."
+            : $"Skills load from {AppSkillsDirectory()} and this folder's .sentinel/skills.";
+    }
+
+    private static string AppSkillsDirectory() =>
+        Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-skills");
+
+    // Reachable only because the user picked the folder themselves - the sandbox grants access
+    // to that path and nothing else, which is also why SentinelCLI's own ~/.config skills
+    // directory can never be read from here.
+    private string? WorkspaceSkillsDirectory() =>
+        _workspaceRoot is null ? null : Path.Combine(_workspaceRoot, ".sentinel", "skills");
+
+    private void OnPersonaChanged(object? sender, EventArgs e)
+    {
+        if (PersonaPicker.SelectedIndex < 0 || PersonaPicker.SelectedIndex >= AgentPersonas.All.Count) return;
+        _persona = AgentPersonas.All[PersonaPicker.SelectedIndex];
+        // The persona is part of the system prompt, so it only takes effect on a rebuilt agent.
+        // Existing history is kept - unlike a model switch, a persona change doesn't invalidate
+        // what was already said.
+        if (SelectedModel is { } model && _agent is { } existing)
+        {
+            var history = existing.Messages.ToList();
+            _agent = CreateAgent(model);
+            _agent.LoadConversation(history);
+            _agent.ReplaceSystemPrompt(BuildSystemPrompt(_devTools, model.SupportsTools, _persona));
+        }
     }
 
     private async Task LoadApiKeyIntoFieldAsync() => ApiKeyEntry.Text = await _apiKeyStore.GetAsync();
@@ -317,7 +555,7 @@ public partial class SentinelGptPage : ContentPage
         var prompt = PromptEditor.Text?.Trim();
         if (string.IsNullOrWhiteSpace(prompt)) return;
 
-        if (ModelPicker.SelectedItem is string model)
+        if (SelectedModel is { } model)
         {
             _agent ??= CreateAgent(model);
         }
@@ -334,7 +572,18 @@ public partial class SentinelGptPage : ContentPage
         // rather than blocking the user from sending at all.
 
         PromptEditor.Text = string.Empty;
-        await RunTurnAsync(prompt);
+        await RunTurnAsync(ApplyPendingSkill(prompt), displayText: prompt);
+    }
+
+    // Wraps one message in the chosen skill's instructions, then clears the selection - a skill
+    // is a one-turn modifier (SentinelCLI's /skills semantics), not a mode.
+    private string ApplyPendingSkill(string prompt)
+    {
+        if (SkillPicker.SelectedItem is not string skillName || skillName == NoSkill) return prompt;
+        SkillPicker.SelectedIndex = 0;
+        return _skills.Load(skillName) is { } instructions
+            ? SkillLibrary.BuildTurnPrompt(skillName, instructions, prompt)
+            : prompt;
     }
 
     private async void OnRetryClicked(object? sender, EventArgs e)
@@ -345,7 +594,11 @@ public partial class SentinelGptPage : ContentPage
         await RunTurnAsync(prompt);
     }
 
-    private async Task RunTurnAsync(string prompt)
+    // displayText is what the user actually typed; prompt is what the model sees. They differ
+    // only when a skill wraps the message - the transcript should show the question as asked,
+    // not the skill boilerplate around it. Retry reuses the wrapped form so a retried turn
+    // behaves identically to the first attempt.
+    private async Task RunTurnAsync(string prompt, string? displayText = null)
     {
         _sending = true;
         SendButton.IsEnabled = false;
@@ -355,7 +608,7 @@ public partial class SentinelGptPage : ContentPage
         foreach (var previous in _messages)
             previous.RetryPrompt = null;
 
-        _messages.Add(new ChatMessageViewModel(isUser: true) { Text = prompt, IsComplete = true });
+        _messages.Add(new ChatMessageViewModel(isUser: true) { Text = displayText ?? prompt, IsComplete = true });
         var answer = new ChatMessageViewModel(isUser: false);
         // One subscription covers every way this turn's answer can update (deep-analysis status,
         // each streamed delta, a fallback message, or an error) - simpler than scrolling from each
@@ -434,6 +687,16 @@ public partial class SentinelGptPage : ContentPage
                     var activityText = $"\U0001F527 {activity}...";
                     MainThread.BeginInvokeOnMainThread(() => answer.Text = activityText);
                 }
+                else if (turnEvent.ThinkingDelta is { Length: > 0 })
+                {
+                    // Shown as transient status, never appended: a reasoning model's
+                    // deliberation is not its answer, and the next content delta replaces this
+                    // the same way it replaces a tool-activity indicator. Only reachable when a
+                    // thinking model ignores the think:false CreateAgent sends (deepseek-r1
+                    // does exactly that) - without this the turn would look frozen.
+                    showingActivity = true;
+                    MainThread.BeginInvokeOnMainThread(() => answer.Text = "\U0001F4AD Thinking...");
+                }
                 else if (turnEvent.ContentDelta is { Length: > 0 } delta)
                 {
                     var replacePrevious = showingActivity;
@@ -454,6 +717,21 @@ public partial class SentinelGptPage : ContentPage
         {
             throw;
         }
+        catch (InvalidOperationException ex) when (IsLocalModelRejection(ex))
+        {
+            // A model that can't serve this request at all (Ollama answers HTTP 4xx, e.g. "does
+            // not support tools"). Falling back to the server here would be actively wrong: the
+            // user picked a local model and would silently get a hosted answer instead, with no
+            // hint that their choice was the problem. LoadModelsAsync now keeps the known-bad
+            // choices out of the picker, so reaching this means something new - say what
+            // happened rather than papering over it.
+            answer.Text = $"'{PickerModel()}' can't handle this request: {ex.Message}\n\n" +
+                          "Pick a different local model from the picker at the top right.";
+            answer.IsError = true;
+            answer.IsComplete = true;
+            answer.RetryPrompt = prompt;
+            return true;
+        }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException or OperationCanceledException)
         {
             // Ollama unreachable, the model errored, or LocalTurnTimeout fired (a bare
@@ -462,6 +740,13 @@ public partial class SentinelGptPage : ContentPage
             return false;
         }
     }
+
+    // Ollama reports "this model cannot do that" as an HTTP 4xx that OllamaClient surfaces as an
+    // InvalidOperationException carrying the status line, which is otherwise indistinguishable
+    // from "Ollama is unavailable". Matched on the status text OllamaClient itself formats
+    // rather than on the daemon's wording, which varies by model and version.
+    private static bool IsLocalModelRejection(InvalidOperationException exception) =>
+        exception.Message.Contains("Ollama returned HTTP 4", StringComparison.Ordinal);
 
     // The fallback deliberately never touches _agent/_sessions - it bypasses the local agent
     // entirely (no tool-calling, no conversation continuity with it), so folding its answer into
@@ -497,7 +782,7 @@ public partial class SentinelGptPage : ContentPage
         answer.IsComplete = true;
     }
 
-    private string PickerModel() => ModelPicker.SelectedItem as string ?? PreferredModel;
+    private string PickerModel() => SelectedModel?.Name ?? PreferredModel;
 
     private async void OnApproveClicked(object? sender, EventArgs e)
     {
@@ -555,11 +840,24 @@ public partial class SentinelGptPage : ContentPage
         WorkspacePathLabel.Text = _workspaceRoot ?? "No folder chosen yet.";
         ClearFolderButton.IsVisible = _workspaceRoot is not null;
 
-        _agent = CreateAgent(loaded.Model);
-        _agent.LoadConversation(loaded.Messages);
+        // A conversation can name a model that's since been removed from Ollama, or one this
+        // list now filters out - fall back to the current selection rather than rebuilding an
+        // agent around a model that can't answer. The recorded name stays in the saved session
+        // either way; only what we resume *with* changes.
+        var recorded = _models.FindIndex(model =>
+            string.Equals(model.Name, loaded.Model, StringComparison.OrdinalIgnoreCase));
+        if (recorded >= 0)
+        {
+            _restoringModelSelection = true;
+            try { ModelPicker.SelectedIndex = recorded; }
+            finally { _restoringModelSelection = false; }
+        }
 
-        var modelIndex = _models.FindIndex(m => m == loaded.Model);
-        if (modelIndex >= 0) ModelPicker.SelectedIndex = modelIndex;
+        if (SelectedModel is { } resumeModel)
+        {
+            _agent = CreateAgent(resumeModel);
+            _agent.LoadConversation(loaded.Messages);
+        }
 
         _messages.Clear();
         foreach (var message in loaded.Messages.Where(m => m.Role is "user" or "assistant" && m.Content.Length > 0))

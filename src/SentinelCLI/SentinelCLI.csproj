@@ -10,13 +10,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="..\..\ollama\required-models.txt"
-                      LogicalName="GwsBusinessSuite.SentinelCLI.required-models.txt" />
-    <EmbeddedResource Include="..\..\ollama\SentinelGPT.Modelfile"
-                      LogicalName="GwsBusinessSuite.SentinelCLI.SentinelGPT.Modelfile" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\GwsBusinessSuite.OllamaKit\GwsBusinessSuite.OllamaKit.csproj" />
     <ProjectReference Include="..\GwsBusinessSuite.SentinelAgentKit\GwsBusinessSuite.SentinelAgentKit.csproj" />
   </ItemGroup>
