@@ -1085,6 +1085,13 @@ public sealed class CmsPage : AuditableEntity
     public required string Title { get; set; }
     public required string Slug { get; set; }
     public string BlocksJson { get; set; } = "[]";
+    // The live, publicly-rendered content. On a Published page this is only ever replaced by an
+    // explicit "Publish changes" - autosaved edits land in DraftBlocksJson instead, so editing a
+    // live page no longer pushes every keystroke to the public site.
+    // Null means "no unpublished changes"; non-null means this page has a draft ahead of the live
+    // copy. A Draft-status page has nothing public to protect, so its edits go straight to
+    // BlocksJson and this stays null.
+    public string? DraftBlocksJson { get; set; }
     public string MetaTitle { get; set; } = string.Empty;
     public string MetaDescription { get; set; } = string.Empty;
     public string OgImageUrl { get; set; } = string.Empty;

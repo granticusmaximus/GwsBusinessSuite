@@ -172,7 +172,7 @@ live can watch.
 
 The public marketing/blog site (`grantwatson.dev` and `www.grantwatson.dev`) is entirely separate
 from the Client Portal and from staff logins — it has no visitor accounts of any kind. It's built
-from the same "Pages"/Canvas Studio CMS builder documented in
+from the same "Pages"/page-editor CMS builder documented in
 [`SITE_BUILDING_USER_GUIDE.md`](SITE_BUILDING_USER_GUIDE.md); this section only covers what a
 visitor experiences when browsing the finished result, not how staff builds a page.
 

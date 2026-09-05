@@ -482,7 +482,22 @@ public sealed class CmsBuilderService(
         page.ParentPageId = editor.ParentPageId;
         page.Title = editor.Title.Trim();
         page.Slug = uniqueSlug;
-        page.BlocksJson = NormalizeBlocksJson(editor.BlocksJson);
+        // Draft-vs-live content routing. An autosave on a Published page parks its edit in
+        // DraftBlocksJson so the live copy the public renders stays exactly as it was last
+        // published; "Publish changes" sends ContentIsDraftEdit=false and promotes it. Anything
+        // that isn't a draft edit against an already-published page writes live content and
+        // clears any pending draft, which also covers unpublishing (the draft is no longer
+        // hiding from anyone once the page leaves Published).
+        var normalizedBlocks = NormalizeBlocksJson(editor.BlocksJson);
+        if (editor.ContentIsDraftEdit && !isNew && previousStatus == CmsPageStatuses.Published && requestedStatus == CmsPageStatuses.Published)
+        {
+            page.DraftBlocksJson = normalizedBlocks;
+        }
+        else
+        {
+            page.BlocksJson = normalizedBlocks;
+            page.DraftBlocksJson = null;
+        }
         page.MetaTitle = editor.MetaTitle?.Trim() ?? string.Empty;
         page.MetaDescription = editor.MetaDescription?.Trim() ?? string.Empty;
         page.OgImageUrl = editor.OgImageUrl?.Trim() ?? string.Empty;

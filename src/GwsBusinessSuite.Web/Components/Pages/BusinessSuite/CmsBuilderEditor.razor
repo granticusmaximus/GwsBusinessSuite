@@ -1,3 +1,5 @@
+@page "/admin/pages/{PageId:guid}/edit"
+@* Kept so existing links/bookmarks into the Studio keep working. *@
 @page "/admin/canvas/editor/{PageId:guid}"
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @attribute [Authorize(Policy = "ContributorAccess")]
@@ -13,21 +15,20 @@
 @inject IGlobalBlockService GlobalBlockService
 @inject GlobalBlockResolver GlobalBlockResolver
 @inject IMediaLibraryService MediaLibraryService
-@inject ICmsKnowledgeService CmsKnowledgeService
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject ILogger<CmsBuilderEditor> Logger
 
-<PageTitle>Canvas Studio — @(_page?.Title ?? "Loading…")</PageTitle>
+<PageTitle>Edit page — @(_page?.Title ?? "Loading…")</PageTitle>
 
 <div class="studio-shell">
 
 @* ── Header ─────────────────────────────────────────────────────────────── *@
 <div class="studio-header page-header">
     <div>
-        <div class="studio-kicker">Live page studio</div>
-        <h1><i class="bi bi-grid-1x2 me-2 text-primary"></i>@(_page?.Title ?? "Canvas Studio")</h1>
-        <p class="mb-0">Add sections and widgets, edit their content, and save — changes go live immediately, no rebuild or deploy.</p>
+        <div class="studio-kicker">Page editor</div>
+        <h1><i class="bi bi-grid-1x2 me-2 text-primary"></i>@(_page?.Title ?? "Page editor")</h1>
+        <p class="mb-0">Add sections and blocks and edit their content. Your work autosaves as a draft; publishing puts it on the live site.</p>
         @if (_site is not null && _page is not null)
         {
             <p class="small text-secondary mb-0 mt-1">Website: @_site.Name · Live at: <span class="font-monospace">/@CurrentFullPath</span></p>
@@ -38,6 +39,10 @@
             @if (_page is not null)
             {
                 <span class="studio-pill @(_page.Status == CmsPageStatuses.Published ? "" : "studio-pill-subtle")">@(_page.Status == CmsPageStatuses.Published ? "Published" : "Draft")</span>
+                @if (_hasUnpublishedChanges)
+                {
+                    <span class="studio-pill studio-pill-draft" title="The live page still shows the last published version.">Unpublished changes</span>
+                }
             }
             <span class="studio-pill">@_layout.Sections.Count section@(_layout.Sections.Count == 1 ? "" : "s")</span>
             <span class="studio-pill studio-pill-subtle">@TotalWidgetCount widget@(TotalWidgetCount == 1 ? "" : "s")</span>
@@ -51,9 +56,21 @@
                 <i class="bi bi-arrow-clockwise"></i>
             </button>
         </div>
+        @* Save state is reported, not asked for - edits autosave as a draft. The only button is
+           the deliberate, publicly-visible act, named after its consequence (Wikimedia renamed
+           "Save page" to "Publish changes" in 2016 after research found new editors thought
+           saving was private). *@
+        <span class="studio-save-state">@SaveStateText</span>
         <button class="btn btn-outline-secondary" @onclick="BackToList">Back</button>
-        <button class="btn btn-primary" @onclick="() => SaveAsync()" disabled="@(_isBusy || _page is null || _layoutParseFailed)">
-            <i class="bi bi-cloud-check me-1"></i>@(_isBusy ? "Saving…" : "Save")
+        @if (_page is not null && !string.IsNullOrWhiteSpace(PreviewUrl))
+        {
+            <a class="btn btn-outline-secondary" href="@PreviewUrl" target="_blank" rel="noopener noreferrer">
+                <i class="bi bi-box-arrow-up-right me-1"></i>Preview
+            </a>
+        }
+        <button class="btn btn-primary" @onclick="() => SaveAsync(publish: true)"
+                disabled="@(_isBusy || _page is null || _layoutParseFailed || !CanPublish)">
+            <i class="bi bi-cloud-upload me-1"></i>@PublishButtonText
         </button>
     </div>
 </div>
@@ -105,40 +122,58 @@ else
     <aside class="studio-panel studio-panel-left">
         <div class="studio-tab-strip">
             <button class="studio-tab @(_leftTab == "widgets" ? "is-active" : "")" @onclick='() => _leftTab = "widgets"'>
-                <i class="bi bi-grid-3x2-gap me-1"></i>Widgets
-            </button>
-            <button class="studio-tab @(_leftTab == "global" ? "is-active" : "")" @onclick='() => _leftTab = "global"'>
-                <i class="bi bi-globe2 me-1"></i>Global
-            </button>
-            <button class="studio-tab @(_leftTab == "reference" ? "is-active" : "")" @onclick='() => _leftTab = "reference"'>
-                <i class="bi bi-journal-richtext me-1"></i>Reference
+                <i class="bi bi-plus-square me-1"></i>Insert
             </button>
             <button class="studio-tab @(_leftTab == "layers" ? "is-active" : "")" @onclick='() => _leftTab = "layers"'>
                 <i class="bi bi-layers me-1"></i>Layers
+            </button>
+            <button class="studio-tab @(_leftTab == "global" ? "is-active" : "")" @onclick='() => _leftTab = "global"'>
+                <i class="bi bi-globe2 me-1"></i>Library
             </button>
         </div>
 
         @if (_leftTab == "widgets")
         {
             <div class="studio-panel-section">
-                <div class="studio-section-eyebrow mb-2 px-1">Click to add to the selected section</div>
-                <div class="studio-widget-grid">
-                    @foreach (var wt in WidgetCatalog)
+                <input class="form-control form-control-sm mb-2" type="search" placeholder="Search blocks…"
+                       value="@_blockSearch" @oninput="OnBlockSearchInput" aria-label="Search blocks" />
+                <div class="studio-section-eyebrow mb-2 px-1">Click to add to the selected section, or drag onto the canvas</div>
+                @{
+                    var anyBlockMatches = false;
+                }
+                @foreach (var group in WidgetGroupOrder)
+                {
+                    var groupWidgets = VisibleWidgets(group).ToList();
+                    if (groupWidgets.Count == 0)
                     {
-                        <button class="studio-widget-card"
-                                draggable="true"
-                                data-gws-palette-widget="@wt.Type"
-                                ondragstart="window.gwsCmsBuilderBridge.beginPaletteDrag(event)"
-                                ondragend="window.gwsCmsBuilderBridge.endExternalDrag()"
-                                @onclick="() => QuickAddWidget(wt.Type)">
-                            <span class="studio-widget-icon"><i class="@wt.Icon"></i></span>
-                            <span class="studio-widget-copy">
-                                <strong>@wt.Title</strong>
-                                <small>@wt.Tagline</small>
-                            </span>
-                        </button>
+                        continue;
                     }
-                </div>
+                    anyBlockMatches = true;
+                    <div class="studio-block-group-label">@group</div>
+                    <div class="studio-widget-grid mb-2">
+                        @foreach (var wt in groupWidgets)
+                        {
+                            <button class="studio-widget-card"
+                                    draggable="true"
+                                    data-gws-palette-widget="@wt.Type"
+                                    ondragstart="window.gwsCmsBuilderBridge.beginPaletteDrag(event)"
+                                    ondragend="window.gwsCmsBuilderBridge.endExternalDrag()"
+                                    @onclick="() => QuickAddWidget(wt.Type)">
+                                <span class="studio-widget-icon"><i class="@wt.Icon"></i></span>
+                                <span class="studio-widget-copy">
+                                    <strong>@wt.Title</strong>
+                                    <small>@wt.Tagline</small>
+                                </span>
+                            </button>
+                        }
+                    </div>
+                }
+                @if (!anyBlockMatches)
+                {
+                    <div class="studio-empty-card">
+                        <p>No blocks match “@_blockSearch”.</p>
+                    </div>
+                }
             </div>
         }
         else if (_leftTab == "global")
@@ -180,47 +215,6 @@ else
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </div>
-                            </div>
-                        }
-                    </div>
-                }
-            </div>
-        }
-        else if (_leftTab == "reference")
-        {
-            <div class="studio-panel-section">
-                <div class="studio-section-eyebrow mb-2 px-1">Clean-room workflow notes, not implementation</div>
-                <div class="d-flex gap-2 mb-2">
-                    <input class="form-control form-control-sm" placeholder="e.g. revision workflow, responsive style..."
-                           value="@_referenceQuery" @oninput="OnReferenceQueryInput" @onkeydown="OnReferenceQueryKeyDown" />
-                    <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" @onclick="RunReferenceSearchAsync" disabled="@string.IsNullOrWhiteSpace(_referenceQuery)">
-                        Search
-                    </button>
-                </div>
-                @if (_referenceResults.Count == 0)
-                {
-                    <div class="studio-empty-card">
-                        <p>@(_referenceSearched ? "No matches. Try different words, or add notes in the Builder Reference Library (Tools > Builder Reference)." : "Search for a capability (e.g. \"template routing\", \"nested sections\") to see clean-room workflow notes and suggested block types.")</p>
-                    </div>
-                }
-                else
-                {
-                    <div class="studio-layer-list">
-                        @foreach (var result in _referenceResults)
-                        {
-                            <div class="studio-layer-item flex-column align-items-start py-2">
-                                <div class="fw-semibold small">@result.Capability <span class="badge text-bg-light">@result.SourceName</span></div>
-                                <div class="small text-secondary">@result.WorkflowSummary</div>
-                                <div class="small">@result.ImplementationHint</div>
-                                @if (result.SuggestedBlocks.Length > 0)
-                                {
-                                    <div class="mt-1">
-                                        @foreach (var block in result.SuggestedBlocks)
-                                        {
-                                            <span class="badge text-bg-secondary me-1">@block</span>
-                                        }
-                                    </div>
-                                }
                             </div>
                         }
                     </div>
@@ -345,19 +339,100 @@ else
             </div>
         </div>
         <p class="small text-secondary px-2 mb-0">
-            <i class="bi bi-info-circle me-1"></i>All edits autosave. Drag widgets or global blocks onto the canvas; structural changes refresh the preview automatically.
+            <i class="bi bi-info-circle me-1"></i>Edits autosave as a draft — nothing reaches the live site until you publish. Drag blocks or global blocks onto the canvas; structural changes refresh the preview automatically.
         </p>
     </section>
 
     @* ── RIGHT PANEL — Inspector ──────────────────────────────────────────── *@
     <aside class="studio-panel studio-panel-right">
+        @* Page vs Block, the split WordPress uses for Document vs Block. Page settings used to
+           live on a separate screen that this editor could only carry forward blindly. *@
         <div class="studio-tab-strip">
-            <button class="studio-tab is-active" disabled>
-                <i class="bi bi-pencil-square me-1"></i>Inspector
+            <button class="studio-tab @(_rightTab == "page" ? "is-active" : "")" @onclick='() => _rightTab = "page"'>
+                <i class="bi bi-file-earmark-text me-1"></i>Page
+            </button>
+            <button class="studio-tab @(_rightTab == "block" ? "is-active" : "")" @onclick='() => _rightTab = "block"'>
+                <i class="bi bi-pencil-square me-1"></i>Block
             </button>
         </div>
 
-        <div class="studio-panel-section">
+        <div class="studio-panel-section" hidden="@(_rightTab != "page")">
+            @if (_page is not null)
+            {
+                <div class="studio-section-eyebrow mb-2 px-1">Identity</div>
+                <label class="form-label fw-semibold small">Title</label>
+                <input class="form-control form-control-sm mb-2" value="@_page.Title"
+                       @onchange="OnPageTitleChanged" />
+
+                <label class="form-label fw-semibold small">Slug</label>
+                <input class="form-control form-control-sm mb-1" value="@_page.Slug"
+                       @onchange="OnPageSlugChanged" />
+                <div class="small text-secondary mb-3">Live at <span class="font-monospace">/@CurrentFullPath</span></div>
+
+                <label class="form-label fw-semibold small">Parent page</label>
+                <select class="form-select form-select-sm mb-3" value="@(_page.ParentPageId?.ToString() ?? "")"
+                        @onchange="OnParentPageChanged">
+                    <option value="">— None (top level) —</option>
+                    @foreach (var candidate in ParentPageCandidates())
+                    {
+                        <option value="@candidate.Id">@candidate.Title</option>
+                    }
+                </select>
+
+                <div class="studio-section-eyebrow mb-2 px-1">Publishing</div>
+                <label class="form-label fw-semibold small">Publish at</label>
+                <input type="datetime-local" class="form-control form-control-sm mb-1"
+                       value="@(_page.PublishedAt?.ToLocalTime().ToString("yyyy-MM-ddTHH:mm"))"
+                       @onchange="OnPublishAtChanged" />
+                <div class="small text-secondary mb-3">Leave empty to publish immediately. A future time schedules it.</div>
+
+                @if (_page.Status == CmsPageStatuses.Published)
+                {
+                    <button class="btn btn-sm btn-outline-secondary w-100 mb-3" @onclick="UnpublishAsync" disabled="@_isBusy">
+                        <i class="bi bi-eye-slash me-1"></i>Unpublish
+                    </button>
+                }
+
+                <div class="studio-section-eyebrow mb-2 px-1">Search &amp; social</div>
+                <label class="form-label fw-semibold small">SEO title</label>
+                <input class="form-control form-control-sm mb-2" value="@_page.MetaTitle" @onchange="OnMetaTitleChanged" />
+
+                <label class="form-label fw-semibold small">Meta description</label>
+                <textarea class="form-control form-control-sm mb-2" rows="3" @onchange="OnMetaDescriptionChanged">@_page.MetaDescription</textarea>
+
+                <label class="form-label fw-semibold small">Canonical URL</label>
+                <input class="form-control form-control-sm mb-2" value="@_preservedCanonicalUrl" @onchange="OnCanonicalUrlChanged" />
+
+                <label class="form-label fw-semibold small">Social image URL</label>
+                <input class="form-control form-control-sm mb-3" value="@_page.OgImageUrl" @onchange="OnOgImageChanged" />
+
+                <div class="studio-section-eyebrow mb-2 px-1">Organization</div>
+                <label class="form-label fw-semibold small">Category</label>
+                <input class="form-control form-control-sm mb-2" value="@_preservedCategoryName" @onchange="OnCategoryChanged" />
+
+                <label class="form-label fw-semibold small">Tags</label>
+                <input class="form-control form-control-sm mb-1" value="@_preservedTags" @onchange="OnTagsChanged" />
+                <div class="small text-secondary mb-3">Comma-separated.</div>
+
+                @if (_isAdmin)
+                {
+                    <div class="studio-section-eyebrow mb-2 px-1">Advanced</div>
+                    <label class="form-label fw-semibold small">Page custom CSS</label>
+                    <textarea class="form-control form-control-sm studio-inspector-textarea font-monospace mb-2" rows="4"
+                              @onchange="OnCustomCssChanged">@_page.CustomCss</textarea>
+                }
+
+                @* Revision history, form submissions and workflow blueprints are page-level tools
+                   rather than layout controls, so they stay on their own screen instead of
+                   crowding this panel. *@
+                <div class="studio-section-eyebrow mb-2 px-1">More</div>
+                <a class="btn btn-sm btn-outline-secondary w-100" href="/admin/pages/edit/@_page.Id">
+                    <i class="bi bi-clock-history me-1"></i>Revisions, submissions &amp; blueprints
+                </a>
+            }
+        </div>
+
+        <div class="studio-panel-section" hidden="@(_rightTab != "block")">
             @if (!string.IsNullOrEmpty(_selectedWidgetId))
             {
                 @* Widget inspector *@
@@ -1366,12 +1441,11 @@ else
     private CmsSite? _site;
     private List<CmsPage> _allPagesInSite = new();
 
-    // Canvas Studio never edits Category/Tags/CanonicalUrl/custom field values (those belong to
-    // the separate /admin/pages/edit page-settings screen) - but CmsPageEditorModel's fields are
-    // full-replace ("omit = clear"), so every autosave here needs to carry these three forward
-    // unchanged or it silently wipes them. Captured once at load time, before anything here has
-    // a chance to touch them, and reused as-is on every subsequent SaveAsync call in this
-    // session - real bug found and fixed, see feedback_canvas_studio_autosave_wipes_page_fields.
+    // Category/Tags/CanonicalUrl/custom field values. These are now editable here too (the Page
+    // tab writes straight to them), but they still have to be held as state and sent on every
+    // save: CmsPageEditorModel is full-replace ("omit = clear"), so an autosave that left them
+    // out would silently wipe them - the original bug behind
+    // feedback_canvas_studio_autosave_wipes_page_fields. Seeded at load time from the stored page.
     private string _preservedCategoryName = string.Empty;
     private string _preservedTags = string.Empty;
     private string _preservedCanonicalUrl = string.Empty;
@@ -1391,6 +1465,12 @@ else
     private string _statusMessage = string.Empty;
     private string _errorMessage = string.Empty;
     private CancellationTokenSource? _autosaveCts;
+    // Drives the header's save-state text and the "unpublished changes" pill. Autosave writes a
+    // draft, so the author needs to see both that their work is safe and that the public hasn't
+    // seen it yet - two facts the old single "Save" button conflated.
+    private bool _hasUnpublishedChanges;
+    private DateTimeOffset? _lastSavedAt;
+    private string _rightTab = "block";
     private bool _pendingAutosaveReloadPreview;
     private const int AutosaveDelayMs = 800;
     private const int StructuralAutosaveDelayMs = 150;
@@ -1403,35 +1483,6 @@ else
     private string _leftTab = "widgets";
     private string _previewViewport = "desktop";
     private long _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    private string _referenceQuery = string.Empty;
-    private List<CmsKnowledgeQueryResult> _referenceResults = new();
-    private bool _referenceSearched;
-
-    private void OnReferenceQueryInput(ChangeEventArgs e) => _referenceQuery = e.Value?.ToString() ?? string.Empty;
-
-    private async Task OnReferenceQueryKeyDown(KeyboardEventArgs e)
-    {
-        if (e.Key == "Enter")
-        {
-            await RunReferenceSearchAsync();
-        }
-    }
-
-    private async Task RunReferenceSearchAsync()
-    {
-        if (string.IsNullOrWhiteSpace(_referenceQuery)) return;
-
-        try
-        {
-            _referenceResults = (await CmsKnowledgeService.SearchAsync(_referenceQuery, take: 8)).ToList();
-            _referenceSearched = true;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "CMS knowledge reference search failed.");
-        }
-    }
-
     // ── Computed ──────────────────────────────────────────────────────────
     private int TotalWidgetCount => _layout.Sections
         .SelectMany(s => s.Columns)
@@ -1462,25 +1513,50 @@ else
     }
 
     // ── Widget catalog ────────────────────────────────────────────────────
-    private record WidgetDef(string Type, string Icon, string Title, string Tagline);
+    private record WidgetDef(string Type, string Icon, string Title, string Tagline, string Group);
+
+    // Grouped the way WordPress and Squarespace group their inserters. A flat list of fourteen is
+    // survivable; the same list at thirty is not, and the flat version gave no hint that "Spacer"
+    // and "Testimonial" are different kinds of thing. Order within a group is rough frequency of
+    // use, and Advanced is last because raw HTML is an escape hatch, not a starting point.
+    private const string GroupText = "Text";
+    private const string GroupMedia = "Media";
+    private const string GroupLayout = "Layout";
+    private const string GroupDynamic = "Dynamic";
+    private const string GroupAdvanced = "Advanced";
+
+    private static readonly string[] WidgetGroupOrder =
+        [GroupText, GroupMedia, GroupLayout, GroupDynamic, GroupAdvanced];
 
     private static readonly WidgetDef[] WidgetCatalog =
     [
-        new("hero",        "bi bi-stars",                  "Hero",        "Full-width headline + CTAs"),
-        new("heading",     "bi bi-type-h1",                "Heading",     "H1–H4 title text"),
-        new("paragraph",   "bi bi-text-paragraph",         "Paragraph",   "Body copy"),
-        new("richtext",    "bi bi-file-richtext",          "Rich Text",   "Markdown: bold, links, lists, etc."),
-        new("button",      "bi bi-hand-index-thumb",       "Button",      "CTA or navigation link"),
-        new("image",       "bi bi-image",                  "Image",       "Photo or graphic"),
-        new("card",        "bi bi-card-heading",           "Card",        "Title + body + optional image"),
-        new("testimonial", "bi bi-chat-quote",             "Testimonial", "Quote + author"),
-        new("accordion",   "bi bi-list-nested",            "Accordion",   "Collapsible FAQ-style items"),
-        new("form",        "bi bi-ui-checks",              "Form",        "Custom fields, posts to submissions"),
-        new("spacer",      "bi bi-arrows-expand-vertical", "Spacer",      "Vertical whitespace"),
-        new("divider",     "bi bi-dash-lg",                "Divider",     "Horizontal rule"),
-        new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block"),
-        new("posts-grid",  "bi bi-grid-3x3-gap",           "Posts Grid",  "Live grid of your latest blog posts"),
+        new("hero",        "bi bi-stars",                  "Hero",        "Full-width headline + CTAs",          GroupText),
+        new("heading",     "bi bi-type-h1",                "Heading",     "H1–H4 title text",                    GroupText),
+        new("paragraph",   "bi bi-text-paragraph",         "Paragraph",   "Body copy",                           GroupText),
+        new("richtext",    "bi bi-file-richtext",          "Rich Text",   "Markdown: bold, links, lists, etc.",  GroupText),
+        new("button",      "bi bi-hand-index-thumb",       "Button",      "CTA or navigation link",              GroupText),
+        new("image",       "bi bi-image",                  "Image",       "Photo or graphic",                    GroupMedia),
+        new("card",        "bi bi-card-heading",           "Card",        "Title + body + optional image",       GroupMedia),
+        new("testimonial", "bi bi-chat-quote",             "Testimonial", "Quote + author",                      GroupMedia),
+        new("accordion",   "bi bi-list-nested",            "Accordion",   "Collapsible FAQ-style items",         GroupLayout),
+        new("spacer",      "bi bi-arrows-expand-vertical", "Spacer",      "Vertical whitespace",                 GroupLayout),
+        new("divider",     "bi bi-dash-lg",                "Divider",     "Horizontal rule",                     GroupLayout),
+        new("form",        "bi bi-ui-checks",              "Form",        "Custom fields, posts to submissions", GroupDynamic),
+        new("posts-grid",  "bi bi-grid-3x3-gap",           "Posts Grid",  "Live grid of your latest blog posts", GroupDynamic),
+        new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block",                      GroupAdvanced),
     ];
+
+    private string _blockSearch = string.Empty;
+
+    private void OnBlockSearchInput(ChangeEventArgs e) => _blockSearch = e.Value?.ToString() ?? string.Empty;
+
+    private IEnumerable<WidgetDef> VisibleWidgets(string group) =>
+        WidgetCatalog.Where(w => w.Group == group && MatchesBlockSearch(w));
+
+    private bool MatchesBlockSearch(WidgetDef widget) =>
+        string.IsNullOrWhiteSpace(_blockSearch)
+        || widget.Title.Contains(_blockSearch, StringComparison.OrdinalIgnoreCase)
+        || widget.Tagline.Contains(_blockSearch, StringComparison.OrdinalIgnoreCase);
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
     protected override async Task OnInitializedAsync()
@@ -1712,7 +1788,12 @@ else
                 return;
             }
 
-            if (!CmsBuilderJson.TryParseLayout(_page.BlocksJson, out var parsedLayout))
+            // Edit the draft when one exists, otherwise the live copy. DraftBlocksJson is only
+            // non-null on a Published page with edits that haven't been published yet, so this
+            // reopens exactly what the author last left behind rather than the live version.
+            _hasUnpublishedChanges = !string.IsNullOrWhiteSpace(_page.DraftBlocksJson);
+            var contentToEdit = _hasUnpublishedChanges ? _page.DraftBlocksJson! : _page.BlocksJson;
+            if (!CmsBuilderJson.TryParseLayout(contentToEdit, out var parsedLayout))
             {
                 _layoutParseFailed = true;
                 _errorMessage = "This page's saved content could not be read - it may be corrupted or in an unrecognized format. Editing has been disabled here to avoid overwriting it; check the page's revision history or contact support before making changes.";
@@ -1758,7 +1839,10 @@ else
     }
 
     // ── Save ──────────────────────────────────────────────────────────────
-    private async Task SaveAsync(bool reloadPreview = true, bool isAutosave = false)
+    // publish=true is the deliberate "Publish changes" action: it promotes the current canvas to
+    // live content. Everything else (autosave, an explicit draft save) is a draft edit and leaves
+    // an already-published page's live content untouched - see CmsPage.DraftBlocksJson.
+    private async Task SaveAsync(bool reloadPreview = true, bool isAutosave = false, bool publish = false)
     {
         if (_page is null || _layoutParseFailed) return;
         if (!isAutosave)
@@ -1798,10 +1882,12 @@ else
                 MetaDescription = _page.MetaDescription,
                 OgImageUrl = _page.OgImageUrl,
                 CustomCss = _page.CustomCss,
-                Status = _page.Status,
+                Status = publish ? CmsPageStatuses.Published : _page.Status,
+                PublishedAt = _page.PublishedAt,
+                ContentIsDraftEdit = !publish,
                 EditPermission = _page.EditPermission,
-                // CmsPageEditorModel is full-replace - carry these forward unchanged since
-                // Canvas Studio never edits them itself (see _preserved* fields' own comment).
+                // CmsPageEditorModel is full-replace, so these must be sent on every save even
+                // when untouched (see the _preserved* fields' own comment).
                 CategoryName = _preservedCategoryName,
                 Tags = _preservedTags,
                 CanonicalUrl = _preservedCanonicalUrl,
@@ -1810,7 +1896,11 @@ else
             };
             _page = await CmsBuilderService.SavePageAsync(editor);
             _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
-            _statusMessage = isAutosave ? "Changes saved automatically." : "Saved — live now.";
+            _hasUnpublishedChanges = !string.IsNullOrWhiteSpace(_page.DraftBlocksJson);
+            _lastSavedAt = DateTimeOffset.Now;
+            _statusMessage = publish
+                ? "Published — your changes are live."
+                : string.Empty;
             if (reloadPreview)
             {
                 ReloadPreview();
@@ -1825,6 +1915,116 @@ else
         {
             _isBusy = false;
         }
+    }
+
+    // ── Page settings (right panel, "Page" tab) ───────────────────────────
+    // Each writes through to _page/_preserved* - the same values SaveAsync already sends - then
+    // queues an autosave. Settings changes are draft edits like any other: on a published page
+    // they sit in the draft until Publish, so renaming a slug can't break a live URL by accident.
+    private static string ValueOf(ChangeEventArgs e) => e.Value?.ToString() ?? string.Empty;
+
+    private void OnPageTitleChanged(ChangeEventArgs e)
+    {
+        if (_page is null) return;
+        _page.Title = ValueOf(e);
+        QueueAutosave(reloadPreview: true);
+    }
+
+    private void OnPageSlugChanged(ChangeEventArgs e)
+    {
+        if (_page is null) return;
+        _page.Slug = ValueOf(e);
+        QueueAutosave(reloadPreview: true);
+    }
+
+    private void OnParentPageChanged(ChangeEventArgs e)
+    {
+        if (_page is null) return;
+        _page.ParentPageId = Guid.TryParse(ValueOf(e), out var parentId) ? parentId : null;
+        QueueAutosave(reloadPreview: true);
+    }
+
+    private void OnPublishAtChanged(ChangeEventArgs e)
+    {
+        if (_page is null) return;
+        var raw = ValueOf(e);
+        _page.PublishedAt = DateTime.TryParse(raw, out var parsed)
+            ? new DateTimeOffset(DateTime.SpecifyKind(parsed, DateTimeKind.Local))
+            : null;
+        QueueAutosave(reloadPreview: false);
+    }
+
+    private void OnMetaTitleChanged(ChangeEventArgs e)
+    {
+        if (_page is null) return;
+        _page.MetaTitle = ValueOf(e);
+        QueueAutosave(reloadPreview: false);
+    }
+
+    private void OnMetaDescriptionChanged(ChangeEventArgs e)
+    {
+        if (_page is null) return;
+        _page.MetaDescription = ValueOf(e);
+        QueueAutosave(reloadPreview: false);
+    }
+
+    private void OnOgImageChanged(ChangeEventArgs e)
+    {
+        if (_page is null) return;
+        _page.OgImageUrl = ValueOf(e);
+        QueueAutosave(reloadPreview: false);
+    }
+
+    private void OnCustomCssChanged(ChangeEventArgs e)
+    {
+        if (_page is null) return;
+        _page.CustomCss = ValueOf(e);
+        QueueAutosave(reloadPreview: true);
+    }
+
+    private void OnCanonicalUrlChanged(ChangeEventArgs e)
+    {
+        _preservedCanonicalUrl = ValueOf(e);
+        QueueAutosave(reloadPreview: false);
+    }
+
+    private void OnCategoryChanged(ChangeEventArgs e)
+    {
+        _preservedCategoryName = ValueOf(e);
+        QueueAutosave(reloadPreview: false);
+    }
+
+    private void OnTagsChanged(ChangeEventArgs e)
+    {
+        _preservedTags = ValueOf(e);
+        QueueAutosave(reloadPreview: false);
+    }
+
+    // A page can't be its own parent or sit under one of its own descendants - SavePageAsync
+    // rejects both, so don't offer them.
+    private IEnumerable<CmsPage> ParentPageCandidates()
+    {
+        if (_page is null) return [];
+        var descendants = new HashSet<Guid>();
+        void Collect(Guid parentId)
+        {
+            foreach (var child in _allPagesInSite.Where(p => p.ParentPageId == parentId))
+            {
+                if (descendants.Add(child.Id)) Collect(child.Id);
+            }
+        }
+        Collect(_page.Id);
+        return _allPagesInSite
+            .Where(p => p.Id != _page.Id && !descendants.Contains(p.Id))
+            .OrderBy(p => p.Title);
+    }
+
+    private async Task UnpublishAsync()
+    {
+        if (_page is null) return;
+        _page.Status = CmsPageStatuses.Draft;
+        await SaveAsync(reloadPreview: true);
+        _statusMessage = "Unpublished — this page is no longer on the live site.";
     }
 
     private void QueueAutosave(bool reloadPreview, bool immediate = false)
@@ -2098,6 +2298,39 @@ else
         _site is null || _page is null
             ? "about:blank"
             : $"/cms/{_site.Slug}/{CurrentFullPath}?_t={_previewTimestamp}&edit=1";
+
+    // preview=1 renders the unpublished draft without the click-to-select edit overlays, so
+    // "Preview" shows what publishing would actually put live. Both flags are Studio-only on the
+    // server side (see Program.cs's showDraftContent).
+    private string PreviewUrl =>
+        _site is null || _page is null
+            ? string.Empty
+            : $"/cms/{_site.Slug}/{CurrentFullPath}?_t={_previewTimestamp}&preview=1";
+
+    private bool CanPublish =>
+        _page is not null && (_page.Status != CmsPageStatuses.Published || _hasUnpublishedChanges);
+
+    private string PublishButtonText
+    {
+        get
+        {
+            if (_isBusy) return "Publishing…";
+            if (_page is null) return "Publish changes";
+            if (_page.Status != CmsPageStatuses.Published) return "Publish";
+            return _hasUnpublishedChanges ? "Publish changes" : "Published";
+        }
+    }
+
+    private string SaveStateText
+    {
+        get
+        {
+            if (_isBusy) return "Saving…";
+            if (_layoutParseFailed) return string.Empty;
+            if (_lastSavedAt is { } savedAt) return $"Draft saved {savedAt.ToLocalTime():h:mm tt}";
+            return _hasUnpublishedChanges ? "Unpublished draft" : string.Empty;
+        }
+    }
 
     // ── Selection ─────────────────────────────────────────────────────────
     private void SelectSection(string sectionId)

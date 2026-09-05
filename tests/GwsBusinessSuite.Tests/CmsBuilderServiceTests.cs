@@ -944,6 +944,128 @@ public sealed class CmsBuilderServiceTests
         reloadedLayout.Sections.Single().Columns.Single().Widgets.Single().EditPermission.Should().Be(CmsEditPermissions.Locked);
     }
 
+    [Fact]
+    public async Task SavePageAsync_ShouldParkContentAsADraft_WhenEditingAPublishedPage()
+    {
+        // The whole point of DraftBlocksJson: autosaving the page editor on a live page must not
+        // change what the public sees. Before this, every autosave wrote straight to BlocksJson,
+        // so editing a published page pushed each intermediate state to the live site.
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var published = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id, Title = "Pricing", Slug = "pricing",
+            BlocksJson = "{\"sections\":[{\"id\":\"live\"}]}",
+            Status = CmsPageStatuses.Published
+        });
+
+        var afterDraftEdit = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = published.Id, SiteId = site.Id, Title = "Pricing", Slug = "pricing",
+            BlocksJson = "{\"sections\":[{\"id\":\"drafted\"}]}",
+            Status = CmsPageStatuses.Published,
+            ContentIsDraftEdit = true
+        });
+
+        afterDraftEdit.BlocksJson.Should().Contain("live", "the live copy must be untouched by a draft edit");
+        afterDraftEdit.BlocksJson.Should().NotContain("drafted");
+        afterDraftEdit.DraftBlocksJson.Should().Contain("drafted", "the edit is parked as an unpublished draft");
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldPromoteTheDraftAndClearIt_WhenPublishing()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var published = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id, Title = "Pricing", Slug = "pricing",
+            BlocksJson = "{\"sections\":[{\"id\":\"live\"}]}",
+            Status = CmsPageStatuses.Published
+        });
+        await service.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = published.Id, SiteId = site.Id, Title = "Pricing", Slug = "pricing",
+            BlocksJson = "{\"sections\":[{\"id\":\"drafted\"}]}",
+            Status = CmsPageStatuses.Published,
+            ContentIsDraftEdit = true
+        });
+
+        // "Publish changes" sends the same content with ContentIsDraftEdit off.
+        var afterPublish = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = published.Id, SiteId = site.Id, Title = "Pricing", Slug = "pricing",
+            BlocksJson = "{\"sections\":[{\"id\":\"drafted\"}]}",
+            Status = CmsPageStatuses.Published,
+            ContentIsDraftEdit = false
+        });
+
+        afterPublish.BlocksJson.Should().Contain("drafted", "publishing promotes the draft to live");
+        afterPublish.DraftBlocksJson.Should().BeNull("there are no unpublished changes left");
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldWriteLiveContentDirectly_WhenThePageIsStillADraft()
+    {
+        // A Draft-status page has nothing public to protect, so routing its edits through
+        // DraftBlocksJson would just leave BlocksJson permanently empty.
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var draft = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id, Title = "Scratch", Slug = "scratch", Status = CmsPageStatuses.Draft
+        });
+
+        var afterEdit = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = draft.Id, SiteId = site.Id, Title = "Scratch", Slug = "scratch",
+            BlocksJson = "{\"sections\":[{\"id\":\"written\"}]}",
+            Status = CmsPageStatuses.Draft,
+            ContentIsDraftEdit = true
+        });
+
+        afterEdit.BlocksJson.Should().Contain("written");
+        afterEdit.DraftBlocksJson.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SavePageAsync_ShouldFoldTheDraftIntoLiveContent_WhenUnpublishing()
+    {
+        // Unpublishing removes the page from the public site, so there is no longer a published
+        // version to protect - the draft becomes the page's content rather than being stranded.
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Site" });
+        var published = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id, Title = "Pricing", Slug = "pricing",
+            BlocksJson = "{\"sections\":[{\"id\":\"live\"}]}",
+            Status = CmsPageStatuses.Published
+        });
+        await service.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = published.Id, SiteId = site.Id, Title = "Pricing", Slug = "pricing",
+            BlocksJson = "{\"sections\":[{\"id\":\"drafted\"}]}",
+            Status = CmsPageStatuses.Published,
+            ContentIsDraftEdit = true
+        });
+
+        var afterUnpublish = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            PageId = published.Id, SiteId = site.Id, Title = "Pricing", Slug = "pricing",
+            BlocksJson = "{\"sections\":[{\"id\":\"drafted\"}]}",
+            Status = CmsPageStatuses.Draft,
+            ContentIsDraftEdit = true
+        });
+
+        afterUnpublish.Status.Should().Be(CmsPageStatuses.Draft);
+        afterUnpublish.BlocksJson.Should().Contain("drafted");
+        afterUnpublish.DraftBlocksJson.Should().BeNull();
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

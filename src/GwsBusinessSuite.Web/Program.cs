@@ -1890,7 +1890,15 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
         && (httpContext.User.IsInRole(AppRoles.Admin) || httpContext.User.IsInRole(AppRoles.Contributor));
     var editMode = isStudioUser && httpContext.Request.Query["edit"] == "1";
 
-    var layout = CmsBuilderJson.ParseLayout(page.BlocksJson);
+    // Unpublished draft content (CmsPage.DraftBlocksJson) is visible only to a Studio user who
+    // explicitly asked for it - the live-preview iframe (edit=1) or a "Preview" tab (preview=1).
+    // A real visitor always gets BlocksJson, the last thing actually published, which is the
+    // whole point of keeping the two apart.
+    var showDraftContent = isStudioUser
+        && (editMode || httpContext.Request.Query["preview"] == "1")
+        && !string.IsNullOrWhiteSpace(page.DraftBlocksJson);
+
+    var layout = CmsBuilderJson.ParseLayout(showDraftContent ? page.DraftBlocksJson! : page.BlocksJson);
     if (layout is not null)
     {
         await globalBlockResolver.ResolveAsync(site.Id, layout);

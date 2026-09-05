@@ -41,7 +41,7 @@ editing:
   draft it was published from.
 - **CMS page** — a structured page built from sections/columns/widgets (`BlocksJson`), served at
   `/cms/{siteSlug}/{pageSlug}`. SEO Audit, Localization, and the SentinelGPT Page Builder all work
-  with CMS pages as well as articles; day-to-day page editing itself happens in Canvas Studio
+  with CMS pages as well as articles; day-to-day page editing itself happens in the page editor
   (Pages), covered in the Site Building guide.
 - **Content Studio draft** (`SeoArticleDraft`) — a separate, richer working copy used only while
   an SentinelGPT-generated article is being written and reviewed. It has its own status
@@ -324,6 +324,6 @@ cannot run an SEO audit, manage translations, or approve a generated page plan.
   earlier page's structure between turns rather than only adding to it.
 - **Approved generated pages land as Drafts, unattached to any menu.** Approval creates the CMS
   page rows; adding them to site navigation or publishing them live is a separate, manual step in
-  Canvas Studio.
+  the page editor.
 - **The Page Builder only creates new pages.** It can't edit or extend an existing CMS page's
-  layout through chat — that's Canvas Studio's job.
+  layout through chat — that's the page editor's job.

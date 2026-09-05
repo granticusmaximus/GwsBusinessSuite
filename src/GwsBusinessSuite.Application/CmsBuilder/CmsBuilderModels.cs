@@ -73,6 +73,15 @@ public sealed class CmsPageEditorModel
     // values, matching the pre-existing Canvas-Studio-vs-EditPage editor split's own behavior.
     public Dictionary<Guid, string> PropertyValues { get; set; } = [];
 
+    // When true, BlocksJson is an unpublished draft edit rather than something the public should
+    // see: on an already-Published page SavePageAsync parks it in CmsPage.DraftBlocksJson and
+    // leaves the live BlocksJson untouched. Set by the page editor's autosave; left false by the
+    // explicit "Publish changes" action and by every non-interactive caller (import/duplicate,
+    // translation publish, Developer API, automation), which all write live content directly.
+    // Has no effect on a Draft-status page - there is nothing public to protect, so those edits
+    // go straight to BlocksJson.
+    public bool ContentIsDraftEdit { get; set; }
+
     // Optimistic-concurrency check against CmsPage.ConcurrencyVersion, same opt-in-by-nonzero
     // convention as WikiPageEditorModel.ExpectedContentVersion. Left at the default 0 (skip the
     // check) by every non-interactive caller (site import/duplicate, translation-draft publish,

@@ -53,7 +53,7 @@ else
             </button>
             @if (!ShowTrash)
             {
-                <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewPage" disabled="@(IsCmsBusy || !SelectedSiteId.HasValue)">
+                <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewPageAsync" disabled="@(IsCmsBusy || !SelectedSiteId.HasValue)">
                     <i class="bi bi-file-earmark-plus me-1"></i>New Page
                 </button>
             }
@@ -125,7 +125,7 @@ else
                             <button type="button"
                                     class="list-group-item-action bg-transparent border-0 text-start flex-grow-1 py-2 pe-3"
                                     style="padding-left:@(0.5 + depth * 1.25)rem;"
-                                    @onclick="() => EditPage(cmsPage.Id)"
+                                    @onclick="() => OpenPageEditor(cmsPage.Id)"
                                     disabled="@IsCmsBusy">
                                 <div class="fw-semibold d-flex align-items-center gap-2">
                                     @(depth > 0 ? "— " : "")@cmsPage.Title
@@ -137,11 +137,24 @@ else
                                     {
                                         <span class="badge text-bg-secondary">Draft</span>
                                     }
+                                    @if (!string.IsNullOrWhiteSpace(cmsPage.DraftBlocksJson))
+                                    {
+                                        @* Otherwise an unpublished draft is invisible from here and
+                                           the live page quietly stays stale. *@
+                                        <span class="badge text-bg-warning">Unpublished changes</span>
+                                    }
                                 </div>
                                 <div class="small text-secondary">/@BuildFullPath(cmsPage)</div>
                             </button>
-                            <div class="d-flex gap-1 flex-shrink-0 wp-row-actions me-3">
-                                <a href="/admin/pages/edit/@cmsPage.Id">Edit</a>
+                            @* WordPress-style row actions. "Edit" goes straight to the visual
+                               editor - reaching it used to mean opening a metadata form first
+                               and finding a button below the fold. *@
+                            <div class="d-flex gap-2 flex-shrink-0 wp-row-actions me-3">
+                                <a href="/admin/pages/@cmsPage.Id/edit">Edit</a>
+                                <a href="/admin/pages/@cmsPage.Id/edit?panel=page">Settings</a>
+                                <a href="@BuildLiveUrl(cmsPage)" target="_blank" rel="noopener noreferrer">View</a>
+                                <button type="button" class="text-danger"
+                                        @onclick="() => TrashPageAsync(cmsPage.Id)" disabled="@IsCmsBusy">Trash</button>
                             </div>
                         </div>
                     }
@@ -292,9 +305,69 @@ else
         && page.PublishedAt is { } publishAt
         && publishAt > DateTimeOffset.UtcNow;
 
-    private void CreateNewPage() => Navigation.NavigateTo("/admin/pages/edit");
+    // Content-first: create the draft immediately and open the editor on it, rather than making
+    // someone fill in slug/SEO/canonical before they can write anything. The page is a Draft with
+    // no content, so nothing is public until they publish - the same auto-draft move WordPress,
+    // Squarespace and Wikipedia all make.
+    private async Task CreateNewPageAsync()
+    {
+        if (!SelectedSiteId.HasValue) return;
 
-    private void EditPage(Guid pageId) => Navigation.NavigateTo($"/admin/pages/edit/{pageId}");
+        IsCmsBusy = true;
+        CmsErrorMessage = string.Empty;
+        try
+        {
+            var created = await CmsBuilderService.SavePageAsync(new CmsPageEditorModel
+            {
+                SiteId = SelectedSiteId,
+                Title = "Untitled page",
+                BlocksJson = "{\"sections\":[]}",
+                Status = CmsPageStatuses.Draft
+            });
+            Navigation.NavigateTo($"/admin/pages/{created.Id}/edit");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to create a new page.");
+            CmsErrorMessage = $"Could not create the page. {ex.Message}";
+            IsCmsBusy = false;
+        }
+    }
+
+    // Both the row body and the "Edit" action land in the visual editor now; the old
+    // /admin/pages/edit/{id} metadata form is a redirect into it (see EditPage.razor).
+    private void OpenPageEditor(Guid pageId) => Navigation.NavigateTo($"/admin/pages/{pageId}/edit");
+
+    private string BuildLiveUrl(CmsPage page) =>
+        CurrentSite is null ? "#" : $"/cms/{CurrentSite.Slug}/{BuildFullPath(page)}";
+
+    private async Task TrashPageAsync(Guid pageId)
+    {
+        if (!SelectedSiteId.HasValue) return;
+
+        var siteId = SelectedSiteId.Value;
+        IsCmsBusy = true;
+        CmsErrorMessage = string.Empty;
+        CmsStatusMessage = string.Empty;
+        try
+        {
+            var title = CmsPages.FirstOrDefault(p => p.Id == pageId)?.Title ?? "Page";
+            await CmsBuilderService.TrashPageAsync(pageId);
+            CmsPages = (await CmsBuilderService.ListPagesAsync(siteId)).ToList();
+            TrashedPages = (await CmsBuilderService.ListTrashedPagesAsync(siteId)).ToList();
+            CmsStatusMessage = $"Moved '{title}' to Trash.";
+        }
+        catch (Exception ex)
+        {
+            // Same reason the bulk path collects failures: a page with active children refuses.
+            Logger.LogError(ex, "Failed to trash page {PageId}.", pageId);
+            CmsErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsCmsBusy = false;
+        }
+    }
 
     private void TogglePageSelect(Guid pageId, bool selected)
     {

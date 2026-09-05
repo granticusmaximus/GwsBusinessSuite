@@ -1,7 +1,7 @@
 # Site Building — User Guide
 
 This is the complete guide to GWS Business Suite's Site Building cluster: **Pages** and
-**Canvas Studio** (`/admin/pages`, `/admin/pages/edit/{id}`, `/admin/canvas/editor/{id}`) — a
+the **page editor** (`/admin/pages`, `/admin/pages/{id}/edit`) — a
 drag-and-drop page builder for the live public site — plus **Appearance** (`/admin/appearance/customize`
 and `/admin/appearance/menus`) for site-wide brand/design/navigation, and the **Media Library**
 (`/admin/media`) that feeds images into all of it.
@@ -14,8 +14,8 @@ for why, and how that may change later.
 1. [Core concepts](#core-concepts)
 2. [The Pages list](#the-pages-list)
 3. [Creating and configuring a page](#creating-and-configuring-a-page)
-4. [Canvas Studio: the editor layout](#canvas-studio-the-editor-layout)
-5. [Adding and arranging widgets](#adding-and-arranging-widgets)
+4. [The page editor layout](#the-page-editor-layout)
+5. [Adding and arranging blocks](#adding-and-arranging-widgets)
 6. [Editing widget content and style](#editing-widget-content-and-style)
 7. [Freeform canvas positioning](#freeform-canvas-positioning)
 8. [Global blocks](#global-blocks)
@@ -63,12 +63,16 @@ content — a JSON **layout** of **sections**.
   placement of it stays in sync with the saved original, except for whichever individual fields
   you've explicitly marked as "per-instance" (see [Global blocks](#global-blocks)).
 
-Editing a page's content happens in **Canvas Studio** — a separate screen
-(`/admin/canvas/editor/{pageId}`) from the page's settings screen
-(`/admin/pages/edit/{pageId}`). Settings (title, slug, SEO, publish status, custom CSS) live on
-one screen; visual content lives on the other, with a button linking each way. Studio autosaves
-as you work — there is no separate "publish" step for content changes on an already-published
-page; only the page's own Draft/Published **status** gates whether the page is reachable at all.
+Editing a page happens in the **page editor** (`/admin/pages/{pageId}/edit`). Content and
+settings live together there: the canvas holds the visual content, and the right panel's **Page**
+tab holds title, slug, parent, SEO, scheduling, category, tags and custom CSS. (The older
+`/admin/canvas/editor/{pageId}` address still works.)
+
+Your work **autosaves as a draft**. On a page that is already Published, a draft edit does not
+change what visitors see — the live page keeps showing the last published version until you press
+**Publish changes**. An "Unpublished changes" badge appears while a draft is ahead of the live
+copy, and **Preview** opens the draft in a new tab. On a Draft-status page there is nothing public
+to protect, so edits simply save.
 
 ## The Pages list
 
@@ -113,21 +117,19 @@ moment; a background sweep flips the page live and can fire a **CMS Page Publish
 trigger (see the Automation guide). **Reset** clears the form back to a blank new page. **Move to
 Trash** is only available once the page exists.
 
-Once saved, a **View Live Page** link and an **Open Studio** button appear — Studio is where you
-actually build the page's content (see next section). If the page isn't yet in the site's primary
-navigation, an **Add to Nav** button appears to add it with one click.
+Once saved, a **View Live Page** link and an **Edit page** button appear. If the page isn't yet in
+the site's primary navigation, an **Add to Nav** button appears to add it with one click.
 
-## Canvas Studio: the editor layout
+## The page editor layout
 
-`/admin/canvas/editor/{pageId}` — reached from a page's settings screen via **Open Studio** — is
-a three-panel workspace:
+`/admin/pages/{pageId}/edit` — reached from **New Page**, from a row's **Edit** action, or by
+clicking the row itself — is a three-panel workspace:
 
-- **Left panel**, with four tabs:
-  - **Widgets** — the widget palette. Click or drag a card onto the canvas.
-  - **Global** — your site's saved global blocks (sections and widgets). Click or drag to insert.
-  - **Reference** — a search box over the Builder Reference Library (curated workflow notes and
-    suggested block types for a capability you're trying to build — populated separately under
-    Tools > Builder Reference). This is documentation, not a code generator.
+- **Left panel**, with three tabs:
+  - **Insert** — the block palette, grouped into Text, Media, Layout, Dynamic and Advanced, with a
+    search box. Click or drag a card onto the canvas.
+  - **Layers** — the page's section/block tree.
+  - **Library** — your site's saved global blocks (sections and blocks). Click or drag to insert.
   - **Layers** — a collapsible tree of every section and widget on the page, with drag handles
     for reordering, and an **Add Section** button.
 - **Center panel** — the **live preview**, an actual same-origin iframe rendering the real public
@@ -242,7 +244,7 @@ rights on a page without risking the page's structure:
 | Locked | No edits at all |
 
 **Admins are never restricted** by this — it only constrains the Contributor role, and only in
-Canvas Studio (the `[Authorize(Policy = "ContributorAccess")]` on these pages already keeps
+the page editor (the `[Authorize(Policy = "ContributorAccess")]` on these pages already keeps
 everyone else out entirely). A Contributor viewing a restricted widget/section sees a small lock
 notice explaining why fields are disabled, and — since a locked widget's own Client Access control
 is itself inside the disabled fieldset — can never unlock something they don't already fully
@@ -254,7 +256,7 @@ Independent of Client Access, every widget has a **Visibility** rule controlling
 renders for a real visitor at all: **Always show**, **Logged-in visitors only**, **Homepage
 only**, or **Matching URL pattern** (a simple glob like `blog/*` matched against the page's full
 path, where `*` matches any run of characters). A conditionally-hidden widget always still renders
-inside Canvas Studio's own preview — with an edit-mode badge — so you never lose the ability to
+inside the page editor's own preview — with an edit-mode badge — so you never lose the ability to
 find and edit it.
 
 ## Interactions and animations
@@ -271,7 +273,7 @@ Visibility:
   replays every time the widget re-enters and leaves the viewport rather than firing just the
   first time.
 
-A widget with an interaction always renders fully visible inside Canvas Studio's own preview —
+A widget with an interaction always renders fully visible inside the page editor's own preview —
 the animation only ever plays on the live public page (and inside a downloaded Site Recipe
 export, which is fully self-contained and doesn't need the live site to animate correctly). A
 visitor with their operating system's "reduce motion" preference turned on sees the widget in its
@@ -294,8 +296,14 @@ action (a click, a drop) always starts a fresh step.
 
 Every change autosaves — most content edits after a short debounce, structural changes (adding,
 deleting, or reordering something) almost immediately. There is no unsaved-changes state to lose
-by navigating away, and no separate manual "Save" required for content to go live on an
-already-Published page; the header's Save button exists for peace of mind, not necessity.
+by navigating away; the header reports the state ("Draft saved 12:04") rather than asking you to
+save.
+
+Autosave writes a **draft**. On an already-Published page that draft sits alongside the live
+version and visitors keep seeing the last published content until you press **Publish changes** —
+so you can leave a page half-rewritten without anyone seeing it. Publishing promotes the draft and
+clears the badge. Unpublishing a page folds any pending draft back into the page's content, since
+there is no longer a public version to protect.
 
 ## Workflow blueprints
 
@@ -382,7 +390,7 @@ blog:
 - **Logo URL** / **Favicon URL** — external URLs or `/media/{id}` references.
 - **Design Tokens** — named **Colors** (a name plus a hex value) and a **Type scale** (a name plus
   a rem value), each addable/removable from simple inline forms. Once defined, any widget's Style
-  panel in Canvas Studio can reference a token by name instead of a raw value — change the token
+  panel in the page editor can reference a token by name instead of a raw value — change the token
   here later and every widget referencing it updates everywhere, live site included.
 - **Custom fields** — site-wide typed field *definitions* (Text/Number/Date/Select/Media
   reference) that then become editable per-page on that page's settings screen. Defining a field
@@ -406,7 +414,7 @@ support, so every link sits at the same level in both the header and footer.
 
 ## Media Library
 
-`/admin/media` is the shared image library behind Posts, Content Studio, and every Canvas Studio
+`/admin/media` is the shared image library behind Posts, Content Studio, and every page-editor
 Image widget (and the Image widget's own picker button opens this same library inline, without
 leaving Studio). It is intentionally shared across websites rather than filtered by the current
 website, so an uploaded brand asset can be reused without storing duplicate copies.
@@ -427,12 +435,11 @@ website, so an uploaded brand asset can be reused without storing duplicate copi
 
 ## End-to-end tutorial: build a simple landing page
 
-1. From `/admin/pages`, click **New Page**. Set Title to "Spring Promo" (slug auto-fills to
-   `spring-promo`). Leave Parent Page as top-level. Click **Save Page Details** — this
-   canonicalizes the URL and unlocks the rest of the screen.
-2. Click **Open Studio**.
-3. On the **Widgets** tab, click **Hero** to drop one in. Select it; in the Inspector, set a
-   headline, subline, and a CTA label/URL.
+1. From `/admin/pages`, click **New Page**. The editor opens immediately on a new Draft page.
+2. In the right panel's **Page** tab, set Title to "Spring Promo" (the slug auto-fills to
+   `spring-promo`). Leave Parent page as top-level.
+3. On the **Insert** tab, under **Text**, click **Hero** to drop one in. Select it; in the
+   **Block** tab, set a headline, subline, and a CTA label/URL.
 4. Click **Add Section** (Layers tab) to add a second section below it. Select it, set its
    **Column Layout** to "Two Equal Columns (50/50)".
 5. Drag a **Card** widget into the left column and an **Image** widget into the right column
@@ -440,26 +447,25 @@ website, so an uploaded brand asset can be reused without storing duplicate copi
    Image widget's picker button to choose something from the Media Library.
 6. Add a **Form** widget in its own section below that, with a couple of fields, so visitors can
    request more info.
-7. Watch the live preview update after each change — no separate save/publish click is needed
-   for content.
-8. Back on the page's settings screen, set **Publish At** if you want it to go live at a specific
-   time, then click **Publish** (or **Schedule**, if the date is in the future).
+7. Watch the live preview update after each change. The header shows "Draft saved" as you work —
+   the page is still a Draft, so nothing is public yet.
+8. In the **Page** tab, set **Publish at** if you want it live at a specific time, then click
+   **Publish** in the header (it reads **Publish changes** on a page that's already live).
 9. Open **Appearance > Menus**, add a link labeled "Spring Promo" pointing at `/spring-promo` to
-   the Primary menu, and **Save changes** — or just use the **Add to Nav** button back on the
-   page's own settings screen, which does the same thing in one click.
+   the Primary menu, and **Save changes** — or just use the **Add to Nav** button on the page's
+   tools screen, which does the same thing in one click.
 
 ## Known limitations
 
 - **Website selection is session-scoped.** Pages, new-page creation, Appearance, Menus, and the
   website identity fields in Settings all share the **Website** selector. Imported recipe sites
   appear in the selector on the next CMS screen load. The configured `Canvas:SiteSlug` is only the initial selection for a
-  new login/session; a full reload starts from that configured site again. Canvas Studio and an
-  existing page editor stay bound to the page's own website, while Media remains intentionally
+  new login/session; a full reload starts from that configured site again. The page editor stays bound to the page's own website, while Media remains intentionally
   shared across every website.
-- **No draft/live separation for content.** Unlike Workflow Automation's draft-vs-published
-  version model, Canvas Studio autosaves straight to the live record. The only content-level
-  safety net is Revision History (snapshot-before-save, with restore) — there is no "preview
-  without publishing" mode for a page that's already Published.
+- **Drafts are per-page, not per-branch.** A Published page holds exactly one pending draft at a
+  time; there is no way to keep two competing drafts of the same page, and a second editor opening
+  the page picks up the same draft. Revision History remains the snapshot-and-restore safety net
+  underneath that.
 - **Undo/redo is in-memory and per-session.** Capped at 50 steps, lost on page reload; it isn't a
   substitute for Revision History.
 - **Revision diff only compares adjacent revisions**, not any two arbitrary revisions, and

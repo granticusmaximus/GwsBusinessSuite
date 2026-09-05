@@ -74,6 +74,36 @@
 	border: 1px solid var(--gws-panel-border);
 }
 
+/* Amber, not the blue of the neutral pills - "the live page is behind your draft" is a state
+   the author should notice without it reading as an error. */
+.studio-pill-draft {
+	background: rgba(217, 164, 92, 0.18);
+	color: #e6b76e;
+	border: 1px solid rgba(217, 164, 92, 0.35);
+}
+
+/* Replaces the old primary Save button: save is now reported, not requested. Deliberately
+   quiet - it should be findable when looked for and ignorable otherwise. */
+.studio-save-state {
+	font-size: 0.78rem;
+	color: var(--gws-text-soft);
+	white-space: nowrap;
+	min-width: 7.5rem;
+	text-align: right;
+}
+
+/* Category heading in the block inserter - quiet enough to scan past when you already know
+   which block you want, present enough to teach the grouping the first few times. */
+.studio-block-group-label {
+	font-size: 0.68rem;
+	font-weight: 700;
+	letter-spacing: 0.09em;
+	text-transform: uppercase;
+	color: var(--gws-text-soft);
+	padding: 0 0.25rem;
+	margin: 0.35rem 0 0.4rem;
+}
+
 /* ── Three-column workspace ──────────────────────────────────────────────── */
 
 .studio-workspace {

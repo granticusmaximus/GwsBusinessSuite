@@ -40,7 +40,7 @@ too, not that the update should be skipped.
 
 - [Content Creation](CONTENT_CREATION_USER_GUIDE.md) — Posts, Content Studio, SEO Audit,
   Localization, SentinelGPT Page Builder, Approval Queue.
-- [Site Building](SITE_BUILDING_USER_GUIDE.md) — Pages (Canvas Studio), Appearance, Menus, Media
+- [Site Building](SITE_BUILDING_USER_GUIDE.md) — Pages (the page editor), Appearance, Menus, Media
   Library.
 - Growth Studio (`/admin/growth`) — see [`GROWTH_STUDIO.md`](GROWTH_STUDIO.md) for the product
   spec; an operator-facing companion guide is planned.
