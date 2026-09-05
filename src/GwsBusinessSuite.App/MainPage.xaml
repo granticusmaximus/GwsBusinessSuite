@@ -54,7 +54,9 @@
                 Clicked="OnConfigureDeviceLoginClicked"
                 ToolTipProperties.Text="Configure device login">
             <Button.IsVisible>
-                <OnPlatform x:TypeArguments="x:Boolean" Default="False" MacCatalyst="True" />
+                <OnPlatform x:TypeArguments="x:Boolean" Default="False">
+                    <On Platform="MacCatalyst" Value="True" />
+                </OnPlatform>
             </Button.IsVisible>
         </Button>
 
