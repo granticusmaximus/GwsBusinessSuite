@@ -177,6 +177,24 @@ public static class CmsBlockHtmlRenderer
           .gws-section-toolbar button.is-primary { background: #2563eb; color: #fff; font-weight: 600; }
           .gws-section-toolbar button.is-primary:hover { background: #1d4ed8; }
           .gws-section-toolbar button.is-danger:hover { background: #b91c1c; color: #fff; }
+          /* Selection formatting bar. Deliberately carries only bold / italic / link: those are
+             exactly what the HTML->Markdown serializer can carry back, so the toolbar doubles as
+             an honest boundary of what inline editing supports. */
+          .gws-format-bar {
+            position: absolute; z-index: 2147483600; display: none; gap: 2px;
+            background: #1e293b; border-radius: 7px; padding: 4px;
+            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.35);
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+          }
+          .gws-format-bar.is-open { display: flex; }
+          .gws-format-bar button {
+            appearance: none; border: 0; background: transparent; color: #e2e8f0;
+            min-width: 28px; height: 26px; padding: 0 8px; border-radius: 5px; cursor: pointer;
+            font-size: 13px; line-height: 1;
+          }
+          .gws-format-bar button:hover { background: rgba(148, 163, 184, 0.3); color: #fff; }
+          .gws-format-bar button.is-active { background: #2563eb; color: #fff; }
+          [data-gws-inline-rich]:focus { outline: 2px solid #16a34a; outline-offset: 3px; cursor: text; }
           [data-gws-inline-prop]:focus { outline: 2px solid #16a34a !important; outline-offset: 2px; cursor: text; }
           .gws-column { position: relative; min-height: 24px; }
           .gws-column.is-drop-target { outline: 1px dashed rgba(37, 99, 235, 0.45); outline-offset: 6px; border-radius: 14px; }
@@ -626,6 +644,83 @@ public static class CmsBlockHtmlRenderer
             buildSectionToolbar(el, sectionId);
           }
 
+          var formatBar = null;
+
+          function ensureFormatBar() {
+            if (formatBar) return formatBar;
+            formatBar = document.createElement('div');
+            formatBar.className = 'gws-format-bar';
+            formatBar.setAttribute('data-gws-toolbar', '1');
+            [
+              { cmd: 'bold',   label: 'B', style: 'font-weight:700' },
+              { cmd: 'italic', label: 'I', style: 'font-style:italic' },
+              { cmd: 'link',   label: '\u{1F517}', style: '' }
+            ].forEach(function (action) {
+              var b = document.createElement('button');
+              b.type = 'button';
+              b.textContent = action.label;
+              if (action.style) b.setAttribute('style', action.style);
+              b.setAttribute('data-gws-format', action.cmd);
+              // mousedown, not click: click would land after the contenteditable had already
+              // lost focus and the selection with it.
+              b.addEventListener('mousedown', function (ev) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                applyFormat(action.cmd);
+              }, true);
+              formatBar.appendChild(b);
+            });
+            document.body.appendChild(formatBar);
+            return formatBar;
+          }
+
+          function applyFormat(cmd) {
+            if (cmd === 'link') {
+              var url = window.prompt('Link URL');
+              if (url === null) return;
+              document.execCommand(url ? 'createLink' : 'unlink', false, url || undefined);
+            } else {
+              document.execCommand(cmd, false);
+            }
+            syncFormatBarState();
+          }
+
+          function syncFormatBarState() {
+            if (!formatBar) return;
+            formatBar.querySelectorAll('[data-gws-format]').forEach(function (b) {
+              var cmd = b.getAttribute('data-gws-format');
+              var on = cmd !== 'link' && document.queryCommandState && document.queryCommandState(cmd);
+              b.classList.toggle('is-active', !!on);
+            });
+          }
+
+          function hideFormatBar() {
+            if (formatBar) formatBar.classList.remove('is-open');
+          }
+
+          function updateFormatBar() {
+            var sel = window.getSelection();
+            if (!sel || sel.isCollapsed || sel.rangeCount === 0) { hideFormatBar(); return; }
+            var node = sel.anchorNode;
+            var host = node && (node.nodeType === 1 ? node : node.parentElement);
+            host = host && host.closest ? host.closest('[data-gws-inline-rich]') : null;
+            if (!host) { hideFormatBar(); return; }
+
+            var rect = sel.getRangeAt(0).getBoundingClientRect();
+            if (!rect || (!rect.width && !rect.height)) { hideFormatBar(); return; }
+            var bar = ensureFormatBar();
+            bar.classList.add('is-open');
+            // Measured after it is visible, otherwise offsetWidth is 0 and it sits off-centre.
+            var top = rect.top + window.scrollY - bar.offsetHeight - 8;
+            var left = rect.left + window.scrollX + (rect.width / 2) - (bar.offsetWidth / 2);
+            bar.style.top = Math.max(window.scrollY + 4, top) + 'px';
+            bar.style.left = Math.max(4, left) + 'px';
+            syncFormatBarState();
+          }
+
+          document.addEventListener('selectionchange', updateFormatBar);
+          window.addEventListener('scroll', hideFormatBar, true);
+
           document.addEventListener('click', function (e) {
             // The toolbar lives inside the section it controls, so without this its own
             // buttons would re-trigger a section select underneath them.
@@ -654,9 +749,16 @@ public static class CmsBlockHtmlRenderer
           // on Enter instead of inserting a line break, matching how a normal text input
           // behaves - blur() below is what actually sends the edit (see the blur listener).
           document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+              var active = e.target.closest && e.target.closest('[data-gws-inline-prop]');
+              if (active) { e.preventDefault(); active.blur(); }
+              return;
+            }
             if (e.key !== 'Enter') return;
             var el = e.target.closest('[data-gws-inline-prop]');
-            if (el) { e.preventDefault(); el.blur(); }
+            // Rich props are multi-paragraph prose - Enter makes a new line there, the way it
+            // does in any editor. Only single-line fields commit on Enter.
+            if (el && !el.hasAttribute('data-gws-inline-rich')) { e.preventDefault(); el.blur(); }
           }, true);
 
           // blur doesn't bubble, so this must be a capture-phase listener to observe it via
@@ -667,13 +769,19 @@ public static class CmsBlockHtmlRenderer
             var widgetEl = el.closest('[data-gws-widget-id]');
             var sectionEl = el.closest('[data-gws-section-id]');
             if (!widgetEl) return;
+            var isRich = el.hasAttribute('data-gws-inline-rich');
             send({
               type: 'cms:edit',
               sectionId: sectionEl ? sectionEl.getAttribute('data-gws-section-id') : '',
               widgetId: widgetEl.getAttribute('data-gws-widget-id'),
               prop: el.getAttribute('data-gws-inline-prop'),
-              value: el.innerText
+              // Rich props round-trip as HTML and are converted to Markdown by the parent;
+              // plain props stay plain text.
+              value: isRich ? '' : el.innerText,
+              html: isRich ? el.innerHTML : '',
+              rich: isRich
             });
+            hideFormatBar();
           }, true);
 
           window.addEventListener('message', function (e) {
@@ -914,7 +1022,7 @@ public static class CmsBlockHtmlRenderer
             "hero" => $"""
                 <div class="gws-hero gws-align-{Html(Align(p))}">
                   <h1 class="gws-hero-headline"{InlineEditAttrs(editMode, "headline")}>{Html(Get(p, "headline"))}</h1>
-                  {(HasValue(p, "subline") ? $"""<div class="gws-hero-subline">{Markdown.ToHtml(Get(p, "subline"), MarkdownPipeline)}</div>""" : "")}
+                  {(HasValue(p, "subline") ? $"""<div class="gws-hero-subline"{InlineRichAttrs(editMode, "subline", Get(p, "subline"))}>{Markdown.ToHtml(Get(p, "subline"), MarkdownPipeline)}</div>""" : "")}
                   <div class="gws-hero-actions">
                     {HeroCta(Get(p, "cta1Label"), Get(p, "cta1Href"), "btn-primary", editMode, "cta1Label")}
                     {HeroCta(Get(p, "cta2Label"), Get(p, "cta2Href"), "btn-ghost", editMode, "cta2Label")}
@@ -922,7 +1030,7 @@ public static class CmsBlockHtmlRenderer
                 </div>
                 """,
             "heading" => $"""<{Tag(p)} class="gws-heading gws-align-{Html(Align(p))}"{InlineEditAttrs(editMode, "text")}>{Html(Get(p, "text"))}</{Tag(p)}>""",
-            "paragraph" => $"""<div class="gws-paragraph gws-align-{Html(Align(p))}">{Markdown.ToHtml(Get(p, "text"), MarkdownPipeline)}</div>""",
+            "paragraph" => $"""<div class="gws-paragraph gws-align-{Html(Align(p))}"{InlineRichAttrs(editMode, "text", Get(p, "text"))}>{Markdown.ToHtml(Get(p, "text"), MarkdownPipeline)}</div>""",
             // Same trust boundary as blog articles: only authenticated Contributor/Author/
             // Admin roles can edit Canvas widgets, so rendering Markdown -> HTML here (rather
             // than HTML-encoding it, which would show raw asterisks/brackets) is consistent
@@ -931,7 +1039,7 @@ public static class CmsBlockHtmlRenderer
             // this prop is Markdown, contenteditable produces HTML, and reconciling
             // HTML-from-contenteditable back into Markdown is a lossy conversion for no
             // real gain. Stays click-to-select -> edit in the Inspector's Markdown textarea.
-            "richtext" => $"""<div class="gws-richtext">{Markdown.ToHtml(Get(p, "content"), MarkdownPipeline)}</div>""",
+            "richtext" => $"""<div class="gws-richtext"{InlineRichAttrs(editMode, "content", Get(p, "content"))}>{Markdown.ToHtml(Get(p, "content"), MarkdownPipeline)}</div>""",
             "button" => $"""
                 <div class="gws-button-wrap gws-align-{Html(Align(p))}">
                   <a href="{Html(HrefOrHash(Get(p, "href")))}" class="btn btn-{Html(Get(p, "variant", "primary"))}"{OpenInNewTabAttrs(p)}{InlineEditAttrs(editMode, "label")}>{Html(Get(p, "label"))}</a>
@@ -941,7 +1049,7 @@ public static class CmsBlockHtmlRenderer
                 ? $"""
                     <div class="gws-image gws-image-{Html(Get(p, "width", "full"))}">
                       <img src="{Html(Get(p, "src"))}" alt="{Html(Get(p, "alt"))}" />
-                      {(HasValue(p, "caption") ? $"""<p class="gws-image-caption">{Html(Get(p, "caption"))}</p>""" : "")}
+                      {(HasValue(p, "caption") ? $"""<p class="gws-image-caption"{InlineEditAttrs(editMode, "caption")}>{Html(Get(p, "caption"))}</p>""" : "")}
                     </div>
                     """
                 : string.Empty,
@@ -949,26 +1057,26 @@ public static class CmsBlockHtmlRenderer
                 <div class="gws-card">
                   {(HasValue(p, "imageSrc") ? $"""<img src="{Html(Get(p, "imageSrc"))}" alt="" class="gws-card-img" />""" : "")}
                   <div class="gws-card-body">
-                    <h3 class="gws-card-title">{Html(Get(p, "title"))}</h3>
-                    <div class="gws-card-text">{Markdown.ToHtml(Get(p, "body"), MarkdownPipeline)}</div>
+                    <h3 class="gws-card-title"{InlineEditAttrs(editMode, "title")}>{Html(Get(p, "title"))}</h3>
+                    <div class="gws-card-text"{InlineRichAttrs(editMode, "body", Get(p, "body"))}>{Markdown.ToHtml(Get(p, "body"), MarkdownPipeline)}</div>
                     {(HasValue(p, "link") ? $"""<a href="{Html(HrefOrHash(Get(p, "link")))}" class="btn btn-sm btn-outline-primary">Read more</a>""" : "")}
                   </div>
                 </div>
                 """,
             "testimonial" => $"""
                 <blockquote class="gws-testimonial">
-                  <div class="gws-testimonial-quote">{Markdown.ToHtml(Get(p, "quote"), MarkdownPipeline)}</div>
+                  <div class="gws-testimonial-quote"{InlineRichAttrs(editMode, "quote", Get(p, "quote"))}>{Markdown.ToHtml(Get(p, "quote"), MarkdownPipeline)}</div>
                   <footer class="gws-testimonial-author">
-                    <span class="gws-testimonial-name">{Html(Get(p, "authorName"))}</span>
-                    {(HasValue(p, "authorRole") ? $"""<span class="gws-testimonial-role">{Html(Get(p, "authorRole"))}</span>""" : "")}
+                    <span class="gws-testimonial-name"{InlineEditAttrs(editMode, "authorName")}>{Html(Get(p, "authorName"))}</span>
+                    {(HasValue(p, "authorRole") ? $"""<span class="gws-testimonial-role"{InlineEditAttrs(editMode, "authorRole")}>{Html(Get(p, "authorRole"))}</span>""" : "")}
                   </footer>
                 </blockquote>
                 """,
-            "accordion" => RenderAccordion(Get(p, "itemsJson")),
+            "accordion" => RenderAccordion(Get(p, "itemsJson"), editMode),
             "spacer" => $"""<div class="gws-spacer" style="height:{GetInt(p, "height", 48)}px"></div>""",
             "divider" => $"""<hr class="gws-divider gws-divider-{Html(Get(p, "style", "solid"))}" />""",
             "html" => Get(p, "content"),
-            "form" => RenderForm(p, siteSlug, pageSlug),
+            "form" => RenderForm(p, siteSlug, pageSlug, editMode),
             "posts-grid" => RenderPostsGrid(p, articles),
             _ => string.Empty
         };
@@ -1012,7 +1120,7 @@ public static class CmsBlockHtmlRenderer
 
     // <details>/<summary> gives collapsible behavior natively, no JS needed — matches this
     // codebase's preference for the simplest mechanism that actually works.
-    private static string RenderAccordion(string itemsJson)
+    private static string RenderAccordion(string itemsJson, bool editMode = false)
     {
         try
         {
@@ -1020,16 +1128,18 @@ public static class CmsBlockHtmlRenderer
             if (node is null || node.Count == 0) return string.Empty;
 
             var sb = new StringBuilder("""<div class="gws-accordion">""");
+            var index = -1;
             foreach (var item in node.OfType<JsonObject>())
             {
+                index++;
                 var question = item["question"]?.GetValue<string>() ?? string.Empty;
                 var answer = item["answer"]?.GetValue<string>() ?? string.Empty;
                 if (string.IsNullOrWhiteSpace(question)) continue;
 
                 sb.Append($"""
                     <details class="gws-accordion-item">
-                      <summary class="gws-accordion-question">{Html(question)}</summary>
-                      <div class="gws-accordion-answer">{Markdown.ToHtml(answer, MarkdownPipeline)}</div>
+                      <summary class="gws-accordion-question"{InlineEditAttrs(editMode, $"itemsJson[{index}].question")}>{Html(question)}</summary>
+                      <div class="gws-accordion-answer"{InlineRichAttrs(editMode, $"itemsJson[{index}].answer", answer)}>{Markdown.ToHtml(answer, MarkdownPipeline)}</div>
                     </details>
                     """);
             }
@@ -1050,7 +1160,10 @@ public static class CmsBlockHtmlRenderer
     // — a nested page's path (e.g. "services/web-dev") can't appear before a fixed "/submit"
     // segment once the live site's page route becomes a catch-all, so the path travels as a
     // hidden field instead, same as the honeypot.
-    private static string RenderForm(IReadOnlyDictionary<string, string> p, string siteSlug, string pageSlug)
+    // Field *labels* are prose a visitor reads, so they edit in place like any other text. A
+    // field's type / required / key / options are configuration with no visitor-facing text and
+    // stay in the Inspector - that is the line, not "flat prop vs structured JSON".
+    private static string RenderForm(IReadOnlyDictionary<string, string> p, string siteSlug, string pageSlug, bool editMode = false)
     {
         var fields = ParseFormFields(Get(p, "fieldsJson"));
         var sb = new StringBuilder();
@@ -1059,7 +1172,7 @@ public static class CmsBlockHtmlRenderer
 
         foreach (var field in fields)
         {
-            sb.Append("""<label class="gws-form-field"><span class="gws-form-label">""");
+            sb.Append($"""<label class="gws-form-field"><span class="gws-form-label"{InlineEditAttrs(editMode, $"fieldsJson[{field.SourceIndex}].label")}>""");
             sb.Append(Html(field.Label));
             if (field.Required) sb.Append("""<span class="gws-form-required">*</span>""");
             sb.Append("</span>");
@@ -1073,7 +1186,7 @@ public static class CmsBlockHtmlRenderer
         // used "company", which collided with the "Company" FormFieldRole's own derived key and
         // silently dropped every real submission through a field with that exact label.
         sb.Append("""<input type="text" name="_hp" class="gws-form-honeypot" tabindex="-1" autocomplete="off" />""");
-        sb.Append($"""<button type="submit" class="btn btn-primary gws-form-submit">{Html(Get(p, "submitLabel", "Submit"))}</button>""");
+        sb.Append($"""<button type="submit" class="btn btn-primary gws-form-submit"{InlineEditAttrs(editMode, "submitLabel")}>{Html(Get(p, "submitLabel", "Submit"))}</button>""");
         sb.Append("</form>");
         return sb.ToString();
     }
@@ -1117,12 +1230,17 @@ public static class CmsBlockHtmlRenderer
             var node = JsonNode.Parse(string.IsNullOrWhiteSpace(fieldsJson) ? "[]" : fieldsJson) as JsonArray;
             if (node is null) return [];
 
-            return node.OfType<JsonObject>().Select(obj => new FormFieldDefinition(
+            // SourceIndex is the field's position in the stored array, captured BEFORE the
+            // keyless-field filter below. Inline label editing addresses fields as
+            // "fieldsJson[n].label", so numbering the rendered fields instead would write to the
+            // wrong element on any form that contains a keyless field.
+            return node.OfType<JsonObject>().Select((obj, sourceIndex) => new FormFieldDefinition(
                 Key: obj["key"]?.GetValue<string>() ?? string.Empty,
                 Label: obj["label"]?.GetValue<string>() ?? string.Empty,
                 Type: obj["type"]?.GetValue<string>() ?? "text",
                 Required: obj["required"]?.GetValue<bool>() ?? false,
-                OptionsJson: obj["optionsJson"]?.GetValue<string>() ?? string.Empty
+                OptionsJson: obj["optionsJson"]?.GetValue<string>() ?? string.Empty,
+                SourceIndex: sourceIndex
             )).Where(f => !string.IsNullOrWhiteSpace(f.Key)).ToList();
         }
         catch
@@ -1131,7 +1249,7 @@ public static class CmsBlockHtmlRenderer
         }
     }
 
-    private sealed record FormFieldDefinition(string Key, string Label, string Type, bool Required, string OptionsJson);
+    private sealed record FormFieldDefinition(string Key, string Label, string Type, bool Required, string OptionsJson, int SourceIndex = 0);
 
     private static string HeroCta(string label, string href, string cssClass, bool editMode, string inlinePropKey) =>
         string.IsNullOrWhiteSpace(label)
@@ -1152,6 +1270,38 @@ public static class CmsBlockHtmlRenderer
     private static string SectionHandle(LayoutSection section, bool editMode) =>
         editMode
             ? $"""<button type="button" class="gws-section-handle" data-gws-section-handle="{Html(section.Id)}">{Html(string.IsNullOrWhiteSpace(section.Label) ? "Section" : section.Label)}</button>"""
+            : string.Empty;
+
+    // Markdown constructs the canvas editor's HTML->Markdown serializer (professionalEditor.js's
+    // serialize()) cannot represent. A prop containing any of these stays click-to-select and is
+    // edited in the Inspector instead, so inline editing can never silently flatten a table or
+    // drop a footnote. scripts/scan-cms-markdown.py reports the same set across a database - it
+    // found zero occurrences in production, so this is a guard against future content rather
+    // than a workaround for existing content.
+    private static readonly Regex[] UnserializableMarkdown =
+    [
+        new(@"^\s*\|.*\|\s*$", RegexOptions.Multiline),
+        new(@"\[\^[^\]]+\]"),
+        new(@"^\s*[-*]\s+\[[ xX]\]", RegexOptions.Multiline),
+        new(@"\$\$|\\\(|\\\["),
+        new(@"!\[[^\]]*\]\("),
+        new(@"^#{4,}\s", RegexOptions.Multiline),
+        new(@"^:\s{1,3}\S", RegexOptions.Multiline),
+        new(@"^:::", RegexOptions.Multiline),
+        new(@"^\*\[[^\]]+\]:", RegexOptions.Multiline),
+        new(@"^\[[^\]]+\]:\s*\S", RegexOptions.Multiline),
+    ];
+
+    internal static bool CanEditInline(string markdown) =>
+        !string.IsNullOrEmpty(markdown) && !UnserializableMarkdown.Any(rx => rx.IsMatch(markdown));
+
+    // Rich (Markdown-backed) inline editing. contenteditable is "true" rather than
+    // "plaintext-only" so bold/italic/link survive typing; the canvas posts innerHTML up and the
+    // parent converts it back to Markdown. Empty content is editable too - there is nothing to
+    // lose - which is what lets an author fill in a blank paragraph in place.
+    private static string InlineRichAttrs(bool editMode, string propKey, string markdown) =>
+        editMode && (string.IsNullOrEmpty(markdown) || CanEditInline(markdown))
+            ? $" contenteditable=\"true\" data-gws-inline-prop=\"{propKey}\" data-gws-inline-rich=\"1\""
             : string.Empty;
 
     private static string InlineEditAttrs(bool editMode, string propKey) =>

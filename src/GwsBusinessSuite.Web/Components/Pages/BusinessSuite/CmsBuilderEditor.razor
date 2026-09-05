@@ -2982,20 +2982,70 @@ else
         QueueAutosave(reloadPreview, immediateAutosave);
     }
 
+    // Only plain-text props can be patched into the canvas live, because the patch sets
+    // textContent. A Markdown-backed prop (paragraph.text, hero.subline, richtext.content,
+    // card.body, testimonial.quote) has to go through a preview reload so Markdig re-renders it -
+    // patching it live painted the raw Markdown source onto the page instead of the formatted
+    // text, which was visible whenever one of those was edited from the Inspector.
     private static bool CanPatchWidgetPropLive(string widgetType, string key) => (widgetType, key) switch
     {
         ("hero", "headline") => true,
-        ("hero", "subline") => true,
         ("hero", "cta1Label") => true,
         ("hero", "cta2Label") => true,
         ("heading", "text") => true,
-        ("paragraph", "text") => true,
         ("button", "label") => true,
         _ => false
     };
 
+    // Accordion items and form fields are stored as a JSON array inside one prop, so the canvas
+    // addresses their text as "itemsJson[0].answer" / "fieldsJson[2].label". Editing those in
+    // place means writing back into the array rather than replacing the whole prop.
+    private static readonly System.Text.RegularExpressions.Regex IndexedPropKey =
+        new(@"^(?<prop>[A-Za-z0-9_]+)\[(?<index>\d+)\]\.(?<field>[A-Za-z0-9_]+)$");
+
+    private void SetIndexedProp(LayoutWidget widget, string key, string value, bool forceNewUndoStep)
+    {
+        var match = IndexedPropKey.Match(key);
+        if (!match.Success) return;
+
+        var propName = match.Groups["prop"].Value;
+        var index = int.Parse(match.Groups["index"].Value);
+        var field = match.Groups["field"].Value;
+
+        var raw = widget.Props.GetValueOrDefault(propName, "[]");
+        System.Text.Json.Nodes.JsonArray? items;
+        try
+        {
+            items = System.Text.Json.Nodes.JsonNode.Parse(string.IsNullOrWhiteSpace(raw) ? "[]" : raw) as System.Text.Json.Nodes.JsonArray;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // Malformed stored JSON: refuse rather than replacing it with a rewritten array and
+            // losing whatever was in there (same reasoning as CmsBuilderJson's parse guard).
+            return;
+        }
+
+        if (items is null || index < 0 || index >= items.Count) return;
+        if (items[index] is not System.Text.Json.Nodes.JsonObject item) return;
+
+        item[field] = value;
+        // Structural reload: the array drives repeated markup, so the preview has to re-render
+        // rather than patch one element in place.
+        ApplyTrackedMutation(
+            editKey: $"{widget.Id}:{key}",
+            mutation: () => widget.Props[propName] = items.ToJsonString(),
+            reloadPreview: true,
+            forceNewUndoStep: forceNewUndoStep);
+    }
+
     private void SetProp(LayoutWidget widget, string key, string value, bool forceNewUndoStep = false)
     {
+        if (key.Contains('['))
+        {
+            SetIndexedProp(widget, key, value, forceNewUndoStep);
+            return;
+        }
+
         var canPatchLive = CanPatchWidgetPropLive(widget.WidgetType, key);
         ApplyTrackedMutation(
             editKey: $"{widget.Id}:{key}",

@@ -172,7 +172,21 @@ window.gwsCmsBuilderBridge = (function () {
                 // anchors to the selected section.
                 _dotNetRef.invokeMethodAsync('OnSectionCommandFromIframe', data.sectionId || '', data.command || '');
                 break;
-            case 'cms:edit':
+            case 'cms:edit': {
+                // Rich props arrive as HTML and are converted back to Markdown here, using the
+                // same serializer the article editor uses (professionalEditor.js) rather than a
+                // second copy inside the canvas document.
+                let edited = data.value || '';
+                if (data.rich) {
+                    const converter = window.gwsProfessionalEditor;
+                    edited = converter && converter.htmlStringToMarkdown
+                        ? converter.htmlStringToMarkdown(data.html || '')
+                        : (data.html || '');
+                }
+                _dotNetRef.invokeMethodAsync('OnWidgetPropEditedFromIframe', data.sectionId || '', data.widgetId || '', data.prop || '', edited);
+                break;
+            }
+            case 'cms:edit-legacy':
                 _dotNetRef.invokeMethodAsync('OnWidgetPropEditedFromIframe', data.sectionId || '', data.widgetId || '', data.prop || '', data.value || '');
                 break;
             case 'cms:drop':

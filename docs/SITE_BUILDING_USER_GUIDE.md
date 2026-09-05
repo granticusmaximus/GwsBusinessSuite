@@ -16,6 +16,7 @@ for why, and how that may change later.
 3. [Creating and configuring a page](#creating-and-configuring-a-page)
 4. [The page editor layout](#the-page-editor-layout)
 5. [Adding and arranging blocks](#adding-and-arranging-widgets)
+5a. [Editing text on the canvas](#editing-text-on-the-canvas)
 6. [Editing widget content and style](#editing-widget-content-and-style)
 7. [Freeform canvas positioning](#freeform-canvas-positioning)
 8. [Global blocks](#global-blocks)
@@ -282,6 +283,30 @@ final, fully-revealed state immediately, with no animation played at all.
 Only one interaction is supported per widget today — there's no way to chain a sequence of
 animations, or to combine two triggers on the same widget (e.g. "reveal on scroll, then also
 bounce on click").
+
+## Editing text on the canvas
+
+Most text edits happen by clicking the text itself and typing - no side panel needed.
+
+**Prose** (paragraphs, rich text, hero sublines, card bodies, testimonial quotes, accordion
+answers) is fully rich-text editable in place. Select any of it and a small toolbar appears with
+**bold**, *italic* and link. Those three are deliberately the whole toolbar: they are exactly what
+survives the round trip back to Markdown, so anything the toolbar offers is something that will
+still be there after you save.
+
+**Short labels** (headings, buttons, card titles, image captions, testimonial author names,
+accordion questions, form field labels, the form's submit button) are plain single-line edits.
+Press Enter to commit, Escape to cancel.
+
+**Configuration stays in the Inspector.** A form field's *label* is text a visitor reads, so you
+edit it on the canvas; its type, whether it's required, its key and its select options are
+settings, so they live in the right-hand panel. Same widget, split by what the thing actually is.
+
+**One exception.** A block whose Markdown uses something the inline editor cannot faithfully
+convert back - a table, a footnote, a task list, an image, math, or a heading below `###` - is not
+click-to-type. It stays click-to-select and is edited in the Inspector's Markdown box instead, so
+inline editing can never quietly flatten it. You can check a whole site for these with
+`python3 scripts/scan-cms-markdown.py <database>`.
 
 ## Undo, redo, and autosave
 

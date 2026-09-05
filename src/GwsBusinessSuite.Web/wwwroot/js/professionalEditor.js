@@ -132,6 +132,16 @@ window.gwsProfessionalEditor = (() => {
             .replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
     }
 
+    // Serializes an HTML *string* rather than a live editor node. The CMS canvas edits inside an
+    // iframe that never loads this file, so it posts its contenteditable's innerHTML up to the
+    // parent and the conversion happens here - one serializer for both editors instead of a
+    // second copy living in the canvas script.
+    function htmlStringToMarkdown(html) {
+        const holder = document.createElement("div");
+        holder.innerHTML = html ?? "";
+        return htmlToMarkdown(holder);
+    }
+
     function updateCount(instance) {
         const words = textOf(instance.editor).trim().match(/\S+/g)?.length ?? 0;
         instance.count.textContent = `${words} ${words === 1 ? "word" : "words"}`;
@@ -260,5 +270,5 @@ window.gwsProfessionalEditor = (() => {
         instances.delete(rootId);
     }
 
-    return { init, setHtml, insertMarkdown, insertText, focus, destroy, markdownToHtml };
+    return { init, setHtml, insertMarkdown, insertText, focus, destroy, markdownToHtml, htmlStringToMarkdown };
 })();
