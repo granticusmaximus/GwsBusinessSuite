@@ -1,10 +1,29 @@
 #!/usr/bin/env python3
 """Reports CMS content that a Markdown<->HTML WYSIWYG round-trip could not preserve.
 
-The inline editor serializes HTML back to Markdown and only knows:
+The canvas inline editor serializes HTML back to Markdown and only knows:
   p br strong/b em/i u s/del h1-h3 ul/ol/li blockquote pre/code a hr
-Markdig here runs UseAdvancedExtensions(), so content MAY legally contain much more.
-Anything this prints is content that would be damaged by inline editing.
+Markdig here runs UseAdvancedExtensions(), so content MAY legally contain much more
+(tables, footnotes, task lists, math, images, definition lists). Anything this prints is
+content that click-to-type editing would damage, and therefore needs an inspector fallback.
+
+Usage
+-----
+Local:
+    python3 scripts/scan-cms-markdown.py src/GwsBusinessSuite.Web/gws-suite.db
+
+Production (reads a throwaway copy; never touches the live database). Set GWS_DROPLET to
+the deploy target - it is deliberately not committed here, because this repository is public
+and the origin host sits behind Cloudflare:
+
+    export GWS_DROPLET=root@<droplet-host>
+    scp scripts/scan-cms-markdown.py "$GWS_DROPLET":/tmp/
+    ssh "$GWS_DROPLET" 'cd /opt/gwssuite \
+      && docker compose cp gwssuite:/app/data/gws-suite.db /tmp/prod-cms.db \
+      && python3 /tmp/scan-cms-markdown.py /tmp/prod-cms.db; \
+      rm -f /tmp/prod-cms.db'
+
+Exit code is 0 regardless of findings - this is a report, not a gate.
 """
 import json, re, sqlite3, sys
 
