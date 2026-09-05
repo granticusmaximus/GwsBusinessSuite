@@ -3,6 +3,40 @@
 set -uo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Git hooks launched from a GUI (VS Code, Xcode, a Git client) inherit a bare login PATH -
+# typically /usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin - not the interactive shell's. npm,
+# docker and git live in /usr/local/bin so they resolve there, but a Homebrew dotnet lives in
+# /opt/homebrew/bin and does not, so the pre-push hook failed four checks with a bare
+# "dotnet: command not found" while the same script passed in a terminal. Resolve dotnet from
+# the usual install locations ourselves rather than depending on the caller's environment.
+ensure_dotnet_on_path() {
+  if command -v dotnet >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local candidate
+  for candidate in \
+    "${DOTNET_ROOT:-}" \
+    /opt/homebrew/bin \
+    /usr/local/share/dotnet \
+    "$HOME/.dotnet" \
+    /usr/local/bin
+  do
+    if [ -n "$candidate" ] && [ -x "$candidate/dotnet" ]; then
+      PATH="$candidate:$PATH"
+      export PATH
+      return 0
+    fi
+  done
+
+  echo "verify-release: 'dotnet' not found on PATH and not in any known install location." >&2
+  echo "  PATH was: $PATH" >&2
+  echo "  If dotnet is installed elsewhere, export DOTNET_ROOT to the directory containing it." >&2
+  return 1
+}
+
+ensure_dotnet_on_path || exit 1
 base_url=""
 public_base_url=""
 output_path=""
