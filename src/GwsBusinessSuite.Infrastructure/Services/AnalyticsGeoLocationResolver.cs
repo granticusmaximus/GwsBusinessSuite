@@ -36,7 +36,10 @@ public sealed class AnalyticsGeoLocationResolver : IAnalyticsGeoLocationResolver
         try
         {
             reader = new DatabaseReader(path);
-            logger.LogInformation("Analytics GeoIP enrichment is ready using the local database.");
+            Attribution = AttributionFor(reader.Metadata.DatabaseType);
+            logger.LogInformation(
+                "Analytics GeoIP enrichment is ready using the local database ({DatabaseType}).",
+                reader.Metadata.DatabaseType);
         }
         catch (Exception exception)
         {
@@ -47,6 +50,23 @@ public sealed class AnalyticsGeoLocationResolver : IAnalyticsGeoLocationResolver
     }
 
     public bool IsConfigured => reader is not null;
+
+    public AnalyticsGeoAttribution? Attribution { get; }
+
+    // Matched on the MMDB's own metadata database type, so the credit always names whatever is
+    // actually loaded. DB-IP's Lite editions ("DBIP-City-Lite") are CC-BY 4.0 and *require* the
+    // link; MaxMind's GeoLite2 asks to be credited but does not require an in-page link, and is
+    // returned here anyway so the panel reads honestly either way. An unrecognized database gets
+    // no claim attached rather than a guessed one.
+    public static AnalyticsGeoAttribution? AttributionFor(string? databaseType)
+    {
+        if (string.IsNullOrWhiteSpace(databaseType)) return null;
+        if (databaseType.Contains("DBIP", StringComparison.OrdinalIgnoreCase))
+            return new("IP Geolocation by DB-IP", "https://db-ip.com");
+        if (databaseType.Contains("GeoLite", StringComparison.OrdinalIgnoreCase))
+            return new("IP Geolocation by MaxMind GeoLite2", "https://www.maxmind.com");
+        return null;
+    }
 
     public AnalyticsGeoLocation? Resolve(IPAddress? address)
     {

@@ -180,6 +180,7 @@ public sealed class GrowthAnalyticsService(
                 (decimal)averageEngagement.TotalSeconds,
                 (decimal)comparisonMetrics.AverageEngagement.TotalSeconds),
             GeoLocationConfigured = geoLocationResolver?.IsConfigured == true,
+            GeoAttribution = geoLocationResolver?.Attribution,
             RetentionPeriodLabel = retention.PeriodLabel,
             RetentionCohorts = retention.Cohorts,
             Trend = BuildTrend(pageViews, from, to),

@@ -6,9 +6,22 @@ public sealed record AnalyticsGeoLocation(
     string RegionCode,
     string RegionName);
 
+// Who to credit for the loaded location database, and where to link. Several of the free
+// databases this app can read are licensed on condition that the credit is actually shown -
+// DB-IP's Lite editions are CC-BY 4.0, which requires a link back to db-ip.com on any page that
+// displays results derived from them.
+public sealed record AnalyticsGeoAttribution(string Text, string Url);
+
 public interface IAnalyticsGeoLocationResolver
 {
     bool IsConfigured { get; }
+
+    // Derived from the loaded file's own metadata rather than configured, so it can never credit
+    // a vendor whose data isn't actually in use - swapping DB-IP for MaxMind's GeoLite2 changes
+    // this on its own. Null when no database is loaded, or when the database is one with no
+    // attribution requirement to honour.
+    AnalyticsGeoAttribution? Attribution { get; }
+
     AnalyticsGeoLocation? Resolve(System.Net.IPAddress? address);
 }
 

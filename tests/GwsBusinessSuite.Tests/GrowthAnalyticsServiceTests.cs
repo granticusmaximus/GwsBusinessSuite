@@ -724,9 +724,11 @@ public sealed class GrowthAnalyticsServiceTests
 
     private sealed class StubGeoLocationResolver(
         AnalyticsGeoLocation? location,
-        bool isConfigured = true) : IAnalyticsGeoLocationResolver
+        bool isConfigured = true,
+        AnalyticsGeoAttribution? attribution = null) : IAnalyticsGeoLocationResolver
     {
         public bool IsConfigured { get; } = isConfigured;
+        public AnalyticsGeoAttribution? Attribution { get; } = attribution;
         public IPAddress? LastAddress { get; private set; }
         public int ResolveCallCount { get; private set; }
 

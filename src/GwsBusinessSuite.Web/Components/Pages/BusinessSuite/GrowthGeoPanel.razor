@@ -44,7 +44,17 @@
 
     <footer>
         <i class="bi bi-shield-lock"></i>
-        <span>The request IP is used only for an in-process lookup and then discarded. Only country and region are saved; GeoIP is approximate.</span>
+        <span>
+            The request IP is used only for an in-process lookup and then discarded. Only country and region are saved; GeoIP is approximate.
+            @if (Dashboard.GeoAttribution is { } attribution)
+            {
+                @* Required credit, not decoration: DB-IP's Lite databases are CC-BY 4.0, which
+                   obliges any page showing results derived from them to link back. Driven by the
+                   loaded database's own metadata, so it always names the vendor actually in use. *@
+                <text> </text>
+                <a href="@attribution.Url" target="_blank" rel="noopener noreferrer">@attribution.Text</a>
+            }
+        </span>
     </footer>
 </section>
 

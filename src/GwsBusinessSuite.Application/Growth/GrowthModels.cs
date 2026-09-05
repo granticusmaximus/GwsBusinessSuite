@@ -158,6 +158,9 @@ public sealed class GrowthAnalyticsDashboard
     public AnalyticsPeriodComparison BounceRateComparison { get; init; } = new(0, 0);
     public AnalyticsPeriodComparison AverageEngagementComparison { get; init; } = new(0, 0);
     public bool GeoLocationConfigured { get; init; }
+    // Non-null whenever the loaded location database carries a credit obligation - rendered by
+    // GrowthGeoPanel. See AnalyticsGeoAttribution for why this is data rather than fixed markup.
+    public AnalyticsGeoAttribution? GeoAttribution { get; init; }
     public string RetentionPeriodLabel { get; init; } = "Day";
     public IReadOnlyList<AnalyticsRetentionCohort> RetentionCohorts { get; init; } = [];
     public IReadOnlyList<AnalyticsPoint> Trend { get; init; } = [];
