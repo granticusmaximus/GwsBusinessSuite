@@ -21,8 +21,9 @@ public sealed class WorkspaceBookmarkStore(string filePath)
         {
             var bytes = await File.ReadAllBytesAsync(filePath);
             var bookmark = NSData.FromArray(bytes);
+            // No resolution options: security scope is implicit on Mac Catalyst (see PersistAsync).
             var url = NSUrl.FromBookmarkData(
-                bookmark, NSUrlBookmarkResolutionOptions.WithSecurityScope, null, out var isStale, out var error);
+                bookmark, default, null, out var isStale, out var error);
 
             if (url is null || error is not null)
             {
@@ -69,7 +70,15 @@ public sealed class WorkspaceBookmarkStore(string filePath)
     {
         try
         {
-            var bookmark = url.CreateBookmarkData(NSUrlBookmarkCreationOptions.WithSecurityScope, [], null, out var error);
+            // No creation options - deliberately not NSUrlBookmarkCreationOptions.WithSecurityScope.
+            // macOS makes you opt in to security scope with that flag; Mac Catalyst inherits iOS's
+            // model where a bookmark is already security-scoped and resolving one implicitly starts
+            // access, so the flag is declared [UnsupportedOSPlatform("maccatalyst")] in the binding
+            // and using it here was a CA1416 warning. The opt-outs that do exist on Catalyst
+            // (CreationWithoutImplicitSecurityScope / WithoutImplicitStartAccessing) confirm the
+            // implicit behavior is the default. StartAccessingSecurityScopedResource() below is
+            // still the correct and supported call.
+            var bookmark = url.CreateBookmarkData(default, [], null, out var error);
             if (bookmark is null || error is not null) return;
 
             Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
