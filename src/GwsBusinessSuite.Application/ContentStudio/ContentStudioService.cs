@@ -189,6 +189,8 @@ public sealed class ContentStudioService(
             throw new InvalidOperationException("SentinelGPT returned an empty draft. Try again or switch models.");
         }
 
+        markdown = await CompileAndRepairAsync(model, markdown, timeoutCts.Token);
+
         var (saved, _) = await PersistGeneratedDraftAsync(request, markdown, scoredOffers, cancellationToken);
         return saved;
     }
@@ -227,6 +229,17 @@ public sealed class ContentStudioService(
             throw new InvalidOperationException("SentinelGPT returned an empty draft. Try again or switch models.");
         }
 
+        // The streamed text is what the model wrote; it still has to compile. Repairing after the
+        // stream (rather than skipping it here) is what keeps the two generation paths honest -
+        // otherwise streaming would quietly be the unverified one.
+        var verified = GeneratedCodeVerifier.Verify(markdown);
+        if (!verified.IsClean)
+        {
+            yield return new ContentStudioGenerationChunk(
+                $"\n\n_Checking code… {verified.Problems.Count} compile error(s) found, fixing._\n", null);
+            markdown = await CompileAndRepairAsync(model, markdown, timeoutCts.Token);
+        }
+
         var (saved, flaggedClaimCount) = await PersistGeneratedDraftAsync(request, markdown, scoredOffers, cancellationToken);
         yield return new ContentStudioGenerationChunk(null, saved, flaggedClaimCount);
     }
@@ -256,6 +269,22 @@ public sealed class ContentStudioService(
             sourceNotes = $"SentinelGPT flagged {flaggedClaims.Count} claim(s) it could not verify while writing - review each before publishing:\n"
                 + string.Join('\n', flaggedClaims.Select(claim => $"- {claim}"))
                 + $"\n\n{sourceNotes}";
+        }
+
+        // Compiler results go at the top, above the model's own [VERIFY] flags: these are the
+        // errors it could not fix even when handed them directly, so they are the likeliest place
+        // an article is still wrong. A clean result is stated too - "0 problems" is information,
+        // and silence would be indistinguishable from the check not having run.
+        var codeReport = GeneratedCodeVerifier.Verify(markdownWithAffiliateSlots);
+        if (codeReport.BlocksChecked > 0)
+        {
+            var codeNote = codeReport.IsClean
+                ? $"Code check: all {codeReport.BlocksChecked} C# block(s) compile."
+                : $"Code check: {codeReport.Problems.Count} block(s) still fail to compile after "
+                  + $"{MaxRepairAttempts} repair attempt(s) - these are the most likely errors in this draft:\n"
+                  + string.Join('\n', codeReport.Problems.Select(problem =>
+                      $"- Block {problem.BlockNumber}: {problem.Diagnostic}"));
+            sourceNotes = $"{codeNote}\n\n{sourceNotes}";
         }
 
         var draft = new SeoArticleDraft
@@ -364,6 +393,12 @@ public sealed class ContentStudioService(
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(timeout);
         var revisedMarkdown = (await ollama.GenerateAsync(configuredModel, BuildSystemPrompt(), prompt, timeoutCts.Token)).Trim();
+        // A revision can reintroduce a hallucination the first pass had fixed, so it gets the
+        // same compile-and-repair treatment rather than being trusted because it came second.
+        if (!string.IsNullOrWhiteSpace(revisedMarkdown))
+        {
+            revisedMarkdown = await CompileAndRepairAsync(configuredModel, revisedMarkdown, timeoutCts.Token);
+        }
         if (string.IsNullOrWhiteSpace(revisedMarkdown))
         {
             throw new InvalidOperationException("SentinelGPT returned an empty revised draft.");
@@ -828,6 +863,93 @@ public sealed class ContentStudioService(
         CancellationToken cancellationToken = default)
     {
         return await ApplyDecisionAsync(request, SeoArticleDraftStatuses.Rejected, SeoArticleWorkflowEventTypes.Rejected, cancellationToken);
+    }
+
+    // How many times the model gets to fix its own compiler errors before the rest are handed to
+    // a human. Two is deliberate: the first pass fixes the great majority, the second catches
+    // what the first broke, and beyond that a model that still cannot compile the snippet is
+    // usually looping rather than converging - and every pass costs a full generation.
+    private const int MaxRepairAttempts = 2;
+
+    // Generate, compile, feed the real errors back, repeat. This is the step that replaces a
+    // second reviewing agent: the model is not asked to introspect (which is what the system
+    // prompt's self-check already does, unreliably, on the same weights that produced the error)
+    // but handed ground truth from a compiler that cannot be persuaded an API exists.
+    private async Task<string> CompileAndRepairAsync(string model, string markdown, CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= MaxRepairAttempts; attempt++)
+        {
+            var report = GeneratedCodeVerifier.Verify(markdown);
+            if (report.IsClean)
+            {
+                if (report.BlocksChecked > 0)
+                {
+                    logger.LogInformation(
+                        "Content Studio: all {Count} C# block(s) compiled on attempt {Attempt}.",
+                        report.BlocksChecked, attempt);
+                }
+                return markdown;
+            }
+
+            logger.LogInformation(
+                "Content Studio: {Problems} compile error(s) across {Blocks} block(s); asking {Model} to fix them (attempt {Attempt}/{Max}).",
+                report.Problems.Count, report.BlocksChecked, model, attempt, MaxRepairAttempts);
+
+            string repaired;
+            try
+            {
+                repaired = (await ollama.GenerateAsync(
+                    model, BuildSystemPrompt(), BuildRepairPrompt(markdown, report), cancellationToken)).Trim();
+            }
+            catch (OperationCanceledException)
+            {
+                // Out of time. The draft still saves with its problems listed for review - that
+                // is strictly better than failing the whole generation.
+                logger.LogWarning("Content Studio: repair pass timed out; saving the draft with its errors flagged.");
+                return markdown;
+            }
+
+            // A repair that comes back empty or drops the article is worse than the original.
+            if (string.IsNullOrWhiteSpace(repaired) || repaired.Length < markdown.Length / 2)
+            {
+                logger.LogWarning("Content Studio: repair pass returned an unusable draft; keeping the original.");
+                return markdown;
+            }
+
+            markdown = repaired;
+        }
+
+        return markdown;
+    }
+
+    // Deliberately specific. "Check your work" produces confident agreement; a compiler error
+    // with a line number and the offending name produces a fix.
+    private static string BuildRepairPrompt(string markdown, CodeVerificationReport report)
+    {
+        var errors = string.Join('\n', report.Problems.Select(problem =>
+            $"- Code block {problem.BlockNumber}: {problem.Diagnostic}"));
+
+        return $"""
+            The article below was written by you. Its C# code was then compiled, and the compiler
+            reported these errors. These are facts from a compiler, not opinions: the APIs named
+            do not exist, or are not being called correctly.
+
+            {errors}
+
+            Rewrite the article so every code block compiles. Rules:
+            - Fix only what is required to make the code correct. Leave the prose, structure and
+              headings alone unless an error forces a change.
+            - Replace invented APIs with real ones that achieve the same thing. Do not invent a
+              different API to replace an invented one.
+            - If you genuinely do not know the correct API, remove that example and mark the gap
+              with [VERIFY: ...] rather than guessing again.
+            - Return the complete article as Markdown, not a diff and not a description of your
+              changes.
+
+            ---
+
+            {markdown}
+            """;
     }
 
     public static string BuildSystemPrompt() => """

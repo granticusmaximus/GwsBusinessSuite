@@ -42,3 +42,6 @@ secrets.json
 # Node / React
 node_modules/
 apps/public-site/dist/
+
+# MSBuild SDK-resolver scratch files, written next to the csproj during MAUI builds.
+*.SdkResolver.*.proj.Backup.tmp

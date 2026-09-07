@@ -147,6 +147,37 @@ Rejected) and a topic search. Per-draft actions: **Open** (into the draft worksp
 interested** (rejects the draft with a note, without opening it), and **Delete** (permanent, with
 a confirmation prompt).
 
+## Automatic code checking
+
+Every generated draft has its C# **compiled** before you see it. This is the step that replaces
+reading the article with a second AI to catch invented APIs.
+
+**Why compiling rather than asking the model to check itself.** The system prompt already forbids
+inventing APIs and ends with a self-check. It still hallucinates, because a self-check runs on the
+same weights that produced the error: a model confident enough to invent `HttpClient.GetJsonAsync`
+is confident enough to confirm it exists. A compiler cannot be argued with.
+
+**What happens.** Every ```csharp block is extracted and compiled against the framework this app
+runs on. If anything fails, the real compiler errors, with line numbers, are handed back to the
+model: not "check your work" but *"line 12: CS1061: 'HttpClient' does not contain a definition for
+'GetJsonAsync'"*. It gets two attempts to fix them. When streaming, you will see a short
+"Checking code…" note between the draft finishing and the fixes landing.
+
+**What you see on the draft.** The Sources and verification box leads with the code check:
+
+- `Code check: all 4 C# block(s) compile.` — nothing invented, nothing miscalled.
+- `Code check: 1 block(s) still fail to compile…` followed by the block number and the exact
+  compiler error. These are the errors the model could not fix *even when handed them directly*,
+  so they are the likeliest place the article is still wrong. Read those first.
+
+Below that sit the model's own `[VERIFY: ...]` flags, as before.
+
+**What it does not check.** Compiling proves the code is real. It says nothing about prose claims,
+benchmark figures or version numbers, and it only checks C# — a `bash` or `json` block is ignored.
+Snippets that legitimately omit `using` directives, show a bare method body, or reference a type
+defined in an earlier block are all accepted rather than flagged, so a failure in this list is
+worth taking seriously.
+
 ## The draft workspace: review, revise, approve, publish
 
 `/admin/content-studio/draft/{id}` is where a Content Studio draft is actually worked through to
