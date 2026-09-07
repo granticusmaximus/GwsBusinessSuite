@@ -101,12 +101,20 @@ else
                         <article class="automation-node @(node.Id == _selectedNodeId ? "is-selected" : "") @(_multiSelectedNodeIds.Contains(node.Id) ? "is-multi-selected" : "") @(node.IsDisabled ? "is-disabled" : "")"
                                  data-automation-node="@node.Id" style="left:@(node.PositionX)px; top:@(node.PositionY)px"
                                  @onclick="e => SelectNode(node.Id, e)" @onclick:stopPropagation="true">
-                            <div class="node-output node-output-main" title="Output"></div>
+                            @* data-port carries everything the canvas script needs to start and
+                               land a wire. Before this the ports rendered but nothing read them,
+                               so they looked draggable and were not. *@
+                            <div class="node-output node-output-main" title="Drag to connect"
+                                 data-port="output" data-port-node="@node.Id" data-port-name="main"></div>
                             @if (definition?.Outputs.Contains("true") == true)
                             {
-                                <div class="node-output node-output-true" title="True output"></div><div class="node-output node-output-false" title="False output"></div>
+                                <div class="node-output node-output-true" title="True output — drag to connect"
+                                     data-port="output" data-port-node="@node.Id" data-port-name="true"></div>
+                                <div class="node-output node-output-false" title="False output — drag to connect"
+                                     data-port="output" data-port-node="@node.Id" data-port-name="false"></div>
                             }
-                            <div class="node-input" title="Input"></div>
+                            <div class="node-input" title="Input"
+                                 data-port="input" data-port-node="@node.Id" data-port-name="main"></div>
                             <div class="node-icon"><i class="bi @(definition?.IconClass ?? "bi-box")"></i></div>
                             <div class="node-copy"><strong>@node.Name</strong><small>@(definition?.DisplayName ?? node.TypeKey)</small></div>
                             @if (node.RetryOnFail) { <i class="bi bi-arrow-repeat node-policy" title="Retries enabled"></i> }
@@ -451,6 +459,40 @@ else
         if (!Guid.TryParse(nodeId, out var id)) return;
         try { await WorkflowService.MoveNodeAsync(WorkflowId, id, x, y); await Reload(); await InvokeAsync(StateHasChanged); }
         catch (Exception ex) { Fail(ex, "Unable to save node position."); }
+    }
+
+    // Called when a wire dragged between two ports is released on a valid target. The canvas
+    // already rejects the obvious cases mid-drag (output-to-output, self-connection) so the
+    // gesture shows its own validity; these checks are the authority rather than the feedback,
+    // because the canvas can be stale by the time the drop lands.
+    [JSInvokable]
+    public async Task ConnectPorts(string sourceNodeId, string sourceOutput, string targetNodeId, string targetInput)
+    {
+        if (!Guid.TryParse(sourceNodeId, out var source) || !Guid.TryParse(targetNodeId, out var target)) return;
+        if (source == target) return;
+        if (_view is null) return;
+
+        // Re-adding an edge that already exists would create a duplicate the executor would then
+        // traverse twice, running the whole downstream branch twice per item.
+        var alreadyConnected = _view.Connections.Any(c =>
+            c.SourceNodeId == source && c.TargetNodeId == target
+            && string.Equals(c.SourceOutput, sourceOutput, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(c.TargetInput, targetInput, StringComparison.OrdinalIgnoreCase));
+        if (alreadyConnected)
+        {
+            Show("Those ports are already connected.", true);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        try
+        {
+            await WorkflowService.AddConnectionAsync(WorkflowId, source, sourceOutput, target, targetInput);
+            await Reload();
+            _message = $"Connected {NodeName(source)} to {NodeName(target)}.";
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) { Fail(ex, "Unable to connect those nodes."); }
     }
 
     private void SelectNode(Guid id)
