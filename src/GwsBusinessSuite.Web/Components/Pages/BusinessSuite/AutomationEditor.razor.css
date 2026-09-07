@@ -190,3 +190,10 @@
    pointerdown - also suppresses the browser's follow-up click, which the canvas relies on to
    clear selection, so the suppression is done here instead. */
 .automation-canvas-viewport.is-marqueeing { -webkit-user-select: none; user-select: none; }
+
+/* Save state, reported not requested - deliberately quiet so it is findable when looked for and
+   ignorable otherwise. */
+.editor-save-state {
+	font-size: .74rem; color: var(--gws-text-soft); white-space: nowrap;
+	min-width: 6.5rem; text-align: right; align-self: center;
+}

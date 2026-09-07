@@ -58,6 +58,9 @@ else
                     <button class="btn btn-sm btn-outline-secondary" title="Copy selected (Ctrl+C)" disabled="@(_busy || SelectedNodeIds.Count == 0)" @onclick="CopySelection"><i class="bi bi-clipboard"></i></button>
                     <button class="btn btn-sm btn-outline-secondary" title="Paste (Ctrl+V)" disabled="@(_busy || _clipboardNodes.Count == 0)" @onclick="PasteClipboardAsync"><i class="bi bi-clipboard-check"></i></button>
                 </div>
+                @* Edits still persist immediately, so this reports state rather than offering a
+                   Save button that would imply they do not. *@
+                <span class="editor-save-state">@SaveStateText</span>
                 <button class="btn btn-sm btn-outline-primary" @onclick="Publish" disabled="@_busy"><i class="bi bi-cloud-arrow-up me-1"></i>Publish</button>
                 <button class="btn btn-sm @(_view.Status == AutomationWorkflowStatuses.Active ? "btn-success" : "btn-outline-success")" @onclick="ToggleActive" disabled="@(_busy || _view.CurrentVersion == 0)">
                     <i class="bi @(_view.Status == AutomationWorkflowStatuses.Active ? "bi-toggle-on" : "bi-toggle-off") me-1"></i>@(_view.Status == AutomationWorkflowStatuses.Active ? "Active" : "Inactive")
@@ -145,7 +148,7 @@ else
                     {
                         var definition = NodeRegistry.Find(node.TypeKey, node.TypeVersion);
                         <article class="automation-node @(node.Id == _selectedNodeId ? "is-selected" : "") @(_multiSelectedNodeIds.Contains(node.Id) ? "is-multi-selected" : "") @(node.IsDisabled ? "is-disabled" : "")"
-                                 data-automation-node="@node.Id" style="left:@(node.PositionX)px; top:@(node.PositionY)px"
+                                 data-automation-node="@node.Id" style="left:@(NodePosition(node).X.ToString(CultureInfo.InvariantCulture))px; top:@(NodePosition(node).Y.ToString(CultureInfo.InvariantCulture))px"
                                  @onclick="e => SelectNode(node.Id, e)" @onclick:stopPropagation="true">
                             @* data-port carries everything the canvas script needs to start and
                                land a wire. Before this the ports rendered but nothing read them,
@@ -180,7 +183,7 @@ else
                         @foreach (var node in _view.Nodes)
                         {
                             <span class="automation-minimap-dot @(node.Id == _selectedNodeId || _multiSelectedNodeIds.Contains(node.Id) ? "is-selected" : "")"
-                                  style="left:@(MinimapPercent(node.PositionX, horizontal: true))%; top:@(MinimapPercent(node.PositionY, horizontal: false))%"></span>
+                                  style="left:@(MinimapPercent(NodePosition(node).X, horizontal: true))%; top:@(MinimapPercent(NodePosition(node).Y, horizontal: false))%"></span>
                         }
                     </div>
                 }
@@ -488,7 +491,7 @@ else
         }
         _definitions = NodeRegistry.ListDefinitions();
         _credentials = await CredentialService.ListAsync();
-        await Reload();
+        await ReloadAsync(includeAccess: true);
     }
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -498,15 +501,24 @@ else
         await _module.InvokeVoidAsync("initialize", _canvas, _dotNetRef);
     }
 
-    private async Task Reload()
+    // Sharing and permissions were refetched on every graph edit - a second round trip per
+    // gesture for data that only changes when someone actually edits sharing. They are loaded
+    // once and refreshed by the handful of operations that can change them.
+    private Task Reload() => ReloadAsync(includeAccess: false);
+
+    private async Task ReloadAsync(bool includeAccess)
     {
         try
         {
             _view = await WorkflowService.GetAsync(WorkflowId);
+            _movedPositions.Clear();
             if (_view is not null) { _name = _view.Name; _description = _view.Description; _tags = _view.TagsCsv; _allowDownstreamTriggers = _view.AllowDownstreamAutomationTriggers; }
-            var access = await AccessService.GetAccessAsync(WorkflowId, isDatabase: false);
-            _publicShares = access.Shares.ToList();
-            _workflowPermissions = access.Permissions.ToList();
+            if (includeAccess)
+            {
+                var access = await AccessService.GetAccessAsync(WorkflowId, isDatabase: false);
+                _publicShares = access.Shares.ToList();
+                _workflowPermissions = access.Permissions.ToList();
+            }
         }
         catch (Exception ex) { Fail(ex, "Unable to open workflow."); }
         finally { _loading = false; }
@@ -516,7 +528,18 @@ else
     public async Task UpdateNodePosition(string nodeId, double x, double y)
     {
         if (!Guid.TryParse(nodeId, out var id)) return;
-        try { await WorkflowService.MoveNodeAsync(WorkflowId, id, x, y); await Reload(); await InvokeAsync(StateHasChanged); }
+        try
+        {
+            await WorkflowService.MoveNodeAsync(WorkflowId, id, x, y);
+            // No reload: the canvas already moved the node, so refetching the graph would
+            // re-render it in exactly the place it is already in. The in-memory view is patched
+            // instead so later reads (fit-to-content, the minimap, connection geometry) agree
+            // with what is on screen. AutomationNodeView is an init-only record, so the node is
+            // replaced rather than mutated.
+            _movedPositions[id] = (x, y);
+            MarkSaved();
+            await InvokeAsync(StateHasChanged);
+        }
         catch (Exception ex) { Fail(ex, "Unable to save node position."); }
     }
 
@@ -596,10 +619,12 @@ else
         var target = _view?.Nodes.FirstOrDefault(node => node.Id == connection.TargetNodeId);
         if (source is null || target is null) return (0, 0);
 
-        var sx = source.PositionX + 196;
-        var sy = source.PositionY + (connection.SourceOutput == "true" ? 38 : connection.SourceOutput == "false" ? 72 : 55);
-        var tx = target.PositionX;
-        var ty = target.PositionY + 55;
+        var (sourceX, sourceY) = NodePosition(source);
+        var (targetX, targetY) = NodePosition(target);
+        var sx = sourceX + 196;
+        var sy = sourceY + (connection.SourceOutput == "true" ? 38 : connection.SourceOutput == "false" ? 72 : 55);
+        var tx = targetX;
+        var ty = targetY + 55;
         var bend = Math.Max(70, Math.Abs(tx - sx) * .45);
         var x = (sx + 3 * (sx + bend) + 3 * (tx - bend) + tx) / 8d;
         var y = (sy + 3 * sy + 3 * ty + ty) / 8d;
@@ -618,10 +643,11 @@ else
         // top of it and swallow pointer-downs meant to start a new connection from that port -
         // which is how a port with an existing connection became un-draggable.
         const double offset = 22;
+        var (sourceX, sourceY) = NodePosition(source); var (targetX, targetY) = NodePosition(target);
         return sourceEnd
-            ? (source.PositionX + 196 - 7 + offset,
-               source.PositionY + (connection.SourceOutput == "true" ? 38 : connection.SourceOutput == "false" ? 72 : 55) - 7)
-            : (target.PositionX - 7 - offset, target.PositionY + 55 - 7);
+            ? (sourceX + 196 - 7 + offset,
+               sourceY + (connection.SourceOutput == "true" ? 38 : connection.SourceOutput == "false" ? 72 : 55) - 7)
+            : (targetX - 7 - offset, targetY + 55 - 7);
     }
 
     // Moving one end of an existing connection to a different port. The canvas anchors the drag
@@ -949,7 +975,7 @@ else
             var created = await WorkflowService.SaveNodeAsync(WorkflowId, new AutomationNodeEditor
             {
                 Name = UniqueNodeName(node.Name), TypeKey = editor.TypeKey, TypeVersion = editor.TypeVersion,
-                PositionX = Math.Clamp(node.PositionX + 40, 0, 5000), PositionY = Math.Clamp(node.PositionY + 40, 0, 5000),
+                PositionX = Math.Clamp(NodePosition(node).X + 40, 0, 5000), PositionY = Math.Clamp(NodePosition(node).Y + 40, 0, 5000),
                 ParametersJson = editor.ParametersJson, CredentialId = editor.CredentialId, IsDisabled = editor.IsDisabled,
                 ContinueOnFail = editor.ContinueOnFail, RetryOnFail = editor.RetryOnFail, MaxTries = editor.MaxTries,
                 WaitBetweenTriesMs = editor.WaitBetweenTriesMs, TimeoutMs = editor.TimeoutMs, Notes = editor.Notes
@@ -979,10 +1005,10 @@ else
         return suffix == 2 && _view.Nodes.All(node => node.Name != $"{baseName} copy") ? $"{baseName} copy" : $"{baseName} copy {suffix}";
     }
 
-    private static AutomationNodeEditor EditorFrom(AutomationNodeView node) => new()
+    private AutomationNodeEditor EditorFrom(AutomationNodeView node) => new()
     {
         Name = node.Name, TypeKey = node.TypeKey, TypeVersion = node.TypeVersion,
-        PositionX = node.PositionX, PositionY = node.PositionY, ParametersJson = node.ParametersJson,
+        PositionX = NodePosition(node).X, PositionY = NodePosition(node).Y, ParametersJson = node.ParametersJson,
         CredentialId = node.CredentialId, IsDisabled = node.IsDisabled, ContinueOnFail = node.ContinueOnFail,
         RetryOnFail = node.RetryOnFail, MaxTries = node.MaxTries, WaitBetweenTriesMs = node.WaitBetweenTriesMs,
         TimeoutMs = node.TimeoutMs, Notes = node.Notes
@@ -1064,7 +1090,7 @@ else
         _newPublicShareUrl = Navigation.ToAbsoluteUri($"/sentinel/share/{share.PublicToken}").ToString();
         _shareExpiresAt = null;
         _sharePassword = "";
-        await Reload();
+        await ReloadAsync(includeAccess: true);
         _message = "Public status link created.";
     });
     private async Task RevokePublicShare(Guid shareId) => await Work(async () =>
@@ -1088,7 +1114,7 @@ else
     private async Task RevokeWorkflowAccess(Guid permissionId) => await Work(async () =>
     {
         await AccessService.RemovePermissionAsync(permissionId, _username);
-        await Reload();
+        await ReloadAsync(includeAccess: true);
         _message = "Access removed.";
     });
     private async Task LoadExecution(Guid id) => await Work(async () => { _latestExecution = await WorkflowService.GetExecutionAsync(id); _bottomTab = "runs"; });
@@ -1144,10 +1170,28 @@ else
     private async Task Work(Func<Task> action)
     {
         _busy = true; _message = ""; _messageIsError = false;
-        try { await action(); }
+        try { await action(); MarkSaved(); }
         catch (Exception ex) { Fail(ex, ex.Message); }
         finally { _busy = false; }
     }
+    // Positions of nodes moved since the last graph fetch. AutomationWorkflowView is a class
+    // with init-only members, so the fetched view cannot be patched in place - and it must not
+    // simply be left stale, because the node's own style and every connection path render from
+    // it. Without this overlay a re-render would snap a dragged node back to where the server
+    // last said it was. Cleared whenever the graph is refetched.
+    private readonly Dictionary<Guid, (double X, double Y)> _movedPositions = [];
+
+    private (double X, double Y) NodePosition(AutomationNodeView node) =>
+        _movedPositions.TryGetValue(node.Id, out var moved) ? moved : (node.PositionX, node.PositionY);
+
+    // Reported rather than requested: every edit here still persists immediately, so the header
+    // says what happened instead of offering a Save button that would imply otherwise.
+    private DateTimeOffset? _lastSavedAt;
+    private void MarkSaved() => _lastSavedAt = DateTimeOffset.Now;
+    private string SaveStateText => _busy
+        ? "Saving…"
+        : _lastSavedAt is { } at ? $"Saved {at.ToLocalTime():h:mm tt}" : string.Empty;
+
     private void Show(string message, bool error = false) { _message = message; _messageIsError = error; }
     private void Fail(Exception ex, string message) { Logger.LogError(ex, "Workflow editor operation failed for {WorkflowId}.", WorkflowId); Show(message, true); }
     private string NodeName(Guid id) => _view?.Nodes.FirstOrDefault(node => node.Id == id)?.Name ?? "Missing node";
@@ -1155,7 +1199,8 @@ else
     {
         var source = _view?.Nodes.FirstOrDefault(node => node.Id == connection.SourceNodeId); var target = _view?.Nodes.FirstOrDefault(node => node.Id == connection.TargetNodeId);
         if (source is null || target is null) return "";
-        var sx = source.PositionX + 196; var sy = source.PositionY + (connection.SourceOutput == "true" ? 38 : connection.SourceOutput == "false" ? 72 : 55); var tx = target.PositionX; var ty = target.PositionY + 55; var bend = Math.Max(70, Math.Abs(tx - sx) * .45);
+        var (sourceX, sourceY) = NodePosition(source); var (targetX, targetY) = NodePosition(target);
+        var sx = sourceX + 196; var sy = sourceY + (connection.SourceOutput == "true" ? 38 : connection.SourceOutput == "false" ? 72 : 55); var tx = targetX; var ty = targetY + 55; var bend = Math.Max(70, Math.Abs(tx - sx) * .45);
         return $"M {sx} {sy} C {sx + bend} {sy}, {tx - bend} {ty}, {tx} {ty}";
     }
     // Scaled to the graph's own extent rather than the old fixed 2200x1250 clamp. Now that
@@ -1165,8 +1210,8 @@ else
     {
         if (_view is null || _view.Nodes.Count == 0) return "0";
         var max = horizontal
-            ? Math.Max(2200, _view.Nodes.Max(node => node.PositionX) + 200)
-            : Math.Max(1250, _view.Nodes.Max(node => node.PositionY) + 120);
+            ? Math.Max(2200, _view.Nodes.Max(node => NodePosition(node).X) + 200)
+            : Math.Max(1250, _view.Nodes.Max(node => NodePosition(node).Y) + 120);
         var percent = Math.Clamp(value / max * 100, 0, 100);
         return percent.ToString("0.##", CultureInfo.InvariantCulture);
     }
