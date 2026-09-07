@@ -167,14 +167,20 @@ else
                         </article>
                     }
                 </div>
-                <div class="canvas-help"><i class="bi bi-arrows-move me-1"></i>Drag nodes to arrange · click to select · Ctrl/Shift+click to multi-select · Ctrl+C/V to copy/paste · Ctrl+Z/Y to undo/redo</div>
+                <div class="canvas-view-controls" role="group" aria-label="Canvas view">
+                    <button type="button" title="Zoom out" aria-label="Zoom out" @onclick="ZoomOutAsync"><i class="bi bi-dash-lg"></i></button>
+                    <button type="button" title="Fit workflow to view" aria-label="Fit workflow to view" @onclick="FitToContentAsync"><i class="bi bi-arrows-angle-contract"></i></button>
+                    <button type="button" title="Reset to 100%" aria-label="Reset zoom to 100 percent" @onclick="ResetViewAsync"><i class="bi bi-aspect-ratio"></i></button>
+                    <button type="button" title="Zoom in" aria-label="Zoom in" @onclick="ZoomInAsync"><i class="bi bi-plus-lg"></i></button>
+                </div>
+                <div class="canvas-help"><i class="bi bi-arrows-move me-1"></i>Drag to select · Space or middle-drag to pan · scroll to zoom · Ctrl/Shift+click to multi-select · Ctrl+C/V copy · Ctrl+Z/Y undo</div>
                 @if (_view.Nodes.Count > 0)
                 {
                     <div class="automation-minimap" aria-hidden="true" title="Workflow overview">
                         @foreach (var node in _view.Nodes)
                         {
                             <span class="automation-minimap-dot @(node.Id == _selectedNodeId || _multiSelectedNodeIds.Contains(node.Id) ? "is-selected" : "")"
-                                  style="left:@(node.PositionX / 2200 * 100)%; top:@(node.PositionY / 1250 * 100)%"></span>
+                                  style="left:@(MinimapPercent(node.PositionX, horizontal: true))%; top:@(MinimapPercent(node.PositionY, horizontal: false))%"></span>
                         }
                     </div>
                 }
@@ -671,6 +677,36 @@ else
 
     // A node dragged from the palette onto the canvas. Landing where the pointer released is the
     // whole point - the click-to-add path puts nodes at a cycling position where they pile up.
+    // Rubber-band selection result. Additive when a modifier was held during the drag, matching
+    // how Ctrl/Shift+click already extends the selection here.
+    [JSInvokable]
+    public async Task SelectNodesInRegion(string[] nodeIds, bool additive)
+    {
+        if (!additive) _multiSelectedNodeIds.Clear();
+        foreach (var raw in nodeIds)
+        {
+            if (Guid.TryParse(raw, out var id)) _multiSelectedNodeIds.Add(id);
+        }
+
+        // A marquee selects a set, so the single-node inspector selection is cleared - leaving
+        // both would make Delete and the inspector disagree about what is selected.
+        _selectedNodeId = null;
+        _selectedConnectionId = null;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ZoomInAsync() => await InvokeModuleAsync("zoomIn");
+    private async Task ZoomOutAsync() => await InvokeModuleAsync("zoomOut");
+    private async Task FitToContentAsync() => await InvokeModuleAsync("fitToContent");
+    private async Task ResetViewAsync() => await InvokeModuleAsync("resetView");
+
+    private async Task InvokeModuleAsync(string function)
+    {
+        if (_module is null) return;
+        try { await _module.InvokeVoidAsync(function, _canvas); }
+        catch (JSDisconnectedException) { }
+    }
+
     [JSInvokable]
     public async Task AddNodeAt(string typeKey, int typeVersion, double x, double y)
     {
@@ -1122,6 +1158,19 @@ else
         var sx = source.PositionX + 196; var sy = source.PositionY + (connection.SourceOutput == "true" ? 38 : connection.SourceOutput == "false" ? 72 : 55); var tx = target.PositionX; var ty = target.PositionY + 55; var bend = Math.Max(70, Math.Abs(tx - sx) * .45);
         return $"M {sx} {sy} C {sx + bend} {sy}, {tx - bend} {ty}, {tx} {ty}";
     }
+    // Scaled to the graph's own extent rather than the old fixed 2200x1250 clamp. Now that
+    // panning has removed that clamp, a node beyond it would have put its dot outside the
+    // minimap entirely.
+    private string MinimapPercent(double value, bool horizontal)
+    {
+        if (_view is null || _view.Nodes.Count == 0) return "0";
+        var max = horizontal
+            ? Math.Max(2200, _view.Nodes.Max(node => node.PositionX) + 200)
+            : Math.Max(1250, _view.Nodes.Max(node => node.PositionY) + 120);
+        var percent = Math.Clamp(value / max * 100, 0, 100);
+        return percent.ToString("0.##", CultureInfo.InvariantCulture);
+    }
+
     private static string ConnectionClass(string output) => output == "true" ? "is-true" : output == "false" ? "is-false" : "";
     private static string FormatDate(DateTimeOffset? value) => value?.ToLocalTime().ToString("MMM d, h:mm:ss tt") ?? "—";
     private static string Duration(DateTimeOffset? start, DateTimeOffset? end) => start is null || end is null ? "—" : $"{(end.Value - start.Value).TotalMilliseconds:N0} ms";

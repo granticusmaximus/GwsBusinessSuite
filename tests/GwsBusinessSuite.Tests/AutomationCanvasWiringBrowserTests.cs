@@ -19,7 +19,8 @@ public sealed class AutomationCanvasWiringBrowserTests(PlaywrightBrowserFixture 
 
     private static string Canvas() => $$"""
         <!doctype html><html><head><style>
-          .automation-canvas { position:relative; width:900px; height:400px; }
+          .automation-canvas-viewport { position:relative; width:900px; height:400px; overflow:hidden; }
+          .automation-canvas { position:relative; width:900px; height:400px; transform-origin:0 0; }
           .automation-palette { position:absolute; right:0; top:0; width:160px; }
           .palette-node { display:block; width:150px; height:40px; }
           .automation-connections { position:absolute; inset:0; }
@@ -34,6 +35,7 @@ public sealed class AutomationCanvasWiringBrowserTests(PlaywrightBrowserFixture 
           <button type="button" class="palette-node"
                   data-palette-node="core.httpRequest" data-palette-version="1" data-palette-label="HTTP Request">HTTP Request</button>
         </aside>
+        <div class="automation-canvas-viewport" id="viewport">
         <div class="automation-canvas" id="canvas">
           <svg class="automation-connections" width="900" height="400"></svg>
           <article class="automation-node" data-automation-node="{{NodeA}}" style="left:60px; top:60px">
@@ -56,7 +58,7 @@ public sealed class AutomationCanvasWiringBrowserTests(PlaywrightBrowserFixture 
             <div class="node-output node-output-main" data-port="output" data-port-node="{{NodeC}}" data-port-name="main"></div>
             <div class="node-input" data-port="input" data-port-node="{{NodeC}}" data-port-name="main"></div>
           </article>
-        </div></body></html>
+        </div></div></body></html>
         """;
 
     private async Task<IPage> OpenAsync()
@@ -70,7 +72,7 @@ public sealed class AutomationCanvasWiringBrowserTests(PlaywrightBrowserFixture 
 
         // Stand in for the Blazor circuit and record what the module invokes.
         var module = await File.ReadAllTextAsync(ScriptPath);
-        await page.AddScriptTagAsync(new() { Type = "module", Content = module + "\nwindow.gwsCanvas = { initialize, dispose };" });
+        await page.AddScriptTagAsync(new() { Type = "module", Content = module + "\nwindow.gwsCanvas = { initialize, dispose, zoomIn, zoomOut, resetView, fitToContent };" });
         await page.WaitForFunctionAsync("() => Boolean(window.gwsCanvas)");
         await page.EvaluateAsync("""
             () => {
@@ -354,6 +356,116 @@ public sealed class AutomationCanvasWiringBrowserTests(PlaywrightBrowserFixture 
         var calls = await page.EvaluateAsync<int>(
             "() => window.__calls.filter(c => c.name === 'BeginConnectedInsert').length");
         calls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DraggingOnEmptyCanvas_ShouldRubberBandSelectTheNodesItCovers()
+    {
+        await using var page = await OpenAsync();
+        var v = await (await page.QuerySelectorAsync("#viewport"))!.BoundingBoxAsync();
+
+        // A band across both nodes' rows but starting in empty space below them.
+        await page.Mouse.MoveAsync(v!.X + 20, v.Y + 40);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(v.X + 800, v.Y + 200, new() { Steps = 10 });
+        await page.Mouse.UpAsync();
+
+        var calls = await page.EvaluateAsync<string[]>(
+            "() => window.__calls.filter(c => c.name === 'SelectNodesInRegion').map(c => c.args[0].slice().sort().join(','))");
+        calls.Should().ContainSingle();
+        calls[0].Should().Contain(NodeA).And.Contain(NodeB);
+    }
+
+    [Fact]
+    public async Task AMarqueeThatSelectsNothing_ShouldStillNotThrow()
+    {
+        await using var page = await OpenAsync();
+        var v = await (await page.QuerySelectorAsync("#viewport"))!.BoundingBoxAsync();
+
+        // Well below both nodes.
+        await page.Mouse.MoveAsync(v!.X + 40, v.Y + 330);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(v.X + 300, v.Y + 380, new() { Steps = 6 });
+        await page.Mouse.UpAsync();
+
+        var ids = await page.EvaluateAsync<int>(
+            "() => { const c = window.__calls.filter(x => x.name === 'SelectNodesInRegion'); return c.length ? c[0].args[0].length : -1; }");
+        ids.Should().Be(0, "an empty band clears the selection rather than doing nothing");
+    }
+
+    [Fact]
+    public async Task ScrollingTheCanvas_ShouldZoomIt()
+    {
+        await using var page = await OpenAsync();
+        var v = await (await page.QuerySelectorAsync("#viewport"))!.BoundingBoxAsync();
+
+        await page.Mouse.MoveAsync(v!.X + 400, v.Y + 200);
+        await page.Mouse.WheelAsync(0, -240);
+
+        var zoom = await page.EvaluateAsync<double>(
+            "() => parseFloat(document.getElementById('canvas').dataset.zoom)");
+        zoom.Should().BeGreaterThan(1.0, "scrolling up zooms in");
+    }
+
+    [Fact]
+    public async Task ConnectingWhileZoomed_ShouldStillHitTheRightPorts()
+    {
+        // The whole reason coordinates go through one conversion: at any zoom other than 1, an
+        // offset-based calculation lands the wire somewhere else entirely.
+        await using var page = await OpenAsync();
+        await page.EvaluateAsync("() => window.gwsCanvas.zoomOut(document.getElementById('canvas'))");
+        await page.EvaluateAsync("() => window.gwsCanvas.zoomOut(document.getElementById('canvas'))");
+
+        await DragAsync(page,
+            $"[data-port-node='{NodeA}'][data-port='output']",
+            $"[data-port-node='{NodeB}'][data-port='input']");
+
+        var calls = await page.EvaluateAsync<string[]>(
+            "() => window.__calls.filter(c => c.name === 'ConnectPorts').map(c => c.args.join('|'))");
+        calls.Should().ContainSingle().Which.Should().Be($"{NodeA}|main|{NodeB}|main");
+    }
+
+    [Fact]
+    public async Task DraggingANodeWhileZoomed_ShouldTrackThePointer()
+    {
+        // A node dragged at 0.7 zoom must follow the cursor, not lag or overshoot by the scale
+        // factor - the classic symptom of mixing screen and canvas space.
+        await using var page = await OpenAsync();
+        await page.EvaluateAsync("() => window.gwsCanvas.zoomOut(document.getElementById('canvas'))");
+
+        var box = await (await page.QuerySelectorAsync($"[data-automation-node='{NodeA}']"))!.BoundingBoxAsync();
+        var startLeft = await page.EvaluateAsync<double>(
+            $"() => parseFloat(document.querySelector(\"[data-automation-node='{NodeA}']\").style.left)");
+
+        await page.Mouse.MoveAsync(box!.X + box.Width / 2, box.Y + box.Height / 2);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(box.X + box.Width / 2 + 120, box.Y + box.Height / 2, new() { Steps = 10 });
+        await page.Mouse.UpAsync();
+
+        var zoom = await page.EvaluateAsync<double>("() => parseFloat(document.getElementById('canvas').dataset.zoom)");
+        var endLeft = await page.EvaluateAsync<double>(
+            $"() => parseFloat(document.querySelector(\"[data-automation-node='{NodeA}']\").style.left)");
+
+        // 120 screen px at this zoom is 120/zoom canvas px.
+        (endLeft - startLeft).Should().BeApproximately(120 / zoom, 4);
+    }
+
+    [Fact]
+    public async Task FitToContent_ShouldBringEveryNodeIntoView()
+    {
+        await using var page = await OpenAsync();
+        await page.EvaluateAsync("() => window.gwsCanvas.fitToContent(document.getElementById('canvas'))");
+
+        var visible = await page.EvaluateAsync<bool>("""
+            () => {
+              const v = document.getElementById('viewport').getBoundingClientRect();
+              return [...document.querySelectorAll('[data-automation-node]')].every(el => {
+                const r = el.getBoundingClientRect();
+                return r.left >= v.left - 1 && r.right <= v.right + 1 && r.top >= v.top - 1 && r.bottom <= v.bottom + 1;
+              });
+            }
+            """);
+        visible.Should().BeTrue("fit has to actually fit every node inside the viewport");
     }
 
     [Fact]

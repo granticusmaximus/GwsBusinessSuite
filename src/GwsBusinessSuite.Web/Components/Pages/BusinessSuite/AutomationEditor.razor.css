@@ -22,8 +22,14 @@
 .palette-node strong,.palette-node small { display:block; }
 .palette-node strong { font-size:.82rem; }
 .palette-node small { max-width:145px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--gws-text-soft); font-size:.69rem; }
-.automation-canvas-viewport { position:relative; overflow:auto; background-color:var(--gws-body-bg); background-image:radial-gradient(#3a3532 1px,transparent 1px); background-size:20px 20px; }
-.automation-canvas { position:relative; width:2400px; height:1400px; }
+/* overflow:hidden, not auto - panning is a transform now. Scrolling and transforming together
+   makes every coordinate ambiguous about which space it is in, and scrolling cannot zoom. */
+.automation-canvas-viewport { position:relative; overflow:hidden; background-color:var(--gws-body-bg); background-image:radial-gradient(#3a3532 1px,transparent 1px); background-size:20px 20px; touch-action:none; }
+.automation-canvas-viewport.is-pannable { cursor:grab; }
+.automation-canvas-viewport.is-panning { cursor:grabbing; }
+/* Still generous, but no longer a hard boundary: node positions are not clamped to it any more,
+   and panning means content beyond it is reachable rather than lost. */
+.automation-canvas { position:relative; width:2400px; height:1400px; transform-origin:0 0; }
 /* The layer used to be pointer-events:none, which made every connection permanently
    unclickable. It now receives events; the visible line opts out individually so only the wide
    invisible hit-stroke underneath it catches the pointer. */
@@ -156,3 +162,26 @@
 
 /* A dashed edge while a node is being carried, so the canvas reads as a live drop target. */
 .automation-canvas.is-drop-ready { outline: 2px dashed rgba(129, 140, 248, .45); outline-offset: -6px; }
+
+/* ── Pan, zoom, marquee ───────────────────────────────────────────────────── */
+
+.canvas-marquee {
+	position: absolute; z-index: 5; pointer-events: none;
+	border: 1px solid #818cf8; background: rgba(129, 140, 248, .12); border-radius: 2px;
+}
+
+.canvas-view-controls {
+	position: absolute; right: .75rem; bottom: 2.6rem; z-index: 6;
+	display: flex; gap: 2px; padding: 3px; border-radius: .5rem;
+	background: var(--gws-panel-bg-2); border: 1px solid var(--gws-panel-border);
+	box-shadow: var(--gws-shadow-md);
+}
+
+.canvas-view-controls button {
+	appearance: none; border: 0; background: transparent; color: var(--gws-text-soft);
+	width: 26px; height: 26px; border-radius: .35rem; cursor: pointer;
+	display: flex; align-items: center; justify-content: center; font-size: .8rem;
+}
+
+.canvas-view-controls button:hover { background: rgba(129, 140, 248, .22); color: var(--gws-text-strong); }
+.canvas-view-controls button:focus-visible { outline: 2px solid #818cf8; outline-offset: 1px; }
