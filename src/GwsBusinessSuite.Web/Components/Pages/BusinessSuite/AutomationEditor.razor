@@ -80,7 +80,11 @@ else
                     <div class="palette-category">@group.Key</div>
                     @foreach (var definition in group)
                     {
-                        <button type="button" class="palette-node" @onclick="() => AddNode(definition)" title="@definition.Description">
+                        @* Click still adds (and is the keyboard path); the data attributes let the
+                           canvas script drag the same entry to a chosen point instead. *@
+                        <button type="button" class="palette-node" @onclick="() => AddNode(definition)" title="@definition.Description"
+                                data-palette-node="@definition.TypeKey" data-palette-version="@definition.Version"
+                                data-palette-label="@definition.DisplayName">
                             <span class="palette-node-icon"><i class="bi @definition.IconClass"></i></span>
                             <span><strong>@definition.DisplayName</strong><small>@definition.Description</small></span>
                         </button>
@@ -409,6 +413,9 @@ else
     // because a splice in progress must survive the selection changing underneath it.
     private Guid? _selectedConnectionId;
     private Guid? _spliceConnectionId;
+    // Set when a wire is released in empty canvas: the next node chosen from the palette is
+    // created already wired to this port, which is n8n's fastest way to extend a flow.
+    private (Guid NodeId, string Output, double X, double Y)? _pendingConnect;
     private string _connectionOutput = "main", _connectionTargetInput = "main";
     private bool _showSaveTemplate;
     private string _templateName = "", _templateDescription = "";
@@ -563,7 +570,7 @@ else
         _multiSelectedNodeIds.Clear();
         SelectNode(id);
     }
-    private void ClearSelection() { _selectedNodeId = null; _multiSelectedNodeIds.Clear(); _selectedConnectionId = null; _spliceConnectionId = null; }
+    private void ClearSelection() { _selectedNodeId = null; _multiSelectedNodeIds.Clear(); _selectedConnectionId = null; _spliceConnectionId = null; _pendingConnect = null; }
 
     private void SelectConnection(Guid connectionId)
     {
@@ -662,6 +669,30 @@ else
         catch (Exception ex) { Fail(ex, "Unable to rewire that connection."); }
     }
 
+    // A node dragged from the palette onto the canvas. Landing where the pointer released is the
+    // whole point - the click-to-add path puts nodes at a cycling position where they pile up.
+    [JSInvokable]
+    public async Task AddNodeAt(string typeKey, int typeVersion, double x, double y)
+    {
+        var definition = NodeRegistry.Find(typeKey, typeVersion);
+        if (definition is null || _view is null) return;
+        await AddNodeCoreAsync(definition, x, y);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // A wire released over empty canvas. Rather than discarding the gesture, remember where it
+    // ended and let the next palette pick land there already connected.
+    [JSInvokable]
+    public async Task BeginConnectedInsert(string sourceNodeId, string sourceOutput, double x, double y)
+    {
+        if (!Guid.TryParse(sourceNodeId, out var source) || _view is null) return;
+        _pendingConnect = (source, sourceOutput, x, y);
+        _spliceConnectionId = null;
+        _selectedConnectionId = null;
+        Show($"Pick a node to connect to {NodeName(source)}.");
+        await InvokeAsync(StateHasChanged);
+    }
+
     private void BeginSplice(Guid connectionId)
     {
         _spliceConnectionId = connectionId;
@@ -696,26 +727,46 @@ else
         catch (Exception ex) { Fail(ex, "Unable to load version history."); }
     }
 
-    private async Task AddNode(AutomationNodeDefinition definition) => await Work(async () =>
+    private async Task AddNode(AutomationNodeDefinition definition) =>
+        await Work(() => AddNodeCoreAsync(definition, null, null));
+
+    // The one place a node gets created, shared by all four routes in: clicking the palette,
+    // dragging from the palette to a point, splicing into a wire, and releasing a wire in empty
+    // space. Keeping them together is what stops the wiring rules drifting between them.
+    private async Task AddNodeCoreAsync(AutomationNodeDefinition definition, double? dropX, double? dropY)
     {
         var count = _view!.Nodes.Count(node => node.TypeKey == definition.TypeKey) + 1;
         var name = count == 1 ? definition.DisplayName : $"{definition.DisplayName} {count}";
 
-        // Splicing: drop the new node onto the wire the user clicked "+" on, so it lands between
-        // those two nodes rather than in the corner needing to be wired up by hand.
         var splice = _spliceConnectionId is { } spliceId
             ? _view.Connections.FirstOrDefault(c => c.Id == spliceId)
             : null;
+        var pending = _pendingConnect;
 
         double x, y;
         if (splice is not null)
         {
+            // Centre the 196px-wide node on the wire it is being inserted into.
             var midpoint = ConnectionMidpoint(splice);
-            x = Math.Max(0, midpoint.X - 98);   // centre the 196px-wide node on the wire
+            x = Math.Max(0, midpoint.X - 98);
             y = Math.Max(0, midpoint.Y - 55);
+        }
+        else if (dropX is { } dx && dropY is { } dy)
+        {
+            x = Math.Max(0, dx);
+            y = Math.Max(0, dy);
+        }
+        else if (pending is { } p)
+        {
+            // Where the wire was let go, less half the node, so it lands under the cursor rather
+            // than starting at it.
+            x = Math.Max(0, p.X - 98);
+            y = Math.Max(0, p.Y - 55);
         }
         else
         {
+            // Click-to-add has no point to work from, so it cycles - which is why nodes pile up
+            // and why dragging from the palette exists.
             x = 360 + ((_view.Nodes.Count * 35) % 500);
             y = 160 + ((_view.Nodes.Count * 55) % 500);
         }
@@ -726,23 +777,40 @@ else
             PositionX = x, PositionY = y, ParametersJson = definition.DefaultParametersJson
         });
 
+        var outcome = $"Added {node.Name}.";
+
         if (splice is not null)
         {
-            // Rewire before dropping the original, so a failure part-way leaves the graph with a
+            // Both new edges before dropping the original, so a failure part-way leaves a
             // duplicate path rather than a severed one - the recoverable direction to fail in.
             await WorkflowService.AddConnectionAsync(WorkflowId, splice.SourceNodeId, splice.SourceOutput, node.Id, "main");
             await WorkflowService.AddConnectionAsync(WorkflowId, node.Id, "main", splice.TargetNodeId, splice.TargetInput);
             await WorkflowService.DeleteConnectionAsync(WorkflowId, splice.Id);
-            _spliceConnectionId = null;
-            _selectedConnectionId = null;
+            outcome = $"Inserted {node.Name} into the connection.";
         }
+        else if (pending is { } connect)
+        {
+            // A trigger has no input, so wiring into one would fail - the node still gets created
+            // where it was dropped, which is the useful half of the gesture.
+            if (definition.IsTrigger)
+            {
+                outcome = $"Added {node.Name}. Triggers have no input, so it was not connected.";
+            }
+            else
+            {
+                await WorkflowService.AddConnectionAsync(WorkflowId, connect.NodeId, connect.Output, node.Id, "main");
+                outcome = $"Added {node.Name}, connected from {NodeName(connect.NodeId)}.";
+            }
+        }
+
+        _spliceConnectionId = null;
+        _selectedConnectionId = null;
+        _pendingConnect = null;
 
         await Reload();
         SelectNode(node.Id);
-        _message = splice is not null
-            ? $"Inserted {node.Name} into the connection."
-            : $"Added {node.Name}.";
-    });
+        _message = outcome;
+    }
 
     private async Task SaveSelectedNode()
     {

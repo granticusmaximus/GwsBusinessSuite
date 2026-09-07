@@ -138,3 +138,21 @@
 
 @media (hover: none) { .connection-endpoint { opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .connection-endpoint { transition: none; } }
+
+/* ── Palette drag ─────────────────────────────────────────────────────────── */
+/* Clicking a palette entry still adds a node; dragging one places it. The ghost follows the
+   cursor so the gesture reads as carrying something rather than as a failed click. */
+
+.palette-node { cursor: grab; }
+.palette-node:active { cursor: grabbing; }
+
+.palette-drag-ghost {
+	position: fixed; z-index: 3000; pointer-events: none;
+	padding: .4rem .7rem; border-radius: .5rem;
+	background: #818cf8; color: #fff;
+	font-size: .78rem; font-weight: 600;
+	box-shadow: 0 8px 20px rgba(15, 23, 42, .45);
+}
+
+/* A dashed edge while a node is being carried, so the canvas reads as a live drop target. */
+.automation-canvas.is-drop-ready { outline: 2px dashed rgba(129, 140, 248, .45); outline-offset: -6px; }

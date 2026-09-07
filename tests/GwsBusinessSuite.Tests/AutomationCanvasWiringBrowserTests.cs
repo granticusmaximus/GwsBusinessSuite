@@ -20,6 +20,8 @@ public sealed class AutomationCanvasWiringBrowserTests(PlaywrightBrowserFixture 
     private static string Canvas() => $$"""
         <!doctype html><html><head><style>
           .automation-canvas { position:relative; width:900px; height:400px; }
+          .automation-palette { position:absolute; right:0; top:0; width:160px; }
+          .palette-node { display:block; width:150px; height:40px; }
           .automation-connections { position:absolute; inset:0; }
           .automation-node { position:absolute; width:196px; height:110px; background:#222; }
           .node-input,.node-output { position:absolute; width:12px; height:12px; border-radius:50%; background:#789; }
@@ -28,6 +30,10 @@ public sealed class AutomationCanvasWiringBrowserTests(PlaywrightBrowserFixture 
              even though the real stylesheet gives them 14px. */
           .connection-endpoint { width:14px; height:14px; border-radius:50%; background:#818cf8; }
         </style></head><body>
+        <aside class="automation-palette">
+          <button type="button" class="palette-node"
+                  data-palette-node="core.httpRequest" data-palette-version="1" data-palette-label="HTTP Request">HTTP Request</button>
+        </aside>
         <div class="automation-canvas" id="canvas">
           <svg class="automation-connections" width="900" height="400"></svg>
           <article class="automation-node" data-automation-node="{{NodeA}}" style="left:60px; top:60px">
@@ -259,6 +265,94 @@ public sealed class AutomationCanvasWiringBrowserTests(PlaywrightBrowserFixture 
 
         var calls = await page.EvaluateAsync<int>(
             "() => window.__calls.filter(c => c.name === 'ConnectPorts' || c.name === 'RewireConnection').length");
+        calls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DraggingAPaletteEntryOntoTheCanvas_ShouldAddANodeThere()
+    {
+        await using var page = await OpenAsync();
+
+        var entry = await (await page.QuerySelectorAsync(".palette-node"))!.BoundingBoxAsync();
+        var canvas = await (await page.QuerySelectorAsync("#canvas"))!.BoundingBoxAsync();
+        await page.Mouse.MoveAsync(entry!.X + entry.Width / 2, entry.Y + entry.Height / 2);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(canvas!.X + 300, canvas.Y + 250, new() { Steps = 12 });
+        await page.Mouse.UpAsync();
+
+        var calls = await page.EvaluateAsync<string[]>(
+            "() => window.__calls.filter(c => c.name === 'AddNodeAt').map(c => c.args.join('|'))");
+        calls.Should().ContainSingle();
+        // Dropped at canvas (300,250), offset by half a node so it lands centred on the pointer.
+        calls[0].Should().Be("core.httpRequest|1|202|195");
+    }
+
+    [Fact]
+    public async Task ClickingAPaletteEntry_ShouldNotBeTreatedAsADrag()
+    {
+        // A click with a pixel of pointer wobble must still be a click - the Blazor @onclick
+        // handler adds the node, and a drag firing too would add a second one.
+        await using var page = await OpenAsync();
+
+        var entry = await (await page.QuerySelectorAsync(".palette-node"))!.BoundingBoxAsync();
+        await page.Mouse.MoveAsync(entry!.X + entry.Width / 2, entry.Y + entry.Height / 2);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(entry.X + entry.Width / 2 + 2, entry.Y + entry.Height / 2 + 1);
+        await page.Mouse.UpAsync();
+
+        var calls = await page.EvaluateAsync<int>(
+            "() => window.__calls.filter(c => c.name === 'AddNodeAt').length");
+        calls.Should().Be(0, "movement under the threshold is a click, not a drag");
+    }
+
+    [Fact]
+    public async Task DraggingAPaletteEntryOutsideTheCanvas_ShouldAddNothing()
+    {
+        await using var page = await OpenAsync();
+
+        var entry = await (await page.QuerySelectorAsync(".palette-node"))!.BoundingBoxAsync();
+        await page.Mouse.MoveAsync(entry!.X + entry.Width / 2, entry.Y + entry.Height / 2);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(entry.X + entry.Width / 2, entry.Y + 320, new() { Steps = 10 });
+        await page.Mouse.UpAsync();
+
+        var calls = await page.EvaluateAsync<int>(
+            "() => window.__calls.filter(c => c.name === 'AddNodeAt').length");
+        calls.Should().Be(0, "dropping outside the canvas has no position to create at");
+    }
+
+    [Fact]
+    public async Task ReleasingAWireOverEmptyCanvas_ShouldOfferAConnectedInsert()
+    {
+        await using var page = await OpenAsync();
+
+        var port = await (await page.QuerySelectorAsync($"[data-port-node='{NodeA}'][data-port='output']"))!.BoundingBoxAsync();
+        var canvas = await (await page.QuerySelectorAsync("#canvas"))!.BoundingBoxAsync();
+        await page.Mouse.MoveAsync(port!.X + port.Width / 2, port.Y + port.Height / 2);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(canvas!.X + 320, canvas.Y + 320, new() { Steps = 12 });
+        await page.Mouse.UpAsync();
+
+        var calls = await page.EvaluateAsync<string[]>(
+            "() => window.__calls.filter(c => c.name === 'BeginConnectedInsert').map(c => c.args.slice(0,2).join('|'))");
+        calls.Should().ContainSingle().Which.Should().Be($"{NodeA}|main");
+    }
+
+    [Fact]
+    public async Task ReleasingARewireOverEmptyCanvas_ShouldNotCreateANode()
+    {
+        // Moving an existing endpoint into space means "I changed my mind", not "make me a node".
+        await using var page = await OpenAsync();
+
+        var handle = await (await page.QuerySelectorAsync("[data-rewire='target']"))!.BoundingBoxAsync();
+        var canvas = await (await page.QuerySelectorAsync("#canvas"))!.BoundingBoxAsync();
+        await page.Mouse.MoveAsync(handle!.X + handle.Width / 2, handle.Y + handle.Height / 2);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(canvas!.X + 320, canvas.Y + 330, new() { Steps = 10 });
+        await page.Mouse.UpAsync();
+
+        var calls = await page.EvaluateAsync<int>(
+            "() => window.__calls.filter(c => c.name === 'BeginConnectedInsert').length");
         calls.Should().Be(0);
     }
 

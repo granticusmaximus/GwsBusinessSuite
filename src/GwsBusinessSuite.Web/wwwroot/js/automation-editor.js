@@ -13,7 +13,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 export function initialize(canvas, dotNetRef) {
     dispose(canvas);
-    const state = { dotNetRef, drag: null, wire: null };
+    const state = { dotNetRef, drag: null, wire: null, palette: null };
 
     // ── Geometry ────────────────────────────────────────────────────────────
     // Ports are positioned by CSS relative to their node, so their canvas-space centre is read
@@ -123,6 +123,20 @@ export function initialize(canvas, dotNetRef) {
 
         const under = document.elementFromPoint(event.clientX, event.clientY);
         const target = under && under.closest ? under.closest('[data-port]') : null;
+
+        if (!target) {
+            // Released over nothing. Rather than throwing the gesture away, offer to create a
+            // node here already wired up - dragging into space is how you extend a flow in n8n.
+            const overCanvas = under && canvas.contains(under);
+            if (overCanvas && wire.fromDirection === 'output' && !wire.rewireConnection) {
+                const x = event.clientX - wire.canvasRect.left + canvas.scrollLeft;
+                const y = event.clientY - wire.canvasRect.top + canvas.scrollTop;
+                try { await state.dotNetRef.invokeMethodAsync('BeginConnectedInsert', wire.fromNode, wire.fromName, x, y); }
+                catch { /* circuit dropped */ }
+            }
+            return;
+        }
+
         if (!isValidTarget(wire, target)) return;
 
         // Normalise direction: whichever end is the output is the source, so dragging
@@ -190,11 +204,80 @@ export function initialize(canvas, dotNetRef) {
         catch { /* The Blazor circuit may have disconnected while dragging. */ }
     };
 
+    // ── Palette drag ────────────────────────────────────────────────────────
+    // The palette is outside the canvas element, so these listen on the document and filter to
+    // palette entries rather than hanging off the canvas like the other two drag modes.
+    const onPaletteDown = event => {
+        if (event.button !== 0) return;
+        const entry = event.target.closest('[data-palette-node]');
+        if (!entry) return;
+
+        state.palette = {
+            pointerId: event.pointerId,
+            typeKey: entry.dataset.paletteNode,
+            version: Number.parseInt(entry.dataset.paletteVersion, 10) || 1,
+            startX: event.clientX,
+            startY: event.clientY,
+            ghost: null,
+            label: entry.dataset.paletteLabel ?? 'Node'
+        };
+        entry.setPointerCapture(event.pointerId);
+        state.palette.capturedBy = entry;
+    };
+
+    const onPaletteMove = event => {
+        const drag = state.palette;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+
+        // Only start dragging past a small threshold, so an ordinary click still adds a node the
+        // way it always did rather than being swallowed by a 2px pointer wobble.
+        if (!drag.ghost) {
+            if (Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY) < 5) return;
+            const ghost = document.createElement('div');
+            ghost.className = 'palette-drag-ghost';
+            ghost.textContent = drag.label;
+            document.body.appendChild(ghost);
+            drag.ghost = ghost;
+            canvas.classList.add('is-drop-ready');
+        }
+        drag.ghost.style.left = `${event.clientX + 12}px`;
+        drag.ghost.style.top = `${event.clientY + 12}px`;
+    };
+
+    const onPaletteUp = async event => {
+        const drag = state.palette;
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        state.palette = null;
+        canvas.classList.remove('is-drop-ready');
+        drag.ghost?.remove();
+        if (!drag.ghost) return;   // never passed the threshold: the click handler adds it
+
+        const rect = canvas.getBoundingClientRect();
+        const inside = event.clientX >= rect.left && event.clientX <= rect.right
+            && event.clientY >= rect.top && event.clientY <= rect.bottom;
+        if (!inside) return;
+
+        // Offset by half the node so it lands centred under the pointer, not starting at it.
+        const x = event.clientX - rect.left + canvas.scrollLeft - 98;
+        const y = event.clientY - rect.top + canvas.scrollTop - 55;
+        try { await state.dotNetRef.invokeMethodAsync('AddNodeAt', drag.typeKey, drag.version, Math.max(0, x), Math.max(0, y)); }
+        catch { /* circuit dropped */ }
+    };
+
+    document.addEventListener('pointerdown', onPaletteDown, true);
+    document.addEventListener('pointermove', onPaletteMove, true);
+    document.addEventListener('pointerup', onPaletteUp, true);
+    document.addEventListener('pointercancel', onPaletteUp, true);
+
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
     state.dispose = () => {
+        document.removeEventListener('pointerdown', onPaletteDown, true);
+        document.removeEventListener('pointermove', onPaletteMove, true);
+        document.removeEventListener('pointerup', onPaletteUp, true);
+        document.removeEventListener('pointercancel', onPaletteUp, true);
         canvas.removeEventListener('pointerdown', onPointerDown);
         canvas.removeEventListener('pointermove', onPointerMove);
         canvas.removeEventListener('pointerup', onPointerUp);
