@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "ContentAccess")]
 @implements IAsyncDisposable
+@using System.Globalization
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.Automation
 @using GwsBusinessSuite.Application.Wiki
@@ -89,12 +90,53 @@ else
 
             <main class="automation-canvas-viewport">
                 <div class="automation-canvas" @ref="_canvas" tabindex="0" @onclick="ClearSelection" @onkeydown="HandleCanvasKeyDown">
-                    <svg class="automation-connections" width="2400" height="1400" aria-hidden="true">
+                    @* Connections are objects you can point at, not decoration. Each one draws
+                       twice: a wide transparent stroke that catches the pointer (a 2px line is
+                       nearly impossible to hit), and the visible line on top. The layer no longer
+                       sets pointer-events:none, so the hit-strokes can actually receive events. *@
+                    <svg class="automation-connections" width="2400" height="1400">
                         @foreach (var connection in _view.Connections)
                         {
-                            <path d="@ConnectionPath(connection)" class="automation-connection @ConnectionClass(connection.SourceOutput)" />
+                            var path = ConnectionPath(connection);
+                            var isSelected = connection.Id == _selectedConnectionId;
+                            <g class="automation-connection-group @(isSelected ? "is-selected" : "")">
+                                <path d="@path" class="automation-connection-hit"
+                                      @onclick="() => SelectConnection(connection.Id)" @onclick:stopPropagation="true">
+                                    <title>@NodeName(connection.SourceNodeId) → @NodeName(connection.TargetNodeId) · click to select, Delete to remove</title>
+                                </path>
+                                <path d="@path" class="automation-connection @ConnectionClass(connection.SourceOutput)" />
+                            </g>
                         }
                     </svg>
+                    @* The splice control lives outside the SVG so it can be a real button with a
+                       normal focus ring, rather than SVG shapes pretending to be one. *@
+                    @foreach (var connection in _view.Connections)
+                    {
+                        var midpoint = ConnectionMidpoint(connection);
+                        <button type="button" class="connection-splice @(connection.Id == _selectedConnectionId ? "is-selected" : "")"
+                                style="left:@(midpoint.X.ToString(CultureInfo.InvariantCulture))px; top:@(midpoint.Y.ToString(CultureInfo.InvariantCulture))px"
+                                title="Insert a node here" aria-label="Insert a node between @NodeName(connection.SourceNodeId) and @NodeName(connection.TargetNodeId)"
+                                @onclick="() => BeginSplice(connection.Id)" @onclick:stopPropagation="true">
+                            <i class="bi bi-plus"></i>
+                        </button>
+                    }
+
+                    @* Endpoint grab handles. Each carries the identity of the end that is NOT
+                       moving, so the canvas anchors the drag there and the existing port
+                       validity rules (no output-to-output, no self-connection) apply unchanged. *@
+                    @foreach (var connection in _view.Connections.Where(c => c.Id == _selectedConnectionId))
+                    {
+                        var sourceEnd = ConnectionEndpoint(connection, sourceEnd: true);
+                        var targetEnd = ConnectionEndpoint(connection, sourceEnd: false);
+                        <span class="connection-endpoint" title="Drag to move this end of the connection"
+                              style="left:@(sourceEnd.X.ToString(CultureInfo.InvariantCulture))px; top:@(sourceEnd.Y.ToString(CultureInfo.InvariantCulture))px"
+                              data-rewire="source" data-rewire-connection="@connection.Id"
+                              data-port="input" data-port-node="@connection.TargetNodeId" data-port-name="@connection.TargetInput"></span>
+                        <span class="connection-endpoint" title="Drag to move this end of the connection"
+                              style="left:@(targetEnd.X.ToString(CultureInfo.InvariantCulture))px; top:@(targetEnd.Y.ToString(CultureInfo.InvariantCulture))px"
+                              data-rewire="target" data-rewire-connection="@connection.Id"
+                              data-port="output" data-port-node="@connection.SourceNodeId" data-port-name="@connection.SourceOutput"></span>
+                    }
                     @foreach (var node in _view.Nodes)
                     {
                         var definition = NodeRegistry.Find(node.TypeKey, node.TypeVersion);
@@ -363,6 +405,10 @@ else
     private bool _nodeDisabled, _nodeContinueOnFail, _nodeRetryOnFail;
     private int _nodeMaxTries = 1, _nodeWaitMs, _nodeTimeoutMs;
     private Guid? _connectionSource, _connectionTarget;
+    // The edge the user has pointed at, and the edge they are inserting a node into. Kept apart
+    // because a splice in progress must survive the selection changing underneath it.
+    private Guid? _selectedConnectionId;
+    private Guid? _spliceConnectionId;
     private string _connectionOutput = "main", _connectionTargetInput = "main";
     private bool _showSaveTemplate;
     private string _templateName = "", _templateDescription = "";
@@ -517,7 +563,128 @@ else
         _multiSelectedNodeIds.Clear();
         SelectNode(id);
     }
-    private void ClearSelection() { _selectedNodeId = null; _multiSelectedNodeIds.Clear(); }
+    private void ClearSelection() { _selectedNodeId = null; _multiSelectedNodeIds.Clear(); _selectedConnectionId = null; _spliceConnectionId = null; }
+
+    private void SelectConnection(Guid connectionId)
+    {
+        // One selection at a time: a node and an edge being selected together would make Delete
+        // ambiguous, which is exactly the kind of thing that deletes the wrong object.
+        _selectedNodeId = null;
+        _multiSelectedNodeIds.Clear();
+        _selectedConnectionId = connectionId;
+        _spliceConnectionId = null;
+    }
+
+    // Midpoint of the same cubic ConnectionPath draws, so the splice button sits on the wire
+    // rather than near it. At t=0.5 the Bezier reduces to this weighting of its control points.
+    private (double X, double Y) ConnectionMidpoint(AutomationConnectionView connection)
+    {
+        var source = _view?.Nodes.FirstOrDefault(node => node.Id == connection.SourceNodeId);
+        var target = _view?.Nodes.FirstOrDefault(node => node.Id == connection.TargetNodeId);
+        if (source is null || target is null) return (0, 0);
+
+        var sx = source.PositionX + 196;
+        var sy = source.PositionY + (connection.SourceOutput == "true" ? 38 : connection.SourceOutput == "false" ? 72 : 55);
+        var tx = target.PositionX;
+        var ty = target.PositionY + 55;
+        var bend = Math.Max(70, Math.Abs(tx - sx) * .45);
+        var x = (sx + 3 * (sx + bend) + 3 * (tx - bend) + tx) / 8d;
+        var y = (sy + 3 * sy + 3 * ty + ty) / 8d;
+        return (x - 11, y - 11); // centre the 22px button on the point
+    }
+
+    // The two ends of a connection, matching ConnectionPath's own anchor maths. Returned as the
+    // handle's top-left so the 14px grab target sits centred on the wire's end.
+    private (double X, double Y) ConnectionEndpoint(AutomationConnectionView connection, bool sourceEnd)
+    {
+        var source = _view?.Nodes.FirstOrDefault(node => node.Id == connection.SourceNodeId);
+        var target = _view?.Nodes.FirstOrDefault(node => node.Id == connection.TargetNodeId);
+        if (source is null || target is null) return (0, 0);
+
+        // Offset outward along the wire by 22px. A handle centred exactly on the port would sit on
+        // top of it and swallow pointer-downs meant to start a new connection from that port -
+        // which is how a port with an existing connection became un-draggable.
+        const double offset = 22;
+        return sourceEnd
+            ? (source.PositionX + 196 - 7 + offset,
+               source.PositionY + (connection.SourceOutput == "true" ? 38 : connection.SourceOutput == "false" ? 72 : 55) - 7)
+            : (target.PositionX - 7 - offset, target.PositionY + 55 - 7);
+    }
+
+    // Moving one end of an existing connection to a different port. The canvas anchors the drag
+    // at the end that is NOT moving and reuses the same validity rules as drawing a new wire.
+    [JSInvokable]
+    public async Task RewireConnection(string connectionId, string movedEnd, string newNodeId, string newPortName)
+    {
+        if (!Guid.TryParse(connectionId, out var id) || !Guid.TryParse(newNodeId, out var newNode)) return;
+        var connection = _view?.Connections.FirstOrDefault(c => c.Id == id);
+        if (connection is null) return;
+
+        var movingSource = string.Equals(movedEnd, "source", StringComparison.OrdinalIgnoreCase);
+        var sourceNodeId = movingSource ? newNode : connection.SourceNodeId;
+        var sourceOutput = movingSource ? newPortName : connection.SourceOutput;
+        var targetNodeId = movingSource ? connection.TargetNodeId : newNode;
+        var targetInput = movingSource ? connection.TargetInput : newPortName;
+
+        if (sourceNodeId == targetNodeId) return;
+
+        // Dropping an endpoint back where it started is a no-op, not an error - the user simply
+        // changed their mind mid-drag, and deleting/recreating the same edge would churn the graph.
+        if (sourceNodeId == connection.SourceNodeId && targetNodeId == connection.TargetNodeId
+            && string.Equals(sourceOutput, connection.SourceOutput, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(targetInput, connection.TargetInput, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var duplicate = _view!.Connections.Any(c =>
+            c.Id != id && c.SourceNodeId == sourceNodeId && c.TargetNodeId == targetNodeId
+            && string.Equals(c.SourceOutput, sourceOutput, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(c.TargetInput, targetInput, StringComparison.OrdinalIgnoreCase));
+        if (duplicate)
+        {
+            Show("Those ports are already connected.", true);
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        try
+        {
+            // Add before delete, same ordering as the splice: a failure part-way leaves both
+            // edges rather than none.
+            await WorkflowService.AddConnectionAsync(WorkflowId, sourceNodeId, sourceOutput, targetNodeId, targetInput);
+            await WorkflowService.DeleteConnectionAsync(WorkflowId, id);
+            _selectedConnectionId = null;
+            await Reload();
+            _message = $"Rewired to {NodeName(movingSource ? sourceNodeId : targetNodeId)}.";
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) { Fail(ex, "Unable to rewire that connection."); }
+    }
+
+    private void BeginSplice(Guid connectionId)
+    {
+        _spliceConnectionId = connectionId;
+        _selectedConnectionId = connectionId;
+        _selectedNodeId = null;
+        _multiSelectedNodeIds.Clear();
+        Show("Pick a node from the palette to insert it into this connection.");
+    }
+
+    private async Task DeleteSelectedConnectionAsync()
+    {
+        if (_selectedConnectionId is not { } id) return;
+        var connection = _view?.Connections.FirstOrDefault(c => c.Id == id);
+        if (connection is null) return;
+        _selectedConnectionId = null;
+        await Work(async () =>
+        {
+            await WorkflowService.DeleteConnectionAsync(WorkflowId, id);
+            PushUndo(new ConnectionDeletionAction(connection));
+            await Reload();
+            _message = "Connection removed.";
+        });
+    }
     private void Back() => Navigation.NavigateTo("/admin/automation");
     private void ShowConnections() => _bottomTab = "connections";
     private void ShowRuns() => _bottomTab = "runs";
@@ -532,8 +699,49 @@ else
     private async Task AddNode(AutomationNodeDefinition definition) => await Work(async () =>
     {
         var count = _view!.Nodes.Count(node => node.TypeKey == definition.TypeKey) + 1;
-        var node = await WorkflowService.SaveNodeAsync(WorkflowId, new AutomationNodeEditor { Name = count == 1 ? definition.DisplayName : $"{definition.DisplayName} {count}", TypeKey = definition.TypeKey, TypeVersion = definition.Version, PositionX = 360 + ((_view.Nodes.Count * 35) % 500), PositionY = 160 + ((_view.Nodes.Count * 55) % 500), ParametersJson = definition.DefaultParametersJson });
-        await Reload(); SelectNode(node.Id); _message = $"Added {node.Name}.";
+        var name = count == 1 ? definition.DisplayName : $"{definition.DisplayName} {count}";
+
+        // Splicing: drop the new node onto the wire the user clicked "+" on, so it lands between
+        // those two nodes rather than in the corner needing to be wired up by hand.
+        var splice = _spliceConnectionId is { } spliceId
+            ? _view.Connections.FirstOrDefault(c => c.Id == spliceId)
+            : null;
+
+        double x, y;
+        if (splice is not null)
+        {
+            var midpoint = ConnectionMidpoint(splice);
+            x = Math.Max(0, midpoint.X - 98);   // centre the 196px-wide node on the wire
+            y = Math.Max(0, midpoint.Y - 55);
+        }
+        else
+        {
+            x = 360 + ((_view.Nodes.Count * 35) % 500);
+            y = 160 + ((_view.Nodes.Count * 55) % 500);
+        }
+
+        var node = await WorkflowService.SaveNodeAsync(WorkflowId, new AutomationNodeEditor
+        {
+            Name = name, TypeKey = definition.TypeKey, TypeVersion = definition.Version,
+            PositionX = x, PositionY = y, ParametersJson = definition.DefaultParametersJson
+        });
+
+        if (splice is not null)
+        {
+            // Rewire before dropping the original, so a failure part-way leaves the graph with a
+            // duplicate path rather than a severed one - the recoverable direction to fail in.
+            await WorkflowService.AddConnectionAsync(WorkflowId, splice.SourceNodeId, splice.SourceOutput, node.Id, "main");
+            await WorkflowService.AddConnectionAsync(WorkflowId, node.Id, "main", splice.TargetNodeId, splice.TargetInput);
+            await WorkflowService.DeleteConnectionAsync(WorkflowId, splice.Id);
+            _spliceConnectionId = null;
+            _selectedConnectionId = null;
+        }
+
+        await Reload();
+        SelectNode(node.Id);
+        _message = splice is not null
+            ? $"Inserted {node.Name} into the connection."
+            : $"Added {node.Name}.";
     });
 
     private async Task SaveSelectedNode()
@@ -599,6 +807,13 @@ else
 
     private Task HandleCanvasKeyDown(KeyboardEventArgs e)
     {
+        // Checked ahead of the modifier guard below: Delete carries no modifier, so it would
+        // otherwise never be seen at all.
+        if (e.Key is "Delete" or "Backspace" && _selectedConnectionId is not null)
+        {
+            return DeleteSelectedConnectionAsync();
+        }
+
         if (!e.CtrlKey && !e.MetaKey) return Task.CompletedTask;
         switch (e.Key.ToLowerInvariant())
         {

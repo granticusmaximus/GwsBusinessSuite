@@ -24,8 +24,17 @@
 .palette-node small { max-width:145px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; color:var(--gws-text-soft); font-size:.69rem; }
 .automation-canvas-viewport { position:relative; overflow:auto; background-color:var(--gws-body-bg); background-image:radial-gradient(#3a3532 1px,transparent 1px); background-size:20px 20px; }
 .automation-canvas { position:relative; width:2400px; height:1400px; }
-.automation-connections { position:absolute; inset:0; pointer-events:none; overflow:visible; }
-.automation-connection { fill:none; stroke:#57606f; stroke-width:2.25; }
+/* The layer used to be pointer-events:none, which made every connection permanently
+   unclickable. It now receives events; the visible line opts out individually so only the wide
+   invisible hit-stroke underneath it catches the pointer. */
+.automation-connections { position:absolute; inset:0; overflow:visible; }
+.automation-connection { fill:none; stroke:#57606f; stroke-width:2.25; pointer-events:none; }
+
+/* A 2.25px line is close to impossible to hit deliberately. This transparent 18px stroke is what
+   the pointer actually lands on - the standard trick for making thin SVG paths clickable. */
+.automation-connection-hit { fill:none; stroke:transparent; stroke-width:18; cursor:pointer; }
+.automation-connection-group:hover .automation-connection { stroke:#818cf8; stroke-width:3; }
+.automation-connection-group.is-selected .automation-connection { stroke:#818cf8; stroke-width:3.5; filter:drop-shadow(0 0 4px rgba(129,140,248,.6)); }
 .automation-connection.is-true { stroke:#4ade80; }.automation-connection.is-false { stroke:#f87171; }
 .automation-node { position:absolute; width:196px; min-height:110px; display:flex; align-items:center; gap:.75rem; padding:1rem; border:1px solid var(--gws-panel-border); border-radius:.9rem; background:var(--gws-panel-bg-2); box-shadow:var(--gws-shadow-md); cursor:grab; -webkit-user-select:none; user-select:none; touch-action:none; }
 .automation-node:active { cursor:grabbing; }.automation-node.is-selected { border-color:#818cf8; box-shadow:0 0 0 3px rgba(129,140,248,.25),var(--gws-shadow-md); }.automation-node.is-disabled { opacity:.55; }
@@ -80,3 +89,52 @@
 	.automation-connection.is-pending { animation: none; }
 	.node-input, .node-output { transition: none; }
 }
+
+/* ── Splice control ───────────────────────────────────────────────────────── */
+/* A real <button> positioned over the wire's midpoint rather than SVG shapes imitating one, so
+   it keyboard-focuses and announces itself properly. Hidden until the wire is hovered, because
+   one of these per connection would otherwise clutter the whole canvas. */
+
+.connection-splice {
+	position: absolute; width: 22px; height: 22px; padding: 0; z-index: 3;
+	display: flex; align-items: center; justify-content: center;
+	border: 1px solid var(--gws-panel-border); border-radius: 50%;
+	background: var(--gws-panel-bg-2); color: var(--gws-text-soft);
+	font-size: .8rem; line-height: 1; cursor: pointer;
+	opacity: 0; transition: opacity .12s ease, transform .12s ease, background .12s ease;
+}
+
+.automation-canvas:hover .connection-splice { opacity: .5; }
+.connection-splice:hover { opacity: 1; transform: scale(1.25); background: #818cf8; color: #fff; border-color: #818cf8; }
+.connection-splice:focus-visible { opacity: 1; outline: 2px solid #818cf8; outline-offset: 2px; }
+.connection-splice.is-selected { opacity: 1; background: #818cf8; color: #fff; border-color: #818cf8; }
+
+/* No hover on touch, so the controls stay visible there rather than being unreachable. */
+@media (hover: none) { .connection-splice { opacity: .6; } }
+
+@media (prefers-reduced-motion: reduce) { .connection-splice { transition: none; } }
+
+/* ── Endpoint rewire handles ──────────────────────────────────────────────── */
+/* Sit on each end of a connection so an existing wire can be moved rather than deleted and
+   redrawn. Hidden until the canvas is hovered for the same reason as the splice control - two
+   per connection would otherwise cover the graph in dots. */
+
+.connection-endpoint {
+	position: absolute; width: 14px; height: 14px; z-index: 4;
+	border: 2px solid #818cf8; border-radius: 50%;
+	background: var(--gws-panel-bg-2); cursor: grab;
+	opacity: 0; transition: opacity .12s ease, transform .12s ease;
+}
+
+/* Rendered only for the selected connection, so they are visible whenever they exist rather
+   than waiting on a hover the user has already committed to. */
+.connection-endpoint { opacity: .85; }
+.connection-endpoint:hover { opacity: 1; transform: scale(1.3); background: #818cf8; }
+.connection-endpoint:active { cursor: grabbing; }
+
+/* While a wire is being dragged the handles must not sit on top of the ports underneath them,
+   or they would block their own drop targets. */
+.automation-canvas.is-wiring .connection-endpoint { opacity: 0; pointer-events: none; }
+
+@media (hover: none) { .connection-endpoint { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .connection-endpoint { transition: none; } }

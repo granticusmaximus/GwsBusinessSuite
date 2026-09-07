@@ -41,6 +41,7 @@ export function initialize(canvas, dotNetRef) {
     // than arriving as an error after the user has already committed to the gesture.
     const isValidTarget = (wire, targetEl) => {
         if (!targetEl) return false;
+        if (targetEl.dataset.rewire) return false;                           // a handle, not a port
         if (targetEl.dataset.port === wire.fromDirection) return false;      // output->output
         if (targetEl.dataset.portNode === wire.fromNode) return false;       // self-connection
         return true;
@@ -53,7 +54,13 @@ export function initialize(canvas, dotNetRef) {
     // ── Wire drag ───────────────────────────────────────────────────────────
     const beginWire = (event, portEl) => {
         const canvasRect = canvas.getBoundingClientRect();
-        const origin = portCentre(portEl, canvasRect);
+        // For an endpoint handle the wire has to stay pinned to the opposite end while the
+        // grabbed end follows the cursor - anchoring at the handle itself would rubber-band from
+        // the wrong place.
+        const anchorEl = portEl.dataset.rewire
+            ? canvas.querySelector(`[data-port-node="${portEl.dataset.portNode}"][data-port="${portEl.dataset.port}"]`)
+            : portEl;
+        const origin = portCentre(anchorEl ?? portEl, canvasRect);
         const layer = connectionLayer();
         if (!layer) return;
 
@@ -67,6 +74,11 @@ export function initialize(canvas, dotNetRef) {
             fromNode: portEl.dataset.portNode,
             fromName: portEl.dataset.portName,
             fromDirection: portEl.dataset.port,
+            // Present only when the drag started on a connection's endpoint handle. The handle
+            // advertises the identity of the end that is NOT moving, so everything above is
+            // already the anchor - only the commit differs.
+            rewireConnection: portEl.dataset.rewireConnection ?? null,
+            rewireEnd: portEl.dataset.rewire ?? null,
             origin, path, canvasRect, hovered: null
         };
         portEl.classList.add('is-wiring');
@@ -121,7 +133,15 @@ export function initialize(canvas, dotNetRef) {
         const targetNodeId = fromOutput ? target.dataset.portNode : wire.fromNode;
         const targetInput = fromOutput ? target.dataset.portName : wire.fromName;
 
-        try { await state.dotNetRef.invokeMethodAsync('ConnectPorts', sourceNodeId, sourceOutput, targetNodeId, targetInput); }
+        try {
+            if (wire.rewireConnection) {
+                await state.dotNetRef.invokeMethodAsync(
+                    'RewireConnection', wire.rewireConnection, wire.rewireEnd,
+                    target.dataset.portNode, target.dataset.portName);
+            } else {
+                await state.dotNetRef.invokeMethodAsync('ConnectPorts', sourceNodeId, sourceOutput, targetNodeId, targetInput);
+            }
+        }
         catch { /* The Blazor circuit may have dropped mid-drag; the graph reloads on reconnect. */ }
     };
 
@@ -129,6 +149,7 @@ export function initialize(canvas, dotNetRef) {
     const onPointerDown = event => {
         if (event.button !== 0) return;
 
+        // [data-rewire] handles also carry [data-port], so this one check covers both.
         const port = event.target.closest('[data-port]');
         if (port && canvas.contains(port)) { beginWire(event, port); return; }
 
