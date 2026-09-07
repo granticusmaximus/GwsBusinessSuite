@@ -1,12 +1,23 @@
 #!/bin/sh
 # Incrementally builds and opens the native GWS Business Suite Mac Catalyst app.
-# Usage: scripts/open-gws-mac.sh
+#
+# Usage:
+#   scripts/open-gws-mac.sh            # Release - the everyday app
+#   GWS_CONFIG=Debug scripts/open-gws-mac.sh
+#
+# Release is the default because this is the app actually used day to day, not a debugging
+# session: it is XamlC-compiled rather than runtime-inflated, and about 20MB smaller. Debug stays
+# one env var away for when a native crash needs real symbols.
+#
+# Note this only ever rebuilds the NATIVE SHELL. The window is a WebView onto
+# https://admin.gwsapp.net/admin, so everything inside it is whatever is deployed - web changes
+# arrive by deploying and reloading, never by rebuilding this.
 set -eu
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT="$REPO_ROOT/src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj"
 TARGET_FRAMEWORK="net10.0-maccatalyst"
-CONFIGURATION="Debug"
+CONFIGURATION="${GWS_CONFIG:-Release}"
 
 case "$(uname -m)" in
   arm64)
@@ -56,8 +67,8 @@ if [ "$NEEDS_BUILD" = "true" ]; then
     --nologo \
     -p:ValidateXcodeVersion="$VALIDATE_XCODE_VERSION"
 else
-  echo "The GWS Mac app is already up to date."
+  echo "The GWS Mac app ($CONFIGURATION) is already up to date."
 fi
 
-echo "Opening GWS Business Suite for Mac..."
+echo "Opening GWS Business Suite for Mac ($CONFIGURATION)..."
 /usr/bin/open "$APP_BUNDLE"
