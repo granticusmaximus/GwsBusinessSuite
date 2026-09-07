@@ -212,13 +212,18 @@ export function initialize(canvas, dotNetRef) {
         box.className = 'canvas-marquee';
         canvas.appendChild(box);
         const at = toCanvas(event.clientX, event.clientY);
-        state.marquee = { pointerId: event.pointerId, box, startX: at.x, startY: at.y, additive: event.ctrlKey || event.metaKey || event.shiftKey };
-        viewport.setPointerCapture(event.pointerId);
-        event.preventDefault();
+        state.marquee = { pointerId: event.pointerId, box, startX: at.x, startY: at.y, captured: false, additive: event.ctrlKey || event.metaKey || event.shiftKey };
+        // Capture is taken on the first move, not here, and preventDefault is not called at all.
+        // Both suppress the browser's follow-up click - capture by retargeting it to the
+        // viewport, preventDefault by cancelling it - and the canvas needs that click to clear
+        // selection. Taking capture only once this is genuinely a drag keeps a plain click intact
+        // while still following the pointer if it leaves the viewport mid-band.
+        viewport.classList.add('is-marqueeing');
     };
 
     const moveMarquee = event => {
         const m = state.marquee;
+        if (!m.captured) { m.captured = true; viewport.setPointerCapture(event.pointerId); }
         const at = toCanvas(event.clientX, event.clientY);
         const left = Math.min(m.startX, at.x), top = Math.min(m.startY, at.y);
         const width = Math.abs(at.x - m.startX), height = Math.abs(at.y - m.startY);
@@ -230,7 +235,15 @@ export function initialize(canvas, dotNetRef) {
         const m = state.marquee;
         state.marquee = null;
         m.box.remove();
+        viewport.classList.remove('is-marqueeing');
+        // A plain click on empty canvas also opens (and immediately closes) a zero-size band, so
+        // the guard below has to come after this check - swallowing every click would break
+        // click-to-clear-selection entirely.
         if (!m.rect || (m.rect.right - m.rect.left < 4 && m.rect.bottom - m.rect.top < 4)) return;
+
+        // A real drag still ends in a click, and the canvas clears selection on click - so that
+        // one click is swallowed, or the selection is wiped the instant it is made.
+        state.swallowNextClick = true;
 
         // Intersection, not containment: half-covering a node selects it, which is what people
         // expect from a rubber band and avoids having to enclose big nodes exactly.
@@ -245,6 +258,13 @@ export function initialize(canvas, dotNetRef) {
         catch { /* circuit dropped */ }
     };
 
+    const onSwallowClick = event => {
+        if (!state.swallowNextClick) return;
+        state.swallowNextClick = false;
+        event.stopPropagation();
+        event.preventDefault();
+    };
+
     const onWheel = event => {
         // Claimed from the browser's own page zoom: otherwise zooming the graph would zoom the
         // entire admin UI instead.
@@ -253,7 +273,17 @@ export function initialize(canvas, dotNetRef) {
         zoomTo(state.view.zoom * factor, event.clientX, event.clientY);
     };
 
-    const onKeyDown = event => { if (event.code === 'Space' && !state.spaceHeld) { state.spaceHeld = true; viewport.classList.add('is-pannable'); } };
+    const isTyping = target =>
+        target instanceof Element
+        && (target.closest('input,textarea,select,[contenteditable]') !== null);
+
+    const onKeyDown = event => {
+        if (event.code !== 'Space' || state.spaceHeld) return;
+        // Space is a character when a field has focus, not a pan modifier.
+        if (isTyping(event.target)) return;
+        state.spaceHeld = true;
+        viewport.classList.add('is-pannable');
+    };
     const onKeyUp = event => { if (event.code === 'Space') { state.spaceHeld = false; viewport.classList.remove('is-pannable'); } };
 
     // ── Node drag ───────────────────────────────────────────────────────────
@@ -385,6 +415,7 @@ export function initialize(canvas, dotNetRef) {
     viewport.addEventListener('pointermove', onPointerMove);
     viewport.addEventListener('pointerup', onPointerUp);
     viewport.addEventListener('pointercancel', onPointerUp);
+    viewport.addEventListener('click', onSwallowClick, true);
     viewport.addEventListener('wheel', onWheel, { passive: false });
     document.addEventListener('keydown', onKeyDown);
     document.addEventListener('keyup', onKeyUp);
@@ -397,6 +428,7 @@ export function initialize(canvas, dotNetRef) {
         viewport.removeEventListener('pointermove', onPointerMove);
         viewport.removeEventListener('pointerup', onPointerUp);
         viewport.removeEventListener('pointercancel', onPointerUp);
+        viewport.removeEventListener('click', onSwallowClick, true);
         viewport.removeEventListener('wheel', onWheel);
         document.removeEventListener('keydown', onKeyDown);
         document.removeEventListener('keyup', onKeyUp);

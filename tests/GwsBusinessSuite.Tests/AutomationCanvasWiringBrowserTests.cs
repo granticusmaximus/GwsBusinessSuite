@@ -31,6 +31,7 @@ public sealed class AutomationCanvasWiringBrowserTests(PlaywrightBrowserFixture 
              even though the real stylesheet gives them 14px. */
           .connection-endpoint { width:14px; height:14px; border-radius:50%; background:#818cf8; }
         </style></head><body>
+        <input id="inspector" type="text" />
         <aside class="automation-palette">
           <button type="button" class="palette-node"
                   data-palette-node="core.httpRequest" data-palette-version="1" data-palette-label="HTTP Request">HTTP Request</button>
@@ -466,6 +467,74 @@ public sealed class AutomationCanvasWiringBrowserTests(PlaywrightBrowserFixture 
             }
             """);
         visible.Should().BeTrue("fit has to actually fit every node inside the viewport");
+    }
+
+    [Fact]
+    public async Task AMarqueeDrag_ShouldSwallowTheClickThatFollowsIt()
+    {
+        // The canvas clears selection on click, and a drag still ends in one - so without
+        // swallowing it the rubber-band selection is wiped the moment it is made.
+        await using var page = await OpenAsync();
+        await page.EvaluateAsync(
+            "() => { window.__clicks = 0; document.getElementById('canvas').addEventListener('click', () => window.__clicks++); }");
+        var v = await (await page.QuerySelectorAsync("#viewport"))!.BoundingBoxAsync();
+
+        await page.Mouse.MoveAsync(v!.X + 20, v.Y + 40);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(v.X + 800, v.Y + 200, new() { Steps = 10 });
+        await page.Mouse.UpAsync();
+
+        var selections = await page.EvaluateAsync<int>(
+            "() => window.__calls.filter(c => c.name === 'SelectNodesInRegion').length");
+        selections.Should().Be(1, "the marquee still selects");
+
+        var clicks = await page.EvaluateAsync<int>("() => window.__clicks");
+        clicks.Should().Be(0, "the click that would clear that selection must not reach the canvas");
+    }
+
+    [Fact]
+    public async Task AnOrdinaryCanvasClick_ShouldStillReachTheCanvas()
+    {
+        // The guard must swallow exactly one click after a marquee, not suppress clearing
+        // selection by clicking empty space.
+        await using var page = await OpenAsync();
+        await page.EvaluateAsync(
+            "() => { window.__clicks = 0; document.getElementById('canvas').addEventListener('click', () => window.__clicks++); }");
+        var v = await (await page.QuerySelectorAsync("#viewport"))!.BoundingBoxAsync();
+
+        await page.Mouse.ClickAsync(v!.X + 40, v.Y + 350);
+
+        (await page.EvaluateAsync<int>("() => window.__clicks")).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task SpaceInATextField_ShouldNotArmPanning()
+    {
+        // Space is a character when a field has focus. Arming pan from it makes the next canvas
+        // drag pan instead of selecting or moving a node.
+        await using var page = await OpenAsync();
+        await page.FocusAsync("#inspector");
+        await page.Keyboard.PressAsync("Space");
+
+        var pannable = await page.EvaluateAsync<bool>(
+            "() => document.getElementById('viewport').classList.contains('is-pannable')");
+        pannable.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SpaceOnTheCanvas_ShouldArmPanning()
+    {
+        await using var page = await OpenAsync();
+        await page.EvaluateAsync("() => document.getElementById('canvas').focus()");
+        await page.Keyboard.DownAsync("Space");
+
+        var pannable = await page.EvaluateAsync<bool>(
+            "() => document.getElementById('viewport').classList.contains('is-pannable')");
+        pannable.Should().BeTrue();
+
+        await page.Keyboard.UpAsync("Space");
+        (await page.EvaluateAsync<bool>("() => document.getElementById('viewport').classList.contains('is-pannable')"))
+            .Should().BeFalse("releasing space disarms it again");
     }
 
     [Fact]

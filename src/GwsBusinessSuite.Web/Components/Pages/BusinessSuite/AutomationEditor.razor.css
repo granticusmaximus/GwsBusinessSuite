@@ -185,3 +185,8 @@
 
 .canvas-view-controls button:hover { background: rgba(129, 140, 248, .22); color: var(--gws-text-strong); }
 .canvas-view-controls button:focus-visible { outline: 2px solid #818cf8; outline-offset: 1px; }
+
+/* Stops text selecting while a rubber band is dragged. The obvious fix - preventDefault on
+   pointerdown - also suppresses the browser's follow-up click, which the canvas relies on to
+   clear selection, so the suppression is done here instead. */
+.automation-canvas-viewport.is-marqueeing { -webkit-user-select: none; user-select: none; }
