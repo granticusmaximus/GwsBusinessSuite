@@ -1,4 +1,6 @@
 @using GwsBusinessSuite.Application.AdminPortal
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Settings
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Web.Services
 @using Microsoft.AspNetCore.Components.Authorization
@@ -6,6 +8,7 @@
 @inject AuthenticationStateProvider AuthProvider
 @inject NavigationManager Navigation
 @inject IAdminPortalSummaryService SummaryService
+@inject ISiteSettingsService SiteSettingsService
 
 <nav class="gws-nav" aria-label="Primary">
     <NavLink class="gws-nav-link gws-nav-home" href="admin" Match="NavLinkMatch.All" title="Dashboard">
@@ -35,15 +38,21 @@
                 <i class="bi bi-search-heart" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>SEO Audit</span><small>Classic + AI-era readiness</small></span>
             </NavLink>
-            <NavLink class="gws-nav-link" href="admin/localization" title="Content Localization">
-                <i class="bi bi-translate" aria-hidden="true"></i>
-                <span class="gws-nav-link-copy"><span>Localization</span><small>AI-assisted translations</small></span>
-            </NavLink>
-            <NavLink class="gws-nav-link" href="admin/comments" title="Comments">
-                <i class="bi bi-chat-left-text" aria-hidden="true"></i>
-                <span class="gws-nav-link-copy"><span>Comments</span><small>Moderate visitor replies</small></span>
-                @if (_pendingCommentCount > 0) { <span class="gws-nav-count">@_pendingCommentCount</span> }
-            </NavLink>
+            @if (Shown("localization"))
+            {
+                <NavLink class="gws-nav-link" href="admin/localization" title="Content Localization">
+                    <i class="bi bi-translate" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Localization</span><small>AI-assisted translations</small></span>
+                </NavLink>
+            }
+            @if (Shown("comments"))
+            {
+                <NavLink class="gws-nav-link" href="admin/comments" title="Comments">
+                    <i class="bi bi-chat-left-text" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Comments</span><small>Moderate visitor replies</small></span>
+                    @if (_pendingCommentCount > 0) { <span class="gws-nav-count">@_pendingCommentCount</span> }
+                </NavLink>
+            }
             @if (IsAdmin)
             {
                 <NavLink class="gws-nav-link" href="admin/growth" title="Growth Studio">
@@ -51,17 +60,23 @@
                     <span class="gws-nav-link-copy"><span>Growth Studio</span><small>Analytics and social publishing</small></span>
                 </NavLink>
             }
-            <NavLink class="gws-nav-link" href="admin/app-generation" title="SentinelGPT Page Builder">
-                <i class="bi bi-stars" aria-hidden="true"></i>
-                <span class="gws-nav-link-copy"><span>SentinelGPT Builder</span><small>Draft new site pages</small></span>
-            </NavLink>
+            @if (Shown("app-generation"))
+            {
+                <NavLink class="gws-nav-link" href="admin/app-generation" title="SentinelGPT Page Builder">
+                    <i class="bi bi-stars" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>SentinelGPT Builder</span><small>Draft new site pages</small></span>
+                </NavLink>
+            }
             @if (IsAdmin)
             {
-                <NavLink class="gws-nav-link" href="admin/app-generation-queue" title="SentinelGPT Page Queue">
-                    <i class="bi bi-inbox-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Approval Queue</span><small>Review generated plans</small></span>
-                    @if (_pendingAppGenerationCount > 0) { <span class="gws-nav-count">@_pendingAppGenerationCount</span> }
-                </NavLink>
+                @if (Shown("app-generation"))
+                {
+                    <NavLink class="gws-nav-link" href="admin/app-generation-queue" title="SentinelGPT Page Queue">
+                        <i class="bi bi-inbox-fill" aria-hidden="true"></i>
+                        <span class="gws-nav-link-copy"><span>Approval Queue</span><small>Review generated plans</small></span>
+                        @if (_pendingAppGenerationCount > 0) { <span class="gws-nav-count">@_pendingAppGenerationCount</span> }
+                    </NavLink>
+                }
             }
             @if (IsContributorOrAbove)
             {
@@ -84,10 +99,13 @@
             }
             @if (IsAdmin)
             {
-                <NavLink class="gws-nav-link" href="admin/podcasts" title="Podcast Directory">
-                    <i class="bi bi-mic-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Podcasts</span><small>Saved shows and episodes</small></span>
-                </NavLink>
+                @if (Shown("podcasts"))
+                {
+                    <NavLink class="gws-nav-link" href="admin/podcasts" title="Podcast Directory">
+                        <i class="bi bi-mic-fill" aria-hidden="true"></i>
+                        <span class="gws-nav-link-copy"><span>Podcasts</span><small>Saved shows and episodes</small></span>
+                    </NavLink>
+                }
                 <NavLink class="gws-nav-link" href="admin/live-show" title="Live Show">
                     <i class="bi bi-camera-video-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Live Show</span><small>Broadcast studio</small></span>
@@ -101,31 +119,49 @@
         <details class="gws-nav-group" open="@IsGroupOpen(RelationshipPrefixes)">
             <summary><span>Relationships</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
             <div class="gws-nav-group-items">
-                <NavLink class="gws-nav-link" href="admin/crm" title="CRM">
-                    <i class="bi bi-people-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>CRM</span><small>Contacts and activity</small></span>
-                    @if (_dueFollowUpCount > 0) { <span class="gws-nav-count">@_dueFollowUpCount</span> }
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/deal-scoring" title="Deal Scoring">
-                    <i class="bi bi-graph-up-arrow" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Deal Scoring</span><small>Win-likelihood by deal</small></span>
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/billing" title="Billing">
-                    <i class="bi bi-receipt" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Billing</span><small>Draft and send invoices</small></span>
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/support" title="Support">
-                    <i class="bi bi-life-preserver" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Support</span><small>Client portal tickets</small></span>
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/scheduling" title="Scheduling">
-                    <i class="bi bi-calendar2-check" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Scheduling</span><small>Booking types and bookings</small></span>
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/email-campaigns" title="Email Campaigns">
-                    <i class="bi bi-envelope-paper-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Email Campaigns</span><small>Drip sequences</small></span>
-                </NavLink>
+                @if (Shown("crm"))
+                {
+                    <NavLink class="gws-nav-link" href="admin/crm" title="CRM">
+                        <i class="bi bi-people-fill" aria-hidden="true"></i>
+                        <span class="gws-nav-link-copy"><span>CRM</span><small>Contacts and activity</small></span>
+                        @if (_dueFollowUpCount > 0) { <span class="gws-nav-count">@_dueFollowUpCount</span> }
+                    </NavLink>
+                }
+                @if (Shown("crm"))
+                {
+                    <NavLink class="gws-nav-link" href="admin/deal-scoring" title="Deal Scoring">
+                        <i class="bi bi-graph-up-arrow" aria-hidden="true"></i>
+                        <span class="gws-nav-link-copy"><span>Deal Scoring</span><small>Win-likelihood by deal</small></span>
+                    </NavLink>
+                }
+                @if (Shown("billing"))
+                {
+                    <NavLink class="gws-nav-link" href="admin/billing" title="Billing">
+                        <i class="bi bi-receipt" aria-hidden="true"></i>
+                        <span class="gws-nav-link-copy"><span>Billing</span><small>Draft and send invoices</small></span>
+                    </NavLink>
+                }
+                @if (Shown("support"))
+                {
+                    <NavLink class="gws-nav-link" href="admin/support" title="Support">
+                        <i class="bi bi-life-preserver" aria-hidden="true"></i>
+                        <span class="gws-nav-link-copy"><span>Support</span><small>Client portal tickets</small></span>
+                    </NavLink>
+                }
+                @if (Shown("scheduling"))
+                {
+                    <NavLink class="gws-nav-link" href="admin/scheduling" title="Scheduling">
+                        <i class="bi bi-calendar2-check" aria-hidden="true"></i>
+                        <span class="gws-nav-link-copy"><span>Scheduling</span><small>Booking types and bookings</small></span>
+                    </NavLink>
+                }
+                @if (Shown("email-campaigns"))
+                {
+                    <NavLink class="gws-nav-link" href="admin/email-campaigns" title="Email Campaigns">
+                        <i class="bi bi-envelope-paper-fill" aria-hidden="true"></i>
+                        <span class="gws-nav-link-copy"><span>Email Campaigns</span><small>Drip sequences</small></span>
+                    </NavLink>
+                }
                 <NavLink class="gws-nav-link" href="admin/users" title="User Management">
                     <i class="bi bi-person-gear" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Users</span><small>Accounts and roles</small></span>
@@ -238,6 +274,13 @@
     private static readonly IReadOnlyList<string> GrowthMonetizationPrefixes = NavMenuGroups.GrowthMonetizationPrefixes;
     private static readonly IReadOnlyList<string> PlatformPrefixes = NavMenuGroups.PlatformPrefixes;
 
+    private IReadOnlyList<string> _hiddenNavKeys = [];
+
+    // Hidden, not disabled: the route still resolves, so an existing bookmark keeps working and
+    // turning a feature back on is a checkbox in Settings rather than a deploy.
+    private bool Shown(string featureKey) =>
+        !_hiddenNavKeys.Contains(featureKey, StringComparer.OrdinalIgnoreCase);
+
     private string _role = string.Empty;
     private int _pendingCommentCount;
     private int _unreadDockerAlertCount;
@@ -250,6 +293,18 @@
         var state = await AuthProvider.GetAuthenticationStateAsync();
         _role = state.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
         if (state.User.Identity?.IsAuthenticated != true) return;
+
+        // Nav visibility is a display preference, so a settings failure must never take the whole
+        // menu down - on error everything simply stays visible.
+        try
+        {
+            var settings = await SiteSettingsService.GetSettingsAsync();
+            _hiddenNavKeys = AdminFeatures.Parse(settings.HiddenNavKeys);
+        }
+        catch (Exception)
+        {
+            _hiddenNavKeys = [];
+        }
 
         var summary = await SummaryService.GetAsync(IsAdmin);
         _pendingCommentCount = summary.PendingComments;

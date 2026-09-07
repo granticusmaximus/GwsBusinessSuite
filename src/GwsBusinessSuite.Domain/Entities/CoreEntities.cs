@@ -1417,6 +1417,11 @@ public sealed class SiteSettings : AuditableEntity
     public int PostsPerPage { get; set; } = 12;
     public Guid? DefaultArticleCategoryId { get; set; }
     public string? DefaultAuthorByline { get; set; }
+    // Comma-separated AdminFeatures keys hidden from the admin navigation. Hiding, not
+    // disabling: the routes still work, so a bookmark keeps functioning and re-enabling is a
+    // checkbox rather than a deploy. Exists because 57 admin pages make the dozen actually in
+    // use harder to find - several features have never held a single row in production.
+    public string? HiddenNavKeys { get; set; }
     public string? OllamaModelOverride { get; set; }
     public int? OllamaTimeoutMinutesOverride { get; set; }
     public string? HeroImageModelOverride { get; set; }

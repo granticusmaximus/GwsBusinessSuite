@@ -7,7 +7,10 @@ public sealed record SiteSettingsView(
     string? OllamaModelOverride,
     int? OllamaTimeoutMinutesOverride,
     string? HeroImageModelOverride,
-    int MaxMediaUploadSizeMb);
+    int MaxMediaUploadSizeMb,
+    // Null means "never configured" and takes AdminFeatures.DefaultHiddenKeys; an empty string
+    // is a deliberate "show everything" and is preserved as such.
+    string? HiddenNavKeys = null);
 
 public interface ISiteSettingsService
 {

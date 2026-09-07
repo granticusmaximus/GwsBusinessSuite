@@ -84,6 +84,33 @@ else
                     <input class="form-control" @bind="SiteSlugInput" />
                     <div class="form-text">Changing this affects any URLs or references built from the site slug.</div>
                 </div>
+                <hr class="my-4" />
+
+                @* Hiding, not disabling. Each feature below has never held a row in production,
+                   and 57 admin destinations make the dozen in daily use harder to find. The
+                   routes still work, so nothing breaks and re-enabling is one checkbox. *@
+                <h2 class="h6">Navigation</h2>
+                <p class="text-secondary small mb-3">
+                    Hidden areas disappear from the menu but keep working if you visit them directly,
+                    so nothing is lost by hiding something you later want back.
+                </p>
+                @foreach (var group in AdminFeatures.All.GroupBy(feature => feature.Group))
+                {
+                    <div class="small fw-semibold text-secondary mt-3 mb-1">@group.Key</div>
+                    @foreach (var feature in group)
+                    {
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="nav-@feature.Key"
+                                   checked="@(!HiddenNavKeysInput.Contains(feature.Key))"
+                                   @onchange="e => ToggleFeature(feature.Key, (bool)(e.Value ?? false))" />
+                            <label class="form-check-label" for="nav-@feature.Key">
+                                @feature.DisplayName
+                                <span class="text-secondary small d-block">@feature.Reason</span>
+                            </label>
+                        </div>
+                    }
+                }
+
                 <div class="gws-settings-actions"><span>Changes affect the public site immediately.</span><button class="btn btn-primary" @onclick="SaveGeneralAsync" disabled="@IsBusy">@(IsBusy ? "Saving…" : "Save changes")</button></div>
             </div>
         </div>
@@ -395,6 +422,7 @@ else
         OllamaModelOverrideInput = settings.OllamaModelOverride ?? string.Empty;
         OllamaTimeoutOverrideInput = settings.OllamaTimeoutMinutesOverride;
         HeroImageModelOverrideInput = settings.HeroImageModelOverride ?? string.Empty;
+        HiddenNavKeysInput = [.. AdminFeatures.Parse(settings.HiddenNavKeys)];
         SemanticIndexStatus = await HybridSearchService.GetStatusAsync();
         ApiKeys = (await DeveloperApiKeyService.ListAsync()).ToList();
 
@@ -434,7 +462,22 @@ else
                 FaviconUrl = CurrentSite.FaviconUrl
             });
             CurrentSite = saved;
+
+            // Serialized even when nothing is hidden: an empty string is the stored form of
+            // "show everything", and leaving it null would silently restore the defaults on the
+            // next load, making the setting impossible to clear.
+            var settings = await SiteSettingsService.GetSettingsAsync();
+            await SiteSettingsService.SaveSettingsAsync(
+                settings with { HiddenNavKeys = AdminFeatures.Serialize(HiddenNavKeysInput) });
         });
+    }
+
+    private List<string> HiddenNavKeysInput = [];
+
+    private void ToggleFeature(string key, bool shown)
+    {
+        if (shown) HiddenNavKeysInput.RemoveAll(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase));
+        else if (!HiddenNavKeysInput.Contains(key, StringComparer.OrdinalIgnoreCase)) HiddenNavKeysInput.Add(key);
     }
 
     private async Task SaveReadingAsync()
