@@ -24,9 +24,16 @@
     <!-- Please consult https://developer.apple.com/documentation/bundleresources/information_property_list/lsapplicationcategorytype -->
     <!-- <key>LSApplicationCategoryType</key> -->
     <!-- <string>public.app-category.YOUR-CATEGORY-HERE</string> -->
+	<!-- 6 = the Mac idiom ("Optimize Interface for Mac"). The iPad idiom (2) is the Mac
+	     Catalyst default, and macOS renders it at 77% - which is why every page, the hosted
+	     admin site included, came out visibly smaller in this app than the same site does in
+	     a browser. The Mac idiom renders at native scale, so the WebView matches Safari and
+	     the native SentinelGPT tab matches the rest of the desktop. Nothing in this app
+	     branches on UserInterfaceIdiom, so this only affects rendering scale and the AppKit
+	     look of stock controls. -->
 	<key>UIDeviceFamily</key>
 	<array>
-		<integer>2</integer>
+		<integer>6</integer>
 	</array>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.lifestyle</string>

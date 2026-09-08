@@ -298,6 +298,7 @@ public static class DependencyInjection
         services.AddScoped<ISentinelCollaborationService, SentinelCollaborationService>();
         services.AddScoped<ISentinelAccessService, SentinelAccessService>();
         services.AddScoped<ISentinelAiService, SentinelAiService>();
+        services.AddScoped<ISentinelWritingAssistant, SentinelWritingAssistantService>();
         services.AddSingleton<SentinelCollaborationNotifier>();
         services.AddSingleton<SentinelPresenceTracker>();
         services.AddSingleton<SentinelCursorTracker>();

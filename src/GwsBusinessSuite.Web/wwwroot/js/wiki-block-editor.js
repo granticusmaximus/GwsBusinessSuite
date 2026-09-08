@@ -80,6 +80,9 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
         mentionRequestId: 0,
         inlineToolbar: null,
         blockMenu: null,
+        // Server-owned writing-action catalog, fetched lazily the first time the AI menu is
+        // opened and cached for the life of the editor instance.
+        writingActions: null,
         discussionCounts: new Map(),
         // In-memory only (not persisted) - one entry per debounced edit burst or structural
         // op, same granularity as OnBlocksChanged. Cleared whenever setBlocks replaces the
@@ -3777,6 +3780,8 @@ function showInlineToolbar(state) {
     toolbar.setAttribute('role', 'toolbar');
     toolbar.setAttribute('aria-label', 'Text formatting');
 
+    appendWritingAssistantButton(toolbar, state, range);
+
     const actions = [
         { label: 'B', title: 'Bold', tag: 'b', className: 'is-bold' },
         { label: 'I', title: 'Italic', tag: 'i', className: 'is-italic' },
@@ -3846,9 +3851,165 @@ function showInlineToolbar(state) {
     document.body.appendChild(toolbar);
     const rect = range.getBoundingClientRect();
     const toolbarRect = toolbar.getBoundingClientRect();
-    toolbar.style.left = `${window.scrollX + rect.left + (rect.width - toolbarRect.width) / 2}px`;
-    toolbar.style.top = `${window.scrollY + rect.top - toolbarRect.height - 8}px`;
+    toolbar.style.left = `${window.scrollX + Math.max(8, Math.min(rect.left + (rect.width - toolbarRect.width) / 2, window.innerWidth - toolbarRect.width - 8))}px`;
+    toolbar.style.top = `${window.scrollY + Math.max(8, rect.top - toolbarRect.height - 8)}px`;
     state.inlineToolbar = toolbar;
+}
+
+// Inline writing assistance. The action catalog is owned by the server
+// (SentinelWritingActions) and fetched once per editor instance, so the menu can never drift
+// from the actions the server will actually accept.
+async function loadWritingActions(state) {
+    if (state.writingActions) return state.writingActions;
+    try {
+        const actions = await state.dotNetRef.invokeMethodAsync('GetWritingActions');
+        state.writingActions = Array.isArray(actions) ? actions : [];
+    } catch {
+        // A disconnected circuit is not a permanent failure - leave the cache unset so the
+        // next open retries rather than showing an empty menu for the rest of the session.
+        return [];
+    }
+    return state.writingActions;
+}
+
+function setWritingMenuStatus(menu, message, isError = false) {
+    let status = menu.querySelector('.wiki-ai-menu-status');
+    if (!status) {
+        status = document.createElement('div');
+        status.className = 'wiki-ai-menu-status';
+        menu.appendChild(status);
+    }
+    status.textContent = message;
+    status.classList.toggle('is-error', isError);
+    // Announced rather than merely shown, since the menu keeps focus while the model works.
+    status.setAttribute('role', 'status');
+    positionWritingMenu(menu);
+}
+
+function positionWritingMenu(menu) {
+    const toolbar = menu.parentElement;
+    if (!toolbar?.isConnected) return;
+    const rect = toolbar.getBoundingClientRect();
+    const below = Math.max(0, window.innerHeight - rect.bottom - 14);
+    const above = Math.max(0, rect.top - 14);
+    const openAbove = menu.scrollHeight > below && above > below;
+    menu.style.maxHeight = `${openAbove ? above : below}px`;
+    menu.style.top = openAbove ? 'auto' : 'calc(100% + .35rem)';
+    menu.style.bottom = openAbove ? 'calc(100% + .35rem)' : 'auto';
+    menu.style.left = `${Math.min(0, window.innerWidth - rect.left - menu.offsetWidth - 8)}px`;
+}
+
+// The model returns plain text and is inserted as a text node, never as markup. That is the
+// whole XSS story for this feature: nothing it produces is ever parsed as HTML.
+function applyWritingResult(state, action, range, text) {
+    const target = range.cloneRange();
+    if (action.key === 'continue') {
+        // Continue appends rather than replaces - deleting what the user asked to continue
+        // from would be the opposite of the request.
+        target.collapse(false);
+        target.insertNode(document.createTextNode(' ' + text));
+    } else {
+        target.deleteContents();
+        target.insertNode(document.createTextNode(text));
+    }
+
+    const anchor = target.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? target.commonAncestorContainer
+        : target.commonAncestorContainer.parentElement;
+    // Merge the inserted node with its neighbours, otherwise the block serializes with the
+    // rewrite split across adjacent text nodes and later offset maths (discussion anchors)
+    // lands in the wrong place.
+    anchor?.closest?.('.wiki-block-content')?.normalize();
+    scheduleNotify(state);
+}
+
+function appendWritingAssistantButton(toolbar, state, range) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'wiki-ai-menu-toggle';
+    button.textContent = 'AI';
+    button.title = 'Writing assistant';
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('aria-haspopup', 'menu');
+    button.addEventListener('mousedown', event => event.preventDefault());
+    button.addEventListener('click', async event => {
+        event.stopPropagation();
+        if (toolbar.querySelector('.wiki-ai-menu')) {
+            toolbar.querySelectorAll('.wiki-ai-menu').forEach(menu => menu.remove());
+            return;
+        }
+        toolbar.querySelectorAll('.wiki-color-menu').forEach(menu => menu.remove());
+
+        const menu = document.createElement('div');
+        menu.className = 'wiki-ai-menu';
+        menu.setAttribute('role', 'menu');
+        menu.setAttribute('aria-label', button.title);
+        toolbar.appendChild(menu);
+        setWritingMenuStatus(menu, 'Loading actions…');
+
+        const actions = await loadWritingActions(state);
+        if (!toolbar.isConnected) return;
+        menu.textContent = '';
+        if (actions.length === 0) {
+            setWritingMenuStatus(menu, 'The writing assistant is unavailable.', true);
+            return;
+        }
+
+        for (const action of actions) {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.setAttribute('role', 'menuitem');
+            option.setAttribute('aria-label', action.label);
+            const icon = document.createElement('span');
+            icon.className = 'wiki-ai-menu-icon';
+            icon.textContent = action.icon || '·';
+            const label = document.createElement('span');
+            label.textContent = action.label;
+            option.append(icon, label);
+            option.addEventListener('mousedown', mouseEvent => mouseEvent.preventDefault());
+            option.addEventListener('click', async optionEvent => {
+                optionEvent.stopPropagation();
+                await runWritingAction(state, toolbar, menu, action, range);
+            });
+            menu.appendChild(option);
+        }
+        positionWritingMenu(menu);
+    });
+    toolbar.appendChild(button);
+}
+
+async function runWritingAction(state, toolbar, menu, action, range) {
+    const selectedText = range.toString();
+    if (!selectedText.trim()) {
+        setWritingMenuStatus(menu, 'Select some text first.', true);
+        return;
+    }
+
+    // Disable every option while one is running, so a second click cannot start a competing
+    // rewrite against a range the first one is about to replace.
+    menu.querySelectorAll('button').forEach(item => { item.disabled = true; });
+    setWritingMenuStatus(menu, `${action.label}…`);
+
+    let result;
+    try {
+        result = await state.dotNetRef.invokeMethodAsync('RunWritingAction', action.key, selectedText);
+    } catch {
+        if (toolbar.isConnected) {
+            menu.querySelectorAll('button').forEach(item => { item.disabled = false; });
+            setWritingMenuStatus(menu, 'The editor lost its connection.', true);
+        }
+        return;
+    }
+
+    if (!toolbar.isConnected) return;
+    if (!result || !result.succeeded) {
+        menu.querySelectorAll('button').forEach(item => { item.disabled = false; });
+        setWritingMenuStatus(menu, (result && result.error) || 'That did not work.', true);
+        return;
+    }
+
+    applyWritingResult(state, action, range, result.text);
+    closeInlineToolbar(state);
 }
 
 // One "A" dropdown with two labeled sections (Color / Background) - matching Notion's own

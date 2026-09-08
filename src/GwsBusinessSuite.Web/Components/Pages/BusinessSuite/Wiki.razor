@@ -19,6 +19,7 @@
 @inject INotionOAuthService NotionOAuthService
 @inject IMediaLibraryService MediaLibraryService
 @inject ISentinelTemplateService SentinelTemplateService
+@inject ISentinelWritingAssistant WritingAssistant
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject SentinelCursorTracker CursorTracker
 @inject IJSRuntime JS
@@ -2753,6 +2754,36 @@
         if (Guid.TryParse(blockId, out var parsedBlockId) && _sentinelDiscussions is not null)
         {
             await _sentinelDiscussions.FocusBlockAsync(parsedBlockId);
+        }
+    }
+
+    // The menu is built from the server's catalog rather than a copy kept in JavaScript, so
+    // adding an action in SentinelWritingActions is enough to make it appear in the editor.
+    [JSInvokable]
+    public Task<IReadOnlyList<SentinelWritingActionOption>> GetWritingActions() =>
+        Task.FromResult<IReadOnlyList<SentinelWritingActionOption>>(
+            [.. SentinelWritingActions.All.Select(action =>
+                new SentinelWritingActionOption(action.Key, action.Label, action.Icon))]);
+
+    // Inline writing assistance for the selection toolbar. Returns replacement text only -
+    // the editor applies it locally and the resulting document flows back through
+    // OnBlocksChanged like any other edit, so the page's normal save path and its permission
+    // and concurrency checks still govern what actually gets written.
+    [JSInvokable]
+    public async Task<SentinelWritingResult> RunWritingAction(string actionKey, string text)
+    {
+        try
+        {
+            return await WritingAssistant.TransformAsync(actionKey, text);
+        }
+        catch (OperationCanceledException)
+        {
+            return SentinelWritingResult.Failed("The writing assistant was cancelled.");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Inline writing action {Action} failed.", actionKey);
+            return SentinelWritingResult.Failed("The writing assistant is unavailable right now.");
         }
     }
 

@@ -141,6 +141,27 @@ and **Delete**. Selecting text opens an inline formatting toolbar (**Bold, Itali
 Inline code**, plus text/background color). Typing `[[` opens page-link autocomplete; typing `@`
 opens a person-mention picker. `Tab` / `Shift+Tab` indent and outdent the current block.
 
+### Writing assistant
+
+The **AI** button at the left of the inline formatting toolbar rewrites the text you have
+selected: **Improve writing, Make shorter, Make longer, Fix spelling & grammar, Simplify
+language, Make professional,** and **Continue writing**. Pick one and the result replaces your
+selection in place — except *Continue writing*, which appends to it instead.
+The menu opens above the toolbar when there is insufficient space below it. If the editor
+loses its connection, your selection stays unchanged and you can retry once it reconnects.
+
+This runs through the app server's configured Ollama service (the model set by **Settings →
+Ollama model override**, otherwise `sentinelgpt`). With a local model, there is no third-party
+generation request or per-request model charge. It is a different tool from the **Sentinel AI panel** above the editor: the
+panel holds a conversation and can use tools, while this only transforms the text you hand it.
+
+Two behaviours are deliberate. The assistant is instructed never to introduce a fact, name,
+number, or citation that is not already in your selection — if it cannot verify something it
+leaves it alone. These are model instructions, not fact-checking; review the result before relying
+on it. If the model returns a wildly longer passage than you selected, the result
+is rejected rather than pasted, because a runaway rewrite is easy to miss once it is in the page.
+Selections above 4,000 characters are declined; select a paragraph rather than a whole document.
+
 The system-managed User Guides landing page (including if you rename it to “GWS Documentations
 and Tutorials”) is rebuilt on startup with one visual linked-page card for every repository-backed
 guide. Those cards and the pages beneath them stay synchronized with `docs/`; edit the source
