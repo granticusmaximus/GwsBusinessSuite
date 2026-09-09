@@ -158,6 +158,74 @@ public sealed class SentinelWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task GetPageGraphAsync_ShouldIncludeTheCenterPageItsBacklinksAndItsForwardLinks()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var wiki = new WikiService(db);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System);
+
+        var center = await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Runbook" }, "u");
+        var linksToCenter = await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Onboarding Guide",
+            BlocksJson = WikiBlockJson.Serialize([WikiBlockJson.CreatePageLink(center.Id, "Runbook")])
+        }, "u");
+        var linkedFromCenter = await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Escalation Policy" }, "u");
+        await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = center.Id,
+            ExpectedContentVersion = center.ContentVersion,
+            Title = center.Title,
+            BlocksJson = WikiBlockJson.Serialize([WikiBlockJson.CreatePageLink(linkedFromCenter.Id, "Escalation Policy")])
+        }, "u");
+        var unrelated = await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Unrelated Page" }, "u");
+
+        var graph = await sentinel.GetPageGraphAsync(center.Id, "u");
+
+        graph.Nodes.Should().HaveCount(3, "the center page plus one backlink source plus one forward-link target");
+        graph.Nodes.Single(node => node.IsCenter).PageId.Should().Be(center.Id);
+        graph.Nodes.Select(node => node.PageId).Should().Contain([linksToCenter.Id, linkedFromCenter.Id]);
+        graph.Nodes.Select(node => node.PageId).Should().NotContain(unrelated.Id);
+        graph.Edges.Should().Contain(new SentinelPageGraphEdge(linksToCenter.Id, center.Id));
+        graph.Edges.Should().Contain(new SentinelPageGraphEdge(center.Id, linkedFromCenter.Id));
+    }
+
+    [Fact]
+    public async Task GetPageGraphAsync_ShouldHideANeighborTheViewerCannotAccess()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var wiki = new WikiService(db);
+        var accessService = new SentinelAccessService(db);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System, accessService);
+
+        var center = await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Public Runbook" }, "u");
+        var restrictedNeighbor = await wiki.SavePageAsync(new WikiPageEditorModel { Title = "Salary Notes" }, "u");
+        await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = center.Id,
+            ExpectedContentVersion = center.ContentVersion,
+            Title = center.Title,
+            BlocksJson = WikiBlockJson.Serialize([WikiBlockJson.CreatePageLink(restrictedNeighbor.Id, "Salary Notes")])
+        }, "u");
+        db.SentinelResourcePermissions.Add(new SentinelResourcePermission
+        {
+            TargetId = center.Id, IsDatabase = false, Username = "viewer", AccessLevel = SentinelAccessLevels.View
+        });
+        await db.SaveChangesAsync();
+        // "viewer" can see the center page but was never granted access to restrictedNeighbor -
+        // the forward link's target must not leak into the graph.
+
+        var graph = await sentinel.GetPageGraphAsync(center.Id, "viewer");
+
+        graph.Nodes.Select(node => node.PageId).Should().NotContain(restrictedNeighbor.Id);
+        graph.Edges.Should().NotContain(edge => edge.TargetPageId == restrictedNeighbor.Id);
+    }
+
+    [Fact]
     public async Task SearchAsync_ShouldRequireEveryTokenAndReturnMatchedTerms()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

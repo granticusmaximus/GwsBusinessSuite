@@ -355,6 +355,79 @@ public sealed class SentinelWorkspaceService(
         return backlinks.OrderBy(link => link.SourcePageTitle, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    public async Task<SentinelPageGraph> GetPageGraphAsync(
+        Guid pageId,
+        string username,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await CanAccessTargetAsync(pageId, false, username, cancellationToken))
+        {
+            return new SentinelPageGraph([], []);
+        }
+        var center = await dbContext.WikiPages.AsNoTracking()
+            .FirstOrDefaultAsync(page => page.Id == pageId, cancellationToken);
+        if (center is null)
+        {
+            return new SentinelPageGraph([], []);
+        }
+
+        // Inbound edges reuse the existing, already access-checked, already-defined notion of
+        // "a link between two pages" rather than re-scanning the wiki with a second definition.
+        var backlinks = await GetBacklinksAsync(pageId, username, cancellationToken);
+
+        // Outbound edges only need this one page's own content - unlike a backlink scan, this
+        // is a single-row read regardless of wiki size, which is what keeps this whole feature
+        // independent of MaxScanPages's cost concern.
+        var forwardTargetIds = WikiBlockJson.ParseBlocks(center.BlocksJson)
+            .SelectMany(block => block.RichText)
+            .Select(span => span.Link)
+            .Where(link => link is not null && link.StartsWith("wikilink:", StringComparison.OrdinalIgnoreCase))
+            .Select(link => link!["wikilink:".Length..])
+            .Select(idText => Guid.TryParse(idText, out var id) ? id : (Guid?)null)
+            .Where(id => id is not null && id != pageId)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+
+        var neighborIds = backlinks.Select(link => link.SourcePageId)
+            .Concat(forwardTargetIds)
+            .Distinct()
+            .Where(id => id != pageId)
+            .ToList();
+
+        // A forward link can point to a page this viewer cannot see (it was written by someone
+        // with broader access) - the same access boundary GetBacklinksAsync already enforces
+        // for inbound links must hold for outbound ones too, or the graph would leak the
+        // existence and title of a page the viewer has no permission on.
+        IReadOnlySet<SentinelAccessTarget> accessibleNeighbors = neighborIds.Count == 0
+            ? new HashSet<SentinelAccessTarget>()
+            : await GetAccessibleTargetsAsync(
+                neighborIds.Select(id => new SentinelAccessTarget(id, IsDatabase: false)),
+                username,
+                SentinelAccessLevels.View,
+                cancellationToken);
+        var accessibleNeighborIds = accessibleNeighbors.Select(target => target.TargetId).ToHashSet();
+
+        var neighborPages = accessibleNeighborIds.Count == 0
+            ? new List<WikiPage>()
+            : await dbContext.WikiPages.AsNoTracking()
+                .Where(page => accessibleNeighborIds.Contains(page.Id))
+                .ToListAsync(cancellationToken);
+
+        var nodes = new List<SentinelPageGraphNode> { new(center.Id, center.Title, center.Icon, IsCenter: true) };
+        nodes.AddRange(neighborPages.Select(page => new SentinelPageGraphNode(page.Id, page.Title, page.Icon, IsCenter: false)));
+
+        var edges = new List<SentinelPageGraphEdge>();
+        edges.AddRange(backlinks
+            .Where(link => accessibleNeighborIds.Contains(link.SourcePageId))
+            .Select(link => new SentinelPageGraphEdge(link.SourcePageId, pageId)));
+        edges.AddRange(forwardTargetIds
+            .Where(accessibleNeighborIds.Contains)
+            .Select(targetId => new SentinelPageGraphEdge(pageId, targetId)));
+
+        return new SentinelPageGraph(nodes, edges);
+    }
+
     public async Task<IReadOnlyList<SentinelBacklink>> GetRowMentionsAsync(
         Guid wikiDatabaseId,
         Guid rowId,

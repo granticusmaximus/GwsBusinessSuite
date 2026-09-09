@@ -19,6 +19,21 @@ public sealed record SentinelBacklink(
     string SourcePageTitle,
     string Preview);
 
+// A one-hop "local graph" centered on a single page - the page itself, every page that links to
+// it (via GetBacklinksAsync), and every page it links to (parsed from its own blocks). Not a
+// whole-wiki graph: SentinelWorkspaceService already bounds full-content scans at
+// MaxScanPages specifically because that cost scales with wiki size, and a graph one page at a
+// time (matching how Obsidian's own "local graph" works, rather than its separate whole-vault
+// graph) keeps this feature's cost independent of wiki size instead of adding a second
+// unbounded scan.
+public sealed record SentinelPageGraphNode(Guid PageId, string Title, string? Icon, bool IsCenter);
+
+public sealed record SentinelPageGraphEdge(Guid SourcePageId, Guid TargetPageId);
+
+public sealed record SentinelPageGraph(
+    IReadOnlyList<SentinelPageGraphNode> Nodes,
+    IReadOnlyList<SentinelPageGraphEdge> Edges);
+
 // Facet filtering (Phase 5.3) over an already-fetched SearchAsync result set - both the
 // sidebar's always-present search box and the Ctrl/Cmd+K command palette (Wiki.razor) call
 // this against their own independent result lists rather than adding filter parameters to
@@ -96,6 +111,11 @@ public interface ISentinelWorkspaceService
 
     Task<IReadOnlyList<SentinelBacklink>> GetBacklinksAsync(
         Guid targetPageId,
+        string username,
+        CancellationToken cancellationToken = default);
+
+    Task<SentinelPageGraph> GetPageGraphAsync(
+        Guid pageId,
         string username,
         CancellationToken cancellationToken = default);
 
