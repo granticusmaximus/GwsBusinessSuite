@@ -14,9 +14,11 @@ namespace GwsBusinessSuite.App;
 // empty, it is native chrome rather than page chrome, and it is where a macOS user already
 // looks for app-level actions - so the two concerns stop competing for the same pixels.
 //
-// Text labels only, deliberately: this binding's NSToolbarItem.Image wants an AppKit NSImage,
-// and there is no SF Symbol constructor exposed on it in this SDK - converting a UIImage across
-// that boundary is not worth the fragility it would add to a two-button toolbar.
+// Icons are small template PNGs bundled as MauiAsset (Resources/Raw/toolbar-*.png), loaded via
+// NSBundle rather than an SF Symbol: NSToolbarItem.Image wants an AppKit NSImage, and there is
+// no SF Symbol constructor exposed on NSImage in this SDK, so a bundled bitmap is the reliable
+// path. Marked Template so AppKit tints them to match the titlebar's light/dark appearance and
+// the selected-tab highlight automatically, the same way every stock macOS toolbar icon works.
 internal static class MacToolbarActions
 {
     // Set by MainPage while it is on screen. Null when the SentinelGPT tab is showing, which is
@@ -54,6 +56,10 @@ internal sealed class MacWindowToolbar : NSToolbarDelegate
     private const string SentinelGptId = "gws.tab.sentinelgpt";
     private const string ReloadId = "gws.reload";
     private const string DeviceLoginId = "gws.deviceLogin";
+
+    // Standard macOS toolbar icon size; the bundled PNGs are rendered at 2x this (36x36) for a
+    // crisp Retina result once NSImage.Size below scales the bitmap down to it.
+    private static readonly CoreGraphics.CGSize IconSize = new(18, 18);
 
     private NSToolbar? _toolbar;
 
@@ -99,19 +105,20 @@ internal sealed class MacWindowToolbar : NSToolbarDelegate
     public override NSToolbarItem? WillInsertItem(NSToolbar toolbar, string itemIdentifier, bool willBeInserted) =>
         itemIdentifier switch
         {
-            WorkspaceId => BuildTabButton(WorkspaceId, "Workspace", "MainPage"),
-            SentinelGptId => BuildTabButton(SentinelGptId, "SentinelGPT", "SentinelGptPage"),
-            ReloadId => BuildActionButton(ReloadId, "Reload", "Reload the workspace", () => MacToolbarActions.Reload?.Invoke()),
+            WorkspaceId => BuildTabButton(WorkspaceId, "Workspace", "MainPage", "toolbar-workspace"),
+            SentinelGptId => BuildTabButton(SentinelGptId, "SentinelGPT", "SentinelGptPage", "toolbar-sentinelgpt"),
+            ReloadId => BuildActionButton(ReloadId, "Reload", "Reload the workspace", "toolbar-reload", () => MacToolbarActions.Reload?.Invoke()),
             DeviceLoginId => BuildDeviceLoginButton(),
             _ => null
         };
 
-    private static NSToolbarItem BuildTabButton(string identifier, string label, string route)
+    private static NSToolbarItem BuildTabButton(string identifier, string label, string route, string iconResourceName)
     {
         var item = new NSToolbarItem(identifier)
         {
             Label = label,
             PaletteLabel = label,
+            Image = LoadIcon(iconResourceName),
             Bordered = true,
             Target = new ActionTarget(() => MacToolbarActions.SelectTab?.Invoke(route)),
             Action = new Selector("gwsToolbarActionActivated:")
@@ -119,13 +126,15 @@ internal sealed class MacWindowToolbar : NSToolbarDelegate
         return item;
     }
 
-    private static NSToolbarItem BuildActionButton(string identifier, string label, string tooltip, Action onActivated)
+    private static NSToolbarItem BuildActionButton(
+        string identifier, string label, string tooltip, string iconResourceName, Action onActivated)
     {
         var item = new NSToolbarItem(identifier)
         {
             Label = label,
             PaletteLabel = label,
             ToolTip = tooltip,
+            Image = LoadIcon(iconResourceName),
             Bordered = true,
             Target = new ActionTarget(onActivated),
             Action = new Selector("gwsToolbarActionActivated:")
@@ -137,8 +146,40 @@ internal sealed class MacWindowToolbar : NSToolbarDelegate
     // NativeAppAuthService), and this whole toolbar only exists on the Mac idiom, so no
     // per-item availability check is needed here.
     private static NSToolbarItem BuildDeviceLoginButton() =>
-        BuildActionButton(DeviceLoginId, "Device Login", "Configure device login",
+        BuildActionButton(DeviceLoginId, "Device Login", "Configure device login", "toolbar-devicelogin",
             () => MacToolbarActions.ConfigureDeviceLogin?.Invoke());
+
+    // The MauiAsset build item bundles Resources/Raw/<name>.png as a top-level bundle resource
+    // (verified: it lands at Contents/Resources/<name>.png in the built .app), so a plain
+    // NSBundle lookup finds it - no MAUI FileSystem/Essentials dependency, and safe to call this
+    // early in the scene lifecycle. Returns null (an icon-less but still fully functional
+    // button) rather than throwing if a future rename of the asset ever breaks the lookup - a
+    // missing icon should degrade the toolbar, not crash the app on launch.
+    private static NSImage? LoadIcon(string resourceName)
+    {
+        var path = NSBundle.MainBundle.PathForResource(resourceName, "png");
+        if (string.IsNullOrEmpty(path))
+        {
+            return null;
+        }
+
+        var data = NSData.FromFile(path);
+        if (data is null)
+        {
+            return null;
+        }
+
+        var image = new NSImage(data)
+        {
+            // A template image is drawn as a single-color mask that AppKit tints to match the
+            // toolbar's current appearance (light/dark, selected/idle) - the same mechanism
+            // every stock macOS toolbar icon uses, which is why these are plain black-on-
+            // transparent PNGs rather than pre-colored art.
+            Template = true,
+            Size = IconSize
+        };
+        return image;
+    }
 
     // NSToolbarItem dispatches through target/action rather than a managed delegate, so each
     // item keeps a small NSObject whose exported selector calls back into managed code. The

@@ -2324,6 +2324,214 @@ public sealed class AutomationWorkflowTests
         crm.SavedContacts.Should().ContainSingle(entry => entry.FullName == "Ada Lovelace" && entry.Email == "ada@example.com");
     }
 
+    // --- Wiki page automation nodes (wiki.createPage/appendBlock/findPages) and
+    // wiki.pageChangedTrigger - the real WikiService/SentinelWorkspaceService/SentinelAccessService
+    // are used throughout, not fakes, because the behaviour worth pinning here is exactly what
+    // those real services enforce: Edit-access checks and the automation-engine actor that
+    // prevents a workflow's own writes from re-triggering itself. CreateAsync always stamps
+    // CreatedBy "user" (it takes no owner parameter), so every test below seeds an AppUsers row
+    // for that exact username to control whether the workflow's owner is an admin. ---
+
+    [Fact]
+    public async Task WikiCreatePage_ShouldCreateATopLevelPage_ForAnAdminOwner()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var wikiService = new WikiService(db);
+        var serviceProvider = new FakeServiceProvider().Register<IWikiService>(wikiService);
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), dbContextFactory: new FakeAppDbContextFactory(options), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Create page");
+        var node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Create page", TypeKey = "wiki.createPage", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"title\":\"{{ $json.title }}\",\"parentWikiPageId\":\"\",\"blocksJson\":\"[]\"}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", node.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id, "{\"title\":\"Weekly Digest\"}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        var page = await db.WikiPages.AsNoTracking().SingleAsync(item => item.Title == "Weekly Digest");
+        page.CreatedBy.Should().Be("automation-engine", "an action node's own write must not count as the workflow owner personally editing");
+    }
+
+    [Fact]
+    public async Task WikiCreatePage_ShouldRequireEditAccessToTheParent_WhenTheOwnerIsNotAnAdmin()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        // "user" is CreateAsync's hardcoded workflow owner - Author, not Admin, so the
+        // default-deny path is exercised rather than the owner/admin bypass.
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Author, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var wikiService = new WikiService(db);
+        var parent = await wikiService.SavePageAsync(new WikiPageEditorModel { Title = "Restricted Parent" }, "admin");
+        // No SentinelResourcePermission row is granted to "user" for the parent, so a
+        // non-admin workflow owner must be denied - the same default-deny as every other
+        // Sentinel resource with no explicit share.
+
+        var serviceProvider = new FakeServiceProvider()
+            .Register<IWikiService>(wikiService)
+            .Register<ISentinelAccessService>(new SentinelAccessService(db));
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), dbContextFactory: new FakeAppDbContextFactory(options), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Create child page");
+        var node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Create page", TypeKey = "wiki.createPage", PositionX = 350, PositionY = 180,
+            ParametersJson = $"{{\"title\":\"Child\",\"parentWikiPageId\":\"{parent.Id}\",\"blocksJson\":\"[]\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", node.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id);
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        execution.ErrorMessage.Should().Contain("does not have Edit access");
+        (await db.WikiPages.AsNoTracking().AnyAsync(item => item.Title == "Child")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task WikiAppendBlock_ShouldAppendAParagraphToTheExistingPage()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var wikiService = new WikiService(db);
+        var page = await wikiService.SavePageAsync(new WikiPageEditorModel { Title = "Meeting Log", BlocksJson = "[]" }, "admin");
+
+        var serviceProvider = new FakeServiceProvider().Register<IWikiService>(wikiService);
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), dbContextFactory: new FakeAppDbContextFactory(options), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Append block");
+        var node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Append", TypeKey = "wiki.appendBlock", PositionX = 350, PositionY = 180,
+            ParametersJson = $"{{\"wikiPageId\":\"{page.Id}\",\"text\":\"{{{{ $json.line }}}}\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", node.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id, "{\"line\":\"Standup notes for today\"}");
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        var reloaded = await db.WikiPages.AsNoTracking().SingleAsync(item => item.Id == page.Id);
+        WikiBlockJson.ParseBlocks(reloaded.BlocksJson).Should().ContainSingle(block => block.PlainText == "Standup notes for today");
+    }
+
+    [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public async Task WikiPageChangedTrigger_ShouldOnlyChainIntoAWatcherWhenAllowed(bool allowDownstreamTriggers, int expectedWatcherExecutions)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var serviceProvider = new FakeServiceProvider();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), dbContextFactory: new FakeAppDbContextFactory(options), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var wikiService = new WikiService(db, automationTriggerService: triggerService);
+        serviceProvider.Register<IWikiService>(wikiService);
+
+        var page = await wikiService.SavePageAsync(new WikiPageEditorModel { Title = "Watched Page", BlocksJson = "[]" }, "admin");
+
+        var watcher = await workflowService.CreateAsync("Watcher");
+        await workflowService.SaveNodeAsync(watcher.Id, new AutomationNodeEditor
+        {
+            Id = watcher.Nodes.Single().Id, Name = watcher.Nodes.Single().Name, TypeKey = "wiki.pageChangedTrigger",
+            PositionX = 100, PositionY = 100, ParametersJson = $"{{\"wikiPageId\":\"{page.Id}\"}}"
+        });
+        await workflowService.PublishAsync(watcher.Id, "v1");
+        await workflowService.SetActiveAsync(watcher.Id, true);
+
+        var writer = await workflowService.CreateAsync("Writer");
+        var writeNode = await workflowService.SaveNodeAsync(writer.Id, new AutomationNodeEditor
+        {
+            Name = "Append", TypeKey = "wiki.appendBlock", PositionX = 350, PositionY = 100,
+            ParametersJson = $"{{\"wikiPageId\":\"{page.Id}\",\"text\":\"Automated update\"}}"
+        });
+        await workflowService.AddConnectionAsync(writer.Id, writer.Nodes.Single().Id, "main", writeNode.Id);
+        await workflowService.PublishAsync(writer.Id, "v1");
+        await workflowService.SetAllowDownstreamAutomationTriggersAsync(writer.Id, allowDownstreamTriggers);
+
+        var execution = await executionService.ExecuteAsync(writer.Id);
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(expectedWatcherExecutions);
+    }
+
+    [Fact]
+    public async Task WikiFindPages_ShouldOnlyReturnPagesTheWorkflowOwnerCanView()
+    {
+        await using var db = await CreateDbAsync();
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Author, IsActive = true });
+        await db.SaveChangesAsync();
+        var wikiService = new WikiService(db);
+        var visible = await wikiService.SavePageAsync(new WikiPageEditorModel { Title = "Onboarding Checklist", BlocksJson = "[]" }, "admin");
+        var hidden = await wikiService.SavePageAsync(new WikiPageEditorModel { Title = "Onboarding Salary Notes", BlocksJson = "[]" }, "admin");
+        db.SentinelResourcePermissions.Add(new SentinelResourcePermission
+        {
+            TargetId = visible.Id, IsDatabase = false, Username = "user", AccessLevel = SentinelAccessLevels.View
+        });
+        await db.SaveChangesAsync();
+        // "hidden" is deliberately left with no permission row for "user".
+
+        var workspaceService = new SentinelWorkspaceService(db, TimeProvider.System, new SentinelAccessService(db));
+        var serviceProvider = new FakeServiceProvider().Register<ISentinelWorkspaceService>(workspaceService);
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Find pages");
+        var node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Find", TypeKey = "wiki.findPages", PositionX = 350, PositionY = 180,
+            ParametersJson = "{\"query\":\"Onboarding\",\"limit\":10}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", node.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id);
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        var output = System.Text.Json.JsonDocument.Parse(execution.OutputJson!).RootElement.GetProperty("pages");
+        var titles = output.EnumerateArray().Select(item => item.GetProperty("title").GetString()).ToList();
+        titles.Should().Contain("Onboarding Checklist");
+        titles.Should().NotContain("Onboarding Salary Notes", "the workflow owner has no permission on that page");
+    }
+
+
     [Fact]
     public async Task CmsSavePage_ShouldCallCmsBuilderServiceWithResolvedExpressions()
     {

@@ -36,8 +36,12 @@ public sealed partial class AutomationNodeRegistry(
         new("support.ticketRepliedTrigger", 1, "Support Ticket Replied", "Starts an active workflow whenever a message is added to a support ticket, from either side of the conversation.", "Triggers", "bi-reply-fill", true, ["main"], "{}"),
         new("support.ticketSlaBreachedTrigger", 1, "Support Ticket SLA Breached", "Starts an active workflow once when a support ticket misses its first-response or resolution target.", "Triggers", "bi-alarm-fill", true, ["main"], "{}"),
         new("cms.formSubmittedTrigger", 1, "CMS Form Submitted", "Starts an active workflow whenever a visitor submits a public CMS form widget (e.g. a contact page). The trigger's output includes submissionId, pageId, siteId, slug, any mapped identity fields (email/fullName/company/phone), and the full raw field set.", "Triggers", "bi-envelope-paper-fill", true, ["main"], "{}"),
+        new("wiki.pageChangedTrigger", 1, "Sentinel Page Changed", "Starts an active workflow when a specific Sentinel page's content changes (its blocks - not a metadata-only save like renaming or changing its icon). Paste the page's id (visible in its Sentinel URL) into wikiPageId. Like Database Row Changed, a save performed by this workflow's own wiki.createPage/wiki.appendBlock nodes never re-fires this trigger, so a workflow cannot loop against a page it also writes to.", "Triggers", "bi-file-earmark-text", true, ["main"], "{\"wikiPageId\":\"\"}"),
         new("database.setRowProperty", 1, "Set Database Row Property", "Sets one property on a Sentinel database row. Paste the database, row, and property ids and an optional {{ $json.path }} expression for the value. Never re-triggers a Database Row Changed workflow, so it cannot cause an automation loop - chaining a second workflow off this write is not supported.", "Actions", "bi-pencil-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"rowId\":\"{{ $json.rowId }}\",\"propertyId\":\"\",\"value\":\"\"}", IsIdempotent: false),
         new("database.addRow", 1, "Add Database Row", "Creates a new row in a Sentinel database. propertyValues maps property ids to values (string values support {{ $json.path }} expressions); parentRowId is optional and nests the new row as a sub-item. Like Set Database Row Property, this never re-triggers a Database Row Changed workflow.", "Actions", "bi-plus-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"parentRowId\":\"\",\"propertyValues\":{}}", IsIdempotent: false),
+        new("wiki.createPage", 1, "Sentinel: Create Page", "Creates a new Sentinel wiki page. title and blocksJson support {{ $json.path }} expressions; parentWikiPageId is optional (omit to create a top-level page) and, when set, requires this workflow's owner to have Edit access to that parent. Never re-triggers a Sentinel Page Changed workflow.", "Actions", "bi-file-earmark-plus", false, ["main"], "{\"title\":\"{{ $json.title }}\",\"parentWikiPageId\":\"\",\"blocksJson\":\"[]\"}", IsIdempotent: false),
+        new("wiki.appendBlock", 1, "Sentinel: Append Block", "Appends one paragraph block to an existing Sentinel page. text supports {{ $json.path }} expressions. Requires this workflow's owner to have Edit access to the target page. Like Add Database Row, never re-triggers a Sentinel Page Changed workflow.", "Actions", "bi-file-earmark-text", false, ["main"], "{\"wikiPageId\":\"\",\"text\":\"{{ $json.text }}\"}", IsIdempotent: false),
+        new("wiki.findPages", 1, "Sentinel: Find Pages", "Searches Sentinel pages and databases by keyword and meaning (the same hybrid keyword + semantic search behind the top Quick Find bar and SentinelGPT's own search tool). query supports {{ $json.path }} expressions. Results are limited to what this workflow's owner can already view - read-only, has no side effects.", "Data", "bi-search", false, ["main"], "{\"query\":\"{{ $json.query }}\",\"limit\":10}"),
         new("automation.subWorkflow", 1, "Execute Workflow", "Runs another published workflow to completion and returns its output. The child must not pause on a Wait or Approval node. workflowId is the id shown in the target workflow's URL.", "Flow", "bi-diagram-3", false, ["main"], "{\"workflowId\":\"\"}", IsIdempotent: false),
         new("core.notify", 1, "Notify", "Sends an email to a person. to/subject/message support {{ $json.path }} expressions. For webhook-style alerts, use HTTP Request instead - this node is specifically for email.", "Actions", "bi-envelope-fill", false, ["main"], "{\"to\":\"\",\"subject\":\"GWS Automation Notification\",\"message\":\"{{ $json }}\"}", IsIdempotent: false),
         new("crm.setDealStage", 1, "CRM: Set Deal Stage", "Moves a CRM deal to a new pipeline stage. dealId and stage support {{ $json.path }} expressions.", "Actions", "bi-graph-up-arrow", false, ["main"], "{\"dealId\":\"{{ $json.dealId }}\",\"stage\":\"\"}", IsIdempotent: false),
@@ -196,8 +200,12 @@ public sealed partial class AutomationNodeRegistry(
             "support.ticketRepliedTrigger" => SingleOutput("main", input),
             "support.ticketSlaBreachedTrigger" => SingleOutput("main", input),
             "cms.formSubmittedTrigger" => SingleOutput("main", input),
+            "wiki.pageChangedTrigger" => SingleOutput("main", input),
             "database.setRowProperty" => await ExecuteSetRowPropertyAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "database.addRow" => await ExecuteAddRowAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
+            "wiki.createPage" => await ExecuteWikiCreatePageAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
+            "wiki.appendBlock" => await ExecuteWikiAppendBlockAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
+            "wiki.findPages" => await ExecuteWikiFindPagesAsync(node, input, workflowOwnerUsername, nodeOutputsByName, cancellationToken),
             "automation.subWorkflow" => await ExecuteSubWorkflowAsync(node, input, subWorkflowChain, cancellationToken),
             "core.notify" => await ExecuteNotifyAsync(node, input, nodeOutputsByName, cancellationToken),
             "crm.setDealStage" => await ExecuteCrmSetDealStageAsync(node, input, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
@@ -529,6 +537,168 @@ public sealed partial class AutomationNodeRegistry(
             ["rowId"] = row.Id.ToString()
         };
         return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteWikiCreatePageAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        string? workflowOwnerUsername,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        bool allowDownstreamTriggers,
+        CancellationToken cancellationToken)
+    {
+        var wikiService = serviceProvider?.GetService(typeof(IWikiService)) as IWikiService
+            ?? throw new InvalidOperationException("Sentinel page writes are not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+
+        var title = ResolveText(parameters["title"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        if (string.IsNullOrWhiteSpace(title)) throw new InvalidOperationException($"{node.Name} requires a title.");
+
+        var parentIdText = ResolveText(parameters["parentWikiPageId"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        var parentWikiPageId = Guid.TryParse(parentIdText, out var parsedParentId) ? parsedParentId : (Guid?)null;
+        if (parentWikiPageId is { } definiteParentId)
+        {
+            // Creating under an existing page nests it into that page's tree, so it needs the
+            // same Edit-access check as writing to it directly would - same reasoning as
+            // EnsureCanEditDatabaseAsync, just against the parent rather than the new page
+            // itself (which does not exist yet to check access against).
+            await EnsureCanEditPageAsync(definiteParentId, workflowOwnerUsername, node.Name, cancellationToken);
+        }
+
+        var blocksJson = parameters["blocksJson"]?.GetValue<string>() ?? "[]";
+        var editor = new WikiPageEditorModel
+        {
+            Title = title,
+            BlocksJson = string.IsNullOrWhiteSpace(blocksJson) ? "[]" : blocksJson,
+            ParentWikiPageId = parentWikiPageId
+        };
+        var page = await wikiService.SavePageAsync(editor, ChainingActor(allowDownstreamTriggers), createRevisionCheckpoint: false, cancellationToken: cancellationToken);
+
+        var output = source.DeepClone().AsObject();
+        output["wikiPage"] = new JsonObject { ["created"] = true, ["wikiPageId"] = page.Id.ToString(), ["title"] = page.Title };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteWikiAppendBlockAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        string? workflowOwnerUsername,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        bool allowDownstreamTriggers,
+        CancellationToken cancellationToken)
+    {
+        var wikiService = serviceProvider?.GetService(typeof(IWikiService)) as IWikiService
+            ?? throw new InvalidOperationException("Sentinel page writes are not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+
+        var wikiPageId = ParseRequiredGuid(parameters["wikiPageId"]?.GetValue<string>(), node.Name, "wikiPageId");
+        await EnsureCanEditPageAsync(wikiPageId, workflowOwnerUsername, node.Name, cancellationToken);
+
+        var text = ResolveText(parameters["text"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        if (string.IsNullOrWhiteSpace(text)) throw new InvalidOperationException($"{node.Name} requires text.");
+
+        var page = await wikiService.GetPageAsync(wikiPageId, cancellationToken)
+            ?? throw new InvalidOperationException($"{node.Name} could not find a Sentinel page with that id.");
+
+        var blocks = WikiBlockJson.ParseBlocks(page.BlocksJson).ToList();
+        blocks.Add(new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [new WikiRichTextSpan(text)], new Dictionary<string, string>()));
+        var appendedBlocksJson = WikiBlockJson.Serialize(blocks);
+
+        var editor = new WikiPageEditorModel
+        {
+            WikiPageId = page.Id,
+            ExpectedContentVersion = page.ContentVersion,
+            Title = page.Title,
+            Slug = page.Slug,
+            BlocksJson = appendedBlocksJson,
+            // Read and appended-to in the same call, so under normal (non-racing) execution
+            // this exactly equals the pre-append content - supplying it costs nothing and lets
+            // a genuine concurrent edit resolve as a block-level merge instead of an outright
+            // concurrency exception, same safety net WikiService.SavePageAsync already gives
+            // any other caller that provides a base snapshot.
+            BaseBlocksJson = page.BlocksJson,
+            Icon = page.Icon,
+            CoverImageUrl = page.CoverImageUrl,
+            ParentWikiPageId = page.ParentWikiPageId,
+            IsFullWidth = page.IsFullWidth,
+            FontStyle = page.FontStyle
+        };
+        var saved = await wikiService.SavePageAsync(editor, ChainingActor(allowDownstreamTriggers), createRevisionCheckpoint: false, cancellationToken: cancellationToken);
+
+        var output = source.DeepClone().AsObject();
+        output["wikiPage"] = new JsonObject { ["wikiPageId"] = saved.Id.ToString(), ["blockCount"] = blocks.Count };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteWikiFindPagesAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        string? workflowOwnerUsername,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        CancellationToken cancellationToken)
+    {
+        var workspaceService = serviceProvider?.GetService(typeof(ISentinelWorkspaceService)) as ISentinelWorkspaceService
+            ?? throw new InvalidOperationException("Sentinel search is not available to the automation engine.");
+        if (string.IsNullOrWhiteSpace(workflowOwnerUsername))
+        {
+            throw new InvalidOperationException($"{node.Name} could not determine the workflow's owner to check page access.");
+        }
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+
+        var query = ResolveText(parameters["query"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        var limit = Math.Clamp(parameters["limit"]?.GetValue<int>() ?? 10, 1, 50);
+
+        // SearchAsync already filters every result to what workflowOwnerUsername can view (the
+        // same access-controlled hybrid keyword + semantic search behind the top Quick Find bar
+        // and SentinelGPT's search_wiki tool) - nothing further to check here.
+        var results = string.IsNullOrWhiteSpace(query)
+            ? []
+            : await workspaceService.SearchAsync(query, workflowOwnerUsername, limit, cancellationToken);
+
+        var output = source.DeepClone().AsObject();
+        output["pages"] = JsonSerializer.SerializeToNode(results.Select(result => new
+        {
+            id = result.Id,
+            isDatabase = result.IsDatabase,
+            title = result.Title,
+            preview = result.Preview
+        }));
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    // Same is-admin-bypass access model as EnsureCanEditDatabaseAsync, against a Sentinel page
+    // instead of a database - kept as a separate method rather than a shared isDatabase
+    // parameter so neither call site risks a copy/paste mistake flipping the wrong resource kind.
+    private async Task EnsureCanEditPageAsync(
+        Guid wikiPageId, string? workflowOwnerUsername, string nodeName, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(workflowOwnerUsername))
+        {
+            throw new InvalidOperationException($"{nodeName} could not determine the workflow's owner to check page access.");
+        }
+
+        var factory = dbContextFactory
+            ?? throw new InvalidOperationException($"{nodeName} cannot verify page access without database access itself.");
+        await using var db = await factory.CreateDbContextAsync(cancellationToken);
+        var isAdmin = await db.AppUsers.AsNoTracking()
+            .AnyAsync(user => user.Username == workflowOwnerUsername && user.Role == AppRoles.Admin, cancellationToken);
+        if (isAdmin)
+        {
+            return;
+        }
+
+        var accessService = serviceProvider?.GetService(typeof(ISentinelAccessService)) as ISentinelAccessService
+            ?? throw new InvalidOperationException($"{nodeName} cannot verify page access right now.");
+        var canEdit = await accessService.CanAccessAsync(
+            wikiPageId, isDatabase: false, workflowOwnerUsername, SentinelAccessLevels.Edit, cancellationToken);
+        if (!canEdit)
+        {
+            throw new InvalidOperationException(
+                $"{nodeName} cannot write to this page - '{workflowOwnerUsername}' (this workflow's owner) does not have Edit access to it.");
+        }
     }
 
     // Bounds automation.subWorkflow's ancestor chain - a flat depth cap rather than attempted

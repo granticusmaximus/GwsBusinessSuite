@@ -360,6 +360,9 @@ public sealed class FormSubmissionServiceTests
         public Task<int> TriggerDatabaseRowChangedAsync(
             Guid wikiDatabaseId, string inputJson, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+        public Task<int> TriggerWikiPageChangedAsync(
+            Guid wikiPageId, string inputJson, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
         public Task<int> TriggerCrmDealStageChangedAsync(
             string stage, string inputJson, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

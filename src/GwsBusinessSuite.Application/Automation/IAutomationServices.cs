@@ -215,6 +215,13 @@ public interface IAutomationTriggerService
     // block the Sentinel row save that triggered it.
     Task<int> TriggerDatabaseRowChangedAsync(Guid wikiDatabaseId, string inputJson, CancellationToken cancellationToken = default);
 
+    // Same shape and contract as TriggerDatabaseRowChangedAsync, for a Sentinel wiki page
+    // instead of a database. Fires every active workflow whose enabled "wiki.pageChangedTrigger"
+    // node targets wikiPageId. Callers must not fire this for a save whose actor is the
+    // automation engine itself (see WikiService.SavePageAsync) - the same self-trigger loop
+    // guard as the database version, since wiki.appendBlock/wiki.createPage both write pages.
+    Task<int> TriggerWikiPageChangedAsync(Guid wikiPageId, string inputJson, CancellationToken cancellationToken = default);
+
     // Same shape as TriggerDatabaseRowChangedAsync, for CRM/CMS domain events instead of
     // Sentinel database rows. Fires every active workflow with an enabled
     // "crm.dealStageChangedTrigger" node, optionally filtered by that node's toStage parameter.

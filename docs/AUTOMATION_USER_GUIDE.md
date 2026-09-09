@@ -151,10 +151,12 @@ draft).
 | **Support Ticket Replied** | A contact or staff member adds a reply. Input includes ticket id, author type/name, body, and reply time. |
 | **Support Ticket SLA Breached** | The five-minute support sweep first detects a missed first-response or resolution target. Each breach type fires once per ticket; input includes ticket/contact/priority, `breachType`, due time, and detection time. |
 | **CMS Form Submitted** | A visitor submits a public "form" widget (e.g. a contact page). Fires on every submission, regardless of whether the widget's own "Create CRM contacts" opt-in is on. Input includes `submissionId`, `pageId`, `siteId`, `slug`, any identity fields the page builder mapped (`email`/`fullName`/`company`/`phone` — null if not mapped or not filled in), and the full raw `fields` object. |
+| **Sentinel Page Changed** | A specific Sentinel page's content changes — its blocks, not a metadata-only save like renaming it or changing its icon/cover. Paste the page's id (visible in its Sentinel URL) into `wikiPageId`. Like Database Row Changed, a write from this workflow's own Sentinel: Create Page / Sentinel: Append Block nodes never re-fires this trigger, so a workflow that watches a page it also writes to cannot loop against itself. |
 
 A published workflow can have at most one enabled Webhook Trigger and one enabled Schedule
-Trigger, but any number of Database Row Changed / CRM / CMS / Support triggers, and any mix of
-trigger types in the same workflow (whichever one actually fires starts that run).
+Trigger, but any number of Database Row Changed / CRM / CMS / Support / Sentinel Page Changed
+triggers, and any mix of trigger types in the same workflow (whichever one actually fires starts
+that run).
 
 ## Action nodes
 
@@ -169,6 +171,9 @@ trigger types in the same workflow (whichever one actually fires starts that run
 | **CMS: Save Page** | Creates or updates a CMS page on a site; omit `pageId` to create one. |
 | **Growth: Publish Social Post** | Publishes an already-drafted social post (draft it first in Growth Studio's composer). |
 | **HTTP Request** | Calls any HTTP API and returns status, headers, and response data. Attach an `httpHeader` credential to send an auth header without it ever appearing in plain text on the canvas. |
+| **Sentinel: Create Page** | Creates a new Sentinel wiki page. `title`/`blocksJson` are expression-capable; `parentWikiPageId` is optional (omit for a top-level page) and, when set, requires this workflow's owner to have Edit access to that parent page. Never re-triggers a Sentinel Page Changed workflow. |
+| **Sentinel: Append Block** | Appends one paragraph block (from `text`, expression-capable) to an existing Sentinel page. Requires this workflow's owner to have Edit access to the target page. Like Add Database Row, never re-triggers a Sentinel Page Changed workflow. |
+| **Sentinel: Find Pages** | Searches Sentinel pages and databases by `query` (expression-capable) — the same hybrid keyword + semantic search behind the top Quick Find bar and SentinelGPT's own search tool, so it can match on meaning as well as exact words. Read-only; results are limited to what this workflow's owner can already view. |
 
 ## Data and flow nodes
 

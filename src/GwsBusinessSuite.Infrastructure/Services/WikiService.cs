@@ -1,5 +1,7 @@
 using System.Text;
+using System.Text.Json;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
@@ -18,7 +20,8 @@ public sealed class WikiService(
     // Optional, resolved by DI in production - records a page edit into the unified security
     // audit stream (Part 4.9), but only for checkpoint-worthy saves (createRevisionCheckpoint),
     // not every silent debounced autosave tick, which would flood the audit log with noise.
-    ISecurityAuditService? securityAudit = null) : IWikiService
+    ISecurityAuditService? securityAudit = null,
+    IAutomationTriggerService? automationTriggerService = null) : IWikiService
 {
     // Was a flat 20-revision cap (hard-deleted anything past it); replaced in Phase 4.4 with a
     // time-tiered policy closer to Notion's own page history - see TrimOldRevisionsAsync.
@@ -270,6 +273,26 @@ public sealed class WikiService(
                     TargetId: page.Id.ToString(),
                     ActorUsername: performedBy), cancellationToken);
             }
+        }
+
+        // Same actor-selection rule as WikiDatabaseService.SaveRowAsync's own trigger fire: a
+        // save performed by the automation engine itself (wiki.createPage/wiki.appendBlock)
+        // must never re-fire this trigger, or a workflow whose own wiki.pageChangedTrigger
+        // targets a page its own action nodes write to would trigger itself forever. Only a
+        // genuine content change is worth notifying about - a metadata-only save (icon, cover,
+        // title) moves nothing an automation's downstream logic could act on differently, same
+        // reasoning as the property-only guard on the database version of this trigger.
+        var contentChanged = isNew || !string.Equals(previousBlocksJson, page.BlocksJson, StringComparison.Ordinal);
+        if (contentChanged && automationTriggerService is not null && performedBy != "automation-engine")
+        {
+            var triggerPayload = JsonSerializer.Serialize(new
+            {
+                wikiPageId = page.Id,
+                title = page.Title,
+                isNew,
+                blocksJson = page.BlocksJson
+            });
+            await automationTriggerService.TriggerWikiPageChangedAsync(page.Id, triggerPayload, cancellationToken);
         }
 
         return page;

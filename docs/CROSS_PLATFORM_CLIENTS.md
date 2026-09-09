@@ -113,6 +113,18 @@ and `SentinelGptPage` register their handlers in `OnAppearing` and clear them in
 `OnDisappearing`, and `AppShell` wires toolbar taps to `GoToAsync` and keeps the toolbar's
 highlighted tab in sync with `Shell.Navigated`.
 
+Each toolbar item carries an icon - small black-on-transparent template PNGs at
+`Resources/Raw/toolbar-*.png`, bundled as `MauiAsset` and loaded at runtime via
+`NSBundle.MainBundle.PathForResource` (verified: a `MauiAsset` lands at `Contents/Resources/
+<name>.png` at the bundle's top level on Mac Catalyst, not under any subfolder, so a plain
+filename lookup finds it - no MAUI `FileSystem`/Essentials dependency, safe this early in the
+scene lifecycle). `NSToolbarItem.Image` wants an `AppKit.NSImage`, and this SDK exposes no SF
+Symbol constructor for it, so a bundled bitmap is the reliable path rather than converting a
+`UIImage` or a Bootstrap Icon glyph across that boundary. Each image is marked `Template = true`
+so AppKit tints it to match the titlebar's light/dark appearance and the selected-tab highlight
+automatically - the same mechanism every stock macOS toolbar icon uses, which is why the source
+art is a plain shape mask rather than pre-colored.
+
 `NSToolbarItem`'s members are bound as `[SupportedOSPlatform("macos")]` with no `maccatalyst`
 carve-out, even though `UIWindowScene.Titlebar.Toolbar` is Apple's documented, supported way to
 add a toolbar to a Mac Catalyst app running this idiom - not a private bridge. The platform-compat
