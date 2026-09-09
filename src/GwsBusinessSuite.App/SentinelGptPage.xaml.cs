@@ -104,6 +104,12 @@ public partial class SentinelGptPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+#if MACCATALYST
+        // No WebView here, so the native titlebar's Reload button is a no-op while this tab is
+        // showing - matches MainPage clearing the same action on its own OnDisappearing.
+        MacToolbarActions.Reload = null;
+        MacToolbarActions.SyncSelectedTab?.Invoke("SentinelGptPage");
+#endif
         if (_models.Count == 0)
             await LoadModelsAsync();
 

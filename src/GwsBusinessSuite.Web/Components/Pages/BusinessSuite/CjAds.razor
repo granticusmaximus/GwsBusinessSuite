@@ -254,10 +254,16 @@
             <button type="button" class="btn-close" aria-label="Close" @onclick="CloseConnectorModal"></button>
           </div>
           <div class="modal-body">
-            <p class="text-secondary">Enter your CJ Developer Key, Publisher ID (CID), and Website ID. CJ requires the Website ID to generate tracking links for this site.</p>
+            <p class="text-secondary">Enter your CJ Personal Access Token, Publisher ID (CID), and Website ID. CJ requires the Website ID to generate tracking links for this site.</p>
               <div class="row g-3">
                 <div class="col-md-6">
-                  <label class="form-label fw-semibold small">Developer Key</label>
+                  <label class="form-label fw-semibold small">Personal Access Token</label>
+                  <div class="form-text mb-1">
+                    This must be a CJ <strong>Personal Access Token</strong> with commissions API access - not the
+                    older CJ Developer Key, which this connector's commissions/GraphQL endpoint will reject with an
+                    "authorization failed" error even though the value itself is entered correctly. Generate one from
+                    your CJ account's Personal Access Tokens page and confirm it covers the Publisher ID below.
+                  </div>
                   <div class="input-group">
                     <input class="form-control" type="@(ShowConnectorDeveloperKey ? "text" : "password")"
                            @bind="ConnectorDeveloperKey" autocomplete="off" />

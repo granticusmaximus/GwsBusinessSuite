@@ -88,6 +88,40 @@ dotnet restore src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -p:GwsClient
 dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-windows10.0.19041.0 -c Release --no-restore -r win-x64 -p:GwsClientTargetFramework=net10.0-windows10.0.19041.0 -p:WindowsAppSDKSelfContained=true
 ```
 
+## Native scale and the titlebar toolbar (macOS)
+
+Mac Catalyst has two interface idioms. The default, `UIDeviceFamily 2` ("Scaled to Match iPad"
+in Xcode), renders the whole app at 77% - every page, including the hosted admin site inside the
+WebView, comes out visibly smaller than the same page in a real browser. `Platforms/MacCatalyst/
+Info.plist` sets `UIDeviceFamily 6` instead ("Optimize Interface for Mac"), which renders at
+native scale; nothing in this app branches on `UserInterfaceIdiom`, so this only affects
+rendering scale and the AppKit look of stock controls. **This value is read from a compiled
+manifest cached under `obj/`** - a stale incremental build can silently keep the old 77% scale
+even after the plist is edited, so a real change here needs a clean rebuild (`rm -rf obj bin` for
+the `net10.0-maccatalyst` folders) to confirm, not just "Build succeeded."
+
+The Mac window's title bar carries a real `NSToolbar` (`Platforms/MacCatalyst/
+MacWindowToolbar.cs`), added because the hosted site already uses every corner of the WebView for
+its own chrome (search and the account menu top-right, the sidebar and Settings bottom-left) -
+floating buttons or Shell's own bottom tab bar sat on top of that chrome rather than beside it.
+The titlebar carries the Workspace/SentinelGPT tab switcher (replacing Shell's `TabBar`, which is
+hidden on this platform via `Shell.TabBarIsVisible`) and the Reload and Configure Device Login
+actions (replacing the old floating corner buttons, which are hidden on Mac and remain in
+`MainPage.xaml` only for iOS). `MacToolbarActions` is the static bridge between the toolbar (Mac
+Catalyst-only, compiled solely under `Platforms/MacCatalyst`) and the shared pages - `MainPage`
+and `SentinelGptPage` register their handlers in `OnAppearing` and clear them in
+`OnDisappearing`, and `AppShell` wires toolbar taps to `GoToAsync` and keeps the toolbar's
+highlighted tab in sync with `Shell.Navigated`.
+
+`NSToolbarItem`'s members are bound as `[SupportedOSPlatform("macos")]` with no `maccatalyst`
+carve-out, even though `UIWindowScene.Titlebar.Toolbar` is Apple's documented, supported way to
+add a toolbar to a Mac Catalyst app running this idiom - not a private bridge. The platform-compat
+analyzer treats `macos` and `maccatalyst` as unrelated identifiers, so no `[SupportedOSPlatform]`
+on this app's own code can satisfy a requirement written against a different identifier; the
+file-scoped `#pragma warning disable CA1416` in `MacWindowToolbar.cs` is a documented limitation
+of the analyzer for this exact bridging case, not a suppressed real risk - see the comment there
+before assuming any future CA1416 in that file is spurious too.
+
 ## Device login and the native SentinelGPT tab (macOS)
 
 The native Mac app's toolbar has a lock-icon "Configure device login" button that saves a shared

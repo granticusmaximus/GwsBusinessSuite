@@ -63,9 +63,16 @@ This guide is text-only (no screenshots) — see the note at the end of
 
 Open **CJ Ads Manager** (`/admin/cj-ads`) and click **Connect CJ Account**. The modal asks for:
 
-- **Developer Key** — your CJ Personal Access Token. Stored encrypted (via this app's Data
-  Protection secret protector); once saved, it's never shown again in plain text, and the modal
-  offers a show/hide eye toggle only while you're actively typing it in.
+- **Personal Access Token** — must be a CJ Personal Access Token with commissions API access,
+  *not* the older CJ Developer Key credential type; CJ's commissions/GraphQL endpoint (the
+  default Endpoint URL below) rejects a legacy Developer Key with an "authorization failed"
+  HTTP 401, even though the value was entered correctly. Generate a Personal Access Token from
+  your CJ account's Personal Access Tokens page and confirm it covers the Publisher ID below.
+  Stored encrypted (via this app's Data Protection secret protector); once saved, it's never
+  shown again in plain text, and the modal offers a show/hide eye toggle only while you're
+  actively typing it in. (Stored internally under the same field name, "Developer Key", used
+  before CJ introduced Personal Access Tokens - the label shown here has been updated, the
+  underlying field has not.)
 - **Publisher ID (CID)** — your CJ publisher account id.
 - **Website ID** (required before links can sync) — the numeric Website ID CJ assigned to this
   specific site. CJ needs this to generate site-specific tracking links; it is not your site's
@@ -83,12 +90,21 @@ Three buttons act on this form:
 - **Connect And Pull Partners** validates, saves, and immediately pulls your My Advertisers
   roster from CJ in one action — this is the normal first-time flow.
 
-If a previously-saved Developer Key can no longer be decrypted (for example, the server's
+If a previously-saved token can no longer be decrypted (for example, the server's
 encryption key ring changed since it was saved), the page detects this on load, clears the
 unreadable value, opens the connector modal automatically, and asks you to re-enter your token.
 
-The **Connected** / **Not Connected** badge at the top reflects whether a Developer Key and
+The **Connected** / **Not Connected** badge at the top reflects whether a token and
 Publisher ID are currently saved — it does not re-validate against CJ on every page load.
+
+**Getting an HTTP 401 "authorization failed" error?** This means CJ itself rejected the
+credential - the app already tries both header formats CJ accepts (`Authorization: Bearer
+<token>` and a raw `Authorization: <token>` header), so a 401 from both is a real CJ-side
+rejection, not a local formatting bug. In order of likelihood: (1) the stored value is a legacy
+Developer Key rather than a Personal Access Token - see above; (2) the token's scopes don't
+include commissions API access - check this on its Personal Access Tokens page; (3) the
+Publisher ID or Website ID entered doesn't belong to the CJ account that issued the token; (4)
+the token expired or was revoked and needs regenerating.
 
 ## Browsing advertisers and syncing links
 

@@ -31,7 +31,17 @@
                 BorderColor="#44403C"
                 BorderWidth="1"
                 Clicked="OnReloadClicked"
-                ToolTipProperties.Text="Reload" />
+                ToolTipProperties.Text="Reload">
+            <!-- MacCatalyst gets this same action from the native titlebar toolbar instead (see
+                 Platforms/MacCatalyst/MacWindowToolbar.cs), which does not sit over the hosted
+                 site's own top-right chrome (Quick find, Notion sync, account menu) the way this
+                 floating corner button did. -->
+            <Button.IsVisible>
+                <OnPlatform x:TypeArguments="x:Boolean" Default="True">
+                    <On Platform="MacCatalyst" Value="False" />
+                </OnPlatform>
+            </Button.IsVisible>
+        </Button>
 
         <!-- MacCatalyst-only: lets this device sign in via a pre-provisioned shared secret
              instead of the browser-facing MFA challenge (see DeviceSecretStore/
@@ -53,10 +63,13 @@
                 BorderWidth="1"
                 Clicked="OnConfigureDeviceLoginClicked"
                 ToolTipProperties.Text="Configure device login">
+            <!-- Was MacCatalyst-only (this feature does not apply elsewhere) and now has a
+                 native titlebar equivalent there too (see
+                 Platforms/MacCatalyst/MacWindowToolbar.cs), so this floating copy is unused on
+                 every platform. Left in place rather than deleted, in case a future platform
+                 needs the same floating-button pattern without a native toolbar to lean on. -->
             <Button.IsVisible>
-                <OnPlatform x:TypeArguments="x:Boolean" Default="False">
-                    <On Platform="MacCatalyst" Value="True" />
-                </OnPlatform>
+                <OnPlatform x:TypeArguments="x:Boolean" Default="False" />
             </Button.IsVisible>
         </Button>
 

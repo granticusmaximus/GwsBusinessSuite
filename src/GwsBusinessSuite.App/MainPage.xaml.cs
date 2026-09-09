@@ -29,6 +29,15 @@ public partial class MainPage : ContentPage
 
         UpdateConnectivity(Connectivity.Current.NetworkAccess);
 
+#if MACCATALYST
+        // Route the Mac window's native titlebar buttons to this page's own handlers while it is
+        // the visible tab. Cleared in OnDisappearing so Reload is a no-op while the SentinelGPT
+        // tab is showing instead of silently reloading a WebView the user can no longer see.
+        MacToolbarActions.Reload = () => OnReloadClicked(this, EventArgs.Empty);
+        MacToolbarActions.ConfigureDeviceLogin = () => OnConfigureDeviceLoginClicked(this, EventArgs.Empty);
+        MacToolbarActions.SyncSelectedTab?.Invoke("MainPage");
+#endif
+
         // Only attempt device login once per launch - re-appearing (e.g. returning from another
         // Shell tab) must never re-show the sign-in prompt over an already-loading/loaded WebView.
         if (!_startedLoading)
@@ -105,6 +114,11 @@ public partial class MainPage : ContentPage
             Connectivity.Current.ConnectivityChanged -= OnConnectivityChanged;
             _connectivitySubscribed = false;
         }
+
+#if MACCATALYST
+        MacToolbarActions.Reload = null;
+        MacToolbarActions.ConfigureDeviceLogin = null;
+#endif
 
         base.OnDisappearing();
     }

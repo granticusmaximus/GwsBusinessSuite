@@ -7,6 +7,14 @@
     Title="GWS Business Suite"
     Shell.NavBarIsVisible="False"
     FlyoutBehavior="Disabled">
+    <!-- MacCatalyst gets a native titlebar toolbar instead (see
+         Platforms/MacCatalyst/MacWindowToolbar.cs) - Shell's own bottom tab bar is an iOS idiom
+         that floated over the hosted site's own bottom-left chrome (the sidebar, Settings). -->
+    <Shell.TabBarIsVisible>
+        <OnPlatform x:TypeArguments="x:Boolean" Default="True">
+            <On Platform="MacCatalyst" Value="False" />
+        </OnPlatform>
+    </Shell.TabBarIsVisible>
 
     <TabBar>
         <ShellContent
