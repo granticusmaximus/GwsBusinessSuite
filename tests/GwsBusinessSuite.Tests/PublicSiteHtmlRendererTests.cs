@@ -360,6 +360,34 @@ public sealed class PublicSiteHtmlRendererTests
     }
 
     [Fact]
+    public void BlogPostBody_ShouldRenderRelatedArticles_WhenProvided()
+    {
+        var html = PublicSiteHtmlRenderer.BlogPostBody(
+            "Title", "Description", "Grant Watson", DateTimeOffset.UtcNow, "5 min", "",
+            null, "", "", "Body text",
+            relatedArticles:
+            [
+                new RelatedArticleView("Getting Started with EF Core", "getting-started-with-ef-core"),
+                new RelatedArticleView("ASP.NET Core Middleware Explained", "aspnet-core-middleware-explained")
+            ]);
+
+        Assert.Contains("Related articles", html);
+        Assert.Contains("href=\"/blog/getting-started-with-ef-core\"", html);
+        Assert.Contains("Getting Started with EF Core", html);
+        Assert.Contains("href=\"/blog/aspnet-core-middleware-explained\"", html);
+    }
+
+    [Fact]
+    public void BlogPostBody_ShouldOmitRelatedArticlesSection_WhenNoneAreProvided()
+    {
+        var html = PublicSiteHtmlRenderer.BlogPostBody(
+            "Title", "Description", "Grant Watson", DateTimeOffset.UtcNow, "5 min", "",
+            null, "", "", "Body text");
+
+        Assert.DoesNotContain("related-posts", html);
+    }
+
+    [Fact]
     public void BlogPostBody_ShouldRenderNestedRepliesAndReplyFormContext()
     {
         var comments = new[]

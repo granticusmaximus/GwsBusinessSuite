@@ -3,6 +3,10 @@ namespace GwsBusinessSuite.Application.AffiliateAnalytics;
 public sealed class AffiliateAnalyticsDashboard
 {
     public int TotalClicks { get; init; }
+    // Clicks recorded in this same window that AffiliateClickFilter classified as bot/crawler
+    // traffic - kept out of TotalClicks and every breakdown below, surfaced here so filtering
+    // is visible rather than a silent change to numbers advertisers or the dashboard already see.
+    public int FilteredClickCount { get; init; }
     public decimal TotalCommissionAmount { get; init; }
     public IReadOnlyList<AdvertiserClickSummary> ClicksByAdvertiser { get; init; } = Array.Empty<AdvertiserClickSummary>();
     public IReadOnlyList<ArticleClickSummary> ClicksByArticle { get; init; } = Array.Empty<ArticleClickSummary>();

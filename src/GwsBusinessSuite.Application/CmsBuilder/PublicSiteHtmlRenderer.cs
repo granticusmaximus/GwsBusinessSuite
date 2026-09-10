@@ -17,6 +17,8 @@ namespace GwsBusinessSuite.Application.CmsBuilder;
 /// Contact/etc.) are still rendered by <see cref="CmsBlockHtmlRenderer"/> and just get
 /// wrapped in <see cref="Layout"/> here.
 /// </summary>
+public sealed record RelatedArticleView(string Title, string Slug);
+
 public static class PublicSiteHtmlRenderer
 {
     private static readonly MarkdownPipeline MarkdownPipeline = new MarkdownPipelineBuilder()
@@ -530,7 +532,8 @@ public static class PublicSiteHtmlRenderer
         string slug = "",
         IReadOnlyList<CommentView>? approvedComments = null,
         Guid? replyToCommentId = null,
-        string? replyToAuthorName = null)
+        string? replyToAuthorName = null,
+        IReadOnlyList<RelatedArticleView>? relatedArticles = null)
     {
         var dateLabel = publishedAt?.ToString("MMMM d, yyyy") ?? "";
         var heroHtml = string.IsNullOrWhiteSpace(heroImageUrl)
@@ -600,6 +603,17 @@ public static class PublicSiteHtmlRenderer
             </section>
             """;
 
+        var relatedPostsHtml = relatedArticles is not { Count: > 0 }
+            ? string.Empty
+            : $"""
+                <section class="related-posts" aria-labelledby="related-posts-heading">
+                  <h2 id="related-posts-heading" class="related-posts-heading">Related articles</h2>
+                  <ul class="related-posts-list">
+                    {string.Concat(relatedArticles.Select(r => $"""<li><a href="/blog/{Html(r.Slug)}">{Html(r.Title)}</a></li>"""))}
+                  </ul>
+                </section>
+                """;
+
         return $"""
             <article>
               {heroHtml}
@@ -616,6 +630,7 @@ public static class PublicSiteHtmlRenderer
                 {(string.IsNullOrWhiteSpace(metaDescription) ? "" : $"""<p class="blog-post-lead">{Html(metaDescription)}</p>""")}
                 <p class="blog-post-author">By {Html(author)}</p>
                 <div class="blog-post-body">{bodyHtml}</div>
+                {relatedPostsHtml}
                 <footer class="blog-post-footer">
                   <a href="/blog">&larr; All articles</a>
                 </footer>

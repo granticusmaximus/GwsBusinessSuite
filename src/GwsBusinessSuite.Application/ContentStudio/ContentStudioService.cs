@@ -159,6 +159,21 @@ public sealed class ContentStudioService(
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    // Capped well above the current article count (39) so every published article is offered
+    // as a link candidate today, while keeping the prompt bounded as the catalogue grows.
+    private const int MaxExistingArticleLinks = 150;
+
+    // Ordered by PublishedAtUnixSeconds, not PublishedAt - SQLite/EF Core can't translate
+    // ORDER BY on a DateTimeOffset column (see this codebase's other shadow-column comments).
+    private async Task<IReadOnlyList<ExistingArticleLink>> GetExistingArticleLinksAsync(CancellationToken cancellationToken) =>
+        await db.Articles
+            .AsNoTracking()
+            .Where(a => a.PublishedAt != null && a.TrashedAt == null)
+            .OrderByDescending(a => a.PublishedAtUnixSeconds)
+            .Take(MaxExistingArticleLinks)
+            .Select(a => new ExistingArticleLink(a.Title, a.Slug))
+            .ToListAsync(cancellationToken);
+
     public async Task<ArticleGenerationResult> GenerateArticleAsync(
         ArticleGenerationRequest request,
         CancellationToken cancellationToken = default)
@@ -166,7 +181,8 @@ public sealed class ContentStudioService(
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Topic);
 
         var scoredOffers = await offerScoringService.ScoreOffersAsync(request, maxOffers: AffiliateSlotTokens.Length, cancellationToken);
-        var prompt = BuildPrompt(request, scoredOffers);
+        var existingArticles = await GetExistingArticleLinksAsync(cancellationToken);
+        var prompt = BuildPrompt(request, scoredOffers, existingArticles);
         var model = await GetEffectiveModelAsync(cancellationToken);
         var timeout = await GetEffectiveTimeoutAsync(cancellationToken);
 
@@ -202,7 +218,8 @@ public sealed class ContentStudioService(
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Topic);
 
         var scoredOffers = await offerScoringService.ScoreOffersAsync(request, maxOffers: AffiliateSlotTokens.Length, cancellationToken);
-        var prompt = BuildPrompt(request, scoredOffers);
+        var existingArticles = await GetExistingArticleLinksAsync(cancellationToken);
+        var prompt = BuildPrompt(request, scoredOffers, existingArticles);
         var model = await GetEffectiveModelAsync(cancellationToken);
         var timeout = await GetEffectiveTimeoutAsync(cancellationToken);
 
@@ -381,7 +398,8 @@ public sealed class ContentStudioService(
         };
 
         var scoredOffers = await offerScoringService.ScoreOffersAsync(baseRequest, maxOffers: AffiliateSlotTokens.Length, cancellationToken);
-        var prompt = BuildPrompt(baseRequest, scoredOffers) + $"\n\nRequested revisions:\n- {revisionNotes}";
+        var existingArticles = await GetExistingArticleLinksAsync(cancellationToken);
+        var prompt = BuildPrompt(baseRequest, scoredOffers, existingArticles) + $"\n\nRequested revisions:\n- {revisionNotes}";
 
         var configuredModel = await GetEffectiveModelAsync(cancellationToken);
         var timeout = await GetEffectiveTimeoutAsync(cancellationToken);
@@ -1009,9 +1027,13 @@ public sealed class ContentStudioService(
         Output format: GitHub-flavored Markdown. Do not include fake links.
         """;
 
-    public static string BuildPrompt(ArticleGenerationRequest request, IReadOnlyCollection<ScoredAffiliateOfferView>? scoredOffers = null)
+    public static string BuildPrompt(
+        ArticleGenerationRequest request,
+        IReadOnlyCollection<ScoredAffiliateOfferView>? scoredOffers = null,
+        IReadOnlyCollection<ExistingArticleLink>? existingArticles = null)
     {
         var affiliatePromptBlock = BuildAffiliateOfferPromptContext(scoredOffers ?? Array.Empty<ScoredAffiliateOfferView>());
+        var internalLinkPromptBlock = BuildInternalLinkPromptContext(existingArticles ?? Array.Empty<ExistingArticleLink>());
 
         return $$"""
         Write the how-to guide described below, following all rules already given.
@@ -1024,6 +1046,7 @@ public sealed class ContentStudioService(
         - If affiliate placeholders are provided below, preserve them exactly (do not rename tokens)
 
         {{affiliatePromptBlock}}
+        {{internalLinkPromptBlock}}
         """;
     }
 
@@ -1153,6 +1176,20 @@ public sealed class ContentStudioService(
             .ToArray();
 
         return $"CJ affiliate offers you may reference:\n{string.Join("\n", offerLines)}\n\nAffiliate placeholders to include exactly as written:\n- {AffiliateSlotTokens[0]}\n- {AffiliateSlotTokens[1]}\n- {AffiliateSlotTokens[2]}";
+    }
+
+    private static string BuildInternalLinkPromptContext(IReadOnlyCollection<ExistingArticleLink> existingArticles)
+    {
+        if (existingArticles.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var articleLines = existingArticles.Select(a => $"- {a.Title} — /blog/{a.Slug}").ToArray();
+        return $"""
+            Existing published articles on this site you may link to when genuinely relevant to the topic (Markdown link, using the exact URL shown - never invent a slug that isn't listed here, and don't force a link where none of these truly relate):
+            {string.Join("\n", articleLines)}
+            """;
     }
 
     private static string EnsureAffiliatePlaceholders(string markdown)

@@ -57,6 +57,12 @@ else
                 <div class="card-body">
                     <div class="text-secondary small">Total Clicks (last 90 days)</div>
                     <div class="fs-3 fw-semibold">@Dashboard.TotalClicks</div>
+                    @if (Dashboard.FilteredClickCount > 0)
+                    {
+                        <div class="text-secondary small mt-1" title="Hits from known bots, crawlers, and prefetch requests - excluded from the count above.">
+                            +@Dashboard.FilteredClickCount filtered out as bot traffic
+                        </div>
+                    }
                 </div>
             </div>
         </div>

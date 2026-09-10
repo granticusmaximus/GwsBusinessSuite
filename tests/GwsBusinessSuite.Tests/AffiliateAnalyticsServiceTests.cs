@@ -10,6 +10,85 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class AffiliateAnalyticsServiceTests
 {
+    private const string RealBrowserUserAgent =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15";
+
+    [Fact]
+    public async Task RecordClickAsync_ShouldStillRedirect_ButNotCountTowardTotalClicks_ForABotUserAgent()
+    {
+        await using var db = await CreateDbAsync();
+        var article = await CreateArticleAsync(db);
+        var placement = new ArticleAffiliatePlacement
+        {
+            ArticleId = article.Id,
+            SlotToken = "{{CJ_AD_1}}",
+            AdvertiserId = "adv-1",
+            AdvertiserName = "Acme Tools",
+            TrackingUrl = "https://example.com/track"
+        };
+        db.ArticleAffiliatePlacements.Add(placement);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        var destination = await service.RecordClickAsync(placement.Id, "Mozilla/5.0 (compatible; AhrefsBot/7.0)", null);
+
+        destination.Should().Be("https://example.com/track", "a filtered hit still redirects correctly - only the analytics count is affected");
+        db.ArticleAffiliateClicks.Should().ContainSingle(c => c.PassedBotFilter == false && c.FilterReason != null);
+
+        var dashboard = await service.GetDashboardAsync();
+        dashboard.TotalClicks.Should().Be(0);
+        dashboard.FilteredClickCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RecordClickAsync_ShouldTreatAMissingUserAgentAsFiltered()
+    {
+        await using var db = await CreateDbAsync();
+        var article = await CreateArticleAsync(db);
+        var placement = new ArticleAffiliatePlacement
+        {
+            ArticleId = article.Id,
+            SlotToken = "{{CJ_AD_1}}",
+            AdvertiserId = "adv-1",
+            AdvertiserName = "Acme Tools",
+            TrackingUrl = "https://example.com/track"
+        };
+        db.ArticleAffiliatePlacements.Add(placement);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db);
+        await service.RecordClickAsync(placement.Id, null, null);
+
+        db.ArticleAffiliateClicks.Should().ContainSingle(c => c.PassedBotFilter == false);
+    }
+
+    [Fact]
+    public async Task GetDashboardAsync_ShouldCountAHistoricalRowWithNoBotClassification_AsReal()
+    {
+        // Rows written before this filter existed have PassedBotFilter == null, not false -
+        // they must keep counting as real clicks rather than being silently reinterpreted.
+        await using var db = await CreateDbAsync();
+        var article = await CreateArticleAsync(db);
+        var now = DateTimeOffset.UtcNow;
+        db.ArticleAffiliateClicks.Add(new ArticleAffiliateClick
+        {
+            ArticleId = article.Id,
+            PlacementId = Guid.NewGuid(),
+            AdvertiserId = "adv-1",
+            AdvertiserName = "Acme Tools",
+            TrackingUrl = "https://example.com/historical",
+            CreatedAt = now,
+            CreatedAtUnixSeconds = now.ToUnixTimeSeconds(),
+            PassedBotFilter = null
+        });
+        await db.SaveChangesAsync();
+
+        var dashboard = await CreateService(db).GetDashboardAsync();
+
+        dashboard.TotalClicks.Should().Be(1);
+        dashboard.FilteredClickCount.Should().Be(0);
+    }
+
     [Fact]
     public async Task RecordClickAsync_ShouldLogClick_AndReturnTrackingUrl()
     {
@@ -27,10 +106,11 @@ public sealed class AffiliateAnalyticsServiceTests
         await db.SaveChangesAsync();
 
         var service = CreateService(db);
-        var destination = await service.RecordClickAsync(placement.Id);
+        var destination = await service.RecordClickAsync(placement.Id, RealBrowserUserAgent, null);
 
         destination.Should().Be("https://example.com/track");
-        db.ArticleAffiliateClicks.Should().ContainSingle(c => c.PlacementId == placement.Id && c.AdvertiserName == "Acme Tools");
+        db.ArticleAffiliateClicks.Should().ContainSingle(c =>
+            c.PlacementId == placement.Id && c.AdvertiserName == "Acme Tools" && c.PassedBotFilter == true);
     }
 
     [Fact]
@@ -39,7 +119,7 @@ public sealed class AffiliateAnalyticsServiceTests
         await using var db = await CreateDbAsync();
         var service = CreateService(db);
 
-        var destination = await service.RecordClickAsync(Guid.NewGuid());
+        var destination = await service.RecordClickAsync(Guid.NewGuid(), RealBrowserUserAgent, null);
 
         destination.Should().BeNull();
         db.ArticleAffiliateClicks.Should().BeEmpty();
@@ -65,7 +145,7 @@ public sealed class AffiliateAnalyticsServiceTests
         db.ArticleAffiliateRotations.Add(rotation);
         await db.SaveChangesAsync();
 
-        var destination = await CreateService(db).RecordClickAsync(rotation.Id);
+        var destination = await CreateService(db).RecordClickAsync(rotation.Id, RealBrowserUserAgent, null);
 
         destination.Should().Be("https://example.com/rotation");
         db.ArticleAffiliateClicks.Should().ContainSingle(click =>
@@ -89,7 +169,7 @@ public sealed class AffiliateAnalyticsServiceTests
         await db.SaveChangesAsync();
 
         var service = CreateService(db);
-        var destination = await service.RecordClickAsync(placement.Id);
+        var destination = await service.RecordClickAsync(placement.Id, RealBrowserUserAgent, null);
 
         destination.Should().BeNull();
         db.ArticleAffiliateClicks.Should().ContainSingle();
@@ -123,8 +203,8 @@ public sealed class AffiliateAnalyticsServiceTests
         await db.SaveChangesAsync();
 
         var service = CreateService(db);
-        await service.RecordClickAsync(placementA.Id);
-        await service.RecordClickAsync(placementB.Id);
+        await service.RecordClickAsync(placementA.Id, RealBrowserUserAgent, null);
+        await service.RecordClickAsync(placementB.Id, RealBrowserUserAgent, null);
 
         var dashboard = await service.GetDashboardAsync();
 
@@ -154,8 +234,8 @@ public sealed class AffiliateAnalyticsServiceTests
         // or refresh hitting the redirect twice in quick succession.
         var service = CreateService(db);
 
-        var firstDestination = await service.RecordClickAsync(placement.Id);
-        var secondDestination = await service.RecordClickAsync(placement.Id);
+        var firstDestination = await service.RecordClickAsync(placement.Id, RealBrowserUserAgent, null);
+        var secondDestination = await service.RecordClickAsync(placement.Id, RealBrowserUserAgent, null);
 
         firstDestination.Should().Be("https://example.com/track");
         secondDestination.Should().Be("https://example.com/track");

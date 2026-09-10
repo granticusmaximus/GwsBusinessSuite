@@ -40,6 +40,63 @@ public sealed class ContentStudioServiceTests
     }
 
     [Fact]
+    public void BuildPrompt_ShouldOmitInternalLinkSection_WhenNoExistingArticlesAreGiven()
+    {
+        var request = new ArticleGenerationRequest { Topic = "Clean Architecture in Blazor" };
+
+        var prompt = ContentStudioService.BuildPrompt(request);
+
+        Assert.DoesNotContain("Existing published articles on this site", prompt);
+    }
+
+    [Fact]
+    public void BuildPrompt_ShouldListExistingArticlesByRealSlug_WhenProvided()
+    {
+        var request = new ArticleGenerationRequest { Topic = "Clean Architecture in Blazor" };
+        var existingArticles = new[]
+        {
+            new ExistingArticleLink("Getting Started with EF Core", "getting-started-with-ef-core"),
+            new ExistingArticleLink("ASP.NET Core Middleware Explained", "aspnet-core-middleware-explained")
+        };
+
+        var prompt = ContentStudioService.BuildPrompt(request, existingArticles: existingArticles);
+
+        Assert.Contains("Existing published articles on this site", prompt);
+        Assert.Contains("Getting Started with EF Core — /blog/getting-started-with-ef-core", prompt);
+        Assert.Contains("ASP.NET Core Middleware Explained — /blog/aspnet-core-middleware-explained", prompt);
+        Assert.Contains("never invent a slug", prompt);
+    }
+
+    [Fact]
+    public async Task GenerateArticleAsync_ShouldOfferOnlyPublishedNonTrashedArticles_AsInternalLinkCandidates()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var published = DateTimeOffset.UtcNow;
+        db.Articles.Add(new Article
+        {
+            Slug = "published-article", Title = "A Published Article",
+            PublishedAt = published, PublishedAtUnixSeconds = published.ToUnixTimeSeconds()
+        });
+        db.Articles.Add(new Article { Slug = "draft-article", Title = "A Draft Article", PublishedAt = null });
+        db.Articles.Add(new Article
+        {
+            Slug = "trashed-article", Title = "A Trashed Article",
+            PublishedAt = published, PublishedAtUnixSeconds = published.ToUnixTimeSeconds(),
+            TrashedAt = published
+        });
+        await db.SaveChangesAsync();
+
+        var ollama = new FakeOllamaService { GenerateTextResult = "# Title\n\nGenerated body" };
+        var service = CreateService(db, factory, ollama);
+
+        await service.GenerateArticleAsync(new ArticleGenerationRequest { Topic = "A New Topic" });
+
+        Assert.Contains("A Published Article", ollama.LastUserPrompt);
+        Assert.DoesNotContain("A Draft Article", ollama.LastUserPrompt);
+        Assert.DoesNotContain("A Trashed Article", ollama.LastUserPrompt);
+    }
+
+    [Fact]
     public void BuildSystemPrompt_ShouldIncludeAccuracyLengthAndStyleRules()
     {
         var systemPrompt = ContentStudioService.BuildSystemPrompt();
@@ -701,12 +758,14 @@ public sealed class ContentStudioServiceTests
         public IReadOnlyList<string>? GenerateStreamFragments { get; set; }
         public IReadOnlyCollection<string> Models { get; set; } = Array.Empty<string>();
         public string? LastRequestedModel { get; private set; }
+        public string? LastUserPrompt { get; private set; }
         public string GenerateImageResult { get; set; } = string.Empty;
         public string? LastImagePrompt { get; private set; }
 
         public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
         {
             LastRequestedModel = model;
+            LastUserPrompt = userPrompt;
             return Task.FromResult(GenerateTextResult);
         }
 

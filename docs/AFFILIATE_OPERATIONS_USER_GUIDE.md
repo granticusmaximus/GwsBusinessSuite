@@ -249,7 +249,8 @@ so directly ("last 90 days"), and older activity drops out of every figure on th
 ages past that window.
 
 - **Total Clicks** / **Total Commission** (both labeled "last 90 days") — headline tiles for the
-  windowed data described above.
+  windowed data described above. Total Clicks counts only clicks that passed bot filtering (see
+  below); a "+N filtered out as bot traffic" line appears underneath when any were excluded.
 - **Clicks by Advertiser** — click counts and last-click timestamp, grouped by advertiser,
   highest first.
 - **Clicks by Article** — click counts per article, with a link to the live article if it still
@@ -266,6 +267,16 @@ the reader is still redirected normally every time. This dedupe does not key on 
 other reader-identifying signal (deliberately, to avoid collecting PII for what's an internal
 analytics feature) and isn't meant as fraud protection — it only smooths out the cheap, common
 double-counting cases.
+
+Separately, every click is classified as real or bot traffic before it's counted: a missing
+user-agent, a prefetch request, or a user-agent matching a known crawler/bot/scripted-client
+marker (search engine bots, SEO crawlers, `curl`, `python-requests`, headless browsers, and
+similar) is excluded from Total Clicks and every breakdown above, though the redirect still
+happens normally either way — filtering only affects what gets counted, never what a real
+visitor experiences. Filtered hits are still recorded, just tagged, so the dashboard's headline
+tile can show how many were excluded rather than hiding the difference. Click rows recorded
+before this filter existed are treated as real (they were never classified either way) rather
+than being reinterpreted after the fact.
 
 ## Syncing commissions
 

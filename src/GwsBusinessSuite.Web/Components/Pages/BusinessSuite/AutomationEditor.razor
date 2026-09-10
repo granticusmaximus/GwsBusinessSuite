@@ -61,9 +61,9 @@ else
                 @* Edits still persist immediately, so this reports state rather than offering a
                    Save button that would imply they do not. *@
                 <span class="editor-save-state">@SaveStateText</span>
-                <button class="btn btn-sm btn-outline-primary" @onclick="Publish" disabled="@_busy"><i class="bi bi-cloud-arrow-up me-1"></i>Publish</button>
-                <button class="btn btn-sm @(_view.Status == AutomationWorkflowStatuses.Active ? "btn-success" : "btn-outline-success")" @onclick="ToggleActive" disabled="@(_busy || _view.CurrentVersion == 0)">
-                    <i class="bi @(_view.Status == AutomationWorkflowStatuses.Active ? "bi-toggle-on" : "bi-toggle-off") me-1"></i>@(_view.Status == AutomationWorkflowStatuses.Active ? "Active" : "Inactive")
+                <button class="btn btn-sm btn-outline-secondary" @onclick="Publish" disabled="@_busy" title="Save a runnable version without going live - lets Run workflow test it before real triggers can fire it"><i class="bi bi-cloud-arrow-up me-1"></i>Publish</button>
+                <button class="btn btn-sm @(_view.Status == AutomationWorkflowStatuses.Active ? "btn-success" : "btn-outline-success")" @onclick="Activate" disabled="@_busy">
+                    <i class="bi @(_view.Status == AutomationWorkflowStatuses.Active ? "bi-toggle-on" : "bi-toggle-off") me-1"></i>@(_view.Status == AutomationWorkflowStatuses.Active ? "Active" : "Activate")
                 </button>
                 <button class="btn btn-sm btn-primary" @onclick="RunWorkflow" disabled="@(_busy || _view.CurrentVersion == 0)"><i class="bi bi-play-fill me-1"></i>Run workflow</button>
             </div>
@@ -1072,7 +1072,58 @@ else
     private async Task SaveMetadata() => await Work(async () => { await WorkflowService.UpdateMetadataAsync(WorkflowId, _name, _description, _tags); await Reload(); _message = "Workflow saved."; });
     private async Task Validate() => await Work(async () => { var result = await WorkflowService.ValidateAsync(WorkflowId); Show(result.IsValid ? "Workflow is valid and ready to publish." : string.Join(" ", result.Errors), !result.IsValid); });
     private async Task Publish() => await Work(async () => { await WorkflowService.UpdateMetadataAsync(WorkflowId, _name, _description, _tags); var version = await WorkflowService.PublishAsync(WorkflowId, "Published from visual editor"); await Reload(); _message = $"Published immutable version {version}."; });
-    private async Task ToggleActive() => await Work(async () => { await WorkflowService.SetActiveAsync(WorkflowId, _view!.Status != AutomationWorkflowStatuses.Active); await Reload(); _message = _view!.Status == AutomationWorkflowStatuses.Active ? "Workflow activated." : "Workflow deactivated."; });
+
+    // A single Activate button rather than the old two-step "Publish, then flip Active" dance -
+    // that toggle used to sit disabled with no visible reason whenever CurrentVersion was 0.
+    // Activate now publishes on the way to going live when a version doesn't already exist,
+    // and on a validation failure it selects the offending node in the inspector instead of
+    // just naming it in an error banner the user has to go hunting from.
+    private async Task Activate() => await Work(async () =>
+    {
+        if (_view!.Status == AutomationWorkflowStatuses.Active)
+        {
+            await WorkflowService.SetActiveAsync(WorkflowId, false);
+            await Reload();
+            _message = "Workflow deactivated.";
+            return;
+        }
+
+        await WorkflowService.UpdateMetadataAsync(WorkflowId, _name, _description, _tags);
+        var validation = await WorkflowService.ValidateAsync(WorkflowId);
+        if (!validation.IsValid)
+        {
+            SelectOffendingNode(validation.Errors);
+            Show(string.Join(" ", validation.Errors), true);
+            return;
+        }
+
+        await WorkflowService.PublishAsync(WorkflowId, "Published from visual editor");
+        await WorkflowService.SetActiveAsync(WorkflowId, true);
+        await Reload();
+        _message = "Workflow activated.";
+    });
+
+    // Validation error messages already name the offending node in single quotes (see
+    // AutomationWorkflowService.ValidateAsync) - reused here instead of threading a NodeId
+    // through every error site, which would mean rewriting AutomationValidationResult's shape
+    // across every existing caller for a quick-win button.
+    private void SelectOffendingNode(IReadOnlyList<string> errors)
+    {
+        foreach (var error in errors)
+        {
+            var start = error.IndexOf('\'');
+            if (start < 0) continue;
+            var end = error.IndexOf('\'', start + 1);
+            if (end < 0) continue;
+            var name = error[(start + 1)..end];
+            var node = _view?.Nodes.FirstOrDefault(n => n.Name == name);
+            if (node is not null)
+            {
+                SelectNode(node.Id);
+                return;
+            }
+        }
+    }
     private async Task ToggleAllowDownstreamTriggers() => await Work(async () =>
     {
         await WorkflowService.SetAllowDownstreamAutomationTriggersAsync(WorkflowId, !_allowDownstreamTriggers);

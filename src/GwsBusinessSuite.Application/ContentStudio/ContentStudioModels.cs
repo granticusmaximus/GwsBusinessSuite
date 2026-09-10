@@ -10,6 +10,11 @@ public sealed class ArticleGenerationRequest
     public string SecondaryKeywords { get; init; } = string.Empty;
 }
 
+// A published article the model may link to by its real slug. Verified finding: none of this
+// site's 39 published articles link to another - the generator previously had no idea other
+// articles existed, so it never could.
+public sealed record ExistingArticleLink(string Title, string Slug);
+
 public sealed class DraftRevisionRequest
 {
     public Guid DraftId { get; init; }

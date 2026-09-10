@@ -19,7 +19,11 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
     // the same limitation) or require pulling the whole table down on every single click.
     private static readonly TimeSpan ClickDedupeWindow = TimeSpan.FromMinutes(30);
 
-    public async Task<string?> RecordClickAsync(Guid placementId, CancellationToken cancellationToken = default)
+    public async Task<string?> RecordClickAsync(
+        Guid placementId,
+        string? userAgent,
+        string? prefetchHeader,
+        CancellationToken cancellationToken = default)
     {
         var placement = await db.ArticleAffiliatePlacements
             .AsNoTracking()
@@ -41,6 +45,8 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
                 rotation.AdvertiserId,
                 rotation.AdvertiserName,
                 rotation.TrackingUrl,
+                userAgent,
+                prefetchHeader,
                 cancellationToken);
         }
 
@@ -50,6 +56,8 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
             placement.AdvertiserId,
             placement.AdvertiserName,
             placement.TrackingUrl,
+            userAgent,
+            prefetchHeader,
             cancellationToken);
     }
 
@@ -59,6 +67,8 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
         string advertiserId,
         string advertiserName,
         string trackingUrl,
+        string? userAgent,
+        string? prefetchHeader,
         CancellationToken cancellationToken)
     {
         var dedupeCacheKey = $"affiliate-click-dedupe:{placementId}";
@@ -66,6 +76,7 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
         {
             cache.Set(dedupeCacheKey, true, ClickDedupeWindow);
 
+            var classification = AffiliateClickFilter.Classify(userAgent, prefetchHeader);
             var now = DateTimeOffset.UtcNow;
             await db.ArticleAffiliateClicks.AddAsync(new ArticleAffiliateClick
             {
@@ -76,7 +87,9 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
                 TrackingUrl = trackingUrl,
                 CreatedAt = now,
                 CreatedAtUnixSeconds = now.ToUnixTimeSeconds(),
-                CreatedBy = "affiliate-click-redirect"
+                CreatedBy = "affiliate-click-redirect",
+                PassedBotFilter = classification.Passed,
+                FilterReason = classification.Reason
             }, cancellationToken);
             await db.SaveChangesAsync(cancellationToken);
         }
@@ -104,7 +117,14 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
             .Take(MaxDashboardRows)
             .ToListAsync(cancellationToken);
 
-        var articleIds = clicks.Select(c => c.ArticleId).Distinct().ToList();
+        // A row with PassedBotFilter == false was classified as bot/crawler traffic at record
+        // time (see AffiliateClickFilter) and is excluded from every "real" total below - it's
+        // still kept in `clicks` so FilteredClickCount/RawClickCount can report it separately.
+        // Null (predates filtering) counts as real, matching historical totals rather than
+        // silently reinterpreting them.
+        var realClicks = clicks.Where(c => c.PassedBotFilter != false).ToList();
+
+        var articleIds = realClicks.Select(c => c.ArticleId).Distinct().ToList();
         var articles = await db.Articles
             .AsNoTracking()
             .Where(a => articleIds.Contains(a.Id))
@@ -113,13 +133,13 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
 
         // SQLite can't translate ORDER BY on a DateTimeOffset column, so all of this
         // grouping/ordering happens in memory over the already-materialized `clicks` list.
-        var clicksByAdvertiser = clicks
+        var clicksByAdvertiser = realClicks
             .GroupBy(c => (c.AdvertiserId, c.AdvertiserName))
             .Select(g => new AdvertiserClickSummary(g.Key.AdvertiserId, g.Key.AdvertiserName, g.Count(), g.Max(c => c.CreatedAt)))
             .OrderByDescending(s => s.ClickCount)
             .ToList();
 
-        var clicksByArticle = clicks
+        var clicksByArticle = realClicks
             .GroupBy(c => c.ArticleId)
             .Select(g => articles.TryGetValue(g.Key, out var article)
                 ? new ArticleClickSummary(g.Key, article.Title, article.Slug, g.Count())
@@ -127,7 +147,7 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
             .OrderByDescending(s => s.ClickCount)
             .ToList();
 
-        var recentClicks = clicks
+        var recentClicks = realClicks
             .OrderByDescending(c => c.CreatedAt)
             .Take(50)
             .Select(c =>
@@ -158,7 +178,8 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
 
         return new AffiliateAnalyticsDashboard
         {
-            TotalClicks = clicks.Count,
+            TotalClicks = realClicks.Count,
+            FilteredClickCount = clicks.Count - realClicks.Count,
             TotalCommissionAmount = commissions.Sum(c => c.CommissionAmount),
             ClicksByAdvertiser = clicksByAdvertiser,
             ClicksByArticle = clicksByArticle,

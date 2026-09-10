@@ -147,6 +147,17 @@ Rejected) and a topic search. Per-draft actions: **Open** (into the draft worksp
 interested** (rejects the draft with a note, without opening it), and **Delete** (permanent, with
 a confirmation prompt).
 
+## Internal links to other posts
+
+Every generation and revision (initial draft, streamed draft, and requested revisions) is given
+the title and URL of every currently-published article as part of its prompt, and is told to link
+to one when it's genuinely relevant to the topic — using the real `/blog/{slug}` URL, never an
+invented one. It's told not to force a link where nothing on the site actually relates.
+
+Separately, once an article is live, its public page shows a **Related articles** section
+underneath the body, listing up to three other published articles that share its category or
+tags — computed directly from data already on the article, with no separate step to run.
+
 ## Automatic code checking
 
 Every generated draft has its C# **compiled** before you see it. This is the step that replaces

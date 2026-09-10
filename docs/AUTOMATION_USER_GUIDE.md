@@ -141,8 +141,7 @@ Selecting a node opens its settings panel on the right:
 ![Node config panel](images/automation/node-config-panel.png)
 
 The toolbar above the canvas has Save, Validate, Export, Save as template, undo/redo, copy/paste,
-Publish, an Active/Inactive toggle, and Run workflow (a manual test run against the current
-draft).
+Publish, an Activate toggle, and Run workflow (a manual test run against the current draft).
 
 ## Trigger nodes
 
@@ -245,9 +244,13 @@ Webhook/Schedule trigger, Merge nodes have 2+ distinct inputs, no dangling conne
 and reports every problem at once.
 
 **Publish** validates, then snapshots the current draft as a new **immutable version** (position-free,
-content-only) and makes it the version that actually runs. Publishing does not activate the
-workflow — you still need to flip the Active/Inactive toggle for triggers other than Manual to
-actually fire.
+content-only) and makes it the version that actually runs, without going live — useful for
+testing a version with Run workflow before triggers other than Manual can fire it for real.
+
+**Activate** is the button for going live: it validates, publishes a version if one doesn't
+already exist, and flips the workflow to Active in one step — you don't need to Publish first.
+If validation fails, the offending node is selected in the inspector instead of only being named
+in the error message. Click Activate again to deactivate.
 
 ![Publish confirmation](images/automation/publish-confirmation.png)
 
@@ -412,7 +415,7 @@ review would care about.
    `message` to `{{ $json.stage }} deal for contact {{ $json.contactId }}`.
 5. Click **Validate** — it should report no errors (a trigger and at least one node, connected, no
    cycles).
-6. Click **Publish**, then flip the status toggle from Inactive to **Active**.
+6. Click **Activate**.
 7. From now on, whenever any CRM deal's stage changes to Won, this workflow's execution shows up
    in its own Executions tab, and you get an email.
 8. Anytime later, open a specific execution and click **Replay** to see whether today's

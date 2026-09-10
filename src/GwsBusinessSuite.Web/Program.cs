@@ -2346,13 +2346,15 @@ app.MapGet("/blog/{slug}", async (
         var approvedComments = await commentService.ListApprovedForArticleAsync(a.Id);
         var replyToCommentId = Guid.TryParse(request.Query["replyTo"], out var parsedReplyToId) ? parsedReplyToId : (Guid?)null;
         var replyComment = replyToCommentId.HasValue ? FindCommentById(approvedComments, replyToCommentId.Value) : null;
+        var relatedArticles = await GetRelatedArticlesAsync(db, a);
 
         var bodyHtml = PublicSiteHtmlRenderer.BlogPostBody(
             a.Title, a.MetaDescription, a.Author, a.PublishedAt, a.EstimatedReadingTime, a.PrimaryKeyword,
             heroImageUrl, a.HeroImageAltText, a.HeroImageCaption, renderedMarkdown,
             articleCategory?.Name, articleCategory?.Slug, ParseTags(a.Tags), a.Slug, approvedComments,
             replyToCommentId: replyComment?.Id,
-            replyToAuthorName: replyComment?.AuthorName);
+            replyToAuthorName: replyComment?.AuthorName,
+            relatedArticles: relatedArticles);
 
         if (request.Query["comment"] == "1")
         {
@@ -2477,9 +2479,14 @@ app.MapPost("/api/analytics/events", async (
 // here (see ArticleMarkdownRenderer.BuildCardMarkup) instead of the raw CJ URL directly.
 app.MapGet("/go/{placementId:guid}", async (
     Guid placementId,
+    HttpRequest request,
     IAffiliateAnalyticsService affiliateAnalyticsService) =>
 {
-    var destinationUrl = await affiliateAnalyticsService.RecordClickAsync(placementId);
+    var prefetchHeader = request.Headers["Purpose"].FirstOrDefault() ?? request.Headers["Sec-Purpose"].FirstOrDefault();
+    var destinationUrl = await affiliateAnalyticsService.RecordClickAsync(
+        placementId,
+        request.Headers.UserAgent.ToString(),
+        prefetchHeader);
     if (destinationUrl is null)
     {
         // Redirecting to "/" here silently looked like the ad worked while actually
@@ -3522,6 +3529,37 @@ static string SanitizeInlineCss(string css) =>
 // WatchedTopic.Keywords) - parsed on read rather than normalized into a join table.
 static List<string> ParseTags(string tags) =>
     tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+// Scored by shared category (weighted higher) plus shared tags, entirely from data every
+// article already carries - no embedding index required. Verified finding: the site's
+// semantic search index only covers CMS pages, wiki pages, and CRM records, not blog
+// Articles, so building this on IHybridSearchService would have meant standing up a new
+// indexing path rather than reusing an existing one.
+static async Task<List<RelatedArticleView>> GetRelatedArticlesAsync(ApplicationDbContext db, Article article)
+{
+    var currentTags = ParseTags(article.Tags).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var candidates = await db.Articles
+        .AsNoTracking()
+        .Where(x => x.Id != article.Id && x.TrashedAt == null && x.PublishedAt != null)
+        .Select(x => new { x.Title, x.Slug, x.CategoryId, x.Tags, x.PublishedAtUnixSeconds })
+        .ToListAsync();
+
+    return candidates
+        .Select(x => new
+        {
+            x.Title,
+            x.Slug,
+            x.PublishedAtUnixSeconds,
+            Score = (x.CategoryId.HasValue && x.CategoryId == article.CategoryId ? 2 : 0)
+                  + ParseTags(x.Tags).Count(t => currentTags.Contains(t))
+        })
+        .Where(x => x.Score > 0)
+        .OrderByDescending(x => x.Score)
+        .ThenByDescending(x => x.PublishedAtUnixSeconds)
+        .Take(3)
+        .Select(x => new RelatedArticleView(x.Title, x.Slug))
+        .ToList();
+}
 
 // A misconfigured deploy that ships a blank/trivial AdminAuth:Password previously seeded
 // it without any complaint — the admin login would then be guessable on day one. This is

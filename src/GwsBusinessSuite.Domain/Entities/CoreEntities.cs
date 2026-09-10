@@ -1635,6 +1635,12 @@ public sealed class ArticleAffiliateClick : AuditableEntity
     // SQL-pushed-down Where+OrderByDescending+Take instead of loading every click row this
     // site has ever recorded into memory.
     public long CreatedAtUnixSeconds { get; set; }
+
+    // Null means this row predates bot filtering and was never classified - it counts as a
+    // real click for continuity with historical totals rather than being silently reinterpreted.
+    // True/false are real classifications made at record time by AffiliateClickFilter.
+    public bool? PassedBotFilter { get; set; }
+    public string? FilterReason { get; set; }
 }
 
 public static class WebAnalyticsEventNames
