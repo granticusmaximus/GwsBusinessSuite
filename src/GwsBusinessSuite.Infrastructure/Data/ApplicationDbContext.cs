@@ -63,6 +63,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<WikiDatabaseProperty> WikiDatabaseProperties => Set<WikiDatabaseProperty>();
     public DbSet<WikiDatabaseRow> WikiDatabaseRows => Set<WikiDatabaseRow>();
     public DbSet<WikiDatabaseRowTemplate> WikiDatabaseRowTemplates => Set<WikiDatabaseRowTemplate>();
+    public DbSet<WikiDatabaseRowRecurrence> WikiDatabaseRowRecurrences => Set<WikiDatabaseRowRecurrence>();
     public DbSet<WikiDatabaseRowRevision> WikiDatabaseRowRevisions => Set<WikiDatabaseRowRevision>();
     public DbSet<WikiDatabaseView> WikiDatabaseViews => Set<WikiDatabaseView>();
     public DbSet<WikiDatabaseViewPersonalization> WikiDatabaseViewPersonalizations => Set<WikiDatabaseViewPersonalization>();
@@ -389,6 +390,17 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .IsUnique();
         modelBuilder.Entity<WikiDatabaseRowTemplate>().Property(x => x.Name).HasMaxLength(120);
         modelBuilder.Entity<WikiDatabaseRowTemplate>().Property(x => x.NormalizedName).HasMaxLength(120);
+        modelBuilder.Entity<WikiDatabaseRowRecurrence>()
+            .HasOne(x => x.WikiDatabase)
+            .WithMany(x => x.RowRecurrences)
+            .HasForeignKey(x => x.WikiDatabaseId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<WikiDatabaseRowRecurrence>()
+            .HasOne(x => x.WikiDatabaseRowTemplate)
+            .WithMany()
+            .HasForeignKey(x => x.WikiDatabaseRowTemplateId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<WikiDatabaseRowRecurrence>().HasIndex(x => x.NextRunAtUnixSeconds);
         modelBuilder.Entity<WikiDatabaseView>()
             .HasOne(x => x.WikiDatabase)
             .WithMany(x => x.Views)

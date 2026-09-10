@@ -793,7 +793,11 @@ public sealed class WikiDatabaseService(
             editor.Type == WikiDatabasePropertyTypes.Button && !string.IsNullOrWhiteSpace(editor.ButtonLabel) ? editor.ButtonLabel.Trim() : null,
             editor.Type == WikiDatabasePropertyTypes.UniqueId && !string.IsNullOrWhiteSpace(editor.UniqueIdPrefix) ? editor.UniqueIdPrefix.Trim() : null,
             editor.Type == WikiDatabasePropertyTypes.AiField && !string.IsNullOrWhiteSpace(editor.AiPromptTemplate) ? editor.AiPromptTemplate.Trim() : null,
-            editor.Type == WikiDatabasePropertyTypes.AiField && !string.IsNullOrWhiteSpace(editor.AiModel) ? editor.AiModel.Trim() : null);
+            editor.Type == WikiDatabasePropertyTypes.AiField && !string.IsNullOrWhiteSpace(editor.AiModel) ? editor.AiModel.Trim() : null,
+            editor.IsRequired,
+            editor.Type == WikiDatabasePropertyTypes.Number ? editor.MinValue : null,
+            editor.Type == WikiDatabasePropertyTypes.Number ? editor.MaxValue : null,
+            WikiDatabasePropertyValidation.PatternEligibleTypes.Contains(editor.Type) && !string.IsNullOrWhiteSpace(editor.ValidationPattern) ? editor.ValidationPattern.Trim() : null);
         await ValidatePropertyConfigurationAsync(wikiDatabaseId, property.Id, editor.Type, configuration, cancellationToken);
         if (!isNew && editor.Type == WikiDatabasePropertyTypes.Relation
             && previousConfiguration.RelatedDatabaseId != configuration.RelatedDatabaseId)
@@ -880,12 +884,18 @@ public sealed class WikiDatabaseService(
             }
         }
 
-        property.ConfigJson = editor.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect
-            or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Relation or WikiDatabasePropertyTypes.Rollup
-            or WikiDatabasePropertyTypes.Status or WikiDatabasePropertyTypes.Button or WikiDatabasePropertyTypes.UniqueId
-            or WikiDatabasePropertyTypes.AiField
-            ? WikiDatabasePropertyConfig.Serialize(configuration)
-            : "{}";
+        // Every field on `configuration` is already type-gated at construction above (null
+        // unless the matching property type applies), so serializing it unconditionally is
+        // safe for every type - it used to be gated to a specific type allowlist here, which
+        // silently discarded ConfigJson for any type not on that list. That allowlist predated
+        // Required/MinValue/MaxValue/ValidationPattern (validation rules meaningful on plain
+        // Text/Number/Url/Email/Phone properties, none of which were ever on the list) and was
+        // a real bug once those fields existed: SavePropertyAsync accepted them, and every
+        // save silently threw them away for exactly the types they matter most on. A property
+        // with nothing configured serializes to the same effective empty shape either way (see
+        // WikiDatabasePropertyConfig.Parse's null-coalescing), so this changes nothing for any
+        // property that was already relying on the old "{}" behavior.
+        property.ConfigJson = WikiDatabasePropertyConfig.Serialize(configuration);
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return property;
@@ -1123,6 +1133,15 @@ public sealed class WikiDatabaseService(
                 }
             }
         }
+        var properties = await dbContext.WikiDatabaseProperties
+            .Where(property => property.WikiDatabaseId == wikiDatabaseId)
+            .ToListAsync(cancellationToken);
+        var validationErrors = WikiDatabasePropertyValidation.Validate(properties, values);
+        if (validationErrors.Count > 0)
+        {
+            throw new InvalidOperationException(string.Join(" ", validationErrors));
+        }
+
         await ValidateTimelineDependenciesAsync(wikiDatabaseId, row.Id, values, cancellationToken);
         row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
         var propertyValuesChanged = isNew || !string.Equals(WikiPropertyValues.Serialize(previousValues), row.PropertyValuesJson, StringComparison.Ordinal);
@@ -1302,6 +1321,41 @@ public sealed class WikiDatabaseService(
                 throw new InvalidOperationException("Every sub-item ancestor must belong to the same database.");
             }
         }
+    }
+
+    public async Task<WikiDatabaseBulkUpdateResult> BulkSetPropertyValueAsync(
+        Guid wikiDatabaseId, IReadOnlyList<Guid> rowIds, Guid propertyId, JsonNode? value,
+        string performedBy, CancellationToken cancellationToken = default)
+    {
+        var failures = new List<WikiDatabaseBulkUpdateFailure>();
+        var succeeded = 0;
+        // Sequential, not parallel - each iteration goes through the same SaveRowAsync as a
+        // single-row edit (validation, computed-property carry-forward, trigger firing all
+        // apply exactly as they would one row at a time), and this dbContext instance is not
+        // safe for concurrent use.
+        foreach (var rowId in rowIds.Distinct())
+        {
+            try
+            {
+                var row = await dbContext.WikiDatabaseRows.AsNoTracking()
+                    .FirstOrDefaultAsync(item => item.Id == rowId && item.WikiDatabaseId == wikiDatabaseId, cancellationToken)
+                    ?? throw new InvalidOperationException("This row no longer exists.");
+                var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+                values[propertyId.ToString()] = value?.DeepClone();
+                await SaveRowAsync(wikiDatabaseId, new WikiDatabaseRowEditor
+                {
+                    Id = row.Id,
+                    ParentRowId = row.ParentRowId,
+                    Values = values.ToDictionary(item => item.Key, item => item.Value)
+                }, performedBy, cancellationToken);
+                succeeded++;
+            }
+            catch (Exception ex)
+            {
+                failures.Add(new WikiDatabaseBulkUpdateFailure(rowId, ex.Message));
+            }
+        }
+        return new WikiDatabaseBulkUpdateResult(succeeded, failures);
     }
 
     public async Task<WikiDatabaseCsvImportResult> ImportCsvAsync(

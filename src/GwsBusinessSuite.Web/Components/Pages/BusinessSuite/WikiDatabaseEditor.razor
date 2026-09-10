@@ -3,6 +3,7 @@
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Application.Automation
 @inject IWikiDatabaseService WikiDatabaseService
+@inject IWikiDatabaseRecurrenceService WikiDatabaseRecurrenceService
 @inject INotionSyncService NotionSyncService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IAutomationWorkflowService AutomationWorkflowService
@@ -116,7 +117,9 @@ else
                         <div class="list-group list-group-flush border rounded-3 overflow-hidden">
                             @foreach (var template in RowTemplates)
                             {
-                                <div class="list-group-item d-flex align-items-center justify-content-between gap-3 py-2">
+                                var recurrence = RowRecurrences.FirstOrDefault(item => item.WikiDatabaseRowTemplateId == template.Id);
+                                <div class="list-group-item py-2">
+                                <div class="d-flex align-items-center justify-content-between gap-3">
                                     <div class="d-flex align-items-center gap-2 min-w-0">
                                         <span aria-hidden="true">@(string.IsNullOrWhiteSpace(template.Icon) ? "📄" : template.Icon)</span>
                                         <span class="small fw-semibold text-truncate">@template.Name</span>
@@ -125,10 +128,53 @@ else
                                         <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => AddRowFromTemplateAsync(template.Id)" disabled="@(IsBusy || !CanEdit)">
                                             <i class="bi bi-plus-lg me-1"></i>New row
                                         </button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleRecurrenceEditor(template.Id)" disabled="@(IsBusy || !CanEdit)">
+                                            <i class="bi bi-arrow-repeat me-1"></i>@(recurrence is null ? "Repeat…" : "Repeat")
+                                        </button>
                                         <button type="button" class="btn btn-sm btn-link text-danger text-decoration-none" @onclick="() => DeleteRowTemplateAsync(template.Id)" disabled="@(IsBusy || !CanEdit || Database.IsLocked)" title="Delete template">
                                             <i class="bi bi-trash"></i><span class="visually-hidden">Delete @template.Name</span>
                                         </button>
                                     </div>
+                                </div>
+                                @if (recurrence is not null)
+                                {
+                                    <div class="d-flex align-items-center gap-2 mt-2 small text-secondary">
+                                        <div class="form-check form-switch mb-0">
+                                            <input class="form-check-input" type="checkbox" role="switch" id="@($"recurrence-active-{recurrence.Id}")"
+                                                   checked="@recurrence.IsActive"
+                                                   @onchange="e => SetRecurrenceActiveAsync(recurrence.Id, (bool)e.Value!)" disabled="@(IsBusy || !CanEdit)" />
+                                            <label class="form-check-label" for="@($"recurrence-active-{recurrence.Id}")">
+                                                <code>@recurrence.CronExpression</code>
+                                                @if (recurrence.IsActive && recurrence.NextRunAt is { } nextRunAt)
+                                                {
+                                                    <text> · Next: @nextRunAt.ToLocalTime().ToString("MMM d, h:mm tt")</text>
+                                                }
+                                                else
+                                                {
+                                                    <text> · Paused</text>
+                                                }
+                                            </label>
+                                        </div>
+                                        <button type="button" class="btn btn-xs btn-link text-danger p-0" @onclick="() => DeleteRecurrenceAsync(recurrence.Id)" disabled="@(IsBusy || !CanEdit)" title="Stop repeating">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </div>
+                                }
+                                @if (_recurrenceEditorTemplateId == template.Id)
+                                {
+                                    <div class="d-flex align-items-start gap-2 mt-2">
+                                        <div class="flex-grow-1">
+                                            <input class="form-control form-control-sm" @bind="_newRecurrenceCron" placeholder="0 9 * * 1"
+                                                   aria-label="@($"Cron schedule for {template.Name}")" disabled="@IsBusy" />
+                                            <div class="form-text">5 fields: minute hour day-of-month month day-of-week. <code>0 9 * * 1</code> = every Monday at 9am.</div>
+                                            @if (_recurrenceError is not null)
+                                            {
+                                                <div class="text-danger small mt-1">@_recurrenceError</div>
+                                            }
+                                        </div>
+                                        <button type="button" class="btn btn-sm btn-primary" @onclick="() => CreateRecurrenceAsync(template.Id)" disabled="@IsBusy">Save</button>
+                                    </div>
+                                }
                                 </div>
                             }
                         </div>
@@ -282,6 +328,41 @@ else
                                         </div>
                                     </div>
                                     <div class="form-text">Reference properties as <code>[Property name]</code>. Only generated when someone clicks "Generate" on the cell.</div>
+                                </div>
+                            }
+                            @if (!WikiDatabasePropertyValidation.NotRequirable.Contains(property.Type))
+                            {
+                                var propertyConfig = WikiDatabasePropertyConfig.Parse(property);
+                                <div class="col-12">
+                                    <div class="row g-2 align-items-center">
+                                        <div class="col-md-auto form-check">
+                                            <input class="form-check-input" type="checkbox" id="@($"required-{property.Id}")"
+                                                   checked="@propertyConfig.IsRequired"
+                                                   @onchange="e => SetPropertyRequiredAsync(property, (bool)e.Value!)" disabled="@IsBusy" />
+                                            <label class="form-check-label small" for="@($"required-{property.Id}")">Required</label>
+                                        </div>
+                                        @if (property.Type == WikiDatabasePropertyTypes.Number)
+                                        {
+                                            <div class="col-md-2">
+                                                <input class="form-control form-control-sm" type="number" placeholder="Min"
+                                                       value="@propertyConfig.MinValue" aria-label="@($"Minimum value for {property.Name}")"
+                                                       @onchange="e => SetPropertyMinValueAsync(property, e.Value?.ToString() ?? string.Empty)" disabled="@IsBusy" />
+                                            </div>
+                                            <div class="col-md-2">
+                                                <input class="form-control form-control-sm" type="number" placeholder="Max"
+                                                       value="@propertyConfig.MaxValue" aria-label="@($"Maximum value for {property.Name}")"
+                                                       @onchange="e => SetPropertyMaxValueAsync(property, e.Value?.ToString() ?? string.Empty)" disabled="@IsBusy" />
+                                            </div>
+                                        }
+                                        @if (WikiDatabasePropertyValidation.PatternEligibleTypes.Contains(property.Type))
+                                        {
+                                            <div class="col-md-4">
+                                                <input class="form-control form-control-sm" placeholder="Regex pattern (optional)"
+                                                       value="@propertyConfig.ValidationPattern" aria-label="@($"Required format for {property.Name}")"
+                                                       @onchange="e => SetPropertyValidationPatternAsync(property, e.Value?.ToString() ?? string.Empty)" disabled="@IsBusy" />
+                                            </div>
+                                        }
+                                    </div>
                                 </div>
                             }
                             <div class="col-md-1 text-end">
@@ -817,6 +898,81 @@ else
 
             @{ var titleProperty = Database.Properties.First(p => p.Type == WikiDatabasePropertyTypes.Title); }
 
+            @{
+                // One column's full markup, shared between the plain single-axis board and every
+                // swimlane row of the matrix board - secondaryProperty/secondaryOptionId are null/
+                // empty in the single-axis case, which is what tells DropOnBoardCellAsync and the
+                // per-card move <select> below whether there is a second property to also set.
+                RenderFragment BoardColumn(
+                    WikiDatabaseProperty groupByProperty,
+                    WikiDatabaseBoardGroup group,
+                    IReadOnlyList<WikiDatabaseBoardGroup> siblingColumns,
+                    WikiDatabaseProperty? secondaryProperty,
+                    string secondaryOptionId,
+                    WikiDatabaseProperty titleProp) =>
+                    @<div class="wiki-db-board-column" @ondragover:preventDefault
+                          @ondrop="() => DropOnBoardCellAsync(groupByProperty, group.OptionId, secondaryProperty, secondaryOptionId)">
+                        <div class="wiki-db-board-column-header fw-semibold small mb-2">@group.Label <span class="text-secondary">(@group.Rows.Count)</span></div>
+                        @foreach (var row in group.Rows)
+                        {
+                            <div class="wiki-db-board-card" draggable="true" @ondragstart="() => StartDragRow(row)" @ondragend="EndDragRow">
+                                <div class="d-flex align-items-center justify-content-between gap-2">
+                                    <div class="fw-semibold small text-truncate">@(GetText(row, titleProp) ?? "Untitled")</div>
+                                    <button type="button" class="btn btn-xs btn-link p-0" @onclick="() => OpenRow(row)" title="Open as page">
+                                        Open
+                                    </button>
+                                </div>
+                                @foreach (var property in Database.Properties.Where(p => p.Id != titleProp.Id && p.Id != groupByProperty.Id && p.Id != secondaryProperty?.Id).Take(3))
+                                {
+                                    var text = WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt);
+                                    @if (!string.IsNullOrWhiteSpace(text))
+                                    {
+                                        <span class="badge text-bg-light border me-1">@text</span>
+                                    }
+                                }
+                                @* Drag-and-drop (above) has no keyboard equivalent - a card could never be
+                                   moved between columns without a mouse. A plain <select> is fully
+                                   keyboard/screen-reader operable with no custom widget needed. The
+                                   "No status" column's real OptionId is "" (WikiDatabaseViewLogic
+                                   .GroupForBoard), same as an unset <select> - MovePlaceholderValue is a
+                                   value no real option can ever have, so the two stay distinguishable.
+                                   With swimlanes active, each destination also carries which swimlane
+                                   it belongs to - moving a card can change both properties at once,
+                                   the same as dragging it into a different cell of the matrix. *@
+                                <select class="form-select form-select-sm wiki-db-board-card-move mt-2"
+                                        aria-label="@($"Move \"{GetText(row, titleProp) ?? "Untitled"}\" to another column")"
+                                        @onchange="e => MoveRowToBoardCellAsync(row, groupByProperty, secondaryProperty, (string)e.Value!)"
+                                        disabled="@IsBusy">
+                                    <option value="@MovePlaceholderValue" selected>Move to&hellip;</option>
+                                    @if (secondaryProperty is null)
+                                    {
+                                        @foreach (var target in siblingColumns.Where(candidate => candidate.OptionId != group.OptionId))
+                                        {
+                                            <option value="@target.OptionId">@target.Label</option>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        @foreach (var laneOption in WikiDatabasePropertyConfig.GetOptions(secondaryProperty).Select(o => (Id: o.Id, Label: o.Label)).Append((Id: "", Label: "No status")))
+                                        {
+                                            @foreach (var target in siblingColumns)
+                                            {
+                                                @if (target.OptionId != group.OptionId || laneOption.Id != secondaryOptionId)
+                                                {
+                                                    <option value="@EncodeMoveTarget(target.OptionId, laneOption.Id)">@target.Label &rarr; @laneOption.Label</option>
+                                                }
+                                            }
+                                        }
+                                    }
+                                </select>
+                            </div>
+                        }
+                        <button type="button" class="btn btn-sm btn-link" @onclick="() => AddRowToBoardCellAsync(groupByProperty, group.OptionId, secondaryProperty, secondaryOptionId)" disabled="@IsBusy">
+                            <i class="bi bi-plus-lg me-1"></i>New
+                        </button>
+                    </div>;
+            }
+
             @if (ActiveView is { Type: WikiDatabaseViewTypes.Board })
             {
                 var groupByProperty = Database.Properties.FirstOrDefault(p => p.Id.ToString() == ActiveViewConfig?.GroupByPropertyId)
@@ -827,53 +983,53 @@ else
                 }
                 else
                 {
-                    var groups = WikiDatabaseViewLogic.GroupForBoard(VisibleRows, groupByProperty);
-                    <div class="wiki-db-board d-flex gap-3 overflow-auto pb-2">
-                        @foreach (var group in groups)
-                        {
-                            <div class="wiki-db-board-column" @ondragover:preventDefault @ondrop="() => DropOnColumnAsync(groupByProperty, group.OptionId)">
-                                <div class="wiki-db-board-column-header fw-semibold small mb-2">@group.Label <span class="text-secondary">(@group.Rows.Count)</span></div>
-                                @foreach (var row in group.Rows)
-                                {
-                                    <div class="wiki-db-board-card" draggable="true" @ondragstart="() => StartDragRow(row)" @ondragend="EndDragRow">
-                                        <div class="d-flex align-items-center justify-content-between gap-2">
-                                            <div class="fw-semibold small text-truncate">@(GetText(row, titleProperty) ?? "Untitled")</div>
-                                            <button type="button" class="btn btn-xs btn-link p-0" @onclick="() => OpenRow(row)" title="Open as page">
-                                                Open
-                                            </button>
-                                        </div>
-                                        @foreach (var property in Database.Properties.Where(p => p.Id != titleProperty.Id && p.Id != groupByProperty.Id).Take(3))
-                                        {
-                                            var text = WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt);
-                                            @if (!string.IsNullOrWhiteSpace(text))
-                                            {
-                                                <span class="badge text-bg-light border me-1">@text</span>
-                                            }
-                                        }
-                                        @* Drag-and-drop (above) has no keyboard equivalent - a card could never be
-                                           moved between columns without a mouse. A plain <select> is fully
-                                           keyboard/screen-reader operable with no custom widget needed. The
-                                           "No status" column's real OptionId is "" (WikiDatabaseViewLogic
-                                           .GroupForBoard), same as an unset <select> - MovePlaceholderValue is a
-                                           value no real option can ever have, so the two stay distinguishable. *@
-                                        <select class="form-select form-select-sm wiki-db-board-card-move mt-2"
-                                                aria-label="@($"Move \"{GetText(row, titleProperty) ?? "Untitled"}\" to another column")"
-                                                @onchange="e => MoveRowToOptionAsync(row, groupByProperty, (string)e.Value!)"
-                                                disabled="@IsBusy">
-                                            <option value="@MovePlaceholderValue" selected>Move to&hellip;</option>
-                                            @foreach (var target in groups.Where(candidate => candidate.OptionId != group.OptionId))
-                                            {
-                                                <option value="@target.OptionId">@target.Label</option>
-                                            }
-                                        </select>
-                                    </div>
-                                }
-                                <button type="button" class="btn btn-sm btn-link" @onclick="() => AddRowToGroupAsync(groupByProperty, group.OptionId)" disabled="@IsBusy">
-                                    <i class="bi bi-plus-lg me-1"></i>New
-                                </button>
-                            </div>
-                        }
+                    // A property equal to the primary grouping is treated as "no swimlanes" here
+                    // (not just filtered out of the picker below) so a config saved before this
+                    // safety net existed, or edited directly, can't silently double-group a
+                    // board by the same property.
+                    var swimlaneProperty = Database.Properties.FirstOrDefault(p =>
+                        p.Id.ToString() == ActiveViewConfig?.SecondaryGroupByPropertyId && p.Id != groupByProperty.Id);
+
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <label class="small text-secondary mb-0">Swimlanes</label>
+                        <select class="form-select form-select-sm w-auto" style="min-width:10rem"
+                                @onchange="e => SetSwimlanePropertyAsync((string)e.Value!)" disabled="@IsBusy">
+                            <option value="" selected="@(swimlaneProperty is null)">None</option>
+                            @foreach (var candidate in Database.Properties.Where(p => p.Type == WikiDatabasePropertyTypes.Select && p.Id != groupByProperty.Id))
+                            {
+                                <option value="@candidate.Id" selected="@(candidate.Id == swimlaneProperty?.Id)">@candidate.Name</option>
+                            }
+                        </select>
                     </div>
+
+                    @if (swimlaneProperty is null)
+                    {
+                        var groups = WikiDatabaseViewLogic.GroupForBoard(VisibleRows, groupByProperty);
+                        <div class="wiki-db-board d-flex gap-3 overflow-auto pb-2">
+                            @foreach (var group in groups)
+                            {
+                                @BoardColumn(groupByProperty, group, groups, null, string.Empty, titleProperty)
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        var matrix = WikiDatabaseViewLogic.GroupForBoardMatrix(VisibleRows, groupByProperty, swimlaneProperty);
+                        <div class="wiki-db-board-matrix overflow-auto pb-2">
+                            @foreach (var lane in matrix.Swimlanes)
+                            {
+                                <div class="wiki-db-swimlane mb-3">
+                                    <div class="wiki-db-swimlane-header fw-semibold small mb-2">@lane.SecondaryLabel <span class="text-secondary">(@lane.Columns.Sum(c => c.Rows.Count))</span></div>
+                                    <div class="wiki-db-board d-flex gap-3">
+                                        @foreach (var group in lane.Columns)
+                                        {
+                                            @BoardColumn(groupByProperty, group, lane.Columns, swimlaneProperty, lane.SecondaryOptionId, titleProperty)
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
                 }
             }
             else if (ActiveView is { Type: WikiDatabaseViewTypes.Calendar })
@@ -991,10 +1147,64 @@ else
             }
             else
             {
+                var bulkEligibleProperties = Database.Properties.Where(IsBulkEditable).OrderBy(p => p.SortOrder).ToList();
+                if (_selectedRowIds.Count > 0)
+                {
+                    <div class="d-flex align-items-center gap-2 mb-2 p-2 border rounded-3 bg-light-subtle flex-wrap">
+                        <span class="small fw-semibold">@_selectedRowIds.Count selected</span>
+                        <select class="form-select form-select-sm w-auto" @bind="_bulkPropertyId" disabled="@IsBusy">
+                            <option value="">Set property…</option>
+                            @foreach (var property in bulkEligibleProperties)
+                            {
+                                <option value="@property.Id">@property.Name</option>
+                            }
+                        </select>
+                        @if (_bulkPropertyId is { } bulkPropertyGuid)
+                        {
+                            var bulkProperty = Database.Properties.FirstOrDefault(p => p.Id == bulkPropertyGuid);
+                            if (bulkProperty?.Type == WikiDatabasePropertyTypes.Checkbox)
+                            {
+                                <select class="form-select form-select-sm w-auto" @bind="_bulkTextValue" disabled="@IsBusy">
+                                    <option value="true">Checked</option>
+                                    <option value="false">Unchecked</option>
+                                </select>
+                            }
+                            else if (bulkProperty?.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status)
+                            {
+                                <select class="form-select form-select-sm w-auto" @bind="_bulkTextValue" disabled="@IsBusy">
+                                    <option value="">—</option>
+                                    @foreach (var option in WikiDatabasePropertyConfig.GetOptions(bulkProperty))
+                                    {
+                                        <option value="@option.Id">@option.Label</option>
+                                    }
+                                </select>
+                            }
+                            else
+                            {
+                                <input class="form-control form-control-sm w-auto" @bind="_bulkTextValue"
+                                       type="@(bulkProperty?.Type == WikiDatabasePropertyTypes.Number ? "number" : "text")"
+                                       placeholder="New value" disabled="@IsBusy" />
+                            }
+                            <button type="button" class="btn btn-sm btn-primary" @onclick="ApplyBulkEditAsync" disabled="@IsBusy">Apply</button>
+                        }
+                        <button type="button" class="btn btn-sm btn-link" @onclick="ClearRowSelection" disabled="@IsBusy">Clear selection</button>
+                        @if (_bulkResult is { } bulkResult)
+                        {
+                            <span class="small @(bulkResult.Failures.Count > 0 ? "text-danger" : "text-success")">
+                                Updated @bulkResult.SucceededCount row(s)@(bulkResult.Failures.Count > 0 ? $"; {bulkResult.Failures.Count} failed - {bulkResult.Failures[0].Error}" : ".")
+                            </span>
+                        }
+                    </div>
+                }
                 <div class="table-responsive">
                     <table class="table table-sm align-middle">
                         <thead>
                             <tr>
+                                <th style="width:2rem">
+                                    <input class="form-check-input" type="checkbox" title="Select all"
+                                           checked="@(TableRows.Count > 0 && TableRows.All(display => _selectedRowIds.Contains(display.Row.Id)))"
+                                           @onchange="e => SelectAllRows((bool)e.Value!)" disabled="@IsBusy" />
+                                </th>
                                 @foreach (var property in Database.Properties.OrderBy(p => p.SortOrder))
                                 {
                                     <th>@property.Name</th>
@@ -1007,6 +1217,11 @@ else
                             {
                                 var row = rowDisplay.Row;
                                 <tr>
+                                    <td>
+                                        <input class="form-check-input" type="checkbox" aria-label="@($"Select {GetDatabaseRowTitle(Database, row)}")"
+                                               checked="@_selectedRowIds.Contains(row.Id)"
+                                               @onchange="e => ToggleRowSelected(row.Id, (bool)e.Value!)" disabled="@IsBusy" />
+                                    </td>
                                     @foreach (var property in Database.Properties.OrderBy(p => p.SortOrder))
                                     {
                                         <td>
@@ -1209,6 +1424,7 @@ else
                         </tbody>
                         <tfoot>
                             <tr>
+                                <td></td>
                                 @foreach (var property in Database.Properties.OrderBy(p => p.SortOrder))
                                 {
                                     <td>
@@ -1320,6 +1536,10 @@ else
     private bool _showTrashedRows;
     private List<WikiDatabaseRow> TrashedRows { get; set; } = new();
     private List<WikiDatabaseRowTemplate> RowTemplates { get; set; } = new();
+    private List<WikiDatabaseRowRecurrenceView> RowRecurrences { get; set; } = new();
+    private Guid? _recurrenceEditorTemplateId;
+    private string _newRecurrenceCron = "0 9 * * 1";
+    private string? _recurrenceError;
     private string _newRowTemplateName = string.Empty;
     private Guid? _rowTemplateSourceRowId;
     private WikiDatabaseCsvImportResult? _csvImportResult;
@@ -1327,6 +1547,10 @@ else
     private bool _schemaPushSucceeded;
     private Guid? _activeViewId;
     private Guid? _draggedRowId;
+    private readonly HashSet<Guid> _selectedRowIds = [];
+    private Guid? _bulkPropertyId;
+    private string _bulkTextValue = string.Empty;
+    private WikiDatabaseBulkUpdateResult? _bulkResult;
     private WikiDatabaseRow? _openRow;
     private readonly HashSet<Guid> _collapsedSubItemRowIds = [];
     private string _title = string.Empty;
@@ -1561,6 +1785,7 @@ else
                     : string.Empty;
                 TrashedRows = (await WikiDatabaseService.ListTrashedRowsAsync(WikiDatabaseId)).ToList();
                 RowTemplates = (await WikiDatabaseService.ListRowTemplatesAsync(WikiDatabaseId)).ToList();
+                RowRecurrences = (await WikiDatabaseRecurrenceService.ListAsync(WikiDatabaseId)).ToList();
                 if (_rowTemplateSourceRowId is null || Database.Rows.All(row => row.Id != _rowTemplateSourceRowId))
                 {
                     _rowTemplateSourceRowId = Database.Rows.OrderBy(row => row.SortOrder).FirstOrDefault()?.Id;
@@ -1749,6 +1974,42 @@ else
         var user = await CurrentUserNameAsync();
         var editor = CreatePropertyEditor(property);
         editor.Options = options;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, user);
+        await ReloadAsync();
+    });
+
+    private async Task SetPropertyRequiredAsync(WikiDatabaseProperty property, bool isRequired) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        var editor = CreatePropertyEditor(property);
+        editor.IsRequired = isRequired;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, user);
+        await ReloadAsync();
+    });
+
+    private async Task SetPropertyMinValueAsync(WikiDatabaseProperty property, string rawValue) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        var editor = CreatePropertyEditor(property);
+        editor.MinValue = decimal.TryParse(rawValue, out var parsed) ? parsed : null;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, user);
+        await ReloadAsync();
+    });
+
+    private async Task SetPropertyMaxValueAsync(WikiDatabaseProperty property, string rawValue) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        var editor = CreatePropertyEditor(property);
+        editor.MaxValue = decimal.TryParse(rawValue, out var parsed) ? parsed : null;
+        await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, user);
+        await ReloadAsync();
+    });
+
+    private async Task SetPropertyValidationPatternAsync(WikiDatabaseProperty property, string pattern) => await Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        var editor = CreatePropertyEditor(property);
+        editor.ValidationPattern = string.IsNullOrWhiteSpace(pattern) ? null : pattern.Trim();
         await WikiDatabaseService.SavePropertyAsync(WikiDatabaseId, editor, user);
         await ReloadAsync();
     });
@@ -2184,6 +2445,46 @@ else
         await ReloadAsync();
     });
 
+    private void ToggleRecurrenceEditor(Guid templateId)
+    {
+        _recurrenceError = null;
+        _recurrenceEditorTemplateId = _recurrenceEditorTemplateId == templateId ? null : templateId;
+        _newRecurrenceCron = "0 9 * * 1";
+    }
+
+    private async Task CreateRecurrenceAsync(Guid templateId)
+    {
+        _recurrenceError = null;
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            await WikiDatabaseRecurrenceService.CreateAsync(WikiDatabaseId, templateId, _newRecurrenceCron, user);
+            _recurrenceEditorTemplateId = null;
+            await ReloadAsync();
+        }
+        catch (FormatException ex)
+        {
+            // Shown inline next to the cron field rather than routed through Work/ErrorMessage -
+            // a malformed expression is an expected, correctable input mistake, not an
+            // operation failure, and the editor should stay open so the user can fix it in
+            // place instead of having to reopen it.
+            _recurrenceError = ex.Message;
+        }
+    }
+
+    private Task SetRecurrenceActiveAsync(Guid recurrenceId, bool isActive) => Work(async () =>
+    {
+        var user = await CurrentUserNameAsync();
+        await WikiDatabaseRecurrenceService.SetActiveAsync(recurrenceId, isActive, user);
+        await ReloadAsync();
+    });
+
+    private Task DeleteRecurrenceAsync(Guid recurrenceId) => Work(async () =>
+    {
+        await WikiDatabaseRecurrenceService.DeleteAsync(recurrenceId);
+        await ReloadAsync();
+    });
+
     private async Task ImportCsvAsync(InputFileChangeEventArgs args)
     {
         const long maxCsvBytes = WikiDatabaseCsvImportLimits.MaxFileBytes;
@@ -2240,12 +2541,20 @@ else
     private void NextCalendarMonth() => _calendarMonth = _calendarMonth.AddMonths(1);
     private void ShowCurrentCalendarMonth() => _calendarMonth = new DateOnly(DateTime.Today.Year, DateTime.Today.Month, 1);
 
-    private async Task AddRowToGroupAsync(WikiDatabaseProperty groupByProperty, string optionId) => await Work(async () =>
+    // secondaryProperty/secondaryOptionId are null/empty for a plain single-axis board -
+    // BoardColumn always passes them, so this is the one path both board shapes create rows
+    // through.
+    private async Task AddRowToBoardCellAsync(
+        WikiDatabaseProperty groupByProperty, string optionId, WikiDatabaseProperty? secondaryProperty, string secondaryOptionId) => await Work(async () =>
     {
         var values = new JsonObject();
         if (!string.IsNullOrEmpty(optionId))
         {
             WikiPropertyValues.SetText(values, groupByProperty.Id, optionId);
+        }
+        if (secondaryProperty is not null && !string.IsNullOrEmpty(secondaryOptionId))
+        {
+            WikiPropertyValues.SetText(values, secondaryProperty.Id, secondaryOptionId);
         }
 
         var user = await CurrentUserNameAsync();
@@ -2260,6 +2569,73 @@ else
         await WikiDatabaseService.TrashRowAsync(WikiDatabaseId, row.Id, user);
         await ReloadAsync();
     });
+
+    // The bulk toolbar only offers one flat input widget (text/number/select/checkbox), so
+    // eligibility is the intersection of "not read-only or computed" (reusing
+    // WikiDatabasePropertyValidation's own NotRequirable set - the same properties nobody could
+    // meaningfully set a value on by hand) and "a type that widget can actually represent" -
+    // MultiSelect/Date/Person/Files/Place/Relation each need their own dedicated picker this
+    // toolbar does not build.
+    private static bool IsBulkEditable(WikiDatabaseProperty property) =>
+        !WikiDatabasePropertyValidation.NotRequirable.Contains(property.Type)
+        && property.Type is WikiDatabasePropertyTypes.Text or WikiDatabasePropertyTypes.Number
+            or WikiDatabasePropertyTypes.Url or WikiDatabasePropertyTypes.Email or WikiDatabasePropertyTypes.Phone
+            or WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status or WikiDatabasePropertyTypes.Checkbox;
+
+    private void ToggleRowSelected(Guid rowId, bool isSelected)
+    {
+        if (isSelected) _selectedRowIds.Add(rowId);
+        else _selectedRowIds.Remove(rowId);
+        _bulkResult = null;
+    }
+
+    private void SelectAllRows(bool selectAll)
+    {
+        _selectedRowIds.Clear();
+        if (selectAll)
+        {
+            foreach (var display in TableRows) _selectedRowIds.Add(display.Row.Id);
+        }
+        _bulkResult = null;
+    }
+
+    private void ClearRowSelection()
+    {
+        _selectedRowIds.Clear();
+        _bulkPropertyId = null;
+        _bulkTextValue = string.Empty;
+        _bulkResult = null;
+    }
+
+    private async Task ApplyBulkEditAsync()
+    {
+        if (_bulkPropertyId is not { } propertyId) return;
+        var property = Database?.Properties.FirstOrDefault(p => p.Id == propertyId);
+        if (property is null) return;
+
+        await Work(async () =>
+        {
+            var container = new System.Text.Json.Nodes.JsonObject();
+            switch (property.Type)
+            {
+                case WikiDatabasePropertyTypes.Number:
+                    WikiPropertyValues.SetNumber(container, propertyId,
+                        decimal.TryParse(_bulkTextValue, out var number) ? number : null);
+                    break;
+                case WikiDatabasePropertyTypes.Checkbox:
+                    WikiPropertyValues.SetCheckbox(container, propertyId, _bulkTextValue == "true");
+                    break;
+                default:
+                    WikiPropertyValues.SetText(container, propertyId, _bulkTextValue);
+                    break;
+            }
+
+            var user = await CurrentUserNameAsync();
+            _bulkResult = await WikiDatabaseService.BulkSetPropertyValueAsync(
+                WikiDatabaseId, _selectedRowIds.ToList(), propertyId, container[propertyId.ToString()], user);
+            await ReloadAsync();
+        });
+    }
 
     private void OpenRow(WikiDatabaseRow row) => _openRow = row;
     private void OpenRowById(Guid rowId) => _openRow = Database?.Rows.FirstOrDefault(row => row.Id == rowId);
@@ -2538,43 +2914,107 @@ else
     private void StartDragRow(WikiDatabaseRow row) => _draggedRowId = row.Id;
     private void EndDragRow() => _draggedRowId = null;
 
-    private async Task DropOnColumnAsync(WikiDatabaseProperty groupByProperty, string optionId)
+    // secondaryProperty/secondaryOptionId are null/empty for a plain single-axis board. When a
+    // swimlane is active this issues two writes (the primary move, keeping MoveRowAsync's
+    // "append to the end of the target column" position semantics, then a plain property set
+    // for the swimlane) rather than one combined write - WikiDatabaseService has no single
+    // method that moves a row's position within one property while also setting a second, and
+    // both writes land the row in the correct cell either way. The one real cost is that
+    // database.rowChangedTrigger fires twice instead of once for a swimlane move; automations
+    // are already expected to tolerate a trigger firing on a change that doesn't affect their
+    // own conditions (see DatabaseTriggerConditions), so this is a deliberate, bounded trade-off
+    // rather than a new method purely to collapse it into one write.
+    private async Task DropOnBoardCellAsync(
+        WikiDatabaseProperty groupByProperty, string optionId, WikiDatabaseProperty? secondaryProperty, string secondaryOptionId)
     {
         if (_draggedRowId is not { } rowId)
         {
             return;
         }
 
+        var row = VisibleRows.FirstOrDefault(r => r.Id == rowId);
         _draggedRowId = null;
         await Work(async () =>
         {
             var user = await CurrentUserNameAsync();
             await WikiDatabaseService.MoveRowAsync(WikiDatabaseId, rowId, groupByProperty.Id, string.IsNullOrEmpty(optionId) ? null : optionId, int.MaxValue, user);
+            if (secondaryProperty is not null && row is not null)
+            {
+                await WikiDatabaseService.SaveRowAsync(WikiDatabaseId, new WikiDatabaseRowEditor
+                {
+                    Id = row.Id,
+                    ParentRowId = row.ParentRowId,
+                    Values = SetTextIn(WikiPropertyValues.ParseObject(row.PropertyValuesJson), secondaryProperty.Id, secondaryOptionId)
+                }, user);
+            }
             await ReloadAsync();
         });
     }
 
-    // A value no real Select option can ever have (see the <select>'s own comment), used to
-    // tell "nothing chosen yet" apart from the "No status" column, whose real OptionId is "".
+    // A value no real Select option, nor a valid EncodeMoveTarget pair, can ever have (see the
+    // <select>'s own comment), used to tell "nothing chosen yet" apart from the "No status"
+    // column, whose real OptionId is "".
     private const string MovePlaceholderValue = "__wiki-db-board-move-placeholder__";
 
-    // Keyboard/screen-reader equivalent of DropOnColumnAsync's drag-and-drop - same underlying
-    // move (append to the end of the target column), just triggered from the per-card <select>
-    // instead of a drop event.
-    private async Task MoveRowToOptionAsync(WikiDatabaseRow row, WikiDatabaseProperty groupByProperty, string optionId)
+    // "::" rather than a space or comma - option ids are normally short slugs, but nothing
+    // guarantees one can never contain either of those, and this is cheap insurance against
+    // decoding a compound value incorrectly if one ever does.
+    private const string MoveTargetSeparator = "::";
+
+    private static string EncodeMoveTarget(string primaryOptionId, string secondaryOptionId) =>
+        $"{primaryOptionId}{MoveTargetSeparator}{secondaryOptionId}";
+
+    // Keyboard/screen-reader equivalent of DropOnBoardCellAsync's drag-and-drop - same
+    // underlying move(s), just triggered from the per-card <select> instead of a drop event.
+    private async Task MoveRowToBoardCellAsync(
+        WikiDatabaseRow row, WikiDatabaseProperty groupByProperty, WikiDatabaseProperty? secondaryProperty, string value)
     {
-        if (optionId == MovePlaceholderValue)
+        if (value == MovePlaceholderValue)
         {
             return;
+        }
+
+        string optionId;
+        string? secondaryOptionId = null;
+        if (secondaryProperty is null)
+        {
+            optionId = value;
+        }
+        else
+        {
+            var parts = value.Split(MoveTargetSeparator, 2);
+            optionId = parts[0];
+            secondaryOptionId = parts.Length > 1 ? parts[1] : string.Empty;
         }
 
         await Work(async () =>
         {
             var user = await CurrentUserNameAsync();
             await WikiDatabaseService.MoveRowAsync(WikiDatabaseId, row.Id, groupByProperty.Id, string.IsNullOrEmpty(optionId) ? null : optionId, int.MaxValue, user);
+            if (secondaryProperty is not null && secondaryOptionId is not null)
+            {
+                await WikiDatabaseService.SaveRowAsync(WikiDatabaseId, new WikiDatabaseRowEditor
+                {
+                    Id = row.Id,
+                    ParentRowId = row.ParentRowId,
+                    Values = SetTextIn(WikiPropertyValues.ParseObject(row.PropertyValuesJson), secondaryProperty.Id, secondaryOptionId)
+                }, user);
+            }
             await ReloadAsync();
         });
     }
+
+    private static Dictionary<string, JsonNode?> SetTextIn(JsonObject values, Guid propertyId, string text)
+    {
+        WikiPropertyValues.SetText(values, propertyId, text);
+        return values.ToDictionary(kv => kv.Key, kv => kv.Value);
+    }
+
+    private Task SetSwimlanePropertyAsync(string propertyId) =>
+        UpdateActiveViewConfigAsync(config => config with
+        {
+            SecondaryGroupByPropertyId = string.IsNullOrEmpty(propertyId) ? null : propertyId
+        });
 
     private async Task SaveRowValueAsync(WikiDatabaseRow row, Action<JsonObject> mutate) => await Work(async () =>
     {
@@ -2709,7 +3149,11 @@ else
             ButtonLabel = config.ButtonLabel,
             UniqueIdPrefix = config.UniqueIdPrefix,
             AiPromptTemplate = config.AiPromptTemplate,
-            AiModel = config.AiModel
+            AiModel = config.AiModel,
+            IsRequired = config.IsRequired,
+            MinValue = config.MinValue,
+            MaxValue = config.MaxValue,
+            ValidationPattern = config.ValidationPattern
         };
     }
 

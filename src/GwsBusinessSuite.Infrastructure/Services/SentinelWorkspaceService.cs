@@ -747,6 +747,71 @@ public sealed class SentinelWorkspaceService(
         return mentions;
     }
 
+    public async Task<IReadOnlyList<SentinelMyWorkItem>> GetMyWorkAsync(
+        string username, CancellationToken cancellationToken = default)
+    {
+        var items = new List<SentinelMyWorkItem>();
+
+        // Open to-dos - same bounded, access-filtered page scan as GetMentionsAsync.
+        var pages = await dbContext.WikiPages.AsNoTracking()
+            .Where(page => page.TrashedAt == null)
+            .Take(MaxScanPages)
+            .ToListAsync(cancellationToken);
+        var accessiblePages = await GetAccessibleTargetsAsync(
+            pages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false)),
+            username, SentinelAccessLevels.View, cancellationToken);
+        pages = pages.Where(page => accessiblePages.Contains(
+            new SentinelAccessTarget(page.Id, IsDatabase: false))).ToList();
+        foreach (var page in pages)
+        {
+            foreach (var block in WikiBlockJson.ParseBlocks(page.BlocksJson))
+            {
+                if (block.Type != WikiBlockTypes.ToDo) continue;
+                if (block.Props.GetValueOrDefault("checked") == "true") continue;
+                items.Add(new SentinelMyWorkItem(page.Id, false, page.Title, block.PlainText, SentinelMyWorkItem.OpenTask));
+            }
+        }
+
+        // Rows with a Person property naming this user - Person values are stored the same way
+        // as MultiSelect (free-text ids, not a predefined option list), so this reads them the
+        // same way WikiDatabaseService's own CSV export does for that property type.
+        var databases = await dbContext.WikiDatabases.AsNoTracking()
+            .Where(database => database.TrashedAt == null)
+            .Include(database => database.Properties)
+            .Include(database => database.Rows)
+            .Take(MaxScanPages)
+            .ToListAsync(cancellationToken);
+        var accessibleDatabases = await GetAccessibleTargetsAsync(
+            databases.Select(database => new SentinelAccessTarget(database.Id, IsDatabase: true)),
+            username, SentinelAccessLevels.View, cancellationToken);
+        databases = databases.Where(database => accessibleDatabases.Contains(
+            new SentinelAccessTarget(database.Id, IsDatabase: true))).ToList();
+
+        var normalizedUsername = NormalizeUsername(username);
+        foreach (var database in databases)
+        {
+            var personProperties = database.Properties
+                .Where(property => property.Type == WikiDatabasePropertyTypes.Person)
+                .ToList();
+            if (personProperties.Count == 0) continue;
+
+            var titleProperty = database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Title);
+            foreach (var row in database.Rows.Where(row => row.TrashedAt == null))
+            {
+                var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+                var isAssignedToMe = personProperties.Any(property =>
+                    WikiPropertyValues.GetMultiSelect(values, property.Id).Any(
+                        assignee => string.Equals(NormalizeUsername(assignee), normalizedUsername, StringComparison.Ordinal)));
+                if (!isAssignedToMe) continue;
+
+                var title = titleProperty is null ? "Untitled" : WikiPropertyValues.GetText(values, titleProperty.Id) ?? "Untitled";
+                items.Add(new SentinelMyWorkItem(database.Id, true, title, database.Title, SentinelMyWorkItem.AssignedRow, row.Id));
+            }
+        }
+
+        return items;
+    }
+
     private static string SearchableBlockText(WikiBlock block)
     {
         var propsText = string.Join(' ', block.Props.Values);

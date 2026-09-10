@@ -45,6 +45,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<WikiDatabaseProperty> WikiDatabaseProperties { get; }
     DbSet<WikiDatabaseRow> WikiDatabaseRows { get; }
     DbSet<WikiDatabaseRowTemplate> WikiDatabaseRowTemplates { get; }
+    DbSet<WikiDatabaseRowRecurrence> WikiDatabaseRowRecurrences { get; }
     DbSet<WikiDatabaseRowRevision> WikiDatabaseRowRevisions { get; }
     DbSet<WikiDatabaseView> WikiDatabaseViews { get; }
     DbSet<WikiDatabaseViewPersonalization> WikiDatabaseViewPersonalizations { get; }

@@ -299,6 +299,47 @@ public sealed class WikiDatabaseViewLogicTests
     }
 
     [Fact]
+    public void GroupForBoardMatrix_ShouldCrossTabulateRowsByBothProperties()
+    {
+        var statusProperty = NewProperty(WikiDatabasePropertyTypes.Select);
+        statusProperty.ConfigJson = WikiDatabasePropertyConfig.Serialize(
+        [
+            new WikiDatabasePropertyOption("todo", "To Do", "#ccc"),
+            new WikiDatabasePropertyOption("done", "Done", "#0f0")
+        ]);
+        var ownerProperty = NewProperty(WikiDatabasePropertyTypes.Select);
+        ownerProperty.ConfigJson = WikiDatabasePropertyConfig.Serialize(
+        [
+            new WikiDatabasePropertyOption("ada", "Ada", "#ccc"),
+            new WikiDatabasePropertyOption("grace", "Grace", "#0f0")
+        ]);
+        var rows = new[]
+        {
+            RowWithTwoOptions(statusProperty.Id, "todo", ownerProperty.Id, "ada"),
+            RowWithTwoOptions(statusProperty.Id, "todo", ownerProperty.Id, "grace"),
+            RowWithTwoOptions(statusProperty.Id, "done", ownerProperty.Id, "ada"),
+            RowWithTwoOptions(statusProperty.Id, "todo", ownerProperty.Id, "")
+        };
+
+        var matrix = WikiDatabaseViewLogic.GroupForBoardMatrix(rows, statusProperty, ownerProperty);
+
+        matrix.ColumnHeaders.Select(column => column.Label).Should().Equal("To Do", "Done", "No status");
+        matrix.ColumnHeaders.Should().OnlyContain(column => column.Rows.Count == 0, "headers exist only to drive column order/labels");
+        matrix.Swimlanes.Select(lane => lane.SecondaryLabel).Should().Equal("Ada", "Grace", "No status");
+
+        var ada = matrix.Swimlanes.Single(lane => lane.SecondaryLabel == "Ada");
+        ada.Columns.Single(column => column.Label == "To Do").Rows.Should().HaveCount(1);
+        ada.Columns.Single(column => column.Label == "Done").Rows.Should().HaveCount(1);
+
+        var grace = matrix.Swimlanes.Single(lane => lane.SecondaryLabel == "Grace");
+        grace.Columns.Single(column => column.Label == "To Do").Rows.Should().HaveCount(1);
+        grace.Columns.Single(column => column.Label == "Done").Rows.Should().BeEmpty();
+
+        var noOwner = matrix.Swimlanes.Single(lane => lane.SecondaryLabel == "No status");
+        noOwner.Columns.Single(column => column.Label == "To Do").Rows.Should().HaveCount(1);
+    }
+
+    [Fact]
     public void BuildCalendarMonth_ShouldCreateSixWeekSundayFirstGrid()
     {
         var dateProperty = NewProperty(WikiDatabasePropertyTypes.Date);
@@ -481,6 +522,14 @@ public sealed class WikiDatabaseViewLogicTests
     {
         var values = System.Text.Json.Nodes.JsonNode.Parse("{}")!.AsObject();
         WikiPropertyValues.SetText(values, propertyId, value);
+        return new WikiDatabaseRow { Id = Guid.NewGuid(), PropertyValuesJson = WikiPropertyValues.Serialize(values) };
+    }
+
+    private static WikiDatabaseRow RowWithTwoOptions(Guid firstPropertyId, string firstValue, Guid secondPropertyId, string secondValue)
+    {
+        var values = System.Text.Json.Nodes.JsonNode.Parse("{}")!.AsObject();
+        WikiPropertyValues.SetText(values, firstPropertyId, firstValue);
+        WikiPropertyValues.SetText(values, secondPropertyId, secondValue);
         return new WikiDatabaseRow { Id = Guid.NewGuid(), PropertyValuesJson = WikiPropertyValues.Serialize(values) };
     }
 

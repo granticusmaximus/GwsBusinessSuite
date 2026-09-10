@@ -282,6 +282,7 @@ public static class DependencyInjection
         services.AddScoped<IAutomationTriggerService, AutomationTriggerService>();
         services.AddScoped<IAutomationTemplateService, AutomationTemplateService>();
         services.AddHostedService<AutomationScheduleBackgroundService>();
+        services.AddHostedService<WikiDatabaseRecurrenceBackgroundService>();
         services.AddHostedService<AutomationResumeBackgroundService>();
         services.AddHostedService<AutomationCredentialRefreshBackgroundService>();
         services.AddHostedService<CmsScheduledPublishBackgroundService>();
@@ -289,6 +290,7 @@ public static class DependencyInjection
         services.AddScoped<IWikiService, WikiService>();
         services.AddScoped<IQuickNoteService, QuickNoteService>();
         services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();
+        services.AddScoped<IWikiDatabaseRecurrenceService, WikiDatabaseRecurrenceService>();
         services.AddScoped<ISentinelTemplateService, SentinelTemplateService>();
         services.AddScoped<ISentinelWorkspaceImportService, SentinelWorkspaceImportService>();
         services.AddScoped<ISentinelWorkspaceService, SentinelWorkspaceService>();

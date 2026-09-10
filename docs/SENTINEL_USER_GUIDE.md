@@ -216,10 +216,22 @@ individually trashed rows).
 Views appear as tabs across the top of a database. Beyond the default Table view you can add:
 
 - **Board** — groups rows into columns by a **Select** property's options (a Status property
-  can't be used for this — see [Known limitations](#known-limitations)).
+  can't be used for this — see [Known limitations](#known-limitations)). Pick a second Select
+  property in the **Swimlanes** dropdown above the board to cross-tabulate by both at once —
+  useful for something like Status columns with an Owner row per swimlane. Dragging a card (or
+  using its "Move to…" dropdown, which lists every column/swimlane combination when swimlanes
+  are on) sets both properties together.
 - **List** — rows with inline property editing and expandable/collapsible sub-items.
 - **Gallery** — a card grid.
 - **Calendar** — a month grid keyed to a Date property, with an "Undated" bucket for rows without one.
+
+Check the box next to any row in **Table** view to select it; a toolbar appears above the table
+letting you pick one property and a new value and **Apply** it to every selected row at once.
+This covers Text, Number, Url, Email, Phone, Select, Status, and Checkbox properties — Multi-select,
+Date, Person, Files, Place, and Relation each need their own picker and aren't offered here. A row
+that fails validation (see the property's own Required/format rules) is skipped rather than
+blocking the rows that succeeded, and the toolbar reports how many rows updated and how many
+failed, with the first failure's reason.
 
 Six further "advanced" view types cover more specialized presentations, each falling back to a
 short prompt if the database doesn't yet have the property it needs:
@@ -274,6 +286,14 @@ sidebar:
   property defaults (e.g. a "Standard task" starting point) so new rows in that same database can
   start from it.
 
+A row template can also **repeat on a schedule**: open a database's Templates panel and click
+**Repeat** next to any row template to give it a 5-field cron schedule (`minute hour
+day-of-month month day-of-week`, e.g. `0 9 * * 1` for every Monday at 9am — the same syntax as
+the Automation engine's Schedule Trigger). A new row is created from that template automatically
+each time it fires; the toggle next to it pauses or resumes it without deleting the schedule, and
+re-enabling a paused schedule always computes its next run from the moment you re-enable it,
+rather than immediately firing for every occurrence it missed while paused.
+
 The same panel also hosts Notion workspace/template import — see
 [Notion import and sync](#notion-import-and-sync).
 
@@ -309,8 +329,18 @@ across page titles and block content, and database titles, property names, and r
 author and date filters, and highlight the matched terms. Press `⌘K`/`Ctrl+K` from anywhere in
 Sentinel to open the palette; arrow keys navigate results. You can bookmark a query as a
 **Saved search** for one-click reruns later. When the search box is empty, the sidebar instead
-shows **Favorites**, **Recent** (your last-opened items), and **Mentions**. Every page also has a
-**Backlinks** panel listing every other page that links to it.
+shows **My work**, **Favorites**, **Recent** (your last-opened items), and **Mentions**. **My
+work** lists every unchecked to-do block and every database row with a Person property naming
+you, across everything you can view — clicking an open task jumps straight to the page it's on;
+clicking an assigned row opens that row's database (not yet the row itself). Every page also has
+a **Backlinks** panel listing every other page that links to it.
+
+Click **View graph** in the Backlinks panel for a visual map of one page's connections: the page
+itself (shown in orange), every page that links to it, and every page it links to. Click a node
+to open that page. This is a one-hop view centered on the page you're on, the same way a "local
+graph" works in similar tools — not a map of your entire wiki, which would make an already-large
+workspace slow to draw and unreadable once opened. A page with no links yet shows a note instead
+of an empty canvas.
 
 ## Sharing and permissions
 

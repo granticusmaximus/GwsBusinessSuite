@@ -158,6 +158,77 @@ public sealed class SentinelWorkspaceServiceTests
     }
 
     [Fact]
+    public async Task GetMyWorkAsync_ShouldFindOpenToDosAndRowsAssignedToTheUser()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var wiki = new WikiService(db);
+        var databases = new WikiDatabaseService(db);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System);
+
+        await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Sprint Notes",
+            BlocksJson = WikiBlockJson.Serialize([
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.ToDo, 0,
+                    [new WikiRichTextSpan("Ship the release notes")],
+                    new Dictionary<string, string> { ["checked"] = "false" }),
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.ToDo, 0,
+                    [new WikiRichTextSpan("Already done")],
+                    new Dictionary<string, string> { ["checked"] = "true" })])
+        }, "u");
+
+        var database = await databases.CreateDatabaseAsync("Projects", null, "u");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var owner = await databases.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Owner", Type = WikiDatabasePropertyTypes.Person }, "u");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(values, titleProperty.Id, "Northstar migration");
+        WikiPropertyValues.SetMultiSelect(values, owner.Id, ["grant"]);
+        await databases.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(kv => kv.Key, kv => kv.Value) }, "u");
+        var unassignedValues = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(unassignedValues, titleProperty.Id, "Someone else's task");
+        await databases.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = unassignedValues.ToDictionary(kv => kv.Key, kv => kv.Value) }, "u");
+
+        var myWork = await sentinel.GetMyWorkAsync("grant");
+
+        myWork.Should().ContainSingle(item => item.Kind == SentinelMyWorkItem.OpenTask && item.Title == "Sprint Notes");
+        myWork.Should().NotContain(item => item.Context == "Already done");
+        myWork.Should().ContainSingle(item => item.Kind == SentinelMyWorkItem.AssignedRow && item.Title == "Northstar migration");
+        myWork.Should().NotContain(item => item.Title == "Someone else's task");
+    }
+
+    [Fact]
+    public async Task GetMyWorkAsync_ShouldHideAnAssignedRow_TheUserCannotAccess()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var databases = new WikiDatabaseService(db);
+        var accessService = new SentinelAccessService(db);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System, accessService);
+
+        var database = await databases.CreateDatabaseAsync("Private Projects", null, "u");
+        var titleProperty = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var owner = await databases.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Owner", Type = WikiDatabasePropertyTypes.Person }, "u");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(values, titleProperty.Id, "Confidential rollout");
+        WikiPropertyValues.SetMultiSelect(values, owner.Id, ["grant"]);
+        await databases.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(kv => kv.Key, kv => kv.Value) }, "u");
+        // No SentinelResourcePermission is granted to "grant" on this database - it stays
+        // invisible to My Work the same way it stays invisible to search.
+
+        var myWork = await sentinel.GetMyWorkAsync("grant");
+
+        myWork.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task GetPageGraphAsync_ShouldIncludeTheCenterPageItsBacklinksAndItsForwardLinks()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

@@ -910,6 +910,7 @@ public sealed class WikiDatabase : AuditableEntity
     public ICollection<WikiDatabaseRow> Rows { get; set; } = new List<WikiDatabaseRow>();
     public ICollection<WikiDatabaseView> Views { get; set; } = new List<WikiDatabaseView>();
     public ICollection<WikiDatabaseRowTemplate> RowTemplates { get; set; } = new List<WikiDatabaseRowTemplate>();
+    public ICollection<WikiDatabaseRowRecurrence> RowRecurrences { get; set; } = new List<WikiDatabaseRowRecurrence>();
 }
 
 public sealed class WikiDatabaseProperty : AuditableEntity
@@ -978,6 +979,27 @@ public sealed class WikiDatabaseRowTemplate : AuditableEntity
     public string? Icon { get; set; }
     public string? CoverImageUrl { get; set; }
     public WikiDatabase? WikiDatabase { get; set; }
+}
+
+// A recurring row is "materialize this template again on a schedule" - it deliberately points
+// at a WikiDatabaseRowTemplate rather than a live WikiDatabaseRow, so editing or deleting a row
+// created from an earlier firing never disturbs future ones, and CreateRowFromTemplateAsync
+// (already the exact operation "New row" from a template performs by hand) is the entire
+// materialization step; no separate cloning logic needed.
+public sealed class WikiDatabaseRowRecurrence : AuditableEntity
+{
+    public Guid WikiDatabaseId { get; set; }
+    public Guid WikiDatabaseRowTemplateId { get; set; }
+    public required string CronExpression { get; set; }
+    public bool IsActive { get; set; } = true;
+    // Dual DateTimeOffset/long fields, same pattern as AutomationWorkflow.NextScheduledAt(UnixSeconds)
+    // - SQLite can't translate a DateTimeOffset range comparison or ORDER BY, so the sweep query
+    // that finds due recurrences filters on the long column, never the DateTimeOffset one.
+    public DateTimeOffset? NextRunAt { get; set; }
+    public long? NextRunAtUnixSeconds { get; set; }
+    public DateTimeOffset? LastRunAt { get; set; }
+    public WikiDatabase? WikiDatabase { get; set; }
+    public WikiDatabaseRowTemplate? WikiDatabaseRowTemplate { get; set; }
 }
 
 // Bounded DB-snapshot history for a row's page body, mirroring WikiPageRevision exactly

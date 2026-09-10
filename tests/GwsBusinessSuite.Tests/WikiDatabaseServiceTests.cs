@@ -13,6 +13,156 @@ namespace GwsBusinessSuite.Tests;
 public sealed class WikiDatabaseServiceTests
 {
     [Fact]
+    public async Task BulkSetPropertyValueAsync_ShouldApplyTheValueToEveryRow()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var status = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status", Type = WikiDatabasePropertyTypes.Text
+        }, "u");
+        var first = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var second = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        var value = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(value, status.Id, "Done");
+        var result = await service.BulkSetPropertyValueAsync(
+            database.Id, [first.Id, second.Id], status.Id, value[status.Id.ToString()], "u");
+
+        result.SucceededCount.Should().Be(2);
+        result.Failures.Should().BeEmpty();
+        var reloaded = await service.GetDatabaseAsync(database.Id);
+        foreach (var row in reloaded!.Rows)
+        {
+            WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), status.Id).Should().Be("Done");
+        }
+    }
+
+    [Fact]
+    public async Task BulkSetPropertyValueAsync_ShouldReportOneMissingRow_WithoutBlockingTheOthers()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var status = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status", Type = WikiDatabasePropertyTypes.Text
+        }, "u");
+        var real = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var missingRowId = Guid.NewGuid();
+
+        var value = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(value, status.Id, "Done");
+        var result = await service.BulkSetPropertyValueAsync(
+            database.Id, [real.Id, missingRowId], status.Id, value[status.Id.ToString()], "u");
+
+        result.SucceededCount.Should().Be(1);
+        result.Failures.Should().ContainSingle(failure => failure.RowId == missingRowId);
+        var reloaded = await service.GetDatabaseAsync(database.Id);
+        WikiPropertyValues.GetText(
+            WikiPropertyValues.ParseObject(reloaded!.Rows.Single(row => row.Id == real.Id).PropertyValuesJson), status.Id)
+            .Should().Be("Done");
+    }
+
+    [Fact]
+    public async Task BulkSetPropertyValueAsync_ShouldReportAValidationFailure_WithoutBlockingOtherRows()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Inventory", null, "u");
+        var sku = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "SKU", Type = WikiDatabasePropertyTypes.Text, ValidationPattern = @"^SKU-\d{4}$"
+        }, "u");
+        var first = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        var second = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        var value = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(value, sku.Id, "not-a-valid-sku");
+        var result = await service.BulkSetPropertyValueAsync(
+            database.Id, [first.Id, second.Id], sku.Id, value[sku.Id.ToString()], "u");
+
+        result.SucceededCount.Should().Be(0);
+        result.Failures.Should().HaveCount(2);
+        result.Failures.Should().OnlyContain(failure => failure.Error.Contains("doesn't match the required format"));
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldRejectARowMissingARequiredProperty()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var owner = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Owner", Type = WikiDatabasePropertyTypes.Text, IsRequired = true
+        }, "u");
+
+        var act = () => service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Owner is required*");
+        (await db.WikiDatabaseRows.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldAcceptARowWithARequiredPropertyFilledIn()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var owner = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Owner", Type = WikiDatabasePropertyTypes.Text, IsRequired = true
+        }, "u");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(values, owner.Id, "Grant");
+
+        var row = await service.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(kv => kv.Key, kv => kv.Value) }, "u");
+
+        WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), owner.Id).Should().Be("Grant");
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldRejectANumberOutsideItsConfiguredRange()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Projects", null, "u");
+        var budget = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Budget", Type = WikiDatabasePropertyTypes.Number, MinValue = 100, MaxValue = 1000
+        }, "u");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetNumber(values, budget.Id, 5m);
+
+        var act = () => service.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(kv => kv.Key, kv => kv.Value) }, "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Budget must be at least 100*");
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldRejectTextThatDoesNotMatchAConfiguredPattern()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Inventory", null, "u");
+        var sku = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "SKU", Type = WikiDatabasePropertyTypes.Text, ValidationPattern = @"^SKU-\d{4}$"
+        }, "u");
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(values, sku.Id, "not-a-sku");
+
+        var act = () => service.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(kv => kv.Key, kv => kv.Value) }, "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*SKU doesn't match the required format*");
+    }
+
+    [Fact]
     public async Task SaveRowAsync_ShouldRejectAStaleBlocksJsonSave_WhenExpectedVersionDoesNotMatch()
     {
         // Regression test: opening a row "as a page" (SentinelDatabaseRowPage) and saving its

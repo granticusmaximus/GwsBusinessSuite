@@ -176,6 +176,35 @@
     <div class="modal-backdrop show" style="z-index:-1"></div>
 }
 
+@if (_showGraphModal)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="sentinelPageGraphTitle">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="sentinelPageGraphTitle"><i class="bi bi-diagram-2 me-2"></i>Page graph</h5>
+                    <button type="button" class="btn-close" @onclick="CloseGraphModalAsync" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-0">
+                    <div class="small text-secondary px-3 pt-3 pb-2">
+                        This page (orange), the pages that link to it, and the pages it links to.
+                        Click a page to open it.
+                    </div>
+                    @if (_pageGraph is { Nodes.Count: 1 })
+                    {
+                        <div class="p-4 text-secondary small">No links to or from this page yet.</div>
+                    }
+                    else
+                    {
+                        <canvas @ref="_pageGraphCanvas" class="sentinel-page-graph-canvas"></canvas>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show" style="z-index:-1"></div>
+}
+
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
     <div class="alert alert-danger sentinel-notice d-flex align-items-start gap-2" role="alert">
@@ -326,6 +355,19 @@
                             {
                                 <button type="button" class="sentinel-nav-item" @onclick="() => OpenNavigationItemAsync(item)" disabled="@IsBusy">
                                     <span>@(string.IsNullOrWhiteSpace(item.Icon) ? (item.IsDatabase ? "🗄️" : "📄") : item.Icon)</span>
+                                    <span class="text-truncate">@item.Title</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                    @if (MyWork.Count > 0)
+                    {
+                        <div class="sentinel-nav-section">
+                            <div class="sentinel-nav-heading"><i class="bi bi-check2-square"></i> My work</div>
+                            @foreach (var item in MyWork.Take(8))
+                            {
+                                <button type="button" class="sentinel-nav-item" @onclick="() => OpenMyWorkItemAsync(item)" disabled="@IsBusy" title="@item.Context">
+                                    <i class="bi @(item.Kind == SentinelMyWorkItem.OpenTask ? "bi-square" : "bi-person-check") text-secondary"></i>
                                     <span class="text-truncate">@item.Title</span>
                                 </button>
                             }
@@ -809,7 +851,12 @@
                         <div class="fw-semibold"><i class="bi bi-arrow-left-right me-1"></i>Backlinks</div>
                         <div class="small text-secondary">Pages in Sentinel that link to this page.</div>
                     </div>
-                    <span class="badge text-bg-secondary">@Backlinks.Count</span>
+                    <div class="d-flex align-items-center gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="OpenGraphModalAsync" disabled="@IsBusy">
+                            <i class="bi bi-diagram-2 me-1"></i>View graph
+                        </button>
+                        <span class="badge text-bg-secondary">@Backlinks.Count</span>
+                    </div>
                 </div>
                 <div class="card-body p-0">
                     @if (Backlinks.Count == 0)
@@ -1593,6 +1640,33 @@
     private bool _workspaceBrowserCollapsed;
     private bool _showShortcutsModal;
     private void ToggleShortcutsModal() => _showShortcutsModal = !_showShortcutsModal;
+
+    private bool _showGraphModal;
+    private SentinelPageGraph? _pageGraph;
+    private bool _graphNeedsRender;
+    private ElementReference _pageGraphCanvas;
+    private IJSObjectReference? _pageGraphModule;
+
+    private async Task OpenGraphModalAsync()
+    {
+        if (SelectedPageId is not { } pageId) return;
+        _pageGraph = await SentinelWorkspaceService.GetPageGraphAsync(pageId, CurrentUsername);
+        _showGraphModal = true;
+        // Rendered lazily in OnAfterRenderAsync once the canvas element the graph is drawn onto
+        // actually exists in the DOM - it does not until this @if block re-renders.
+        _graphNeedsRender = _pageGraph.Nodes.Count > 1;
+    }
+
+    private async Task CloseGraphModalAsync()
+    {
+        _showGraphModal = false;
+        _graphNeedsRender = false;
+        if (_pageGraphModule is not null)
+        {
+            try { await _pageGraphModule.InvokeVoidAsync("dispose", _pageGraphCanvas); }
+            catch (JSDisconnectedException) { /* circuit already gone - nothing to clean up */ }
+        }
+    }
     // Keep the document canvas primary by default. The context rail remains one click away
     // and opening it is comfortable on wide workspaces; forcing it open alongside both the
     // portal and workspace navigation made common laptop widths unusably narrow.
@@ -1617,6 +1691,7 @@
     private string _autosaveStatus = string.Empty;
     private SentinelNavigationState Navigation { get; set; } = new([], []);
     private List<SentinelMention> Mentions { get; set; } = new();
+    private List<SentinelMyWorkItem> MyWork { get; set; } = new();
     private List<SentinelSavedSearchView> SavedSearches { get; set; } = new();
     private bool IsCurrentSearchSaved => SavedSearches.Any(saved =>
         string.Equals(saved.Query, SearchQuery.Trim(), StringComparison.Ordinal));
@@ -2951,6 +3026,17 @@
             _wikiLinksInitialized = true;
         }
 
+        if (_graphNeedsRender && _pageGraph is not null)
+        {
+            _graphNeedsRender = false;
+            _pageGraphModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-page-graph.js");
+            // Passed as a plain object, not pre-serialized here - Blazor's own JS interop
+            // marshalling already serializes to camelCase JSON, matching every other payload
+            // handed to a JS module in this file (setDiscussionCounts, BuildRemoteCursorPayload).
+            await _pageGraphModule.InvokeVoidAsync(
+                "initialize", _pageGraphCanvas, DotNetObjectReference.Create(this), _pageGraph);
+        }
+
         if (SelectedDatabaseId is null && !_blockEditorInitialized)
         {
             _blockEditorRef ??= DotNetObjectReference.Create(this);
@@ -2995,6 +3081,7 @@
     {
         Navigation = await SentinelWorkspaceService.GetNavigationAsync(CurrentUsername);
         Mentions = (await SentinelWorkspaceService.GetMentionsAsync(CurrentUsername)).ToList();
+        MyWork = (await SentinelWorkspaceService.GetMyWorkAsync(CurrentUsername)).ToList();
         SavedSearches = (await SentinelWorkspaceService.ListSavedSearchesAsync(CurrentUsername)).ToList();
     }
 
@@ -3445,6 +3532,14 @@
         await SentinelWorkspaceService.RecordOpenedAsync(CurrentUsername, wikiDatabaseId, true);
         await LoadWorkspaceNavigationAsync();
     }
+
+    // An open-task item opens the page it lives on directly. An assigned-row item opens the
+    // database rather than deep-linking the specific row - Wiki.razor has no way to hand a
+    // target row id to WikiDatabaseEditor's own row-detail state from here, so this gets the
+    // user to the right place, not all the way to the exact row; SourceRowId is kept on the
+    // item for a future version of this that can.
+    private Task OpenMyWorkItemAsync(SentinelMyWorkItem item) =>
+        item.IsDatabase ? OpenDatabaseAsync(item.Id) : OpenPageAsync(item.Id);
 
     private async Task OpenDuplicatedDatabaseAsync(Guid wikiDatabaseId)
     {
@@ -4434,6 +4529,19 @@
         }
 
         _blockEditorRef?.Dispose();
+
+        if (_pageGraphModule is not null)
+        {
+            try
+            {
+                await _pageGraphModule.InvokeVoidAsync("dispose", _pageGraphCanvas);
+                await _pageGraphModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // The circuit is already gone (e.g. browser closed); nothing to clean up client-side.
+            }
+        }
 
         if (_wikiLinksInitialized)
         {

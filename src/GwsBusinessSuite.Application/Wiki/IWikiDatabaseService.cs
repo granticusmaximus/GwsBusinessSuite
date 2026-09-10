@@ -26,6 +26,15 @@ public interface IWikiDatabaseService
     Task DeletePropertyAsync(Guid wikiDatabaseId, Guid propertyId, string performedBy, CancellationToken cancellationToken = default);
 
     Task<WikiDatabaseRow> SaveRowAsync(Guid wikiDatabaseId, WikiDatabaseRowEditor editor, string performedBy, CancellationToken cancellationToken = default);
+
+    // See WikiDatabaseBulkUpdateResult's own comment for why this is best-effort per row
+    // rather than all-or-nothing. value is passed through as-is (already the right JSON shape
+    // for propertyId's type, e.g. built via WikiPropertyValues.SetText/SetNumber/SetCheckbox on
+    // an empty JsonObject and read back) - this method stays property-type-agnostic rather than
+    // re-implementing per-type value construction that already exists on the caller's side.
+    Task<WikiDatabaseBulkUpdateResult> BulkSetPropertyValueAsync(
+        Guid wikiDatabaseId, IReadOnlyList<Guid> rowIds, Guid propertyId, System.Text.Json.Nodes.JsonNode? value,
+        string performedBy, CancellationToken cancellationToken = default);
     Task<WikiDatabaseCsvImportResult> ImportCsvAsync(Guid wikiDatabaseId, string csv, string performedBy, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<WikiDatabaseRowTemplate>> ListRowTemplatesAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default);
     Task<WikiDatabaseRowTemplate> CreateRowTemplateFromRowAsync(Guid wikiDatabaseId, Guid sourceRowId, string name, string performedBy, CancellationToken cancellationToken = default);

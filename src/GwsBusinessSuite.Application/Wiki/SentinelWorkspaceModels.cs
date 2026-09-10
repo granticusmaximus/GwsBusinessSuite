@@ -19,6 +19,23 @@ public sealed record SentinelBacklink(
     string SourcePageTitle,
     string Preview);
 
+// One item on the "My Work" panel: either an unchecked to-do block (Id/IsDatabase = the page it
+// lives on, matching how a to-do is actually opened - there is no standalone "to-do" resource to
+// navigate to) or a database row with a Person property naming this user (Id/IsDatabase = the
+// database, SourceRowId = the specific row - the exact SentinelSearchResult convention already
+// used for a database-row search hit, reused here rather than inventing a second one).
+public sealed record SentinelMyWorkItem(
+    Guid Id,
+    bool IsDatabase,
+    string Title,
+    string Context,
+    string Kind,
+    Guid? SourceRowId = null)
+{
+    public const string OpenTask = "Open task";
+    public const string AssignedRow = "Assigned to you";
+}
+
 // A one-hop "local graph" centered on a single page - the page itself, every page that links to
 // it (via GetBacklinksAsync), and every page it links to (parsed from its own blocks). Not a
 // whole-wiki graph: SentinelWorkspaceService already bounds full-content scans at
@@ -145,6 +162,13 @@ public interface ISentinelWorkspaceService
     Task<IReadOnlyList<SentinelMention>> GetMentionsAsync(
         string username,
         int maxResults = 20,
+        CancellationToken cancellationToken = default);
+
+    // Every open (unchecked) to-do block and every database row with a Person property naming
+    // this user, across everything they can view - see SentinelMyWorkItem's own comment for why
+    // each kind resolves to a different navigation target.
+    Task<IReadOnlyList<SentinelMyWorkItem>> GetMyWorkAsync(
+        string username,
         CancellationToken cancellationToken = default);
 
     // Reuses SentinelBacklink's shape ("which page mentions this, and how") for a database

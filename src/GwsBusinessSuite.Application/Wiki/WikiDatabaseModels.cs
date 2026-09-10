@@ -26,7 +26,18 @@ public sealed record WikiDatabasePropertyConfiguration(
     // (same bracket syntax WikiDatabaseComputation's formula engine already resolves by
     // name) and the Ollama model to call - see WikiDatabaseService.GenerateAiFieldValueAsync.
     string? AiPromptTemplate = null,
-    string? AiModel = null)
+    string? AiModel = null,
+    // Validation, applies to any property type on save (WikiDatabasePropertyValidation.Validate,
+    // called from WikiDatabaseService.SaveRowAsync). All optional/off by default so every
+    // existing database keeps behaving exactly as it does today until someone opts in.
+    bool IsRequired = false,
+    // Number properties only. Either bound can be set alone.
+    decimal? MinValue = null,
+    decimal? MaxValue = null,
+    // Text-shaped properties only (Text/Url/Email/Phone) - a .NET regex the value must match.
+    // An invalid pattern is treated as "no pattern" rather than rejecting every value (see
+    // WikiDatabasePropertyValidation), so a typo in the pattern can't lock the whole property.
+    string? ValidationPattern = null)
 {
     public static WikiDatabasePropertyConfiguration Empty { get; } = new([], null, null, null, null, null, null);
 }
@@ -116,9 +127,16 @@ public sealed record WikiDatabaseViewConfig(
     string? DependencyPropertyId = null,
     // Phase 5.1 - which of WikiDatabaseChartTypes a Chart view renders as; null/unrecognized
     // falls back to Bar (the original, only chart type before this field existed).
-    string? ChartType = null)
+    string? ChartType = null,
+    // A Board view's second grouping axis (swimlanes) - GroupByPropertyId still supplies the
+    // columns. Null/unset keeps today's single-axis board unchanged, and a value equal to
+    // GroupByPropertyId is treated as unset (see WikiDatabaseViewLogic.GroupForBoardMatrix) so a
+    // property picker doesn't need special-case logic to prevent grouping a board by itself
+    // twice. Schemaless like every other view option here - stored in WikiDatabaseView.ConfigJson,
+    // not a database column, so adding it needed no migration.
+    string? SecondaryGroupByPropertyId = null)
 {
-    public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null, [], [], new Dictionary<string, string>(), null, null, null);
+    public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null, [], [], new Dictionary<string, string>(), null, null, null, null);
 }
 
 public static class WikiDatabaseChartTypes
@@ -212,7 +230,8 @@ public static class WikiDatabaseViewConfigJson
                     parsed.Calculations ?? new Dictionary<string, string>(),
                     parsed.FilterGroup,
                     parsed.DependencyPropertyId,
-                    parsed.ChartType);
+                    parsed.ChartType,
+                    parsed.SecondaryGroupByPropertyId);
         }
         catch (JsonException) { return WikiDatabaseViewConfig.Empty; }
     }
@@ -241,6 +260,10 @@ public sealed class WikiDatabasePropertyEditor
     public string? UniqueIdPrefix { get; set; }
     public string? AiPromptTemplate { get; set; }
     public string? AiModel { get; set; }
+    public bool IsRequired { get; set; }
+    public decimal? MinValue { get; set; }
+    public decimal? MaxValue { get; set; }
+    public string? ValidationPattern { get; set; }
 }
 
 public sealed class WikiDatabaseRowEditor
@@ -435,7 +458,8 @@ public static class WikiDatabasePropertyConfig
                     parsed.ReciprocalPropertyId, parsed.RelationPropertyId,
                     parsed.RollupPropertyId, parsed.RollupAggregation,
                     parsed.AutomationWorkflowId, parsed.ButtonLabel, parsed.UniqueIdPrefix,
-                    parsed.AiPromptTemplate, parsed.AiModel);
+                    parsed.AiPromptTemplate, parsed.AiModel,
+                    parsed.IsRequired, parsed.MinValue, parsed.MaxValue, parsed.ValidationPattern);
         }
         catch (JsonException) { return WikiDatabasePropertyConfiguration.Empty; }
     }
@@ -459,7 +483,11 @@ public static class WikiDatabasePropertyConfig
             configuration.ButtonLabel,
             configuration.UniqueIdPrefix,
             configuration.AiPromptTemplate,
-            configuration.AiModel), WikiPropertyValues.Options);
+            configuration.AiModel,
+            configuration.IsRequired,
+            configuration.MinValue,
+            configuration.MaxValue,
+            configuration.ValidationPattern), WikiPropertyValues.Options);
 
     private sealed record PropertyConfigDto(
         IReadOnlyList<WikiDatabasePropertyOption>? Options,
@@ -473,7 +501,122 @@ public static class WikiDatabasePropertyConfig
         string? ButtonLabel = null,
         string? UniqueIdPrefix = null,
         string? AiPromptTemplate = null,
-        string? AiModel = null);
+        string? AiModel = null,
+        bool IsRequired = false,
+        decimal? MinValue = null,
+        decimal? MaxValue = null,
+        string? ValidationPattern = null);
+}
+
+// Property-level validation (Required, Number min/max, a regex pattern for text-shaped
+// properties), applied on every row save (WikiDatabaseService.SaveRowAsync). Pure and DB-free,
+// same split as WikiDatabaseViewLogic - takes an already-loaded property list and the row's
+// already-resolved values, returns human-readable error strings rather than throwing itself,
+// so the caller decides how failures are reported (currently: joined into one
+// InvalidOperationException, surfaced to the editor's ErrorMessage banner).
+public static class WikiDatabasePropertyValidation
+{
+    // Every type whose value a user could never "leave blank" by choice, or that isn't
+    // user-writable at all - a Required check on a Formula/Rollup/Button/etc. would be a
+    // config error that has nothing to do with what the person filling out the row did.
+    // Public for the same reason PatternEligibleTypes is - the property editor UI hides the
+    // Required checkbox for these types rather than showing a control that would silently do
+    // nothing, and it should read this list rather than keep its own copy.
+    public static readonly HashSet<string> NotRequirable =
+    [
+        WikiDatabasePropertyTypes.Title, WikiDatabasePropertyTypes.Formula, WikiDatabasePropertyTypes.Rollup,
+        WikiDatabasePropertyTypes.CreatedTime, WikiDatabasePropertyTypes.LastEditedTime,
+        WikiDatabasePropertyTypes.LastEditedBy, WikiDatabasePropertyTypes.CreatedBy,
+        WikiDatabasePropertyTypes.Button, WikiDatabasePropertyTypes.UniqueId, WikiDatabasePropertyTypes.AiField
+    ];
+
+    // Text-shaped: the property types ValidationPattern is offered for and actually checked
+    // against. A pattern configured on any other type is ignored, same "typo can't lock the
+    // property" tolerance as an invalid pattern itself gets. Public so WikiDatabaseService's
+    // SavePropertyAsync can gate what it writes to ConfigJson against the exact same set,
+    // rather than keeping a second list here and there to drift out of sync.
+    public static readonly HashSet<string> PatternEligibleTypes =
+    [
+        WikiDatabasePropertyTypes.Text, WikiDatabasePropertyTypes.Url,
+        WikiDatabasePropertyTypes.Email, WikiDatabasePropertyTypes.Phone
+    ];
+
+    public static IReadOnlyList<string> Validate(IReadOnlyList<WikiDatabaseProperty> properties, JsonObject values)
+    {
+        var errors = new List<string>();
+        foreach (var property in properties)
+        {
+            var config = WikiDatabasePropertyConfig.Parse(property);
+            var isBlank = IsBlank(values, property.Id);
+
+            if (config.IsRequired && !NotRequirable.Contains(property.Type) && isBlank)
+            {
+                errors.Add($"{property.Name} is required.");
+                // Min/max/pattern on a value that isn't there yet would just restate
+                // "required" in a more confusing way - one error per property per save.
+                continue;
+            }
+
+            if (isBlank)
+            {
+                continue;
+            }
+
+            if (property.Type == WikiDatabasePropertyTypes.Number
+                && (config.MinValue is not null || config.MaxValue is not null))
+            {
+                var number = WikiPropertyValues.GetNumber(values, property.Id);
+                if (number is { } value)
+                {
+                    if (config.MinValue is { } min && value < min)
+                    {
+                        errors.Add($"{property.Name} must be at least {min}.");
+                    }
+                    else if (config.MaxValue is { } max && value > max)
+                    {
+                        errors.Add($"{property.Name} must be at most {max}.");
+                    }
+                }
+            }
+
+            if (PatternEligibleTypes.Contains(property.Type) && !string.IsNullOrWhiteSpace(config.ValidationPattern))
+            {
+                var text = WikiPropertyValues.GetText(values, property.Id);
+                // null (not false) means "pattern doesn't compile" - treated as "don't reject
+                // this value" (see ValidationPattern's own comment), so only an explicit false
+                // (a valid pattern that genuinely didn't match) is an error.
+                if (text is not null && TryMatch(config.ValidationPattern, text) == false)
+                {
+                    errors.Add($"{property.Name} doesn't match the required format.");
+                }
+            }
+        }
+        return errors;
+    }
+
+    private static bool IsBlank(JsonObject values, Guid propertyId)
+    {
+        if (!values.TryGetPropertyValue(propertyId.ToString(), out var node) || node is null)
+        {
+            return true;
+        }
+
+        return node switch
+        {
+            JsonArray array => array.Count == 0,
+            JsonValue value when value.TryGetValue<string>(out var text) => string.IsNullOrWhiteSpace(text),
+            _ => false
+        };
+    }
+
+    // null means "the pattern itself doesn't compile" - a config typo must not turn into
+    // every save failing, so an invalid pattern is treated the same as no pattern at all
+    // (see ValidationPattern's own comment).
+    private static bool? TryMatch(string pattern, string text)
+    {
+        try { return System.Text.RegularExpressions.Regex.IsMatch(text, pattern); }
+        catch (ArgumentException) { return null; }
+    }
 }
 
 // Pure, DB-free filter/sort/group logic over an already-loaded row list - same split as
@@ -667,6 +810,41 @@ public static class WikiDatabaseViewLogic
             byOption[string.Empty].Select(entry => entry.Row).OrderBy(row => row.SortOrder).ToList()));
 
         return groups;
+    }
+
+    // A Board view with a second grouping property becomes a swimlane matrix: the same column
+    // set GroupForBoard already computes (one row of columns per secondary-property option, plus
+    // "No status"), each holding only the rows that also match that swimlane. Every swimlane
+    // shares an identical, identically-ordered set of column ids/labels - built once via
+    // GroupForBoard(rows, primaryProperty) so the UI can render one shared header row and then
+    // zip each swimlane's own Columns against it by index without a second lookup.
+    public static WikiDatabaseBoardMatrix GroupForBoardMatrix(
+        IReadOnlyList<WikiDatabaseRow> rows,
+        WikiDatabaseProperty primaryProperty,
+        WikiDatabaseProperty secondaryProperty)
+    {
+        var columnHeaders = GroupForBoard(rows, primaryProperty)
+            .Select(group => new WikiDatabaseBoardGroup(group.OptionId, group.Label, []))
+            .ToList();
+
+        var secondaryOptions = WikiDatabasePropertyConfig.GetOptions(secondaryProperty);
+        var bySecondaryOption = rows
+            .Select(row => (
+                Row: row,
+                SecondaryOptionId: WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), secondaryProperty.Id) ?? string.Empty))
+            .ToLookup(entry => entry.SecondaryOptionId);
+
+        WikiDatabaseBoardMatrixRow BuildSwimlane(string secondaryOptionId, string secondaryLabel)
+        {
+            var laneRows = bySecondaryOption[secondaryOptionId].Select(entry => entry.Row).ToList();
+            var columns = GroupForBoard(laneRows, primaryProperty);
+            return new WikiDatabaseBoardMatrixRow(secondaryOptionId, secondaryLabel, columns);
+        }
+
+        var swimlanes = secondaryOptions.Select(option => BuildSwimlane(option.Id, option.Label)).ToList();
+        swimlanes.Add(BuildSwimlane(string.Empty, "No status"));
+
+        return new WikiDatabaseBoardMatrix(columnHeaders, swimlanes);
     }
 
     public static WikiDatabaseCalendarMonth BuildCalendarMonth(
@@ -874,6 +1052,29 @@ public static class WikiDatabaseViewLogic
 public readonly record struct WikiDatabaseDonutSegment(string Color, double DashArrayValue, double DashOffset);
 
 public sealed record WikiDatabaseBoardGroup(string OptionId, string Label, IReadOnlyList<WikiDatabaseRow> Rows);
+
+// Applies one property value to many rows in a single request from the table view's row
+// checkboxes. Deliberately best-effort per row (one row's own failure - a Required property
+// left blank by this exact bulk value, a row deleted by someone else mid-batch - is reported,
+// not allowed to silently discard every other row's update) rather than all-or-nothing, since
+// a bulk edit is normally a large batch and "27 of 30 succeeded, here is why the other 3 didn't"
+// is far more useful than losing all 30 over one bad row.
+public sealed record WikiDatabaseBulkUpdateFailure(Guid RowId, string Error);
+
+public sealed record WikiDatabaseBulkUpdateResult(int SucceededCount, IReadOnlyList<WikiDatabaseBulkUpdateFailure> Failures);
+
+// ColumnHeaders carries the shared, ordered (OptionId, Label) pairs every swimlane's own Columns
+// list follows (its own Rows are always empty - it exists purely to drive the header row, so the
+// UI never needs a second GroupForBoard call just to know the column order). Swimlanes is one
+// row per secondary-property option, "No status" last - same convention as GroupForBoard.
+public sealed record WikiDatabaseBoardMatrix(
+    IReadOnlyList<WikiDatabaseBoardGroup> ColumnHeaders,
+    IReadOnlyList<WikiDatabaseBoardMatrixRow> Swimlanes);
+
+public sealed record WikiDatabaseBoardMatrixRow(
+    string SecondaryOptionId,
+    string SecondaryLabel,
+    IReadOnlyList<WikiDatabaseBoardGroup> Columns);
 
 public sealed record WikiDatabaseCalendarDay(DateOnly Date, bool IsCurrentMonth, IReadOnlyList<WikiDatabaseRow> Rows);
 
