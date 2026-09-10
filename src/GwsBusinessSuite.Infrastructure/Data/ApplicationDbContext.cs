@@ -132,6 +132,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<AutomationCredential> AutomationCredentials => Set<AutomationCredential>();
     public DbSet<AutomationExecution> AutomationExecutions => Set<AutomationExecution>();
     public DbSet<AutomationNodeExecution> AutomationNodeExecutions => Set<AutomationNodeExecution>();
+    public DbSet<AutomationFailureAcknowledgement> AutomationFailureAcknowledgements => Set<AutomationFailureAcknowledgement>();
     public DbSet<AutomationWorkflowTemplate> AutomationWorkflowTemplates => Set<AutomationWorkflowTemplate>();
     public DbSet<SecurityAuditEvent> SecurityAuditEvents => Set<SecurityAuditEvent>();
     public DbSet<PrivacyRetentionPolicy> PrivacyRetentionPolicies => Set<PrivacyRetentionPolicy>();
@@ -781,6 +782,14 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<AutomationNodeExecution>()
             .HasIndex(x => new { x.ExecutionId, x.StartedAtUnixSeconds });
+        modelBuilder.Entity<AutomationFailureAcknowledgement>()
+            .HasOne(x => x.Execution)
+            .WithMany()
+            .HasForeignKey(x => x.ExecutionId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<AutomationFailureAcknowledgement>()
+            .HasIndex(x => x.ExecutionId)
+            .IsUnique();
     }
 
     private void SynchronizeNewsItemTimestamps()

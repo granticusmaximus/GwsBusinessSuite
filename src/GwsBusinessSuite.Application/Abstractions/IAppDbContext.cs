@@ -113,6 +113,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<AutomationCredential> AutomationCredentials { get; }
     DbSet<AutomationExecution> AutomationExecutions { get; }
     DbSet<AutomationNodeExecution> AutomationNodeExecutions { get; }
+    DbSet<AutomationFailureAcknowledgement> AutomationFailureAcknowledgements { get; }
     DbSet<AutomationWorkflowTemplate> AutomationWorkflowTemplates { get; }
     DbSet<SecurityAuditEvent> SecurityAuditEvents { get; }
     DbSet<PrivacyRetentionPolicy> PrivacyRetentionPolicies { get; }

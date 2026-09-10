@@ -521,8 +521,16 @@ public sealed class AutomationWorkflowService(
     {
         // FinishedAtUnixSeconds (a plain long) is server-orderable, unlike the DateTimeOffset
         // FinishedAt column it mirrors - see the project-wide SQLite/DateTimeOffset note.
+        // The acknowledged-id exclusion has to happen before Take, not after - filtering a
+        // page of results down after the fact would silently return fewer than `take` rows
+        // whenever some of that page had already been dismissed, even though more
+        // still-unacknowledged failures exist further back.
+        var acknowledgedIds = await db.AutomationFailureAcknowledgements.AsNoTracking()
+            .Select(ack => ack.ExecutionId)
+            .ToListAsync(cancellationToken);
         var failures = await db.AutomationExecutions.AsNoTracking()
-            .Where(execution => execution.Status == AutomationExecutionStatuses.Failed)
+            .Where(execution => execution.Status == AutomationExecutionStatuses.Failed
+                && !acknowledgedIds.Contains(execution.Id))
             .OrderByDescending(execution => execution.FinishedAtUnixSeconds)
             .Take(Math.Clamp(take, 1, 100))
             .Select(execution => new { execution.Id, execution.WorkflowId, execution.Mode, execution.ErrorMessage, execution.FinishedAt })
@@ -535,14 +543,62 @@ public sealed class AutomationWorkflowService(
             .ToDictionaryAsync(workflow => workflow.Id, workflow => workflow.Name, cancellationToken);
 
         return failures
-            .Select(failure => new AutomationRecentFailureView(
-                failure.Id,
-                failure.WorkflowId,
-                workflowNames.GetValueOrDefault(failure.WorkflowId, "(deleted workflow)"),
-                failure.Mode,
-                failure.ErrorMessage,
-                failure.FinishedAt))
+            .Select(failure =>
+            {
+                var diagnosis = AutomationFailureDiagnostics.Diagnose(failure.ErrorMessage);
+                return new AutomationRecentFailureView(
+                    failure.Id,
+                    failure.WorkflowId,
+                    workflowNames.GetValueOrDefault(failure.WorkflowId, "(deleted workflow)"),
+                    failure.Mode,
+                    failure.ErrorMessage,
+                    failure.FinishedAt,
+                    diagnosis.Category,
+                    diagnosis.SuggestedFix);
+            })
             .ToList();
+    }
+
+    public async Task AcknowledgeFailureAsync(Guid executionId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var alreadyAcknowledged = await db.AutomationFailureAcknowledgements.AsNoTracking()
+            .AnyAsync(ack => ack.ExecutionId == executionId, cancellationToken);
+        if (alreadyAcknowledged) return;
+
+        db.AutomationFailureAcknowledgements.Add(new AutomationFailureAcknowledgement
+        {
+            ExecutionId = executionId,
+            CreatedBy = performedBy
+        });
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            // A second concurrent dismiss (the same double-click race the interface doc
+            // comment describes) hits the unique index on ExecutionId and throws here instead
+            // of being caught by the AnyAsync check above - same outcome either way: nothing
+            // more to do, not an error worth surfacing.
+        }
+    }
+
+    public async Task<int> AcknowledgeAllFailuresAsync(string performedBy, CancellationToken cancellationToken = default)
+    {
+        var acknowledgedIds = await db.AutomationFailureAcknowledgements.AsNoTracking()
+            .Select(ack => ack.ExecutionId)
+            .ToListAsync(cancellationToken);
+        var unacknowledgedFailureIds = await db.AutomationExecutions.AsNoTracking()
+            .Where(execution => execution.Status == AutomationExecutionStatuses.Failed
+                && !acknowledgedIds.Contains(execution.Id))
+            .Select(execution => execution.Id)
+            .ToListAsync(cancellationToken);
+        if (unacknowledgedFailureIds.Count == 0) return 0;
+
+        db.AutomationFailureAcknowledgements.AddRange(unacknowledgedFailureIds.Select(executionId =>
+            new AutomationFailureAcknowledgement { ExecutionId = executionId, CreatedBy = performedBy }));
+        await db.SaveChangesAsync(cancellationToken);
+        return unacknowledgedFailureIds.Count;
     }
 
     public async Task<AutomationPublicStatusView?> GetPublicStatusAsync(Guid workflowId, int take = 10, CancellationToken cancellationToken = default)

@@ -41,18 +41,33 @@
     <div class="card border-0 shadow-sm mb-4 border-start border-danger border-3">
         <div class="card-header bg-white border-bottom py-2 d-flex align-items-center justify-content-between">
             <span class="fw-semibold text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>Recent failures across all workflows</span>
-            <span class="badge text-bg-danger">@_recentFailures.Count</span>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge text-bg-danger">@_recentFailures.Count</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ClearAllFailuresAsync" disabled="@_clearingFailures">
+                    Clear all
+                </button>
+            </div>
         </div>
         <div class="list-group list-group-flush">
             @foreach (var failure in _recentFailures)
             {
-                <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-start gap-2" @onclick="() => OpenWorkflow(failure.WorkflowId)">
-                    <div>
+                <div class="list-group-item d-flex justify-content-between align-items-start gap-2">
+                    <button type="button" class="btn btn-link text-start text-decoration-none p-0 flex-grow-1 text-reset" @onclick="() => OpenWorkflow(failure.WorkflowId)">
                         <div class="fw-semibold">@failure.WorkflowName <span class="text-secondary fw-normal">&middot; @failure.Mode</span></div>
                         <div class="small text-secondary text-truncate" style="max-width: 40rem;">@failure.ErrorMessage</div>
+                        <div class="small text-truncate" style="max-width: 40rem;">
+                            <span class="badge text-bg-light border me-1">@failure.Category</span>
+                            <span class="text-secondary">@failure.SuggestedFix</span>
+                        </div>
+                    </button>
+                    <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                        <span class="small text-secondary">@FormatLastRun(failure.FinishedAt)</span>
+                        <button type="button" class="btn btn-xs btn-link text-secondary p-0" title="Dismiss - I've fixed this"
+                                @onclick="() => DismissFailureAsync(failure.ExecutionId)" disabled="@_clearingFailures">
+                            <i class="bi bi-x-lg"></i><span class="visually-hidden">Dismiss</span>
+                        </button>
                     </div>
-                    <span class="small text-secondary flex-shrink-0">@FormatLastRun(failure.FinishedAt)</span>
-                </button>
+                </div>
             }
         </div>
     </div>
@@ -211,6 +226,7 @@ else
 @code {
     private List<AutomationWorkflowSummary> _workflows = [];
     private List<AutomationRecentFailureView> _recentFailures = [];
+    private bool _clearingFailures;
     private List<AutomationWorkflowTemplateSummary> _templates = [];
     private bool _loading = true, _busy, _showCreate, _showTemplates, _importing;
     private string _search = "", _statusFilter = "", _tagFilter = "", _newName = "", _newDescription = "", _error = "";
@@ -267,6 +283,40 @@ else
     private void OpenCreate() { _newName = ""; _newDescription = ""; _showCreate = true; }
     private void CloseCreate() => _showCreate = false;
     private void OpenWorkflow(Guid id) => Navigation.NavigateTo($"/admin/automation/{id}");
+
+    private async Task DismissFailureAsync(Guid executionId)
+    {
+        _clearingFailures = true;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await WorkflowService.AcknowledgeFailureAsync(executionId, username);
+            _recentFailures = (await WorkflowService.ListRecentFailuresAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to dismiss automation failure {ExecutionId}.", executionId);
+            _error = $"Unable to dismiss that failure. {ex.Message}";
+        }
+        finally { _clearingFailures = false; }
+    }
+
+    private async Task ClearAllFailuresAsync()
+    {
+        _clearingFailures = true;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await WorkflowService.AcknowledgeAllFailuresAsync(username);
+            _recentFailures = (await WorkflowService.ListRecentFailuresAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to clear the automation failures list.");
+            _error = $"Unable to clear the failures list. {ex.Message}";
+        }
+        finally { _clearingFailures = false; }
+    }
     private async Task CreateWorkflow()
     {
         _busy = true; _error = "";

@@ -100,6 +100,13 @@ publish again — this is the same model as "save vs. deploy."
 version, last-run time, and tags. The banner at the top surfaces recent failures across every
 workflow so a broken automation is visible the moment you open the page.
 
+Each failure shows a category and a plain-language suggested fix, worked out from the error
+message itself (a permissions problem, a bad cron expression, a missing node parameter, a
+validation rule rejecting a value, and so on). Once you've dealt with one, click its **×** to
+dismiss it - dismissed failures stop showing here and on the Mission Control dashboard, though
+the underlying run stays in that workflow's own Executions tab exactly as it happened. **Clear
+all** dismisses every failure currently listed in one step.
+
 ![Workflow list](images/automation/workflow-list.png)
 
 From here you can create a workflow, start from a starter or saved template, import an exported

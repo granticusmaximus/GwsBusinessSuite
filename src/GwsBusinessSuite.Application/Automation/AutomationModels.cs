@@ -95,7 +95,12 @@ public sealed record AutomationRecentFailureView(
     string WorkflowName,
     string Mode,
     string ErrorMessage,
-    DateTimeOffset? FinishedAt);
+    DateTimeOffset? FinishedAt,
+    // Computed at read time from ErrorMessage via AutomationFailureDiagnostics - never
+    // persisted, so a future improvement to the diagnosis rules applies retroactively to
+    // every failure already on file, not just ones that happen after the change ships.
+    string Category,
+    string SuggestedFix);
 
 public sealed record AutomationExecutionView(
     Guid Id,

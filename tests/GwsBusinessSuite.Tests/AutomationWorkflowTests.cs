@@ -2324,6 +2324,119 @@ public sealed class AutomationWorkflowTests
         crm.SavedContacts.Should().ContainSingle(entry => entry.FullName == "Ada Lovelace" && entry.Email == "ada@example.com");
     }
 
+    // --- Recent failures panel: dismiss / clear all, and the AutomationFailureDiagnostics
+    // fields attached to each row ---
+
+    [Fact]
+    public async Task ListRecentFailuresAsync_ShouldAttachADiagnosisToEachFailure()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var service = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var workflow = await service.CreateAsync("Nightly sync");
+        await SeedFailedExecutionAsync(db, workflow.Id, "SKU is required.");
+
+        var failures = await service.ListRecentFailuresAsync();
+
+        failures.Should().ContainSingle();
+        failures[0].Category.Should().Be("Validation rule");
+        failures[0].SuggestedFix.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task AcknowledgeFailureAsync_ShouldRemoveOnlyThatFailureFromTheList()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var service = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var workflow = await service.CreateAsync("Nightly sync");
+        var keep = await SeedFailedExecutionAsync(db, workflow.Id, "Budget must be at least 100.");
+        var dismiss = await SeedFailedExecutionAsync(db, workflow.Id, "SKU is required.");
+
+        await service.AcknowledgeFailureAsync(dismiss, "grant");
+        var failures = await service.ListRecentFailuresAsync();
+
+        failures.Should().ContainSingle(failure => failure.ExecutionId == keep);
+        failures.Should().NotContain(failure => failure.ExecutionId == dismiss);
+    }
+
+    [Fact]
+    public async Task AcknowledgeFailureAsync_ShouldBeIdempotent_WhenCalledTwiceForTheSameExecution()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var service = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var workflow = await service.CreateAsync("Nightly sync");
+        var executionId = await SeedFailedExecutionAsync(db, workflow.Id, "SKU is required.");
+
+        var act = async () =>
+        {
+            await service.AcknowledgeFailureAsync(executionId, "grant");
+            await service.AcknowledgeFailureAsync(executionId, "grant");
+        };
+
+        await act.Should().NotThrowAsync();
+        (await db.AutomationFailureAcknowledgements.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AcknowledgeFailureAsync_ShouldNotThrow_ForAnExecutionThatDoesNotExist()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var service = new AutomationWorkflowService(db, registry, TimeProvider.System);
+
+        var act = () => service.AcknowledgeFailureAsync(Guid.NewGuid(), "grant");
+
+        await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task AcknowledgeAllFailuresAsync_ShouldClearExactlyWhatListRecentFailuresAsyncCurrentlyReturns()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var service = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var workflow = await service.CreateAsync("Nightly sync");
+        await SeedFailedExecutionAsync(db, workflow.Id, "SKU is required.");
+        await SeedFailedExecutionAsync(db, workflow.Id, "Budget must be at least 100.");
+        var alreadyDismissed = await SeedFailedExecutionAsync(db, workflow.Id, "This row no longer exists.");
+        await service.AcknowledgeFailureAsync(alreadyDismissed, "grant");
+
+        var acknowledgedCount = await service.AcknowledgeAllFailuresAsync("grant");
+
+        acknowledgedCount.Should().Be(2, "the third failure was already dismissed and shouldn't be counted again");
+        (await service.ListRecentFailuresAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AcknowledgeAllFailuresAsync_ShouldReturnZero_WhenNothingIsUnacknowledged()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var service = new AutomationWorkflowService(db, registry, TimeProvider.System);
+
+        (await service.AcknowledgeAllFailuresAsync("grant")).Should().Be(0);
+    }
+
+    private static async Task<Guid> SeedFailedExecutionAsync(ApplicationDbContext db, Guid workflowId, string errorMessage)
+    {
+        var finishedAt = DateTimeOffset.UtcNow;
+        var execution = new AutomationExecution
+        {
+            WorkflowId = workflowId,
+            Mode = AutomationExecutionModes.Manual,
+            Status = AutomationExecutionStatuses.Failed,
+            ErrorMessage = errorMessage,
+            FinishedAt = finishedAt,
+            FinishedAtUnixSeconds = finishedAt.ToUnixTimeSeconds(),
+            CreatedBy = "test"
+        };
+        db.AutomationExecutions.Add(execution);
+        await db.SaveChangesAsync();
+        return execution.Id;
+    }
+
     // --- Wiki page automation nodes (wiki.createPage/appendBlock/findPages) and
     // wiki.pageChangedTrigger - the real WikiService/SentinelWorkspaceService/SentinelAccessService
     // are used throughout, not fakes, because the behaviour worth pinning here is exactly what

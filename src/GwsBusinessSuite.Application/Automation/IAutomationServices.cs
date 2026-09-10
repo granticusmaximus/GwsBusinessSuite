@@ -38,9 +38,22 @@ public interface IAutomationWorkflowService
     Task<AutomationWorkflowSnapshot?> GetSnapshotByVersionAsync(Guid workflowId, int versionNumber, CancellationToken cancellationToken = default);
     Task<AutomationExecutionView?> GetExecutionAsync(Guid executionId, CancellationToken cancellationToken = default);
 
-    // Failed executions across every workflow, most recent first - an admin currently has no
-    // way to see this without opening each workflow's own Executions tab individually.
+    // Failed executions across every workflow, most recent first, excluding any already
+    // acknowledged via AcknowledgeFailureAsync/AcknowledgeAllFailuresAsync - an admin currently
+    // has no way to see this without opening each workflow's own Executions tab individually,
+    // nor any way to clear a failure off this list once they've dealt with it.
     Task<IReadOnlyList<AutomationRecentFailureView>> ListRecentFailuresAsync(int take = 20, CancellationToken cancellationToken = default);
+
+    // Marks one failed execution as handled, removing it from ListRecentFailuresAsync (and
+    // therefore from Mission Control's snapshot too - the same signal, not a page-local
+    // filter). Idempotent: acknowledging an already-acknowledged or nonexistent execution is a
+    // silent no-op rather than an error, since a user clicking "dismiss" twice in a row (a
+    // slow connection, a double-click) is not a mistake worth surfacing.
+    Task AcknowledgeFailureAsync(Guid executionId, string performedBy, CancellationToken cancellationToken = default);
+
+    // Acknowledges every execution ListRecentFailuresAsync currently returns, in one call -
+    // "Clear all". Returns how many were newly acknowledged.
+    Task<int> AcknowledgeAllFailuresAsync(string performedBy, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<AutomationWorkflowVersionSummary>> ListVersionsAsync(Guid workflowId, CancellationToken cancellationToken = default);
     Task<AutomationWorkflowDiff> DiffVersionsAsync(Guid workflowId, int fromVersion, int toVersion, CancellationToken cancellationToken = default);

@@ -2324,6 +2324,20 @@ public sealed class AutomationNodeExecution : AuditableEntity
     public AutomationExecution? Execution { get; set; }
 }
 
+// Marks one failed AutomationExecution as "seen and handled" from the Recent Failures panel -
+// a separate overlay rather than a field on AutomationExecution itself, so the execution
+// remains an untouched audit record (what actually happened, when) while "has anyone dealt
+// with this" is tracked independently. Acknowledging is a single, workspace-wide signal:
+// respected by both the Automation page's own list and Mission Control's snapshot, so
+// dismissing a failure in one place doesn't leave it still nagging in the other. One row per
+// ExecutionId (enforced by a unique index) - acknowledging twice is a no-op, not a duplicate.
+public sealed class AutomationFailureAcknowledgement : AuditableEntity
+{
+    public Guid ExecutionId { get; set; }
+    public AutomationExecution? Execution { get; set; }
+}
+
+
 // A point-in-time copy of a workflow's editable draft (node positions/notes included, unlike
 // the position-free publish snapshot in AutomationWorkflowVersion), captured via
 // AutomationTemplateService.CreateFromWorkflowAsync. Instantiating a template always mints
