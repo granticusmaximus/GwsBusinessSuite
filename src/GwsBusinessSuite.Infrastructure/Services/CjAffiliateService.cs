@@ -279,40 +279,45 @@ public sealed class CjAffiliateService(HttpClient http) : ICjAffiliateService
 
         var payload = BuildGraphQlPayload(graphQlQuery, publisherId, websiteId);
 
+        // A real, correctly-authorized query can legitimately return zero records (an account
+        // with no commissions yet, or none in scope for this publisher/website) - verified
+        // directly against CJ's own GraphQL endpoint via curl: HTTP 200, no "errors" array,
+        // just {"count":0,"records":[]}. Requiring Commissions.Count > 0 here to call the
+        // Bearer attempt a success treated that legitimate empty result as a failure, fell
+        // through to the raw-header attempt below, and then reported *that* attempt's real
+        // "Unauthorized" rejection (CJ's GraphQL endpoint doesn't accept the non-Bearer header
+        // style) - surfacing a misleading auth error for a request that had actually succeeded.
         var bearerAttempt = await SendGraphQlCommissionAttemptAsync(endpoint, developerKey, payload, useBearerScheme: true, ct);
-        if (bearerAttempt.Commissions.Count > 0 && bearerAttempt.ErrorMessages.Count == 0)
+        if (bearerAttempt.ErrorMessages.Count == 0)
         {
-            return new CjCommissionFetchResult(bearerAttempt.Commissions, $"Fetched {bearerAttempt.Commissions.Count} commission record(s).");
+            return new CjCommissionFetchResult(bearerAttempt.Commissions, bearerAttempt.Commissions.Count == 0
+                ? "Connected to CJ commissions API. No commission records were returned for this publisher/website - this can mean zero transactions in the queried window."
+                : $"Fetched {bearerAttempt.Commissions.Count} commission record(s).");
         }
 
         var rawAttempt = await SendGraphQlCommissionAttemptAsync(endpoint, developerKey, payload, useBearerScheme: false, ct);
-        if (rawAttempt.Commissions.Count > 0 && rawAttempt.ErrorMessages.Count == 0)
+        if (rawAttempt.ErrorMessages.Count == 0)
         {
-            return new CjCommissionFetchResult(rawAttempt.Commissions, $"Fetched {rawAttempt.Commissions.Count} commission record(s).");
+            return new CjCommissionFetchResult(rawAttempt.Commissions, rawAttempt.Commissions.Count == 0
+                ? "Connected to CJ commissions API. No commission records were returned for this publisher/website - this can mean zero transactions in the queried window."
+                : $"Fetched {rawAttempt.Commissions.Count} commission record(s).");
         }
 
-        var errorSource = bearerAttempt.ErrorMessages.Count > 0 ? bearerAttempt : rawAttempt;
-        if (errorSource.ErrorMessages.Count > 0)
-        {
-            // CJ's commissions GraphQL endpoint rejected both the Bearer-scheme and raw-header
-            // auth attempts with a real error from CJ itself (not a local request-construction
-            // bug - both header shapes were exercised above). This almost always means the
-            // stored credential is a legacy Developer Key rather than a commissions-API-scoped
-            // Personal Access Token, or that PAT has expired/been revoked/doesn't cover this
-            // Publisher ID - flagged as an error (not a routine status) so the UI doesn't bury
-            // it next to "0 new commissions, nothing to do" messages.
-            return new CjCommissionFetchResult(
-                Array.Empty<CjCommissionFetchRecord>(),
-                $"CJ commission query returned an error: {string.Join(" | ", errorSource.ErrorMessages)}. " +
-                "This is usually caused by an expired/invalid CJ Personal Access Token, or a token that " +
-                "doesn't have commissions API access for this Publisher ID - regenerate it in your CJ " +
-                "account and re-enter it in the CJ connector settings.",
-                IsError: true);
-        }
-
+        // Reaching this point means bearerAttempt.ErrorMessages.Count > 0 (the only way past its
+        // early return above) - both the Bearer-scheme and raw-header auth attempts were
+        // exercised and both came back with a real error from CJ itself, not a local
+        // request-construction bug. This almost always means the stored credential is a legacy
+        // Developer Key rather than a commissions-API-scoped Personal Access Token, or that PAT
+        // has expired/been revoked/doesn't cover this Publisher ID - flagged as an error (not a
+        // routine status) so the UI doesn't bury it next to "0 new commissions, nothing to do"
+        // messages.
         return new CjCommissionFetchResult(
             Array.Empty<CjCommissionFetchRecord>(),
-            "No commission records returned. This can mean zero transactions in this account, or CJ's schema for commission fields differs from what was requested.");
+            $"CJ commission query returned an error: {string.Join(" | ", bearerAttempt.ErrorMessages)}. " +
+            "This is usually caused by an expired/invalid CJ Personal Access Token, or a token that " +
+            "doesn't have commissions API access for this Publisher ID - regenerate it in your CJ " +
+            "account and re-enter it in the CJ connector settings.",
+            IsError: true);
     }
 
     private async Task<CjGraphQlCommissionAttemptResult> SendGraphQlCommissionAttemptAsync(

@@ -461,6 +461,99 @@ public sealed class CjAffiliateServiceTests
         Assert.Equal(0, result.PartnerCountPreview);
     }
 
+    // Regression coverage for a real bug: a correctly-authorized commissions query can
+    // legitimately return zero records (verified directly against CJ's live GraphQL endpoint
+    // via curl - HTTP 200, no "errors" array, just {"count":0,"records":[]}). The Bearer
+    // attempt's success check used to require Commissions.Count > 0, so this exact response
+    // was treated as a failure, fell through to the raw-header attempt, and reported *that*
+    // attempt's real "Unauthorized" rejection instead - surfacing a misleading auth error for
+    // a request that had actually succeeded.
+    [Fact]
+    public async Task FetchCommissionsAsync_ShouldSucceed_WhenBearerAttemptReturnsZeroRecordsWithNoErrors()
+    {
+        using var handler = new RecordingHandler(
+            observedUris: [],
+            responseFactory: request =>
+            {
+                var auth = request.Headers.TryGetValues("Authorization", out var values)
+                    ? values.FirstOrDefault() ?? string.Empty
+                    : string.Empty;
+
+                if (string.Equals(auth, "Bearer dev-key", StringComparison.Ordinal))
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{\"data\":{\"publisherCommissions\":{\"count\":0,\"records\":[]}}}", Encoding.UTF8, "application/json")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"data\":null,\"errors\":[{\"message\":\"Unauthorized\"}]}", Encoding.UTF8, "application/json")
+                };
+            });
+        using var client = new HttpClient(handler);
+        var service = new CjAffiliateService(client);
+
+        var result = await service.FetchCommissionsAsync(new CjConnectionRequest(
+            DeveloperKey: "dev-key",
+            PublisherId: "123456",
+            EndpointUrl: "https://commissions.api.cj.com/query",
+            MaxResults: 5));
+
+        Assert.False(result.IsError, "a zero-record, zero-error Bearer response is a real success, not a failure");
+        Assert.Empty(result.Commissions);
+        Assert.DoesNotContain("Unauthorized", result.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task FetchCommissionsAsync_ShouldReturnRecords_WhenBearerAttemptSucceedsWithData()
+    {
+        using var handler = new RecordingHandler(
+            observedUris: [],
+            responseFactory: _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"data\":{\"publisherCommissions\":{\"count\":1,\"records\":[{\"commissionId\":\"c-1\",\"advertiserId\":\"1001\",\"advertiserName\":\"Acme Corp\",\"actionStatus\":\"new\",\"orderId\":\"o-1\",\"saleAmountUsd\":100,\"pubCommissionAmountUsd\":10}]}}}",
+                    Encoding.UTF8, "application/json")
+            });
+        using var client = new HttpClient(handler);
+        var service = new CjAffiliateService(client);
+
+        var result = await service.FetchCommissionsAsync(new CjConnectionRequest(
+            DeveloperKey: "dev-key",
+            PublisherId: "123456",
+            EndpointUrl: "https://commissions.api.cj.com/query",
+            MaxResults: 5));
+
+        Assert.False(result.IsError);
+        Assert.Single(result.Commissions);
+        Assert.Equal("c-1", result.Commissions.Single().ExternalId);
+    }
+
+    [Fact]
+    public async Task FetchCommissionsAsync_ShouldReturnError_WhenBothAuthSchemesAreRejected()
+    {
+        using var handler = new RecordingHandler(
+            observedUris: [],
+            responseFactory: _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"data\":null,\"errors\":[{\"message\":\"Unauthorized\"}]}", Encoding.UTF8, "application/json")
+            });
+        using var client = new HttpClient(handler);
+        var service = new CjAffiliateService(client);
+
+        var result = await service.FetchCommissionsAsync(new CjConnectionRequest(
+            DeveloperKey: "dev-key",
+            PublisherId: "123456",
+            EndpointUrl: "https://commissions.api.cj.com/query",
+            MaxResults: 5));
+
+        Assert.True(result.IsError, "both auth schemes genuinely failing must still be reported as an error");
+        Assert.Contains("Unauthorized", result.Message, StringComparison.Ordinal);
+        Assert.Empty(result.Commissions);
+    }
+
     private sealed class RecordingHandler(
         List<Uri> observedUris,
         List<HttpMethod>? observedMethods = null,
