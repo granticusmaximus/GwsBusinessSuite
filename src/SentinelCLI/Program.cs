@@ -41,6 +41,15 @@ public static class Program
                 throw new InvalidOperationException(
                     $"Model '{options.Model}' is not installed. Run 'sentinelcli models sync' or choose --model <installed-model>.");
 
+            // Interactive sessions have idle time before the user finishes typing their first
+            // message - race the model's cold-start load against that instead of letting the
+            // first real prompt absorb it. A one-shot invocation has no such idle window (the
+            // real request follows immediately), so it isn't worth warming there.
+            if (options.IsInteractive)
+            {
+                _ = ollama.WarmAsync(options.Model, cancellation.Token);
+            }
+
             var tools = new WorkspaceTools(options.WorkspaceRoot, approval, options.ReadOnly);
             var agent = new SentinelCodingAgent(ollama, tools, options.Model, options.MaxRounds);
             var sessionStore = new SessionStore(SessionsDirectory());

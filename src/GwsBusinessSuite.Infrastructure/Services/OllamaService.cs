@@ -295,7 +295,18 @@ public sealed class OllamaService(
             ["model"] = model,
             ["stream"] = false,
             ["messages"] = messagesArray,
-            ["keep_alive"] = ModelKeepAlive
+            ["keep_alive"] = ModelKeepAlive,
+            // Mirrors GwsBusinessSuite.OllamaKit.OllamaClient's tool-calling payload (the CLI and
+            // Mac app's client), which had these tuned and this one didn't: Ollama's stock
+            // context window is often small enough (2048-4096) to silently truncate a multi-turn
+            // tool-calling transcript with no error, and a lower temperature measurably reduces
+            // hallucinated tool arguments versus a chat-tuned default. think:false is safe to
+            // send even to models without a "thinking" capability (they ignore it) and to
+            // reasoning models that think anyway (they accept it without erroring) - verified
+            // against llama3.2, qwen2.5-coder, and deepseek-r1 there; kept here rather than
+            // gated on a per-model capability lookup for the same reason.
+            ["options"] = new JsonObject { ["num_ctx"] = 16_384, ["temperature"] = 0.2 },
+            ["think"] = false
         };
         if (tools is { Count: > 0 })
         {

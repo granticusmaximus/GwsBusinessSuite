@@ -1,5 +1,6 @@
 using System.Net;
 using FluentAssertions;
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
 
@@ -85,6 +86,32 @@ public sealed class OllamaServiceTests
         payload.Should().Contain("\"model\":\"sentinelgpt\"");
         payload.Should().Contain("\"keep_alive\":\"30m\"");
         payload.Should().NotContain("\"prompt\"");
+    }
+
+    [Fact]
+    public async Task ChatAsync_ShouldSendTunedContextWindowTemperatureAndThinkFalse()
+    {
+        // Regression guard for a real bug: this payload previously had none of these tuned,
+        // unlike GwsBusinessSuite.OllamaKit.OllamaClient (the CLI/Mac app's client), which left
+        // every /api/chat tool-calling caller on Ollama's stock context window (often small
+        // enough to silently truncate a multi-turn tool transcript) and a chat-tuned temperature
+        // more prone to hallucinated tool arguments.
+        string? payload = null;
+        var logger = new RecordingLogger<OllamaService>();
+        var handler = new RecordingHandler(request =>
+        {
+            payload = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"message":{"content":"ok"},"done":true}""")
+            };
+        });
+        var service = CreateService(handler, logger);
+
+        await service.ChatAsync("sentinelgpt", [new OllamaChatMessage("user", "hi")]);
+
+        payload.Should().Contain("\"options\":{\"num_ctx\":16384,\"temperature\":0.2}");
+        payload.Should().Contain("\"think\":false");
     }
 
     [Fact]

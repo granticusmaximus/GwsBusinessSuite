@@ -107,6 +107,27 @@ public sealed class OllamaClient : IDisposable
         }
     }
 
+    // Ollama's documented "load only" idiom: POSTing to /api/generate with no "prompt" field
+    // loads the model into memory (and keeps it there for keep_alive) without generating any
+    // output. Callers with idle time before the user's first real message - an interactive CLI
+    // session waiting on typed input, a UI waiting on the first keystroke - can race this in the
+    // background so the model is already warm by the time a real request needs it, instead of
+    // that first request silently absorbing the full cold-start load time. Best-effort: a failed
+    // warm-up (Ollama not running yet, model not pulled) is swallowed rather than surfaced, since
+    // the real chat call right behind it will fail with a clearer, actionable error anyway.
+    public async Task WarmAsync(string model, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await _http.PostAsJsonAsync(
+                "api/generate", new { model, keep_alive = "30m" }, cancellationToken);
+        }
+        catch
+        {
+            // Best-effort - see method comment.
+        }
+    }
+
     public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken) =>
         (await ListModelDetailsAsync(cancellationToken)).Select(model => model.Name).ToArray();
 

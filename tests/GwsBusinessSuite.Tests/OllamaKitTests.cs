@@ -375,6 +375,43 @@ public sealed class OllamaKitTests : IDisposable
     }
 
     [Fact]
+    public async Task WarmAsync_SendsALoadOnlyGenerateRequest()
+    {
+        // Ollama's documented idiom for loading a model without generating output: POST
+        // /api/generate with no "prompt" field. An interactive CLI session races this against
+        // the user typing their first message so the model is already warm by the time a real
+        // chat request needs it.
+        string? path = null;
+        string? payload = null;
+        using var client = CreateClient(request =>
+        {
+            path = request.RequestUri!.AbsolutePath;
+            payload = request.Content!.ReadAsStringAsync().Result;
+            return JsonResponse("""{"done":true}""");
+        });
+
+        await client.WarmAsync("gemma4:latest", default);
+
+        path.Should().Be("/api/generate");
+        payload.Should().Contain("\"model\":\"gemma4:latest\"");
+        payload.Should().Contain("\"keep_alive\":\"30m\"");
+        payload.Should().NotContain("\"prompt\"");
+    }
+
+    [Fact]
+    public async Task WarmAsync_SwallowsAFailureInsteadOfThrowing()
+    {
+        // Best-effort: a warm-up attempt that fails (Ollama not running yet, model not pulled)
+        // must not surface to the caller - the real chat request right behind it will fail with
+        // a clearer, actionable error on its own.
+        using var client = CreateClient(_ => throw new HttpRequestException("connection refused"));
+
+        var action = async () => await client.WarmAsync("gemma4:latest", default);
+
+        await action.Should().NotThrowAsync();
+    }
+
+    [Fact]
     public async Task ChatStreamAsync_OmitsThinkUnlessTheCallerAsksForIt()
     {
         var payloads = new List<string>();
