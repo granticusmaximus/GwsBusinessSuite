@@ -1213,7 +1213,7 @@ else
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var rowDisplay in TableRows)
+                            @foreach (var rowDisplay in TableRows.Take(_tableRowWindowSize))
                             {
                                 var row = rowDisplay.Row;
                                 <tr>
@@ -1454,6 +1454,15 @@ else
                         </tfoot>
                     </table>
                 </div>
+                @if (TableRows.Count > _tableRowWindowSize)
+                {
+                    <div class="d-flex align-items-center gap-2 mb-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ShowMoreTableRows" disabled="@IsBusy">
+                            Show @Math.Min(TableRowWindowStep, TableRows.Count - _tableRowWindowSize) more
+                        </button>
+                        <span class="small text-secondary">Showing @_tableRowWindowSize of @TableRows.Count rows.</span>
+                    </div>
+                }
                 <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddRowAsync" disabled="@IsBusy">
                     <i class="bi bi-plus-lg me-1"></i>New row
                 </button>
@@ -1548,6 +1557,14 @@ else
     private Guid? _activeViewId;
     private Guid? _draggedRowId;
     private readonly HashSet<Guid> _selectedRowIds = [];
+    // Verified finding: the Table view rendered every row in one pass with no bound, so a
+    // database that grows into the thousands renders thousands of <tr> elements at once. This
+    // windows the render only - VisibleRows/TableRows still compute over the full row set
+    // (relations/rollups/formulas need that to stay correct), only the DOM output is capped.
+    // Reset on database or view switch (see OnParametersSetAsync/SelectViewAsync) so a
+    // previously-expanded window doesn't carry over onto an unrelated view.
+    private const int TableRowWindowStep = 200;
+    private int _tableRowWindowSize = TableRowWindowStep;
     private Guid? _bulkPropertyId;
     private string _bulkTextValue = string.Empty;
     private WikiDatabaseBulkUpdateResult? _bulkResult;
@@ -1713,6 +1730,7 @@ else
         if (Database?.Id != WikiDatabaseId)
         {
             _activeViewId = null;
+            _tableRowWindowSize = TableRowWindowStep;
             await ReloadAsync();
         }
 
@@ -1735,8 +1753,11 @@ else
     private async Task SelectViewAsync(Guid viewId)
     {
         _activeViewId = viewId;
+        _tableRowWindowSize = TableRowWindowStep;
         await LoadPersonalOverrideAsync();
     }
+
+    private void ShowMoreTableRows() => _tableRowWindowSize += TableRowWindowStep;
 
     private async Task EnablePersonalFiltersAsync()
     {

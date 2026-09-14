@@ -12,6 +12,61 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class WikiDatabaseServiceTests
 {
+    // Regression guard for a real gap: nothing previously capped a database's total row count -
+    // WikiDatabaseCsvImportLimits.MaxRows (10,000) only ever bounded a single CSV import, and a
+    // database could sail past it one row-by-row create at a time, at which point
+    // GetDatabaseAsync's "load every row into memory" strategy has no backstop at all. Bulk-
+    // inserts the row rows directly (bypassing SaveRowAsync) since going through the full
+    // service 10,000 times would make this test suite itself slow.
+    [Fact]
+    public async Task SaveRowAsync_ShouldRejectANewRow_OnceTheDatabaseIsAtItsRowLimit()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Huge dataset", null, "u");
+        db.WikiDatabaseRows.AddRange(Enumerable.Range(0, 10_000)
+            .Select(_ => new WikiDatabaseRow { WikiDatabaseId = database.Id, CreatedBy = "seed" }));
+        await db.SaveChangesAsync();
+
+        var act = () => service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*10,000-row limit*");
+    }
+
+    [Fact]
+    public async Task SaveRowAsync_ShouldNotCountTrashedRows_AgainstTheRowLimit()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Huge dataset", null, "u");
+        var trashedAt = DateTimeOffset.UtcNow;
+        db.WikiDatabaseRows.AddRange(Enumerable.Range(0, 10_000)
+            .Select(_ => new WikiDatabaseRow { WikiDatabaseId = database.Id, CreatedBy = "seed", TrashedAt = trashedAt }));
+        await db.SaveChangesAsync();
+
+        var act = () => service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        await act.Should().NotThrowAsync("10,000 trashed rows must not count toward the live-row limit");
+    }
+
+    // Editing an existing row must never be blocked by the row-count cap - only creating a new
+    // one should be, since editing doesn't grow the database at all.
+    [Fact]
+    public async Task SaveRowAsync_ShouldStillAllowEditingAnExistingRow_WhenTheDatabaseIsAtItsRowLimit()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Huge dataset", null, "u");
+        var existingRow = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+        db.WikiDatabaseRows.AddRange(Enumerable.Range(0, 9_999)
+            .Select(_ => new WikiDatabaseRow { WikiDatabaseId = database.Id, CreatedBy = "seed" }));
+        await db.SaveChangesAsync();
+
+        var act = () => service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { Id = existingRow.Id }, "u");
+
+        await act.Should().NotThrowAsync();
+    }
+
     [Fact]
     public async Task BulkSetPropertyValueAsync_ShouldApplyTheValueToEveryRow()
     {

@@ -2555,6 +2555,89 @@ public sealed class AutomationWorkflowTests
         WikiBlockJson.ParseBlocks(reloaded.BlocksJson).Should().ContainSingle(block => block.PlainText == "Standup notes for today");
     }
 
+    // Regression guard for a real gap: wiki.createPage and wiki.appendBlock existed, but nothing
+    // could edit a page's already-existing content - only create a new one or add a single
+    // paragraph to the end.
+    [Fact]
+    public async Task WikiUpdatePage_ShouldReplaceTheEntireBody_AndKeepTheExistingTitleWhenNoneIsGiven()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var wikiService = new WikiService(db);
+        var page = await wikiService.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Status Report",
+            BlocksJson = WikiBlockJson.Serialize([new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [new WikiRichTextSpan("Stale content")], new Dictionary<string, string>())])
+        }, "admin");
+
+        var serviceProvider = new FakeServiceProvider().Register<IWikiService>(wikiService);
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), dbContextFactory: new FakeAppDbContextFactory(options), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Refresh status page");
+        var newBlocksJson = WikiBlockJson.Serialize([new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [new WikiRichTextSpan("Fresh content")], new Dictionary<string, string>())]);
+        var node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Update page", TypeKey = "wiki.updatePage", PositionX = 350, PositionY = 180,
+            ParametersJson = System.Text.Json.JsonSerializer.Serialize(new { wikiPageId = page.Id.ToString(), title = "", blocksJson = newBlocksJson })
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", node.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id);
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Succeeded);
+        var reloaded = await db.WikiPages.AsNoTracking().SingleAsync(item => item.Id == page.Id);
+        reloaded.Title.Should().Be("Status Report", "an empty title parameter must keep the existing title");
+        reloaded.CreatedBy.Should().Be("admin", "CreatedBy reflects the original author, not who last edited it");
+        var blocks = WikiBlockJson.ParseBlocks(reloaded.BlocksJson);
+        blocks.Should().ContainSingle(block => block.PlainText == "Fresh content");
+        blocks.Should().NotContain(block => block.PlainText == "Stale content");
+    }
+
+    [Fact]
+    public async Task WikiUpdatePage_ShouldRequireEditAccess_WhenTheOwnerIsNotAnAdmin()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Author, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var wikiService = new WikiService(db);
+        var page = await wikiService.SavePageAsync(new WikiPageEditorModel { Title = "Locked Page", BlocksJson = "[]" }, "admin");
+
+        var serviceProvider = new FakeServiceProvider()
+            .Register<IWikiService>(wikiService)
+            .Register<ISentinelAccessService>(new SentinelAccessService(db));
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), dbContextFactory: new FakeAppDbContextFactory(options), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var workflow = await workflowService.CreateAsync("Rewrite locked page");
+        var node = await workflowService.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Update page", TypeKey = "wiki.updatePage", PositionX = 350, PositionY = 180,
+            ParametersJson = $"{{\"wikiPageId\":\"{page.Id}\",\"title\":\"\",\"blocksJson\":\"[]\"}}"
+        });
+        await workflowService.AddConnectionAsync(workflow.Id, workflow.Nodes.Single().Id, "main", node.Id);
+        await workflowService.PublishAsync(workflow.Id, "v1");
+
+        var execution = await executionService.ExecuteAsync(workflow.Id);
+
+        execution.Status.Should().Be(AutomationExecutionStatuses.Failed);
+        execution.ErrorMessage.Should().Contain("does not have Edit access");
+    }
+
     [Theory]
     [InlineData(false, 0)]
     [InlineData(true, 1)]

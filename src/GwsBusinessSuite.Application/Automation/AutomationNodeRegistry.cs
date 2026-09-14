@@ -41,6 +41,7 @@ public sealed partial class AutomationNodeRegistry(
         new("database.addRow", 1, "Add Database Row", "Creates a new row in a Sentinel database. propertyValues maps property ids to values (string values support {{ $json.path }} expressions); parentRowId is optional and nests the new row as a sub-item. Like Set Database Row Property, this never re-triggers a Database Row Changed workflow.", "Actions", "bi-plus-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"parentRowId\":\"\",\"propertyValues\":{}}", IsIdempotent: false),
         new("wiki.createPage", 1, "Sentinel: Create Page", "Creates a new Sentinel wiki page. title and blocksJson support {{ $json.path }} expressions; parentWikiPageId is optional (omit to create a top-level page) and, when set, requires this workflow's owner to have Edit access to that parent. Never re-triggers a Sentinel Page Changed workflow.", "Actions", "bi-file-earmark-plus", false, ["main"], "{\"title\":\"{{ $json.title }}\",\"parentWikiPageId\":\"\",\"blocksJson\":\"[]\"}", IsIdempotent: false),
         new("wiki.appendBlock", 1, "Sentinel: Append Block", "Appends one paragraph block to an existing Sentinel page. text supports {{ $json.path }} expressions. Requires this workflow's owner to have Edit access to the target page. Like Add Database Row, never re-triggers a Sentinel Page Changed workflow.", "Actions", "bi-file-earmark-text", false, ["main"], "{\"wikiPageId\":\"\",\"text\":\"{{ $json.text }}\"}", IsIdempotent: false),
+        new("wiki.updatePage", 1, "Sentinel: Update Page", "Replaces an existing Sentinel page's entire body with new content. blocksJson is the page's complete new block array (the same shape wiki.createPage accepts) and replaces everything currently on the page - use wiki.appendBlock instead if you only want to add to what's already there. title is optional; leave it blank to keep the page's current title. Requires this workflow's owner to have Edit access to the target page. Never re-triggers a Sentinel Page Changed workflow.", "Actions", "bi-file-earmark-arrow-up", false, ["main"], "{\"wikiPageId\":\"\",\"title\":\"\",\"blocksJson\":\"[]\"}", IsIdempotent: false),
         new("wiki.findPages", 1, "Sentinel: Find Pages", "Searches Sentinel pages and databases by keyword and meaning (the same hybrid keyword + semantic search behind the top Quick Find bar and SentinelGPT's own search tool). query supports {{ $json.path }} expressions. Results are limited to what this workflow's owner can already view - read-only, has no side effects.", "Data", "bi-search", false, ["main"], "{\"query\":\"{{ $json.query }}\",\"limit\":10}"),
         new("automation.subWorkflow", 1, "Execute Workflow", "Runs another published workflow to completion and returns its output. The child must not pause on a Wait or Approval node. workflowId is the id shown in the target workflow's URL.", "Flow", "bi-diagram-3", false, ["main"], "{\"workflowId\":\"\"}", IsIdempotent: false),
         new("core.notify", 1, "Notify", "Sends an email to a person. to/subject/message support {{ $json.path }} expressions. For webhook-style alerts, use HTTP Request instead - this node is specifically for email.", "Actions", "bi-envelope-fill", false, ["main"], "{\"to\":\"\",\"subject\":\"GWS Automation Notification\",\"message\":\"{{ $json }}\"}", IsIdempotent: false),
@@ -205,6 +206,7 @@ public sealed partial class AutomationNodeRegistry(
             "database.addRow" => await ExecuteAddRowAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "wiki.createPage" => await ExecuteWikiCreatePageAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "wiki.appendBlock" => await ExecuteWikiAppendBlockAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
+            "wiki.updatePage" => await ExecuteWikiUpdatePageAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "wiki.findPages" => await ExecuteWikiFindPagesAsync(node, input, workflowOwnerUsername, nodeOutputsByName, cancellationToken),
             "automation.subWorkflow" => await ExecuteSubWorkflowAsync(node, input, subWorkflowChain, cancellationToken),
             "core.notify" => await ExecuteNotifyAsync(node, input, nodeOutputsByName, cancellationToken),
@@ -629,6 +631,52 @@ public sealed partial class AutomationNodeRegistry(
 
         var output = source.DeepClone().AsObject();
         output["wikiPage"] = new JsonObject { ["wikiPageId"] = saved.Id.ToString(), ["blockCount"] = blocks.Count };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    // Verified finding: wiki.createPage and wiki.appendBlock exist, but nothing could edit a
+    // page's already-existing content - only create a new one or add a single paragraph.
+    // Mirrors ExecuteWikiAppendBlockAsync's editor construction almost exactly, replacing the
+    // body outright instead of appending to it.
+    private async Task<AutomationNodeRunResult> ExecuteWikiUpdatePageAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        string? workflowOwnerUsername,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        bool allowDownstreamTriggers,
+        CancellationToken cancellationToken)
+    {
+        var wikiService = serviceProvider?.GetService(typeof(IWikiService)) as IWikiService
+            ?? throw new InvalidOperationException("Sentinel page writes are not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+
+        var wikiPageId = ParseRequiredGuid(parameters["wikiPageId"]?.GetValue<string>(), node.Name, "wikiPageId");
+        await EnsureCanEditPageAsync(wikiPageId, workflowOwnerUsername, node.Name, cancellationToken);
+
+        var page = await wikiService.GetPageAsync(wikiPageId, cancellationToken)
+            ?? throw new InvalidOperationException($"{node.Name} could not find a Sentinel page with that id.");
+
+        var requestedTitle = ResolveText(parameters["title"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName);
+        var blocksJson = parameters["blocksJson"]?.GetValue<string>() ?? "[]";
+
+        var editor = new WikiPageEditorModel
+        {
+            WikiPageId = page.Id,
+            ExpectedContentVersion = page.ContentVersion,
+            Title = string.IsNullOrWhiteSpace(requestedTitle) ? page.Title : requestedTitle,
+            Slug = page.Slug,
+            BlocksJson = string.IsNullOrWhiteSpace(blocksJson) ? "[]" : blocksJson,
+            Icon = page.Icon,
+            CoverImageUrl = page.CoverImageUrl,
+            ParentWikiPageId = page.ParentWikiPageId,
+            IsFullWidth = page.IsFullWidth,
+            FontStyle = page.FontStyle
+        };
+        var saved = await wikiService.SavePageAsync(editor, ChainingActor(allowDownstreamTriggers), createRevisionCheckpoint: false, cancellationToken: cancellationToken);
+
+        var output = source.DeepClone().AsObject();
+        output["wikiPage"] = new JsonObject { ["wikiPageId"] = saved.Id.ToString(), ["title"] = saved.Title };
         return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }
 

@@ -29,6 +29,12 @@ public sealed class WikiDatabaseService(
     private const int MaxCsvFieldCharacters = 128 * 1024;
     private const int MaxCsvWarnings = 200;
 
+    // A real cap on a database's total size, distinct from WikiDatabaseCsvImportLimits.MaxRows
+    // (which only ever bounded a single CSV import). Matches that figure so the two limits read
+    // as one number rather than two different ones. GetDatabaseAsync loads every non-trashed row
+    // into memory on every open - this is the backstop until row virtualization/paging exists.
+    private const int MaxRowsPerDatabase = 10_000;
+
     public async Task<IReadOnlyList<WikiDatabase>> ListDatabasesAsync(bool includeTrashed = false, CancellationToken cancellationToken = default)
     {
         var query = dbContext.WikiDatabases.AsNoTracking();
@@ -1059,6 +1065,23 @@ public sealed class WikiDatabaseService(
             : WikiPropertyValues.ParseObject(row.PropertyValuesJson);
 
         var isNew = row is null;
+        if (isNew)
+        {
+            // Verified finding: nothing previously stopped a database from growing without
+            // bound - GetDatabaseAsync loads every row into memory on every open, and the
+            // editor renders them all at once. WikiDatabaseCsvImportLimits.MaxRows (10,000)
+            // only ever bounded a single CSV import, not the database's total size, so a
+            // database could sail past it one row-by-row create at a time. This is the actual
+            // ceiling; MaxRowsPerDatabase intentionally matches the CSV import figure so the
+            // two limits read as one consistent number, not two different ones.
+            var existingRowCount = await dbContext.WikiDatabaseRows
+                .CountAsync(item => item.WikiDatabaseId == wikiDatabaseId && item.TrashedAt == null, cancellationToken);
+            if (existingRowCount >= MaxRowsPerDatabase)
+            {
+                throw new InvalidOperationException(
+                    $"This database has reached its {MaxRowsPerDatabase:N0}-row limit. Move older rows to a separate database or trash ones you no longer need before adding more.");
+            }
+        }
         row ??= new WikiDatabaseRow
         {
             WikiDatabaseId = wikiDatabaseId,
