@@ -17,7 +17,7 @@ public sealed class MobilePushTests
     public async Task RegisterDeviceAsync_ShouldUpsertByUsernameAndToken_NotAccumulateDuplicates()
     {
         await using var db = await CreateDbAsync();
-        var service = new MobilePushRegistrationService(db, TimeProvider.System);
+        var service = new MobilePushRegistrationService(db, TimeProvider.System, new FakeSecretProtector());
 
         var first = await service.RegisterDeviceAsync("grant", MobileDevicePlatforms.Ios, "token-abc", "iPhone");
         var second = await service.RegisterDeviceAsync("grant", MobileDevicePlatforms.Ios, "token-abc", "iPhone (renamed)");
@@ -32,7 +32,7 @@ public sealed class MobilePushTests
     public async Task UnregisterDeviceAsync_ShouldRemoveOnlyTheMatchingDevice()
     {
         await using var db = await CreateDbAsync();
-        var service = new MobilePushRegistrationService(db, TimeProvider.System);
+        var service = new MobilePushRegistrationService(db, TimeProvider.System, new FakeSecretProtector());
         await service.RegisterDeviceAsync("grant", MobileDevicePlatforms.Ios, "token-a", "Phone A");
         await service.RegisterDeviceAsync("grant", MobileDevicePlatforms.Android, "token-b", "Phone B");
 
@@ -46,11 +46,35 @@ public sealed class MobilePushTests
     public async Task RegisterDeviceAsync_ShouldRejectAnUnknownPlatform()
     {
         await using var db = await CreateDbAsync();
-        var service = new MobilePushRegistrationService(db, TimeProvider.System);
+        var service = new MobilePushRegistrationService(db, TimeProvider.System, new FakeSecretProtector());
 
         var act = () => service.RegisterDeviceAsync("grant", "blackberry", "token", "Old phone");
 
         await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task RegisterDeviceAsync_ShouldStoreTheTokenProtectedRatherThanInPlaintext()
+    {
+        // Regression guard for a real finding: PushToken was the one credential-like field in
+        // the app never routed through ISecretProtector, unlike every comparable secret. The
+        // register/unregister lookup can't key on the protected value directly (Protect() is
+        // non-deterministic), which is what PushTokenHash is for.
+        await using var db = await CreateDbAsync();
+        var service = new MobilePushRegistrationService(db, TimeProvider.System, new FakeSecretProtector());
+
+        await service.RegisterDeviceAsync("grant", MobileDevicePlatforms.Ios, "raw-token-value", "iPhone");
+
+        var stored = await db.MobileDeviceRegistrations.AsNoTracking().SingleAsync();
+        stored.PushToken.Should().NotBe("raw-token-value");
+        stored.PushToken.Should().StartWith("protected::");
+        stored.PushTokenHash.Should().NotBeNullOrWhiteSpace();
+
+        // Re-registering the same raw token still resolves back to the same row via the hash,
+        // even though the stored (protected) value differs from what a fresh Protect() call
+        // would produce.
+        var second = await service.RegisterDeviceAsync("grant", MobileDevicePlatforms.Ios, "raw-token-value", "iPhone (renamed)");
+        second.Id.Should().Be(stored.Id);
     }
 
     [Fact]

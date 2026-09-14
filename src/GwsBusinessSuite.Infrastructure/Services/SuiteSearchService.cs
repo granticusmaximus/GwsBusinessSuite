@@ -85,6 +85,19 @@ public sealed class SuiteSearchService(
         results.AddRange(offers.Where(item => Matches(query, item.LinkName, item.AdvertiserName)).Take(PerCategoryLimit)
             .Select(item => new SuiteSearchResult(item.LinkName, item.AdvertiserName, "Affiliate offer", "/admin/cj-ads", "bi bi-link-45deg")));
 
+        // Support tickets and billing invoices were the two areas the September audit flagged
+        // as the highest-friction gaps in ⌘K search - the two feature areas most likely to need
+        // "find this specific record right now" rather than browsing.
+        var tickets = await db.SupportTickets.AsNoTracking()
+            .Take(ModuleScanLimit).Select(item => new { item.Subject, item.Status }).ToListAsync(cancellationToken);
+        results.AddRange(tickets.Where(item => Matches(query, item.Subject)).Take(PerCategoryLimit)
+            .Select(item => new SuiteSearchResult(item.Subject, $"{item.Status} ticket", "Support ticket", "/admin/support", "bi bi-life-preserver")));
+
+        var invoices = await db.Invoices.AsNoTracking()
+            .Take(ModuleScanLimit).Select(item => new { item.Title, item.Status }).ToListAsync(cancellationToken);
+        results.AddRange(invoices.Where(item => Matches(query, item.Title)).Take(PerCategoryLimit)
+            .Select(item => new SuiteSearchResult(item.Title, $"{item.Status} invoice", "Billing invoice", "/admin/billing", "bi bi-receipt")));
+
         return results
             .DistinctBy(item => (item.Category, item.Title, item.Url))
             .Take(Math.Clamp(take, 1, 40))

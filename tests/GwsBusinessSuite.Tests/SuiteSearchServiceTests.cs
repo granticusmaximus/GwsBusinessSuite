@@ -41,6 +41,29 @@ public sealed class SuiteSearchServiceTests
     }
 
     [Fact]
+    public async Task SearchAsync_ShouldFindMatchesAcrossSupportTicketsAndBillingInvoices()
+    {
+        // Regression guard for a real gap: Support and Billing were entirely absent from ⌘K
+        // search, despite being two of the areas most likely to need "find this specific record
+        // right now" rather than browsing a list.
+        await using var db = await CreateDbAsync();
+        var contact = new Contact { FullName = "Acme Rendering Corp Contact", CreatedBy = "u" };
+        db.Contacts.Add(contact);
+        await db.SaveChangesAsync();
+        db.SupportTickets.Add(new SupportTicket { ContactId = contact.Id, Subject = "Acme Rendering export is broken", CreatedBy = "u" });
+        db.Invoices.Add(new Invoice { ContactId = contact.Id, Title = "Acme Rendering Q3 invoice", CreatedBy = "u" });
+        await db.SaveChangesAsync();
+
+        var sentinelWorkspace = new SentinelWorkspaceService(db, TimeProvider.System);
+        var service = new SuiteSearchService(db, sentinelWorkspace);
+
+        var results = await service.SearchAsync("Acme Rendering", "u");
+
+        results.Should().Contain(item => item.Category == "Support ticket" && item.Title == "Acme Rendering export is broken" && item.Url == "/admin/support");
+        results.Should().Contain(item => item.Category == "Billing invoice" && item.Title == "Acme Rendering Q3 invoice" && item.Url == "/admin/billing");
+    }
+
+    [Fact]
     public async Task SearchAsync_ShouldReturnNothingForAQueryShorterThanTwoCharacters()
     {
         await using var db = await CreateDbAsync();

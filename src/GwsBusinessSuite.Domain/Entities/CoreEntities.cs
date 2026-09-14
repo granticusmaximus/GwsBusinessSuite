@@ -2385,7 +2385,21 @@ public sealed class MobileDeviceRegistration : AuditableEntity
 {
     public required string Username { get; set; }
     public required string Platform { get; set; }
+
+    // Protected via ISecretProtector (Data Protection), not plaintext - a push token is a live,
+    // unique identifier for a person's device. Protection is non-deterministic (a random IV per
+    // call), so it can't be looked up by equality against a freshly-protected value - that's what
+    // PushTokenHash is for.
     public required string PushToken { get; set; }
+
+    // A deterministic SHA-256 hash of the raw token, used only for the register/unregister
+    // lookup - never reversed, never displayed. Rows written before this column existed have an
+    // empty hash and simply won't match a future lookup; re-registering that device (which
+    // happens routinely on app relaunch) creates one fresh, correctly-hashed row rather than
+    // requiring a backfill migration for a table with no working consumer yet (see the class
+    // comment: push delivery itself isn't wired up).
+    public string PushTokenHash { get; set; } = string.Empty;
+
     public string DeviceName { get; set; } = string.Empty;
     public DateTimeOffset RegisteredAt { get; set; }
     public DateTimeOffset? LastSeenAt { get; set; }

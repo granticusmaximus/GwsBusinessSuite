@@ -285,6 +285,17 @@ builder.Services.AddHealthChecks()
         "disk-space",
         tags: ["ready"]);
 
+// Without this, the checks above only ever run when something hits /health - which nothing
+// does proactively today, so an Unhealthy/Degraded result (disk space, Ollama down) could sit
+// unnoticed indefinitely. This is the framework's own periodic-evaluation hook: it runs every
+// check on Period and hands the report to every registered IHealthCheckPublisher.
+builder.Services.Configure<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckPublisherOptions>(options =>
+{
+    options.Period = TimeSpan.FromMinutes(5);
+});
+builder.Services.AddSingleton<Microsoft.Extensions.Diagnostics.HealthChecks.IHealthCheckPublisher,
+    GwsBusinessSuite.Web.HealthChecks.OperationalAlertHealthCheckPublisher>();
+
 // HeaderName enables validating JSON API requests (which can't carry a hidden form
 // field) via the X-CSRF-TOKEN header instead, for the /admin/api/articles endpoints.
 builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
@@ -1491,7 +1502,7 @@ app.MapGet("/auth/logout", async (HttpContext httpContext, ISecurityAuditService
     await httpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     await httpContext.SignOutAsync(MfaAuthenticationDefaults.PendingScheme);
     return Results.LocalRedirect("/admin/login");
-}).AllowAnonymous();
+}).AllowAnonymous().RequireRateLimiting("public-read");
 
 // Client portal passwordless login. Mirrors the /auth/login -> /auth/mfa/* split: the
 // SignInAsync call has to happen from a minimal-API endpoint, not an interactive Razor
@@ -1562,7 +1573,7 @@ app.MapGet("/client-portal/auth/logout", async (HttpContext httpContext) =>
 {
     await httpContext.SignOutAsync(ClientPortalAuthenticationDefaults.Scheme);
     return Results.LocalRedirect("/client-portal/login");
-}).AllowAnonymous();
+}).AllowAnonymous().RequireRateLimiting("public-read");
 
 app.MapGet("/auth/notion/connect", (
     HttpContext httpContext,
@@ -2650,7 +2661,7 @@ app.MapGet("/__not-found", async (HttpContext httpContext, ICmsBuilderService cm
             </html>
             """, "text/html");
     })
-    .AllowAnonymous();
+    .AllowAnonymous().RequireRateLimiting("public-read");
 
 // Part 6.2 - a portable structured recipe of a CmsSite (pages, categories, custom field
 // definitions, global blocks, design settings), distinct from export.zip below: that endpoint
