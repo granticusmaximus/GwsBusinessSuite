@@ -17,7 +17,6 @@ public partial class SentinelGptPage : ContentPage
     private readonly ApprovedMemoryStore _approvedMemory;
     private readonly SecureApiKeyStore _apiKeyStore;
     private readonly WorkspaceBookmarkStore _workspaceBookmarks;
-    private readonly SentinelVoiceService _voice;
     private readonly DeepAnalysisAdvisor _deepAnalysis;
     private readonly NativeFallbackChatService _fallbackChat;
     private readonly DeviceSecretStore _deviceSecretStore;
@@ -72,7 +71,6 @@ public partial class SentinelGptPage : ContentPage
         ApprovedMemoryStore approvedMemory,
         SecureApiKeyStore apiKeyStore,
         WorkspaceBookmarkStore workspaceBookmarks,
-        SentinelVoiceService voice,
         DeepAnalysisAdvisor deepAnalysis,
         NativeFallbackChatService fallbackChat,
         DeviceSecretStore deviceSecretStore,
@@ -84,7 +82,6 @@ public partial class SentinelGptPage : ContentPage
         _approvedMemory = approvedMemory;
         _apiKeyStore = apiKeyStore;
         _workspaceBookmarks = workspaceBookmarks;
-        _voice = voice;
         _deepAnalysis = deepAnalysis;
         _fallbackChat = fallbackChat;
         _deviceSecretStore = deviceSecretStore;
@@ -931,19 +928,13 @@ public partial class SentinelGptPage : ContentPage
 
     private async void OnApproveClicked(object? sender, EventArgs e)
     {
-        if ((sender as Button)?.BindingContext is not ChatMessageViewModel answer || answer.IsApproved) return;
+        if ((sender as ImageButton)?.BindingContext is not ChatMessageViewModel answer || answer.IsApproved) return;
         var index = _messages.IndexOf(answer);
         var question = index > 0 ? _messages[index - 1] : null;
         if (question is null || !question.IsUser) return;
 
         await _approvedMemory.AppendAsync(question.Text, answer.Text, CancellationToken.None);
         answer.IsApproved = true;
-    }
-
-    private async void OnSpeakClicked(object? sender, EventArgs e)
-    {
-        if ((sender as Button)?.BindingContext is ChatMessageViewModel { Text.Length: > 0 } message)
-            await _voice.SpeakAsync(message.Text);
     }
 
     private void RefreshHistory()

@@ -54,9 +54,12 @@ public sealed class ChatMessageViewModel(bool isUser) : INotifyPropertyChanged
         }
     }
 
+    // Default matches iOS Messages' own "received" bubble gray - error/notice states keep their
+    // own distinct colors since those are functional indicators, not a chat-bubble role iMessage
+    // has an equivalent for.
     public Color BubbleColor => IsError ? Color.FromArgb("#2B1515")
         : IsSystemNotice ? Color.FromArgb("#161B22")
-        : Color.FromArgb("#1C1917");
+        : Color.FromArgb("#3A3A3C");
 
     // Local output from a slash command, not something the model said. Styled and labelled
     // differently on purpose: presenting the app's own answer in an identical bubble would let a
@@ -75,11 +78,14 @@ public sealed class ChatMessageViewModel(bool isUser) : INotifyPropertyChanged
         {
             _isApproved = value;
             OnPropertyChanged();
-            OnPropertyChanged(nameof(ApproveButtonText));
+            OnPropertyChanged(nameof(ApproveIconSource));
         }
     }
 
-    public string ApproveButtonText => IsApproved ? "✓ Approved" : "\U0001F44D";
+    // A filled glyph once approved mirrors SF Symbols' own outline/filled convention for a
+    // toggled state (the same visual language as Apple's own "liked" indicators).
+    public ImageSource? ApproveIconSource =>
+        SfSymbolImageSource.Get(IsApproved ? "hand.thumbsup.fill" : "hand.thumbsup", "#78716C");
 
     // Set once a turn resolves (successfully or not) - lets the transcript template hide the
     // approve/speak/retry row while a streaming answer is still arriving.

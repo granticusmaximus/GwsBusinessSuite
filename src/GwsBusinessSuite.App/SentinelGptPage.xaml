@@ -140,37 +140,40 @@
                     <DataTemplate x:DataType="local:ChatMessageViewModel">
                         <Grid Padding="0,6">
 
-                            <Border IsVisible="{Binding IsUser}" Padding="12,8" HorizontalOptions="End" MaximumWidthRequest="480"
-                                    BackgroundColor="#2B2215" Stroke="#66501F" StrokeShape="RoundRectangle 10">
-                                <Label Text="{Binding Text}" TextColor="#FAFAF9" FontSize="14" />
+                            <Border IsVisible="{Binding IsUser}" Padding="14,9" HorizontalOptions="End" MaximumWidthRequest="480"
+                                    BackgroundColor="#0B93F6" Stroke="Transparent" StrokeShape="RoundRectangle 18">
+                                <Label Text="{Binding Text}" TextColor="#FFFFFF" FontSize="14" LineBreakMode="WordWrap" />
                             </Border>
 
                             <VerticalStackLayout IsVisible="{Binding IsAssistant}" Spacing="4">
                                 <Label Text="via server (local Ollama unavailable)" IsVisible="{Binding IsFromServerFallback}"
                                        TextColor="#F59E0B" FontSize="11" FontAttributes="Bold" Margin="4,0,0,0" />
-                                <Border Padding="12,8" HorizontalOptions="Start" MaximumWidthRequest="560"
+                                <Border Padding="14,9" HorizontalOptions="Start" MaximumWidthRequest="560"
                                         BackgroundColor="{Binding BubbleColor}"
-                                        Stroke="#292524" StrokeShape="RoundRectangle 10">
+                                        Stroke="Transparent" StrokeShape="RoundRectangle 18">
                                     <Grid>
                                         <!-- The empty-answer window only. TypingIndicatorView
                                              starts and stops itself with IsVisible, so it never
                                              animates behind a finished message. -->
                                         <local:TypingIndicatorView IsVisible="{Binding ShowTypingIndicator}" />
-                                        <HorizontalStackLayout IsVisible="{Binding HasText}" Spacing="1">
-                                            <Label Text="{Binding Text}" TextColor="#FAFAF9" FontSize="14"
-                                                   FontFamily="{Binding TextFontFamily}" />
+                                        <!-- Grid, not HorizontalStackLayout: a StackLayout hands its
+                                             children unconstrained width along the stacking axis, so
+                                             the Label never had a boundary to wrap against and instead
+                                             rendered the whole reply on one line, clipped by the
+                                             bubble's MaximumWidthRequest. The "*" column gives it one. -->
+                                        <Grid IsVisible="{Binding HasText}" ColumnDefinitions="*,Auto" ColumnSpacing="2">
+                                            <Label Grid.Column="0" Text="{Binding Text}" TextColor="#FAFAF9" FontSize="14"
+                                                   FontFamily="{Binding TextFontFamily}" LineBreakMode="WordWrap" />
                                             <!-- Blinking caret while tokens are still arriving. -->
-                                            <local:StreamingCaretView IsVisible="{Binding ShowStreamingCaret}"
+                                            <local:StreamingCaretView Grid.Column="1" IsVisible="{Binding ShowStreamingCaret}"
                                                                       VerticalOptions="End" />
-                                        </HorizontalStackLayout>
+                                        </Grid>
                                     </Grid>
                                 </Border>
                                 <HorizontalStackLayout IsVisible="{Binding IsComplete}" Spacing="10" Margin="4,0,0,0">
-                                    <Button Text="&#x1F50A;" FontSize="12" Padding="4" BackgroundColor="Transparent"
-                                            TextColor="#78716C" Clicked="OnSpeakClicked" BindingContext="{Binding}" />
-                                    <Button Text="{Binding ApproveButtonText}"
-                                            FontSize="12" Padding="4" BackgroundColor="Transparent" TextColor="#78716C"
-                                            Clicked="OnApproveClicked" BindingContext="{Binding}" />
+                                    <ImageButton Source="{Binding ApproveIconSource}" HeightRequest="20" WidthRequest="20"
+                                                 Padding="0" BackgroundColor="Transparent"
+                                                 Clicked="OnApproveClicked" BindingContext="{Binding}" />
                                     <Button Text="Retry" FontSize="12" Padding="4" BackgroundColor="Transparent"
                                             TextColor="#78716C" IsVisible="{Binding HasRetryPrompt}"
                                             Clicked="OnRetryClicked" BindingContext="{Binding}" />
