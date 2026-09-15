@@ -13,7 +13,8 @@ public static class SentinelStarterTemplates
     [
         new SentinelStarterTemplate("meeting-notes", "🗓️", "Meeting notes", "Meeting Notes", MeetingNotesBlocks()),
         new SentinelStarterTemplate("project-tracker", "📋", "Project tracker", "Project Tracker", ProjectTrackerBlocks()),
-        new SentinelStarterTemplate("roadmap", "🧭", "Roadmap", "Roadmap", RoadmapBlocks())
+        new SentinelStarterTemplate("roadmap", "🧭", "Roadmap", "Roadmap", RoadmapBlocks()),
+        new SentinelStarterTemplate("todo-list", "✅", "To-do list", "To-do List", TodoListBlocks())
     ];
 
     public static SentinelStarterTemplate? Find(string key) =>
@@ -41,6 +42,16 @@ public static class SentinelStarterTemplates
         ToDo("Launch"),
         Heading2("Risks"),
         Bullet("Risk one")
+    ];
+
+    private static IReadOnlyList<WikiBlock> TodoListBlocks() =>
+    [
+        Heading1("To-do List"),
+        Heading2("Today"),
+        ToDo("First thing to do"),
+        ToDo("Second thing to do"),
+        Heading2("Later"),
+        ToDo("Something that can wait")
     ];
 
     private static IReadOnlyList<WikiBlock> RoadmapBlocks() =>

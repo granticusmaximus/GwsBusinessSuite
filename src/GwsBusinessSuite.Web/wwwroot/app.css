@@ -2371,6 +2371,15 @@ audio.wiki-embed-media { max-width: 100%; }
     grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
     gap: 1rem;
 }
+/* Verified finding: unlike the List/Gallery/Calendar views (all of which make the whole
+   card/row clickable to open a row as a page), the Board card only had a small "Open" text
+   link responding to a click - clicking the card itself (title, badges, anywhere else) did
+   nothing, which reads as broken rather than as "you missed the tiny link". cursor: pointer
+   signals the whole card is now clickable, matching those other views. */
+.wiki-db-board-card { cursor: pointer; }
+.wiki-db-board-card:hover { box-shadow: 0 0.25rem 0.75rem rgba(15, 23, 42, 0.08); }
+.wiki-db-board-card-move { cursor: default; }
+
 .sentinel-db-gallery-card {
     border: 1px solid #dee2e6;
     border-radius: 0.65rem;
@@ -3022,6 +3031,26 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 .sentinel-document-context .sentinel-breadcrumb-up:hover,
 .sentinel-document-context .sentinel-breadcrumb-up:focus-visible {
+    border-color: var(--sentinel-border-strong);
+    background: var(--sentinel-hover);
+}
+.sentinel-nav-back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 1.9rem;
+    height: 1.9rem;
+    margin-right: .4rem;
+    border: 1px solid var(--sentinel-border);
+    border-radius: 6px;
+    background: rgba(255,255,255,.025);
+    color: var(--gws-text-strong);
+    font-size: .8rem;
+}
+.sentinel-nav-back:hover,
+.sentinel-nav-back:focus-visible {
+    outline: 0;
     border-color: var(--sentinel-border-strong);
     background: var(--sentinel-hover);
 }

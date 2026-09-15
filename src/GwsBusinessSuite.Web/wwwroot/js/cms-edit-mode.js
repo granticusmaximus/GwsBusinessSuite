@@ -574,6 +574,21 @@
       clearDropVisuals(html5Indicator);
       paletteDragTarget = null;
       paletteDragTargetKey = '';
+    } else if (e.data.type === 'cms:external-drag-move') {
+      // Parent-coordinated fallback for engines (WebKit) that don't reliably deliver native
+      // dragover/drop from a parent-document drag into this iframe's own document - see
+      // cms-builder-bridge.js's own comment on this. x/y already arrive translated into this
+      // iframe's local coordinate space, so resolveDropTarget needs no changes at all; this is
+      // the exact same resolution the native dragover listener below already uses.
+      var moveTarget = resolveDropTarget(e.data.x, e.data.y, null);
+      if (!html5Indicator) html5Indicator = createIndicator();
+      paletteDragTarget = moveTarget;
+      reportExternalDragTarget(moveTarget);
+      drawDropIndicator(moveTarget, html5Indicator);
+    } else if (e.data.type === 'cms:external-drag-leave') {
+      clearDropVisuals(html5Indicator);
+      paletteDragTarget = null;
+      paletteDragTargetKey = '';
     }
   });
 

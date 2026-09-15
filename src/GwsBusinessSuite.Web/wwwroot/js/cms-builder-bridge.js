@@ -6,7 +6,10 @@
 window.gwsCmsBuilderBridge = (function () {
     let _dotNetRef = null;
     let _boundHandler = null;
-    let _boundParentDragOver = null;
+    let _boundParentDrag = null;
+    let _dragRaf = null;
+    let _pendingDragEvent = null;
+    let _wasOverIframe = false;
     let _externalDrag = null;
 
     function iframe() {
@@ -24,14 +27,51 @@ window.gwsCmsBuilderBridge = (function () {
         // key combos don't currently overlap (this one: Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z,
         // Cmd/Ctrl+Y) - re-check both before assuming they'll coexist cleanly if that changes.
         window.addEventListener('keydown', handleKeydown);
-        _boundParentDragOver = function (event) {
-            // Events inside the iframe belong to its document. Receiving dragover here
-            // means the pointer left the iframe, so its last target is no longer valid.
-            if (_externalDrag && event.target !== iframe()) {
-                _externalDrag.target = null;
-            }
+        // WebKit (Safari, and the Mac app's WebView, which is WebKit-backed) is known to be
+        // unreliable at delivering dragenter/dragover/drop for a drag that started in a
+        // *different* document than the one it's currently over - the palette lives in the
+        // parent document, the drop zones live inside cms-builder-iframe's own document, so a
+        // palette-to-canvas drag could silently deliver nothing at all in WebKit even though
+        // Chromium (imperfectly - see endExternalDrag's own comment) mostly gets it right.
+        // The native "drag" event is different: it fires continuously on the drag's *source*
+        // document throughout the whole gesture regardless of which element/frame the pointer
+        // is currently over, which is the one part of HTML5 DnD that doesn't depend on the
+        // target document receiving anything. Feeding its clientX/clientY into the iframe via
+        // postMessage - the same coordination channel cms:external-drag-target already uses -
+        // gives the existing resolveDropTarget/reportExternalDragTarget/endExternalDrag pipeline
+        // a working coordinate feed even when the browser never delivers a single native drag
+        // event into the iframe itself. This is additive: browsers where the iframe's own
+        // dragover/drop already work (Chromium) are untouched, since endExternalDrag already
+        // lets a real iframe-reported drop win first.
+        _boundParentDrag = function (event) {
+            _pendingDragEvent = event;
+            if (_dragRaf) return;
+            _dragRaf = window.requestAnimationFrame(processParentDrag);
         };
-        document.addEventListener('dragover', _boundParentDragOver, true);
+        document.addEventListener('drag', _boundParentDrag, true);
+    }
+
+    function processParentDrag() {
+        _dragRaf = null;
+        const event = _pendingDragEvent;
+        if (!event || !_externalDrag) return;
+        const el = iframe();
+        if (!el) return;
+        const rect = el.getBoundingClientRect();
+        const overIframe = event.clientX >= rect.left && event.clientX <= rect.right
+            && event.clientY >= rect.top && event.clientY <= rect.bottom;
+        if (overIframe) {
+            _wasOverIframe = true;
+            sendToIframe({
+                type: 'cms:external-drag-move',
+                x: event.clientX - rect.left,
+                y: event.clientY - rect.top
+            });
+        } else if (_wasOverIframe) {
+            _wasOverIframe = false;
+            _externalDrag.target = null;
+            sendToIframe({ type: 'cms:external-drag-leave' });
+        }
     }
 
     function dispose() {
@@ -40,10 +80,16 @@ window.gwsCmsBuilderBridge = (function () {
             _boundHandler = null;
         }
         window.removeEventListener('keydown', handleKeydown);
-        if (_boundParentDragOver) {
-            document.removeEventListener('dragover', _boundParentDragOver, true);
-            _boundParentDragOver = null;
+        if (_boundParentDrag) {
+            document.removeEventListener('drag', _boundParentDrag, true);
+            _boundParentDrag = null;
         }
+        if (_dragRaf) {
+            window.cancelAnimationFrame(_dragRaf);
+            _dragRaf = null;
+        }
+        _pendingDragEvent = null;
+        _wasOverIframe = false;
         _externalDrag = null;
         _dotNetRef = null;
     }

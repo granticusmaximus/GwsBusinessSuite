@@ -583,6 +583,15 @@
         {
         <div class="sentinel-document">
             <div class="sentinel-document-toolbar">
+                @if (CanGoBack)
+                {
+                    <button type="button" class="sentinel-nav-back"
+                            aria-label="@($"Go back{(BackStackTargetTitle is { } backTitle ? $" to {backTitle}" : string.Empty)}")"
+                            title="@($"Go back{(BackStackTargetTitle is { } backTitle2 ? $" to {backTitle2}" : string.Empty)}")"
+                            @onclick="GoBackAsync" disabled="@IsBusy">
+                        <i class="bi bi-arrow-90deg-left" aria-hidden="true"></i>
+                    </button>
+                }
                 <nav class="sentinel-document-context" aria-label="Page breadcrumb">
                     @if (CurrentParentNode() is { } parentBreadcrumb)
                     {
@@ -1631,6 +1640,50 @@
     private Guid? SelectedPageId { get; set; }
     private Guid? SelectedDatabaseId { get; set; }
     private Guid? _pendingOpenRowId;
+
+    // Verified finding: clicking a page link, backlink, mention, or search result had no way
+    // back to wherever you clicked it from - the breadcrumb only ever shows the target page's
+    // own folder-tree ancestors, not the page you actually came from, and Blazor Server never
+    // pushed a browser history entry for in-app navigation (SelectedPageId/SelectedDatabaseId
+    // are internal state, not routed URLs), so the browser Back button did nothing useful either.
+    // This is a plain in-memory LIFO stack, not full browser-style back/forward - "get back to
+    // where I was" is the actual ask, not a redo/forward feature.
+    private readonly Stack<(Guid? PageId, Guid? DatabaseId)> _navigationBackStack = new();
+    private bool CanGoBack => _navigationBackStack.Count > 0;
+
+    private string? BackStackTargetTitle
+    {
+        get
+        {
+            if (_navigationBackStack.Count == 0) return null;
+            var (pageId, databaseId) = _navigationBackStack.Peek();
+            if (pageId is { } previousPageId) return WikiPages.FirstOrDefault(p => p.Id == previousPageId)?.Title;
+            if (databaseId is { } previousDatabaseId) return WikiDatabases.FirstOrDefault(d => d.Id == previousDatabaseId)?.Title;
+            return null;
+        }
+    }
+
+    private void PushCurrentLocationToBackStack(bool recordHistory, Guid? newPageId, Guid? newDatabaseId)
+    {
+        if (!recordHistory) return;
+        if (SelectedPageId is null && SelectedDatabaseId is null) return;
+        if (SelectedPageId == newPageId && SelectedDatabaseId == newDatabaseId) return;
+        _navigationBackStack.Push((SelectedPageId, SelectedDatabaseId));
+    }
+
+    private async Task GoBackAsync()
+    {
+        if (_navigationBackStack.Count == 0) return;
+        var (pageId, databaseId) = _navigationBackStack.Pop();
+        if (pageId is { } previousPageId)
+        {
+            await OpenPageAsync(previousPageId, recordHistory: false);
+        }
+        else if (databaseId is { } previousDatabaseId)
+        {
+            await OpenDatabaseAsync(previousDatabaseId, recordHistory: false);
+        }
+    }
     private bool _canEditOpenDatabase = true;
     private string SelectedDatabaseTitle => SelectedDatabaseId is { } databaseId
         ? WikiDatabases.FirstOrDefault(database => database.Id == databaseId)?.Title ?? string.Empty
@@ -3492,6 +3545,11 @@
         CreateNewPage();
         Editor.Title = template.Title;
         Editor.BlocksJson = WikiBlockJson.Serialize(template.Blocks);
+        // Verified finding: the starter gallery shows each template's icon in its own menu
+        // item, but the created page never actually got it - CreateNewPage() resets Editor to a
+        // blank model and this method only copied Title/BlocksJson across, leaving Icon at its
+        // default (none) regardless of which template was picked.
+        Editor.Icon = template.Icon;
         StatusMessage = $"Ready to create a new page from '{template.Name}'.";
     }
 
@@ -3504,7 +3562,9 @@
         StatusMessage = $"Created database '{database.Title}'.";
     });
 
-    private async Task OpenDatabaseAsync(Guid wikiDatabaseId)
+    private Task OpenDatabaseAsync(Guid wikiDatabaseId) => OpenDatabaseAsync(wikiDatabaseId, recordHistory: true);
+
+    private async Task OpenDatabaseAsync(Guid wikiDatabaseId, bool recordHistory)
     {
         // Flush any pending page-editor autosave before this method blanks SelectedPageId out
         // from under it - otherwise the in-progress edit becomes orphaned in memory and is
@@ -3519,6 +3579,7 @@
         }
         _canEditOpenDatabase = await CanAccessPageOrDatabaseAsync(wikiDatabaseId, isDatabase: true, SentinelAccessLevels.Edit);
 
+        PushCurrentLocationToBackStack(recordHistory, newPageId: null, newDatabaseId: wikiDatabaseId);
         _mobileWorkspaceNavOpen = false;
         ExpandAncestorPath(wikiDatabaseId);
         await DeactivateBlockEditorAsync();
@@ -3577,7 +3638,9 @@
         }
     }
 
-    private async Task OpenPageAsync(Guid wikiPageId)
+    private Task OpenPageAsync(Guid wikiPageId) => OpenPageAsync(wikiPageId, recordHistory: true);
+
+    private async Task OpenPageAsync(Guid wikiPageId, bool recordHistory)
     {
         // Flush any pending autosave from whatever was previously open before this method
         // replaces Editor with the target page's data - otherwise an in-progress edit is
@@ -3602,6 +3665,7 @@
                 return;
             }
 
+            PushCurrentLocationToBackStack(recordHistory, newPageId: page.Id, newDatabaseId: null);
             _mobileWorkspaceNavOpen = false;
             SearchQuery = string.Empty;
             WorkspaceSearchResults = new();

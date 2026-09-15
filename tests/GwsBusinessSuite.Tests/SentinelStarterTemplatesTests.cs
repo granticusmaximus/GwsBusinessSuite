@@ -14,6 +14,16 @@ public sealed class SentinelStarterTemplatesTests
     }
 
     [Fact]
+    public void All_ShouldOfferAToDoListTemplate_WithAtLeastOneToDoBlock()
+    {
+        var template = SentinelStarterTemplates.Find("todo-list");
+
+        template.Should().NotBeNull();
+        template!.Icon.Should().NotBeNullOrWhiteSpace();
+        template.Blocks.Should().Contain(block => block.Type == WikiBlockTypes.ToDo);
+    }
+
+    [Fact]
     public void Find_ShouldBeCaseInsensitiveAndReturnNullForAnUnknownKey()
     {
         SentinelStarterTemplates.Find("MEETING-NOTES").Should().NotBeNull();

@@ -915,10 +915,11 @@ else
                         <div class="wiki-db-board-column-header fw-semibold small mb-2">@group.Label <span class="text-secondary">(@group.Rows.Count)</span></div>
                         @foreach (var row in group.Rows)
                         {
-                            <div class="wiki-db-board-card" draggable="true" @ondragstart="() => StartDragRow(row)" @ondragend="EndDragRow">
+                            <div class="wiki-db-board-card" draggable="true" @onclick="() => OpenRow(row)"
+                                 @ondragstart="() => StartDragRow(row)" @ondragend="EndDragRow">
                                 <div class="d-flex align-items-center justify-content-between gap-2">
                                     <div class="fw-semibold small text-truncate">@(GetText(row, titleProp) ?? "Untitled")</div>
-                                    <button type="button" class="btn btn-xs btn-link p-0" @onclick="() => OpenRow(row)" title="Open as page">
+                                    <button type="button" class="btn btn-xs btn-link p-0" @onclick="() => OpenRow(row)" @onclick:stopPropagation="true" title="Open as page">
                                         Open
                                     </button>
                                 </div>
@@ -942,6 +943,7 @@ else
                                 <select class="form-select form-select-sm wiki-db-board-card-move mt-2"
                                         aria-label="@($"Move \"{GetText(row, titleProp) ?? "Untitled"}\" to another column")"
                                         @onchange="e => MoveRowToBoardCellAsync(row, groupByProperty, secondaryProperty, (string)e.Value!)"
+                                        @onclick:stopPropagation="true"
                                         disabled="@IsBusy">
                                     <option value="@MovePlaceholderValue" selected>Move to&hellip;</option>
                                     @if (secondaryProperty is null)
