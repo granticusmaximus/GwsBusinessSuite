@@ -42,7 +42,33 @@ public sealed record FederalGovernmentCoverage(
     IReadOnlyList<FederalNewsItem> SenateNews,
     IReadOnlyList<FederalNewsItem> HouseNews,
     FloorStatus SenateFloor,
-    FloorStatus HouseFloor);
+    FloorStatus HouseFloor,
+    IReadOnlyList<CivicHearing> Hearings);
+
+// One merged, chamber-tagged, chronological list rather than split Senate/House fields like
+// votes/news - hearings read as a single "what's coming up" timeline, not a side-by-side grid.
+// No filtering on MeetingType (Hearing/Markup/Open Business Meeting/etc.) - verified live
+// against api.congress.gov that real committee proceedings routinely carry types other than
+// literally "Hearing" (markups include witness testimony too), so all are shown with the type
+// displayed rather than some silently hidden.
+// WatchUrl comes from the API's videos[] field, which - verified live - can already hold a
+// working link (Senate's own senate.gov/isvp/ player, or a direct YouTube link) even for a
+// still-*scheduled* meeting, not just a post-hearing recording; no auth wall on either source
+// (C-SPAN's own live channel does have one - confirmed both by a prior comment on
+// HouseLatestFloorUrl below and a live fetch of c-span.org/live/ - which is why that was
+// rejected as a source). CommitteePageUrl (committees[].url) is only the fallback once no video
+// exists yet.
+public sealed record CivicHearing(
+    string Title,
+    string Chamber,
+    string CommitteeName,
+    string MeetingType,
+    string Status,
+    DateTimeOffset? StartAt,
+    string Location,
+    string? WatchUrl,
+    string? CommitteePageUrl,
+    string DetailUrl);
 
 public sealed record FederalNewsItem(
     string Title,

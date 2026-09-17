@@ -31,8 +31,24 @@ public sealed class FederalCivicFeedService(
     private const string HouseNewsCacheKey = "federal-civic:news:house";
     private const string SenateFloorCacheKey = "federal-civic:floor:senate";
     private const string HouseFloorCacheKey = "federal-civic:floor:house";
+    private const string HearingsCacheKey = "federal-civic:hearings";
     private static readonly TimeSpan CacheDuration = TimeSpan.FromHours(1);
     private const int MaxNewsItemsPerChamber = 8;
+    private const int MaxHearingsTotal = 30;
+
+    // Kept deliberately small: unlike the news/floor-status calls above (one request each),
+    // each list item here needs its OWN detail request (no bulk detail endpoint exists), so
+    // this fans out to 2x this many HTTP calls per chamber per hourly refresh. Verified live
+    // that a page size of 25 (50 detail calls/chamber/refresh) exhausts the public DEMO_KEY's
+    // rate limit within a single refresh, failing most detail fetches with 429 (handled
+    // gracefully per-item, but leaves most hearings missing) - 8 keeps this sustainable on
+    // DEMO_KEY while still surfacing the most recently updated meetings per chamber.
+    private const int HearingsListPageSize = 8;
+
+    // The committee-meeting endpoint requires a specific congress number in its path (unlike
+    // the bill/congressional-record endpoints above, which query across all congresses by
+    // date). The 119th Congress runs January 2025 - January 2027; bump this every two years.
+    private const int CurrentCongressNumber = 119;
 
     // In-session is approximated from how recently the official Congressional Record was
     // published for a chamber - Congress doesn't sit every day (weekends, recesses), so a
@@ -61,6 +77,9 @@ public sealed class FederalCivicFeedService(
     public FloorStatus GetCachedHouseFloorOrEmpty() =>
         cache.TryGetValue(HouseFloorCacheKey, out FloorStatus? cached) && cached is not null ? cached : EmptyFloorStatus;
 
+    public IReadOnlyList<CivicHearing> GetCachedHearingsOrEmpty() =>
+        cache.TryGetValue(HearingsCacheKey, out IReadOnlyList<CivicHearing>? cached) && cached is not null ? cached : [];
+
     private static readonly FloorStatus EmptyFloorStatus = new(false, string.Empty, null, null);
 
     public async Task<IReadOnlyList<CongressionalTranscriptSummary>> ListTranscriptArchiveAsync(
@@ -85,7 +104,8 @@ public sealed class FederalCivicFeedService(
     {
         var newsTask = RefreshNewsAsync(ct);
         var floorTask = RefreshFloorStatusAsync(ct);
-        await Task.WhenAll(newsTask, floorTask);
+        var hearingsTask = RefreshHearingsAsync(ct);
+        await Task.WhenAll(newsTask, floorTask, hearingsTask);
     }
 
     private async Task RefreshNewsAsync(CancellationToken ct)
@@ -236,6 +256,85 @@ public sealed class FederalCivicFeedService(
         }
     }
 
+    // List-then-detail, same shape as the Senate votes loader elsewhere in this codebase: the
+    // list endpoint only returns eventId/url/updateDate, so a per-eventId detail call is
+    // required for title/status/committees/videos. Each detail call is individually
+    // try/caught (returns null on failure) rather than the whole method failing, since dozens
+    // of per-item HTTP calls run per chamber and one bad eventId (a transient 404/500) must not
+    // blank out everything else that succeeded.
+    private async Task RefreshHearingsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var senateTask = FetchChamberHearingsAsync("senate", ct);
+            var houseTask = FetchChamberHearingsAsync("house", ct);
+            await Task.WhenAll(senateTask, houseTask);
+
+            var merged = senateTask.Result
+                .Concat(houseTask.Result)
+                .OrderBy(h => h.StartAt ?? DateTimeOffset.MaxValue)
+                .Take(MaxHearingsTotal)
+                .ToList();
+
+            cache.Set(HearingsCacheKey, (IReadOnlyList<CivicHearing>)merged, CacheDuration);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Federal Civic Feed: hearings refresh failed");
+        }
+    }
+
+    private async Task<List<CivicHearing>> FetchChamberHearingsAsync(string chamber, CancellationToken ct)
+    {
+        var listUrl = $"https://api.congress.gov/v3/committee-meeting/{CurrentCongressNumber}/{chamber}" +
+            $"?api_key={Uri.EscapeDataString(settings.ApiKey)}&limit={HearingsListPageSize}&format=json";
+        var listResponse = await http.GetFromJsonAsync<CommitteeMeetingListResponse>(listUrl, JsonOptions, ct);
+        var items = listResponse?.CommitteeMeetings ?? [];
+
+        var chamberLabel = string.Equals(chamber, "senate", StringComparison.OrdinalIgnoreCase) ? "Senate" : "House";
+        var detailTasks = items
+            .Where(i => !string.IsNullOrWhiteSpace(i.EventId))
+            .Select(i => FetchHearingDetailAsync(chamber, i.EventId!, chamberLabel, ct));
+        var details = await Task.WhenAll(detailTasks);
+        return details.Where(h => h is not null).Select(h => h!).ToList();
+    }
+
+    private async Task<CivicHearing?> FetchHearingDetailAsync(string chamber, string eventId, string chamberLabel, CancellationToken ct)
+    {
+        try
+        {
+            var detailUrl = $"https://api.congress.gov/v3/committee-meeting/{CurrentCongressNumber}/{chamber}/{eventId}" +
+                $"?api_key={Uri.EscapeDataString(settings.ApiKey)}&format=json";
+            var response = await http.GetFromJsonAsync<CommitteeMeetingDetailResponse>(detailUrl, JsonOptions, ct);
+            var meeting = response?.CommitteeMeeting;
+            if (meeting is null)
+            {
+                return null;
+            }
+
+            var location = string.Join(", ", new[] { meeting.Location?.Room, meeting.Location?.Building }
+                .Where(s => !string.IsNullOrWhiteSpace(s)));
+            var committee = meeting.Committees?.FirstOrDefault();
+
+            return new CivicHearing(
+                string.IsNullOrWhiteSpace(meeting.Title) ? $"{committee?.Name ?? chamberLabel} {meeting.Type ?? "meeting"}" : meeting.Title,
+                chamberLabel,
+                committee?.Name ?? chamberLabel,
+                meeting.Type ?? "Meeting",
+                meeting.MeetingStatus ?? "Scheduled",
+                DateTimeOffset.TryParse(meeting.Date, out var startAt) ? startAt : null,
+                location,
+                meeting.Videos?.FirstOrDefault()?.Url,
+                committee?.Url,
+                $"https://www.congress.gov/event/{CurrentCongressNumber}th-congress/{chamber}-event/{eventId}");
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Federal Civic Feed: hearing detail fetch failed for {Chamber} event {EventId}", chamber, eventId);
+            return null;
+        }
+    }
+
     private async Task<CongressionalTranscriptSummary> UpsertTranscriptAsync(
         string chamber, DateOnly sessionDate, string pdfUrl, CongressionalRecordIssue issue, CancellationToken ct)
     {
@@ -326,5 +425,38 @@ public sealed class FederalCivicFeedService(
 
     private sealed record HouseBroadcastFile(
         [property: JsonPropertyName("type")] string? Type,
+        [property: JsonPropertyName("url")] string? Url);
+
+    // Field names/casing verified against a live api.congress.gov call (DEMO_KEY), not just
+    // the published docs - the list endpoint only carries eventId/url/updateDate/chamber, and
+    // videos[] on the detail endpoint can already hold a working senate.gov/isvp/ or YouTube
+    // link even for a still-Scheduled meeting, not only a post-hearing recording.
+    private sealed record CommitteeMeetingListResponse(
+        [property: JsonPropertyName("committeeMeetings")] List<CommitteeMeetingListItem>? CommitteeMeetings);
+
+    private sealed record CommitteeMeetingListItem(
+        [property: JsonPropertyName("eventId")] string? EventId);
+
+    private sealed record CommitteeMeetingDetailResponse(
+        [property: JsonPropertyName("committeeMeeting")] CommitteeMeetingDetail? CommitteeMeeting);
+
+    private sealed record CommitteeMeetingDetail(
+        [property: JsonPropertyName("title")] string? Title,
+        [property: JsonPropertyName("type")] string? Type,
+        [property: JsonPropertyName("meetingStatus")] string? MeetingStatus,
+        [property: JsonPropertyName("date")] string? Date,
+        [property: JsonPropertyName("location")] CommitteeMeetingLocation? Location,
+        [property: JsonPropertyName("committees")] List<CommitteeMeetingCommittee>? Committees,
+        [property: JsonPropertyName("videos")] List<CommitteeMeetingVideo>? Videos);
+
+    private sealed record CommitteeMeetingLocation(
+        [property: JsonPropertyName("room")] string? Room,
+        [property: JsonPropertyName("building")] string? Building);
+
+    private sealed record CommitteeMeetingCommittee(
+        [property: JsonPropertyName("name")] string? Name,
+        [property: JsonPropertyName("url")] string? Url);
+
+    private sealed record CommitteeMeetingVideo(
         [property: JsonPropertyName("url")] string? Url);
 }

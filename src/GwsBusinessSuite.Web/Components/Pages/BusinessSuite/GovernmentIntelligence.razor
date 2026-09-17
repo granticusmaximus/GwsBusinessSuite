@@ -313,6 +313,53 @@
                     </section>
                 </div>
 
+                <section class="civic-panel">
+                    <CivicWatchPanelHeader Eyebrow="Committee schedule" Title="Congressional hearings" Count="@FilteredHearings.Count" Icon="bi-mic" />
+
+                    <div class="event-filter-row" role="group" aria-label="Filter hearings">
+                        <button type="button" class="event-chip @(_hearingFilter == "upcoming" ? "is-on" : "")"
+                                @onclick='() => _hearingFilter = "upcoming"'>
+                            Upcoming
+                        </button>
+                        <button type="button" class="event-chip @(_hearingFilter == "all" ? "is-on" : "")"
+                                @onclick='() => _hearingFilter = "all"'>
+                            All / recent
+                        </button>
+                    </div>
+
+                    @if (_snapshot.Federal.Hearings.Count == 0)
+                    {
+                        <CivicWatchEmptyState Icon="bi-mic-mute" Message="No committee meetings were returned." />
+                    }
+                    else if (FilteredHearings.Count == 0)
+                    {
+                        <CivicWatchEmptyState Icon="bi-funnel" Message="No meetings match this filter." />
+                    }
+                    else
+                    {
+                        <div class="date-list hearing-list">
+                            @foreach (var hearing in FilteredHearings)
+                            {
+                                <div class="hearing-row">
+                                    <time><strong>@HearingDay(hearing)</strong><small>@HearingMonth(hearing)</small></time>
+                                    <span>
+                                        <strong>@hearing.Title</strong>
+                                        <small>@hearing.Chamber · @hearing.CommitteeName · @hearing.MeetingType · <em class="hearing-status">@hearing.Status</em></small>
+                                    </span>
+                                    @{ var watchUrl = hearing.WatchUrl ?? hearing.CommitteePageUrl; }
+                                    @if (!string.IsNullOrWhiteSpace(watchUrl))
+                                    {
+                                        <a class="hearing-link" href="@watchUrl" target="_blank" rel="noopener noreferrer">
+                                            @(string.IsNullOrWhiteSpace(hearing.WatchUrl) ? "Hearing details" : "Watch") <i class="bi bi-arrow-up-right"></i>
+                                        </a>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                    <p class="panel-note"><i class="bi bi-clock-history"></i> Committee schedule from Congress.gov refreshes hourly. "Watch" links to whatever video source the committee has published (its own site, YouTube, or the Senate's ISVP player) - it can appear before a meeting starts and may show it live, but isn't guaranteed for every meeting.</p>
+                </section>
+
                 <div class="chamber-grid">
                     <section class="civic-panel">
                         <CivicWatchPanelHeader Eyebrow="U.S. Senate" Title="Recent news" Count="@_snapshot.Federal.SenateNews.Count" Icon="bi-newspaper" />
@@ -493,6 +540,22 @@
 
     private static string EventDay(CivicEvent item) => item.StartAt?.Day.ToString("00", CultureInfo.InvariantCulture) ?? "—";
     private static string EventMonth(CivicEvent item) => item.StartAt?.ToString("MMM", CultureInfo.InvariantCulture) ?? "TBD";
+
+    // ── Federal hearing filter ────────────────────────────────────────────
+    private string _hearingFilter = "upcoming";
+
+    // "Upcoming" keeps a small grace window (rather than a hard cutoff at "now") so a hearing
+    // that just started a few minutes ago doesn't immediately vanish from the default view.
+    private IReadOnlyList<CivicHearing> FilteredHearings =>
+        _snapshot is null
+            ? []
+            : _snapshot.Federal.Hearings
+                .Where(h => _hearingFilter != "upcoming" || h.StartAt is null || h.StartAt >= DateTimeOffset.UtcNow.AddHours(-6))
+                .OrderBy(h => h.StartAt ?? DateTimeOffset.MaxValue)
+                .ToList();
+
+    private static string HearingDay(CivicHearing item) => item.StartAt?.Day.ToString("00", CultureInfo.InvariantCulture) ?? "—";
+    private static string HearingMonth(CivicHearing item) => item.StartAt?.ToString("MMM", CultureInfo.InvariantCulture) ?? "TBD";
     private static string MeetingMeta(CivicMeeting meeting) =>
         string.IsNullOrWhiteSpace(meeting.Location) ? meeting.Source : $"{meeting.Location} · {meeting.Source}";
     private static string EventMeta(CivicEvent item)

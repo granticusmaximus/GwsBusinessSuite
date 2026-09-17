@@ -95,6 +95,16 @@
 .date-list > a > i { color: var(--civic-muted); font-size: .68rem; }
 .panel-note { display: flex; gap: .4rem; margin: .7rem 0 0; padding-top: .65rem; border-top: 1px solid var(--civic-line); color: var(--civic-muted); font-size: .6rem; line-height: 1.45; }
 
+/* Same grid rhythm as .date-list > a, but a plain row (not one big link) - a hearing needs its
+   own separately-clickable action link, not the whole row acting as an href. */
+.hearing-list { margin-top: .6rem; }
+.hearing-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .7rem; padding: .65rem 0; border-top: 1px solid var(--civic-line); }
+.hearing-row:first-child { padding-top: 0; border-top: 0; }
+.hearing-status { font-style: normal; color: var(--civic-accent-strong); font-weight: 700; }
+.hearing-link { flex-shrink: 0; display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .65rem; border: 1px solid var(--civic-line); border-radius: 999px; color: var(--civic-ink); font-size: .64rem; font-weight: 700; text-decoration: none; white-space: nowrap; }
+.hearing-link:hover { border-color: var(--civic-accent-strong); color: var(--civic-accent-strong); }
+.hearing-link i { font-size: .6rem; }
+
 .source-note { margin: 0; }
 
 .civic-panel ::deep details > summary { color: var(--civic-accent-strong); font-size: .68rem; }

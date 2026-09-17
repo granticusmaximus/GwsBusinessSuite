@@ -382,7 +382,8 @@ public sealed class GovernmentIntelligenceService(
             federalCivicFeed.GetCachedSenateNewsOrEmpty(),
             federalCivicFeed.GetCachedHouseNewsOrEmpty(),
             federalCivicFeed.GetCachedSenateFloorOrEmpty(),
-            federalCivicFeed.GetCachedHouseFloorOrEmpty());
+            federalCivicFeed.GetCachedHouseFloorOrEmpty(),
+            federalCivicFeed.GetCachedHearingsOrEmpty());
     }
 
     private async Task<IReadOnlyList<ChamberVoteSummary>> LoadSenateVotesAsync(CancellationToken ct)
@@ -1496,7 +1497,8 @@ public sealed class GovernmentIntelligenceService(
             [],
             [],
             EmptyFloorStatus,
-            EmptyFloorStatus);
+            EmptyFloorStatus,
+            []);
 
     private static readonly FloorStatus EmptyFloorStatus = new(false, string.Empty, null, null);
 

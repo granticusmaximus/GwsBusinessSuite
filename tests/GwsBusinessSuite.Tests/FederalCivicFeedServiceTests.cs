@@ -57,6 +57,42 @@ public sealed class FederalCivicFeedServiceTests
 
     private const string HouseBroadcastNotLiveJson = """[ { "isLiveBroadcast": "False", "asset": null } ]""";
 
+    // Field names/casing here mirror a live api.congress.gov response captured during
+    // implementation (DEMO_KEY), not just the published docs - videos[] can already carry a
+    // real senate.gov/isvp/ or YouTube link even for a still-Scheduled meeting.
+    private const string EmptyCommitteeMeetingListJson = """{ "committeeMeetings": [] }""";
+
+    private static string CommitteeMeetingListJson(params string[] eventIds) =>
+        $$"""{ "committeeMeetings": [ {{string.Join(",", eventIds.Select(id => $$"""{ "eventId": "{{id}}" }"""))}} ] }""";
+
+    private const string SenateHearingWithVideoJson = """
+        {
+          "committeeMeeting": {
+            "title": "Oversight hearing on public health",
+            "type": "Hearing",
+            "meetingStatus": "Scheduled",
+            "date": "2026-09-24T14:00:00Z",
+            "location": { "room": "430", "building": "Dirksen Senate Office Building" },
+            "committees": [ { "name": "Senate Health, Education, Labor, and Pensions", "url": "https://api.congress.gov/v3/committee/senate/sshr00" } ],
+            "videos": [ { "url": "https://www.senate.gov/isvp/?comm=help&filename=help092426" } ]
+          }
+        }
+        """;
+
+    private const string HouseMarkupNoVideoJson = """
+        {
+          "committeeMeeting": {
+            "title": "Markup of H.R. 1234",
+            "type": "Markup",
+            "meetingStatus": "Scheduled",
+            "date": "2026-09-25T10:00:00Z",
+            "location": { "room": "2141", "building": "Rayburn House Office Building" },
+            "committees": [ { "name": "House Judiciary", "url": "https://judiciary.house.gov" } ],
+            "videos": []
+          }
+        }
+        """;
+
     [Fact]
     public async Task RefreshAsync_ShouldSplitBillsIntoSenateAndHouseNewsCaches()
     {
@@ -221,6 +257,115 @@ public sealed class FederalCivicFeedServiceTests
 
         var everything = await fixture.Service.ListTranscriptArchiveAsync();
         everything.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ShouldPopulateHearingsFromBothChambersWithCorrectMapping()
+    {
+        await using var fixture = await Fixture.CreateAsync(request => request.RequestUri!.AbsoluteUri switch
+        {
+            var uri when uri.Contains("/committee-meeting/119/senate/1001") => Json(SenateHearingWithVideoJson),
+            var uri when uri.Contains("/committee-meeting/119/senate") => Json(CommitteeMeetingListJson("1001")),
+            var uri when uri.Contains("/committee-meeting/119/house/2001") => Json(HouseMarkupNoVideoJson),
+            var uri when uri.Contains("/committee-meeting/119/house") => Json(CommitteeMeetingListJson("2001")),
+            var uri when uri.Contains("/v3/bill") => Json(BillsJson),
+            var uri when uri.Contains("/v3/congressional-record") => Json(RecordJson.Replace("TODAY", "1999-01-01")),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        });
+
+        await fixture.Service.RefreshAsync();
+
+        var hearings = fixture.Service.GetCachedHearingsOrEmpty();
+        hearings.Should().HaveCount(2);
+
+        var senateHearing = hearings.Should().ContainSingle(h => h.Chamber == "Senate").Subject;
+        senateHearing.Title.Should().Be("Oversight hearing on public health");
+        senateHearing.MeetingType.Should().Be("Hearing", "no type filtering should hide anything");
+        senateHearing.CommitteeName.Should().Be("Senate Health, Education, Labor, and Pensions");
+        senateHearing.Status.Should().Be("Scheduled");
+        senateHearing.Location.Should().Be("430, Dirksen Senate Office Building");
+
+        var houseHearing = hearings.Should().ContainSingle(h => h.Chamber == "House").Subject;
+        houseHearing.MeetingType.Should().Be("Markup", "markups should not be filtered out even though the user only asked about hearings colloquially");
+    }
+
+    [Fact]
+    public async Task RefreshAsync_WhenAMeetingHasAPublishedVideo_ShouldPopulateWatchUrlEvenThoughItIsStillScheduled()
+    {
+        await using var fixture = await Fixture.CreateAsync(request => request.RequestUri!.AbsoluteUri switch
+        {
+            var uri when uri.Contains("/committee-meeting/119/senate/1001") => Json(SenateHearingWithVideoJson),
+            var uri when uri.Contains("/committee-meeting/119/senate") => Json(CommitteeMeetingListJson("1001")),
+            var uri when uri.Contains("/committee-meeting/119/house") => Json(EmptyCommitteeMeetingListJson),
+            var uri when uri.Contains("/v3/bill") => Json(BillsJson),
+            var uri when uri.Contains("/v3/congressional-record") => Json(RecordJson.Replace("TODAY", "1999-01-01")),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        });
+
+        await fixture.Service.RefreshAsync();
+
+        var hearing = fixture.Service.GetCachedHearingsOrEmpty().Should().ContainSingle().Subject;
+        hearing.WatchUrl.Should().Be("https://www.senate.gov/isvp/?comm=help&filename=help092426",
+            "the meeting is still Scheduled - videos[] is not recording-only");
+        hearing.CommitteePageUrl.Should().Be("https://api.congress.gov/v3/committee/senate/sshr00",
+            "the committee page should still be captured independently of WatchUrl");
+    }
+
+    [Fact]
+    public async Task RefreshAsync_WhenAMeetingHasNoPublishedVideo_ShouldLeaveWatchUrlNullButKeepTheCommitteePageUrl()
+    {
+        await using var fixture = await Fixture.CreateAsync(request => request.RequestUri!.AbsoluteUri switch
+        {
+            var uri when uri.Contains("/committee-meeting/119/house/2001") => Json(HouseMarkupNoVideoJson),
+            var uri when uri.Contains("/committee-meeting/119/house") => Json(CommitteeMeetingListJson("2001")),
+            var uri when uri.Contains("/committee-meeting/119/senate") => Json(EmptyCommitteeMeetingListJson),
+            var uri when uri.Contains("/v3/bill") => Json(BillsJson),
+            var uri when uri.Contains("/v3/congressional-record") => Json(RecordJson.Replace("TODAY", "1999-01-01")),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        });
+
+        await fixture.Service.RefreshAsync();
+
+        var hearing = fixture.Service.GetCachedHearingsOrEmpty().Should().ContainSingle().Subject;
+        hearing.WatchUrl.Should().BeNull();
+        hearing.CommitteePageUrl.Should().Be("https://judiciary.house.gov");
+    }
+
+    [Fact]
+    public async Task RefreshAsync_WhenTheCommitteeMeetingListEndpointFails_ShouldLeaveHearingsCacheEmptyAndNotThrow()
+    {
+        await using var fixture = await Fixture.CreateAsync(request => request.RequestUri!.AbsoluteUri switch
+        {
+            var uri when uri.Contains("/committee-meeting/") => new HttpResponseMessage(HttpStatusCode.InternalServerError),
+            var uri when uri.Contains("/v3/bill") => Json(BillsJson),
+            var uri when uri.Contains("/v3/congressional-record") => Json(RecordJson.Replace("TODAY", "1999-01-01")),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        });
+
+        var act = async () => await fixture.Service.RefreshAsync();
+
+        await act.Should().NotThrowAsync();
+        fixture.Service.GetCachedHearingsOrEmpty().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RefreshAsync_WhenOneMeetingDetailCallFails_ShouldStillPopulateTheOnesThatSucceeded()
+    {
+        await using var fixture = await Fixture.CreateAsync(request => request.RequestUri!.AbsoluteUri switch
+        {
+            var uri when uri.Contains("/committee-meeting/119/senate/1001") => Json(SenateHearingWithVideoJson),
+            var uri when uri.Contains("/committee-meeting/119/senate/9999") => new HttpResponseMessage(HttpStatusCode.InternalServerError),
+            var uri when uri.Contains("/committee-meeting/119/senate") => Json(CommitteeMeetingListJson("1001", "9999")),
+            var uri when uri.Contains("/committee-meeting/119/house") => Json(EmptyCommitteeMeetingListJson),
+            var uri when uri.Contains("/v3/bill") => Json(BillsJson),
+            var uri when uri.Contains("/v3/congressional-record") => Json(RecordJson.Replace("TODAY", "1999-01-01")),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        });
+
+        await fixture.Service.RefreshAsync();
+
+        fixture.Service.GetCachedHearingsOrEmpty().Should().ContainSingle(h => h.Title == "Oversight hearing on public health",
+            "one bad eventId's detail call failing must not blank out the whole batch");
     }
 
     private static HttpResponseMessage Json(string body) => new(HttpStatusCode.OK)

@@ -13,6 +13,7 @@ public interface IFederalCivicFeedService
     IReadOnlyList<FederalNewsItem> GetCachedHouseNewsOrEmpty();
     FloorStatus GetCachedSenateFloorOrEmpty();
     FloorStatus GetCachedHouseFloorOrEmpty();
+    IReadOnlyList<CivicHearing> GetCachedHearingsOrEmpty();
 
     // The archive/detail view CongressionalTranscriptSummary's own doc comment refers to -
     // FloorStatus.LatestTranscript only ever surfaces the single newest transcript per

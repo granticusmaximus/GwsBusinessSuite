@@ -34,6 +34,23 @@ public sealed class GovernmentIntelligenceServiceTests
     }
 
     [Fact]
+    public async Task GetSnapshotAsync_ShouldPassFederalHearingsThroughFromTheFeedServiceUnchanged()
+    {
+        var hearings = new List<CivicHearing>
+        {
+            new("Oversight hearing", "Senate", "Senate HELP", "Hearing", "Scheduled",
+                new DateTimeOffset(2026, 9, 24, 14, 0, 0, TimeSpan.Zero), "Dirksen 430",
+                "https://www.senate.gov/isvp/?comm=help", "https://help.senate.gov",
+                "https://www.congress.gov/event/119th-congress/senate-event/338770")
+        };
+        var service = CreateService(hearings: hearings);
+
+        var snapshot = await service.GetSnapshotAsync(forceRefresh: true);
+
+        snapshot.Federal.Hearings.Should().BeEquivalentTo(hearings);
+    }
+
+    [Fact]
     public async Task GetSnapshotAsync_ShouldParseStatePressReleasesAndSignedLegislation()
     {
         var service = CreateService();
@@ -186,7 +203,8 @@ public sealed class GovernmentIntelligenceServiceTests
         snapshot.Federal.HouseVotes.Should().ContainSingle();
     }
 
-    private static GovernmentIntelligenceService CreateService(Action? onRequest = null, HashSet<string>? failingUrls = null)
+    private static GovernmentIntelligenceService CreateService(
+        Action? onRequest = null, HashSet<string>? failingUrls = null, IReadOnlyList<CivicHearing>? hearings = null)
     {
         var responses = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -457,7 +475,7 @@ public sealed class GovernmentIntelligenceServiceTests
             memoryCache,
             NullLogger<GovernmentIntelligenceService>.Instance,
             new StubLocalEventsScraperService(),
-            new StubFederalCivicFeedService(),
+            new StubFederalCivicFeedService(hearings),
             new FakeOllamaService(),
             new OllamaWorkloadScheduler(),
             Options.Create(new ContentStudioOptions()));
@@ -477,7 +495,7 @@ public sealed class GovernmentIntelligenceServiceTests
     // Federal news/floor status come from the injected feed service's own hourly-cached
     // reads, not from anything BuildFederalCoverageAsync fetches itself - same orthogonal
     // stub shape as StubLocalEventsScraperService above.
-    private sealed class StubFederalCivicFeedService : IFederalCivicFeedService
+    private sealed class StubFederalCivicFeedService(IReadOnlyList<CivicHearing>? hearings = null) : IFederalCivicFeedService
     {
         private static readonly FloorStatus Empty = new(false, string.Empty, null, null);
 
@@ -486,6 +504,7 @@ public sealed class GovernmentIntelligenceServiceTests
         public IReadOnlyList<FederalNewsItem> GetCachedHouseNewsOrEmpty() => [];
         public FloorStatus GetCachedSenateFloorOrEmpty() => Empty;
         public FloorStatus GetCachedHouseFloorOrEmpty() => Empty;
+        public IReadOnlyList<CivicHearing> GetCachedHearingsOrEmpty() => hearings ?? [];
 
         public Task<IReadOnlyList<CongressionalTranscriptSummary>> ListTranscriptArchiveAsync(
             string? chamber = null, int take = 50, CancellationToken ct = default) =>
