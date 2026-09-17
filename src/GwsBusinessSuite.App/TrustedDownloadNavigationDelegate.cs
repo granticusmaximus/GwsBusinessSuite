@@ -30,6 +30,24 @@ internal sealed class TrustedDownloadNavigationDelegate(IWebViewHandler handler)
             return;
         }
 
+        // MauiWebViewNavigationDelegate.DecidePolicy (the base we fall through to below) raises
+        // MAUI's cross-platform Navigating event for every navigation action, main frame or not -
+        // it only special-cases TargetFrame == null (target="_blank"). But the matching Navigated
+        // event is driven by webView:didFinishNavigation:, which WKWebView only ever calls for the
+        // top-level frame; a subframe's own load never produces a WKNavigation/didFinishNavigation
+        // of its own. The page editor's live-preview iframe (a real, same-origin /cms/{slug}/{path}
+        // page, reloaded independently of its parent - see its cache-busting _t= query param) is
+        // exactly this case: MainPage's OnWorkspaceNavigating/StartNavigationTimeout would arm a
+        // watchdog for that reload that can never be cleared, guaranteeing a false "taking too
+        // long to load" exactly 20s later even though the iframe loaded fine. Letting a subframe
+        // navigation through without ever raising MAUI's Navigating event keeps that watchdog
+        // scoped to genuine top-level navigations, which is the only kind it can ever resolve.
+        if (navigationAction.TargetFrame is { MainFrame: false })
+        {
+            decisionHandler(WKNavigationActionPolicy.Allow);
+            return;
+        }
+
         base.DecidePolicy(webView, navigationAction, decisionHandler);
     }
 

@@ -2,6 +2,24 @@ namespace GwsBusinessSuite.App;
 
 public partial class MainPage : ContentPage
 {
+    // TEMPORARY diagnostic - remove once the page-editor loading investigation is done.
+    // App Sandbox blocks writes to a literal /tmp path, so this uses the app's own sandboxed
+    // container instead (visible from Terminal via DebugLogPath).
+    private static readonly string DebugLogPath =
+        Path.Combine(FileSystem.Current.AppDataDirectory, "gws-mainpage-debug.log");
+
+    private static void DebugLog(string message)
+    {
+        try
+        {
+            File.AppendAllText(DebugLogPath, $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
+        }
+        catch (Exception ex)
+        {
+            try { File.AppendAllText(DebugLogPath, $"DebugLog FAILED: {ex}{Environment.NewLine}"); } catch { }
+        }
+    }
+
     private static readonly TimeSpan NavigationTimeout = TimeSpan.FromSeconds(20);
 
     private readonly DeviceSecretStore _deviceSecretStore;
@@ -152,6 +170,7 @@ public partial class MainPage : ContentPage
 
     private void OnWorkspaceNavigating(object? sender, WebNavigatingEventArgs args)
     {
+        DebugLog($"OnWorkspaceNavigating url={args.Url}");
         LoadingOverlay.IsVisible = true;
         if (!Uri.TryCreate(args.Url, UriKind.Absolute, out var uri) || AppEndpoints.IsTrusted(uri))
         {
@@ -159,6 +178,7 @@ public partial class MainPage : ContentPage
             return;
         }
 
+        DebugLog($"OnWorkspaceNavigating: untrusted, cancelling and opening externally url={args.Url}");
         args.Cancel = true;
         LoadingOverlay.IsVisible = false;
         _ = Launcher.Default.OpenAsync(uri);
@@ -166,6 +186,7 @@ public partial class MainPage : ContentPage
 
     private void OnWorkspaceNavigated(object? sender, WebNavigatedEventArgs args)
     {
+        DebugLog($"OnWorkspaceNavigated url={args.Url} result={args.Result}");
         StopNavigationTimeout();
         LoadingOverlay.IsVisible = false;
         if (args.Result == WebNavigationResult.Success)
@@ -184,6 +205,7 @@ public partial class MainPage : ContentPage
     // the overlay's own Cancel button exist so that can never happen again.
     private void StartNavigationTimeout()
     {
+        DebugLog("StartNavigationTimeout");
         StopNavigationTimeout();
         var cts = new CancellationTokenSource();
         _navigationTimeoutCts = cts;
@@ -191,6 +213,7 @@ public partial class MainPage : ContentPage
             task =>
             {
                 if (task.IsCanceled) return;
+                DebugLog("Navigation timeout FIRED");
                 MainThread.BeginInvokeOnMainThread(() =>
                     ShowUnavailable("This page is taking too long to load. Check the connection and try again."));
             },

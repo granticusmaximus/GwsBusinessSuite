@@ -71,6 +71,17 @@ public static class MauiProgram
 		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
 			"TrustedAppleDownloads",
 			(handler, _) => handler.PlatformView.NavigationDelegate = new TrustedDownloadNavigationDelegate(handler));
+		// This ad-hoc-signed local build has no entitlement to reach Apple's SafeBrowsing XPC
+		// service - every navigation's beginSafeBrowsingCheck fails with "Connection invalid"
+		// (confirmed via log stream against com.apple.Safari.SafeBrowsing). Rather than failing
+		// open, this WebKit version leaves the navigation stuck with no Navigated/failure
+		// callback at all, which is what produced the Sentinel page editor's indefinite "taking
+		// too long to load" - the parent shell page loads fine, but the editor's embedded
+		// same-origin iframe never gets past this check. FraudulentWebsiteWarningEnabled is the
+		// public WKPreferences toggle for exactly this feature.
+		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
+			"DisableFraudulentWebsiteWarning",
+			(handler, _) => handler.PlatformView.Configuration.Preferences.FraudulentWebsiteWarningEnabled = false);
 #elif WINDOWS
 		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
 			"TrustedWindowsDownloads",

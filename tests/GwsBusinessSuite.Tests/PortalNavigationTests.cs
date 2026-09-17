@@ -11,6 +11,9 @@ public class PortalNavigationTests
     [InlineData("https://example.com/admin")]
     [InlineData("//example.com/admin")]
     [InlineData("/\\example.com/admin")]
+    [InlineData("/__not-found")]
+    [InlineData("/__NOT-FOUND")]
+    [InlineData("/__not-found?ReturnUrl=%2Fadmin%2Fsentinel")]
     public void ResolvePostLoginPath_ShouldDefaultToDashboard_WhenReturnPathIsMissingOrUnsafe(string? returnUrl)
     {
         PortalNavigation.ResolvePostLoginPath(returnUrl).Should().Be("/admin");
