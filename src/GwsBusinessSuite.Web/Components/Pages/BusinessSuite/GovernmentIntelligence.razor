@@ -1,11 +1,15 @@
 @page "/admin/government-intelligence"
 @rendermode InteractiveServer
-@attribute [Authorize(Policy = "AdminOnly")]
+@* Civic Watch is entirely public-source government data (no confidential business info), so it
+   uses the broader PortalAccess policy (Admin/Author/Contributor) rather than AdminOnly -
+   deliberately widened so more than one admin account can use this section. *@
+@attribute [Authorize(Policy = "PortalAccess")]
 @using System.Globalization
 @using GwsBusinessSuite.Application.GovernmentIntelligence
 @using GwsBusinessSuite.Infrastructure.Services
 @inject IGovernmentIntelligenceService GovernmentService
 @inject ILogger<GovernmentIntelligence> Logger
+@inject IJSRuntime JS
 
 <PageTitle>Civic Watch</PageTitle>
 
@@ -23,6 +27,21 @@
             </button>
         </div>
     </div>
+
+    @if (_showIntroHint)
+    {
+        <div class="gws-hint-banner mb-4" role="status">
+            <i class="bi bi-lightbulb-fill" aria-hidden="true"></i>
+            <span>
+                Civic Watch has three tabs: <strong>Community</strong> (your local town/county government),
+                <strong>State</strong> (Georgia government), and <strong>Federal</strong> (Congress). Each tab's
+                number badge counts what's currently active there. Look for a "Represent &amp; Participate"
+                section on the State and Federal tabs for ways to register to vote, find your polling place,
+                or contact your representatives.
+            </span>
+            <button type="button" class="btn-close ms-auto" aria-label="Dismiss" @onclick="DismissIntroHint"></button>
+        </div>
+    }
 
     @if (!string.IsNullOrWhiteSpace(_errorMessage))
     {
@@ -53,35 +72,35 @@
                 </div>
             </div>
             <div class="briefing-signals" aria-label="Civic Watch source counts">
-                <button class="@SignalClass("community")" @onclick='() => SelectSection("community")'>
+                <button class="@SignalClass("community")" title="@CommunitySignalDescription" @onclick='() => SelectSection("community")'>
                     <i class="bi bi-geo-alt"></i>
-                    <span><strong>@CommunityCount</strong><small>local signals</small></span>
+                    <span><strong>@CommunityCount</strong><small>Community</small></span>
                 </button>
-                <button class="@SignalClass("state")" @onclick='() => SelectSection("state")'>
+                <button class="@SignalClass("state")" title="@StateSignalDescription" @onclick='() => SelectSection("state")'>
                     <i class="bi bi-bank"></i>
-                    <span><strong>@StateCount</strong><small>Georgia actions</small></span>
+                    <span><strong>@StateCount</strong><small>State</small></span>
                 </button>
-                <button class="@SignalClass("federal")" @onclick='() => SelectSection("federal")'>
+                <button class="@SignalClass("federal")" title="@FederalSignalDescription" @onclick='() => SelectSection("federal")'>
                     <i class="bi bi-building"></i>
-                    <span><strong>@FederalCount</strong><small>federal votes</small></span>
+                    <span><strong>@FederalCount</strong><small>Federal</small></span>
                 </button>
             </div>
         </section>
 
         <nav class="scope-nav" aria-label="Civic Watch coverage">
-            <button class="@TabClass("community")" @onclick='() => SelectSection("community")'>
+            <button class="@TabClass("community")" title="@CommunitySignalDescription" @onclick='() => SelectSection("community")'>
                 <i class="bi bi-geo-alt"></i>
-                <span><strong>Community</strong><small>Houston County, Perry &amp; local events</small></span>
+                <span><strong>Community</strong><small>Local government, schools &amp; events</small></span>
                 <b>@CommunityCount</b>
             </button>
-            <button class="@TabClass("state")" @onclick='() => SelectSection("state")'>
+            <button class="@TabClass("state")" title="@StateSignalDescription" @onclick='() => SelectSection("state")'>
                 <i class="bi bi-bank"></i>
-                <span><strong>Georgia</strong><small>Governor, laws &amp; floor votes</small></span>
+                <span><strong>State</strong><small>Governor, laws &amp; floor votes</small></span>
                 <b>@StateCount</b>
             </button>
-            <button class="@TabClass("federal")" @onclick='() => SelectSection("federal")'>
+            <button class="@TabClass("federal")" title="@FederalSignalDescription" @onclick='() => SelectSection("federal")'>
                 <i class="bi bi-building"></i>
-                <span><strong>Congress</strong><small>House, Senate &amp; delegation votes</small></span>
+                <span><strong>Federal</strong><small>House, Senate &amp; delegation votes</small></span>
                 <b>@FederalCount</b>
             </button>
         </nav>
@@ -171,7 +190,7 @@
                                     <option value="month">Next 30 days</option>
                                 </select>
                                 <select class="event-select" value="@_radiusFilter" @onchange="OnRadiusFilterChanged"
-                                        aria-label="Filter events by distance from Kathleen">
+                                        aria-label="@($"Filter events by distance from {_snapshot.AreaLabel}")">
                                     <option value="0">Any distance</option>
                                     <option value="5">Within 5 mi</option>
                                     <option value="10">Within 10 mi</option>
@@ -344,7 +363,7 @@
                                     <time><strong>@HearingDay(hearing)</strong><small>@HearingMonth(hearing)</small></time>
                                     <span>
                                         <strong>@hearing.Title</strong>
-                                        <small>@hearing.Chamber · @hearing.CommitteeName · @hearing.MeetingType · <em class="hearing-status">@hearing.Status</em></small>
+                                        <small>@hearing.Chamber · @hearing.CommitteeName · @hearing.MeetingType · <em class="hearing-status" title="@HearingStatusDescription(hearing.Status)">@hearing.Status</em></small>
                                     </span>
                                     @{ var watchUrl = hearing.WatchUrl ?? hearing.CommitteePageUrl; }
                                     @if (!string.IsNullOrWhiteSpace(watchUrl))
@@ -388,7 +407,12 @@
     }
 </main>
 
+<script src="js/dashboard-hints.js"></script>
+
 @code {
+    private const string IntroHintKey = "gws-civicwatch-intro-hint-dismissed";
+    private bool _showIntroHint;
+
     private GovernmentIntelligenceSnapshot? _snapshot;
     private bool _loading;
     private string _activeSection = "community";
@@ -403,6 +427,28 @@
         _snapshot.Federal.HouseVotes.Count + _snapshot.Federal.SenateVotes.Count;
 
     protected override async Task OnInitializedAsync() => await LoadSnapshotAsync(forceRefresh: false);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var dismissed = await JS.InvokeAsync<bool>("gwsDashboardHints.isDismissed", IntroHintKey);
+        if (!dismissed)
+        {
+            _showIntroHint = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DismissIntroHint()
+    {
+        _showIntroHint = false;
+        await JS.InvokeVoidAsync("gwsDashboardHints.dismiss", IntroHintKey);
+    }
+
+    private const string CommunitySignalDescription = "Local announcements, public meetings, and events found for your area.";
+    private const string StateSignalDescription = "Georgia governor press releases, signed legislation, and House/Senate floor votes.";
+    private const string FederalSignalDescription = "U.S. House and Senate roll-call votes currently on record.";
 
     private async Task RefreshAsync()
     {
@@ -556,6 +602,15 @@
 
     private static string HearingDay(CivicHearing item) => item.StartAt?.Day.ToString("00", CultureInfo.InvariantCulture) ?? "—";
     private static string HearingMonth(CivicHearing item) => item.StartAt?.ToString("MMM", CultureInfo.InvariantCulture) ?? "TBD";
+
+    private static string HearingStatusDescription(string status) => status switch
+    {
+        "Scheduled" => "This meeting is on the calendar and expected to happen as planned.",
+        "Canceled" => "This meeting has been canceled and will not take place.",
+        "Postponed" => "This meeting has been delayed to a date not yet announced.",
+        "Rescheduled" => "This meeting has been moved to a new date.",
+        _ => "Status as reported by Congress.gov."
+    };
     private static string MeetingMeta(CivicMeeting meeting) =>
         string.IsNullOrWhiteSpace(meeting.Location) ? meeting.Source : $"{meeting.Location} · {meeting.Source}";
     private static string EventMeta(CivicEvent item)

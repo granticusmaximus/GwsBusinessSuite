@@ -69,6 +69,8 @@ public sealed class GovernmentIntelligenceService(
     private const string GeorgiaHouseVotesUrl = "https://www.legis.ga.gov/votes/house";
     private const string GeorgiaSenateVotesUrl = "https://www.legis.ga.gov/votes/senate";
     private const string GeorgiaLegislationPageUrl = "https://www.legis.ga.gov/legislation/";
+    private const string GeorgiaFindMyLegislatorUrl = "https://www.legis.ga.gov/find-my-legislator";
+    private const string GeorgiaVoterPageUrl = "https://mvp.sos.ga.gov/";
     private const string GeorgiaApiObscureKey = "jVEXFFwSu36BwwcP83xYgxLAhLYmKk";
     private static string SenateSummaryUrl =>
         $"https://www.senate.gov/legislative/LIS/roll_call_lists/vote_menu_{CurrentCongressNumber}_{CurrentCongressSession}.xml";
@@ -79,6 +81,15 @@ public sealed class GovernmentIntelligenceService(
     private const string HouseVotesIndexUrl = "https://clerk.house.gov/Votes";
     private const string CongressSearchUrl = "https://www.congress.gov/search?q=%7B%22source%22:%22legislation%22%7D";
     private static string CongressPublicLawsUrl => $"https://www.congress.gov/public-laws/{CurrentCongressOrdinal}-congress";
+    private const string FindYourRepresentativeUrl = "https://www.house.gov/representatives/find-your-representative";
+    private const string FindYourSenatorsUrl = "https://www.senate.gov/senators/senators-contact.htm";
+    // Google's Civic Information API's address-to-representative and polling-place lookups
+    // (representativeInfoByAddress/ByDivision) were shut down in April 2025 - only its
+    // voterInfoQuery survives, and that needs a Google Cloud API key to use, which isn't
+    // something to provision unattended. vote.org is the standard, nonpartisan, widely-used
+    // free tool for this exact gap in the absence of a working official API.
+    private const string RegisterToVoteUrl = "https://vote.gov";
+    private const string FindYourPollingPlaceUrl = "https://www.vote.org/polling-place-locator/";
     private const string AreaLabel = "Kathleen, Houston County, Georgia";
     private const string GeorgiaAccessTokenCacheKey = "government-intelligence:georgia:token";
     private const string GeorgiaCurrentSessionCacheKey = "government-intelligence:georgia:session";
@@ -197,7 +208,7 @@ public sealed class GovernmentIntelligenceService(
                 new CivicResourceSection("County Government",
                 [
                     new CivicResourceLink("Latest Announcements", CountyAnnouncementsUrl, "Official Houston County news, notices, and service updates."),
-                    new CivicResourceLink("Commission Calendar", CountyCalendarUrl, "Upcoming county meetings and calendar entries."),
+                    new CivicResourceLink("Attend a Commission Meeting", CountyCalendarUrl, "County commission meetings are open to the public - see when the next one is and what's on the agenda."),
                     new CivicResourceLink("Residents Portal", CountyResidentsUrl, "County resident services, utilities, and local information."),
                     new CivicResourceLink("Board of Elections", CountyElectionsUrl, "County election administration and notices."),
                     new CivicResourceLink("Code of Ordinances", CountyCodeUrl, "County ordinances and governing code.")
@@ -270,6 +281,11 @@ public sealed class GovernmentIntelligenceService(
                     new CivicResourceLink("Signed by Governor", GeorgiaSignedByGovernorUrl, "Georgia legislature view of measures signed by the Governor."),
                     new CivicResourceLink("House Votes", GeorgiaHouseVotesUrl, "Official Georgia House floor-vote archive."),
                     new CivicResourceLink("Senate Votes", GeorgiaSenateVotesUrl, "Official Georgia Senate floor-vote archive.")
+                ]),
+                new CivicResourceSection("Represent & Participate",
+                [
+                    new CivicResourceLink("Find Your Georgia Legislator", GeorgiaFindMyLegislatorUrl, "Enter your address to see your state senator and representative, their committees, and the bills they manage."),
+                    new CivicResourceLink("Register to Vote / My Voter Page", GeorgiaVoterPageUrl, "Georgia Secretary of State's official portal - check your registration, sample ballot, and polling place.")
                 ])
             ]);
     }
@@ -377,6 +393,13 @@ public sealed class GovernmentIntelligenceService(
                     new CivicResourceLink("Public Laws", CongressPublicLawsUrl, "Official Congress.gov public laws index."),
                     new CivicResourceLink("Senate Roll Call Votes", SenateVotesUrl, "Official Senate roll-call list for the current session."),
                     new CivicResourceLink("House Roll Call Votes", HouseVotesIndexUrl, "Official House votes search and roll-call index.")
+                ]),
+                new CivicResourceSection("Represent & Participate",
+                [
+                    new CivicResourceLink("Find Your U.S. Representative", FindYourRepresentativeUrl, "Enter your ZIP code to find your U.S. House member and their contact page."),
+                    new CivicResourceLink("Find Your U.S. Senators", FindYourSenatorsUrl, "Official Senate directory of contact information by state."),
+                    new CivicResourceLink("Register to Vote", RegisterToVoteUrl, "The official federal voter registration portal - routes you to your state's real registration process."),
+                    new CivicResourceLink("Find Your Polling Place", FindYourPollingPlaceUrl, "Look up where and when to vote for upcoming elections.")
                 ])
             ],
             federalCivicFeed.GetCachedSenateNewsOrEmpty(),

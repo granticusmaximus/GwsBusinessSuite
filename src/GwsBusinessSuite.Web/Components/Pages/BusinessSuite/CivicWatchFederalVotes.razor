@@ -18,7 +18,7 @@ else
                 <h3>@(string.IsNullOrWhiteSpace(vote.Measure) ? vote.Title : $"{vote.Measure} · {vote.Title}")</h3>
                 <p>@vote.Question</p>
                 <div class="vote-tally" aria-label="Vote totals">
-                    <span class="result"><strong>@vote.Result</strong></span>
+                    <span class="result" title="The official outcome of this roll call, as reported by the chamber."><strong>@vote.Result</strong></span>
                     <span class="yea"><strong>@vote.YeaCount</strong> Yea</span>
                     <span><strong>@vote.NayCount</strong> Nay</span>
                     @if (vote.PresentCount > 0) { <span><strong>@vote.PresentCount</strong> Present</span> }

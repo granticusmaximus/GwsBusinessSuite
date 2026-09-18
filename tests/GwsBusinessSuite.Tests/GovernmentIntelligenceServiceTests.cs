@@ -203,6 +203,41 @@ public sealed class GovernmentIntelligenceServiceTests
         snapshot.Federal.HouseVotes.Should().ContainSingle();
     }
 
+    [Fact]
+    public async Task GetSnapshotAsync_FederalResourceSections_ShouldIncludeRepresentAndParticipateLinks()
+    {
+        var service = CreateService();
+
+        var snapshot = await service.GetSnapshotAsync(forceRefresh: true);
+
+        var section = snapshot.Federal.ResourceSections.Should().ContainSingle(s => s.Title == "Represent & Participate").Subject;
+        section.Links.Select(l => l.Title).Should().BeEquivalentTo(
+            "Find Your U.S. Representative", "Find Your U.S. Senators", "Register to Vote", "Find Your Polling Place");
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_StateResourceSections_ShouldIncludeRepresentAndParticipateLinks()
+    {
+        var service = CreateService();
+
+        var snapshot = await service.GetSnapshotAsync(forceRefresh: true);
+
+        var section = snapshot.State.ResourceSections.Should().ContainSingle(s => s.Title == "Represent & Participate").Subject;
+        section.Links.Select(l => l.Title).Should().BeEquivalentTo(
+            "Find Your Georgia Legislator", "Register to Vote / My Voter Page");
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_CommunityResourceSections_ShouldFrameTheCommissionCalendarAsAnActionToTake()
+    {
+        var service = CreateService();
+
+        var snapshot = await service.GetSnapshotAsync(forceRefresh: true);
+
+        var section = snapshot.Community.ResourceSections.Should().ContainSingle(s => s.Title == "County Government").Subject;
+        section.Links.Should().ContainSingle(l => l.Title == "Attend a Commission Meeting");
+    }
+
     private static GovernmentIntelligenceService CreateService(
         Action? onRequest = null, HashSet<string>? failingUrls = null, IReadOnlyList<CivicHearing>? hearings = null)
     {
