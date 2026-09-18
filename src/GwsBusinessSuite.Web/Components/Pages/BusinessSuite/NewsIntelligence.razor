@@ -52,6 +52,13 @@
                     <textarea class="form-control form-control-sm mb-2" placeholder="Keywords (comma-separated)"
                               @oninput="e => _formKeywords = e.Value?.ToString() ?? string.Empty"
                               rows="2">@_formKeywords</textarea>
+                    <textarea class="form-control form-control-sm mb-2" placeholder="Trusted RSS feed URLs (one per line, optional)"
+                              @oninput="e => _formTrustedFeeds = e.Value?.ToString() ?? string.Empty"
+                              rows="2">@_formTrustedFeeds</textarea>
+                    <div class="small text-secondary mb-2">
+                        Feeds you add here are pulled in full alongside the keyword search - use this to pin
+                        specific outlets you trust rather than relying only on keyword matches.
+                    </div>
                     <label class="form-label small mb-1">Topic type</label>
                     <select class="form-select form-select-sm mb-1" @bind="_formTopicType">
                         <option value="@WatchedTopicTypes.General">General (Google News + dev.to)</option>
@@ -284,6 +291,7 @@
     private Guid? _editingTopicId;
     private string _formName = string.Empty;
     private string _formKeywords = string.Empty;
+    private string _formTrustedFeeds = string.Empty;
     private string _formColor = "#6366f1";
     private string _formTopicType = WatchedTopicTypes.Technical;
     private bool _formIsActive = true;
@@ -513,7 +521,7 @@
     private void OpenAddForm()
     {
         _editingTopicId = null;
-        _formName = _formKeywords = _formError = string.Empty;
+        _formName = _formKeywords = _formTrustedFeeds = _formError = string.Empty;
         _formColor = "#6366f1";
         _formTopicType = WatchedTopicTypes.Technical;
         _formIsActive = true;
@@ -525,6 +533,7 @@
         _editingTopicId = topic.Id;
         _formName = topic.Name;
         _formKeywords = topic.Keywords;
+        _formTrustedFeeds = topic.TrustedFeedUrls;
         _formColor = topic.ColorHex;
         _formTopicType = topic.TopicType;
         _formIsActive = topic.IsActive;
@@ -542,11 +551,11 @@
         {
             if (_editingTopicId.HasValue)
             {
-                await NewsService.UpdateTopicAsync(_editingTopicId.Value, _formName, _formKeywords, _formColor, _formIsActive, _formTopicType);
+                await NewsService.UpdateTopicAsync(_editingTopicId.Value, _formName, _formKeywords, _formColor, _formIsActive, _formTopicType, _formTrustedFeeds);
             }
             else
             {
-                await NewsService.CreateTopicAsync(_formName, _formKeywords, _formColor, _formTopicType);
+                await NewsService.CreateTopicAsync(_formName, _formKeywords, _formColor, _formTopicType, _formTrustedFeeds);
             }
             CloseForm();
             await LoadTopicsAsync();

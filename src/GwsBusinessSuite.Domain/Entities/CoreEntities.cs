@@ -1974,6 +1974,10 @@ public sealed class WatchedTopic : AuditableEntity
     public bool IsActive { get; set; } = true;
     public DateTimeOffset? LastFetchedAt { get; set; }
     public string TopicType { get; set; } = WatchedTopicTypes.Technical;
+    // Newline-separated RSS feed URLs, fetched in full (unfiltered by Keywords) alongside the
+    // keyword search - lets a user pin specific trusted outlets rather than relying solely on
+    // whatever Google News' aggregator surfaces for a keyword.
+    public string TrustedFeedUrls { get; set; } = string.Empty;
 }
 
 public sealed class NewsItem : AuditableEntity

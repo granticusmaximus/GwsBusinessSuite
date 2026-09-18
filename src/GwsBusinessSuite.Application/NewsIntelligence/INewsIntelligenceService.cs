@@ -3,8 +3,8 @@ namespace GwsBusinessSuite.Application.NewsIntelligence;
 public interface INewsIntelligenceService
 {
     Task<IReadOnlyList<WatchedTopicSummary>> ListTopicsAsync(CancellationToken ct = default);
-    Task<WatchedTopicSummary> CreateTopicAsync(string name, string keywords, string colorHex, string topicType, CancellationToken ct = default);
-    Task<WatchedTopicSummary> UpdateTopicAsync(Guid id, string name, string keywords, string colorHex, bool isActive, string topicType, CancellationToken ct = default);
+    Task<WatchedTopicSummary> CreateTopicAsync(string name, string keywords, string colorHex, string topicType, string trustedFeedUrls, CancellationToken ct = default);
+    Task<WatchedTopicSummary> UpdateTopicAsync(Guid id, string name, string keywords, string colorHex, bool isActive, string topicType, string trustedFeedUrls, CancellationToken ct = default);
     Task DeleteTopicAsync(Guid id, CancellationToken ct = default);
 
     Task<NewsFeedResult> GetFeedAsync(Guid? topicId, CancellationToken ct = default);
@@ -23,7 +23,8 @@ public sealed record WatchedTopicSummary(
     bool IsActive,
     DateTimeOffset? LastFetchedAt,
     int UnreadCount,
-    string TopicType);
+    string TopicType,
+    string TrustedFeedUrls);
 
 public sealed record NewsItemDto(
     Guid Id,

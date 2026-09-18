@@ -253,7 +253,7 @@ public sealed class NewsIntelligenceServiceTests
         var (_, factory) = await CreateDbAsync();
         var service = CreateService(factory);
 
-        var created = await service.CreateTopicAsync("Blazor", "blazor", "#2563eb", WatchedTopicTypes.Technical);
+        var created = await service.CreateTopicAsync("Blazor", "blazor", "#2563eb", WatchedTopicTypes.Technical, string.Empty);
 
         Assert.Equal(WatchedTopicTypes.Technical, created.TopicType);
         var topics = await service.ListTopicsAsync();
@@ -266,7 +266,7 @@ public sealed class NewsIntelligenceServiceTests
         var (_, factory) = await CreateDbAsync();
         var service = CreateService(factory);
 
-        var created = await service.CreateTopicAsync("Atlanta", "atlanta", "#ef4444", "not-a-real-type");
+        var created = await service.CreateTopicAsync("Atlanta", "atlanta", "#ef4444", "not-a-real-type", string.Empty);
 
         Assert.Equal(WatchedTopicTypes.General, created.TopicType);
     }
@@ -276,11 +276,226 @@ public sealed class NewsIntelligenceServiceTests
     {
         var (_, factory) = await CreateDbAsync();
         var service = CreateService(factory);
-        var created = await service.CreateTopicAsync("Python", "python", "#16a34a", WatchedTopicTypes.General);
+        var created = await service.CreateTopicAsync("Python", "python", "#16a34a", WatchedTopicTypes.General, string.Empty);
 
-        var updated = await service.UpdateTopicAsync(created.Id, "Python", "python", "#16a34a", isActive: true, WatchedTopicTypes.Technical);
+        var updated = await service.UpdateTopicAsync(created.Id, "Python", "python", "#16a34a", isActive: true, WatchedTopicTypes.Technical, string.Empty);
 
         Assert.Equal(WatchedTopicTypes.Technical, updated.TopicType);
+    }
+
+    [Fact]
+    public async Task RefreshTopicAsync_ShouldMergeTrustedFeedArticlesWithKeywordSearchResults()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var topic = new WatchedTopic
+        {
+            Name = "Python",
+            Keywords = "python",
+            ColorHex = "#2563eb",
+            TopicType = WatchedTopicTypes.General,
+            TrustedFeedUrls = "https://trusted.example.com/feed.xml"
+        };
+        db.WatchedTopics.Add(topic);
+        await db.SaveChangesAsync();
+
+        var handler = new RecordingHandler(request =>
+        {
+            var url = request.RequestUri!.AbsoluteUri;
+            if (url.Contains("news.google.com", StringComparison.OrdinalIgnoreCase))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(SampleGoogleNewsRss, Encoding.UTF8, "application/rss+xml") };
+            if (url.Contains("trusted.example.com", StringComparison.OrdinalIgnoreCase))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(SampleTrustedFeedRss, Encoding.UTF8, "application/rss+xml") };
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
+        var service = CreateService(factory, new HttpClient(handler), new FakeOllamaService());
+
+        await service.RefreshTopicAsync(topic.Id);
+
+        var feed = await service.GetFeedAsync(topic.Id);
+        Assert.Contains(feed.Items, i => i.Title == "Python 4.0 announced - Example Times");
+        Assert.Contains(feed.Items, i => i.Title == "Trusted outlet exclusive");
+    }
+
+    [Fact]
+    public async Task RefreshTopicAsync_WhenATrustedFeedUrlIsUnreachable_ShouldStillPersistTheKeywordSearchResults()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var topic = new WatchedTopic
+        {
+            Name = "Python",
+            Keywords = "python",
+            ColorHex = "#2563eb",
+            TopicType = WatchedTopicTypes.General,
+            TrustedFeedUrls = "https://broken.example.com/feed.xml"
+        };
+        db.WatchedTopics.Add(topic);
+        await db.SaveChangesAsync();
+
+        var handler = new RecordingHandler(request =>
+        {
+            var url = request.RequestUri!.AbsoluteUri;
+            return url.Contains("news.google.com", StringComparison.OrdinalIgnoreCase)
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(SampleGoogleNewsRss, Encoding.UTF8, "application/rss+xml") }
+                : new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
+        var service = CreateService(factory, new HttpClient(handler), new FakeOllamaService());
+
+        await service.RefreshTopicAsync(topic.Id);
+
+        var feed = await service.GetFeedAsync(topic.Id);
+        Assert.Contains(feed.Items, i => i.Title == "Python 4.0 announced - Example Times");
+    }
+
+    [Fact]
+    public async Task RefreshTopicAsync_WhenAnArticlePageHasRealContent_ShouldSummarizeFromTheExtractedTextNotTheRssSnippet()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var topic = new WatchedTopic
+        {
+            Name = "Python",
+            Keywords = "python",
+            ColorHex = "#2563eb",
+            TopicType = WatchedTopicTypes.General
+        };
+        db.WatchedTopics.Add(topic);
+        await db.SaveChangesAsync();
+
+        var handler = new RecordingHandler(request =>
+        {
+            var url = request.RequestUri!.AbsoluteUri;
+            if (url.Contains("news.google.com", StringComparison.OrdinalIgnoreCase))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(SampleGoogleNewsRss, Encoding.UTF8, "application/rss+xml") };
+            if (url.Contains("example.com/python-4", StringComparison.OrdinalIgnoreCase))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(SampleArticleHtml, Encoding.UTF8, "text/html") };
+            return new HttpResponseMessage(HttpStatusCode.InternalServerError);
+        });
+        var capturingOllama = new CapturingOllamaService();
+        var service = CreateService(factory, new HttpClient(handler), capturingOllama);
+
+        await service.RefreshTopicAsync(topic.Id);
+
+        Assert.NotNull(capturingOllama.LastUserPrompt);
+        Assert.Contains("a distinctive marker sentence that only appears in the full article body", capturingOllama.LastUserPrompt);
+    }
+
+    [Fact]
+    public async Task RefreshTopicAsync_WhenTheArticlePageIsUnreachable_ShouldFallBackToTheRssSnippetForSummarization()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var topic = new WatchedTopic
+        {
+            Name = "Python",
+            Keywords = "python",
+            ColorHex = "#2563eb",
+            TopicType = WatchedTopicTypes.General
+        };
+        db.WatchedTopics.Add(topic);
+        await db.SaveChangesAsync();
+
+        var handler = new RecordingHandler(request =>
+        {
+            var url = request.RequestUri!.AbsoluteUri;
+            return url.Contains("news.google.com", StringComparison.OrdinalIgnoreCase)
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(SampleGoogleNewsRss, Encoding.UTF8, "application/rss+xml") }
+                : new HttpResponseMessage(HttpStatusCode.InternalServerError); // article page fetch fails
+        });
+        var capturingOllama = new CapturingOllamaService();
+        var service = CreateService(factory, new HttpClient(handler), capturingOllama);
+
+        await service.RefreshTopicAsync(topic.Id);
+
+        Assert.NotNull(capturingOllama.LastUserPrompt);
+        Assert.Contains("A short description.", capturingOllama.LastUserPrompt);
+    }
+
+    private const string SampleTrustedFeedRss = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0"><channel>
+          <title>Trusted Example Outlet</title>
+          <item>
+            <title>Trusted outlet exclusive</title>
+            <link>https://trusted.example.com/exclusive</link>
+            <pubDate>Wed, 05 Aug 2026 12:00:00 GMT</pubDate>
+            <description>Reporting only this outlet has.</description>
+          </item>
+        </channel></rss>
+        """;
+
+    // A real <article> with several substantial paragraphs so SmartReader's readability
+    // heuristic reliably picks it as the main content (IsReadable) and clears
+    // MinExtractedArticleLength - the marker sentence lets the test tell "summarized from the
+    // full page" apart from "summarized from the 40-character RSS description" unambiguously.
+    // Verified directly against a real SmartReader.Reader instance before relying on it here -
+    // SmartReader's IsReadable heuristic needs meaningfully more content/structure than a
+    // trivial 3-line snippet to consider a page a real article (confirmed empirically, not
+    // assumed) - this is calibrated to reliably clear that bar.
+    private const string SampleArticleHtml = """
+        <!DOCTYPE html>
+        <html lang="en"><head><title>Python 4.0 announced - Example Times</title></head>
+        <body>
+        <header><nav>Home | World | Tech | Sports | Opinion</nav></header>
+        <div class="site-wrapper">
+        <article class="article-body">
+          <h1>Python 4.0 announced</h1>
+          <p class="byline">By Jane Reporter, Example Times Staff Writer</p>
+          <p>The Python Software Foundation today announced the general availability of Python
+          4.0, a landmark update representing several years of work from thousands of
+          contributors across the global open-source community. The release marks the first
+          major version bump since Python 3.0 was introduced more than a decade ago, and
+          foundation officials say it reflects a deliberate, multi-year effort to modernize the
+          language without repeating the painful migration period that followed the last
+          major version change.</p>
+          <p>This is a distinctive marker sentence that only appears in the full article body,
+          not in any RSS summary or description field anywhere else in this test, and it exists
+          specifically so an automated test can confirm which version of this content a
+          downstream summarizer actually received.</p>
+          <p>Among the headline changes, the release includes a redesigned type system with
+          stricter static analysis support, significant performance improvements to the core
+          interpreter loop that the foundation claims can cut execution time for
+          compute-heavy workloads by as much as thirty percent, and a completely redesigned
+          standard library packaging mechanism intended to simplify dependency management for
+          large, long-lived applications running in production environments.</p>
+          <p>Foundation leadership emphasized that backward compatibility remained the top
+          design priority throughout development. A dedicated compatibility shim will be
+          distributed alongside the release to help large codebases transition gradually
+          rather than all at once, and the foundation has committed to supporting the Python
+          3.x branch for security patches for at least five more years to give enterprise
+          users ample time to plan their migration path.</p>
+          <p>Reaction from the developer community has been largely positive so far, though
+          some maintainers of long-running open-source projects have voiced concern about the
+          scope of the changes to the standard library, noting that even well-tested projects
+          may need meaningful rework to take full advantage of the new packaging system.</p>
+        </article>
+        </div>
+        <footer>Copyright Example Times. All rights reserved.</footer>
+        </body></html>
+        """;
+
+    private sealed class CapturingOllamaService : IOllamaService
+    {
+        public string? LastUserPrompt { get; private set; }
+
+        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
+        {
+            LastUserPrompt = userPrompt;
+            return Task.FromResult(string.Empty);
+        }
+
+        public async IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+
+        public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
+
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) =>
+            Task.FromResult(string.Empty);
     }
 
     private static NewsIntelligenceService CreateService(IAppDbContextFactory factory) =>

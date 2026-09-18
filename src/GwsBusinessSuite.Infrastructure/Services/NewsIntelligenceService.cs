@@ -10,6 +10,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SmartReader;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
@@ -29,6 +30,26 @@ public sealed class NewsIntelligenceService(
     private const string GoogleNewsTopUrl =
         "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en";
 
+    // Curated, individually verified live (real 200 + parseable RSS/XML, not a bot-challenge
+    // page) as reliable public feeds from major wire-adjacent outlets, spanning US network/cable
+    // news, UK, and international coverage - feeds the "Top News" pool alongside Google News so
+    // the default view isn't solely dependent on Google's aggregation. AP News and Reuters were
+    // tried first and dropped: AP's public feed now sits behind a Cloudflare bot challenge, and
+    // Reuters killed its public RSS feeds entirely (both confirmed 403/404 live, not assumed).
+    // CNN's feed only answers over plain HTTP (its HTTPS endpoint fails the TLS handshake) -
+    // safe here since this is a server-side backend fetch, not a browser page load.
+    private const string DefaultTopNewsTrustedFeeds = """
+        https://feeds.bbci.co.uk/news/rss.xml
+        https://feeds.npr.org/1001/rss.xml
+        https://www.theguardian.com/world/rss
+        https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml
+        https://www.pbs.org/newshour/feeds/rss/headlines
+        https://www.aljazeera.com/xml/rss/all.xml
+        http://rss.cnn.com/rss/cnn_topstories.rss
+        https://abcnews.go.com/abcnews/topstories
+        https://www.cbsnews.com/latest/rss/main
+        """;
+
     private const int MaxItemsPerTopic = 30;
     private const int MaxTopNewsItems = 25;
     // IOllamaService's HttpClient carries a 2-hour outer timeout by design (see
@@ -38,6 +59,12 @@ public sealed class NewsIntelligenceService(
     // its own bound a wedged Ollama could hold the single global OllamaWorkloadScheduler
     // lease for up to 2 hours from a live page click - freezing every AI feature app-wide.
     private static readonly TimeSpan BatchSummarizeTimeout = TimeSpan.FromSeconds(60);
+    // Deliberately shorter than the shared HttpClient's default 15s timeout - up to
+    // MaxItemsPerTopic (30) of these run in parallel per topic, so one slow/hostile site
+    // shouldn't be able to dominate the batch. A missed/short extraction just means that one
+    // article's summary falls back to its RSS snippet, not a failed refresh.
+    private static readonly TimeSpan ArticleExtractionTimeout = TimeSpan.FromSeconds(8);
+    private const int MinExtractedArticleLength = 200;
     private const int NewsItemTtlHours = 24;
     private const int MaxConcurrentRefreshes = 3;
     private static readonly SemaphoreSlim WriteLock = new(1, 1);
@@ -74,10 +101,10 @@ public sealed class NewsIntelligenceService(
 
         return topics.Select(t => new WatchedTopicSummary(
             t.Id, t.Name, t.Keywords, t.ColorHex, t.IsActive, t.LastFetchedAt,
-            countMap.GetValueOrDefault(t.Id, 0), t.TopicType)).ToList();
+            countMap.GetValueOrDefault(t.Id, 0), t.TopicType, t.TrustedFeedUrls)).ToList();
     }
 
-    public async Task<WatchedTopicSummary> CreateTopicAsync(string name, string keywords, string colorHex, string topicType, CancellationToken ct = default)
+    public async Task<WatchedTopicSummary> CreateTopicAsync(string name, string keywords, string colorHex, string topicType, string trustedFeedUrls, CancellationToken ct = default)
     {
         await WriteLock.WaitAsync(ct);
         try
@@ -89,11 +116,12 @@ public sealed class NewsIntelligenceService(
                 Keywords = keywords.Trim(),
                 ColorHex = colorHex,
                 IsActive = true,
-                TopicType = NormalizeTopicType(topicType)
+                TopicType = NormalizeTopicType(topicType),
+                TrustedFeedUrls = trustedFeedUrls.Trim()
             };
             db.WatchedTopics.Add(topic);
             await db.SaveChangesAsync(ct);
-            return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, null, 0, topic.TopicType);
+            return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, null, 0, topic.TopicType, topic.TrustedFeedUrls);
         }
         finally
         {
@@ -101,7 +129,7 @@ public sealed class NewsIntelligenceService(
         }
     }
 
-    public async Task<WatchedTopicSummary> UpdateTopicAsync(Guid id, string name, string keywords, string colorHex, bool isActive, string topicType, CancellationToken ct = default)
+    public async Task<WatchedTopicSummary> UpdateTopicAsync(Guid id, string name, string keywords, string colorHex, bool isActive, string topicType, string trustedFeedUrls, CancellationToken ct = default)
     {
         await WriteLock.WaitAsync(ct);
         try
@@ -115,9 +143,10 @@ public sealed class NewsIntelligenceService(
             topic.ColorHex = colorHex;
             topic.IsActive = isActive;
             topic.TopicType = NormalizeTopicType(topicType);
+            topic.TrustedFeedUrls = trustedFeedUrls.Trim();
             topic.UpdatedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
-            return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, topic.LastFetchedAt, 0, topic.TopicType);
+            return new WatchedTopicSummary(topic.Id, topic.Name, topic.Keywords, topic.ColorHex, topic.IsActive, topic.LastFetchedAt, 0, topic.TopicType, topic.TrustedFeedUrls);
         }
         finally
         {
@@ -221,7 +250,7 @@ public sealed class NewsIntelligenceService(
                 .AsNoTracking()
                 .Where(t => t.IsActive)
                 .OrderBy(t => t.Name)
-                .Select(t => new RefreshWorkItem(t.Id, t.Name, t.Keywords, t.TopicType, MaxItemsPerTopic))
+                .Select(t => new RefreshWorkItem(t.Id, t.Name, t.Keywords, t.TopicType, MaxItemsPerTopic, t.TrustedFeedUrls))
                 .ToListAsync(ct));
         }
 
@@ -270,7 +299,7 @@ public sealed class NewsIntelligenceService(
         return await db.WatchedTopics
             .AsNoTracking()
             .Where(t => t.Id == topicId && t.IsActive)
-            .Select(t => new RefreshWorkItem(t.Id, t.Name, t.Keywords, t.TopicType, MaxItemsPerTopic))
+            .Select(t => new RefreshWorkItem(t.Id, t.Name, t.Keywords, t.TopicType, MaxItemsPerTopic, t.TrustedFeedUrls))
             .FirstOrDefaultAsync(ct);
     }
 
@@ -307,14 +336,29 @@ public sealed class NewsIntelligenceService(
         if (workItem.TopicId is not null && keywords is { Length: 0 })
             throw new InvalidOperationException($"Topic '{workItem.Name}' has no keywords.");
 
+        var trustedFeedUrls = workItem.TrustedFeedUrls
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(u => u.Length > 0)
+            .ToArray();
+
         var articles = workItem.TopicType == WatchedTopicTypes.Technical
-            ? await FetchTechnicalArticlesAsync(keywords!, workItem.Name, timings, ct)
-            : await FetchArticlesAsync(keywords, workItem.Name, timings, ct);
+            ? await FetchTechnicalArticlesAsync(keywords!, trustedFeedUrls, workItem.Name, timings, ct)
+            : await FetchArticlesAsync(keywords, trustedFeedUrls, workItem.Name, timings, ct);
 
         var selected = articles.Take(workItem.MaxItems).ToList();
+
+        // Real article text (when it can be fetched) makes for a genuinely grounded summary
+        // instead of one built from a 200-character aggregator snippet - see
+        // ExtractArticleTextAsync. Per-article failures/timeouts fall back to null, which
+        // BatchSummarizeAsync treats the same as "no full text available" today.
+        var fullTexts = await MeasureStageAsync(
+            workItem.Name, "Article extraction", selected.Count,
+            () => Task.WhenAll(selected.Select(a => ExtractArticleTextAsync(a.Url, ct))),
+            timings);
+
         var summaries = await MeasureStageAsync(
             workItem.Name, "Ollama summary", selected.Count,
-            () => BatchSummarizeAsync(selected, ct), timings);
+            () => BatchSummarizeAsync(selected, fullTexts, ct), timings);
 
         return new PreparedRefresh(workItem, selected, summaries);
     }
@@ -383,6 +427,7 @@ public sealed class NewsIntelligenceService(
     /// </summary>
     private async Task<List<RawArticle>> FetchArticlesAsync(
         string[]? keywords,
+        string[] trustedFeedUrls,
         string workItem,
         List<NewsRefreshTiming> timings,
         CancellationToken ct)
@@ -391,12 +436,14 @@ public sealed class NewsIntelligenceService(
             workItem, "Google News", 0, () => FetchGoogleNewsAsync(keywords, ct), timings);
         var devToTask = MeasureStageAsync(
             workItem, "dev.to", 0, () => FetchDevToAsync(keywords, ct), timings);
-        await Task.WhenAll(googleTask, devToTask);
+        var trustedFeedsTask = MeasureStageAsync(
+            workItem, "Trusted feeds", 0, () => FetchTrustedFeedsAsync(trustedFeedUrls, ct), timings);
+        await Task.WhenAll(googleTask, devToTask, trustedFeedsTask);
 
         var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var merged = new List<RawArticle>();
 
-        foreach (var article in googleTask.Result.Concat(devToTask.Result))
+        foreach (var article in googleTask.Result.Concat(devToTask.Result).Concat(trustedFeedsTask.Result))
         {
             if (seenUrls.Add(article.Url))
                 merged.Add(article);
@@ -405,6 +452,34 @@ public sealed class NewsIntelligenceService(
         return merged
             .OrderByDescending(a => a.PublishedAt ?? DateTimeOffset.MinValue)
             .ToList();
+    }
+
+    /// <summary>
+    /// Fetches every user-configured trusted RSS feed URL for a topic, in full - unlike the
+    /// keyword-driven sources, these are returned unfiltered (same precedent as Google News'
+    /// "no keywords -> return the whole top feed" case) since the user picked the feed
+    /// specifically, not a search term.
+    /// </summary>
+    private async Task<List<RawArticle>> FetchTrustedFeedsAsync(string[] feedUrls, CancellationToken ct)
+    {
+        if (feedUrls.Length == 0) return [];
+
+        var tasks = feedUrls.Select(url => FetchFeedAsync(url, ct)).ToArray();
+        var allResults = await Task.WhenAll(tasks);
+
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var merged = new List<RawArticle>();
+
+        foreach (var batch in allResults)
+        {
+            foreach (var article in batch)
+            {
+                if (seenUrls.Add(article.Url))
+                    merged.Add(article);
+            }
+        }
+
+        return merged;
     }
 
     /// <summary>
@@ -418,6 +493,7 @@ public sealed class NewsIntelligenceService(
     /// </summary>
     private async Task<List<RawArticle>> FetchTechnicalArticlesAsync(
         string[] keywords,
+        string[] trustedFeedUrls,
         string workItem,
         List<NewsRefreshTiming> timings,
         CancellationToken ct)
@@ -428,7 +504,9 @@ public sealed class NewsIntelligenceService(
             workItem, "dev.to", 0, () => FetchDevToAsync(keywords, ct), timings);
         var techBlogsTask = MeasureStageAsync(
             workItem, "Curated blogs", 0, () => FetchCuratedTechBlogsAsync(ct), timings);
-        await Task.WhenAll(hackerNewsTask, devToTask, techBlogsTask);
+        var trustedFeedsTask = MeasureStageAsync(
+            workItem, "Trusted feeds", 0, () => FetchTrustedFeedsAsync(trustedFeedUrls, ct), timings);
+        await Task.WhenAll(hackerNewsTask, devToTask, techBlogsTask, trustedFeedsTask);
 
         // Curated blogs have no keyword-search API (unlike HN Algolia / dev.to tags), so
         // match the topic's keywords via case-insensitive substring search against each
@@ -442,7 +520,7 @@ public sealed class NewsIntelligenceService(
         var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var merged = new List<RawArticle>();
 
-        foreach (var article in hackerNewsTask.Result.Concat(devToTask.Result).Concat(matchedTechBlogs))
+        foreach (var article in hackerNewsTask.Result.Concat(devToTask.Result).Concat(matchedTechBlogs).Concat(trustedFeedsTask.Result))
         {
             if (seenUrls.Add(article.Url))
                 merged.Add(article);
@@ -726,13 +804,48 @@ public sealed class NewsIntelligenceService(
 
     // ── Ollama summarisation ──────────────────────────────────
 
-    private async Task<List<string>> BatchSummarizeAsync(List<RawArticle> articles, CancellationToken ct)
+    /// <summary>
+    /// Fetches an article's own page (via this service's own HttpClient, same as every other
+    /// source in this file - keeps the custom User-Agent and, in tests, the RecordingHandler
+    /// fixture in control of what's "on the network") and runs the HTML through SmartReader (a
+    /// C# port of Mozilla's Readability algorithm - the same one behind Firefox's Reader Mode)
+    /// to pull out the real article text, instead of relying solely on a truncated RSS
+    /// description. Parsing itself is synchronous/CPU-only once the HTML is in hand, so only the
+    /// fetch needs the timeout. Returns null on any failure, timeout, or too-short result -
+    /// BatchSummarizeAsync treats that exactly like "no full text available" and falls back to
+    /// the RSS snippet for that one article, so a paywalled or slow site never breaks the batch.
+    /// </summary>
+    private async Task<string?> ExtractArticleTextAsync(string url, CancellationToken ct)
+    {
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(ArticleExtractionTimeout);
+            var html = await http.GetStringAsync(url, timeoutCts.Token);
+
+            // The static Reader.ParseArticle(url, html) overload does not behave as documented
+            // for pre-fetched HTML (verified directly - it returns an empty, unreadable Article
+            // for genuinely well-formed article markup); the instance constructor + GetArticle()
+            // is the form that actually works, confirmed against real sample HTML before relying
+            // on it here.
+            var article = new Reader(url, html).GetArticle();
+            var text = article?.IsReadable == true ? article.TextContent?.Trim() : null;
+            return string.IsNullOrWhiteSpace(text) || text.Length < MinExtractedArticleLength ? null : text;
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Article extraction skipped for {Url}", url);
+            return null;
+        }
+    }
+
+    private async Task<List<string>> BatchSummarizeAsync(List<RawArticle> articles, string?[] fullTexts, CancellationToken ct)
     {
         if (articles.Count == 0) return [];
         try
         {
             var input = articles
-                .Select((a, i) => $"{i + 1}. {a.Title}: {Truncate(a.Description, 200)}")
+                .Select((a, i) => $"{i + 1}. {a.Title}: {(string.IsNullOrWhiteSpace(fullTexts.ElementAtOrDefault(i)) ? Truncate(a.Description, 200) : Truncate(fullTexts[i]!, 1500))}")
                 .ToList();
 
             const string system =
@@ -846,10 +959,11 @@ public sealed class NewsIntelligenceService(
         string Name,
         string Keywords,
         string TopicType,
-        int MaxItems)
+        int MaxItems,
+        string TrustedFeedUrls)
     {
         public static RefreshWorkItem TopNews { get; } = new(
-            null, "Top News", string.Empty, WatchedTopicTypes.General, MaxTopNewsItems);
+            null, "Top News", string.Empty, WatchedTopicTypes.General, MaxTopNewsItems, DefaultTopNewsTrustedFeeds);
     }
 
     private sealed record PreparedRefresh(
