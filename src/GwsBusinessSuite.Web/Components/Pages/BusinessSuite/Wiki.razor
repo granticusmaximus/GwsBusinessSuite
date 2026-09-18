@@ -209,7 +209,8 @@
 {
     <div class="alert alert-danger sentinel-notice d-flex align-items-start gap-2" role="alert">
         <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
-        <div>@ErrorMessage</div>
+        <div class="flex-grow-1">@ErrorMessage</div>
+        <button type="button" class="btn-close" aria-label="Dismiss" @onclick="() => ErrorMessage = string.Empty"></button>
     </div>
 }
 
@@ -217,7 +218,8 @@
 {
     <div class="alert alert-info sentinel-notice d-flex align-items-center gap-2" role="alert">
         <i class="bi bi-check-circle-fill flex-shrink-0"></i>
-        <div>@StatusMessage</div>
+        <div class="flex-grow-1">@StatusMessage</div>
+        <button type="button" class="btn-close" aria-label="Dismiss" @onclick="() => StatusMessage = string.Empty"></button>
     </div>
 }
 
@@ -2767,6 +2769,19 @@
                 SelectedPageId = saved.Id;
                 ExpandAncestorPath(saved.Id);
                 await LoadTreeAsync(selectFirstPage: false);
+
+                // CreateNewPage()/CreateNewPageFromTemplateAsync set StatusMessage to a "ready
+                // to create" flash message before any real page existed. Autosave never touched
+                // StatusMessage before this fix, so that message outlived its own truth the
+                // moment the page was actually saved - it would sit there, increasingly
+                // inaccurate, for as long as the user kept editing, since nothing else was
+                // guaranteed to overwrite it. The ongoing _autosaveStatus indicator (rendered
+                // separately, near the editor toolbar) is the correct place to see live save
+                // state going forward, so this one-off message has fully served its purpose.
+                if (StatusMessage.StartsWith("Ready to create", StringComparison.Ordinal))
+                {
+                    StatusMessage = string.Empty;
+                }
             }
             await InvokeAsync(StateHasChanged);
         }
