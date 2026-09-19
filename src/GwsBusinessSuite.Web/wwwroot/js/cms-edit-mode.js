@@ -350,10 +350,65 @@
   function highlight(widgetId) {
     var prev = document.querySelector('.gws-editor-selected');
     if (prev) prev.classList.remove('gws-editor-selected');
+    removeWidgetToolbar();
     if (widgetId) {
       var el = document.querySelector('[data-gws-widget-id="' + widgetId + '"]');
-      if (el) el.classList.add('gws-editor-selected');
+      if (el) {
+        el.classList.add('gws-editor-selected');
+        var sectionEl = el.closest('[data-gws-section-id]');
+        if (sectionEl) buildWidgetToolbar(el, sectionEl.getAttribute('data-gws-section-id'), widgetId);
+      }
     }
+  }
+
+  var widgetToolbar = null;
+
+  function removeWidgetToolbar() {
+    if (widgetToolbar && widgetToolbar.parentNode) {
+      widgetToolbar.parentNode.removeChild(widgetToolbar);
+    }
+    widgetToolbar = null;
+  }
+
+  // Mirrors buildSectionToolbar below almost exactly - same anchoring trick, same
+  // command-message pattern - just retargeted to a single widget and its own command set.
+  // No "+ Add block" here: that's what the left palette + drag-and-drop already cover.
+  function buildWidgetToolbar(widgetEl, sectionId, widgetId) {
+    removeWidgetToolbar();
+    var bar = document.createElement('div');
+    bar.className = 'gws-widget-toolbar';
+    bar.setAttribute('data-gws-toolbar', '1');
+
+    // Reordering isn't meaningful inside a freeform-positioned section (items are moved by
+    // dragging, not up/down) - so Move Up/Down are omitted there, same freeform detection
+    // already used elsewhere in this file.
+    var isFreeform = !!widgetEl.closest('.gws-section-freeform-canvas');
+    var actions = [{ command: 'duplicate', label: 'Duplicate', cls: '' }];
+    if (!isFreeform) {
+      actions.push({ command: 'move-up', label: '↑', cls: '' });
+      actions.push({ command: 'move-down', label: '↓', cls: '' });
+    }
+    actions.push({ command: 'delete', label: 'Delete', cls: 'is-danger' });
+
+    actions.forEach(function (action) {
+      var button = document.createElement('button');
+      button.type = 'button';
+      button.className = action.cls;
+      button.textContent = action.label;
+      button.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        send({ type: 'cms:widget-command', sectionId: sectionId, widgetId: widgetId, command: action.command });
+      }, true);
+      bar.appendChild(button);
+    });
+
+    var previousPosition = window.getComputedStyle(widgetEl).position;
+    if (previousPosition === 'static') widgetEl.style.position = 'relative';
+    bar.style.top = '0px';
+    bar.style.right = '0px';
+    widgetEl.appendChild(bar);
+    widgetToolbar = bar;
   }
 
   var sectionToolbar = null;

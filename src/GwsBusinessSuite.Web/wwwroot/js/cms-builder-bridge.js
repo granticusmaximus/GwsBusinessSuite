@@ -218,6 +218,11 @@ window.gwsCmsBuilderBridge = (function () {
                 // anchors to the selected section.
                 _dotNetRef.invokeMethodAsync('OnSectionCommandFromIframe', data.sectionId || '', data.command || '');
                 break;
+            case 'cms:widget-command':
+                // Duplicate / move / delete, issued from the toolbar the canvas anchors to the
+                // selected widget - same pattern as cms:section-command above.
+                _dotNetRef.invokeMethodAsync('OnWidgetCommandFromIframe', data.sectionId || '', data.widgetId || '', data.command || '');
+                break;
             case 'cms:edit': {
                 // Rich props arrive as HTML and are converted back to Markdown here, using the
                 // same serializer the article editor uses (professionalEditor.js) rather than a

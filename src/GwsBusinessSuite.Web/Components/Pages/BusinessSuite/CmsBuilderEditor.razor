@@ -1470,7 +1470,11 @@ else
     // seen it yet - two facts the old single "Save" button conflated.
     private bool _hasUnpublishedChanges;
     private DateTimeOffset? _lastSavedAt;
-    private string _rightTab = "block";
+    // Defaults to "page" rather than "block" - before anything is selected there's nothing for
+    // the Block inspector to show but its own empty placeholder, whereas page settings are
+    // always relevant. SelectSection/SelectWidget already force-switch to "block" the moment
+    // something is actually selected, so this only changes the very first thing you see.
+    private string _rightTab = "page";
     private bool _pendingAutosaveReloadPreview;
     private const int AutosaveDelayMs = 800;
     private const int StructuralAutosaveDelayMs = 150;
@@ -1665,6 +1669,34 @@ else
     public Task OnWidgetSelectedFromIframe(string sectionId, string widgetId)
     {
         SelectWidget(sectionId, widgetId);
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    // Toolbar actions issued from the canvas itself (see CmsBlockHtmlRenderer's
+    // buildWidgetToolbar), mirroring OnSectionCommandFromIframe above. The toolbar only ever
+    // appears on the currently-selected widget, so _selectedSectionId/_selectedWidgetId are
+    // already correct here - this reuses the exact same *SelectedWidget methods the right
+    // panel's own action row already calls, with no new business logic.
+    [JSInvokable]
+    public Task OnWidgetCommandFromIframe(string sectionId, string widgetId, string command)
+    {
+        switch (command)
+        {
+            case "duplicate":
+                DuplicateSelectedWidget();
+                break;
+            case "move-up":
+                MoveSelectedWidgetUp();
+                break;
+            case "move-down":
+                MoveSelectedWidgetDown();
+                break;
+            case "delete":
+                DeleteSelectedWidget();
+                break;
+        }
+
         StateHasChanged();
         return Task.CompletedTask;
     }

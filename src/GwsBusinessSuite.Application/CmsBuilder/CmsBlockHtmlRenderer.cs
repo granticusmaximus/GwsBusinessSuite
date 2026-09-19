@@ -180,6 +180,23 @@ public static class CmsBlockHtmlRenderer
           .gws-section-toolbar button.is-primary { background: #2563eb; color: #fff; font-weight: 600; }
           .gws-section-toolbar button.is-primary:hover { background: #1d4ed8; }
           .gws-section-toolbar button.is-danger:hover { background: #b91c1c; color: #fff; }
+          /* Same anchoring trick as .gws-section-toolbar, retargeted to the widget itself
+             (.gws-editable is already position:relative). Floats above the widget's own top
+             edge via translateY(-100%), so it never collides with .gws-drag-handle (top-left,
+             inside the widget) or .gws-visibility-hint (top-right, inside the widget). */
+          .gws-widget-toolbar {
+            position: absolute; z-index: 2147483000; display: flex; gap: 2px;
+            transform: translateY(-100%);
+            background: #1e293b; border-radius: 8px 8px 0 0; padding: 4px;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.28);
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+          }
+          .gws-widget-toolbar button {
+            appearance: none; border: 0; background: transparent; color: #e2e8f0;
+            font-size: 12px; line-height: 1; padding: 6px 9px; border-radius: 5px; cursor: pointer;
+          }
+          .gws-widget-toolbar button:hover { background: rgba(148, 163, 184, 0.25); color: #fff; }
+          .gws-widget-toolbar button.is-danger:hover { background: #b91c1c; color: #fff; }
           /* Selection formatting bar. Deliberately carries only bold / italic / link: those are
              exactly what the HTML->Markdown serializer can carry back, so the toolbar doubles as
              an honest boundary of what inline editing supports. */
