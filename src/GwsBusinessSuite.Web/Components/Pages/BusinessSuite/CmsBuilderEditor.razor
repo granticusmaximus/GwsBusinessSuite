@@ -79,14 +79,16 @@
 {
     <div class="alert alert-danger d-flex align-items-start gap-2 mb-3">
         <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
-        <div>@_errorMessage</div>
+        <div class="flex-grow-1">@_errorMessage</div>
+        <button type="button" class="btn-close" aria-label="Dismiss" @onclick="() => _errorMessage = string.Empty"></button>
     </div>
 }
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
     <div class="alert alert-info d-flex align-items-center gap-2 mb-3">
         <i class="bi bi-info-circle-fill flex-shrink-0"></i>
-        <div>@_statusMessage</div>
+        <div class="flex-grow-1">@_statusMessage</div>
+        <button type="button" class="btn-close" aria-label="Dismiss" @onclick="() => _statusMessage = string.Empty"></button>
     </div>
 }
 
@@ -1938,6 +1940,16 @@ else
         _errorMessage = string.Empty;
         if (!isAutosave)
         {
+            _statusMessage = string.Empty;
+        }
+        else if (_statusMessage.StartsWith("Loaded '", StringComparison.Ordinal))
+        {
+            // The one-off "Loaded 'X'." message from LoadPageAsync used to only get cleared by
+            // an explicit manual save/publish - autosave (the primary workflow here per this
+            // page's own "Your work autosaves as a draft" copy) never touched it, so it sat on
+            // screen indefinitely for anyone who only ever autosaves. Only clear it when it's
+            // still this specific stale message, so a more recent, still-relevant status set
+            // moments before autosave fires isn't clobbered.
             _statusMessage = string.Empty;
         }
         try
