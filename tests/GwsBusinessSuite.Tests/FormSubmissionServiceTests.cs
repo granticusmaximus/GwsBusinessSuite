@@ -100,6 +100,44 @@ public sealed class FormSubmissionServiceTests
     }
 
     [Fact]
+    public async Task ListAllAsync_ShouldReturnSubmissionsAcrossEveryPage_NewestFirst()
+    {
+        // Phase 5 (global form submissions inbox) - unlike ListAsync above (scoped to one
+        // page), this must aggregate across every page for the cross-page admin inbox.
+        await using var db = await CreateDbAsync();
+        var cmsBuilder = new CmsBuilderService(db);
+        var service = CreateService(db);
+        var pageOne = await CreatePageAsync(db, cmsBuilder);
+        var pageTwo = await CreatePageAsync(db, cmsBuilder);
+
+        await service.SubmitAsync(pageOne.Id, new Dictionary<string, string> { ["name"] = "First" });
+        await service.SubmitAsync(pageTwo.Id, new Dictionary<string, string> { ["name"] = "Second" });
+
+        var all = await service.ListAllAsync();
+
+        all.Should().HaveCount(2);
+        all[0].FieldsJson.Should().Contain("Second");
+        all.Select(s => s.PageId).Should().BeEquivalentTo([pageOne.Id, pageTwo.Id]);
+    }
+
+    [Fact]
+    public async Task CountUnreadAsync_ShouldCountOnlyUnreadSubmissions_AcrossEveryPage()
+    {
+        await using var db = await CreateDbAsync();
+        var cmsBuilder = new CmsBuilderService(db);
+        var service = CreateService(db);
+        var pageOne = await CreatePageAsync(db, cmsBuilder);
+        var pageTwo = await CreatePageAsync(db, cmsBuilder);
+
+        var readOnPageOne = await service.SubmitAsync(pageOne.Id, new Dictionary<string, string> { ["name"] = "Read" });
+        await service.SubmitAsync(pageOne.Id, new Dictionary<string, string> { ["name"] = "Unread one" });
+        await service.SubmitAsync(pageTwo.Id, new Dictionary<string, string> { ["name"] = "Unread two" });
+        await service.MarkReadAsync(readOnPageOne.Id);
+
+        (await service.CountUnreadAsync()).Should().Be(2);
+    }
+
+    [Fact]
     public async Task DeleteAsync_ShouldRemoveTheSubmission()
     {
         await using var db = await CreateDbAsync();
