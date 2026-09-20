@@ -112,25 +112,6 @@ builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
 builder.Services.AddScoped<GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor>();
 builder.Services.AddSignalR();
 
-// OSINT Watch (Intelligence tab) - reverse-proxies the internal-only osiris sidecar
-// container (docker-compose.yml) so it's reachable through this app's own AdminOnly-gated
-// admin session instead of needing its own public hostname/Cloudflared route. See the
-// proxy routes below for why /_next, /api, and /data need their own catch-alls.
-builder.Services.AddHttpClient("osiris", client =>
-{
-    client.BaseAddress = new Uri("http://osiris:3000/");
-    client.Timeout = TimeSpan.FromSeconds(30);
-})
-    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
-    {
-        // Redirects must return to the browser so OsintProxyService can keep them inside the
-        // authenticated proxy surface. A pooled cookie jar would also leak one upstream session
-        // between different GWS administrators, so the sidecar is deliberately cookie-free.
-        AllowAutoRedirect = false,
-        UseCookies = false
-    });
-builder.Services.AddSingleton<OsintProxyService>();
-
 // Content Studio article generation can take several minutes against Ollama
 // (first-time model load especially). Extend the circuit's disconnect grace
 // period well past that so a brief network blip over the Cloudflare Tunnel
@@ -594,60 +575,25 @@ app.Use(async (context, next) =>
     context.Response.OnStarting(() =>
     {
         var headers = context.Response.Headers;
-        var isOsintDocument = context.Request.Path.StartsWithSegments(OsintProxyService.ShellPrefix);
-        var isOsintHostPage = string.Equals(
-            context.Request.Path.Value,
-            "/admin/osint",
-            StringComparison.OrdinalIgnoreCase);
         headers["X-Content-Type-Options"] = "nosniff";
-        if (isOsintDocument)
-        {
-            // OSIRIS is a pinned, separately built Next.js application. Its production runtime
-            // uses inline RSC bootstrapping, Web Workers, remote map/media data, and same-origin
-            // API calls. Keep this relaxation confined to the proxied iframe document; the rest
-            // of GWS retains the stricter application-wide policy below.
-            headers.Remove("X-Frame-Options");
-            headers["Referrer-Policy"] = "no-referrer";
-            headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(self), payment=()";
-            headers["Content-Security-Policy"] = string.Join(' ', [
-                "default-src 'self' data: blob: https:;",
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:;",
-                "style-src 'self' 'unsafe-inline' https:;",
-                "img-src 'self' data: blob: https:;",
-                "font-src 'self' data: https:;",
-                "connect-src 'self' data: blob: https: wss: ws:;",
-                "media-src 'self' data: blob: https:;",
-                "worker-src 'self' blob:;",
-                "frame-src 'self' https:;",
-                "frame-ancestors 'self';",
-                "object-src 'none';",
-                "base-uri 'self';",
-                "form-action 'self';"
-            ]);
-        }
-        else
-        {
-            headers["X-Frame-Options"] = "SAMEORIGIN";
-            headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-            headers["Permissions-Policy"] = isOsintHostPage
-                ? "camera=(self), microphone=(self), geolocation=(self), payment=()"
-                : "camera=(self), microphone=(self), geolocation=(), payment=()";
-            headers["Content-Security-Policy"] = string.Join(' ', [
-                "default-src 'self';",
-                "script-src 'self' https://cdn.jsdelivr.net;",
-                "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;",
-                "img-src 'self' data: https:;",
-                "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;",
-                "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net;",
-                "media-src 'self' blob: https:;",
-                "worker-src 'self' blob:;",
-                "frame-src 'self';",
-                "frame-ancestors 'self';",
-                "object-src 'none';",
-                "base-uri 'self';",
-                "form-action 'self';"
-            ]);
-        }
+        headers["X-Frame-Options"] = "SAMEORIGIN";
+        headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(), payment=()";
+        headers["Content-Security-Policy"] = string.Join(' ', [
+            "default-src 'self';",
+            "script-src 'self' https://cdn.jsdelivr.net;",
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;",
+            "img-src 'self' data: https:;",
+            "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;",
+            "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net;",
+            "media-src 'self' blob: https:;",
+            "worker-src 'self' blob:;",
+            "frame-src 'self';",
+            "frame-ancestors 'self';",
+            "object-src 'none';",
+            "base-uri 'self';",
+            "form-action 'self';"
+        ]);
         return Task.CompletedTask;
     });
     await next(context);
@@ -736,7 +682,6 @@ app.MapHealthChecks("/health/ready", new()
 
 app.MapDeveloperApiEndpoints();
 app.MapDeveloperApiSentinelEndpoints();
-app.MapOsintProxyEndpoints();
 
 // Notion connection webhooks are intentionally anonymous: Notion is the caller. Event
 // requests are authenticated with X-Notion-Signature (HMAC-SHA256 over the exact raw body);

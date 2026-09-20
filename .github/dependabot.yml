@@ -12,19 +12,6 @@ updates:
           - "*"
     open-pull-requests-limit: 10
 
-  # vendor/osiris-intel is a deliberately vendored, security-audited snapshot (see its own
-  # README.md), not built live against upstream. These PRs are a useful signal for when a
-  # re-audit is worth doing - review carefully before merging, don't rubber-stamp.
-  - package-ecosystem: "npm"
-    directory: "/vendor/osiris-intel"
-    schedule:
-      interval: "weekly"
-    groups:
-      osiris-intel-dependencies:
-        patterns:
-          - "*"
-    open-pull-requests-limit: 5
-
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

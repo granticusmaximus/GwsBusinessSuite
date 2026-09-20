@@ -2,12 +2,12 @@
 
 This is the complete guide to GWS Business Suite's Intelligence cluster: **Media Watch**
 (`/admin/news-intelligence`), **Civic Watch** (`/admin/government-intelligence`), the **Podcast
-Directory** (`/admin/podcasts`), **Business Intelligence** (`/admin/business-intelligence`),
-**OSINT Watch** (`/admin/osint`), and **Mind Maps** (`/admin/mind-maps`). The first five pages
-don't share a database schema, but they share a shape: each one pulls in outside signal (news,
-government sources, podcast catalogs, public OSINT) or your own suite data, and turns it into
-something you can scan in a few seconds. Mind Maps is the one exception — it doesn't ingest
-anything; it's a plain authoring tool for outlines and roadmaps you build yourself.
+Directory** (`/admin/podcasts`), **Business Intelligence** (`/admin/business-intelligence`), and
+**Mind Maps** (`/admin/mind-maps`). The first four pages don't share a database schema, but they
+share a shape: each one pulls in outside signal (news, government sources, podcast catalogs) or
+your own suite data, and turns it into something you can scan in a few seconds. Mind Maps is the
+one exception — it doesn't ingest anything; it's a plain authoring tool for outlines and roadmaps
+you build yourself.
 
 This guide is text-only (no screenshots) — see the note at the end of [`docs/USER_GUIDES.md`](USER_GUIDES.md)
 for why, and how that may change later.
@@ -24,10 +24,9 @@ for why, and how that may change later.
 8. [Podcast Directory: discovering and saving shows](#podcast-directory-discovering-and-saving-shows)
 9. [Podcast Directory: episodes, playback, and progress](#podcast-directory-episodes-playback-and-progress)
 10. [Business Intelligence: building and pinning a chart](#business-intelligence-building-and-pinning-a-chart)
-11. [OSINT Watch: map and public-source tools](#osint-watch-map-and-public-source-tools)
-12. [Mind Maps: building an outline](#mind-maps-building-an-outline)
-13. [Who can see what](#who-can-see-what)
-14. [Known limitations](#known-limitations)
+11. [Mind Maps: building an outline](#mind-maps-building-an-outline)
+12. [Who can see what](#who-can-see-what)
+13. [Known limitations](#known-limitations)
 
 ---
 
@@ -41,13 +40,10 @@ Each page has its own vocabulary, but two ideas repeat everywhere in this cluste
   admin's pinned charts belong only to them), Mind Maps (each admin's saved mind maps are private
   to them too), and podcast listen progress (whether *you* finished an episode is tracked per
   staff account, even though the saved show itself is shared).
-  OSINT Watch reads live public sources and can keep browser-local map preferences, but it does
-  not save OSINT results into GWS or expose them to another staff account.
 - **Background refresh vs. on-demand refresh.** The four native suite pages either refresh their
   source data on a schedule, recompute it when the page loads, or offer a manual refresh action.
   Where a scheduled and manual refresh share a source, they also share a lock so two runs cannot
-  overwrite each other. OSINT Watch is different: the embedded dashboard polls its public sources
-  while it is open rather than using a GWS background job.
+  overwrite each other.
 
 ## Media Watch: watched topics and the sidebar
 
@@ -249,24 +245,6 @@ different date ranges, GWS still only queries the deals table once per page load
 range any of those widgets needs) and applies each widget's own narrower range afterward, rather
 than re-scanning the table once per widget.
 
-## OSINT Watch: map and public-source tools
-
-OSINT Watch (`/admin/osint`) embeds the OSIRIS public-source intelligence dashboard inside the
-admin portal. It combines live or recently reported aircraft, vessels, satellites, traffic
-cameras, seismic and weather events, conflict data, cyber indicators, infrastructure, and other
-open-source layers on one map. Availability and update timing vary by source.
-
-Use the map's layer and tool controls to narrow the signals you want to inspect, select a marker
-for its available source details, and use **OSIRIS reference** at the top of the page for the
-upstream dashboard's feature and data-source reference. Some layers refresh while the dashboard
-is open; an individual upstream source can fail without taking down every other layer.
-
-Treat every match as an investigative lead, not a confirmed fact. Verify consequential findings
-against an authoritative source before acting on them. Active RECON scanning is intentionally
-unavailable in this deployment, and the dashboard must not be used to enter client data, API keys,
-passwords, or other private material. For the reviewed build and integration boundary, see
-[`OSINT_WATCH_SECURITY.md`](OSINT_WATCH_SECURITY.md).
-
 ## Mind Maps: building an outline
 
 Mind Maps (`/admin/mind-maps`) is a plain visual outlining tool, separate from Wiki/Sentinel and
@@ -293,8 +271,8 @@ each with a few representative resources) — open it to see a populated map bef
 
 ## Who can see what
 
-All six pages require a staff sign-in. Five of them (Media Watch, Civic Watch, Business
-Intelligence, OSINT Watch, and Mind Maps) are restricted to the **AdminOnly** policy specifically;
+All five pages require a staff sign-in. Four of them (Media Watch, Civic Watch, Business
+Intelligence, and Mind Maps) are restricted to the **AdminOnly** policy specifically;
 the Podcast Directory uses the slightly broader **ContributorAccess** policy, so a Contributor-level
 teammate who isn't a full admin can still browse and manage the shared podcast library.
 
@@ -325,10 +303,6 @@ teammate who isn't a full admin can still browse and manage the shared podcast l
 - **Business Intelligence chart rendering is hand-built**, not backed by a charting library — bar
   and line visualizations are simple SVG/CSS constructs, which is why data is capped to a small
   number of points (e.g. top 12 advertisers/articles) rather than rendering dense datasets.
-- **OSINT Watch depends on third-party public feeds and two internal containers.** A feed may be
-  stale, incomplete, misidentified, rate-limited, or temporarily unavailable, and the embedded
-  dashboard requires both the `osiris` and `osiris-intel` services to be healthy. Active RECON
-  scanning is not configured in GWS.
 - **Mind Maps editing is toolbar-driven, not free-form.** You can't double-click a node to rename
   it in place or drag one node onto another to reparent it — every structural change goes through
   the Add child / Rename / Delete buttons. This is a deliberate limitation of the underlying
