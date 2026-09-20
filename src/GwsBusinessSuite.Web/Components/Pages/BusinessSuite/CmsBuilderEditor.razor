@@ -1128,6 +1128,26 @@ else
                             }
                         </div>
 
+                        @* Responsive — Hide on mobile/tablet (Phase 2). Purely CSS-driven, so
+                           it applies inside Studio's own preview too: switching the device
+                           switcher immediately shows a hidden widget disappear. *@
+                        <hr class="my-2" />
+                        <div class="small text-secondary fw-semibold text-uppercase mb-1" style="letter-spacing:.05em;">Responsive</div>
+                        <div class="d-flex gap-3 mb-2">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="widget-hide-mobile"
+                                       checked="@selWidget.HiddenOnMobile"
+                                       @onchange='(e) => SetWidgetHiddenOnMobile(selWidget, (bool)(e.Value ?? false))' />
+                                <label class="form-check-label small" for="widget-hide-mobile">Hide on mobile</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="widget-hide-tablet"
+                                       checked="@selWidget.HiddenOnTablet"
+                                       @onchange='(e) => SetWidgetHiddenOnTablet(selWidget, (bool)(e.Value ?? false))' />
+                                <label class="form-check-label small" for="widget-hide-tablet">Hide on tablet</label>
+                            </div>
+                        </div>
+
                         @* Interactions — no-code scroll/click/hover animation (Phase 5). One
                            optional interaction per widget; unchecking "Enable" clears it back
                            to null so an untouched widget renders byte-for-byte as before this
@@ -1329,6 +1349,23 @@ else
                                 <option value="lg">Large</option>
                                 <option value="xl">XL</option>
                             </select>
+                        </div>
+                        <div>
+                            <label class="form-label small fw-semibold">Responsive</label>
+                            <div class="d-flex gap-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="section-hide-mobile"
+                                           checked="@sel.HiddenOnMobile"
+                                           @onchange='(e) => SetSectionHiddenOnMobile(sel, (bool)(e.Value ?? false))' />
+                                    <label class="form-check-label small" for="section-hide-mobile">Hide on mobile</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="section-hide-tablet"
+                                           checked="@sel.HiddenOnTablet"
+                                           @onchange='(e) => SetSectionHiddenOnTablet(sel, (bool)(e.Value ?? false))' />
+                                    <label class="form-check-label small" for="section-hide-tablet">Hide on tablet</label>
+                                </div>
+                            </div>
                         </div>
                         <div>
                             <label class="form-label small fw-semibold">Client Access</label>
@@ -2213,6 +2250,11 @@ else
             Background = section.Background,
             Padding = section.Padding,
             ColumnLayout = section.ColumnLayout,
+            EditPermission = section.EditPermission,
+            LayoutMode = section.LayoutMode,
+            FreeformHeightPx = section.FreeformHeightPx,
+            HiddenOnMobile = section.HiddenOnMobile,
+            HiddenOnTablet = section.HiddenOnTablet,
             Columns = section.Columns.Select(column => new LayoutColumn
             {
                 Id = column.Id,
@@ -2858,6 +2900,11 @@ else
             Background = original.Background,
             Padding = original.Padding,
             ColumnLayout = original.ColumnLayout,
+            LayoutMode = original.LayoutMode,
+            FreeformHeightPx = original.FreeformHeightPx,
+            EditPermission = original.EditPermission,
+            HiddenOnMobile = original.HiddenOnMobile,
+            HiddenOnTablet = original.HiddenOnTablet,
             Columns = original.Columns.Select(col => new LayoutColumn
             {
                 Id = Guid.NewGuid().ToString("N"),
@@ -2868,6 +2915,8 @@ else
                     GlobalBlockId = w.GlobalBlockId,
                     WidgetType = w.WidgetType,
                     Props = new Dictionary<string, string>(w.Props),
+                    HiddenOnMobile = w.HiddenOnMobile,
+                    HiddenOnTablet = w.HiddenOnTablet,
                     Style = new WidgetStyle
                     {
                         TextColor = w.Style.TextColor,
@@ -2933,6 +2982,9 @@ else
             GlobalBlockId = orig.GlobalBlockId,
             WidgetType = orig.WidgetType,
             Props = new Dictionary<string, string>(orig.Props),
+            EditPermission = orig.EditPermission,
+            HiddenOnMobile = orig.HiddenOnMobile,
+            HiddenOnTablet = orig.HiddenOnTablet,
             Style = new WidgetStyle
             {
                 TextColor = orig.Style.TextColor,
@@ -3239,8 +3291,44 @@ else
         {
             return;
         }
-        _ = PushStyleToCanvasAsync(widget.Id, widget.Style);
+        _ = PushWidgetAppearanceToCanvasAsync(widget);
     }
+
+    // ── Responsive helpers (Phase 2 - Hide on mobile/tablet) ────────────────
+    private void SetWidgetHiddenOnMobile(LayoutWidget widget, bool value)
+    {
+        if (widget.HiddenOnMobile == value) return;
+        ApplyTrackedMutation($"{widget.Id}:hiddenOnMobile", () => widget.HiddenOnMobile = value, reloadPreview: false);
+        _ = PushWidgetAppearanceToCanvasAsync(widget);
+    }
+
+    private void SetWidgetHiddenOnTablet(LayoutWidget widget, bool value)
+    {
+        if (widget.HiddenOnTablet == value) return;
+        ApplyTrackedMutation($"{widget.Id}:hiddenOnTablet", () => widget.HiddenOnTablet = value, reloadPreview: false);
+        _ = PushWidgetAppearanceToCanvasAsync(widget);
+    }
+
+    private void SetSectionHiddenOnMobile(LayoutSection section, bool value)
+    {
+        if (section.HiddenOnMobile == value) return;
+        ApplyTrackedMutation($"{section.Id}:hiddenOnMobile", () => section.HiddenOnMobile = value, reloadPreview: false);
+        _ = PushSectionAppearanceToCanvasAsync(section);
+    }
+
+    private void SetSectionHiddenOnTablet(LayoutSection section, bool value)
+    {
+        if (section.HiddenOnTablet == value) return;
+        ApplyTrackedMutation($"{section.Id}:hiddenOnTablet", () => section.HiddenOnTablet = value, reloadPreview: false);
+        _ = PushSectionAppearanceToCanvasAsync(section);
+    }
+
+    // Mirrors CmsBlockHtmlRenderer.HiddenClasses - kept as a small independent copy the same
+    // way BuildSectionCssClass below already duplicates BgClass/PadClass, since this side only
+    // ever needs it for the live-preview push, not the real render.
+    private static string HiddenClasses(bool hiddenOnMobile, bool hiddenOnTablet) =>
+        string.Join(' ', new[] { hiddenOnMobile ? "gws-hide-mobile" : "", hiddenOnTablet ? "gws-hide-tablet" : "" }
+            .Where(c => c.Length > 0));
 
     // ── Visibility helpers (Part 6.3) ───────────────────────────────────────
     // No live-preview push needed (unlike Style) - the rule has no visual effect in edit
@@ -3281,7 +3369,7 @@ else
         ApplyTrackedMutation($"{widget.Id}:interaction:once",
             () => { if (widget.Interaction is { } i) i.Once = once; }, reloadPreview: true);
 
-    private async Task PushStyleToCanvasAsync(string widgetId, WidgetStyle style)
+    private async Task PushWidgetAppearanceToCanvasAsync(LayoutWidget widget)
     {
         if (!_bridgeInitialized) return;
         try
@@ -3290,9 +3378,10 @@ else
                 new
                 {
                     type = "cms:style-changed",
-                    widgetId,
-                    inlineStyle = style.ToInlineStyle(SiteTokens),
-                    hasAnyOverride = style.HasAnyOverride
+                    widgetId = widget.Id,
+                    inlineStyle = widget.Style.ToInlineStyle(SiteTokens),
+                    hasAnyOverride = widget.Style.HasAnyOverride,
+                    hiddenClasses = HiddenClasses(widget.HiddenOnMobile, widget.HiddenOnTablet)
                 });
         }
         catch (JSDisconnectedException)
@@ -3300,7 +3389,7 @@ else
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Failed to push live style change to canvas for widget {WidgetId}.", widgetId);
+            Logger.LogWarning(ex, "Failed to push live style change to canvas for widget {WidgetId}.", widget.Id);
         }
     }
 
@@ -3323,7 +3412,7 @@ else
             _ => "gws-pad-md"
         };
 
-        return string.Join(' ', new[] { "gws-section", backgroundClass, paddingClass }.Where(x => !string.IsNullOrWhiteSpace(x)));
+        return string.Join(' ', new[] { "gws-section", backgroundClass, paddingClass, HiddenClasses(section.HiddenOnMobile, section.HiddenOnTablet) }.Where(x => !string.IsNullOrWhiteSpace(x)));
     }
 
     // ── Form widget field editor ─────────────────────────────────────────

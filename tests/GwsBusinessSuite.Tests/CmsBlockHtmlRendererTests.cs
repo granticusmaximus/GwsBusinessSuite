@@ -201,6 +201,48 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void Render_ShouldApplyHiddenOnMobileAndTabletClasses_ToASection()
+    {
+        var html = CmsBlockHtmlRenderer.Render(
+            """{"sections":[{"id":"s1","hiddenOnMobile":true,"hiddenOnTablet":true,"columns":[]}]}""");
+
+        Assert.Contains("gws-hide-mobile", html);
+        Assert.Contains("gws-hide-tablet", html);
+    }
+
+    [Fact]
+    public void Render_ShouldNotAddHiddenClasses_ToASection_WhenNeitherFlagIsSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(
+            """{"sections":[{"id":"s1","columns":[]}]}""");
+
+        Assert.DoesNotContain("gws-hide-mobile", html);
+        Assert.DoesNotContain("gws-hide-tablet", html);
+    }
+
+    [Fact]
+    public void Render_ShouldWrapWidgetWithHiddenClass_WhenHiddenOnMobileIsSet_EvenWithNoStyleOverride()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"hiddenOnMobile":true}"""));
+
+        Assert.Contains("gws-widget-style", html);
+        Assert.Contains("gws-hide-mobile", html);
+        Assert.DoesNotContain("gws-hide-tablet", html);
+    }
+
+    [Fact]
+    public void Render_ShouldNotWrapWidget_WhenNeitherStyleNorHiddenFlagsAreSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"paragraph","props":{"text":"Hello"},"hiddenOnMobile":false,"hiddenOnTablet":false}"""));
+
+        Assert.DoesNotContain("gws-widget-style", html);
+        Assert.DoesNotContain("gws-hide-mobile", html);
+        Assert.DoesNotContain("gws-hide-tablet", html);
+    }
+
+    [Fact]
     public void Render_ShouldEmitCanvasDropMetadata_InEditMode()
     {
         var html = CmsBlockHtmlRenderer.Render(

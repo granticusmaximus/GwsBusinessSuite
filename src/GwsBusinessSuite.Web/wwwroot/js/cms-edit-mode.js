@@ -313,21 +313,26 @@
     }) || null;
   }
 
-  function applyWidgetStyle(widgetId, inlineStyle, hasAnyOverride) {
+  // hiddenClasses (Phase 2 - Hide on mobile/tablet) is a space-joined "gws-hide-mobile
+  // gws-hide-tablet" fragment, empty when neither flag is set. A wrapper is needed whenever
+  // EITHER a style override OR a hidden flag is active - mirrors CmsBlockHtmlRenderer.WrapWidget
+  // server-side, so the live-edit push and the next full reload always agree on markup shape.
+  function applyWidgetStyle(widgetId, inlineStyle, hasAnyOverride, hiddenClasses) {
     var container = document.querySelector('[data-gws-widget-id="' + widgetId + '"]');
     if (!container) return;
 
     var wrapper = findDirectStyleWrapper(container);
-    if (hasAnyOverride) {
+    var needsWrapper = hasAnyOverride || !!hiddenClasses;
+    if (needsWrapper) {
       if (!wrapper) {
         wrapper = document.createElement('div');
-        wrapper.className = 'gws-widget-style';
         Array.prototype.slice.call(container.childNodes).forEach(function (node) {
           if (node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-gws-drag-handle-for')) return;
           wrapper.appendChild(node);
         });
         container.appendChild(wrapper);
       }
+      wrapper.className = ('gws-widget-style ' + (hiddenClasses || '')).trim();
       wrapper.setAttribute('style', inlineStyle || '');
       return;
     }
@@ -622,7 +627,7 @@
         el.innerText = e.data.value;
       }
     } else if (e.data.type === 'cms:style-changed') {
-      applyWidgetStyle(e.data.widgetId, e.data.inlineStyle || '', !!e.data.hasAnyOverride);
+      applyWidgetStyle(e.data.widgetId, e.data.inlineStyle || '', !!e.data.hasAnyOverride, e.data.hiddenClasses || '');
     } else if (e.data.type === 'cms:section-changed') {
       applySectionClass(e.data.sectionId, e.data.cssClass || '');
     } else if (e.data.type === 'cms:palette-drag-end') {

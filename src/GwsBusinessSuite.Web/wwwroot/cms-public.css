@@ -63,6 +63,19 @@ body {
   }
 }
 
+/* Phase 2 - Hide on mobile/tablet: a per-section/per-widget visibility toggle set in the
+   Inspector (see CmsBlockHtmlRenderer.HiddenClasses). The "mobile" cutoff matches this file's
+   existing 760px column-stacking breakpoint above; the "tablet" band's upper bound (900px)
+   sits deliberately between Canvas Studio's own simulated tablet (820px) and desktop (980px)
+   preview widths (see CmsBuilderEditor.razor.css's .studio-stage-frame.is-*), so switching the
+   Studio's device switcher always shows exactly one band's hidden elements disappear. */
+@media (max-width: 760px) {
+  .gws-hide-mobile { display: none !important; }
+}
+@media (min-width: 761px) and (max-width: 900px) {
+  .gws-hide-tablet { display: none !important; }
+}
+
 .gws-align-left   { text-align: left; }
 .gws-align-center { text-align: center; }
 .gws-align-right  { text-align: right; }

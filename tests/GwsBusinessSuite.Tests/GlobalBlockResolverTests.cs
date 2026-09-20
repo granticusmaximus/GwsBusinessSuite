@@ -454,6 +454,77 @@ public sealed class GlobalBlockResolverTests
         childWidget.Freeform.Width.Should().Be(50);
     }
 
+    [Fact]
+    public async Task ResolveAsync_ShouldSyncHiddenOnMobileTablet_ForAGlobalSection()
+    {
+        // Phase 2 (Hide on mobile/tablet) - treated as part of the shared canonical design,
+        // same as LayoutMode/FreeformHeightPx above, not a placement-local value.
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var globals = new GlobalBlockService(db);
+        var resolver = new GlobalBlockResolver(globals);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Globals" });
+
+        var globalSection = await globals.CreateSectionAsync(site.Id, "Hidden banner", new LayoutSection
+        {
+            Id = "canonical-section",
+            HiddenOnMobile = true,
+            HiddenOnTablet = true,
+            Columns = [new LayoutColumn { Id = "canonical-column" }]
+        });
+
+        var layout = new PageLayout
+        {
+            Sections = [new LayoutSection { Id = "placement-section", GlobalBlockId = globalSection.Id }]
+        };
+
+        await resolver.ResolveAsync(site.Id, layout);
+
+        layout.Sections[0].HiddenOnMobile.Should().BeTrue();
+        layout.Sections[0].HiddenOnTablet.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ShouldSyncHiddenOnMobileTablet_ForAGlobalWidget()
+    {
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var globals = new GlobalBlockService(db);
+        var resolver = new GlobalBlockResolver(globals);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Globals" });
+
+        var globalWidget = await globals.CreateWidgetAsync(site.Id, "Promo copy", new LayoutWidget
+        {
+            Id = "global-widget",
+            WidgetType = "paragraph",
+            Props = new Dictionary<string, string> { ["text"] = "Synced copy" },
+            HiddenOnMobile = true
+        });
+
+        var layout = new PageLayout
+        {
+            Sections =
+            [
+                new LayoutSection
+                {
+                    Id = "section-1",
+                    Columns =
+                    [
+                        new LayoutColumn
+                        {
+                            Id = "column-1",
+                            Widgets = [new LayoutWidget { Id = "placement-widget", GlobalBlockId = globalWidget.Id }]
+                        }
+                    ]
+                }
+            ]
+        };
+
+        await resolver.ResolveAsync(site.Id, layout);
+
+        layout.Sections[0].Columns[0].Widgets[0].HiddenOnMobile.Should().BeTrue();
+    }
+
     private static async Task<ApplicationDbContext> CreateDbAsync()
     {
         var connection = new SqliteConnection("Data Source=:memory:");

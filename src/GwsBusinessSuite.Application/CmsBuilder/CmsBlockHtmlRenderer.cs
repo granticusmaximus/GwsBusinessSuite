@@ -261,9 +261,20 @@ public static class CmsBlockHtmlRenderer
         <script src="/js/cms-edit-mode.js" defer></script>
         """;
 
+    // Phase 2 (Hide on mobile/tablet) - the space-joined class fragment for whichever of the
+    // two width-scoped hide classes are set; empty when neither is, so a section/widget with
+    // both flags false composes exactly as it did before this feature existed.
+    private static string HiddenClasses(bool hiddenOnMobile, bool hiddenOnTablet)
+    {
+        var classes = new List<string>(2);
+        if (hiddenOnMobile) classes.Add("gws-hide-mobile");
+        if (hiddenOnTablet) classes.Add("gws-hide-tablet");
+        return string.Join(' ', classes);
+    }
+
     private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens = null)
     {
-        var sectionClass = $"gws-section {BgClass(section.Background)} {PadClass(section.Padding)}".TrimEnd();
+        var sectionClass = $"gws-section {BgClass(section.Background)} {PadClass(section.Padding)} {HiddenClasses(section.HiddenOnMobile, section.HiddenOnTablet)}".TrimEnd();
         var sectionAttrs = editMode ? $" data-gws-section-id=\"{Html(section.Id)}\"" : "";
 
         if (section.LayoutMode == CmsSectionLayoutModes.Freeform)
@@ -303,7 +314,7 @@ public static class CmsBlockHtmlRenderer
                 // (BuildInteractionRuntimeScript, never injected into the Canvas Studio
                 // preview iframe) reveals it, which would otherwise make the widget disappear
                 // in the editor with nothing to ever bring it back.
-                var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget.Style, tokens);
+                var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget, tokens);
                 if (!editMode) inner = WrapWithInteraction(inner, widget.Interaction);
                 // Both badges share one absolutely-positioned corner slot (see .gws-visibility-
                 // hint), so a widget with both a visibility rule and a lock setting gets ONE
@@ -315,7 +326,7 @@ public static class CmsBlockHtmlRenderer
                 var hiddenHint = widgetBadgeText.Length > 0
                     ? $"""<div class="gws-visibility-hint">{Html(widgetBadgeText)}</div>"""
                     : string.Empty;
-                // Wrapped OUTSIDE WrapWithStyle so a widget's own background/padding
+                // Wrapped OUTSIDE WrapWidget so a widget's own background/padding
                 // overrides can never clip the selection outline, and closest('[data-gws-
                 // widget-id]') in the edit-mode script always resolves reliably regardless
                 // of per-widget style config.
@@ -360,7 +371,7 @@ public static class CmsBlockHtmlRenderer
             }
 
             var position = widget.Freeform ?? FreeformPosition.DefaultFor(i);
-            var inner = WrapWithStyle(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget.Style, tokens);
+            var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget, tokens);
             if (!editMode) inner = WrapWithInteraction(inner, widget.Interaction);
             var widgetBadgeText = editMode
                 ? string.Join(" | ", new[] { VisibilityBadgeText(widget.Visibility), EditPermissionBadgeText(widget.EditPermission) }
@@ -381,21 +392,28 @@ public static class CmsBlockHtmlRenderer
         return sb.ToString();
     }
 
-    // Wraps a widget's rendered HTML in a styled container when it has any per-widget
-    // style override set (Phase 6) — otherwise returns the inner HTML untouched, so
-    // widgets with no overrides render byte-for-byte as they did before this feature.
-    private static string WrapWithStyle(string innerHtml, WidgetStyle style, DesignTokenSet? tokens = null)
+    // Wraps a widget's rendered HTML in a container when it has any per-widget style override
+    // (Phase 6) and/or a Hide on mobile/tablet flag (Phase 2) set — otherwise returns the inner
+    // HTML untouched, so a widget with neither renders byte-for-byte as it did before either
+    // feature existed.
+    private static string WrapWidget(string innerHtml, LayoutWidget widget, DesignTokenSet? tokens = null)
     {
-        var inlineStyle = style.ToInlineStyle(tokens);
-        return inlineStyle.Length == 0
-            ? innerHtml
-            : $"""<div class="gws-widget-style" style="{Html(inlineStyle)}">{innerHtml}</div>""";
+        var inlineStyle = widget.Style.ToInlineStyle(tokens);
+        var hiddenClasses = HiddenClasses(widget.HiddenOnMobile, widget.HiddenOnTablet);
+        if (inlineStyle.Length == 0 && hiddenClasses.Length == 0)
+        {
+            return innerHtml;
+        }
+
+        var classAttr = $"gws-widget-style {hiddenClasses}".TrimEnd();
+        var styleAttr = inlineStyle.Length == 0 ? "" : $" style=\"{Html(inlineStyle)}\"";
+        return $"""<div class="{Html(classAttr)}"{styleAttr}>{innerHtml}</div>""";
     }
 
     // Phase 5 (Native No-Code Interactions & Animation Engine) — wraps a widget's rendered
     // HTML in a data-gws-interaction container the shared runtime script
     // (BuildInteractionRuntimeScript) reads at load time. Null Interaction (the default)
-    // returns the inner HTML untouched, same "opt-in wrapper" contract as WrapWithStyle above.
+    // returns the inner HTML untouched, same "opt-in wrapper" contract as WrapWidget above.
     // Trigger/Action are re-validated against the known-good sets here rather than trusted
     // as-is — BlocksJson is just a text column, so a hand-crafted save request could otherwise
     // smuggle an arbitrary string into this attribute; an unrecognized value is treated as "no

@@ -43,6 +43,15 @@ public sealed class LayoutSection
     // natural height the way flow children do.
     public int FreeformHeightPx { get; set; } = 480;
 
+    // Phase 2 (Hide on mobile/tablet) - a purely CSS-driven visibility toggle, distinct from
+    // VisibilityRule (which decides whether a WIDGET renders in the DOM at all based on
+    // viewer/URL). This still renders normally server-side and is hidden client-side by a
+    // width-scoped class - see CmsBlockHtmlRenderer.HiddenClasses and cms-public.css/
+    // public-site.css's matching @media rules. False/false (the default) is a no-op, so
+    // existing pages are visually unaffected.
+    public bool HiddenOnMobile { get; set; }
+    public bool HiddenOnTablet { get; set; }
+
     public List<LayoutColumn> Columns { get; set; } = new();
 }
 
@@ -151,6 +160,11 @@ public sealed class LayoutWidget
     // render time - no new EF column, same "lives inside the BlocksJson blob" convention as
     // Freeform/Overrides above.
     public WidgetInteraction? Interaction { get; set; }
+
+    // Phase 2 (Hide on mobile/tablet) - see LayoutSection.HiddenOnMobile/HiddenOnTablet above
+    // for the full explanation; same convention at the widget level.
+    public bool HiddenOnMobile { get; set; }
+    public bool HiddenOnTablet { get; set; }
 }
 
 public sealed class WidgetInteraction

@@ -42,6 +42,8 @@ public static class GlobalBlockMaterializer
             ColumnLayout = canonical.ColumnLayout,
             LayoutMode = canonical.LayoutMode,
             FreeformHeightPx = canonical.FreeformHeightPx,
+            HiddenOnMobile = canonical.HiddenOnMobile,
+            HiddenOnTablet = canonical.HiddenOnTablet,
             Columns = ClonePlacementColumns(canonical.Columns, placementId)
         };
     }
@@ -72,6 +74,8 @@ public static class GlobalBlockMaterializer
             ColumnLayout = section.ColumnLayout,
             LayoutMode = section.LayoutMode,
             FreeformHeightPx = section.FreeformHeightPx,
+            HiddenOnMobile = section.HiddenOnMobile,
+            HiddenOnTablet = section.HiddenOnTablet,
             Columns = section.Columns.Select(column => new LayoutColumn
             {
                 Id = column.Id,
@@ -97,6 +101,8 @@ public static class GlobalBlockMaterializer
         }
         placement.Props = mergedProps;
         placement.Style = CloneStyle(canonical.Style);
+        placement.HiddenOnMobile = canonical.HiddenOnMobile;
+        placement.HiddenOnTablet = canonical.HiddenOnTablet;
     }
 
     public static void ApplyResolvedSection(LayoutSection placement, LayoutSection canonical)
@@ -107,6 +113,8 @@ public static class GlobalBlockMaterializer
         placement.ColumnLayout = canonical.ColumnLayout;
         placement.LayoutMode = canonical.LayoutMode;
         placement.FreeformHeightPx = canonical.FreeformHeightPx;
+        placement.HiddenOnMobile = canonical.HiddenOnMobile;
+        placement.HiddenOnTablet = canonical.HiddenOnTablet;
         placement.Columns = ClonePlacementColumns(canonical.Columns, placement.Id);
     }
 
@@ -153,7 +161,9 @@ public static class GlobalBlockMaterializer
         WidgetType = widget.WidgetType,
         Props = new Dictionary<string, string>(widget.Props),
         Style = CloneStyle(widget.Style),
-        Freeform = CloneFreeform(widget.Freeform)
+        Freeform = CloneFreeform(widget.Freeform),
+        HiddenOnMobile = widget.HiddenOnMobile,
+        HiddenOnTablet = widget.HiddenOnTablet
     };
 
     private static FreeformPosition? CloneFreeform(FreeformPosition? position) => position is null

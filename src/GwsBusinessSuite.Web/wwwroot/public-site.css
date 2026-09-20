@@ -937,6 +937,15 @@ a { color: inherit; }
   }
 }
 
+/* Phase 2 - Hide on mobile/tablet (kept in sync with cms-public.css - see its own comment
+   for the full rationale, including why the tablet band's upper bound is 900px). */
+@media (max-width: 760px) {
+  .gws-hide-mobile { display: none !important; }
+}
+@media (min-width: 761px) and (max-width: 900px) {
+  .gws-hide-tablet { display: none !important; }
+}
+
 .gws-align-left   { text-align: left; }
 .gws-align-center { text-align: center; }
 .gws-align-right  { text-align: right; }
