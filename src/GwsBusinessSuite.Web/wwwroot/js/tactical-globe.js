@@ -1,5 +1,5 @@
-// Tactical Globe (Phase 1+2) - a self-contained CesiumJS interop module. Cesium itself is
-// loaded from jsdelivr (see TacticalGlobe.razor) rather than vendored into this repo (its
+// Overwatch Grid (Phase 1+2) - a self-contained CesiumJS interop module. Cesium itself is
+// loaded from jsdelivr (see OverwatchGrid.razor) rather than vendored into this repo (its
 // prebuilt release is 100+ MB of binary/minified assets - not appropriate to commit). jsdelivr
 // is already a trusted script-src/style-src/font-src origin in this app's CSP for other
 // vendored libs (see Program.cs's own comment), so this crosses no new trust boundary.
@@ -24,11 +24,12 @@ window.tacticalGlobe = (function () {
         // A dark, high-contrast, stylized look reads more "military terminal" than a photoreal
         // basemap - and sidesteps needing any imagery-provider token. These are plain mutable
         // properties Cesium reads per-frame at draw time, so setting them immediately here is
-        // safe even though the provider itself (fromProviderAsync) resolves later - no need for
-        // a layerAdded event listener, which would also (wrongly) restyle the radar overlay
-        // added further below if used generically across every layer.
-        const baseLayer = Cesium.ImageryLayer.fromProviderAsync(
-            Cesium.OpenStreetMapImageryProvider.fromUrl('https://tile.openstreetmap.org/'));
+        // safe. Note: unlike several other Cesium imagery providers, OpenStreetMapImageryProvider
+        // has no async `fromUrl` factory in this Cesium version - it's still a plain synchronous
+        // constructor (confirmed directly against the loaded library: `fromUrl` is undefined on
+        // it), so it's wrapped in a plain `new Cesium.ImageryLayer(...)`, not fromProviderAsync.
+        const baseLayer = new Cesium.ImageryLayer(
+            new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }));
         baseLayer.brightness = 0.55;
         baseLayer.contrast = 1.35;
         baseLayer.gamma = 0.8;
@@ -36,7 +37,7 @@ window.tacticalGlobe = (function () {
         baseLayer.saturation = 0.15;
 
         // Every default Cesium widget is disabled - this page builds its own retro-terminal
-        // chrome around the bare 3D viewport instead (see TacticalGlobe.razor.css). No Ion
+        // chrome around the bare 3D viewport instead (see OverwatchGrid.razor.css). No Ion
         // access token is configured or needed: no terrain (Viewer's own token-free
         // EllipsoidTerrainProvider default is left alone) and the explicit baseLayer above means
         // Cesium never falls back to an Ion-backed default imagery layer.
@@ -144,7 +145,7 @@ window.tacticalGlobe = (function () {
 
     // Cesium's default credit container floats over the canvas with its own light-on-dark
     // styling that clashes with the terminal theme - redirect it into the attribution bar this
-    // page already renders (see TacticalGlobe.razor's .tg-attribution) instead of hiding it
+    // page already renders (see OverwatchGrid.razor's .tg-attribution) instead of hiding it
     // outright, since OSM's attribution requirement still needs to be satisfied somewhere visible.
     function makeCreditContainer(container) {
         const el = document.createElement('div');

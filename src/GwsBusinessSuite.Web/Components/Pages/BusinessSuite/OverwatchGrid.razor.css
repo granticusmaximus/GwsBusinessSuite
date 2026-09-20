@@ -1,4 +1,4 @@
-/* Retro military-terminal shell for the Tactical Globe page. No prior art existed in this repo
+/* Retro military-terminal shell for the Overwatch Grid page. No prior art existed in this repo
    for this look (see the removal plan's exploration notes) - built from scratch, scoped to just
    this page via Blazor CSS isolation. Cesium's own canvas/DOM lives inside .tg-viewport but is
    created by tactical-globe.js, not this component's markup, so isolation doesn't reach it -

@@ -585,7 +585,7 @@ app.Use(async (context, next) =>
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;",
             "img-src 'self' data: https:;",
             "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;",
-            // cdn.jsdelivr.net: Tactical Globe's self-hosted-via-CDN CesiumJS fetches its own
+            // cdn.jsdelivr.net: Overwatch Grid's self-hosted-via-CDN CesiumJS fetches its own
             // Workers/Assets/ThirdParty bundle at runtime from the same jsdelivr origin already
             // trusted in script-src above. tile.openstreetmap.org: the globe's base imagery
             // layer. nowcoast.noaa.gov: the optional NOAA radar overlay's WMS tiles - fetched

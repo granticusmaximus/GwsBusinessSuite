@@ -254,7 +254,7 @@ public static class DependencyInjection
         services.AddSingleton<GwsBusinessSuite.Application.Operations.IOperationalAlertService, OperationalAlertService>();
         services.AddScoped<IGrowthReportService, GrowthReportService>();
         services.AddHostedService<GrowthReportBackgroundService>();
-        // Tactical Globe's camera sources - both require a free, self-registered API key (see
+        // Overwatch Grid's camera sources - both require a free, self-registered API key (see
         // CameraIntelOptions) and simply return no cameras for their source when unconfigured.
         services.AddOptions<CameraIntelOptions>()
             .Bind(configuration.GetSection(CameraIntelOptions.SectionName));
@@ -275,7 +275,7 @@ public static class DependencyInjection
         services.AddHttpClient<INwsAlertsService, NwsAlertsService>(client =>
         {
             client.BaseAddress = new Uri("https://api.weather.gov/");
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-TacticalGlobe/1.0 (+https://www.gwsapp.net)");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-OverwatchGrid/1.0 (+https://www.gwsapp.net)");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddHttpClient<ISocialPublishingService, SocialPublishingService>(client =>

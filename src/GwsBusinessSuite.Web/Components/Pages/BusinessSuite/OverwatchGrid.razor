@@ -8,13 +8,14 @@
 @inject INwsAlertsService NwsAlertsService
 @inject Microsoft.Extensions.Options.IOptions<CameraIntelOptions> CameraIntelOptions
 @inject IJSRuntime JS
+@inject ILogger<OverwatchGrid> Logger
 @implements IAsyncDisposable
 
-<PageTitle>Tactical Globe</PageTitle>
+<PageTitle>Overwatch Grid</PageTitle>
 
 <div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
     <div>
-        <h1><i class="bi bi-globe2 me-2 text-primary"></i>Tactical Globe</h1>
+        <h1><i class="bi bi-globe2 me-2 text-primary"></i>Overwatch Grid</h1>
         <p class="mb-0">
             Drag/zoom the globe to discover legitimate public traffic cameras and webcams in
             view. Only publicly-provided feeds are ever surfaced here - see the attribution
@@ -49,7 +50,7 @@
 
     <div class="tg-hud">
         <div>
-            <div class="tg-hud-title">Tactical Globe // Camera + Weather Intelligence</div>
+            <div class="tg-hud-title">Overwatch Grid // Camera + Weather Intelligence</div>
             <div class="tg-hud-sub">Public sources only - never unsecured private cameras</div>
         </div>
         <div class="tg-hud-status">
@@ -78,15 +79,25 @@
         <span>ADMIN // AUTHORIZED ACCESS ONLY &middot; R: radar &middot; A: alerts &middot; Esc: close feed</span>
     </div>
 
-    <div class="tg-boot @(_bootComplete ? "tg-boot-hidden" : "")">
-        <div class="tg-boot-line">INITIALIZING TACTICAL UPLINK...</div>
-        <div class="tg-boot-bar"><div class="tg-boot-bar-fill"></div></div>
-        <div class="tg-boot-line">STANDBY</div>
-    </div>
+    @if (_initError is null)
+    {
+        <div class="tg-boot @(_bootComplete ? "tg-boot-hidden" : "")">
+            <div class="tg-boot-line">INITIALIZING TACTICAL UPLINK...</div>
+            <div class="tg-boot-bar"><div class="tg-boot-bar-fill"></div></div>
+            <div class="tg-boot-line">STANDBY</div>
+        </div>
+    }
+    else
+    {
+        <div class="tg-boot">
+            <div class="tg-boot-line">UPLINK FAILED</div>
+            <div class="tg-boot-line" style="opacity:.75;font-size:0.7rem;max-width:70%;text-align:center;">@_initError</div>
+        </div>
+    }
 </div>
 
 @code {
-    private DotNetObjectReference<TacticalGlobe>? _dotNetRef;
+    private DotNetObjectReference<OverwatchGrid>? _dotNetRef;
     private List<CameraFeed> _visibleCameras = new();
     private bool _bootComplete;
     private bool _hasAnyProviderConfigured = true;
@@ -94,6 +105,7 @@
     private bool _radarOn;
     private bool _alertsOn;
     private BoundingBox _lastBbox = new(90, -90, 180, -180);
+    private string? _initError;
 
     protected override void OnInitialized()
     {
@@ -107,7 +119,24 @@
         if (!firstRender) return;
 
         _dotNetRef = DotNetObjectReference.Create(this);
-        await JS.InvokeVoidAsync("tacticalGlobe.init", "tg-viewport", _dotNetRef);
+        try
+        {
+            // A real incident: a Cesium API mismatch (OpenStreetMapImageryProvider.fromUrl,
+            // which doesn't exist in this pinned version) threw synchronously inside init(),
+            // which JS interop surfaces back here as a JSException - left uncaught, that fault
+            // an unhandled exception in a lifecycle method - took down this component's whole
+            // circuit, which is why the reported symptom was "nothing on the page responds
+            // anymore," not just "the globe didn't load." Catching it here keeps a future JS
+            // regression contained to this one page instead of freezing the whole app.
+            await JS.InvokeVoidAsync("tacticalGlobe.init", "tg-viewport", _dotNetRef);
+        }
+        catch (JSException ex)
+        {
+            Logger.LogError(ex, "Failed to initialize the Overwatch Grid viewport.");
+            _initError = "The globe failed to start. Check the browser console for details, or try reloading.";
+            StateHasChanged();
+            return;
+        }
         _ = MarkBootCompleteAsync();
     }
 
