@@ -8,11 +8,14 @@ namespace GwsBusinessSuite.Application.CameraIntel;
 // key configured just returns an empty camera list for its source instead of throwing.
 //
 // DatumfeedApiKey is different: Datumfeed's anonymous tier (60 req/h per IP) already works with
-// no key at all, covering ~7,500 real cameras across Austin TX, California (Caltrans), Ontario,
-// Ottawa, Toronto, and London (see DatumfeedCameraProvider) - the key only raises that limit to
-// 3600 req/h for heavier use, it doesn't gate the feature on/off. GDOT (Georgia) needs no key at
-// all, ever - see GdotTrafficCameraProvider. A fresh deployment with zero keys configured still
-// shows real cameras in Georgia and (rate-limited) everywhere Datumfeed covers.
+// no key at all, covering ~9,000 real cameras across Austin TX, California (Caltrans), Ontario,
+// Ottawa, Toronto, London, and (whenever WsdotAccessCode is left empty) Washington State's own
+// cameras too, re-published through Datumfeed - see DatumfeedCameraProvider. The key only raises
+// that rate limit to 3600 req/h, it doesn't gate the feature on/off. GDOT (Georgia) needs no key
+// at all, ever - see GdotTrafficCameraProvider. A fresh deployment with none of these three keys
+// configured still shows real cameras in Georgia and everywhere Datumfeed covers, including
+// Washington - registering for WSDOT's own key is genuinely optional, not required for that
+// coverage, only for switching to WSDOT's own direct (non-Datumfeed-mediated) feed.
 public sealed class CameraIntelOptions
 {
     public const string SectionName = "CameraIntel";

@@ -77,13 +77,26 @@ public sealed class DatumfeedCameraProviderTests
     }
 
     [Fact]
-    public async Task GetCamerasAsync_ShouldExcludeTheWsdotRegistry_ToAvoidDuplicatingOurOwnWsdotProvider()
+    public async Task GetCamerasAsync_ShouldIncludeTheWsdotRegistry_WhenNoWsdotAccessCodeIsConfigured()
     {
-        var provider = CreateProvider("", _ => JsonResponse(SampleJson));
+        // Datumfeed's own re-published WSDOT cameras are the zero-registration path to
+        // Washington coverage for a user who doesn't want to register for any key at all -
+        // must not be dropped just because our direct WSDOT provider theoretically exists.
+        var provider = CreateProvider("", _ => JsonResponse(SampleJson), wsdotAccessCode: "");
 
         var result = await provider.GetCamerasAsync(AnyBbox);
 
-        result.Select(c => c.Id).Should().NotContain("datumfeed-wsdot-9999");
+        result.Select(c => c.Id).Should().Contain("datumfeed-wsdot-9999");
+    }
+
+    [Fact]
+    public async Task GetCamerasAsync_ShouldExcludeTheWsdotRegistry_WhenOurOwnWsdotProviderIsConfigured()
+    {
+        var provider = CreateProvider("", _ => JsonResponse(SampleJson), wsdotAccessCode: "REAL_CODE");
+
+        var result = await provider.GetCamerasAsync(AnyBbox);
+
+        result.Select(c => c.Id).Should().NotContain("datumfeed-wsdot-9999", "our own WsdotTrafficCameraProvider already covers this to avoid duplicate pins");
     }
 
     [Fact]
@@ -141,12 +154,13 @@ public sealed class DatumfeedCameraProviderTests
 
     private static DatumfeedCameraProvider CreateProvider(
         string apiKey,
-        Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
+        Func<HttpRequestMessage, HttpResponseMessage> responseFactory,
+        string wsdotAccessCode = "")
     {
         var http = new HttpClient(new RecordingHandler(responseFactory)) { BaseAddress = new Uri("https://datumfeed.com/") };
         return new DatumfeedCameraProvider(
             http,
-            Options.Create(new CameraIntelOptions { DatumfeedApiKey = apiKey }),
+            Options.Create(new CameraIntelOptions { DatumfeedApiKey = apiKey, WsdotAccessCode = wsdotAccessCode }),
             NullLogger<DatumfeedCameraProvider>.Instance);
     }
 

@@ -9,11 +9,15 @@ namespace GwsBusinessSuite.Application.CameraIntel;
 // normalizes several official public traffic-camera registries into one bounding-box-queryable
 // API. Verified directly against the live API and its published registry metadata
 // (GET /api/registries) during implementation, not assumed:
-//   - Real registries covered (excluding wsdot-cameras, deliberately skipped below): Austin TX
-//     (ATD), Caltrans/California DOT, Ontario 511 (MTO), City of Ottawa, City of Toronto (RESCU),
-//     and Transport for London (JamCams) - roughly 7,500 active cameras across 3 countries.
+//   - Real registries covered: Austin TX (ATD), Caltrans/California DOT, Ontario 511 (MTO),
+//     City of Ottawa, City of Toronto (RESCU), Transport for London (JamCams), and - unless
+//     WsdotTrafficCameraProvider already has its own AccessCode configured (see below) -
+//     Washington State (WSDOT) too. Roughly 7,500-9,000 active cameras across 3 countries.
 //   - Anonymous access already works with no key at all (60 req/h per IP); an optional free key
 //     (self-registered via POST /api/keys) raises that to 3600 req/h - see CameraIntelOptions.
+//     The user may not want to register for *any* key at all (a real, stated preference, not
+//     just an unconfigured default) - Datumfeed's anonymous tier is the zero-registration path
+//     to real Washington coverage in that case, since it re-publishes WSDOT's own cameras.
 //   - `GET /api/cameras?bbox=west,south,east,north` returns a real bounding-box-filtered list;
 //     confirmed against a live call during implementation.
 //   - Every camera returned is a periodically-refreshed still image (`feedType: "jpeg_poll"`),
@@ -23,10 +27,12 @@ public sealed class DatumfeedCameraProvider(
     IOptions<CameraIntelOptions> options,
     ILogger<DatumfeedCameraProvider> logger) : ICameraFeedProvider
 {
-    // Datumfeed's own registry slug for the WSDOT cameras it separately re-publishes - skipped
-    // here since WsdotTrafficCameraProvider already covers Washington directly against WSDOT's
-    // own API. Without this, the same physical cameras would show up as duplicate pins.
-    private const string SkippedWsdotRegistrySlug = "wsdot-cameras";
+    // Datumfeed's own registry slug for the WSDOT cameras it separately re-publishes. Only
+    // skipped when WsdotTrafficCameraProvider is ALSO going to return cameras (i.e. a WSDOT
+    // AccessCode is configured) - otherwise this is the only source of Washington coverage, and
+    // filtering it out unconditionally would silently drop the state entirely for anyone who
+    // declines to register for a WSDOT key.
+    private const string WsdotRegistrySlug = "wsdot-cameras";
 
     // A safety cap, not a real limit Datumfeed enforces - keeps a single wide-zoomed view from
     // requesting (and the globe from having to render) an unbounded number of pins at once.
@@ -56,10 +62,11 @@ public sealed class DatumfeedCameraProvider(
                 return [];
             }
 
+            var skipWsdot = !string.IsNullOrWhiteSpace(options.Value.WsdotAccessCode);
             var results = new List<CameraFeed>();
             foreach (var camera in cameras)
             {
-                var feed = TryParse(camera);
+                var feed = TryParse(camera, skipWsdot);
                 if (feed is not null)
                 {
                     results.Add(feed);
@@ -74,10 +81,10 @@ public sealed class DatumfeedCameraProvider(
         }
     }
 
-    private static CameraFeed? TryParse(JsonNode? camera)
+    private static CameraFeed? TryParse(JsonNode? camera, bool skipWsdot)
     {
         var registrySlug = camera?["registry"]?["slug"]?.GetValue<string>();
-        if (string.Equals(registrySlug, SkippedWsdotRegistrySlug, StringComparison.OrdinalIgnoreCase))
+        if (skipWsdot && string.Equals(registrySlug, WsdotRegistrySlug, StringComparison.OrdinalIgnoreCase))
         {
             return null;
         }
