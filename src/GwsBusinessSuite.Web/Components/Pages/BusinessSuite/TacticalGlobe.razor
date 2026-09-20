@@ -1,0 +1,134 @@
+@page "/admin/osint"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.CameraIntel
+@inject CameraDirectoryService CameraDirectoryService
+@inject Microsoft.Extensions.Options.IOptions<CameraIntelOptions> CameraIntelOptions
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Tactical Globe</PageTitle>
+
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-globe2 me-2 text-primary"></i>Tactical Globe</h1>
+        <p class="mb-0">
+            Drag/zoom the globe to discover legitimate public traffic cameras and webcams in
+            view. Only publicly-provided feeds are ever surfaced here - see the attribution
+            footer for each source.
+        </p>
+    </div>
+</div>
+
+@if (!_hasAnyProviderConfigured)
+{
+    <div class="alert alert-warning d-flex gap-2 align-items-start" role="note">
+        <i class="bi bi-exclamation-triangle-fill mt-1" aria-hidden="true"></i>
+        <div>
+            No camera source has an API key configured yet, so the globe will show no camera
+            pins. Add <code>CameraIntel:WsdotAccessCode</code> and/or
+            <code>CameraIntel:WindyApiKey</code> to enable the WSDOT and Windy sources (both are
+            free to self-register for - see <code>CameraIntelOptions.cs</code>).
+        </div>
+    </div>
+}
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Widgets/widgets.css" />
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Cesium.js"></script>
+<script src="/js/tactical-globe.js"></script>
+
+<div class="tg-shell">
+    <div class="tg-viewport" id="tg-viewport"></div>
+    <div class="tg-scanlines"></div>
+    <div class="tg-vignette"></div>
+
+    <div class="tg-hud">
+        <div>
+            <div class="tg-hud-title">Tactical Globe // Camera + Weather Intelligence</div>
+            <div class="tg-hud-sub">Public sources only - never unsecured private cameras</div>
+        </div>
+        <div class="tg-hud-status">
+            <div>CAMERAS IN VIEW: @_visibleCameras.Count</div>
+        </div>
+    </div>
+
+    <div class="tg-attribution">
+        <span>WSDOT Traveler Information API &middot; Windy Webcams API &middot; &copy; OpenStreetMap contributors</span>
+        <span>ADMIN // AUTHORIZED ACCESS ONLY</span>
+    </div>
+
+    <div class="tg-boot @(_bootComplete ? "tg-boot-hidden" : "")">
+        <div class="tg-boot-line">INITIALIZING TACTICAL UPLINK...</div>
+        <div class="tg-boot-bar"><div class="tg-boot-bar-fill"></div></div>
+        <div class="tg-boot-line">STANDBY</div>
+    </div>
+</div>
+
+@code {
+    private DotNetObjectReference<TacticalGlobe>? _dotNetRef;
+    private List<CameraFeed> _visibleCameras = new();
+    private bool _bootComplete;
+    private bool _hasAnyProviderConfigured = true;
+
+    protected override void OnInitialized()
+    {
+        var options = CameraIntelOptions.Value;
+        _hasAnyProviderConfigured = !string.IsNullOrWhiteSpace(options.WsdotAccessCode)
+            || !string.IsNullOrWhiteSpace(options.WindyApiKey);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _dotNetRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("tacticalGlobe.init", "tg-viewport", _dotNetRef);
+        _ = MarkBootCompleteAsync();
+    }
+
+    private async Task MarkBootCompleteAsync()
+    {
+        await Task.Delay(1800);
+        _bootComplete = true;
+        StateHasChanged();
+    }
+
+    // Raised by tactical-globe.js's camera.moveEnd handler once the view settles after a
+    // drag/zoom (see initGlobe) - degrees, matching Cesium's own Rectangle-to-degrees output.
+    [JSInvokable]
+    public async Task OnGlobeViewChanged(double north, double south, double east, double west)
+    {
+        var bbox = new BoundingBox(north, south, east, west);
+        var cameras = await CameraDirectoryService.GetCamerasInBoundingBoxAsync(bbox);
+        _visibleCameras = cameras.ToList();
+        StateHasChanged();
+
+        var pins = cameras.Select(c => new
+        {
+            id = c.Id,
+            name = c.Name,
+            lat = c.Latitude,
+            lon = c.Longitude,
+            streamUrl = c.StreamUrl,
+            streamKind = c.StreamKind.ToString(),
+            sourceName = c.SourceName,
+            sourceAttributionUrl = c.SourceAttributionUrl
+        }).ToList();
+        await JS.InvokeVoidAsync("tacticalGlobe.setCameraPins", pins);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("tacticalGlobe.dispose", "tg-viewport");
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+        _dotNetRef?.Dispose();
+    }
+}

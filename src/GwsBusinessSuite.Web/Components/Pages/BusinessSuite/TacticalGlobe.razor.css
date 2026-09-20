@@ -1,0 +1,217 @@
+/* Retro military-terminal shell for the Tactical Globe page. No prior art existed in this repo
+   for this look (see the removal plan's exploration notes) - built from scratch, scoped to just
+   this page via Blazor CSS isolation. Cesium's own canvas/DOM lives inside .tg-viewport but is
+   created by tactical-globe.js, not this component's markup, so isolation doesn't reach it -
+   that's fine, every one of Cesium's default UI widgets is disabled (see initGlobe), so there's
+   nothing of its own to theme. */
+
+.tg-shell {
+    position: relative;
+    background: #05080a;
+    color: #7dffb0;
+    font-family: "Share Tech Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    border-radius: 10px;
+    overflow: hidden;
+    height: calc(100vh - 220px);
+    min-height: 520px;
+    box-shadow: 0 0 0 1px rgba(125, 255, 176, 0.25), 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.tg-scanlines {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 5;
+    background: repeating-linear-gradient(
+        to bottom,
+        rgba(0, 0, 0, 0) 0,
+        rgba(0, 0, 0, 0) 2px,
+        rgba(0, 0, 0, 0.18) 3px,
+        rgba(0, 0, 0, 0) 4px
+    );
+    mix-blend-mode: overlay;
+    animation: tg-flicker 6s infinite;
+}
+
+.tg-vignette {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 4;
+    box-shadow: inset 0 0 140px rgba(0, 0, 0, 0.75);
+}
+
+@keyframes tg-flicker {
+    0%, 96%, 100% { opacity: 1; }
+    97% { opacity: 0.85; }
+    98% { opacity: 1; }
+}
+
+.tg-hud {
+    position: absolute;
+    inset: 0 0 auto 0;
+    z-index: 6;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 0.85rem 1.1rem;
+    pointer-events: none;
+    text-shadow: 0 0 6px rgba(125, 255, 176, 0.65);
+    letter-spacing: 0.05em;
+}
+
+.tg-hud-title {
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    font-weight: 700;
+}
+
+.tg-hud-sub {
+    font-size: 0.7rem;
+    opacity: 0.75;
+    margin-top: 0.2rem;
+}
+
+.tg-hud-status {
+    font-size: 0.75rem;
+    text-align: right;
+    opacity: 0.85;
+}
+
+.tg-viewport {
+    position: absolute;
+    inset: 0;
+    background: #000;
+}
+
+.tg-boot {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    background: #05080a;
+    text-shadow: 0 0 8px rgba(125, 255, 176, 0.7);
+    transition: opacity 0.6s ease;
+}
+
+.tg-boot.tg-boot-hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.tg-boot-line {
+    font-size: 0.85rem;
+    letter-spacing: 0.08em;
+}
+
+.tg-boot-bar {
+    width: 260px;
+    height: 6px;
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    overflow: hidden;
+}
+
+.tg-boot-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: #7dffb0;
+    box-shadow: 0 0 8px rgba(125, 255, 176, 0.9);
+    animation: tg-boot-progress 1.8s ease forwards;
+}
+
+@keyframes tg-boot-progress {
+    from { width: 0%; }
+    to { width: 100%; }
+}
+
+.tg-attribution {
+    position: absolute;
+    inset: auto 0 0 0;
+    z-index: 6;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.65rem;
+    opacity: 0.7;
+    pointer-events: none;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
+}
+
+.tg-empty-hint {
+    position: absolute;
+    z-index: 6;
+    top: 4.2rem;
+    left: 1.1rem;
+    right: 1.1rem;
+    font-size: 0.72rem;
+    padding: 0.6rem 0.8rem;
+    border: 1px dashed rgba(125, 255, 176, 0.45);
+    background: rgba(5, 8, 10, 0.6);
+    max-width: 480px;
+}
+
+/* Camera stream panel - built and appended entirely by tactical-globe.js (see setCameraPins'
+   click handler), so these rules target its plain, non-scoped class names directly rather than
+   relying on Blazor's isolation attribute. */
+:global(.tg-stream-panel) {
+    position: absolute;
+    z-index: 20;
+    top: 3.6rem;
+    right: 1.1rem;
+    width: 320px;
+    background: rgba(5, 8, 10, 0.92);
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    box-shadow: 0 0 24px rgba(0, 0, 0, 0.6);
+    color: #7dffb0;
+    font-family: "Share Tech Mono", ui-monospace, monospace;
+}
+
+:global(.tg-stream-panel-header) {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid rgba(125, 255, 176, 0.35);
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+}
+
+:global(.tg-stream-panel-close) {
+    background: none;
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    color: #7dffb0;
+    cursor: pointer;
+    font-size: 0.7rem;
+    line-height: 1;
+    padding: 0.15rem 0.4rem;
+}
+
+:global(.tg-stream-panel-body) {
+    padding: 0.6rem 0.7rem;
+    font-size: 0.7rem;
+}
+
+:global(.tg-stream-panel-body img),
+:global(.tg-stream-panel-body video) {
+    width: 100%;
+    display: block;
+    border: 1px solid rgba(125, 255, 176, 0.35);
+    background: #000;
+}
+
+:global(.tg-stream-panel-meta) {
+    margin-top: 0.4rem;
+    opacity: 0.75;
+    font-size: 0.65rem;
+}
+
+:global(.tg-stream-panel-error) {
+    padding: 1.5rem 0.5rem;
+    text-align: center;
+    opacity: 0.8;
+}

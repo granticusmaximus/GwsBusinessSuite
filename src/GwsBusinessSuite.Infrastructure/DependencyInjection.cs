@@ -8,6 +8,7 @@ using GwsBusinessSuite.Application.AffiliateRotations;
 using GwsBusinessSuite.Application.AppGeneration;
 using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Billing;
+using GwsBusinessSuite.Application.CameraIntel;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Comments;
@@ -252,6 +253,21 @@ public static class DependencyInjection
         services.AddSingleton<GwsBusinessSuite.Application.Operations.IOperationalAlertService, OperationalAlertService>();
         services.AddScoped<IGrowthReportService, GrowthReportService>();
         services.AddHostedService<GrowthReportBackgroundService>();
+        // Tactical Globe's camera sources - both require a free, self-registered API key (see
+        // CameraIntelOptions) and simply return no cameras for their source when unconfigured.
+        services.AddOptions<CameraIntelOptions>()
+            .Bind(configuration.GetSection(CameraIntelOptions.SectionName));
+        services.AddHttpClient<ICameraFeedProvider, WsdotTrafficCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://wsdot.wa.gov/Traffic/api/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddHttpClient<ICameraFeedProvider, WindyWebcamProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.windy.com/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<CameraDirectoryService>();
         services.AddHttpClient<ISocialPublishingService, SocialPublishingService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
