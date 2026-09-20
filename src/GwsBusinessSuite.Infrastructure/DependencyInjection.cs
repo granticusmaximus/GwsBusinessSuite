@@ -254,8 +254,11 @@ public static class DependencyInjection
         services.AddSingleton<GwsBusinessSuite.Application.Operations.IOperationalAlertService, OperationalAlertService>();
         services.AddScoped<IGrowthReportService, GrowthReportService>();
         services.AddHostedService<GrowthReportBackgroundService>();
-        // Overwatch Grid's camera sources - both require a free, self-registered API key (see
-        // CameraIntelOptions) and simply return no cameras for their source when unconfigured.
+        // Overwatch Grid's camera sources. WSDOT/Windy require a free, self-registered API key
+        // (see CameraIntelOptions) and simply return no cameras for their source when
+        // unconfigured. GDOT and Datumfeed need no configuration at all - both work out of the
+        // box on a fresh deployment (Datumfeed's anonymous tier is rate-limited but functional;
+        // its own optional key only raises that limit).
         services.AddOptions<CameraIntelOptions>()
             .Bind(configuration.GetSection(CameraIntelOptions.SectionName));
         services.AddHttpClient<ICameraFeedProvider, WsdotTrafficCameraProvider>(client =>
@@ -266,6 +269,16 @@ public static class DependencyInjection
         services.AddHttpClient<ICameraFeedProvider, WindyWebcamProvider>(client =>
         {
             client.BaseAddress = new Uri("https://api.windy.com/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddHttpClient<ICameraFeedProvider, GdotTrafficCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://services1.arcgis.com/2iUE8l8JKrP2tygQ/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddHttpClient<ICameraFeedProvider, DatumfeedCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://datumfeed.com/");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddScoped<CameraDirectoryService>();

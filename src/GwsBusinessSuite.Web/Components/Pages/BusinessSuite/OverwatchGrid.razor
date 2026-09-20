@@ -26,13 +26,15 @@
 
 @if (!_hasAnyProviderConfigured)
 {
-    <div class="alert alert-warning d-flex gap-2 align-items-start" role="note">
-        <i class="bi bi-exclamation-triangle-fill mt-1" aria-hidden="true"></i>
+    <div class="alert alert-info d-flex gap-2 align-items-start" role="note">
+        <i class="bi bi-info-circle-fill mt-1" aria-hidden="true"></i>
         <div>
-            No camera source has an API key configured yet, so the globe will show no camera
-            pins. Add <code>CameraIntel:WsdotAccessCode</code> and/or
-            <code>CameraIntel:WindyApiKey</code> to enable the WSDOT and Windy sources (both are
-            free to self-register for - see <code>CameraIntelOptions.cs</code>).
+            Georgia (GDOT) and a broad multi-region set (Datumfeed: Austin, California, Ontario,
+            Ottawa, Toronto, London) already work with no setup. Add
+            <code>CameraIntel:WsdotAccessCode</code>, <code>CameraIntel:WindyApiKey</code>, and/or
+            <code>CameraIntel:DatumfeedApiKey</code> for Washington State coverage, Windy's global
+            public webcams, and a higher Datumfeed rate limit (all free to self-register for -
+            see <code>CameraIntelOptions.cs</code>).
         </div>
     </div>
 }
@@ -75,7 +77,7 @@
     }
 
     <div class="tg-attribution">
-        <span>WSDOT Traveler Information API &middot; Windy Webcams API &middot; NOAA/NWS &middot; &copy; OpenStreetMap contributors</span>
+        <span>WSDOT &middot; GDOT &middot; Windy &middot; Datumfeed (Austin/Caltrans/Ontario/Ottawa/Toronto/London) &middot; NOAA/NWS &middot; &copy; OpenStreetMap contributors</span>
         <span>ADMIN // AUTHORIZED ACCESS ONLY &middot; R: radar &middot; A: alerts &middot; Esc: close feed</span>
     </div>
 

@@ -34,6 +34,14 @@ services:
       # Optional externally escrowed key. When absent, GWS creates a mode-0600 key in the
       # data volume; copy that key into a separate password manager before relying on backups.
       Backups__EncryptionKey: ${BACKUP_ENCRYPTION_KEY:-}
+      # Overwatch Grid's camera sources - all three free to self-register for (see
+      # CameraIntelOptions.cs for signup links). GDOT and Datumfeed's anonymous tier already work
+      # with none of these set; WSDOT/Windy need their own key to show any cameras at all, and a
+      # Datumfeed key just raises its anonymous rate limit. Keep the actual values in the
+      # gitignored .env file, never in this Compose file.
+      CameraIntel__WsdotAccessCode: ${CAMERA_INTEL_WSDOT_ACCESS_CODE:-}
+      CameraIntel__WindyApiKey: ${CAMERA_INTEL_WINDY_API_KEY:-}
+      CameraIntel__DatumfeedApiKey: ${CAMERA_INTEL_DATUMFEED_API_KEY:-}
     restart: always
     volumes:
       - gwssuite-data:/app/data
