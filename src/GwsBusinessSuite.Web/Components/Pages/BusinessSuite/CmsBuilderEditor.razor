@@ -12,6 +12,7 @@
 @using System.Text.Json
 @using System.Globalization
 @inject ICmsBuilderService CmsBuilderService
+@inject IPageRevisionService PageRevisionService
 @inject IGlobalBlockService GlobalBlockService
 @inject GlobalBlockResolver GlobalBlockResolver
 @inject IMediaLibraryService MediaLibraryService
@@ -2009,6 +2010,22 @@ else
         }
         try
         {
+            // Phase 3 (real revision checkpoints from Canvas Studio) - only on an explicit
+            // "Publish changes" (never on a plain draft autosave, which writes DraftBlocksJson
+            // and never touches the live BlocksJson a restore would bring back - checkpointing
+            // that too would just flood the 20-revision-per-page cap with noise no one can use).
+            // Mirrors EditPage.razor's SavePageAsync: re-fetch from the DB rather than trust
+            // this session's own in-memory _page, since another admin/tab may have published
+            // more recently - the checkpoint must capture whatever is actually live right now.
+            if (publish)
+            {
+                var currentPage = await CmsBuilderService.GetPageAsync(_page.Id);
+                if (currentPage is not null)
+                {
+                    await PageRevisionService.CreateRevisionAsync(currentPage, "Auto-saved before publishing from the page editor");
+                }
+            }
+
             var storedLayout = await BuildStoredLayoutAsync(_layout, _page.SiteId);
             var editor = new CmsPageEditorModel
             {
