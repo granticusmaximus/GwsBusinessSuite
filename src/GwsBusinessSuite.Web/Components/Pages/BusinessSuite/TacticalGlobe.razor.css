@@ -78,6 +78,35 @@
     opacity: 0.85;
 }
 
+.tg-hud-toggles {
+    display: flex;
+    gap: 0.4rem;
+    justify-content: flex-end;
+    margin-top: 0.4rem;
+    pointer-events: auto;
+}
+
+.tg-toggle {
+    background: rgba(5, 8, 10, 0.7);
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    color: #7dffb0;
+    font-family: inherit;
+    font-size: 0.65rem;
+    letter-spacing: 0.05em;
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    text-shadow: 0 0 6px rgba(125, 255, 176, 0.5);
+}
+
+.tg-toggle:hover {
+    background: rgba(125, 255, 176, 0.15);
+}
+
+.tg-toggle-on {
+    background: rgba(125, 255, 176, 0.28);
+    box-shadow: 0 0 10px rgba(125, 255, 176, 0.5);
+}
+
 .tg-viewport {
     position: absolute;
     inset: 0;
@@ -153,6 +182,7 @@
     border: 1px dashed rgba(125, 255, 176, 0.45);
     background: rgba(5, 8, 10, 0.6);
     max-width: 480px;
+    pointer-events: none;
 }
 
 /* Camera stream panel - built and appended entirely by tactical-globe.js (see setCameraPins'

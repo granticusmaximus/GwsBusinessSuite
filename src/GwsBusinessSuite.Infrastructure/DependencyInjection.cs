@@ -30,6 +30,7 @@ using GwsBusinessSuite.Application.SemanticSearch;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.SshTerminal;
 using GwsBusinessSuite.Application.Users;
+using GwsBusinessSuite.Application.Weather;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
@@ -268,6 +269,15 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddScoped<CameraDirectoryService>();
+        // NWS's docs ask every consumer for a descriptive User-Agent identifying the app/contact -
+        // a browser fetch() can never set this (forbidden header), so alerts are always fetched
+        // server-side (see NwsAlertsService's own comment). No API key needed.
+        services.AddHttpClient<INwsAlertsService, NwsAlertsService>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.weather.gov/");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-TacticalGlobe/1.0 (+https://www.gwsapp.net)");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
         services.AddHttpClient<ISocialPublishingService, SocialPublishingService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);

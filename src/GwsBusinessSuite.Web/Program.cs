@@ -587,8 +587,11 @@ app.Use(async (context, next) =>
             "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;",
             // cdn.jsdelivr.net: Tactical Globe's self-hosted-via-CDN CesiumJS fetches its own
             // Workers/Assets/ThirdParty bundle at runtime from the same jsdelivr origin already
-            // trusted in script-src above. tile.openstreetmap.org: the globe's base imagery layer.
-            "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://tile.openstreetmap.org https://*.tile.openstreetmap.org;",
+            // trusted in script-src above. tile.openstreetmap.org: the globe's base imagery
+            // layer. nowcoast.noaa.gov: the optional NOAA radar overlay's WMS tiles - fetched
+            // directly by the browser (confirmed CORS-open: access-control-allow-origin: *),
+            // unlike NWS alert data which is proxied server-side instead (see NwsAlertsService).
+            "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov;",
             "media-src 'self' blob: https:;",
             "worker-src 'self' blob:;",
             "frame-src 'self';",
