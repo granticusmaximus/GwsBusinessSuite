@@ -201,6 +201,28 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void Render_ShouldApplyColorSchemeInlineStyle_ToASection_WhenBackgroundTokenResolves()
+    {
+        var tokens = new DesignTokenSet([new DesignToken("Accent", "#1c3d5a")], [], []);
+
+        var html = CmsBlockHtmlRenderer.Render(
+            """{"sections":[{"id":"s1","backgroundColorToken":"Accent","textColor":"#f8fafc","columns":[]}]}""",
+            tokens: tokens);
+
+        Assert.Contains("background-color:#1c3d5a", html);
+        Assert.Contains("color:#f8fafc", html);
+    }
+
+    [Fact]
+    public void Render_ShouldNotAddInlineStyle_ToASection_WhenColorSchemeTokenDoesNotResolve()
+    {
+        var html = CmsBlockHtmlRenderer.Render(
+            """{"sections":[{"id":"s1","backgroundColorToken":"Nonexistent","columns":[]}]}""");
+
+        Assert.DoesNotContain("style=", html);
+    }
+
+    [Fact]
     public void Render_ShouldApplyHiddenOnMobileAndTabletClasses_ToASection()
     {
         var html = CmsBlockHtmlRenderer.Render(

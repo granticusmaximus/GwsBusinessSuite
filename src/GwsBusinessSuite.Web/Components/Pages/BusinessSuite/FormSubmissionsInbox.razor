@@ -1,0 +1,219 @@
+@page "/admin/form-submissions"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContributorAccess")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Domain.Entities
+@using System.Text.Json
+@inject IFormSubmissionService FormSubmissionService
+@inject ICmsBuilderService CmsBuilderService
+@inject ILogger<FormSubmissionsInbox> Logger
+
+<PageTitle>Form Submissions</PageTitle>
+
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-inbox me-2 text-primary"></i>Form Submissions</h1>
+        <p class="mb-0">Every visitor submission across every page, newest first. The per-page list on each page's Edit screen is a filtered view of the same data.</p>
+    </div>
+    <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync" disabled="@_isBusy">
+        <i class="bi bi-arrow-repeat me-1"></i>Refresh
+    </button>
+</div>
+
+@if (!string.IsNullOrEmpty(_errorMessage))
+{
+    <div class="alert alert-danger" role="alert">@_errorMessage</div>
+}
+
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body py-3">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small fw-semibold mb-1">Page</label>
+                <select class="form-select form-select-sm" @bind="_pageFilter">
+                    <option value="">All pages</option>
+                    @foreach (var pageOption in _pagesWithSubmissions)
+                    {
+                        <option value="@pageOption.Id">@pageOption.Title</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold mb-1">From</label>
+                <input type="date" class="form-control form-control-sm" @bind="_fromDate" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold mb-1">To</label>
+                <input type="date" class="form-control form-control-sm" @bind="_toDate" />
+            </div>
+            <div class="col-md-2">
+                <button class="btn btn-sm btn-outline-secondary w-100" @onclick="ClearFilters">Clear filters</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+        @if (_isBusy)
+        {
+            <p class="text-secondary p-4 mb-0">Loading…</p>
+        }
+        else if (FilteredSubmissions.Count == 0)
+        {
+            <EmptyState Icon="bi-inbox" Message="No submissions match these filters." CssClass="p-4 text-secondary" />
+        }
+        else
+        {
+            <div class="list-group list-group-flush">
+                @foreach (var submission in FilteredSubmissions)
+                {
+                    <div class="list-group-item">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div>
+                                <div class="fw-semibold">
+                                    @submission.CreatedAt.ToLocalTime().ToString("g")
+                                    @if (!submission.IsRead)
+                                    {
+                                        <span class="badge text-bg-primary ms-2">New</span>
+                                    }
+                                </div>
+                                <div class="small text-secondary mt-1">
+                                    @if (_pagesById.TryGetValue(submission.PageId, out var sourcePage))
+                                    {
+                                        <a href="/admin/pages/edit/@sourcePage.Id">@sourcePage.Title</a>
+                                    }
+                                    else
+                                    {
+                                        <span>Unknown page</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(submission.Email))
+                                    {
+                                        <text> &middot; @submission.Email</text>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(submission.FullName))
+                                    {
+                                        <text> &middot; @submission.FullName</text>
+                                    }
+                                </div>
+                                <dl class="row small mb-0 mt-2">
+                                    @foreach (var field in ParseSubmissionFields(submission.FieldsJson).Take(3))
+                                    {
+                                        <dt class="col-4 text-secondary">@field.Key</dt>
+                                        <dd class="col-8">@field.Value</dd>
+                                    }
+                                </dl>
+                            </div>
+                            <div class="d-flex flex-column gap-1 flex-shrink-0">
+                                <a class="btn btn-xs btn-outline-primary" href="/admin/form-submissions/@submission.Id">View</a>
+                                @if (!submission.IsRead)
+                                {
+                                    <button class="btn btn-xs btn-outline-secondary" @onclick="() => MarkReadAsync(submission.Id)">Mark read</button>
+                                }
+                                <button class="btn btn-xs btn-outline-danger" @onclick="() => DeleteAsync(submission.Id)">Delete</button>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<FormSubmission> _submissions = new();
+    private Dictionary<Guid, CmsPage> _pagesById = new();
+    private bool _isBusy = true;
+    private string _errorMessage = string.Empty;
+
+    private string _pageFilter = string.Empty;
+    private DateTime? _fromDate;
+    private DateTime? _toDate;
+
+    private List<CmsPage> _pagesWithSubmissions =>
+        _submissions
+            .Select(s => _pagesById.GetValueOrDefault(s.PageId))
+            .Where(p => p is not null)
+            .Cast<CmsPage>()
+            .DistinctBy(p => p.Id)
+            .OrderBy(p => p.Title)
+            .ToList();
+
+    private List<FormSubmission> FilteredSubmissions
+    {
+        get
+        {
+            var query = _submissions.AsEnumerable();
+            if (Guid.TryParse(_pageFilter, out var pageId))
+            {
+                query = query.Where(s => s.PageId == pageId);
+            }
+            if (_fromDate is { } from)
+            {
+                query = query.Where(s => s.CreatedAt.LocalDateTime.Date >= from.Date);
+            }
+            if (_toDate is { } to)
+            {
+                query = query.Where(s => s.CreatedAt.LocalDateTime.Date <= to.Date);
+            }
+            return query.ToList();
+        }
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _isBusy = true;
+        _errorMessage = string.Empty;
+        try
+        {
+            _submissions = (await FormSubmissionService.ListAllAsync()).ToList();
+            var pages = await CmsBuilderService.ListPagesAsync(siteId: null, includeTrashed: true);
+            _pagesById = pages.ToDictionary(p => p.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load the form submissions inbox.");
+            _errorMessage = "Unable to load submissions.";
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
+    private void ClearFilters()
+    {
+        _pageFilter = string.Empty;
+        _fromDate = null;
+        _toDate = null;
+    }
+
+    private async Task MarkReadAsync(Guid submissionId)
+    {
+        await FormSubmissionService.MarkReadAsync(submissionId);
+        var submission = _submissions.FirstOrDefault(s => s.Id == submissionId);
+        if (submission is not null) submission.IsRead = true;
+    }
+
+    private async Task DeleteAsync(Guid submissionId)
+    {
+        await FormSubmissionService.DeleteAsync(submissionId);
+        _submissions.RemoveAll(s => s.Id == submissionId);
+    }
+
+    private static Dictionary<string, string> ParseSubmissionFields(string fieldsJson)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(
+                string.IsNullOrWhiteSpace(fieldsJson) ? "{}" : fieldsJson) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+}

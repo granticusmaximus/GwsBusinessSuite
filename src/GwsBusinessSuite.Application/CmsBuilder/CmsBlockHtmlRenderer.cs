@@ -272,10 +272,28 @@ public static class CmsBlockHtmlRenderer
         return string.Join(' ', classes);
     }
 
+    // Page Editor Phase 4 (Section-level Color Scheme shortcut) - resolves to "" when the
+    // section has no BackgroundColorToken (or it doesn't match a real token) and no TextColor,
+    // so an untouched section renders with zero extra markup, same "no-op by default" contract
+    // as WidgetStyle.ToInlineStyle. Reuses WidgetStyle.ResolveColor rather than duplicating its
+    // token-lookup-with-raw-fallback rule. Public so CmsBuilderEditor.razor's live-preview push
+    // (PushSectionAppearanceToCanvasAsync) can compute the exact same style string instead of
+    // re-deriving it.
+    public static string SectionInlineStyle(LayoutSection section, DesignTokenSet? tokens)
+    {
+        var parts = new List<string>();
+        var backgroundColor = WidgetStyle.ResolveColor(section.BackgroundColorToken, "", tokens);
+        if (!string.IsNullOrWhiteSpace(backgroundColor)) parts.Add($"background-color:{backgroundColor}");
+        if (!string.IsNullOrWhiteSpace(section.TextColor)) parts.Add($"color:{section.TextColor}");
+        return string.Join(';', parts);
+    }
+
     private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens = null)
     {
         var sectionClass = $"gws-section {BgClass(section.Background)} {PadClass(section.Padding)} {HiddenClasses(section.HiddenOnMobile, section.HiddenOnTablet)}".TrimEnd();
-        var sectionAttrs = editMode ? $" data-gws-section-id=\"{Html(section.Id)}\"" : "";
+        var sectionStyle = SectionInlineStyle(section, tokens);
+        var sectionAttrs = (editMode ? $" data-gws-section-id=\"{Html(section.Id)}\"" : "")
+            + (sectionStyle.Length == 0 ? "" : $" style=\"{Html(sectionStyle)}\"");
 
         if (section.LayoutMode == CmsSectionLayoutModes.Freeform)
         {

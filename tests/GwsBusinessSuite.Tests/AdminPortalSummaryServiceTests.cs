@@ -1,6 +1,7 @@
 using FluentAssertions;
 using GwsBusinessSuite.Application.AdminPortal;
 using GwsBusinessSuite.Application.AppGeneration;
+using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Crm;
@@ -23,7 +24,7 @@ namespace GwsBusinessSuite.Tests;
 public sealed class AdminPortalSummaryServiceTests
 {
     [Fact]
-    public async Task GetAsync_ShouldAggregateCountsAcrossAllFiveSources()
+    public async Task GetAsync_ShouldAggregateCountsAcrossAllSixSources()
     {
         await using var db = await CreateDbAsync();
         var article = new Article { Slug = "test-article", Title = "Test Article" };
@@ -38,8 +39,9 @@ public sealed class AdminPortalSummaryServiceTests
 
         var contentStudio = new FakeContentStudioService(pendingReview: 3);
         var appGeneration = new FakeAppGenerationService(pendingApproval: 2);
+        var formSubmissions = new FakeFormSubmissionService(unread: 4);
         var service = new AdminPortalSummaryService(
-            new CommentService(db), contentStudio, new CrmService(db), new DockerHealthService(db), appGeneration);
+            new CommentService(db), contentStudio, new CrmService(db), new DockerHealthService(db), appGeneration, formSubmissions);
 
         var summary = await service.GetAsync(includeAdminMetrics: true);
 
@@ -48,6 +50,7 @@ public sealed class AdminPortalSummaryServiceTests
         summary.DueFollowUps.Should().Be(1);
         summary.UnreadSystemAlerts.Should().Be(1);
         summary.PendingAppApprovals.Should().Be(2);
+        summary.UnreadFormSubmissions.Should().Be(4);
     }
 
     [Fact]
@@ -61,13 +64,30 @@ public sealed class AdminPortalSummaryServiceTests
 
         var service = new AdminPortalSummaryService(
             new CommentService(db), new FakeContentStudioService(pendingReview: 0), new CrmService(db),
-            new DockerHealthService(db), new FakeAppGenerationService(pendingApproval: 5));
+            new DockerHealthService(db), new FakeAppGenerationService(pendingApproval: 5), new FakeFormSubmissionService(unread: 0));
 
         var summary = await service.GetAsync(includeAdminMetrics: false);
 
         summary.DueFollowUps.Should().Be(0, "admin-only metrics are skipped, not just zero coincidentally");
         summary.UnreadSystemAlerts.Should().Be(0);
         summary.PendingAppApprovals.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GetAsync_ShouldNotSkipUnreadFormSubmissions_WhenIncludeAdminMetricsIsFalse()
+    {
+        // Unlike DueFollowUps/UnreadSystemAlerts/PendingAppApprovals above, form submissions
+        // aren't admin-only - a Contributor already sees the per-page list in EditPage.razor
+        // and the global inbox, so this count must not go to zero just because the caller
+        // (NavMenu.razor for a non-admin) passed includeAdminMetrics: false.
+        await using var db = await CreateDbAsync();
+        var service = new AdminPortalSummaryService(
+            new CommentService(db), new FakeContentStudioService(pendingReview: 0), new CrmService(db),
+            new DockerHealthService(db), new FakeAppGenerationService(pendingApproval: 0), new FakeFormSubmissionService(unread: 7));
+
+        var summary = await service.GetAsync(includeAdminMetrics: false);
+
+        summary.UnreadFormSubmissions.Should().Be(7);
     }
 
     [Fact]
@@ -84,7 +104,7 @@ public sealed class AdminPortalSummaryServiceTests
 
         var service = new AdminPortalSummaryService(
             new CommentService(db), new FakeContentStudioService(pendingReview: 0), new CrmService(db),
-            new DockerHealthService(db), new FakeAppGenerationService(pendingApproval: 0));
+            new DockerHealthService(db), new FakeAppGenerationService(pendingApproval: 0), new FakeFormSubmissionService(unread: 0));
 
         var withoutAdminMetrics = await service.GetAsync(includeAdminMetrics: false);
         var withAdminMetrics = await service.GetAsync(includeAdminMetrics: true);
@@ -126,6 +146,21 @@ public sealed class AdminPortalSummaryServiceTests
         public Task<AppGenerationChatResult> SubmitForApprovalAsync(Guid requestId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<AppGenerationChatResult> ApproveAsync(Guid requestId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<AppGenerationChatResult> RejectAsync(Guid requestId, string reason, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class FakeFormSubmissionService(int unread) : IFormSubmissionService
+    {
+        public Task<int> CountUnreadAsync(CancellationToken cancellationToken = default) => Task.FromResult(unread);
+
+        public Task<FormSubmission> SubmitAsync(Guid pageId, IReadOnlyDictionary<string, string> fields, IReadOnlyDictionary<string, string>? identityFields = null, bool autoCreateContact = false, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<FormSubmission>> ListAsync(Guid pageId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<FormSubmission>> ListAllAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<FormSubmission>> ListForContactAsync(Guid contactId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task LinkToContactAsync(Guid submissionId, Guid contactId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<FormSubmission?> GetAsync(Guid submissionId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task MarkReadAsync(Guid submissionId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task DeleteAsync(Guid submissionId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task DeleteAllForPageAsync(Guid pageId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private static async Task<ApplicationDbContext> CreateDbAsync()

@@ -10,4 +10,5 @@ public sealed record AdminPortalSummary(
     int PendingComments,
     int DueFollowUps,
     int UnreadSystemAlerts,
-    int PendingAppApprovals);
+    int PendingAppApprovals,
+    int UnreadFormSubmissions);

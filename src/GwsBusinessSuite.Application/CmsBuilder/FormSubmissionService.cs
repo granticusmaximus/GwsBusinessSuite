@@ -194,6 +194,20 @@ public sealed class FormSubmissionService(
     public async Task<FormSubmission?> GetAsync(Guid submissionId, CancellationToken cancellationToken = default) =>
         await dbContext.FormSubmissions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == submissionId, cancellationToken);
 
+    public async Task<IReadOnlyList<FormSubmission>> ListAllAsync(CancellationToken cancellationToken = default)
+    {
+        var submissions = await dbContext.FormSubmissions
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        return submissions
+            .OrderByDescending(submission => submission.CreatedAt)
+            .ToList();
+    }
+
+    public Task<int> CountUnreadAsync(CancellationToken cancellationToken = default) =>
+        dbContext.FormSubmissions.CountAsync(submission => !submission.IsRead, cancellationToken);
+
     public async Task<IReadOnlyList<FormSubmission>> ListForContactAsync(Guid contactId, CancellationToken cancellationToken = default)
     {
         var submissions = await dbContext.FormSubmissions

@@ -345,10 +345,15 @@
     }
   }
 
-  function applySectionClass(sectionId, cssClass) {
+  // style (Page Editor Phase 4 - Color Scheme shortcut) fully replaces the section's style
+  // attribute, matching CmsBlockHtmlRenderer.SectionInlineStyle's own "background-color:...;
+  // color:...", or empty when no scheme/text color is set - a section has no other inline
+  // style source, so this is always safe to overwrite wholesale.
+  function applySectionClass(sectionId, cssClass, style) {
     var section = document.querySelector('[data-gws-section-id="' + sectionId + '"]');
     if (section) {
       section.className = cssClass || 'gws-section';
+      section.setAttribute('style', style || '');
     }
   }
 
@@ -629,7 +634,7 @@
     } else if (e.data.type === 'cms:style-changed') {
       applyWidgetStyle(e.data.widgetId, e.data.inlineStyle || '', !!e.data.hasAnyOverride, e.data.hiddenClasses || '');
     } else if (e.data.type === 'cms:section-changed') {
-      applySectionClass(e.data.sectionId, e.data.cssClass || '');
+      applySectionClass(e.data.sectionId, e.data.cssClass || '', e.data.style || '');
     } else if (e.data.type === 'cms:palette-drag-end') {
       clearDropVisuals(html5Indicator);
       paletteDragTarget = null;

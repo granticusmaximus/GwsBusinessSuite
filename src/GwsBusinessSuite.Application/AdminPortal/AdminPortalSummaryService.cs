@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.AppGeneration;
+using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.Comments;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Crm;
@@ -13,6 +14,7 @@ public sealed class AdminPortalSummaryService(
     ICrmService crmService,
     IDockerHealthService dockerHealthService,
     IAppGenerationService appGenerationService,
+    IFormSubmissionService formSubmissionService,
     IMemoryCache? cache = null) : IAdminPortalSummaryService
 {
     // Was an unconditional `_summaryTask ??= LoadAsync(...)` field - correct for one page load,
@@ -51,13 +53,17 @@ public sealed class AdminPortalSummaryService(
         var approvalsTask = includeAdminMetrics
             ? appGenerationService.CountPendingApprovalAsync(cancellationToken)
             : Task.FromResult(0);
+        // Not gated by includeAdminMetrics - a Contributor already sees the per-page submissions
+        // list in EditPage.razor and the global inbox, same as drafts/comments above.
+        var formSubmissionsTask = formSubmissionService.CountUnreadAsync(cancellationToken);
 
-        await Task.WhenAll(draftsTask, commentsTask, followUpsTask, alertsTask, approvalsTask);
+        await Task.WhenAll(draftsTask, commentsTask, followUpsTask, alertsTask, approvalsTask, formSubmissionsTask);
         return new AdminPortalSummary(
             await draftsTask,
             await commentsTask,
             await followUpsTask,
             await alertsTask,
-            await approvalsTask);
+            await approvalsTask,
+            await formSubmissionsTask);
     }
 }

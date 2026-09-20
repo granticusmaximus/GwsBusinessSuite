@@ -88,6 +88,11 @@
                     <i class="bi bi-layout-three-columns" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Pages</span><small>Build and organize pages</small></span>
                 </NavLink>
+                <NavLink class="gws-nav-link" href="admin/form-submissions" title="Form Submissions">
+                    <i class="bi bi-inbox" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Form Submissions</span><small>Visitor submissions across every page</small></span>
+                    @if (_unreadFormSubmissionCount > 0) { <span class="gws-nav-count">@_unreadFormSubmissionCount</span> }
+                </NavLink>
                 <NavLink class="gws-nav-link" href="admin/appearance/menus" title="Menus">
                     <i class="bi bi-list" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Menus</span><small>Header and footer navigation</small></span>
@@ -287,6 +292,7 @@
     private int _pendingDraftCount;
     private int _dueFollowUpCount;
     private int _pendingAppGenerationCount;
+    private int _unreadFormSubmissionCount;
 
     protected override async Task OnInitializedAsync()
     {
@@ -312,6 +318,7 @@
         _pendingDraftCount = summary.PendingDrafts;
         _dueFollowUpCount = summary.DueFollowUps;
         _pendingAppGenerationCount = summary.PendingAppApprovals;
+        _unreadFormSubmissionCount = summary.UnreadFormSubmissions;
     }
 
     private bool IsGroupOpen(IReadOnlyList<string> prefixes) =>

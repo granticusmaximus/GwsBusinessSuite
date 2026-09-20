@@ -20,6 +20,15 @@ public interface IFormSubmissionService
 
     Task<IReadOnlyList<FormSubmission>> ListAsync(Guid pageId, CancellationToken cancellationToken = default);
 
+    // Phase 5 (global form submissions inbox) - every submission across every page/site, newest
+    // first, for the cross-page admin inbox at /admin/form-submissions. EditPage.razor's own
+    // per-page ListAsync above stays as-is; this is the same underlying rows, unfiltered by page.
+    Task<IReadOnlyList<FormSubmission>> ListAllAsync(CancellationToken cancellationToken = default);
+
+    // Feeds the nav sidebar's unread badge (see AdminPortalSummaryService) - a plain count
+    // avoids loading every submission's full FieldsJson just to size a badge.
+    Task<int> CountUnreadAsync(CancellationToken cancellationToken = default);
+
     // For the new per-Contact detail page's Form Submissions section - every submission ever
     // linked to this Contact, newest first, regardless of which page it came from.
     Task<IReadOnlyList<FormSubmission>> ListForContactAsync(Guid contactId, CancellationToken cancellationToken = default);

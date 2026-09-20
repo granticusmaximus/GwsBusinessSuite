@@ -44,6 +44,8 @@ public static class GlobalBlockMaterializer
             FreeformHeightPx = canonical.FreeformHeightPx,
             HiddenOnMobile = canonical.HiddenOnMobile,
             HiddenOnTablet = canonical.HiddenOnTablet,
+            BackgroundColorToken = canonical.BackgroundColorToken,
+            TextColor = canonical.TextColor,
             Columns = ClonePlacementColumns(canonical.Columns, placementId)
         };
     }
@@ -76,6 +78,8 @@ public static class GlobalBlockMaterializer
             FreeformHeightPx = section.FreeformHeightPx,
             HiddenOnMobile = section.HiddenOnMobile,
             HiddenOnTablet = section.HiddenOnTablet,
+            BackgroundColorToken = section.BackgroundColorToken,
+            TextColor = section.TextColor,
             Columns = section.Columns.Select(column => new LayoutColumn
             {
                 Id = column.Id,
@@ -115,6 +119,8 @@ public static class GlobalBlockMaterializer
         placement.FreeformHeightPx = canonical.FreeformHeightPx;
         placement.HiddenOnMobile = canonical.HiddenOnMobile;
         placement.HiddenOnTablet = canonical.HiddenOnTablet;
+        placement.BackgroundColorToken = canonical.BackgroundColorToken;
+        placement.TextColor = canonical.TextColor;
         placement.Columns = ClonePlacementColumns(canonical.Columns, placement.Id);
     }
 

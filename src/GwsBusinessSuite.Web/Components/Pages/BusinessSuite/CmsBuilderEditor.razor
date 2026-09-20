@@ -1340,6 +1340,21 @@ else
                                 <option value="accent">Accent (Brand Blue)</option>
                             </select>
                         </div>
+                        @if (SiteTokens.Colors.Count > 0)
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Color Scheme</label>
+                                <select class="form-select" value="@sel.BackgroundColorToken"
+                                        @onchange='(e) => SetSectionColorScheme(sel, e.Value?.ToString() ?? "")'>
+                                    <option value="">None (use Background above)</option>
+                                    @foreach (var color in SiteTokens.Colors)
+                                    {
+                                        <option value="@color.Name">@color.Name</option>
+                                    }
+                                </select>
+                                <div class="form-text small">A shortcut over Background: sets this section's background to the token's color and gives newly-added widgets a matching readable text color.</div>
+                            </div>
+                        }
                         <div>
                             <label class="form-label small fw-semibold">Vertical Padding</label>
                             <select class="form-select" value="@sel.Padding"
@@ -1833,7 +1848,7 @@ else
 
         PushUndo();
         var widget = CreateDefaultWidget(widgetType);
-        InsertWidgetIntoLayout(widget, targetSectionId, targetColumnId, targetWidgetId, insertAfter);
+        InsertWidgetIntoLayout(widget, targetSectionId, targetColumnId, targetWidgetId, insertAfter, applyColorSchemeDefault: true);
         StateHasChanged();
         await SaveAsync();
     }
@@ -2272,6 +2287,8 @@ else
             FreeformHeightPx = section.FreeformHeightPx,
             HiddenOnMobile = section.HiddenOnMobile,
             HiddenOnTablet = section.HiddenOnTablet,
+            BackgroundColorToken = section.BackgroundColorToken,
+            TextColor = section.TextColor,
             Columns = section.Columns.Select(column => new LayoutColumn
             {
                 Id = column.Id,
@@ -2666,10 +2683,28 @@ else
         targetColumn ??= targetSection.Columns.FirstOrDefault();
         if (targetColumn is null) return;
 
+        ApplySectionColorSchemeDefault(widget, targetSection);
         targetColumn.Widgets.Add(widget);
         MaterializeFreeformPositionIfNeeded(targetSection, widget);
         SelectWidget(targetSection.Id, widget.Id);
         QueueAutosave(reloadPreview: true, immediate: true);
+    }
+
+    // Page Editor Phase 4 (Section-level Color Scheme shortcut) - a brand-new, freestanding
+    // widget dropped into a section that has a Color Scheme's TextColor set starts pre-colored
+    // to match, so an author doesn't have to manually set every widget's text color after
+    // picking a dark/accent scheme. One-time default only: never touches a widget that already
+    // carries its own Style.TextColor, and never applied to a global-block placement (whose
+    // Style is always canonical/shared, not placement-local - see
+    // GlobalBlockMaterializer.ApplyResolvedWidget). Not called from a widget MOVE/reorder path
+    // (InsertWidgetIntoLayout's own `applyColorSchemeDefault` parameter defaults to false) -
+    // relocating an existing widget must never silently repaint it.
+    private static void ApplySectionColorSchemeDefault(LayoutWidget widget, LayoutSection? section)
+    {
+        if (widget.GlobalBlockId is not null) return;
+        if (section is null || string.IsNullOrWhiteSpace(section.TextColor)) return;
+        if (!string.IsNullOrWhiteSpace(widget.Style.TextColor)) return;
+        widget.Style.TextColor = section.TextColor;
     }
 
     private bool InsertSectionIntoLayout(LayoutSection section, string targetSectionId, string targetWidgetId, bool insertAfter)
@@ -2697,7 +2732,11 @@ else
         return true;
     }
 
-    private bool InsertWidgetIntoLayout(LayoutWidget widget, string targetSectionId, string targetColumnId, string targetWidgetId, bool insertAfter)
+    // applyColorSchemeDefault defaults to false so this stays a pure "place at position"
+    // operation for the widget-MOVE/reorder call site (OnCanvasDropAsync) - only a genuine
+    // brand-new-widget call site (OnCanvasInsertWidgetAsync) opts in. See
+    // ApplySectionColorSchemeDefault's own comment for the full rationale.
+    private bool InsertWidgetIntoLayout(LayoutWidget widget, string targetSectionId, string targetColumnId, string targetWidgetId, bool insertAfter, bool applyColorSchemeDefault = false)
     {
         LayoutSection? targetSection = null;
         LayoutColumn? targetColumn = null;
@@ -2735,6 +2774,11 @@ else
         var targetIndex = string.IsNullOrEmpty(targetWidgetId)
             ? -1
             : targetColumn.Widgets.FindIndex(w => w.Id == targetWidgetId);
+
+        if (applyColorSchemeDefault)
+        {
+            ApplySectionColorSchemeDefault(widget, targetSection);
+        }
 
         if (targetIndex < 0)
         {
@@ -2922,6 +2966,8 @@ else
             EditPermission = original.EditPermission,
             HiddenOnMobile = original.HiddenOnMobile,
             HiddenOnTablet = original.HiddenOnTablet,
+            BackgroundColorToken = original.BackgroundColorToken,
+            TextColor = original.TextColor,
             Columns = original.Columns.Select(col => new LayoutColumn
             {
                 Id = Guid.NewGuid().ToString("N"),
@@ -3251,6 +3297,23 @@ else
         _ = PushSectionAppearanceToCanvasAsync(section);
     }
 
+    // Page Editor Phase 4 (Section-level Color Scheme shortcut) - picking a token sets both
+    // BackgroundColorToken and a computed readable TextColor in one action; picking "None"
+    // clears both back to "" (falls back to the plain Background enum, unaffected). A
+    // nonexistent token name (SiteTokens changed since this dropdown was rendered) clears
+    // TextColor too rather than leaving a stale value paired with an unresolvable background.
+    private void SetSectionColorScheme(LayoutSection section, string tokenName)
+    {
+        if (section.BackgroundColorToken == tokenName) return;
+        ApplyTrackedMutation($"{section.Id}:colorScheme", () =>
+        {
+            section.BackgroundColorToken = tokenName;
+            var token = SiteTokens.Colors.FirstOrDefault(c => string.Equals(c.Name, tokenName, StringComparison.OrdinalIgnoreCase));
+            section.TextColor = token is not null ? ColorContrast.GetReadableTextColor(token.Hex) : "";
+        }, reloadPreview: false);
+        _ = PushSectionAppearanceToCanvasAsync(section);
+    }
+
     private async Task PushSectionAppearanceToCanvasAsync(LayoutSection section)
     {
         if (!_bridgeInitialized) return;
@@ -3261,7 +3324,8 @@ else
                 {
                     type = "cms:section-changed",
                     sectionId = section.Id,
-                    cssClass = BuildSectionCssClass(section)
+                    cssClass = BuildSectionCssClass(section),
+                    style = CmsBlockHtmlRenderer.SectionInlineStyle(section, SiteTokens)
                 });
         }
         catch (JSDisconnectedException)

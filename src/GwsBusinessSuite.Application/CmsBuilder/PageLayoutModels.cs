@@ -52,6 +52,19 @@ public sealed class LayoutSection
     public bool HiddenOnMobile { get; set; }
     public bool HiddenOnTablet { get; set; }
 
+    // Page Editor Phase 4 (Section-level Color Scheme shortcut) - a named reference into the
+    // site's DesignTokenSet, same precedence convention as WidgetStyle.BackgroundColorToken:
+    // when set and resolvable, takes over from the raw Background enum above at render time
+    // (see CmsBlockHtmlRenderer's section inline-style resolution). TextColor is a plain raw
+    // hex computed via ColorContrast.GetReadableTextColor when a scheme is picked in the
+    // Inspector - there's no "paired foreground" token concept to reference by name instead
+    // (see ColorContrast's own doc comment). Selecting a scheme also seeds TextColor as the
+    // default Style.TextColor for widgets newly added to this section afterward (see
+    // CmsBuilderEditor.razor's ApplySectionColorSchemeDefault) - a one-time authoring
+    // convenience, not a live cascade; existing widgets are never retroactively changed.
+    public string BackgroundColorToken { get; set; } = "";
+    public string TextColor { get; set; } = "";
+
     public List<LayoutColumn> Columns { get; set; } = new();
 }
 
@@ -343,7 +356,10 @@ public sealed class WidgetStyle
         return string.Join(';', parts);
     }
 
-    private static string? ResolveColor(string tokenName, string rawValue, DesignTokenSet? tokens)
+    // Internal (not private) so CmsBlockHtmlRenderer's section-level Color Scheme resolution
+    // (Page Editor Phase 4) can reuse the exact same token-lookup-with-raw-fallback rule
+    // instead of duplicating it.
+    internal static string? ResolveColor(string tokenName, string rawValue, DesignTokenSet? tokens)
     {
         if (!string.IsNullOrWhiteSpace(tokenName) && tokens is not null)
         {

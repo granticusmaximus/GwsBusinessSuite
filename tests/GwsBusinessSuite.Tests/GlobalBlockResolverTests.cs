@@ -485,6 +485,36 @@ public sealed class GlobalBlockResolverTests
     }
 
     [Fact]
+    public async Task ResolveAsync_ShouldSyncColorScheme_ForAGlobalSection()
+    {
+        // Page Editor Phase 4 (Color Scheme shortcut) - also treated as part of the shared
+        // canonical design, same as Background/Padding/LayoutMode above.
+        await using var db = await CreateDbAsync();
+        var cms = new CmsBuilderService(db);
+        var globals = new GlobalBlockService(db);
+        var resolver = new GlobalBlockResolver(globals);
+        var site = await cms.SaveSiteAsync(new CmsSiteEditorModel { Name = "Globals" });
+
+        var globalSection = await globals.CreateSectionAsync(site.Id, "Accent banner", new LayoutSection
+        {
+            Id = "canonical-section",
+            BackgroundColorToken = "Accent",
+            TextColor = "#f8fafc",
+            Columns = [new LayoutColumn { Id = "canonical-column" }]
+        });
+
+        var layout = new PageLayout
+        {
+            Sections = [new LayoutSection { Id = "placement-section", GlobalBlockId = globalSection.Id }]
+        };
+
+        await resolver.ResolveAsync(site.Id, layout);
+
+        layout.Sections[0].BackgroundColorToken.Should().Be("Accent");
+        layout.Sections[0].TextColor.Should().Be("#f8fafc");
+    }
+
+    [Fact]
     public async Task ResolveAsync_ShouldSyncHiddenOnMobileTablet_ForAGlobalWidget()
     {
         await using var db = await CreateDbAsync();
