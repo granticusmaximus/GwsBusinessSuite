@@ -226,9 +226,27 @@ else
         else
         {
             <div class="studio-panel-section">
-                <button class="btn btn-sm btn-outline-primary w-100 mb-3" @onclick="AddSectionAtEnd">
-                    <i class="bi bi-plus-lg me-1"></i>Add Section
-                </button>
+                <div class="btn-group w-100 mb-3">
+                    <button class="btn btn-sm btn-outline-primary" @onclick="AddSectionAtEnd">
+                        <i class="bi bi-plus-lg me-1"></i>Add Section
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary dropdown-toggle dropdown-toggle-split" type="button"
+                            data-bs-toggle="dropdown" aria-expanded="false" title="Add section from a template">
+                        <span class="visually-hidden">Section templates</span>
+                    </button>
+                    <ul class="dropdown-menu">
+                        <li><button type="button" class="dropdown-item" @onclick="AddSectionAtEnd">▭ Blank section</button></li>
+                        <li><hr class="dropdown-divider" /></li>
+                        @foreach (var template in CmsSectionTemplates.All)
+                        {
+                            <li>
+                                <button type="button" class="dropdown-item" @onclick="() => AddSectionFromTemplate(template.Key)" title="@template.Description">
+                                    @template.Icon @template.Name
+                                </button>
+                            </li>
+                        }
+                    </ul>
+                </div>
                 @if (_layout.Sections.Count == 0)
                 {
                     <div class="studio-empty-card">
@@ -2446,6 +2464,19 @@ else
     {
         PushUndo();
         var section = CreateDefaultSection();
+        _layout.Sections.Add(section);
+        _leftTab = "layers";
+        SelectSection(section.Id);
+        QueueAutosave(reloadPreview: true, immediate: true);
+    }
+
+    private void AddSectionFromTemplate(string templateKey)
+    {
+        var template = CmsSectionTemplates.Find(templateKey);
+        if (template is null) return;
+
+        PushUndo();
+        var section = template.Build();
         _layout.Sections.Add(section);
         _leftTab = "layers";
         SelectSection(section.Id);
