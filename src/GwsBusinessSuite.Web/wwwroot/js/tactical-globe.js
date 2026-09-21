@@ -17,19 +17,30 @@ window.tacticalGlobe = (function () {
     let streamPanel = null;
     let snapshotRefreshTimer = null;
 
-    function init(containerId, dotNetRef) {
+    async function init(containerId, dotNetRef) {
         const container = document.getElementById(containerId);
         if (!container || viewers.has(containerId)) return;
 
-        // A dark, high-contrast, stylized look reads more "military terminal" than a photoreal
-        // basemap - and sidesteps needing any imagery-provider token. These are plain mutable
-        // properties Cesium reads per-frame at draw time, so setting them immediately here is
-        // safe. Note: unlike several other Cesium imagery providers, OpenStreetMapImageryProvider
-        // has no async `fromUrl` factory in this Cesium version - it's still a plain synchronous
-        // constructor (confirmed directly against the loaded library: `fromUrl` is undefined on
-        // it), so it's wrapped in a plain `new Cesium.ImageryLayer(...)`, not fromProviderAsync.
+        // A real incident: this used to hit tile.openstreetmap.org directly, which looked fine
+        // in every automated check (200 OK, valid PNG, CORS-open) but is OSM's own website tile
+        // server, not a general-purpose public API - confirmed live that it now actively rejects
+        // this app's traffic (every response carries `x-blocked: Access denied - see
+        // operations.osmfoundation.org/policies/tiles/` and the "tile" itself is a fully black
+        // placeholder image), which rendered as an invisible globe indistinguishable from the
+        // starfield behind it, not an error. Switched to Cesium's own bundled Natural Earth II
+        // basemap instead - a low-res, public-domain whole-Earth texture shipped inside the same
+        // jsdelivr-hosted Cesium build already trusted in this app's CSP, so this crosses no new
+        // trust boundary, needs no token/registration, and can never be rate-limited or blocked
+        // by a third party. TileMapServiceImageryProvider has an async `fromUrl` factory in this
+        // Cesium version (confirmed directly against the loaded library) since it has to fetch
+        // its own tilemapresource.xml first - unlike OpenStreetMapImageryProvider, which is a
+        // plain synchronous constructor with no upfront metadata fetch.
         const baseLayer = new Cesium.ImageryLayer(
-            new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' }));
+            await Cesium.TileMapServiceImageryProvider.fromUrl(
+                Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII')));
+        // A dark, high-contrast, stylized look reads more "military terminal" than the bundled
+        // basemap's natural daylight colors - these are plain mutable properties Cesium reads
+        // per-frame at draw time, so setting them immediately here is safe.
         baseLayer.brightness = 0.55;
         baseLayer.contrast = 1.35;
         baseLayer.gamma = 0.8;

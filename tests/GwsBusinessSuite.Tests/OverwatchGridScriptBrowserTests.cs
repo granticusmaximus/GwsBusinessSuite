@@ -97,10 +97,15 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         return (page, consoleErrors);
     }
 
+    // init() is async (it awaits Cesium.TileMapServiceImageryProvider.fromUrl for the bundled
+    // Natural Earth II basemap - see tactical-globe.js), matching how Blazor's own
+    // JS.InvokeVoidAsync awaits it in production. Awaiting it here too is what actually lets
+    // this try/catch observe a rejection - a fire-and-forget call would only catch a
+    // synchronous throw before init's first await, silently missing anything after it.
     private static async Task<string?> InitAsync(IPage page) => await page.EvaluateAsync<string?>("""
-        () => {
+        async () => {
           try {
-            window.tacticalGlobe.init('tg-viewport', { invokeMethodAsync: function () { return Promise.resolve(); } });
+            await window.tacticalGlobe.init('tg-viewport', { invokeMethodAsync: function () { return Promise.resolve(); } });
             return null;
           } catch (e) {
             return e.message;
