@@ -82,6 +82,19 @@ jobs:
       # shell on the droplet, so nothing before this checked the repo out locally.
       - uses: actions/checkout@v7
 
+      # Needed for the "Verify the live deployment from the outside" step below - it runs
+      # ./scripts/verify-release.sh, which restores/builds the whole solution (including
+      # GwsBusinessSuite.App's net10.0-android target) even under --skip-tests. This job never
+      # called setup-dotnet before, relying entirely on whatever SDK ubuntu-latest happened to
+      # bundle by default - that stopped including the maui-android workload (the same real,
+      # external break already fixed for the `test` job above), so this step failed the exact
+      # same way even after a fully successful deploy.
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - run: dotnet workload install maui-android
+
       - name: SSH into droplet and deploy
         uses: appleboy/ssh-action@v1.2.5
         with:
