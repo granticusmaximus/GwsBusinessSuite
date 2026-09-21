@@ -3,6 +3,12 @@
 # ─────────────────────────────────────────────
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build
 WORKDIR /src
+# GwsBusinessSuite.App's net10.0-android target is part of the main solution, so restoring the
+# whole .slnx needs the maui-android workload - a plain dotnet/sdk image doesn't bundle it (a
+# real, confirmed production incident: this same restore started failing here once GitHub's own
+# ubuntu-latest runner image dropped it too, see .github/workflows/deploy.yml's identical fix).
+# Placed before COPY so this layer stays cached across ordinary source changes.
+RUN dotnet workload install maui-android
 COPY . .
 RUN dotnet restore GwsBusinessSuite.slnx
 RUN dotnet publish src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj \
