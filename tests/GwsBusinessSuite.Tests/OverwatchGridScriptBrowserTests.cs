@@ -63,6 +63,9 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
           <div id="tg-viewport" style="width:800px;height:600px;"></div>
           <button data-tg-toggle="radar">radar</button>
           <button data-tg-toggle="alerts">alerts</button>
+          <input type="text" id="tg-search-input" />
+          <button type="button" id="tg-search-button">GO</button>
+          <span id="tg-search-status"></span>
         </body>
         </html>
         """;
@@ -149,5 +152,42 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
             """);
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task LocationSearch_ShouldFlyToTheGeocodedResult_OnGoClick()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+        await page.RouteAsync("https://nominatim.openstreetmap.org/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "application/json",
+            Body = """[{"lat":"33.7490","lon":"-84.3880"}]"""
+        }));
+
+        await page.FillAsync("#tg-search-input", "Atlanta, GA");
+        await page.ClickAsync("#tg-search-button");
+        await page.WaitForFunctionAsync("document.getElementById('tg-search-status').textContent === ''", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var status = await page.EvaluateAsync<string>("document.getElementById('tg-search-status').textContent");
+        status.Should().BeEmpty("a successful geocode clears the status text rather than leaving a stale message");
+    }
+
+    [Fact]
+    public async Task LocationSearch_ShouldShowNotFound_WhenNominatimReturnsNoResults()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+        await page.RouteAsync("https://nominatim.openstreetmap.org/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "application/json",
+            Body = "[]"
+        }));
+
+        await page.FillAsync("#tg-search-input", "a place that does not exist anywhere");
+        await page.ClickAsync("#tg-search-button");
+        await page.WaitForFunctionAsync("document.getElementById('tg-search-status').textContent === 'NOT FOUND'", new PageWaitForFunctionOptions { Timeout = 5000 });
     }
 }

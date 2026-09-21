@@ -72,6 +72,54 @@
     margin-top: 0.2rem;
 }
 
+.tg-search {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+    pointer-events: auto;
+}
+
+.tg-search input {
+    background: rgba(5, 8, 10, 0.75);
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    color: #7dffb0;
+    font-family: inherit;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    padding: 0.3rem 0.5rem;
+    width: 240px;
+}
+
+.tg-search input::placeholder {
+    color: rgba(125, 255, 176, 0.45);
+}
+
+.tg-search input:focus {
+    outline: none;
+    box-shadow: 0 0 8px rgba(125, 255, 176, 0.5);
+}
+
+.tg-search button {
+    background: rgba(5, 8, 10, 0.7);
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    color: #7dffb0;
+    font-family: inherit;
+    font-size: 0.65rem;
+    letter-spacing: 0.05em;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+}
+
+.tg-search button:hover {
+    background: rgba(125, 255, 176, 0.15);
+}
+
+.tg-search-status {
+    font-size: 0.65rem;
+    opacity: 0.8;
+}
+
 .tg-hud-status {
     font-size: 0.75rem;
     text-align: right;

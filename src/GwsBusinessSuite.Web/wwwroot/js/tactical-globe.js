@@ -111,6 +111,51 @@ window.tacticalGlobe = (function () {
         }, 400);
 
         ensureKeyboardShortcutsRegistered();
+        setUpLocationSearch(viewer);
+    }
+
+    // Feature: location search / jump-to. Client-side geocoding against OpenStreetMap's free
+    // Nominatim API - the exact same approach already established in wikiMapView.js (no API key,
+    // nominatim.openstreetmap.org is already an allowed connect-src origin in this app's CSP for
+    // that reason). A single deliberate user-submitted search doesn't need that file's request
+    // queue (built for geocoding many markers in a batch) - one lookup per Enter/click is well
+    // within Nominatim's documented 1 request/second usage policy on its own.
+    function setUpLocationSearch(viewer) {
+        const input = document.getElementById('tg-search-input');
+        const button = document.getElementById('tg-search-button');
+        const status = document.getElementById('tg-search-status');
+        if (!input || !button || !status) return;
+
+        async function performSearch() {
+            const query = input.value.trim();
+            if (!query) return;
+
+            status.textContent = 'SEARCHING...';
+            try {
+                const response = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(query));
+                const body = await response.json();
+                const hit = body && body[0];
+                if (!hit) {
+                    status.textContent = 'NOT FOUND';
+                    return;
+                }
+
+                status.textContent = '';
+                viewer.camera.flyTo({
+                    destination: Cesium.Cartesian3.fromDegrees(Number(hit.lon), Number(hit.lat), 150000)
+                });
+            } catch (e) {
+                status.textContent = 'SEARCH FAILED';
+            }
+        }
+
+        button.addEventListener('click', performSearch);
+        input.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                performSearch();
+            }
+        });
     }
 
     // Module-level, registered at most once regardless of how many times init()/dispose() runs
