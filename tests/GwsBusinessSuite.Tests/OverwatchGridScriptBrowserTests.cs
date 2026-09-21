@@ -190,4 +190,27 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await page.ClickAsync("#tg-search-button");
         await page.WaitForFunctionAsync("document.getElementById('tg-search-status').textContent === 'NOT FOUND'", new PageWaitForFunctionOptions { Timeout = 5000 });
     }
+
+    // Regression guard for the coverage banner's dismiss state (OverwatchGrid.razor): it's
+    // permanently accurate for an admin who never configures the optional WSDOT/Windy keys, so
+    // it never clears itself server-side - dismissal has to persist client-side instead.
+    [Fact]
+    public async Task CoverageBanner_ShouldStayDismissed_AfterDismissAndReload()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+
+        var dismissedBeforeInit = await page.EvaluateAsync<bool>("() => window.tacticalGlobe.isCoverageBannerDismissed()");
+        dismissedBeforeInit.Should().BeFalse("a fresh browser/profile has never dismissed the banner");
+
+        await page.EvaluateAsync("() => window.tacticalGlobe.dismissCoverageBanner()");
+        var dismissedAfterCall = await page.EvaluateAsync<bool>("() => window.tacticalGlobe.isCoverageBannerDismissed()");
+        dismissedAfterCall.Should().BeTrue();
+
+        // Simulate a fresh page load (a new admin visit) re-reading the same localStorage key -
+        // the dismissal must survive a full script re-evaluation, not just live in memory.
+        await page.ReloadAsync();
+        await page.WaitForFunctionAsync("!!window.tacticalGlobe", new PageWaitForFunctionOptions { Timeout = 10000 });
+        var dismissedAfterReload = await page.EvaluateAsync<bool>("() => window.tacticalGlobe.isCoverageBannerDismissed()");
+        dismissedAfterReload.Should().BeTrue("dismissal must persist across page loads, not just within one session");
+    }
 }

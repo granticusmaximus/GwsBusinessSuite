@@ -24,9 +24,9 @@
     </div>
 </div>
 
-@if (!_hasAnyProviderConfigured)
+@if (!_hasAnyProviderConfigured && !_bannerDismissed)
 {
-    <div class="alert alert-info d-flex gap-2 align-items-start" role="note">
+    <div class="alert alert-info alert-dismissible d-flex gap-2 align-items-start" role="note">
         <i class="bi bi-info-circle-fill mt-1" aria-hidden="true"></i>
         <div>
             No setup required: Georgia (GDOT) and Datumfeed's coverage (Austin, California,
@@ -35,6 +35,7 @@
             raise Datumfeed's anonymous rate limit - see <code>CameraIntelOptions.cs</code> if
             you ever want either; nothing here requires them.
         </div>
+        <button type="button" class="btn-close" aria-label="Dismiss" @onclick="DismissBannerAsync"></button>
     </div>
 }
 
@@ -107,6 +108,7 @@
     private List<CameraFeed> _visibleCameras = new();
     private bool _bootComplete;
     private bool _hasAnyProviderConfigured = true;
+    private bool _bannerDismissed;
     private bool _hasSettledOnce;
     private bool _radarOn;
     private bool _alertsOn;
@@ -123,6 +125,12 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
+
+        if (!_hasAnyProviderConfigured)
+        {
+            _bannerDismissed = await JS.InvokeAsync<bool>("tacticalGlobe.isCoverageBannerDismissed");
+            StateHasChanged();
+        }
 
         _dotNetRef = DotNetObjectReference.Create(this);
         try
@@ -144,6 +152,12 @@
             return;
         }
         _ = MarkBootCompleteAsync();
+    }
+
+    private async Task DismissBannerAsync()
+    {
+        _bannerDismissed = true;
+        await JS.InvokeVoidAsync("tacticalGlobe.dismissCoverageBanner");
     }
 
     private async Task MarkBootCompleteAsync()

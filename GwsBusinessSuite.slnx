@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj" />
     <Project Path="src/GwsBusinessSuite.Application/GwsBusinessSuite.Application.csproj" />
     <Project Path="src/GwsBusinessSuite.Domain/GwsBusinessSuite.Domain.csproj" />
     <Project Path="src/GwsBusinessSuite.Infrastructure/GwsBusinessSuite.Infrastructure.csproj" />

@@ -1,3 +1,8 @@
+#if MACCATALYST
+using Foundation;
+using WebKit;
+#endif
+
 namespace GwsBusinessSuite.App;
 
 public partial class MainPage : ContentPage
@@ -68,6 +73,8 @@ public partial class MainPage : ContentPage
     private async Task StartWorkspaceAsync()
     {
 #if MACCATALYST
+        await ClearStaleWebViewCacheAsync();
+
         var deviceSecret = await _deviceSecretStore.GetAsync();
         if (!string.IsNullOrWhiteSpace(deviceSecret) && await TryDeviceLoginAsync(deviceSecret))
         {
@@ -82,6 +89,24 @@ public partial class MainPage : ContentPage
     }
 
 #if MACCATALYST
+    // A real incident: WKWebsiteDataStore.DefaultDataStore's on-disk cache kept serving a
+    // pre-fix response for Overwatch Grid (wrong CSP header) indefinitely - the cache lives in
+    // this app's sandbox container, not process memory, so a full quit/relaunch (which the user
+    // tried first) does nothing to it, unlike a normal browser tab's cache. Only cache-type data
+    // is cleared here - cookies (the login session) and local storage (e.g. the coverage
+    // banner's own dismiss preference) are deliberately left alone.
+    private static Task ClearStaleWebViewCacheAsync()
+    {
+        var cacheTypes = new NSSet<NSString>(new NSString[]
+        {
+            WKWebsiteDataType.DiskCache,
+            WKWebsiteDataType.MemoryCache,
+            WKWebsiteDataType.OfflineWebApplicationCache,
+            WKWebsiteDataType.FetchCache
+        });
+        return WKWebsiteDataStore.DefaultDataStore.RemoveDataOfTypesAsync(cacheTypes, NSDate.DistantPast);
+    }
+
     // Native prompts, not custom XAML - kept intentionally minimal since this is opt-in,
     // single-device tooling, not a polished multi-user login screen. Note DisplayPromptAsync has
     // no masked/secure-entry mode, so the password is briefly visible in the OS alert - an

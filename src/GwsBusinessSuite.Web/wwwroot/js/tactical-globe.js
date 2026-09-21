@@ -383,12 +383,36 @@ window.tacticalGlobe = (function () {
         viewers.delete(containerId || 'tg-viewport');
     }
 
+    // The "no setup required" coverage banner (OverwatchGrid.razor) is permanently accurate for
+    // an admin who never configures the optional WSDOT/Windy keys - it never clears itself, so
+    // it needs an explicit per-admin dismiss. localStorage matches the one other per-viewer UI
+    // preference already in this codebase (CivicWatchThemeToggle's own theme key) rather than
+    // adding server-side persistence for a purely cosmetic banner.
+    const COVERAGE_BANNER_KEY = 'overwatch-grid-coverage-banner-dismissed';
+
+    function isCoverageBannerDismissed() {
+        try {
+            return window.localStorage.getItem(COVERAGE_BANNER_KEY) === 'true';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function dismissCoverageBanner() {
+        try {
+            window.localStorage.setItem(COVERAGE_BANNER_KEY, 'true');
+        } catch (e) {
+        }
+    }
+
     return {
         init: init,
         setCameraPins: setCameraPins,
         setRadarVisible: setRadarVisible,
         setWeatherAlerts: setWeatherAlerts,
         clearWeatherAlerts: clearWeatherAlerts,
-        dispose: dispose
+        dispose: dispose,
+        isCoverageBannerDismissed: isCoverageBannerDismissed,
+        dismissCoverageBanner: dismissCoverageBanner
     };
 })();

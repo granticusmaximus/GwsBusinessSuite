@@ -587,9 +587,20 @@ app.Use(async (context, next) =>
         // by this app's default hardened CSP, which has neither. Scoped to exactly this one
         // route rather than loosened app-wide - every other page keeps the stricter policy.
         var isOverwatchGrid = string.Equals(context.Request.Path.Value, "/admin/osint", StringComparison.OrdinalIgnoreCase);
+        var isOverwatchGridScript = string.Equals(context.Request.Path.Value, "/js/tactical-globe.js", StringComparison.OrdinalIgnoreCase);
         var scriptSrc = isOverwatchGrid
             ? "script-src 'self' https://cdn.jsdelivr.net 'unsafe-eval' 'wasm-unsafe-eval';"
             : "script-src 'self' https://cdn.jsdelivr.net;";
+        // A real incident: a WKWebView's persistent on-disk cache kept serving this page's
+        // pre-fix CSP header indefinitely - surviving a full app quit/relaunch - while a
+        // browser without that cache picked up the very same server-side fix immediately.
+        // Neither this page nor its script carries any per-viewer state worth caching, so
+        // never let any client cache either response, closing off this whole class of bug.
+        if (isOverwatchGrid || isOverwatchGridScript)
+        {
+            headers["Cache-Control"] = "no-store, no-cache";
+            headers["Pragma"] = "no-cache";
+        }
         headers["Content-Security-Policy"] = string.Join(' ', [
             "default-src 'self';",
             scriptSrc,
