@@ -3,78 +3,127 @@ using Microsoft.Playwright;
 
 namespace GwsBusinessSuite.Tests;
 
-// Regression guard for a real incident: OpenStreetMapImageryProvider.fromUrl doesn't exist on
-// the pinned Cesium version (it's still a plain synchronous constructor, unlike several other
-// Cesium imagery providers), so tactical-globe.js's init() threw synchronously the moment anyone
-// opened Overwatch Grid. Left uncaught, that JSException-from-interop crashed the whole Blazor
-// Server circuit - reported by the user as "nothing opens" for the *entire app*, not just this
-// one page. There is no server-side signal for a client-only JS bug like this - only a real
-// browser running the real shipped script (loading the real Cesium build from jsdelivr, exactly
-// as production does) actually exercises the code path that broke. Mirrors
-// CmsCanvasSectionSelectionBrowserTests.cs's own "drive the real script in a browser" approach.
+// Regression guard for two real incidents, both only reproducible in a real browser against
+// the real shipped script - there is no server-side signal for either class of bug:
+//
+// 1. OpenStreetMapImageryProvider.fromUrl doesn't exist on the pinned Cesium version (it's
+//    still a plain synchronous constructor, unlike several other Cesium imagery providers), so
+//    init() threw synchronously the moment anyone opened Overwatch Grid. Left uncaught, that
+//    JSException-from-interop crashed the whole Blazor Server circuit - reported as "nothing
+//    opens" for the *entire app*, not just this one page.
+// 2. CesiumJS calls eval()/new Function() internally and separately compiles a WebAssembly
+//    module at startup - both flatly blocked by this app's default CSP (no 'unsafe-eval', no
+//    'wasm-unsafe-eval'). The FIRST fix above shipped without this CSP header applied at all in
+//    its own test, so it still silently passed while the real page kept failing in production -
+//    the exact gap this harness now closes by sending the real header, not a CSP-free stub.
+//
+// The harness loads tactical-globe.js as an external <script src>, exactly like the real page
+// (OverwatchGrid.razor), and drives init()/etc. via page.EvaluateAsync from outside the page's
+// own HTML rather than an inline <script> tag in the document body - an inline tag would trip
+// this same CSP's lack of 'unsafe-inline' in script-src as a harness artifact having nothing to
+// do with whether the real page (which never inlines a script either - Blazor's JS interop
+// calls in from outside the parsed document, not via a script element) actually works.
+//
+// Mirrors CmsCanvasSectionSelectionBrowserTests.cs's own "drive the real script in a browser"
+// approach. See Program.cs for the actual route-scoped CSP this duplicates.
 [Collection("Playwright")]
 public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fixture)
 {
+    // Kept in sync with Program.cs's CSP for the /admin/osint route by hand - there's no shared
+    // constant to import across the Web/Test project boundary. If this test ever passes while
+    // the real page fails, check this string against Program.cs's script-src first.
+    private const string OverwatchGridCsp =
+        "default-src 'self'; " +
+        "script-src 'self' https://cdn.jsdelivr.net 'unsafe-eval' 'wasm-unsafe-eval'; " +
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; " +
+        "img-src 'self' data: https:; " +
+        "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; " +
+        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov; " +
+        "media-src 'self' blob: https:; " +
+        "worker-src 'self' blob:; " +
+        "frame-src 'self'; " +
+        "frame-ancestors 'self'; " +
+        "object-src 'none'; " +
+        "base-uri 'self'; " +
+        "form-action 'self';";
+
     private static string ScriptPath => Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory,
         "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
 
-    private static async Task<IPage> OpenHarnessAsync(IBrowser browser)
+    private const string HarnessHtml = """
+        <!doctype html>
+        <html>
+        <head>
+          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Widgets/widgets.css" />
+          <script src="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Cesium.js"></script>
+          <script src="/js/tactical-globe.js"></script>
+        </head>
+        <body>
+          <div id="tg-viewport" style="width:800px;height:600px;"></div>
+          <button data-tg-toggle="radar">radar</button>
+          <button data-tg-toggle="alerts">alerts</button>
+        </body>
+        </html>
+        """;
+
+    private static async Task<(IPage Page, List<string> ConsoleErrors)> OpenHarnessAsync(IBrowser browser)
     {
         var script = await File.ReadAllTextAsync(ScriptPath);
-        var html = $$"""
-            <!doctype html>
-            <html>
-            <head>
-              <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Widgets/widgets.css" />
-              <script src="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Cesium.js"></script>
-            </head>
-            <body>
-              <div id="tg-viewport" style="width:800px;height:600px;"></div>
-              <button data-tg-toggle="radar">radar</button>
-              <button data-tg-toggle="alerts">alerts</button>
-              <script>{{script}}</script>
-              <script>
-                var fakeDotNetRef = { invokeMethodAsync: function () { return Promise.resolve(); } };
-                window.__ready = false;
-                window.__error = null;
-                try {
-                  window.tacticalGlobe.init('tg-viewport', fakeDotNetRef);
-                  window.__ready = true;
-                } catch (e) {
-                  window.__error = e.message;
-                }
-              </script>
-            </body>
-            </html>
-            """;
 
         var page = await browser.NewPageAsync();
-        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        var consoleErrors = new List<string>();
+        page.Console += (_, msg) => { if (msg.Type == "error") consoleErrors.Add(msg.Text); };
+
+        await page.RouteAsync("http://localhost/overwatch-grid-harness", route => route.FulfillAsync(new()
         {
             Status = 200,
             ContentType = "text/html",
-            Body = html
+            Headers = new Dictionary<string, string> { ["Content-Security-Policy"] = OverwatchGridCsp },
+            Body = HarnessHtml
         }));
+        await page.RouteAsync("http://localhost/js/tactical-globe.js", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "application/javascript",
+            Body = script
+        }));
+
         await page.GotoAsync("http://localhost/overwatch-grid-harness");
-        await page.WaitForFunctionAsync("window.__ready === true || window.__error !== null", new PageWaitForFunctionOptions { Timeout = 10000 });
-        return page;
+        await page.WaitForFunctionAsync("!!window.tacticalGlobe", new PageWaitForFunctionOptions { Timeout = 10000 });
+        return (page, consoleErrors);
     }
 
+    private static async Task<string?> InitAsync(IPage page) => await page.EvaluateAsync<string?>("""
+        () => {
+          try {
+            window.tacticalGlobe.init('tg-viewport', { invokeMethodAsync: function () { return Promise.resolve(); } });
+            return null;
+          } catch (e) {
+            return e.message;
+          }
+        }
+        """);
+
     [Fact]
-    public async Task Init_ShouldSucceed_AgainstTheRealPinnedCesiumBuild()
+    public async Task Init_ShouldSucceed_AgainstTheRealPinnedCesiumBuildAndTheRealCsp()
     {
-        var page = await OpenHarnessAsync(fixture.Browser);
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
 
-        var error = await page.EvaluateAsync<string?>("window.__error");
+        var error = await InitAsync(page);
+        await page.WaitForTimeoutAsync(500);
 
-        error.Should().BeNull("tacticalGlobe.init() must not throw against the real Cesium build this app loads in production");
+        error.Should().BeNull("tacticalGlobe.init() must not throw against the real Cesium build and CSP this app serves in production");
+        consoleErrors.Should().NotContain(
+            msg => msg.Contains("Content Security Policy", StringComparison.OrdinalIgnoreCase),
+            "a CSP violation here means the real deployed page would fail exactly the same way, even if init() itself didn't throw");
     }
 
     [Fact]
     public async Task AfterInit_EveryExportedFunction_ShouldRunWithoutThrowing()
     {
-        var page = await OpenHarnessAsync(fixture.Browser);
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
 
         var result = await page.EvaluateAsync<string?>("""
             () => {

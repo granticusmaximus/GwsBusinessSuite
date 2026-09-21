@@ -579,9 +579,20 @@ app.Use(async (context, next) =>
         headers["X-Frame-Options"] = "SAMEORIGIN";
         headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
         headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(), payment=()";
+        // CesiumJS (Overwatch Grid, /admin/osint) genuinely requires 'unsafe-eval' and
+        // 'wasm-unsafe-eval' to function - confirmed via real browser console errors, not
+        // assumed: Cesium.js itself calls eval()/new Function() internally (unrelated to the
+        // OpenStreetMapImageryProvider fix earlier), and separately compiles a WebAssembly
+        // module (for compressed-texture/geometry decoding) at startup. Both are flatly blocked
+        // by this app's default hardened CSP, which has neither. Scoped to exactly this one
+        // route rather than loosened app-wide - every other page keeps the stricter policy.
+        var isOverwatchGrid = string.Equals(context.Request.Path.Value, "/admin/osint", StringComparison.OrdinalIgnoreCase);
+        var scriptSrc = isOverwatchGrid
+            ? "script-src 'self' https://cdn.jsdelivr.net 'unsafe-eval' 'wasm-unsafe-eval';"
+            : "script-src 'self' https://cdn.jsdelivr.net;";
         headers["Content-Security-Policy"] = string.Join(' ', [
             "default-src 'self';",
-            "script-src 'self' https://cdn.jsdelivr.net;",
+            scriptSrc,
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;",
             "img-src 'self' data: https:;",
             "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;",
