@@ -40,6 +40,13 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      # GwsBusinessSuite.App's net10.0-android target is part of the main solution, so a plain
+      # `dotnet restore`/`build` here needs the android workload present - GitHub's ubuntu-latest
+      # image stopped bundling it (a real, external break: this same job used to pass without
+      # this step). clients.yml's own Android job already carries this exact fix for its own
+      # restore; mirrored here since this job hits the identical NETSDK1147 otherwise.
+      - run: dotnet workload install android
+
       - name: Verify release gates
         run: >-
           ./scripts/verify-release.sh

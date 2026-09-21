@@ -178,8 +178,15 @@ fi
 run_check "Restore" dotnet restore GwsBusinessSuite.slnx
 run_check "Dependency vulnerability audit" \
   dotnet list GwsBusinessSuite.slnx package --vulnerable --include-transitive --no-restore
+# RunAOTCompilation=false: GwsBusinessSuite.App's Android target defaults to AOT compilation in
+# Release config, which needs a separate set of per-architecture AOT cross-compiler runtime packs
+# that neither this CI image nor a fresh local machine has installed by default (confirmed: even
+# after installing the android workload, Microsoft.NETCore.App.Runtime.AOT.Cross.android-* still
+# can't be resolved) - clients.yml's own Android publish step already disables it for the exact
+# same reason. This whole-solution build only needs to prove the code compiles, not produce an
+# AOT-optimized binary, so disabling it here carries no real cost.
 run_check "Release build" \
-  dotnet build GwsBusinessSuite.slnx -c Release --no-restore --disable-build-servers -m:1
+  dotnet build GwsBusinessSuite.slnx -c Release --no-restore --disable-build-servers -m:1 -p:RunAOTCompilation=false
 
 if [[ "$install_playwright_deps" == true ]]; then
   # This step normally finishes in well under a minute, but its underlying `apt-get install`
