@@ -25,9 +25,12 @@ jobs:
       # `dotnet restore`/`build` here needs the maui-android workload present - GitHub's
       # ubuntu-latest image stopped bundling it (a real, external break: this same job used to
       # pass without this step). `android` alone isn't enough - the actual NETSDK1147 error names
-      # `maui-android` specifically - so this installs the plain `maui` meta-workload, matching
-      # clients.yml's own already-proven-working fix for its Android job.
-      - run: dotnet workload install maui
+      # `maui-android` specifically. clients.yml's own Android job installs the broader `maui`
+      # meta-workload instead, but that only works there because it runs on macos-latest - `maui`
+      # pulls in every platform including macOS-only iOS/MacCatalyst, which fails outright with
+      # "isn't supported on this platform" on Linux (confirmed live). maui-android alone has no
+      # such platform restriction.
+      - run: dotnet workload install maui-android
 
       - name: Verify release gates
         run: >-
