@@ -83,6 +83,22 @@ window.tacticalGlobe = (function () {
         // farther, matching a normal map's zoom pacing.
         viewer.scene.screenSpaceCameraController.zoomFactor = 8.0;
 
+        // A real, reported gap: World_Imagery alone is pure aerial photography with zero labels
+        // baked in - no street names, no city/state names anywhere, unlike Google/Apple Maps'
+        // hybrid view (imagery + a labels layer on top). Esri's own free "Reference" services are
+        // built for exactly this pairing - confirmed live: both are CORS-open, need no API key,
+        // and render as transparent-background PNGs (place/boundary names at low-to-mid zoom,
+        // road names at high zoom) meant to overlay any base imagery. Left at natural brightness
+        // (no dark tint applied, unlike baseLayer above) so the text stays legible.
+        const placesLabelsLayer = new Cesium.ImageryLayer(
+            await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+                'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer'));
+        viewer.imageryLayers.add(placesLabelsLayer);
+        const roadsLabelsLayer = new Cesium.ImageryLayer(
+            await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+                'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer'));
+        viewer.imageryLayers.add(roadsLabelsLayer);
+
         // NOAA nowCOAST's public radar WMS (confirmed CORS-open and token-free directly against
         // the live endpoint during implementation) - added once, hidden by default, toggled via
         // .show rather than added/removed per toggle so re-enabling it is instant.
