@@ -125,12 +125,14 @@ window.tacticalGlobe = (function () {
         setUpLocationSearch(viewer);
     }
 
-    // Feature: location search / jump-to. Client-side geocoding against OpenStreetMap's free
-    // Nominatim API - the exact same approach already established in wikiMapView.js (no API key,
-    // nominatim.openstreetmap.org is already an allowed connect-src origin in this app's CSP for
-    // that reason). A single deliberate user-submitted search doesn't need that file's request
-    // queue (built for geocoding many markers in a batch) - one lookup per Enter/click is well
-    // within Nominatim's documented 1 request/second usage policy on its own.
+    // Feature: location search / jump-to. Client-side geocoding against Komoot's free public
+    // Photon API (photon.komoot.io) - built on OpenStreetMap data like Nominatim, but run as a
+    // separate public service explicitly intended for this kind of direct app usage, unlike
+    // Nominatim's own public instance. Switched after a real incident: Nominatim (this feature's
+    // original provider, matching the approach in wikiMapView.js) started returning "Access
+    // denied - see operations.osmfoundation.org/policies/nominatim/" for every request from this
+    // app - the same OSM Foundation usage-policy enforcement that separately blocked this page's
+    // old tile-based basemap. No API key, no registration, confirmed live and CORS-open.
     function setUpLocationSearch(viewer) {
         const input = document.getElementById('tg-search-input');
         const button = document.getElementById('tg-search-button');
@@ -143,17 +145,18 @@ window.tacticalGlobe = (function () {
 
             status.textContent = 'SEARCHING...';
             try {
-                const response = await fetch('https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(query));
+                const response = await fetch('https://photon.komoot.io/api/?limit=1&q=' + encodeURIComponent(query));
                 const body = await response.json();
-                const hit = body && body[0];
-                if (!hit) {
+                const hit = body && body.features && body.features[0];
+                const coords = hit && hit.geometry && hit.geometry.coordinates;
+                if (!coords) {
                     status.textContent = 'NOT FOUND';
                     return;
                 }
 
                 status.textContent = '';
                 viewer.camera.flyTo({
-                    destination: Cesium.Cartesian3.fromDegrees(Number(hit.lon), Number(hit.lat), 150000)
+                    destination: Cesium.Cartesian3.fromDegrees(Number(coords[0]), Number(coords[1]), 150000)
                 });
             } catch (e) {
                 status.textContent = 'SEARCH FAILED';

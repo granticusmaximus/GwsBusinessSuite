@@ -38,7 +38,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; " +
         "img-src 'self' data: https:; " +
         "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; " +
-        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov; " +
+        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://photon.komoot.io https://*.azurewebsites.net https://cdn.jsdelivr.net https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov; " +
         "media-src 'self' blob: https:; " +
         "worker-src 'self' blob:; " +
         "frame-src 'self'; " +
@@ -164,11 +164,11 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
         await InitAsync(page);
-        await page.RouteAsync("https://nominatim.openstreetmap.org/**", route => route.FulfillAsync(new()
+        await page.RouteAsync("https://photon.komoot.io/**", route => route.FulfillAsync(new()
         {
             Status = 200,
             ContentType = "application/json",
-            Body = """[{"lat":"33.7490","lon":"-84.3880"}]"""
+            Body = """{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[-84.3880,33.7490]},"properties":{"name":"Atlanta"}}]}"""
         }));
 
         await page.FillAsync("#tg-search-input", "Atlanta, GA");
@@ -180,15 +180,15 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     }
 
     [Fact]
-    public async Task LocationSearch_ShouldShowNotFound_WhenNominatimReturnsNoResults()
+    public async Task LocationSearch_ShouldShowNotFound_WhenPhotonReturnsNoResults()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
         await InitAsync(page);
-        await page.RouteAsync("https://nominatim.openstreetmap.org/**", route => route.FulfillAsync(new()
+        await page.RouteAsync("https://photon.komoot.io/**", route => route.FulfillAsync(new()
         {
             Status = 200,
             ContentType = "application/json",
-            Body = "[]"
+            Body = """{"type":"FeatureCollection","features":[]}"""
         }));
 
         await page.FillAsync("#tg-search-input", "a place that does not exist anywhere");

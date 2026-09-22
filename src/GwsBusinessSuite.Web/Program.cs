@@ -613,9 +613,22 @@ app.Use(async (context, next) =>
             // layer. nowcoast.noaa.gov: the optional NOAA radar overlay's WMS tiles - fetched
             // directly by the browser (confirmed CORS-open: access-control-allow-origin: *),
             // unlike NWS alert data which is proxied server-side instead (see NwsAlertsService).
-            "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov;",
+            // photon.komoot.io: Overwatch Grid's location search - switched from Nominatim after
+            // OSM Foundation's usage-policy enforcement started blocking this app's requests to
+            // both nominatim.openstreetmap.org and tile.openstreetmap.org (both still kept here
+            // for wikiMapView.js's separate Wiki-page location feature, which still uses them and
+            // is very likely hitting the same block - a real, related issue, not yet fixed here).
+            "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://photon.komoot.io https://*.azurewebsites.net https://cdn.jsdelivr.net https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov;",
             "media-src 'self' blob: https:;",
-            "worker-src 'self' blob:;",
+            // A real incident: script-src trusting cdn.jsdelivr.net does NOT cover Worker
+            // scripts - that's worker-src's own directive, and it never included jsdelivr. Cesium
+            // loads its actual Worker files (terrain/heightmap vertex generation, typed-array
+            // transfer capability testing) directly from there, so every one of those requests
+            // was silently blocked - confirmed via real Playwright network-failure events, not
+            // assumed. Nothing about this ever threw a catchable JS exception; the globe's
+            // terrain/surface pipeline just never ran, leaving pins/HUD/camera movement (all
+            // main-thread work) fully functional while the globe itself stayed invisible.
+            "worker-src 'self' blob: https://cdn.jsdelivr.net;",
             "frame-src 'self';",
             "frame-ancestors 'self';",
             "object-src 'none';",
