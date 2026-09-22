@@ -605,7 +605,13 @@ app.Use(async (context, next) =>
             "default-src 'self';",
             scriptSrc,
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;",
-            "img-src 'self' data: https:;",
+            // blob: is required for Overwatch Grid specifically - Safari's CesiumJS texture
+            // decode path creates imagery textures via blob: URLs (confirmed via real Safari
+            // console errors: "Refused to load blob:... because it does not appear in the
+            // img-src directive"), unlike the Chromium path, which doesn't - so this never
+            // reproduced in Chromium-based testing. Without it, every tile silently fails to
+            // decode and the globe renders as a bare untextured sphere.
+            "img-src 'self' data: blob: https:;",
             "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;",
             // cdn.jsdelivr.net: Overwatch Grid's self-hosted-via-CDN CesiumJS fetches its own
             // Workers/Assets/ThirdParty bundle at runtime from the same jsdelivr origin already
