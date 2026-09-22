@@ -38,7 +38,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; " +
         "img-src 'self' data: https:; " +
         "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; " +
-        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov; " +
+        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov; " +
         "media-src 'self' blob: https:; " +
         "worker-src 'self' blob:; " +
         "frame-src 'self'; " +

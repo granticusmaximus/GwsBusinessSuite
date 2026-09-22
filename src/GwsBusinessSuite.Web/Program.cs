@@ -609,17 +609,19 @@ app.Use(async (context, next) =>
             "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;",
             // cdn.jsdelivr.net: Overwatch Grid's self-hosted-via-CDN CesiumJS fetches its own
             // Workers/Assets/ThirdParty bundle at runtime from the same jsdelivr origin already
-            // trusted in script-src above. nowcoast.noaa.gov: the optional NOAA radar overlay's
-            // WMS tiles - fetched directly by the browser (confirmed CORS-open:
-            // access-control-allow-origin: *), unlike NWS alert data which is proxied server-side
-            // instead (see NwsAlertsService). Overwatch Grid's own location search is geocoded
-            // server-side now (see GeocodingService), so photon.komoot.io needs no browser-side
-            // entry here. nominatim.openstreetmap.org and tile.openstreetmap.org are kept only
-            // for wikiMapView.js's separate Wiki-page location feature, which still calls them
+            // trusted in script-src above. server.arcgisonline.com: the globe's base imagery -
+            // real satellite/aerial tiles up to zoom 23, confirmed CORS-open, no API key/
+            // registration required, not a Google product. nowcoast.noaa.gov: the optional NOAA
+            // radar overlay's WMS tiles - fetched directly by the browser (confirmed CORS-open),
+            // unlike NWS alert data which is proxied server-side instead (see NwsAlertsService).
+            // Overwatch Grid's own location search is geocoded server-side now (see
+            // GeocodingService), so photon.komoot.io needs no browser-side entry here.
+            // nominatim.openstreetmap.org and tile.openstreetmap.org are kept only for
+            // wikiMapView.js's separate Wiki-page location feature, which still calls them
             // directly and is very likely hitting the same OSM Foundation usage-policy block that
             // this page's own former Nominatim/tile usage did - a real, related issue, not yet
             // fixed here.
-            "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov;",
+            "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov;",
             "media-src 'self' blob: https:;",
             // A real incident: script-src trusting cdn.jsdelivr.net does NOT cover Worker
             // scripts - that's worker-src's own directive, and it never included jsdelivr. Cesium

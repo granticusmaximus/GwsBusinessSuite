@@ -21,31 +21,33 @@ window.tacticalGlobe = (function () {
         const container = document.getElementById(containerId);
         if (!container || viewers.has(containerId)) return;
 
-        // A real incident: this used to hit tile.openstreetmap.org directly, which looked fine
-        // in every automated check (200 OK, valid PNG, CORS-open) but is OSM's own website tile
-        // server, not a general-purpose public API - confirmed live that it now actively rejects
-        // this app's traffic (every response carries `x-blocked: Access denied - see
-        // operations.osmfoundation.org/policies/tiles/` and the "tile" itself is a fully black
-        // placeholder image), which rendered as an invisible globe indistinguishable from the
-        // starfield behind it, not an error. Switched to Cesium's own bundled Natural Earth II
-        // basemap instead - a low-res, public-domain whole-Earth texture shipped inside the same
-        // jsdelivr-hosted Cesium build already trusted in this app's CSP, so this crosses no new
-        // trust boundary, needs no token/registration, and can never be rate-limited or blocked
-        // by a third party. TileMapServiceImageryProvider has an async `fromUrl` factory in this
-        // Cesium version (confirmed directly against the loaded library) since it has to fetch
-        // its own tilemapresource.xml first - unlike OpenStreetMapImageryProvider, which is a
-        // plain synchronous constructor with no upfront metadata fetch.
+        // Real incident history for this one basemap: it first hit tile.openstreetmap.org
+        // directly, which looked fine in every automated check (200 OK, valid PNG, CORS-open)
+        // but is OSM's own website tile server, not a general-purpose public API - confirmed
+        // live it now actively rejects this app's traffic (`x-blocked: Access denied`, and the
+        // "tile" itself is a black placeholder), rendering an invisible globe. Switched to
+        // Cesium's bundled Natural Earth II next - safe from third-party blocking, but it tops
+        // out at zoom level 2 (confirmed against the loaded library), so zooming in past a
+        // whole-continent view just showed a blurrier version of the same low-res texture
+        // instead of the "zoom in and see the actual place" behavior of a real map/aerial view.
+        // Esri's World_Imagery service (server.arcgisonline.com) is real satellite/aerial
+        // imagery up to zoom level 23 - confirmed live: CORS-open, no API key/registration
+        // required for this tile access, and (unlike Google Maps) not a Google product.
+        // ArcGisMapServerImageryProvider has an async `fromUrl` factory in this Cesium version
+        // (confirmed directly against the loaded library) since it has to fetch the service's
+        // own metadata first.
         const baseLayer = new Cesium.ImageryLayer(
-            await Cesium.TileMapServiceImageryProvider.fromUrl(
-                Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII')));
-        // A dark, high-contrast, stylized look reads more "military terminal" than the bundled
-        // basemap's natural daylight colors - these are plain mutable properties Cesium reads
-        // per-frame at draw time, so setting them immediately here is safe.
-        baseLayer.brightness = 0.55;
-        baseLayer.contrast = 1.35;
-        baseLayer.gamma = 0.8;
-        baseLayer.hue = 3.4;
-        baseLayer.saturation = 0.15;
+            await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'));
+        // A dark, high-contrast tint reads more "military terminal" than the raw aerial
+        // photography's natural daylight colors - these are plain mutable properties Cesium
+        // reads per-frame at draw time, so setting them immediately here is safe. Toned down
+        // from the old map-tile values (which pushed hue harder for cartographic flat colors) -
+        // a strong hue rotation looks wrong on photographic imagery.
+        baseLayer.brightness = 0.7;
+        baseLayer.contrast = 1.2;
+        baseLayer.gamma = 0.9;
+        baseLayer.saturation = 0.4;
 
         // Every default Cesium widget is disabled - this page builds its own retro-terminal
         // chrome around the bare 3D viewport instead (see OverwatchGrid.razor.css). No Ion
