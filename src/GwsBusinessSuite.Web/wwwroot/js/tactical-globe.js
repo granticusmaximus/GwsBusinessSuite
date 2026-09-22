@@ -15,7 +15,7 @@ window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesi
 window.tacticalGlobe = (function () {
     const viewers = new Map();
     let streamPanel = null;
-    let snapshotRefreshTimer = null;
+    let watchWallPanel = null;
     let incidentPanel = null;
     let weatherPanel = null;
 
@@ -112,12 +112,52 @@ window.tacticalGlobe = (function () {
         radarLayer.show = false;
         radarLayer.alpha = 0.75;
 
+        // GDOT (~3,829 cameras) and Datumfeed (~9,000 across several regions) mean a wide zoom
+        // can render thousands of individual pins at once - plain viewer.entities has no
+        // clustering support at all, so camera pins live on their own CustomDataSource instead,
+        // which is the one kind of collection Cesium's EntityCluster can actually group.
+        const cameraDataSource = new Cesium.CustomDataSource('tg-cameras');
+        await viewer.dataSources.add(cameraDataSource);
+        cameraDataSource.clustering.enabled = true;
+        cameraDataSource.clustering.pixelRange = 60;
+        cameraDataSource.clustering.minimumClusterSize = 3;
+        cameraDataSource.clustering.clusterEvent.addEventListener(function (clusteredEntities, cluster) {
+            // Restyle Cesium's default cluster billboard (a stock pin icon) to match the
+            // terminal theme's own camera-pin look instead - a solid point plus a count label.
+            cluster.billboard.show = false;
+            cluster.point.show = true;
+            cluster.point.pixelSize = 20;
+            cluster.point.color = Cesium.Color.fromCssColorString('#7dffb0');
+            cluster.point.outlineColor = Cesium.Color.fromCssColorString('#05080a');
+            cluster.point.outlineWidth = 2;
+            cluster.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            cluster.label.show = true;
+            cluster.label.text = clusteredEntities.length.toString();
+            cluster.label.font = 'bold 13px "Share Tech Mono", monospace';
+            cluster.label.fillColor = Cesium.Color.fromCssColorString('#05080a');
+            cluster.label.verticalOrigin = Cesium.VerticalOrigin.CENTER;
+            cluster.label.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
+            cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+        });
+
         const cameraEntities = new Map();
         const alertEntities = new Map();
         let debounceHandle = null;
         viewer.camera.moveEnd.addEventListener(function () {
             if (debounceHandle) clearTimeout(debounceHandle);
             debounceHandle = setTimeout(function () {
+                // Tracked for shareable view links (see buildShareLink) - the camera's own
+                // lat/lon/height, not the bbox rectangle used for the camera query below.
+                const entry = viewers.get(containerId);
+                if (entry) {
+                    const carto = viewer.camera.positionCartographic;
+                    entry.currentView = {
+                        lat: Cesium.Math.toDegrees(carto.latitude),
+                        lon: Cesium.Math.toDegrees(carto.longitude),
+                        height: carto.height
+                    };
+                }
+
                 const rectangle = viewer.camera.computeViewRectangle();
                 if (!rectangle) return;
                 dotNetRef.invokeMethodAsync('OnGlobeViewChanged',
@@ -133,14 +173,32 @@ window.tacticalGlobe = (function () {
         clickHandler.setInputAction(function (movement) {
             const picked = viewer.scene.pick(movement.position);
             const entity = picked && picked.id;
-            if (entity && entity._tacticalGlobeCamera) {
-                openStreamPanel(entity._tacticalGlobeCamera);
+            // A clustered pin's pick.id is an array of the entities it groups (Cesium's own
+            // clustering behavior), not a single Entity - zoom into the cluster instead of
+            // treating it as a camera/incident click.
+            if (Array.isArray(entity)) {
+                const positions = entity
+                    .map(function (e) { return e.position && e.position.getValue(viewer.clock.currentTime); })
+                    .filter(function (p) { return !!p; });
+                if (positions.length > 0) {
+                    viewer.camera.flyToBoundingSphere(Cesium.BoundingSphere.fromPoints(positions), { duration: 0.75 });
+                }
+            } else if (entity && entity._tacticalGlobeCamera) {
+                const entry = viewers.get(containerId);
+                if (entry && entry.selectMode) {
+                    toggleCameraSelection(entry, entity._tacticalGlobeCamera);
+                } else {
+                    openStreamPanel(entity._tacticalGlobeCamera, entry && entry.dotNetRef);
+                }
             } else if (entity && entity._tacticalGlobeIncident) {
                 openIncidentPanel(entity._tacticalGlobeIncident);
             }
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-        viewers.set(containerId, { viewer, cameraEntities, alertEntities, incidentEntities, radarLayer, clickHandler });
+        viewers.set(containerId, {
+            containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentEntities,
+            radarLayer, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null
+        });
 
         // Fire once for the initial view so cameras appear without requiring a drag/zoom first.
         setTimeout(function () {
@@ -156,6 +214,7 @@ window.tacticalGlobe = (function () {
 
         ensureKeyboardShortcutsRegistered();
         setUpLocationSearch(viewer, dotNetRef);
+        setUpShareLink(containerId);
         const hoverIdentify = setUpHoverIdentify(viewer, dotNetRef);
         viewers.get(containerId).hoverIdentify = hoverIdentify;
     }
@@ -282,6 +341,61 @@ window.tacticalGlobe = (function () {
         });
     }
 
+    // Shareable view links: encodes the current camera position + whatever camera(s) are open
+    // (a single stream panel's _tgCamera, or a watch wall's _tgCameras - both stamped when
+    // opened, see openStreamPanel/openWatchWallWithCameras) via BuildShareLinkAsync, which
+    // returns a stateless, self-contained absolute URL (see SharedGridViewCodec) rather than a
+    // DB-backed token. Returns the built URL (or null if there's no active viewer) regardless of
+    // whether the clipboard write itself succeeds, so a caller can still show/log the link.
+    async function buildShareLink(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return null;
+
+        const carto = entry.viewer.camera.positionCartographic;
+        const view = entry.currentView || {
+            lat: Cesium.Math.toDegrees(carto.latitude),
+            lon: Cesium.Math.toDegrees(carto.longitude),
+            height: carto.height
+        };
+
+        let openCameras = [];
+        if (streamPanel && streamPanel._tgCamera) {
+            openCameras = [streamPanel._tgCamera];
+        } else if (watchWallPanel && watchWallPanel._tgCameras) {
+            openCameras = watchWallPanel._tgCameras;
+        }
+        const dtoCameras = openCameras.map(function (c) {
+            return {
+                id: c.id, name: c.name, lat: c.lat, lon: c.lon, streamUrl: c.streamUrl,
+                streamKind: c.streamKind, sourceName: c.sourceName, sourceAttributionUrl: c.sourceAttributionUrl
+            };
+        });
+
+        const url = await entry.dotNetRef.invokeMethodAsync('BuildShareLinkAsync', view.lat, view.lon, view.height, dtoCameras);
+        try {
+            await navigator.clipboard.writeText(url);
+        } catch (e) {
+            // Clipboard access can be denied (permissions, a non-secure context, a headless test
+            // environment) - the link is still returned so a caller can fall back to showing it.
+        }
+        return url;
+    }
+
+    function setUpShareLink(containerId) {
+        const button = document.getElementById('tg-share-button');
+        if (!button) return;
+        button.addEventListener('click', async function () {
+            const originalText = button.textContent;
+            try {
+                const url = await buildShareLink(containerId);
+                button.textContent = url ? 'COPIED!' : 'COPY FAILED';
+            } catch (e) {
+                button.textContent = 'COPY FAILED';
+            }
+            setTimeout(function () { button.textContent = originalText; }, 1500);
+        });
+    }
+
     // Module-level, registered at most once regardless of how many times init()/dispose() runs
     // across page visits within the same document - an addEventListener per init() call would
     // otherwise accumulate duplicate listeners (each toggling the same button an extra time) if
@@ -309,9 +423,19 @@ window.tacticalGlobe = (function () {
             } else if (event.key === 'i' || event.key === 'I') {
                 const button = document.querySelector('[data-tg-toggle="incidents"]');
                 if (button) button.click();
+            } else if (event.key === 'c' || event.key === 'C') {
+                const button = document.querySelector('[data-tg-toggle="coverage"]');
+                if (button) button.click();
+            } else if (event.key === 's' || event.key === 'S') {
+                const button = document.querySelector('[data-tg-toggle="select"]');
+                if (button) button.click();
+            } else if (event.key === 'f' || event.key === 'F') {
+                const button = document.querySelector('[data-tg-toggle="favorites"]');
+                if (button) button.click();
             } else if (event.key === 'Escape') {
                 closeStreamPanel();
                 closeIncidentPanel();
+                closeWatchWall();
             }
         });
     }
@@ -341,11 +465,11 @@ window.tacticalGlobe = (function () {
         const entry = viewers.get(containerId);
         if (!entry) return;
 
-        entry.cameraEntities.forEach(function (entity) { entry.viewer.entities.remove(entity); });
+        entry.cameraEntities.forEach(function (entity) { entry.cameraDataSource.entities.remove(entity); });
         entry.cameraEntities.clear();
 
         (pins || []).forEach(function (pin) {
-            const entity = entry.viewer.entities.add({
+            const entity = entry.cameraDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(pin.lon, pin.lat),
                 point: {
                     // Cesium's scene.pick hit-tests against the point's actual rendered size, so
@@ -361,6 +485,17 @@ window.tacticalGlobe = (function () {
             });
             entity._tacticalGlobeCamera = pin;
             entry.cameraEntities.set(pin.id, entity);
+        });
+    }
+
+    // Used by the coverage index (jump straight to a known-covered region) - reuses the exact
+    // Cartesian3.fromDegrees(lon, lat, height) + camera.flyTo shape already established for
+    // location search, just parameterized instead of driven by a geocode result.
+    function flyTo(containerId, lat, lon, heightMeters) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.viewer.camera.flyTo({
+            destination: Cesium.Cartesian3.fromDegrees(Number(lon), Number(lat), Number(heightMeters))
         });
     }
 
@@ -627,7 +762,11 @@ window.tacticalGlobe = (function () {
         });
     }
 
-    function openStreamPanel(camera) {
+    // dotNetRef is optional - openCamera()/the coverage/favorites panels can open a camera
+    // outside the normal pick flow. When present, it wires the header's favorite-star button to
+    // ToggleCameraFavoriteAsync; without it (shouldn't normally happen once a viewer exists) the
+    // star is just disabled rather than throwing.
+    function openStreamPanel(camera, dotNetRef) {
         closeStreamPanel();
 
         const shell = document.getElementById('tg-viewport').closest('.tg-shell');
@@ -635,12 +774,32 @@ window.tacticalGlobe = (function () {
 
         const panel = document.createElement('div');
         panel.className = 'tg-stream-panel';
+        panel._tgCamera = camera;
         panel.innerHTML =
             '<div class="tg-stream-panel-header">' +
             '<span>' + escapeHtml(camera.name) + '</span>' +
+            '<span class="tg-stream-panel-header-actions">' +
+            '<button type="button" class="tg-stream-panel-favorite" aria-label="Toggle favorite" aria-pressed="' + (camera.isFavorite ? 'true' : 'false') + '">' + (camera.isFavorite ? '★' : '☆') + '</button>' +
             '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
+            '</span>' +
             '</div>' +
             '<div class="tg-stream-panel-body"></div>';
+
+        const favoriteButton = panel.querySelector('.tg-stream-panel-favorite');
+        if (dotNetRef) {
+            favoriteButton.addEventListener('click', function () {
+                dotNetRef.invokeMethodAsync('ToggleCameraFavoriteAsync',
+                    camera.id, camera.name, camera.lat, camera.lon, camera.streamUrl, camera.streamKind,
+                    camera.sourceName, camera.sourceAttributionUrl
+                ).then(function (isFavorite) {
+                    camera.isFavorite = isFavorite;
+                    favoriteButton.textContent = isFavorite ? '★' : '☆';
+                    favoriteButton.setAttribute('aria-pressed', isFavorite ? 'true' : 'false');
+                });
+            });
+        } else {
+            favoriteButton.disabled = true;
+        }
 
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeStreamPanel);
         shell.appendChild(panel);
@@ -648,10 +807,17 @@ window.tacticalGlobe = (function () {
         makeDraggableAndResizable(panel, panel.querySelector('.tg-stream-panel-header'));
 
         const body = panel.querySelector('.tg-stream-panel-body');
-        renderStream(body, camera);
+        panel._tgStreamDispose = renderStream(body, camera);
     }
 
+    // Returns a dispose() handle instead of writing to a shared module-level timer/video
+    // reference - the watch wall (multiple simultaneous renderStream calls) needs each stream's
+    // refresh interval/HLS attachment to be torn down independently, not as one shared global.
+    // Every dispose() is idempotent (safe to call more than once) since a watch-wall tile can be
+    // closed individually before the whole wall is closed.
     function renderStream(body, camera) {
+        let disposed = false;
+
         if (camera.streamKind === 'Hls') {
             const video = document.createElement('video');
             video.controls = true;
@@ -667,21 +833,36 @@ window.tacticalGlobe = (function () {
             } else {
                 video.src = camera.streamUrl;
             }
-        } else {
-            const img = document.createElement('img');
-            img.alt = camera.name;
-            body.appendChild(img);
-            const refresh = function () {
-                img.src = camera.streamUrl + (camera.streamUrl.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now();
+            appendStreamMeta(body, camera);
+            return function dispose() {
+                if (disposed) return;
+                disposed = true;
+                if (window.civicWatchVideo) window.civicWatchVideo.detach(video);
             };
-            img.addEventListener('error', function () {
-                body.innerHTML = '<div class="tg-stream-panel-error">FEED UNAVAILABLE</div>';
-                if (snapshotRefreshTimer) clearInterval(snapshotRefreshTimer);
-            }, { once: true });
-            refresh();
-            snapshotRefreshTimer = setInterval(refresh, 10000);
         }
 
+        const img = document.createElement('img');
+        img.alt = camera.name;
+        body.appendChild(img);
+        let refreshTimer = null;
+        const refresh = function () {
+            img.src = camera.streamUrl + (camera.streamUrl.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now();
+        };
+        img.addEventListener('error', function () {
+            body.innerHTML = '<div class="tg-stream-panel-error">FEED UNAVAILABLE</div>';
+            if (refreshTimer) clearInterval(refreshTimer);
+        }, { once: true });
+        refresh();
+        refreshTimer = setInterval(refresh, 10000);
+        appendStreamMeta(body, camera);
+        return function dispose() {
+            if (disposed) return;
+            disposed = true;
+            if (refreshTimer) clearInterval(refreshTimer);
+        };
+    }
+
+    function appendStreamMeta(body, camera) {
         const meta = document.createElement('div');
         meta.className = 'tg-stream-panel-meta';
         meta.textContent = 'SOURCE: ' + camera.sourceName;
@@ -689,16 +870,154 @@ window.tacticalGlobe = (function () {
     }
 
     function closeStreamPanel() {
-        if (snapshotRefreshTimer) {
-            clearInterval(snapshotRefreshTimer);
-            snapshotRefreshTimer = null;
-        }
-        if (streamPanel && streamPanel.parentNode) {
-            const video = streamPanel.querySelector('video');
-            if (video && window.civicWatchVideo) window.civicWatchVideo.detach(video);
-            streamPanel.parentNode.removeChild(streamPanel);
+        if (streamPanel) {
+            if (streamPanel._tgStreamDispose) streamPanel._tgStreamDispose();
+            if (streamPanel.parentNode) streamPanel.parentNode.removeChild(streamPanel);
         }
         streamPanel = null;
+    }
+
+    // Watch wall: view several selected cameras' streams at once instead of one at a time.
+    // Reuses renderStream/makeDraggableAndResizable as-is - neither has any single-panel-specific
+    // coupling. openWatchWall(containerId) opens whatever is currently selected (see
+    // setSelectModeEnabled/toggleCameraSelection); openWatchWallWithCameras is the lower-level
+    // entry point, also reused by shareable view links to reopen a shared multi-camera view.
+    function openWatchWall(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        openWatchWallWithCameras(containerId, Array.from(entry.selectedCameras.values()));
+    }
+
+    function openWatchWallWithCameras(containerId, cameras) {
+        closeStreamPanel();
+        closeWatchWall(containerId);
+        if (!cameras || cameras.length === 0) return;
+
+        const shell = document.getElementById('tg-viewport') && document.getElementById('tg-viewport').closest('.tg-shell');
+        if (!shell) return;
+
+        const panel = document.createElement('div');
+        panel.className = 'tg-watch-wall-panel';
+        panel._tgCameras = cameras.slice();
+        panel.innerHTML =
+            '<div class="tg-watch-wall-header">' +
+            '<span>WATCH WALL (' + cameras.length + ')</span>' +
+            '<button type="button" class="tg-watch-wall-close" aria-label="Close">X</button>' +
+            '</div>' +
+            '<div class="tg-watch-wall-grid"></div>';
+
+        const grid = panel.querySelector('.tg-watch-wall-grid');
+        const columns = Math.max(1, Math.ceil(Math.sqrt(cameras.length)));
+        grid.style.gridTemplateColumns = 'repeat(' + columns + ', 1fr)';
+
+        cameras.forEach(function (camera) {
+            const tile = document.createElement('div');
+            tile.className = 'tg-watch-wall-tile';
+            tile.innerHTML =
+                '<div class="tg-watch-wall-tile-header">' +
+                '<span>' + escapeHtml(camera.name) + '</span>' +
+                '<button type="button" class="tg-watch-wall-tile-close" aria-label="Close">X</button>' +
+                '</div>' +
+                '<div class="tg-watch-wall-tile-body"></div>';
+            const body = tile.querySelector('.tg-watch-wall-tile-body');
+            const dispose = renderStream(body, camera);
+            tile.querySelector('.tg-watch-wall-tile-close').addEventListener('click', function () {
+                dispose();
+                tile.remove();
+                panel._tgCameras = panel._tgCameras.filter(function (c) { return c.id !== camera.id; });
+            });
+            grid.appendChild(tile);
+        });
+
+        panel.querySelector('.tg-watch-wall-close').addEventListener('click', function () { closeWatchWall(containerId); });
+        shell.appendChild(panel);
+        watchWallPanel = panel;
+        makeDraggableAndResizable(panel, panel.querySelector('.tg-watch-wall-header'));
+
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) {
+            entry.selectedCameras.clear();
+            updateSelectionIndicator(entry);
+        }
+    }
+
+    function closeWatchWall() {
+        if (watchWallPanel) {
+            watchWallPanel.querySelectorAll('.tg-watch-wall-tile-close').forEach(function (button) { button.click(); });
+            if (watchWallPanel.parentNode) watchWallPanel.parentNode.removeChild(watchWallPanel);
+        }
+        watchWallPanel = null;
+    }
+
+    // Select mode: while enabled, clicking a camera pin adds/removes it from the current
+    // selection (and restyles the pin) instead of opening its stream panel directly - see the
+    // click handler in init(). A floating indicator shows the running count and opens the wall.
+    function setSelectModeEnabled(containerIdOrEnabled, maybeEnabled) {
+        let containerId = 'tg-viewport';
+        let enabled = containerIdOrEnabled;
+        if (typeof containerIdOrEnabled === 'string') {
+            containerId = containerIdOrEnabled;
+            enabled = maybeEnabled;
+        }
+        const entry = viewers.get(containerId);
+        if (!entry) return;
+        entry.selectMode = !!enabled;
+        if (!entry.selectMode) {
+            entry.selectedCameras.forEach(function (camera, id) { restyleSelectedPin(entry, id, false); });
+            entry.selectedCameras.clear();
+            updateSelectionIndicator(entry);
+        }
+    }
+
+    function toggleCameraSelection(entry, camera) {
+        if (entry.selectedCameras.has(camera.id)) {
+            entry.selectedCameras.delete(camera.id);
+            restyleSelectedPin(entry, camera.id, false);
+        } else {
+            entry.selectedCameras.set(camera.id, camera);
+            restyleSelectedPin(entry, camera.id, true);
+        }
+        updateSelectionIndicator(entry);
+    }
+
+    function restyleSelectedPin(entry, cameraId, selected) {
+        const entity = entry.cameraEntities.get(cameraId);
+        if (!entity || !entity.point) return;
+        entity.point.outlineColor = Cesium.Color.fromCssColorString(selected ? '#ffe066' : '#05080a');
+        entity.point.outlineWidth = selected ? 4 : 2;
+    }
+
+    function updateSelectionIndicator(entry) {
+        const shell = document.getElementById('tg-viewport') && document.getElementById('tg-viewport').closest('.tg-shell');
+        if (!shell) return;
+        const count = entry.selectedCameras.size;
+        let indicator = shell.querySelector('.tg-selection-indicator');
+        if (count === 0) {
+            if (indicator && indicator.parentNode) indicator.parentNode.removeChild(indicator);
+            return;
+        }
+        if (!indicator) {
+            indicator = document.createElement('button');
+            indicator.type = 'button';
+            indicator.className = 'tg-selection-indicator';
+            indicator.addEventListener('click', function () { openWatchWall(entry.containerId); });
+            shell.appendChild(indicator);
+        }
+        indicator.textContent = 'SELECTED: ' + count + ' - OPEN WATCH WALL';
+    }
+
+    // Opens a camera directly, bypassing the pick-a-rendered-pin flow - needed for a favorited
+    // camera or a shared-link camera that may be well outside the globe's current bbox-queried
+    // pin set, so no clickable entity for it necessarily exists.
+    function openCamera(containerIdOrCamera, maybeCamera) {
+        let containerId = 'tg-viewport';
+        let camera = containerIdOrCamera;
+        if (typeof containerIdOrCamera === 'string') {
+            containerId = containerIdOrCamera;
+            camera = maybeCamera;
+        }
+        const entry = viewers.get(containerId);
+        openStreamPanel(camera, entry && entry.dotNetRef);
     }
 
     function escapeHtml(text) {
@@ -709,10 +1028,12 @@ window.tacticalGlobe = (function () {
 
     function dispose(containerId) {
         closeStreamPanel();
+        closeWatchWall();
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
         entry.clickHandler.destroy();
         if (entry.hoverIdentify) entry.hoverIdentify.dispose();
+        entry.viewer.dataSources.remove(entry.cameraDataSource, true);
         entry.viewer.destroy();
         viewers.delete(containerId || 'tg-viewport');
     }
@@ -741,7 +1062,14 @@ window.tacticalGlobe = (function () {
 
     return {
         init: init,
+        flyTo: flyTo,
         setCameraPins: setCameraPins,
+        setSelectModeEnabled: setSelectModeEnabled,
+        openWatchWall: openWatchWall,
+        openWatchWallWithCameras: openWatchWallWithCameras,
+        closeWatchWall: closeWatchWall,
+        openCamera: openCamera,
+        buildShareLink: buildShareLink,
         setRadarVisible: setRadarVisible,
         setWeatherAlerts: setWeatherAlerts,
         clearWeatherAlerts: clearWeatherAlerts,

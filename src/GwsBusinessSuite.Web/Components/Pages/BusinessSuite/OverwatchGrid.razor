@@ -11,8 +11,11 @@
 @inject INwsForecastService NwsForecastService
 @inject TrafficIncidentDirectoryService TrafficIncidentDirectoryService
 @inject IGeocodingService GeocodingService
+@inject ICameraFavoritesService CameraFavoritesService
+@inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject Microsoft.Extensions.Options.IOptions<CameraIntelOptions> CameraIntelOptions
 @inject IJSRuntime JS
+@inject NavigationManager Navigation
 @inject ILogger<OverwatchGrid> Logger
 @implements IAsyncDisposable
 
@@ -62,6 +65,7 @@
             <div class="tg-search">
                 <input type="text" id="tg-search-input" placeholder="JUMP TO CITY, ADDRESS, OR PLACE..." autocomplete="off" />
                 <button type="button" id="tg-search-button">GO</button>
+                <button type="button" id="tg-share-button" title="Copy a link to this exact view">SHARE VIEW</button>
                 <span id="tg-search-status" class="tg-search-status"></span>
             </div>
         </div>
@@ -77,9 +81,57 @@
                 <button type="button" data-tg-toggle="incidents" class="tg-toggle @(_incidentsOn ? "tg-toggle-on" : "")" title="Toggle traffic accidents/roadwork/closures (I)" @onclick="ToggleIncidentsAsync">
                     INCIDENTS [@(_incidentsOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="coverage" class="tg-toggle @(_coverageIndexOpen ? "tg-toggle-on" : "")" title="Show known camera coverage regions (C)" @onclick="ToggleCoverageIndex">
+                    COVERAGE
+                </button>
+                <button type="button" data-tg-toggle="select" class="tg-toggle @(_selectModeOn ? "tg-toggle-on" : "")" title="Select multiple cameras for the watch wall (S)" @onclick="ToggleSelectModeAsync">
+                    SELECT [@(_selectModeOn ? "ON" : "OFF")]
+                </button>
+                <button type="button" data-tg-toggle="favorites" class="tg-toggle @(_favoritesOpen ? "tg-toggle-on" : "")" title="Show your favorited cameras (F)" @onclick="ToggleFavoritesPanel">
+                    FAVORITES
+                </button>
             </div>
         </div>
     </div>
+
+    @if (_coverageIndexOpen)
+    {
+        <div class="tg-coverage-panel">
+            <div class="tg-coverage-panel-header">KNOWN COVERAGE</div>
+            <ul class="tg-coverage-list">
+                @foreach (var region in CameraCoverageRegions.All)
+                {
+                    <li class="tg-coverage-item">
+                        <span>@region.Name</span>
+                        <button type="button" @onclick="() => FlyToRegionAsync(region)">GO</button>
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+
+    @if (_favoritesOpen)
+    {
+        <div class="tg-coverage-panel tg-favorites-panel">
+            <div class="tg-coverage-panel-header">MY FAVORITES</div>
+            @if (_favorites.Count == 0)
+            {
+                <div class="tg-favorites-empty">No favorited cameras yet - open a camera's feed and click its star to save it here.</div>
+            }
+            else
+            {
+                <ul class="tg-coverage-list">
+                    @foreach (var favorite in _favorites)
+                    {
+                        <li class="tg-coverage-item">
+                            <span>@favorite.Name</span>
+                            <button type="button" @onclick="() => GoToFavoriteAsync(favorite)">GO</button>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    }
 
     @if (_hasAnyProviderConfigured && _hasSettledOnce && _visibleCameras.Count == 0)
     {
@@ -91,7 +143,7 @@
 
     <div class="tg-attribution">
         <span>Basemap: Esri, Maxar, Earthstar Geographics &middot; WSDOT &middot; GDOT &middot; Windy &middot; Datumfeed (Austin/Caltrans/Ontario/Ottawa/Toronto/London) &middot; NOAA/NWS &middot; Search: Photon/OSM, US Census Bureau</span>
-        <span>ADMIN // AUTHORIZED ACCESS ONLY &middot; R: radar &middot; A: alerts &middot; I: incidents &middot; Esc: close feed</span>
+        <span>ADMIN // AUTHORIZED ACCESS ONLY &middot; R: radar &middot; A: alerts &middot; I: incidents &middot; C: coverage &middot; S: select for watch wall &middot; F: favorites &middot; Esc: close feed</span>
     </div>
 
     @if (_initError is null)
@@ -112,6 +164,11 @@
 </div>
 
 @code {
+    // "v" for "view" - a Base64Url-encoded SharedGridView (see SharedGridViewCodec), read the
+    // same way Login.razor reads its own query parameters.
+    [SupplyParameterFromQuery(Name = "v")]
+    public string? SharedViewToken { get; set; }
+
     private DotNetObjectReference<OverwatchGrid>? _dotNetRef;
     private List<CameraFeed> _visibleCameras = new();
     private bool _bootComplete;
@@ -121,14 +178,24 @@
     private bool _radarOn;
     private bool _alertsOn;
     private bool _incidentsOn;
+    private bool _coverageIndexOpen;
+    private bool _selectModeOn;
+    private bool _favoritesOpen;
+    private string _username = "unknown";
+    private List<CameraFeed> _favorites = new();
+    private HashSet<string> _favoriteCameraIds = new();
     private BoundingBox _lastBbox = new(90, -90, 180, -180);
     private string? _initError;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         var options = CameraIntelOptions.Value;
         _hasAnyProviderConfigured = !string.IsNullOrWhiteSpace(options.WsdotAccessCode)
             || !string.IsNullOrWhiteSpace(options.WindyApiKey);
+
+        _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        _favorites = (await CameraFavoritesService.GetFavoritesAsync(_username)).ToList();
+        _favoriteCameraIds = _favorites.Select(f => f.Id).ToHashSet();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -160,6 +227,22 @@
             StateHasChanged();
             return;
         }
+
+        var sharedView = SharedGridViewCodec.TryDecode(SharedViewToken);
+        if (sharedView is not null)
+        {
+            await JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", sharedView.Latitude, sharedView.Longitude, sharedView.HeightMeters);
+            if (sharedView.OpenCameras.Count == 1)
+            {
+                await JS.InvokeVoidAsync("tacticalGlobe.openCamera", ToPinPayload(sharedView.OpenCameras[0]));
+            }
+            else if (sharedView.OpenCameras.Count > 1)
+            {
+                var pins = sharedView.OpenCameras.Select(ToPinPayload).ToList();
+                await JS.InvokeVoidAsync("tacticalGlobe.openWatchWallWithCameras", "tg-viewport", pins);
+            }
+        }
+
         _ = MarkBootCompleteAsync();
     }
 
@@ -190,6 +273,75 @@
     public async Task<PlaceInfo?> ReverseGeocodeAsync(double latitude, double longitude) =>
         await GeocodingService.ReverseGeocodeAsync(latitude, longitude);
 
+    // Shared by the bbox pin push, the favorites panel's "GO" action, and shareable view links -
+    // one camera-identity/payload shape used everywhere a camera crosses the JS interop boundary.
+    private object ToPinPayload(CameraFeed camera) => new
+    {
+        id = camera.Id,
+        name = camera.Name,
+        lat = camera.Latitude,
+        lon = camera.Longitude,
+        streamUrl = camera.StreamUrl,
+        streamKind = camera.StreamKind.ToString(),
+        sourceName = camera.SourceName,
+        sourceAttributionUrl = camera.SourceAttributionUrl,
+        isFavorite = _favoriteCameraIds.Contains(camera.Id)
+    };
+
+    // Called from the stream panel's favorite-star button (tactical-globe.js threads the current
+    // camera payload through). Returns the new favorite state so the star's visual can update
+    // without a second round-trip.
+    [JSInvokable]
+    public async Task<bool> ToggleCameraFavoriteAsync(
+        string cameraId, string name, double lat, double lon, string streamUrl, string streamKind,
+        string sourceName, string sourceAttributionUrl)
+    {
+        var wasFavorite = _favoriteCameraIds.Contains(cameraId);
+        if (wasFavorite)
+        {
+            await CameraFavoritesService.RemoveFavoriteAsync(_username, cameraId);
+            _favoriteCameraIds.Remove(cameraId);
+        }
+        else
+        {
+            var camera = new CameraFeed(cameraId, name, lat, lon, streamUrl,
+                Enum.Parse<CameraStreamKind>(streamKind), sourceName, sourceAttributionUrl);
+            await CameraFavoritesService.AddFavoriteAsync(_username, camera);
+            _favoriteCameraIds.Add(cameraId);
+        }
+        _favorites = (await CameraFavoritesService.GetFavoritesAsync(_username)).ToList();
+        StateHasChanged();
+        return !wasFavorite;
+    }
+
+    private void ToggleFavoritesPanel()
+    {
+        _favoritesOpen = !_favoritesOpen;
+    }
+
+    private async Task GoToFavoriteAsync(CameraFeed favorite)
+    {
+        await JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", favorite.Latitude, favorite.Longitude, 3000);
+        await JS.InvokeVoidAsync("tacticalGlobe.openCamera", ToPinPayload(favorite));
+    }
+
+    // Called from tactical-globe.js's SHARE VIEW button (see buildShareLink) with whatever
+    // camera(s) are currently open plus the camera's own current position/height - encodes it
+    // statelessly (no DB row) and returns an absolute URL back to this same page. The recipient
+    // must already be an authenticated admin, since /admin/osint keeps its existing AdminOnly
+    // policy regardless of the "v" query parameter.
+    [JSInvokable]
+    public Task<string> BuildShareLinkAsync(double latitude, double longitude, double heightMeters, List<SharedCameraDto> openCameras)
+    {
+        var cameras = openCameras
+            .Select(c => new CameraFeed(c.Id, c.Name, c.Lat, c.Lon, c.StreamUrl, Enum.Parse<CameraStreamKind>(c.StreamKind), c.SourceName, c.SourceAttributionUrl))
+            .ToList();
+        var token = SharedGridViewCodec.Encode(new SharedGridView(latitude, longitude, heightMeters, cameras));
+        return Task.FromResult(Navigation.ToAbsoluteUri($"/admin/osint?v={Uri.EscapeDataString(token)}").ToString());
+    }
+
+    public sealed record SharedCameraDto(string Id, string Name, double Lat, double Lon, string StreamUrl, string StreamKind, string SourceName, string SourceAttributionUrl);
+
     // Raised by tactical-globe.js's camera.moveEnd handler once the view settles after a
     // drag/zoom (see initGlobe) - degrees, matching Cesium's own Rectangle-to-degrees output.
     [JSInvokable]
@@ -201,17 +353,7 @@
         _visibleCameras = cameras.ToList();
         StateHasChanged();
 
-        var pins = cameras.Select(c => new
-        {
-            id = c.Id,
-            name = c.Name,
-            lat = c.Latitude,
-            lon = c.Longitude,
-            streamUrl = c.StreamUrl,
-            streamKind = c.StreamKind.ToString(),
-            sourceName = c.SourceName,
-            sourceAttributionUrl = c.SourceAttributionUrl
-        }).ToList();
+        var pins = cameras.Select(ToPinPayload).ToList();
         await JS.InvokeVoidAsync("tacticalGlobe.setCameraPins", pins);
 
         // The alert set is independent of any one view, but re-filtering it against the new
@@ -293,6 +435,27 @@
         {
             await JS.InvokeVoidAsync("tacticalGlobe.clearTrafficIncidents");
         }
+    }
+
+    // Plain client-side UI state (which panel is open) - no JS/server round-trip needed to
+    // toggle it, unlike RADAR/ALERTS/INCIDENTS which each drive a Cesium layer.
+    private void ToggleCoverageIndex()
+    {
+        _coverageIndexOpen = !_coverageIndexOpen;
+    }
+
+    private async Task FlyToRegionAsync(CameraCoverageRegion region)
+    {
+        await JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", region.Latitude, region.Longitude, region.FlyToHeightMeters);
+    }
+
+    // Selection itself is entirely client-side (each pin already carries its full camera
+    // payload) - this just flips the mode flag JS uses to route pin clicks to selection instead
+    // of opening a stream panel directly.
+    private async Task ToggleSelectModeAsync()
+    {
+        _selectModeOn = !_selectModeOn;
+        await JS.InvokeVoidAsync("tacticalGlobe.setSelectModeEnabled", "tg-viewport", _selectModeOn);
     }
 
     private async Task PushIncidentsAsync()

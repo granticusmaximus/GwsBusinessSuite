@@ -292,6 +292,7 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddScoped<CameraDirectoryService>();
+        services.AddScoped<ICameraFavoritesService, CameraFavoritesService>();
         // NWS's docs ask every consumer for a descriptive User-Agent identifying the app/contact -
         // a browser fetch() can never set this (forbidden header), so alerts are always fetched
         // server-side (see NwsAlertsService's own comment). No API key needed.

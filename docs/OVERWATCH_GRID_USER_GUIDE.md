@@ -14,15 +14,19 @@ This guide is text-only (no screenshots) — see the note at the end of
 1. [Core concepts](#core-concepts)
 2. [Navigating the globe](#navigating-the-globe)
 3. [Finding and viewing cameras](#finding-and-viewing-cameras)
-4. [Hovering to identify a place](#hovering-to-identify-a-place)
-5. [Searching for a location](#searching-for-a-location)
-6. [Weather on zoom](#weather-on-zoom)
-7. [Traffic incidents](#traffic-incidents)
-8. [NOAA radar and severe weather alerts](#noaa-radar-and-severe-weather-alerts)
-9. [Moving and resizing a feed/incident window](#moving-and-resizing-a-feedincident-window)
-10. [Keyboard shortcuts](#keyboard-shortcuts)
-11. [Who can see this](#who-can-see-this)
-12. [Known limitations](#known-limitations)
+4. [Coverage index](#coverage-index)
+5. [Hovering to identify a place](#hovering-to-identify-a-place)
+6. [Searching for a location](#searching-for-a-location)
+7. [Weather on zoom](#weather-on-zoom)
+8. [Traffic incidents](#traffic-incidents)
+9. [NOAA radar and severe weather alerts](#noaa-radar-and-severe-weather-alerts)
+10. [Watch wall: viewing multiple cameras at once](#watch-wall-viewing-multiple-cameras-at-once)
+11. [Favoriting a camera](#favoriting-a-camera)
+12. [Sharing a view with a teammate](#sharing-a-view-with-a-teammate)
+13. [Moving and resizing a feed/incident window](#moving-and-resizing-a-feedincident-window)
+14. [Keyboard shortcuts](#keyboard-shortcuts)
+15. [Who can see this](#who-can-see-this)
+16. [Known limitations](#known-limitations)
 
 ---
 
@@ -58,6 +62,17 @@ broken image.
 If a region shows no cameras at all after the view settles, a hint explains that this is a
 genuine coverage gap, not a loading failure — try Georgia, Washington State, or Datumfeed's
 covered cities (Austin, California, Ontario, Ottawa, Toronto, London) for guaranteed coverage.
+
+At a wide zoom, cameras that are close together on screen group into a single numbered marker
+instead of covering the view in overlapping dots — this matters most over Georgia and Datumfeed's
+denser cities, which each have thousands of cameras. Click a numbered marker (or just zoom in) to
+have the camera fly closer and split the group back into individual, clickable pins.
+
+## Coverage index
+
+Click **COVERAGE** (or press **C**) for a list of every region with confirmed, zero-registration
+camera coverage. Click **GO** next to any region to fly there directly instead of manually
+searching or panning — useful as a starting point if you don't already know where coverage exists.
 
 ## Hovering to identify a place
 
@@ -96,6 +111,33 @@ currently covers Georgia; see [Known limitations](#known-limitations) for other 
 active NWS severe weather warning as a colored polygon over the area it covers, colored by
 severity (extreme/severe/moderate).
 
+## Watch wall: viewing multiple cameras at once
+
+Click **SELECT** (or press **S**) to enter selection mode — clicking a camera pin now adds it to
+a running selection (shown with a highlighted outline) instead of opening its feed immediately. A
+floating "SELECTED: N — OPEN WATCH WALL" button appears once at least one camera is selected;
+click it to open every selected camera's feed at once in a grid, each tile refreshing
+independently. The watch wall panel can be dragged and resized just like a single feed window (see
+[Moving and resizing a feed/incident window](#moving-and-resizing-a-feedincident-window)), and each
+tile has its own close button if you want to drop one camera without closing the whole wall.
+Turning **SELECT** back off clears the current selection.
+
+## Favoriting a camera
+
+Open any camera's feed and click the star (☆/★) in its window's title bar to bookmark it — the
+star fills in once saved. Click **FAVORITES** (or press **F**) to see every camera you've
+favorited, with a **GO** button that flies to it and reopens its feed directly, even if that
+camera isn't currently showing on the globe. Favorites are tied to your admin account, not your
+browser, so they follow you across devices and after a page reload.
+
+## Sharing a view with a teammate
+
+Click **SHARE VIEW** next to the search box to copy a link to your clipboard that encodes exactly
+where the globe is currently looking and whichever camera(s) are open — a single feed, or an
+entire watch wall. Opening that link takes another admin straight to the same view. The recipient
+still needs their own valid admin login; a share link only encodes the view itself, not access to
+the page.
+
 ## Moving and resizing a feed/incident window
 
 Every camera feed and incident-detail window can be dragged by its title bar to anywhere on
@@ -108,7 +150,10 @@ it and at whatever size you set until you close it or open a new one in its plac
 - **R** — toggle radar
 - **A** — toggle severe weather alerts
 - **I** — toggle traffic incidents
-- **Esc** — close whichever feed or incident window is open
+- **C** — toggle the coverage index
+- **S** — toggle selection mode for the watch wall
+- **F** — toggle the favorites panel
+- **Esc** — close whichever feed, incident window, or watch wall is open
 
 Shortcuts are ignored while typing in the search box.
 
@@ -137,3 +182,9 @@ Overwatch Grid requires the **AdminOnly** policy, same as the rest of the Intell
 - **The basemap and its label layers are Esri's free public tile service**, not a paid
   subscription — reliable for normal use, but not covered by a formal usage guarantee the way a
   paid Esri or Google Maps plan would be.
+- **The coverage index is a hand-maintained list**, not a live query — it lists the regions known
+  to have zero-registration coverage as of when it was last updated, not a real-time count of what
+  a given source currently publishes.
+- **A shared view link is a snapshot, not a live subscription.** It encodes a position and
+  camera(s) at the moment it was copied; it doesn't stay in sync with anything afterward, and a
+  hand-edited or corrupted link falls back to the default view instead of erroring.

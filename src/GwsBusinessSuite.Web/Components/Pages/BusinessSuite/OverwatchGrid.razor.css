@@ -270,6 +270,12 @@
     user-select: none;
 }
 
+:global(.tg-stream-panel-header-actions) {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
 :global(.tg-stream-panel-close) {
     background: none;
     border: 1px solid rgba(125, 255, 176, 0.5);
@@ -278,6 +284,21 @@
     font-size: 0.7rem;
     line-height: 1;
     padding: 0.15rem 0.4rem;
+}
+
+:global(.tg-stream-panel-favorite) {
+    background: none;
+    border: none;
+    color: #ffe066;
+    cursor: pointer;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0 0.1rem;
+}
+
+:global(.tg-stream-panel-favorite:disabled) {
+    opacity: 0.4;
+    cursor: default;
 }
 
 :global(.tg-stream-panel-body) {
@@ -312,6 +333,133 @@
     padding: 1.5rem 0.5rem;
     text-align: center;
     opacity: 0.8;
+}
+
+/* Watch wall - built entirely by tactical-globe.js (openWatchWallWithCameras), draggable/
+   resizable via the same makeDraggableAndResizable used for .tg-stream-panel. Sized larger by
+   default since it holds a grid of tiles rather than one stream. */
+:global(.tg-watch-wall-panel) {
+    position: absolute;
+    z-index: 20;
+    top: 3.6rem;
+    right: 1.1rem;
+    width: 560px;
+    height: 420px;
+    min-width: 320px;
+    min-height: 240px;
+    display: flex;
+    flex-direction: column;
+    background: rgba(5, 8, 10, 0.92);
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    box-shadow: 0 0 24px rgba(0, 0, 0, 0.6);
+    color: #7dffb0;
+    font-family: "Share Tech Mono", ui-monospace, monospace;
+}
+
+:global(.tg-watch-wall-header) {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0.7rem;
+    border-bottom: 1px solid rgba(125, 255, 176, 0.35);
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+    cursor: move;
+    user-select: none;
+}
+
+:global(.tg-watch-wall-close) {
+    background: none;
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    color: #7dffb0;
+    cursor: pointer;
+    font-size: 0.7rem;
+    line-height: 1;
+    padding: 0.15rem 0.4rem;
+}
+
+:global(.tg-watch-wall-grid) {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: grid;
+    gap: 0.4rem;
+    padding: 0.4rem;
+    overflow-y: auto;
+}
+
+:global(.tg-watch-wall-tile) {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: 1px solid rgba(125, 255, 176, 0.3);
+    background: rgba(0, 0, 0, 0.4);
+}
+
+:global(.tg-watch-wall-tile-header) {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.6rem;
+    border-bottom: 1px solid rgba(125, 255, 176, 0.25);
+    flex-shrink: 0;
+}
+
+:global(.tg-watch-wall-tile-close) {
+    background: none;
+    border: none;
+    color: #7dffb0;
+    cursor: pointer;
+    font-size: 0.65rem;
+    line-height: 1;
+    padding: 0 0.2rem;
+}
+
+:global(.tg-watch-wall-tile-body) {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+:global(.tg-watch-wall-tile-body img),
+:global(.tg-watch-wall-tile-body video) {
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    object-fit: contain;
+    display: block;
+    background: #000;
+}
+
+:global(.tg-watch-wall-tile-body .tg-stream-panel-meta) {
+    font-size: 0.55rem;
+    padding: 0.1rem 0.3rem;
+    margin-top: 0;
+}
+
+/* Selection-mode indicator - only exists while at least one camera is selected (see select
+   mode's own toggle) - a single floating button that opens the watch wall on click. */
+:global(.tg-selection-indicator) {
+    position: absolute;
+    z-index: 8;
+    bottom: 2.6rem;
+    right: 1.1rem;
+    padding: 0.4rem 0.7rem;
+    background: rgba(125, 255, 176, 0.2);
+    border: 1px solid rgba(125, 255, 176, 0.6);
+    color: #7dffb0;
+    font-family: "Share Tech Mono", ui-monospace, monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    box-shadow: 0 0 14px rgba(0, 0, 0, 0.5);
+}
+
+:global(.tg-selection-indicator:hover) {
+    background: rgba(125, 255, 176, 0.32);
 }
 
 :global(.tg-incident-type) {
@@ -387,4 +535,73 @@
 :global(.tg-hover-tooltip-meta) {
     opacity: 0.75;
     margin-top: 0.15rem;
+}
+
+/* Coverage index - rendered directly by OverwatchGrid.razor's own markup (not built by JS), so
+   these stay plain scoped rules, unlike the :global() ones above for JS-injected panels. A
+   plain static list, not draggable - there's only ever one and it needs no resizing. */
+.tg-coverage-panel {
+    position: absolute;
+    z-index: 6;
+    top: 6.4rem;
+    right: 1.1rem;
+    width: 260px;
+    max-height: 60%;
+    overflow-y: auto;
+    background: rgba(5, 8, 10, 0.85);
+    border: 1px solid rgba(125, 255, 176, 0.4);
+    color: #7dffb0;
+    font-family: "Share Tech Mono", ui-monospace, monospace;
+    font-size: 0.7rem;
+    pointer-events: auto;
+}
+
+.tg-coverage-panel-header {
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid rgba(125, 255, 176, 0.3);
+    letter-spacing: 0.05em;
+    font-weight: 700;
+}
+
+.tg-coverage-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.tg-coverage-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    border-bottom: 1px solid rgba(125, 255, 176, 0.15);
+}
+
+.tg-coverage-item button {
+    background: rgba(125, 255, 176, 0.15);
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    color: #7dffb0;
+    font-family: inherit;
+    font-size: 0.65rem;
+    padding: 0.15rem 0.4rem;
+    cursor: pointer;
+}
+
+.tg-coverage-item button:hover {
+    background: rgba(125, 255, 176, 0.3);
+}
+
+/* Favorites reuses .tg-coverage-panel's base look but sits on the opposite side, so both panels
+   can be open at once without overlapping. */
+.tg-favorites-panel {
+    right: auto;
+    left: 1.1rem;
+}
+
+.tg-favorites-empty {
+    padding: 0.6rem;
+    opacity: 0.75;
+    font-size: 0.65rem;
+    line-height: 1.4;
 }

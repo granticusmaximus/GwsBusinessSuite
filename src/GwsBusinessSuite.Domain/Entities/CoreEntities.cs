@@ -643,6 +643,26 @@ public sealed class SentinelSavedSearch : AuditableEntity
     public required string Query { get; set; }
 }
 
+// Per-user favorited Overwatch Grid camera. Unlike SentinelNavigationEntry's TargetId (which
+// re-resolves live against this app's own DB), a CameraFeed isn't a database entity at all -
+// it's a live, provider-composed value projected fresh on every bounding-box query (see
+// CameraDirectoryService), and no provider supports "look up one camera by id" - so a favorite
+// has to snapshot what's needed to reopen the feed directly. StreamKind is stored as its raw
+// string (not GwsBusinessSuite.Application.CameraIntel.CameraStreamKind) because Domain must not
+// depend on Application - the Web project maps between them.
+public sealed class CameraFavorite : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string CameraId { get; set; }
+    public required string Name { get; set; }
+    public double Latitude { get; set; }
+    public double Longitude { get; set; }
+    public required string StreamUrl { get; set; }
+    public required string StreamKind { get; set; }
+    public required string SourceName { get; set; }
+    public required string SourceAttributionUrl { get; set; }
+}
+
 public sealed class SentinelDiscussion : AuditableEntity
 {
     public Guid WikiPageId { get; set; }

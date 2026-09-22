@@ -68,6 +68,9 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
             .tg-stream-panel { position: absolute; top: 3.6rem; right: 1.1rem; width: 320px; min-width: 240px; min-height: 160px; }
             .tg-weather-panel { position: absolute; bottom: 2.6rem; left: 1.1rem; display: none; }
             .tg-panel-resize-handle { position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px; }
+            .tg-watch-wall-panel { position: absolute; top: 3.6rem; right: 1.1rem; width: 560px; height: 420px; min-width: 320px; min-height: 240px; }
+            .tg-watch-wall-grid { display: grid; }
+            .tg-selection-indicator { position: absolute; bottom: 2.6rem; right: 1.1rem; }
           </style>
         </head>
         <body>
@@ -76,8 +79,12 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
           </div>
           <button data-tg-toggle="radar">radar</button>
           <button data-tg-toggle="alerts">alerts</button>
+          <button data-tg-toggle="incidents">incidents</button>
+          <button data-tg-toggle="coverage">coverage</button>
+          <button data-tg-toggle="select">select</button>
           <input type="text" id="tg-search-input" />
           <button type="button" id="tg-search-button">GO</button>
+          <button type="button" id="tg-share-button">SHARE VIEW</button>
           <span id="tg-search-status"></span>
         </body>
         </html>
@@ -134,6 +141,12 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                 if (methodName === 'ReverseGeocodeAsync') {
                   return Promise.resolve(window.__mockPlaceInfo || null);
                 }
+                if (methodName === 'ToggleCameraFavoriteAsync') {
+                  return Promise.resolve(window.__mockToggleFavoriteResult === undefined ? true : window.__mockToggleFavoriteResult);
+                }
+                if (methodName === 'BuildShareLinkAsync') {
+                  return Promise.resolve(window.__mockShareLink || 'https://example.test/admin/osint?v=stub');
+                }
                 return Promise.resolve();
               }
             });
@@ -165,7 +178,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await InitAsync(page);
 
         var result = await page.EvaluateAsync<string?>("""
-            () => {
+            async () => {
               try {
                 window.tacticalGlobe.setCameraPins([{
                   id: 'a', name: 'Test Camera', lat: 47.6, lon: -122.3,
@@ -192,6 +205,22 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                 });
                 window.tacticalGlobe.setWeatherSnapshot(null);
                 window.tacticalGlobe.setRadarVisible(false);
+                window.tacticalGlobe.flyTo('tg-viewport', 33.75, -84.39, 400000);
+                window.tacticalGlobe.setSelectModeEnabled('tg-viewport', true);
+                window.tacticalGlobe.setSelectModeEnabled('tg-viewport', false);
+                window.tacticalGlobe.openCamera({
+                  id: 'cam-x', name: 'Test Camera', lat: 47.6, lon: -122.3,
+                  streamUrl: 'https://example.test/x.jpg', streamKind: 'Snapshot',
+                  sourceName: 'WSDOT', sourceAttributionUrl: 'https://wsdot.wa.gov'
+                });
+                window.tacticalGlobe.openWatchWallWithCameras('tg-viewport', [{
+                  id: 'cam-y', name: 'Test Camera 2', lat: 47.6, lon: -122.3,
+                  streamUrl: 'https://example.test/y.jpg', streamKind: 'Snapshot',
+                  sourceName: 'WSDOT', sourceAttributionUrl: 'https://wsdot.wa.gov'
+                }]);
+                window.tacticalGlobe.closeWatchWall('tg-viewport');
+                window.tacticalGlobe.openWatchWall('tg-viewport');
+                await window.tacticalGlobe.buildShareLink('tg-viewport');
                 window.tacticalGlobe.dispose('tg-viewport');
                 return null;
               } catch (e) {
@@ -201,6 +230,39 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
             """);
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PinCluster_Click_ShouldZoomIn_RatherThanOpenAStreamPanel()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+
+        // Three pins a hundredth of a degree apart, at the default camera's look-at point, land
+        // on nearly the same screen pixel from the initial whole-continent view - well within
+        // clustering.pixelRange (60px) and at/above minimumClusterSize (3), so Cesium groups them
+        // into one cluster marker instead of three separate camera pins.
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([
+                { id: 'cam-1', name: 'Camera 1', lat: 39.80, lon: -98.50, streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot', sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org' },
+                { id: 'cam-2', name: 'Camera 2', lat: 39.81, lon: -98.51, streamUrl: 'https://example.test/b.jpg', streamKind: 'Snapshot', sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org' },
+                { id: 'cam-3', name: 'Camera 3', lat: 39.79, lon: -98.49, streamUrl: 'https://example.test/c.jpg', streamKind: 'Snapshot', sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org' }
+              ]);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        // flyToBoundingSphere's own animation, not a stream panel appearing, is the expected
+        // effect of this click - give it time to run, then assert no panel ever showed up.
+        await page.WaitForTimeoutAsync(1500);
+
+        var hasStreamPanel = await page.EvaluateAsync<bool>("!!document.querySelector('.tg-stream-panel')");
+        hasStreamPanel.Should().BeFalse(
+            "clicking a clustered group of pins should zoom the camera in, not open any single camera's stream panel");
     }
 
     [Fact]
@@ -340,6 +402,200 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
 
         var afterWidth = await page.EvaluateAsync<double>("document.querySelector('.tg-stream-panel').getBoundingClientRect().width");
         (afterWidth - beforeWidth).Should().BeApproximately(100, 5, "dragging the resize handle 100px right should widen the panel by roughly the same amount");
+    }
+
+    [Fact]
+    public async Task SelectMode_ShouldAddToSelectionInsteadOfOpeningSinglePanel_WhenEnabled()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([{
+                id: 'cam-1', name: 'Test Camera', lat: 39.8, lon: -98.5,
+                streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot',
+                sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org'
+              }]);
+              window.tacticalGlobe.setSelectModeEnabled('tg-viewport', true);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-selection-indicator')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var hasStreamPanel = await page.EvaluateAsync<bool>("!!document.querySelector('.tg-stream-panel')");
+        hasStreamPanel.Should().BeFalse("while select mode is on, clicking a camera pin should add it to the selection, not open its stream panel");
+
+        var indicatorText = await page.EvaluateAsync<string>("document.querySelector('.tg-selection-indicator').textContent");
+        indicatorText.Should().Contain("1");
+    }
+
+    [Fact]
+    public async Task WatchWall_ShouldRenderOneTilePerSelectedCamera()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.openWatchWallWithCameras('tg-viewport', [
+                { id: 'cam-1', name: 'Camera 1', lat: 39.8, lon: -98.5, streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot', sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org' },
+                { id: 'cam-2', name: 'Camera 2', lat: 47.6, lon: -122.3, streamUrl: 'https://example.test/b.jpg', streamKind: 'Snapshot', sourceName: 'WSDOT', sourceAttributionUrl: 'https://wsdot.wa.gov' }
+              ]);
+            }
+            """);
+        await page.WaitForFunctionAsync("document.querySelectorAll('.tg-watch-wall-tile').length === 2", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var tileNames = await page.EvaluateAsync<string[]>(
+            "Array.from(document.querySelectorAll('.tg-watch-wall-tile-header span')).map(el => el.textContent)");
+        tileNames.Should().Contain("Camera 1").And.Contain("Camera 2");
+    }
+
+    [Fact]
+    public async Task WatchWall_ShouldBeDraggableAndResizable()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.openWatchWallWithCameras('tg-viewport', [
+                { id: 'cam-1', name: 'Camera 1', lat: 39.8, lon: -98.5, streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot', sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org' }
+              ]);
+            }
+            """);
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-watch-wall-panel')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var beforeTop = await page.EvaluateAsync<double>("document.querySelector('.tg-watch-wall-panel').getBoundingClientRect().top");
+        var headerBox = await page.EvaluateAsync<double[]>("""
+            () => {
+              const r = document.querySelector('.tg-watch-wall-header').getBoundingClientRect();
+              return [r.left + r.width / 2, r.top + r.height / 2];
+            }
+            """);
+        await page.Mouse.MoveAsync((float)headerBox[0], (float)headerBox[1]);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync((float)(headerBox[0] + 40), (float)(headerBox[1] + 90), new MouseMoveOptions { Steps = 5 });
+        await page.Mouse.UpAsync();
+        var afterTop = await page.EvaluateAsync<double>("document.querySelector('.tg-watch-wall-panel').getBoundingClientRect().top");
+        (afterTop - beforeTop).Should().BeApproximately(90, 5, "dragging the header should move the watch wall panel");
+
+        var beforeWidth = await page.EvaluateAsync<double>("document.querySelector('.tg-watch-wall-panel').getBoundingClientRect().width");
+        var handleBox = await page.EvaluateAsync<double[]>("""
+            () => {
+              const r = document.querySelector('.tg-watch-wall-panel .tg-panel-resize-handle').getBoundingClientRect();
+              return [r.left + r.width / 2, r.top + r.height / 2];
+            }
+            """);
+        await page.Mouse.MoveAsync((float)handleBox[0], (float)handleBox[1]);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync((float)(handleBox[0] + 80), (float)(handleBox[1] + 50), new MouseMoveOptions { Steps = 5 });
+        await page.Mouse.UpAsync();
+        var afterWidth = await page.EvaluateAsync<double>("document.querySelector('.tg-watch-wall-panel').getBoundingClientRect().width");
+        (afterWidth - beforeWidth).Should().BeApproximately(80, 5, "dragging the resize handle should widen the watch wall panel");
+    }
+
+    [Fact]
+    public async Task WatchWall_ClosingThenClickingACamera_ShouldStillOpenANormalStreamPanel()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+
+        // Regression guard on the renderStream singleton -> per-panel dispose refactor: using a
+        // watch wall (which calls renderStream/dispose through its own tiles) must not leave any
+        // shared state behind that breaks a normal single-camera stream panel afterward.
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.openWatchWallWithCameras('tg-viewport', [
+                { id: 'cam-1', name: 'Camera 1', lat: 39.8, lon: -98.5, streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot', sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org' }
+              ]);
+              window.tacticalGlobe.closeWatchWall('tg-viewport');
+              window.tacticalGlobe.setCameraPins([{
+                id: 'cam-2', name: 'Camera 2', lat: 39.8, lon: -98.5, streamUrl: 'https://example.test/b.jpg', streamKind: 'Snapshot', sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org'
+              }]);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+
+        var wallStillPresent = await page.EvaluateAsync<bool>("!!document.querySelector('.tg-watch-wall-panel')");
+        wallStillPresent.Should().BeFalse("closeWatchWall should fully remove the panel from the DOM");
+
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-stream-panel')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var panelText = await page.EvaluateAsync<string>("document.querySelector('.tg-stream-panel').textContent");
+        panelText.Should().Contain("Camera 2");
+    }
+
+    [Fact]
+    public async Task FavoriteStar_ShouldInvokeToggleCameraFavoriteAsync_AndUpdateItsVisualState()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+        await page.EvaluateAsync("() => { window.__mockToggleFavoriteResult = true; }");
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([{
+                id: 'cam-1', name: 'Test Camera', lat: 39.8, lon: -98.5,
+                streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot',
+                sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org', isFavorite: false
+              }]);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-stream-panel-favorite')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var beforePressed = await page.EvaluateAsync<string>("document.querySelector('.tg-stream-panel-favorite').getAttribute('aria-pressed')");
+        beforePressed.Should().Be("false");
+
+        await page.ClickAsync(".tg-stream-panel-favorite");
+        await page.WaitForFunctionAsync("document.querySelector('.tg-stream-panel-favorite').getAttribute('aria-pressed') === 'true'", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var invoked = await page.EvaluateAsync<bool>(
+            "window.__invokedMethods.some(c => c.methodName === 'ToggleCameraFavoriteAsync' && c.args[0] === 'cam-1')");
+        invoked.Should().BeTrue("clicking the star should call ToggleCameraFavoriteAsync with the camera's id");
+    }
+
+    [Fact]
+    public async Task ShareButton_ShouldInvokeBuildShareLinkAsync_WithTheOpenCameraAndCurrentPosition()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+        await page.EvaluateAsync("() => { window.__mockShareLink = 'https://example.test/admin/osint?v=abc123'; }");
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([{
+                id: 'cam-1', name: 'Test Camera', lat: 39.8, lon: -98.5,
+                streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot',
+                sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org'
+              }]);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-stream-panel')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        await page.ClickAsync("#tg-share-button");
+        await page.WaitForFunctionAsync(
+            "window.__invokedMethods.some(c => c.methodName === 'BuildShareLinkAsync')",
+            new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var call = await page.EvaluateAsync<System.Text.Json.JsonElement>(
+            "window.__invokedMethods.find(c => c.methodName === 'BuildShareLinkAsync')");
+        var args = call.GetProperty("args");
+        args[0].GetDouble().Should().BeApproximately(39.8, 0.5, "the share link should encode roughly the current camera latitude");
+        var openCameras = args[3];
+        openCameras.GetArrayLength().Should().Be(1);
+        openCameras[0].GetProperty("id").GetString().Should().Be("cam-1");
     }
 
     [Fact]
