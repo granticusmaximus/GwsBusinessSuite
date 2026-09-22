@@ -85,6 +85,62 @@ public sealed class GeocodingServiceTests
         result.Should().BeNull();
     }
 
+    // Shaped from a real photon.komoot.io/reverse response captured during implementation
+    // (hovering near the White House).
+    private const string ReverseHitNearby = """
+        {"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[-77.0365525,38.8976387]},"properties":{"osm_key":"office","osm_value":"government","housenumber":"1600","name":"White House","street":"Pennsylvania Avenue Northwest","city":"Washington","state":"DC"}}]}
+        """;
+
+    [Fact]
+    public async Task ReverseGeocodeAsync_ShouldReturnTheNamedPlace_WhenTheNearestFeatureIsClose()
+    {
+        var service = CreateService(photon: _ => JsonResponse(ReverseHitNearby), census: _ => throw new InvalidOperationException("Census has no POI data and should never be consulted for reverse lookups."));
+
+        // A few meters from the White House's own indexed coordinate - well within the proximity threshold.
+        var result = await service.ReverseGeocodeAsync(38.8977, -77.0365);
+
+        result.Should().NotBeNull();
+        result!.DisplayName.Should().Be("White House");
+        result.Address.Should().Be("1600 Pennsylvania Avenue Northwest, Washington, DC");
+        result.Category.Should().Be("government");
+    }
+
+    [Fact]
+    public async Task ReverseGeocodeAsync_ShouldReturnNull_WhenTheNearestIndexedFeatureIsFarAway()
+    {
+        var service = CreateService(photon: _ => JsonResponse(ReverseHitNearby), census: _ => throw new InvalidOperationException("Census has no POI data and should never be consulted for reverse lookups."));
+
+        // Same response (Photon always returns its nearest match, however far), but the hover
+        // point itself is ~50km away - a real, distinct rural spot, not the White House.
+        var result = await service.ReverseGeocodeAsync(39.3, -77.5);
+
+        result.Should().BeNull("a reverse-geocode hit farther than the proximity threshold would mislabel an unrelated location");
+    }
+
+    [Fact]
+    public async Task ReverseGeocodeAsync_ShouldReturnNull_WhenPhotonHasNoFeatureNearby()
+    {
+        var service = CreateService(photon: _ => JsonResponse(PhotonMiss), census: _ => throw new InvalidOperationException("Census has no POI data and should never be consulted for reverse lookups."));
+
+        var result = await service.ReverseGeocodeAsync(0, 0);
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReverseGeocodeAsync_ShouldFallBackToAddressOrCategory_WhenTheFeatureHasNoName()
+    {
+        const string unnamedHouse = """
+            {"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[-84.388,33.749]},"properties":{"osm_key":"building","osm_value":"residential","housenumber":"42","street":"Main St","city":"Atlanta","state":"GA"}}]}
+            """;
+        var service = CreateService(photon: _ => JsonResponse(unnamedHouse), census: _ => throw new InvalidOperationException("Census has no POI data and should never be consulted for reverse lookups."));
+
+        var result = await service.ReverseGeocodeAsync(33.749, -84.388);
+
+        result.Should().NotBeNull();
+        result!.DisplayName.Should().Be("42 Main St", "an address is a more useful label than a bare category when a feature has no name");
+    }
+
     private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
     {
         Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")

@@ -125,6 +125,85 @@ window.tacticalGlobe = (function () {
 
         ensureKeyboardShortcutsRegistered();
         setUpLocationSearch(viewer, dotNetRef);
+        const hoverIdentify = setUpHoverIdentify(viewer, dotNetRef);
+        viewers.get(containerId).hoverIdentify = hoverIdentify;
+    }
+
+    // Feature: hover-to-identify. Only active once zoomed in close enough for a hover to mean
+    // something (MIN_HOVER_HEIGHT_METERS) - both because "what building is this" is meaningless
+    // from a whole-continent view, and to avoid firing a reverse-geocode call on every idle
+    // mouse wobble while zoomed out. Debounced (waits for the cursor to actually stop, not fired
+    // continuously during movement) and skipped entirely while left-dragging, since Cesium's own
+    // MOUSE_MOVE event fires throughout a drag/orbit gesture too, not just genuine hovers.
+    // pickEllipsoid (not pickPosition/scene.pick) is the right tool here - this globe has no real
+    // terrain or 3D building geometry (EllipsoidTerrainProvider default, see init's own comment),
+    // just a flat WGS84 ellipsoid with imagery draped on it, so a ray-ellipsoid intersection is
+    // both sufficient and doesn't require depth-buffer picking to be enabled.
+    const MIN_HOVER_HEIGHT_METERS = 5000;
+    const HOVER_DEBOUNCE_MS = 400;
+
+    function setUpHoverIdentify(viewer, dotNetRef) {
+        const shell = viewer.container.closest('.tg-shell');
+        let tooltip = null;
+        let debounceHandle = null;
+        let requestToken = 0;
+        let isDragging = false;
+
+        function hideTooltip() {
+            if (tooltip) tooltip.style.display = 'none';
+        }
+
+        function showTooltip(x, y, place) {
+            if (!tooltip) {
+                tooltip = document.createElement('div');
+                tooltip.className = 'tg-hover-tooltip';
+                shell.appendChild(tooltip);
+            }
+            tooltip.innerHTML =
+                '<div class="tg-hover-tooltip-name">' + escapeHtml(place.displayName) + '</div>' +
+                (place.address ? '<div class="tg-hover-tooltip-meta">' + escapeHtml(place.address) + '</div>' : '') +
+                (place.category ? '<div class="tg-hover-tooltip-meta">' + escapeHtml(place.category) + '</div>' : '');
+            tooltip.style.left = (x + 16) + 'px';
+            tooltip.style.top = (y + 16) + 'px';
+            tooltip.style.display = 'block';
+        }
+
+        const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+        handler.setInputAction(function () {
+            isDragging = true;
+            hideTooltip();
+        }, Cesium.ScreenSpaceEventType.LEFT_DOWN);
+        handler.setInputAction(function () {
+            isDragging = false;
+        }, Cesium.ScreenSpaceEventType.LEFT_UP);
+        handler.setInputAction(function (movement) {
+            hideTooltip();
+            if (debounceHandle) clearTimeout(debounceHandle);
+            if (isDragging) return;
+            if (viewer.camera.positionCartographic.height > MIN_HOVER_HEIGHT_METERS) return;
+
+            const screenPosition = movement.endPosition;
+            debounceHandle = setTimeout(async function () {
+                const cartesian = viewer.camera.pickEllipsoid(screenPosition, viewer.scene.globe.ellipsoid);
+                if (!cartesian) return;
+                const cartographic = Cesium.Cartographic.fromCartesian(cartesian);
+                const lat = Cesium.Math.toDegrees(cartographic.latitude);
+                const lon = Cesium.Math.toDegrees(cartographic.longitude);
+
+                const token = ++requestToken;
+                const place = await dotNetRef.invokeMethodAsync('ReverseGeocodeAsync', lat, lon);
+                if (token !== requestToken) return; // a newer hover already superseded this one
+                if (place) showTooltip(screenPosition.x, screenPosition.y, place);
+            }, HOVER_DEBOUNCE_MS);
+        }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+        return {
+            dispose: function () {
+                if (debounceHandle) clearTimeout(debounceHandle);
+                handler.destroy();
+                if (tooltip && tooltip.parentNode) tooltip.parentNode.removeChild(tooltip);
+            }
+        };
     }
 
     // Feature: location search / jump-to. Geocoded server-side via the dotNetRef already used
@@ -393,6 +472,7 @@ window.tacticalGlobe = (function () {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
         entry.clickHandler.destroy();
+        if (entry.hoverIdentify) entry.hoverIdentify.dispose();
         entry.viewer.destroy();
         viewers.delete(containerId || 'tg-viewport');
     }

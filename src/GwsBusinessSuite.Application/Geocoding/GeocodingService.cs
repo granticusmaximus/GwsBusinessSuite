@@ -30,4 +30,7 @@ public sealed class GeocodingService(IPhotonGeocoder photon, ICensusGeocoder cen
         return await photon.GeocodeAsync(query, cancellationToken)
             ?? await census.GeocodeAsync(query, cancellationToken);
     }
+
+    public Task<PlaceInfo?> ReverseGeocodeAsync(double latitude, double longitude, CancellationToken cancellationToken = default) =>
+        photon.ReverseGeocodeAsync(latitude, longitude, cancellationToken);
 }

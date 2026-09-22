@@ -293,3 +293,31 @@
     text-align: center;
     opacity: 0.8;
 }
+
+/* Hover-to-identify tooltip - built and positioned entirely by tactical-globe.js (see
+   setUpHoverIdentify), same non-scoped-class convention as the stream panel above. Follows the
+   cursor, so pointer-events stay off to avoid it ever intercepting the hover it's reporting on. */
+:global(.tg-hover-tooltip) {
+    position: absolute;
+    z-index: 15;
+    pointer-events: none;
+    max-width: 260px;
+    padding: 0.4rem 0.6rem;
+    background: rgba(5, 8, 10, 0.9);
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    color: #7dffb0;
+    font-family: "Share Tech Mono", ui-monospace, monospace;
+    font-size: 0.7rem;
+    line-height: 1.35;
+    box-shadow: 0 0 14px rgba(0, 0, 0, 0.5);
+}
+
+:global(.tg-hover-tooltip-name) {
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+
+:global(.tg-hover-tooltip-meta) {
+    opacity: 0.75;
+    margin-top: 0.15rem;
+}

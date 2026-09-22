@@ -176,6 +176,13 @@
     [JSInvokable]
     public async Task<GeocodeResult?> GeocodeAsync(string query) => await GeocodingService.GeocodeAsync(query);
 
+    // Feature: hover-to-identify. Called from tactical-globe.js's debounced pointer-move handler
+    // (only while zoomed in close enough for a hover to mean something) - same reasoning as
+    // GeocodeAsync for why this is a [JSInvokable] and not a client-side fetch().
+    [JSInvokable]
+    public async Task<PlaceInfo?> ReverseGeocodeAsync(double latitude, double longitude) =>
+        await GeocodingService.ReverseGeocodeAsync(latitude, longitude);
+
     // Raised by tactical-globe.js's camera.moveEnd handler once the view settles after a
     // drag/zoom (see initGlobe) - degrees, matching Cesium's own Rectangle-to-degrees output.
     [JSInvokable]

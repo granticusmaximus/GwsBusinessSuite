@@ -60,7 +60,9 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
           <script src="/js/tactical-globe.js"></script>
         </head>
         <body>
-          <div id="tg-viewport" style="width:800px;height:600px;"></div>
+          <div class="tg-shell" style="position:relative;width:800px;height:600px;">
+            <div id="tg-viewport" style="position:absolute;inset:0;"></div>
+          </div>
           <button data-tg-toggle="radar">radar</button>
           <button data-tg-toggle="alerts">alerts</button>
           <input type="text" id="tg-search-input" />
@@ -97,22 +99,29 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         return (page, consoleErrors);
     }
 
-    // init() is async (it awaits Cesium.TileMapServiceImageryProvider.fromUrl for the bundled
-    // Natural Earth II basemap - see tactical-globe.js), matching how Blazor's own
+    // init() is async (it awaits Cesium.ArcGisMapServerImageryProvider.fromUrl for the Esri
+    // World_Imagery aerial basemap - see tactical-globe.js), matching how Blazor's own
     // JS.InvokeVoidAsync awaits it in production. Awaiting it here too is what actually lets
     // this try/catch observe a rejection - a fire-and-forget call would only catch a
     // synchronous throw before init's first await, silently missing anything after it.
-    // The stubbed dotNetRef's invokeMethodAsync answers 'GeocodeAsync' from window.__mockGeocodeResult
-    // (set per-test before a search) rather than a mocked HTTP route - geocoding now happens via
-    // a [JSInvokable] call into the real Blazor component (see GeocodeAsync on OverwatchGrid.razor),
-    // not a client-side fetch(), so there is no HTTP request for this harness to intercept.
+    // The stubbed dotNetRef's invokeMethodAsync answers 'GeocodeAsync'/'ReverseGeocodeAsync' from
+    // window.__mockGeocodeResult/__mockPlaceInfo (set per-test) rather than a mocked HTTP route -
+    // both now happen via [JSInvokable] calls into the real Blazor component (see GeocodeAsync/
+    // ReverseGeocodeAsync on OverwatchGrid.razor), not a client-side fetch(), so there is no HTTP
+    // request for this harness to intercept. Every call is recorded in window.__invokedMethods so
+    // tests can assert whether (and with what arguments) a given method was actually called.
     private static async Task<string?> InitAsync(IPage page) => await page.EvaluateAsync<string?>("""
         async () => {
+          window.__invokedMethods = [];
           try {
             await window.tacticalGlobe.init('tg-viewport', {
-              invokeMethodAsync: function (methodName) {
+              invokeMethodAsync: function (methodName, ...args) {
+                window.__invokedMethods.push({ methodName: methodName, args: args });
                 if (methodName === 'GeocodeAsync') {
                   return Promise.resolve(window.__mockGeocodeResult || null);
+                }
+                if (methodName === 'ReverseGeocodeAsync') {
+                  return Promise.resolve(window.__mockPlaceInfo || null);
                 }
                 return Promise.resolve();
               }
@@ -195,6 +204,56 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await page.FillAsync("#tg-search-input", "a place that does not exist anywhere");
         await page.ClickAsync("#tg-search-button");
         await page.WaitForFunctionAsync("document.getElementById('tg-search-status').textContent === 'NOT FOUND'", new PageWaitForFunctionOptions { Timeout = 5000 });
+    }
+
+    // Zooms in via real mouse-wheel input (the same gesture a user performs), rather than a
+    // direct camera API call - this is what actually exercises setUpHoverIdentify's own height
+    // check against the real Cesium camera, not just an assumption about what "zoomed in" means.
+    private static async Task ZoomInBelowHoverThresholdAsync(IPage page)
+    {
+        await page.Mouse.MoveAsync(400, 300);
+        for (var i = 0; i < 50; i++)
+        {
+            await page.Mouse.WheelAsync(0, -300);
+            await page.WaitForTimeoutAsync(100);
+        }
+    }
+
+    [Fact]
+    public async Task HoverIdentify_ShouldShowTooltip_WhenZoomedInAndAPlaceIsFound()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+        await ZoomInBelowHoverThresholdAsync(page);
+        await page.EvaluateAsync("""
+            () => {
+              window.__mockPlaceInfo = { displayName: 'White House', address: '1600 Pennsylvania Avenue Northwest, Washington, DC', category: 'government' };
+            }
+            """);
+
+        await page.Mouse.MoveAsync(410, 310);
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-hover-tooltip')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var tooltipText = await page.EvaluateAsync<string>("document.querySelector('.tg-hover-tooltip').textContent");
+        tooltipText.Should().Contain("White House").And.Contain("Washington, DC").And.Contain("government");
+
+        var invoked = await page.EvaluateAsync<bool>("window.__invokedMethods.some(m => m.methodName === 'ReverseGeocodeAsync')");
+        invoked.Should().BeTrue("hovering while zoomed in should call the real reverse-geocode interop method");
+    }
+
+    [Fact]
+    public async Task HoverIdentify_ShouldNotCallReverseGeocode_WhenZoomedOut()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+        // No zoom - stays at init's own far default view (18,000 km altitude).
+
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.MoveAsync(410, 310);
+        await page.WaitForTimeoutAsync(800); // past the 400ms debounce, with margin
+
+        var invoked = await page.EvaluateAsync<bool>("window.__invokedMethods.some(m => m.methodName === 'ReverseGeocodeAsync')");
+        invoked.Should().BeFalse("identifying a specific building is meaningless (and wasteful) from a whole-continent view");
     }
 
     // Regression guard for the coverage banner's dismiss state (OverwatchGrid.razor): it's
