@@ -233,15 +233,23 @@
     pointer-events: none;
 }
 
-/* Camera stream panel - built and appended entirely by tactical-globe.js (see setCameraPins'
-   click handler), so these rules target its plain, non-scoped class names directly rather than
-   relying on Blazor's isolation attribute. */
+/* Camera stream panel and incident-detail panel (which reuses these same classes plus its own
+   .tg-incident-panel) - both built and appended entirely by tactical-globe.js (see
+   setCameraPins'/openIncidentPanel's click handlers), so these rules target their plain,
+   non-scoped class names directly rather than relying on Blazor's isolation attribute. Both are
+   draggable (by the header) and resizable (bottom-right handle) via makeDraggableAndResizable -
+   flex-column so the resize handle's height change actually flows into the body instead of
+   leaving dead space, and a min-height so it can never be resized down to nothing. */
 :global(.tg-stream-panel) {
     position: absolute;
     z-index: 20;
     top: 3.6rem;
     right: 1.1rem;
     width: 320px;
+    min-width: 240px;
+    min-height: 160px;
+    display: flex;
+    flex-direction: column;
     background: rgba(5, 8, 10, 0.92);
     border: 1px solid rgba(125, 255, 176, 0.5);
     box-shadow: 0 0 24px rgba(0, 0, 0, 0.6);
@@ -257,6 +265,9 @@
     border-bottom: 1px solid rgba(125, 255, 176, 0.35);
     font-size: 0.75rem;
     letter-spacing: 0.05em;
+    flex-shrink: 0;
+    cursor: move;
+    user-select: none;
 }
 
 :global(.tg-stream-panel-close) {
@@ -272,11 +283,19 @@
 :global(.tg-stream-panel-body) {
     padding: 0.6rem 0.7rem;
     font-size: 0.7rem;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
 }
 
 :global(.tg-stream-panel-body img),
 :global(.tg-stream-panel-body video) {
     width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    object-fit: contain;
     display: block;
     border: 1px solid rgba(125, 255, 176, 0.35);
     background: #000;
@@ -286,11 +305,59 @@
     margin-top: 0.4rem;
     opacity: 0.75;
     font-size: 0.65rem;
+    flex-shrink: 0;
 }
 
 :global(.tg-stream-panel-error) {
     padding: 1.5rem 0.5rem;
     text-align: center;
+    opacity: 0.8;
+}
+
+:global(.tg-incident-type) {
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.4rem;
+    opacity: 0.9;
+}
+
+:global(.tg-panel-resize-handle) {
+    position: absolute;
+    right: 2px;
+    bottom: 2px;
+    width: 14px;
+    height: 14px;
+    cursor: nwse-resize;
+    background: linear-gradient(135deg, transparent 50%, rgba(125, 255, 176, 0.6) 50%);
+}
+
+/* Weather-on-zoom - a single fixed HUD panel (not draggable, only one ever exists) that always
+   reflects wherever the view is currently centered - built/updated entirely by
+   tactical-globe.js's setWeatherSnapshot. */
+:global(.tg-weather-panel) {
+    position: absolute;
+    z-index: 6;
+    bottom: 2.6rem;
+    left: 1.1rem;
+    max-width: 260px;
+    padding: 0.5rem 0.7rem;
+    background: rgba(5, 8, 10, 0.75);
+    border: 1px solid rgba(125, 255, 176, 0.4);
+    color: #7dffb0;
+    font-family: "Share Tech Mono", ui-monospace, monospace;
+    pointer-events: none;
+    display: none;
+}
+
+:global(.tg-weather-temp) {
+    font-size: 0.95rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+}
+
+:global(.tg-weather-meta) {
+    margin-top: 0.2rem;
+    font-size: 0.65rem;
     opacity: 0.8;
 }
 

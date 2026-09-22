@@ -16,6 +16,8 @@ window.tacticalGlobe = (function () {
     const viewers = new Map();
     let streamPanel = null;
     let snapshotRefreshTimer = null;
+    let incidentPanel = null;
+    let weatherPanel = null;
 
     async function init(containerId, dotNetRef) {
         const container = document.getElementById(containerId);
@@ -126,16 +128,19 @@ window.tacticalGlobe = (function () {
             }, 500);
         });
 
+        const incidentEntities = new Map();
         const clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
         clickHandler.setInputAction(function (movement) {
             const picked = viewer.scene.pick(movement.position);
             const entity = picked && picked.id;
             if (entity && entity._tacticalGlobeCamera) {
                 openStreamPanel(entity._tacticalGlobeCamera);
+            } else if (entity && entity._tacticalGlobeIncident) {
+                openIncidentPanel(entity._tacticalGlobeIncident);
             }
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-        viewers.set(containerId, { viewer, cameraEntities, alertEntities, radarLayer, clickHandler });
+        viewers.set(containerId, { viewer, cameraEntities, alertEntities, incidentEntities, radarLayer, clickHandler });
 
         // Fire once for the initial view so cameras appear without requiring a drag/zoom first.
         setTimeout(function () {
@@ -301,8 +306,12 @@ window.tacticalGlobe = (function () {
             } else if (event.key === 'a' || event.key === 'A') {
                 const button = document.querySelector('[data-tg-toggle="alerts"]');
                 if (button) button.click();
+            } else if (event.key === 'i' || event.key === 'I') {
+                const button = document.querySelector('[data-tg-toggle="incidents"]');
+                if (button) button.click();
             } else if (event.key === 'Escape') {
                 closeStreamPanel();
+                closeIncidentPanel();
             }
         });
     }
@@ -418,6 +427,206 @@ window.tacticalGlobe = (function () {
         }
     }
 
+    // incidents: [{ id, roadwayName, description, eventType, severity, lat, lon, sourceName,
+    // sourceAttributionUrl }]. Colored by eventType, not severity - most incident sources' own
+    // severity field is coarse/unreliable ("minor" on nearly everything, per GDOT's real feed),
+    // while eventType (accidentsAndIncidents/roadwork/closures/specialEvents) is the far more
+    // useful at-a-glance distinction for "should I care about this."
+    function setTrafficIncidents(containerIdOrIncidents, maybeIncidents) {
+        let containerId = 'tg-viewport';
+        let incidents = containerIdOrIncidents;
+        if (typeof containerIdOrIncidents === 'string') {
+            containerId = containerIdOrIncidents;
+            incidents = maybeIncidents;
+        }
+
+        const entry = viewers.get(containerId);
+        if (!entry) return;
+
+        entry.incidentEntities.forEach(function (entity) { entry.viewer.entities.remove(entity); });
+        entry.incidentEntities.clear();
+
+        (incidents || []).forEach(function (incident) {
+            const entity = entry.viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(incident.lon, incident.lat),
+                point: {
+                    pixelSize: 14,
+                    color: incidentTypeColor(incident.eventType),
+                    outlineColor: Cesium.Color.fromCssColorString('#05080a'),
+                    outlineWidth: 2,
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                }
+            });
+            entity._tacticalGlobeIncident = incident;
+            entry.incidentEntities.set(incident.id, entity);
+        });
+    }
+
+    function clearTrafficIncidents(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.incidentEntities.forEach(function (entity) { entry.viewer.entities.remove(entity); });
+        entry.incidentEntities.clear();
+    }
+
+    function incidentTypeColor(eventType) {
+        switch (eventType) {
+            case 'accidentsAndIncidents': return Cesium.Color.fromCssColorString('#ff3b3b');
+            case 'closures': return Cesium.Color.fromCssColorString('#ff9d3b');
+            case 'roadwork': return Cesium.Color.fromCssColorString('#ffe83b');
+            default: return Cesium.Color.fromCssColorString('#8fd3ff');
+        }
+    }
+
+    function openIncidentPanel(incident) {
+        closeIncidentPanel();
+
+        const shell = document.getElementById('tg-viewport').closest('.tg-shell');
+        if (!shell) return;
+
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel';
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header">' +
+            '<span>' + escapeHtml(incident.roadwayName) + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
+            '</div>' +
+            '<div class="tg-stream-panel-body">' +
+            '<div class="tg-incident-type">' + escapeHtml(formatIncidentType(incident.eventType)) + '</div>' +
+            '<div>' + escapeHtml(incident.description) + '</div>' +
+            '<div class="tg-stream-panel-meta">SOURCE: ' + escapeHtml(incident.sourceName) + '</div>' +
+            '</div>';
+
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        shell.appendChild(panel);
+        incidentPanel = panel;
+        makeDraggableAndResizable(panel, panel.querySelector('.tg-stream-panel-header'));
+    }
+
+    function closeIncidentPanel() {
+        if (incidentPanel && incidentPanel.parentNode) {
+            incidentPanel.parentNode.removeChild(incidentPanel);
+        }
+        incidentPanel = null;
+    }
+
+    function formatIncidentType(eventType) {
+        switch (eventType) {
+            case 'accidentsAndIncidents': return 'ACCIDENT / INCIDENT';
+            case 'closures': return 'CLOSURE';
+            case 'roadwork': return 'ROADWORK';
+            case 'specialEvents': return 'SPECIAL EVENT';
+            default: return (eventType || 'UNKNOWN').toUpperCase();
+        }
+    }
+
+    // snapshot: { currentTemperatureFahrenheit, currentConditions, forecastTemperatureFahrenheit,
+    // shortForecast, detailedForecast, windSpeed, windDirection, chanceOfPrecipitationPercent } or
+    // null (e.g. the view center is over open ocean/outside NWS coverage). A fixed HUD panel, not
+    // a draggable one like the stream/incident panels - there's only ever one, it always reflects
+    // "wherever the view currently is," and it updates automatically on every settle rather than
+    // being opened/closed per click.
+    function setWeatherSnapshot(containerIdOrSnapshot, maybeSnapshot) {
+        let containerId = 'tg-viewport';
+        let snapshot = containerIdOrSnapshot;
+        if (typeof containerIdOrSnapshot === 'string') {
+            containerId = containerIdOrSnapshot;
+            snapshot = maybeSnapshot;
+        }
+
+        const shell = document.getElementById(containerId);
+        const shellEl = shell && shell.closest('.tg-shell');
+        if (!shellEl) return;
+
+        if (!snapshot) {
+            if (weatherPanel) weatherPanel.style.display = 'none';
+            return;
+        }
+
+        if (!weatherPanel) {
+            weatherPanel = document.createElement('div');
+            weatherPanel.className = 'tg-weather-panel';
+            shellEl.appendChild(weatherPanel);
+        }
+
+        const currentTemp = snapshot.currentTemperatureFahrenheit;
+        const tempLine = currentTemp !== null && currentTemp !== undefined
+            ? Math.round(currentTemp) + '°F' + (snapshot.currentConditions ? ' — ' + escapeHtml(snapshot.currentConditions) : '')
+            : Math.round(snapshot.forecastTemperatureFahrenheit) + '°F (forecast)';
+        const precip = snapshot.chanceOfPrecipitationPercent !== null && snapshot.chanceOfPrecipitationPercent !== undefined
+            ? snapshot.chanceOfPrecipitationPercent + '% precip'
+            : null;
+        const windLine = [snapshot.windDirection, snapshot.windSpeed].filter(Boolean).join(' ');
+
+        weatherPanel.innerHTML =
+            '<div class="tg-weather-temp">' + tempLine + '</div>' +
+            '<div class="tg-weather-meta">' + escapeHtml(snapshot.shortForecast || '') + '</div>' +
+            '<div class="tg-weather-meta">' + [windLine, precip].filter(Boolean).map(escapeHtml).join(' · ') + '</div>';
+        weatherPanel.style.display = 'block';
+    }
+
+    // Shared by the camera-stream and incident-detail panels - drag via the header, resize via a
+    // handle in the bottom-right corner. Move/resize listeners are added to the document only
+    // for the duration of an active drag/resize gesture and removed on mouseup, rather than
+    // staying attached for the panel's whole lifetime - this is what stops them from piling up
+    // across repeated open/close cycles (a panel is destroyed and recreated on every click).
+    function makeDraggableAndResizable(panel, dragHandle) {
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+
+        function onDragMove(event) {
+            const shellRect = panel.parentElement.getBoundingClientRect();
+            panel.style.left = (event.clientX - shellRect.left - dragOffsetX) + 'px';
+            panel.style.top = (event.clientY - shellRect.top - dragOffsetY) + 'px';
+            panel.style.right = 'auto';
+        }
+        function onDragEnd() {
+            document.removeEventListener('mousemove', onDragMove);
+            document.removeEventListener('mouseup', onDragEnd);
+        }
+        dragHandle.addEventListener('mousedown', function (event) {
+            const rect = panel.getBoundingClientRect();
+            const shellRect = panel.parentElement.getBoundingClientRect();
+            // Pin the panel's current on-screen position as explicit left/top before dragging -
+            // it starts out positioned via CSS (top/right), which a drag needs to override.
+            panel.style.left = (rect.left - shellRect.left) + 'px';
+            panel.style.top = (rect.top - shellRect.top) + 'px';
+            panel.style.right = 'auto';
+            dragOffsetX = event.clientX - rect.left;
+            dragOffsetY = event.clientY - rect.top;
+            document.addEventListener('mousemove', onDragMove);
+            document.addEventListener('mouseup', onDragEnd);
+            event.preventDefault();
+        });
+
+        const resizeHandle = document.createElement('div');
+        resizeHandle.className = 'tg-panel-resize-handle';
+        panel.appendChild(resizeHandle);
+
+        let resizeStartX = 0;
+        let resizeStartY = 0;
+        let startWidth = 0;
+        let startHeight = 0;
+        function onResizeMove(event) {
+            panel.style.width = Math.max(240, startWidth + (event.clientX - resizeStartX)) + 'px';
+            panel.style.height = Math.max(160, startHeight + (event.clientY - resizeStartY)) + 'px';
+        }
+        function onResizeEnd() {
+            document.removeEventListener('mousemove', onResizeMove);
+            document.removeEventListener('mouseup', onResizeEnd);
+        }
+        resizeHandle.addEventListener('mousedown', function (event) {
+            resizeStartX = event.clientX;
+            resizeStartY = event.clientY;
+            startWidth = panel.offsetWidth;
+            startHeight = panel.offsetHeight;
+            document.addEventListener('mousemove', onResizeMove);
+            document.addEventListener('mouseup', onResizeEnd);
+            event.preventDefault();
+            event.stopPropagation();
+        });
+    }
+
     function openStreamPanel(camera) {
         closeStreamPanel();
 
@@ -436,6 +645,7 @@ window.tacticalGlobe = (function () {
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeStreamPanel);
         shell.appendChild(panel);
         streamPanel = panel;
+        makeDraggableAndResizable(panel, panel.querySelector('.tg-stream-panel-header'));
 
         const body = panel.querySelector('.tg-stream-panel-body');
         renderStream(body, camera);
@@ -535,6 +745,9 @@ window.tacticalGlobe = (function () {
         setRadarVisible: setRadarVisible,
         setWeatherAlerts: setWeatherAlerts,
         clearWeatherAlerts: clearWeatherAlerts,
+        setTrafficIncidents: setTrafficIncidents,
+        clearTrafficIncidents: clearTrafficIncidents,
+        setWeatherSnapshot: setWeatherSnapshot,
         dispose: dispose,
         isCoverageBannerDismissed: isCoverageBannerDismissed,
         dismissCoverageBanner: dismissCoverageBanner

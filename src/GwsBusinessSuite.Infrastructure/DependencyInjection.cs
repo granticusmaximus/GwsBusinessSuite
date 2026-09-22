@@ -29,6 +29,7 @@ using GwsBusinessSuite.Application.Resume;
 using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Application.SemanticSearch;
 using GwsBusinessSuite.Application.Settings;
+using GwsBusinessSuite.Application.TrafficIncidents;
 using GwsBusinessSuite.Application.SshTerminal;
 using GwsBusinessSuite.Application.Users;
 using GwsBusinessSuite.Application.Weather;
@@ -277,6 +278,14 @@ public static class DependencyInjection
             client.BaseAddress = new Uri("https://services1.arcgis.com/2iUE8l8JKrP2tygQ/");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
+        // Same free, unauthenticated GDOT ArcGIS org as the camera layer above, just a
+        // different one (GDOT_511_Events_Public_View) - real-time accidents/roadwork/closures.
+        services.AddHttpClient<ITrafficIncidentProvider, GdotTrafficIncidentProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://services1.arcgis.com/2iUE8l8JKrP2tygQ/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<TrafficIncidentDirectoryService>();
         services.AddHttpClient<ICameraFeedProvider, DatumfeedCameraProvider>(client =>
         {
             client.BaseAddress = new Uri("https://datumfeed.com/");
@@ -287,6 +296,12 @@ public static class DependencyInjection
         // a browser fetch() can never set this (forbidden header), so alerts are always fetched
         // server-side (see NwsAlertsService's own comment). No API key needed.
         services.AddHttpClient<INwsAlertsService, NwsAlertsService>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.weather.gov/");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-OverwatchGrid/1.0 (+https://www.gwsapp.net)");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddHttpClient<INwsForecastService, NwsForecastService>(client =>
         {
             client.BaseAddress = new Uri("https://api.weather.gov/");
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-OverwatchGrid/1.0 (+https://www.gwsapp.net)");

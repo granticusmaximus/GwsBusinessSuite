@@ -3999,6 +3999,7 @@ static async Task EnsureUserGuidesInSentinelAsync(IServiceProvider services, IHo
         ("SUPPORT_USER_GUIDE.md", "Support", "🛟"),
         ("SENTINEL_USER_GUIDE.md", "Sentinel & SentinelGPT", "📚"),
         ("INTELLIGENCE_USER_GUIDE.md", "Intelligence & BI", "🛰️"),
+        ("OVERWATCH_GRID_USER_GUIDE.md", "Overwatch Grid", "🌍"),
         ("AUTOMATION_USER_GUIDE.md", "Workflow Automation", "🔀"),
         ("AFFILIATE_OPERATIONS_USER_GUIDE.md", "Affiliate Operations", "🔗"),
         ("PLATFORM_OPERATIONS_USER_GUIDE.md", "Platform Operations", "🛠️"),

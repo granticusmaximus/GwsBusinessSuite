@@ -51,6 +51,12 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         AppContext.BaseDirectory,
         "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
 
+    // Real production styling for the drag/resize-relevant classes lives in
+    // OverwatchGrid.razor.css (a Blazor-scoped stylesheet), which this bare-JS harness never
+    // loads - without it, .tg-stream-panel etc. have no `position: absolute` at all, so
+    // style.left/top set by makeDraggableAndResizable would be entirely inert (a real gap this
+    // duplicates just enough of to make drag/resize testable, confirmed empirically: the drag/
+    // resize tests read a stale, unpositioned 0-diff before this was added).
     private const string HarnessHtml = """
         <!doctype html>
         <html>
@@ -58,6 +64,11 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
           <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Widgets/widgets.css" />
           <script src="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Cesium.js"></script>
           <script src="/js/tactical-globe.js"></script>
+          <style>
+            .tg-stream-panel { position: absolute; top: 3.6rem; right: 1.1rem; width: 320px; min-width: 240px; min-height: 160px; }
+            .tg-weather-panel { position: absolute; bottom: 2.6rem; left: 1.1rem; display: none; }
+            .tg-panel-resize-handle { position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px; }
+          </style>
         </head>
         <body>
           <div class="tg-shell" style="position:relative;width:800px;height:600px;">
@@ -167,6 +178,19 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                   rings: [[[-122.5, 47.5], [-122.0, 47.5], [-122.0, 48.0], [-122.5, 48.0], [-122.5, 47.5]]]
                 }]);
                 window.tacticalGlobe.clearWeatherAlerts();
+                window.tacticalGlobe.setTrafficIncidents([{
+                  id: 'incident-1', roadwayName: 'SR 101', description: 'Crash blocking left lane.',
+                  eventType: 'accidentsAndIncidents', severity: 'minor', lat: 47.6, lon: -122.3,
+                  sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org'
+                }]);
+                window.tacticalGlobe.clearTrafficIncidents();
+                window.tacticalGlobe.setWeatherSnapshot({
+                  currentTemperatureFahrenheit: 82.4, currentConditions: 'Mostly Clear',
+                  forecastTemperatureFahrenheit: 90, shortForecast: 'Chance Showers',
+                  detailedForecast: 'A chance of showers.', windSpeed: '5 mph', windDirection: 'E',
+                  chanceOfPrecipitationPercent: 50
+                });
+                window.tacticalGlobe.setWeatherSnapshot(null);
                 window.tacticalGlobe.setRadarVisible(false);
                 window.tacticalGlobe.dispose('tg-viewport');
                 return null;
@@ -177,6 +201,145 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
             """);
 
         result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task TrafficIncidentClick_ShouldOpenIncidentPanel_WithDescriptionAndType()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+
+        // Placed exactly at the default camera's look-at point (-98.5, 39.8), so it lands dead
+        // center of the canvas without needing to compute a screen projection - same technique
+        // already established for camera pins.
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setTrafficIncidents([{
+                id: 'incident-1', roadwayName: 'I-85 Northbound', description: 'Multi-vehicle crash, right lane blocked.',
+                eventType: 'accidentsAndIncidents', severity: 'minor', lat: 39.8, lon: -98.5,
+                sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org'
+              }]);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-incident-panel')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var panelText = await page.EvaluateAsync<string>("document.querySelector('.tg-incident-panel').textContent");
+        panelText.Should().Contain("I-85 Northbound").And.Contain("Multi-vehicle crash").And.Contain("ACCIDENT");
+    }
+
+    [Fact]
+    public async Task WeatherSnapshot_ShouldRenderCurrentConditionsInThePanel()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setWeatherSnapshot({
+                currentTemperatureFahrenheit: 82.4, currentConditions: 'Mostly Clear',
+                forecastTemperatureFahrenheit: 90, shortForecast: 'Chance Showers And Thunderstorms',
+                detailedForecast: 'A chance of showers.', windSpeed: '5 mph', windDirection: 'E',
+                chanceOfPrecipitationPercent: 50
+              });
+            }
+            """);
+        await page.WaitForFunctionAsync("document.querySelector('.tg-weather-panel') && document.querySelector('.tg-weather-panel').style.display === 'block'", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var panelText = await page.EvaluateAsync<string>("document.querySelector('.tg-weather-panel').textContent");
+        panelText.Should().Contain("82").And.Contain("Mostly Clear").And.Contain("Chance Showers");
+    }
+
+    [Fact]
+    public async Task WeatherSnapshot_ShouldHideThePanel_WhenGivenNull()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+
+        await page.EvaluateAsync("() => { window.tacticalGlobe.setWeatherSnapshot({ currentTemperatureFahrenheit: 70, currentConditions: 'Clear', forecastTemperatureFahrenheit: 70, shortForecast: 'Clear', detailedForecast: 'Clear', windSpeed: '0 mph', windDirection: '', chanceOfPrecipitationPercent: null }); }");
+        await page.WaitForFunctionAsync("document.querySelector('.tg-weather-panel').style.display === 'block'", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        await page.EvaluateAsync("() => { window.tacticalGlobe.setWeatherSnapshot(null); }");
+        var display = await page.EvaluateAsync<string>("document.querySelector('.tg-weather-panel').style.display");
+        display.Should().Be("none");
+    }
+
+    [Fact]
+    public async Task StreamPanel_ShouldBeDraggable_ViaItsHeader()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([{
+                id: 'cam-1', name: 'Test Camera', lat: 39.8, lon: -98.5,
+                streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot',
+                sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org'
+              }]);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-stream-panel')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var beforeTop = await page.EvaluateAsync<double>("document.querySelector('.tg-stream-panel').getBoundingClientRect().top");
+
+        var headerBox = await page.EvaluateAsync<double[]>("""
+            () => {
+              const r = document.querySelector('.tg-stream-panel-header').getBoundingClientRect();
+              return [r.left + r.width / 2, r.top + r.height / 2];
+            }
+            """);
+        await page.Mouse.MoveAsync((float)headerBox[0], (float)headerBox[1]);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync((float)(headerBox[0] + 40), (float)(headerBox[1] + 120), new MouseMoveOptions { Steps = 5 });
+        await page.Mouse.UpAsync();
+
+        var afterTop = await page.EvaluateAsync<double>("document.querySelector('.tg-stream-panel').getBoundingClientRect().top");
+        (afterTop - beforeTop).Should().BeApproximately(120, 5, "dragging the header by 120px vertically should move the panel by roughly the same amount");
+    }
+
+    [Fact]
+    public async Task StreamPanel_ShouldBeResizable_ViaTheHandle()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await InitAsync(page);
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([{
+                id: 'cam-1', name: 'Test Camera', lat: 39.8, lon: -98.5,
+                streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot',
+                sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org'
+              }]);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-panel-resize-handle')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var beforeWidth = await page.EvaluateAsync<double>("document.querySelector('.tg-stream-panel').getBoundingClientRect().width");
+
+        var handleBox = await page.EvaluateAsync<double[]>("""
+            () => {
+              const r = document.querySelector('.tg-panel-resize-handle').getBoundingClientRect();
+              return [r.left + r.width / 2, r.top + r.height / 2];
+            }
+            """);
+        await page.Mouse.MoveAsync((float)handleBox[0], (float)handleBox[1]);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync((float)(handleBox[0] + 100), (float)(handleBox[1] + 60), new MouseMoveOptions { Steps = 5 });
+        await page.Mouse.UpAsync();
+
+        var afterWidth = await page.EvaluateAsync<double>("document.querySelector('.tg-stream-panel').getBoundingClientRect().width");
+        (afterWidth - beforeWidth).Should().BeApproximately(100, 5, "dragging the resize handle 100px right should widen the panel by roughly the same amount");
     }
 
     [Fact]

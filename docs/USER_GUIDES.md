@@ -60,6 +60,8 @@ too, not that the update should be skipped.
   analyzing and making reviewable changes in one local repository or a directory of repositories.
 - [Intelligence & BI](INTELLIGENCE_USER_GUIDE.md) — Media Watch, Civic Watch, Podcast Directory,
   Business Intelligence dashboards, and Mind Maps.
+- [Overwatch Grid](OVERWATCH_GRID_USER_GUIDE.md) — the live 3D globe for public camera feeds,
+  weather, and traffic incidents.
 
 ### Operations
 
