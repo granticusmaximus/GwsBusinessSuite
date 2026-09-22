@@ -73,6 +73,16 @@ window.tacticalGlobe = (function () {
             destination: Cesium.Cartesian3.fromDegrees(-98.5, 39.8, 18000000)
         });
 
+        // A real, measured problem, not a feel-based guess: Cesium's default zoomFactor (5.0)
+        // needs roughly 24 scroll-wheel ticks just to bring the camera from the initial
+        // whole-continent view down to 5km - confirmed by directly logging camera height across
+        // a real simulated scroll sequence. That is far more scrolling than anyone would
+        // actually do to "zoom in on an area," which is exactly why hover-to-identify (gated on
+        // being this close) read as completely non-functional, and part of why zooming felt
+        // nothing like Google/Apple Maps. Raising this makes each tick zoom in noticeably
+        // farther, matching a normal map's zoom pacing.
+        viewer.scene.screenSpaceCameraController.zoomFactor = 8.0;
+
         // NOAA nowCOAST's public radar WMS (confirmed CORS-open and token-free directly against
         // the live endpoint during implementation) - added once, hidden by default, toggled via
         // .show rather than added/removed per toggle so re-enabling it is instant.
@@ -313,7 +323,11 @@ window.tacticalGlobe = (function () {
             const entity = entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(pin.lon, pin.lat),
                 point: {
-                    pixelSize: 9,
+                    // Cesium's scene.pick hit-tests against the point's actual rendered size, so
+                    // a bigger point is a genuinely bigger, easier click target, not just a
+                    // cosmetic change - 9px was hard to land precisely, especially in areas with
+                    // hundreds of nearby cameras (e.g. Austin, Georgia).
+                    pixelSize: 14,
                     color: Cesium.Color.fromCssColorString('#7dffb0'),
                     outlineColor: Cesium.Color.fromCssColorString('#05080a'),
                     outlineWidth: 2,
