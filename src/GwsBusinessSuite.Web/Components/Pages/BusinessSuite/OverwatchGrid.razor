@@ -3,9 +3,11 @@
 @attribute [Authorize(Policy = "AdminOnly")]
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.CameraIntel
+@using GwsBusinessSuite.Application.Geocoding
 @using GwsBusinessSuite.Application.Weather
 @inject CameraDirectoryService CameraDirectoryService
 @inject INwsAlertsService NwsAlertsService
+@inject IGeocodingService GeocodingService
 @inject Microsoft.Extensions.Options.IOptions<CameraIntelOptions> CameraIntelOptions
 @inject IJSRuntime JS
 @inject ILogger<OverwatchGrid> Logger
@@ -166,6 +168,13 @@
         _bootComplete = true;
         StateHasChanged();
     }
+
+    // Called from tactical-globe.js's location search instead of a client-side fetch(): the
+    // Census geocoder (this feature's fallback for exact US addresses Photon's OSM-based data
+    // often misses) isn't CORS-open at all, and Photon's own docs ask for an identifying
+    // User-Agent a browser fetch() can never set - see GeocodingService's own comment.
+    [JSInvokable]
+    public async Task<GeocodeResult?> GeocodeAsync(string query) => await GeocodingService.GeocodeAsync(query);
 
     // Raised by tactical-globe.js's camera.moveEnd handler once the view settles after a
     // drag/zoom (see initGlobe) - degrees, matching Cesium's own Rectangle-to-degrees output.

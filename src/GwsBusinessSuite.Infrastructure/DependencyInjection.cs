@@ -17,6 +17,7 @@ using GwsBusinessSuite.Application.DockerHealth;
 using GwsBusinessSuite.Application.DigitalOcean;
 using GwsBusinessSuite.Application.CjAds;
 using GwsBusinessSuite.Application.ContentStudio;
+using GwsBusinessSuite.Application.Geocoding;
 using GwsBusinessSuite.Application.GovernmentIntelligence;
 using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.LiveShow;
@@ -291,6 +292,20 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-OverwatchGrid/1.0 (+https://www.gwsapp.net)");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
+        // Both free, no API key/registration - see GeocodingService's own comment for why each
+        // is called server-side rather than straight from the browser.
+        services.AddHttpClient<IPhotonGeocoder, PhotonGeocoder>(client =>
+        {
+            client.BaseAddress = new Uri("https://photon.komoot.io/");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-OverwatchGrid/1.0 (+https://www.gwsapp.net)");
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        services.AddHttpClient<ICensusGeocoder, CensusGeocoder>(client =>
+        {
+            client.BaseAddress = new Uri("https://geocoding.geo.census.gov/");
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        services.AddScoped<IGeocodingService, GeocodingService>();
         services.AddHttpClient<ISocialPublishingService, SocialPublishingService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);

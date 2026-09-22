@@ -38,7 +38,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; " +
         "img-src 'self' data: https:; " +
         "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; " +
-        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://photon.komoot.io https://*.azurewebsites.net https://cdn.jsdelivr.net https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov; " +
+        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov; " +
         "media-src 'self' blob: https:; " +
         "worker-src 'self' blob:; " +
         "frame-src 'self'; " +
@@ -102,10 +102,21 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     // JS.InvokeVoidAsync awaits it in production. Awaiting it here too is what actually lets
     // this try/catch observe a rejection - a fire-and-forget call would only catch a
     // synchronous throw before init's first await, silently missing anything after it.
+    // The stubbed dotNetRef's invokeMethodAsync answers 'GeocodeAsync' from window.__mockGeocodeResult
+    // (set per-test before a search) rather than a mocked HTTP route - geocoding now happens via
+    // a [JSInvokable] call into the real Blazor component (see GeocodeAsync on OverwatchGrid.razor),
+    // not a client-side fetch(), so there is no HTTP request for this harness to intercept.
     private static async Task<string?> InitAsync(IPage page) => await page.EvaluateAsync<string?>("""
         async () => {
           try {
-            await window.tacticalGlobe.init('tg-viewport', { invokeMethodAsync: function () { return Promise.resolve(); } });
+            await window.tacticalGlobe.init('tg-viewport', {
+              invokeMethodAsync: function (methodName) {
+                if (methodName === 'GeocodeAsync') {
+                  return Promise.resolve(window.__mockGeocodeResult || null);
+                }
+                return Promise.resolve();
+              }
+            });
             return null;
           } catch (e) {
             return e.message;
@@ -164,12 +175,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
         await InitAsync(page);
-        await page.RouteAsync("https://photon.komoot.io/**", route => route.FulfillAsync(new()
-        {
-            Status = 200,
-            ContentType = "application/json",
-            Body = """{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Point","coordinates":[-84.3880,33.7490]},"properties":{"name":"Atlanta"}}]}"""
-        }));
+        await page.EvaluateAsync("() => { window.__mockGeocodeResult = { latitude: 33.7490, longitude: -84.3880 }; }");
 
         await page.FillAsync("#tg-search-input", "Atlanta, GA");
         await page.ClickAsync("#tg-search-button");
@@ -180,16 +186,11 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     }
 
     [Fact]
-    public async Task LocationSearch_ShouldShowNotFound_WhenPhotonReturnsNoResults()
+    public async Task LocationSearch_ShouldShowNotFound_WhenGeocodingReturnsNoResult()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
         await InitAsync(page);
-        await page.RouteAsync("https://photon.komoot.io/**", route => route.FulfillAsync(new()
-        {
-            Status = 200,
-            ContentType = "application/json",
-            Body = """{"type":"FeatureCollection","features":[]}"""
-        }));
+        await page.EvaluateAsync("() => { window.__mockGeocodeResult = null; }");
 
         await page.FillAsync("#tg-search-input", "a place that does not exist anywhere");
         await page.ClickAsync("#tg-search-button");

@@ -122,18 +122,19 @@ window.tacticalGlobe = (function () {
         }, 400);
 
         ensureKeyboardShortcutsRegistered();
-        setUpLocationSearch(viewer);
+        setUpLocationSearch(viewer, dotNetRef);
     }
 
-    // Feature: location search / jump-to. Client-side geocoding against Komoot's free public
-    // Photon API (photon.komoot.io) - built on OpenStreetMap data like Nominatim, but run as a
-    // separate public service explicitly intended for this kind of direct app usage, unlike
-    // Nominatim's own public instance. Switched after a real incident: Nominatim (this feature's
-    // original provider, matching the approach in wikiMapView.js) started returning "Access
-    // denied - see operations.osmfoundation.org/policies/nominatim/" for every request from this
-    // app - the same OSM Foundation usage-policy enforcement that separately blocked this page's
-    // old tile-based basemap. No API key, no registration, confirmed live and CORS-open.
-    function setUpLocationSearch(viewer) {
+    // Feature: location search / jump-to. Geocoded server-side via the dotNetRef already used
+    // for OnGlobeViewChanged, not a client-side fetch() - see GeocodingService's own comment for
+    // why (Photon needs a real identifying User-Agent a browser can't set; its Census Bureau
+    // fallback for exact US addresses isn't CORS-open at all). Both providers are free, need no
+    // API key, and this feature briefly called Nominatim, then Photon, directly from the browser
+    // before landing here - Nominatim started returning "Access denied" for this app (the same
+    // OSM Foundation policy enforcement that separately blocked this page's old tile-based
+    // basemap), and Photon alone still missed real, current US residential addresses often
+    // enough to matter.
+    function setUpLocationSearch(viewer, dotNetRef) {
         const input = document.getElementById('tg-search-input');
         const button = document.getElementById('tg-search-button');
         const status = document.getElementById('tg-search-status');
@@ -145,18 +146,15 @@ window.tacticalGlobe = (function () {
 
             status.textContent = 'SEARCHING...';
             try {
-                const response = await fetch('https://photon.komoot.io/api/?limit=1&q=' + encodeURIComponent(query));
-                const body = await response.json();
-                const hit = body && body.features && body.features[0];
-                const coords = hit && hit.geometry && hit.geometry.coordinates;
-                if (!coords) {
+                const hit = await dotNetRef.invokeMethodAsync('GeocodeAsync', query);
+                if (!hit) {
                     status.textContent = 'NOT FOUND';
                     return;
                 }
 
                 status.textContent = '';
                 viewer.camera.flyTo({
-                    destination: Cesium.Cartesian3.fromDegrees(Number(coords[0]), Number(coords[1]), 150000)
+                    destination: Cesium.Cartesian3.fromDegrees(Number(hit.longitude), Number(hit.latitude), 150000)
                 });
             } catch (e) {
                 status.textContent = 'SEARCH FAILED';
