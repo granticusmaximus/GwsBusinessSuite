@@ -643,7 +643,7 @@ public sealed class SentinelSavedSearch : AuditableEntity
     public required string Query { get; set; }
 }
 
-// Per-user favorited Overwatch Grid camera. Unlike SentinelNavigationEntry's TargetId (which
+// Per-user favorited Overwatch camera. Unlike SentinelNavigationEntry's TargetId (which
 // re-resolves live against this app's own DB), a CameraFeed isn't a database entity at all -
 // it's a live, provider-composed value projected fresh on every bounding-box query (see
 // CameraDirectoryService), and no provider supports "look up one camera by id" - so a favorite

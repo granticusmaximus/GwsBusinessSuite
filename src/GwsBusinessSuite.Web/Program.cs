@@ -579,7 +579,7 @@ app.Use(async (context, next) =>
         headers["X-Frame-Options"] = "SAMEORIGIN";
         headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
         headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(), payment=()";
-        // CesiumJS (Overwatch Grid, /admin/osint) genuinely requires 'unsafe-eval' and
+        // CesiumJS (Overwatch, /admin/osint) genuinely requires 'unsafe-eval' and
         // 'wasm-unsafe-eval' to function - confirmed via real browser console errors, not
         // assumed: Cesium.js itself calls eval()/new Function() internally (unrelated to the
         // OpenStreetMapImageryProvider fix earlier), and separately compiles a WebAssembly
@@ -605,7 +605,7 @@ app.Use(async (context, next) =>
             "default-src 'self';",
             scriptSrc,
             "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com;",
-            // blob: is required for Overwatch Grid specifically - Safari's CesiumJS texture
+            // blob: is required for Overwatch specifically - Safari's CesiumJS texture
             // decode path creates imagery textures via blob: URLs (confirmed via real Safari
             // console errors: "Refused to load blob:... because it does not appear in the
             // img-src directive"), unlike the Chromium path, which doesn't - so this never
@@ -613,14 +613,14 @@ app.Use(async (context, next) =>
             // decode and the globe renders as a bare untextured sphere.
             "img-src 'self' data: blob: https:;",
             "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;",
-            // cdn.jsdelivr.net: Overwatch Grid's self-hosted-via-CDN CesiumJS fetches its own
+            // cdn.jsdelivr.net: Overwatch's self-hosted-via-CDN CesiumJS fetches its own
             // Workers/Assets/ThirdParty bundle at runtime from the same jsdelivr origin already
             // trusted in script-src above. server.arcgisonline.com: the globe's base imagery -
             // real satellite/aerial tiles up to zoom 23, confirmed CORS-open, no API key/
             // registration required, not a Google product. nowcoast.noaa.gov: the optional NOAA
             // radar overlay's WMS tiles - fetched directly by the browser (confirmed CORS-open),
             // unlike NWS alert data which is proxied server-side instead (see NwsAlertsService).
-            // Overwatch Grid's own location search is geocoded server-side now (see
+            // Overwatch's own location search is geocoded server-side now (see
             // GeocodingService), so photon.komoot.io needs no browser-side entry here.
             // nominatim.openstreetmap.org and tile.openstreetmap.org are kept only for
             // wikiMapView.js's separate Wiki-page location feature, which still calls them
@@ -4005,7 +4005,7 @@ static async Task EnsureUserGuidesInSentinelAsync(IServiceProvider services, IHo
         ("SUPPORT_USER_GUIDE.md", "Support", "🛟"),
         ("SENTINEL_USER_GUIDE.md", "Sentinel & SentinelGPT", "📚"),
         ("INTELLIGENCE_USER_GUIDE.md", "Intelligence & BI", "🛰️"),
-        ("OVERWATCH_GRID_USER_GUIDE.md", "Overwatch Grid", "🌍"),
+        ("OVERWATCH_USER_GUIDE.md", "Overwatch", "🌍"),
         ("AUTOMATION_USER_GUIDE.md", "Workflow Automation", "🔀"),
         ("AFFILIATE_OPERATIONS_USER_GUIDE.md", "Affiliate Operations", "🔗"),
         ("PLATFORM_OPERATIONS_USER_GUIDE.md", "Platform Operations", "🛠️"),

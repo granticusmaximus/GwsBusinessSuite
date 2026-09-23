@@ -1,6 +1,6 @@
 namespace GwsBusinessSuite.Application.CameraIntel;
 
-// Per-admin-account bookmarks for Overwatch Grid cameras, so a specific camera can be returned
+// Per-admin-account bookmarks for Overwatch cameras, so a specific camera can be returned
 // to quickly regardless of whether it's currently in the globe's bbox-queried pin set. Returns
 // CameraFeed (not the Domain CameraFavorite entity) so the Razor page can treat a favorite
 // exactly like any other camera - same pin payload shape, same "open stream panel" flow.

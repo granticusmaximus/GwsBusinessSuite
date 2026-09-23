@@ -1,4 +1,4 @@
-// Overwatch Grid (Phase 1+2) - a self-contained CesiumJS interop module. Cesium itself is
+// Overwatch (Phase 1+2) - a self-contained CesiumJS interop module. Cesium itself is
 // loaded from jsdelivr (see OverwatchGrid.razor) rather than vendored into this repo (its
 // prebuilt release is 100+ MB of binary/minified assets - not appropriate to commit). jsdelivr
 // is already a trusted script-src/style-src/font-src origin in this app's CSP for other

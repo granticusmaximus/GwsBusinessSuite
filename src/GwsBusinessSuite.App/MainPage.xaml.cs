@@ -90,7 +90,7 @@ public partial class MainPage : ContentPage
 
 #if MACCATALYST
     // A real incident: WKWebsiteDataStore.DefaultDataStore's on-disk cache kept serving a
-    // pre-fix response for Overwatch Grid (wrong CSP header) indefinitely - the cache lives in
+    // pre-fix response for Overwatch (wrong CSP header) indefinitely - the cache lives in
     // this app's sandbox container, not process memory, so a full quit/relaunch (which the user
     // tried first) does nothing to it, unlike a normal browser tab's cache. Only cache-type data
     // is cleared here - cookies (the login session) and local storage (e.g. the coverage

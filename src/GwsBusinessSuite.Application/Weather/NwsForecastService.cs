@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Application.Weather;
 
-// Overwatch Grid's weather-on-zoom panel. Free, no API key (same api.weather.gov origin and
+// Overwatch's weather-on-zoom panel. Free, no API key (same api.weather.gov origin and
 // User-Agent requirement as NwsAlertsService - see its own comment for why this has to be
 // server-side, not a client-side fetch()). NWS's own three-step lookup: a lat/lon resolves to a
 // forecast office grid cell via /points, which hands back both a forecast URL and an

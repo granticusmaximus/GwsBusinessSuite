@@ -1,6 +1,6 @@
 namespace GwsBusinessSuite.Application.CameraIntel;
 
-// One entry in the Overwatch Grid coverage index - a "jump straight there" shortcut for a region
+// One entry in the Overwatch coverage index - a "jump straight there" shortcut for a region
 // with known live camera coverage. Deliberately a static, hand-maintained list rather than a
 // live query: no ICameraFeedProvider/CameraDirectoryService method returns "all known regions"
 // independent of a bounding box (every provider is queried bbox-first), and no provider exposes

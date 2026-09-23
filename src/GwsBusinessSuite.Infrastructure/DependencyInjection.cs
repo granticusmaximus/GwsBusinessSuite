@@ -256,7 +256,7 @@ public static class DependencyInjection
         services.AddSingleton<GwsBusinessSuite.Application.Operations.IOperationalAlertService, OperationalAlertService>();
         services.AddScoped<IGrowthReportService, GrowthReportService>();
         services.AddHostedService<GrowthReportBackgroundService>();
-        // Overwatch Grid's camera sources. WSDOT/Windy require a free, self-registered API key
+        // Overwatch's camera sources. WSDOT/Windy require a free, self-registered API key
         // (see CameraIntelOptions) and simply return no cameras for their source when
         // unconfigured. GDOT and Datumfeed need no configuration at all - both work out of the
         // box on a fresh deployment (Datumfeed's anonymous tier is rate-limited but functional;

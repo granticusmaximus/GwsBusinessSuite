@@ -8,7 +8,7 @@ namespace GwsBusinessSuite.Tests;
 //
 // 1. OpenStreetMapImageryProvider.fromUrl doesn't exist on the pinned Cesium version (it's
 //    still a plain synchronous constructor, unlike several other Cesium imagery providers), so
-//    init() threw synchronously the moment anyone opened Overwatch Grid. Left uncaught, that
+//    init() threw synchronously the moment anyone opened Overwatch. Left uncaught, that
 //    JSException-from-interop crashed the whole Blazor Server circuit - reported as "nothing
 //    opens" for the *entire app*, not just this one page.
 // 2. CesiumJS calls eval()/new Function() internally and separately compiles a WebAssembly

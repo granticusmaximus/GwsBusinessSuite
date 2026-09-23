@@ -1,6 +1,6 @@
-# Overwatch Grid — User Guide
+# Overwatch — User Guide
 
-Overwatch Grid (`/admin/osint`) is a real-time 3D globe for viewing legitimate, publicly-provided
+Overwatch (`/admin/osint`) is a real-time 3D globe for viewing legitimate, publicly-provided
 camera feeds, weather, and traffic conditions anywhere they're available — drag and zoom to any
 place on Earth, and it surfaces whatever public data exists for that spot. Everything it shows
 comes from free, publicly-provided sources (state DOTs, NOAA/NWS, OpenStreetMap-derived data,
@@ -159,7 +159,7 @@ Shortcuts are ignored while typing in the search box.
 
 ## Who can see this
 
-Overwatch Grid requires the **AdminOnly** policy, same as the rest of the Intelligence cluster.
+Overwatch requires the **AdminOnly** policy, same as the rest of the Intelligence cluster.
 
 ## Known limitations
 

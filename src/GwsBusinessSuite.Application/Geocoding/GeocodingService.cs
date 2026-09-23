@@ -1,6 +1,6 @@
 namespace GwsBusinessSuite.Application.Geocoding;
 
-// Overwatch Grid's location search. Both providers are free and need no API key/registration -
+// Overwatch's location search. Both providers are free and need no API key/registration -
 // kept server-side (not fetched straight from the browser) for two different reasons per
 // provider: Photon's docs ask for a descriptive identifying User-Agent, which a browser fetch()
 // can never set (same reason NwsAlertsService is server-side); the Census geocoder simply isn't

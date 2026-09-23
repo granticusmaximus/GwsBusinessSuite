@@ -19,11 +19,11 @@
 @inject ILogger<OverwatchGrid> Logger
 @implements IAsyncDisposable
 
-<PageTitle>Overwatch Grid</PageTitle>
+<PageTitle>Overwatch</PageTitle>
 
 <div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
     <div>
-        <h1><i class="bi bi-globe2 me-2 text-primary"></i>Overwatch Grid</h1>
+        <h1><i class="bi bi-globe2 me-2 text-primary"></i>Overwatch</h1>
         <p class="mb-0">
             Drag/zoom the globe to discover legitimate public traffic cameras and webcams in
             view. Only publicly-provided feeds are ever surfaced here - see the attribution
@@ -60,7 +60,7 @@
 
     <div class="tg-hud">
         <div>
-            <div class="tg-hud-title">Overwatch Grid // Camera + Weather Intelligence</div>
+            <div class="tg-hud-title">Overwatch // Camera + Weather Intelligence</div>
             <div class="tg-hud-sub">Public sources only - never unsecured private cameras</div>
             <div class="tg-search">
                 <input type="text" id="tg-search-input" placeholder="JUMP TO CITY, ADDRESS, OR PLACE..." autocomplete="off" />
@@ -222,7 +222,7 @@
         }
         catch (JSException ex)
         {
-            Logger.LogError(ex, "Failed to initialize the Overwatch Grid viewport.");
+            Logger.LogError(ex, "Failed to initialize the Overwatch viewport.");
             _initError = "The globe failed to start. Check the browser console for details, or try reloading.";
             StateHasChanged();
             return;
