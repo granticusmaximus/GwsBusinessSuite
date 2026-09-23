@@ -47,10 +47,14 @@ public sealed class WindyWebcamProvider(
             var webcams = root?["webcams"]?.AsArray();
             if (webcams is null)
             {
+                logger.LogWarning(
+                    "Windy webcams: response had no \"webcams\" array - raw response: {RawResponse}",
+                    root?.ToJsonString());
                 return [];
             }
 
             var results = new List<CameraFeed>();
+            var skipped = 0;
             foreach (var webcam in webcams)
             {
                 var feed = TryParse(webcam);
@@ -58,7 +62,23 @@ public sealed class WindyWebcamProvider(
                 {
                     results.Add(feed);
                 }
+                else
+                {
+                    skipped++;
+                }
             }
+
+            // The exact response shape was never confirmed against a live key (see the class
+            // comment) - this makes a real-world "why are so few Windy cameras showing up"
+            // report diagnosable from the logs instead of requiring another guess at the schema.
+            if (skipped > 0)
+            {
+                logger.LogWarning(
+                    "Windy webcams: {Skipped} of {Total} entries were skipped (missing id/location/image field) - " +
+                    "sample raw entry: {SampleEntry}",
+                    skipped, webcams.Count, webcams.Count > 0 ? webcams[0]?.ToJsonString() : null);
+            }
+
             return results;
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)

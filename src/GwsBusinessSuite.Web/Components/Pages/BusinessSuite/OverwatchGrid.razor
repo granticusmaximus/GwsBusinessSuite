@@ -134,11 +134,14 @@
         </div>
     }
 
-    @if (_hasAnyProviderConfigured && _hasSettledOnce && _visibleCameras.Count == 0)
+    @if (_hasAnyProviderConfigured && _hasSettledOnce && _visibleCameras.Count == 0 && !_emptyHintDismissed)
     {
         <div class="tg-empty-hint">
-            NO KNOWN CAMERA COVERAGE IN THIS AREA &mdash; try Washington State (WSDOT) or zoom out
-            for broader Windy webcam coverage.
+            <span>
+                NO KNOWN CAMERA COVERAGE IN THIS AREA &mdash; try Washington State (WSDOT) or zoom
+                out for broader Windy webcam coverage.
+            </span>
+            <button type="button" class="tg-empty-hint-close" aria-label="Dismiss" @onclick="() => _emptyHintDismissed = true">&times;</button>
         </div>
     }
 
@@ -175,6 +178,7 @@
     private bool _bootComplete;
     private bool _hasAnyProviderConfigured = true;
     private bool _bannerDismissed;
+    private bool _emptyHintDismissed;
     private bool _hasSettledOnce;
     private bool _radarOn;
     private bool _alertsOn;
@@ -368,6 +372,13 @@
         _hasSettledOnce = true;
         var cameras = await CameraDirectoryService.GetCamerasInBoundingBoxAsync(_lastBbox);
         _visibleCameras = cameras.ToList();
+        // Reset the dismiss so a future empty area shows the hint again - this isn't a
+        // one-time app-level notice like the provider-setup banner, it's per-location
+        // information that should reappear whenever it becomes true again.
+        if (_visibleCameras.Count > 0)
+        {
+            _emptyHintDismissed = false;
+        }
         StateHasChanged();
 
         var pins = cameras.Select(ToPinPayload).ToList();
