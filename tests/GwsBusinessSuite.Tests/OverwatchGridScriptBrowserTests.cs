@@ -711,7 +711,13 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await page.EvaluateAsync("""
             () => {
               window.__mockAnalyzeResult = 'clear skies';
-              window.__mockAnalyzeDelayMs = 300;
+              // Long enough to leave a reliable window to observe the "during" state even on a
+              // slower/more contended CI runner - confirmed via real CI failures that a short
+              // delay combined with reading DOM state immediately after ClickAsync (with no
+              // wait) is a genuine race: the click handler's synchronous disabled/text mutation
+              // can still be a tick behind ClickAsync's own return on a loaded runner, even
+              // though nothing async happens before those two lines in the handler itself.
+              window.__mockAnalyzeDelayMs = 2000;
             }
             """);
         await page.EvaluateAsync("""
@@ -731,9 +737,17 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
 
         await page.ClickAsync(".tg-stream-panel-analyze");
 
-        var duringText = await page.EvaluateAsync<string>("document.querySelector('.tg-stream-panel-analyze').textContent");
+        // Wait for the "during" state rather than reading it immediately after ClickAsync - the
+        // click handler's disable/text mutation is synchronous in the app code, but nothing
+        // guarantees it has already run on the renderer's main thread by the time Playwright's
+        // click() call itself returns, especially on a slower/loaded runner. The 2s mock delay
+        // above leaves a wide, safe window for this to become true well before the mocked
+        // response resolves and reverts it.
+        await page.WaitForFunctionAsync(
+            "document.querySelector('.tg-stream-panel-analyze').textContent === 'ANALYZING...'",
+            new PageWaitForFunctionOptions { Timeout = 5000 });
+
         var duringDisabled = await page.EvaluateAsync<bool>("document.querySelector('.tg-stream-panel-analyze').disabled");
-        duringText.Should().Be("ANALYZING...");
         duringDisabled.Should().BeTrue();
 
         await page.WaitForFunctionAsync(
