@@ -26,7 +26,8 @@ public sealed class SiteSettingsService(
             row?.OllamaTimeoutMinutesOverride,
             row?.HeroImageModelOverride,
             row?.MaxMediaUploadSizeMb ?? defaults.MaxMediaUploadSizeMb,
-            row?.HiddenNavKeys);
+            row?.HiddenNavKeys,
+            row?.VisionModelOverride);
     }
 
     public async Task SaveSettingsAsync(SiteSettingsView settings, CancellationToken cancellationToken = default)
@@ -55,6 +56,7 @@ public sealed class SiteSettingsService(
         // Not trimmed to null when empty: "" means "show every feature", which is a real choice
         // and distinct from null's "never configured, use the defaults".
         row.HiddenNavKeys = settings.HiddenNavKeys;
+        row.VisionModelOverride = string.IsNullOrWhiteSpace(settings.VisionModelOverride) ? null : settings.VisionModelOverride.Trim();
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
 

@@ -207,6 +207,16 @@ else
                         not work against a Linux-hosted local model service. Leave blank to disable the button.
                     </div>
                 </div>
+                <div class="mb-3">
+                    <label class="form-label small text-secondary">Vision analysis model</label>
+                    <input class="form-control" @bind="VisionModelOverrideInput" placeholder="e.g. llava" />
+                    <div class="form-text">
+                        Model used by Overwatch's camera ANALYZE button to describe a snapshot. Must be an
+                        installed model with vision/image-understanding capability (e.g. <code>llava</code>,
+                        <code>moondream</code>, or a multimodal Gemma 3 build) — the main SentinelGPT model is
+                        text-only and cannot be used here. Leave blank to disable the button.
+                    </div>
+                </div>
                 <div class="border rounded-3 p-3 mb-3 bg-body-tertiary">
                     <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
                         <div>
@@ -388,6 +398,7 @@ else
     private string PullModelNameInput { get; set; } = string.Empty;
     private bool _pullingModel;
     private string HeroImageModelOverrideInput { get; set; } = string.Empty;
+    private string VisionModelOverrideInput { get; set; } = string.Empty;
     private SemanticIndexStatus? SemanticIndexStatus { get; set; }
     private List<DeveloperApiKeyView> ApiKeys { get; set; } = [];
     private HashSet<string> SelectedApiScopes { get; } = [DeveloperApiScopes.ContactsRead];
@@ -422,6 +433,7 @@ else
         OllamaModelOverrideInput = settings.OllamaModelOverride ?? string.Empty;
         OllamaTimeoutOverrideInput = settings.OllamaTimeoutMinutesOverride;
         HeroImageModelOverrideInput = settings.HeroImageModelOverride ?? string.Empty;
+        VisionModelOverrideInput = settings.VisionModelOverride ?? string.Empty;
         HiddenNavKeysInput = [.. AdminFeatures.Parse(settings.HiddenNavKeys)];
         SemanticIndexStatus = await HybridSearchService.GetStatusAsync();
         ApiKeys = (await DeveloperApiKeyService.ListAsync()).ToList();
@@ -521,7 +533,8 @@ else
             {
                 OllamaModelOverride = OllamaModelOverrideInput,
                 OllamaTimeoutMinutesOverride = OllamaTimeoutOverrideInput,
-                HeroImageModelOverride = HeroImageModelOverrideInput
+                HeroImageModelOverride = HeroImageModelOverrideInput,
+                VisionModelOverride = VisionModelOverrideInput
             });
         });
     }

@@ -115,6 +115,46 @@ public sealed class OllamaServiceTests
     }
 
     [Fact]
+    public async Task ChatAsync_WithImages_ShouldIncludeAPerMessageImagesArray()
+    {
+        string? payload = null;
+        var logger = new RecordingLogger<OllamaService>();
+        var handler = new RecordingHandler(request =>
+        {
+            payload = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"message":{"content":"a quiet street"},"done":true}""")
+            };
+        });
+        var service = CreateService(handler, logger);
+
+        await service.ChatAsync("llava", [new OllamaChatMessage("user", "Describe this image.", Images: ["ZmFrZQ=="])]);
+
+        payload.Should().Contain("\"images\":[\"ZmFrZQ==\"]");
+    }
+
+    [Fact]
+    public async Task ChatAsync_WithoutImages_ShouldNotIncludeAnImagesKey()
+    {
+        string? payload = null;
+        var logger = new RecordingLogger<OllamaService>();
+        var handler = new RecordingHandler(request =>
+        {
+            payload = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"message":{"content":"ok"},"done":true}""")
+            };
+        });
+        var service = CreateService(handler, logger);
+
+        await service.ChatAsync("sentinelgpt", [new OllamaChatMessage("user", "hi")]);
+
+        payload.Should().NotContain("\"images\"");
+    }
+
+    [Fact]
     public async Task GenerateStreamAsync_ShouldCaptureInteractiveChatPerformanceWithoutPromptContent()
     {
         string? payload = null;

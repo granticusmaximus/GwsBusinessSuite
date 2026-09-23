@@ -22,11 +22,12 @@ This guide is text-only (no screenshots) — see the note at the end of
 9. [NOAA radar and severe weather alerts](#noaa-radar-and-severe-weather-alerts)
 10. [Watch wall: viewing multiple cameras at once](#watch-wall-viewing-multiple-cameras-at-once)
 11. [Favoriting a camera](#favoriting-a-camera)
-12. [Sharing a view with a teammate](#sharing-a-view-with-a-teammate)
-13. [Moving and resizing a feed/incident window](#moving-and-resizing-a-feedincident-window)
-14. [Keyboard shortcuts](#keyboard-shortcuts)
-15. [Who can see this](#who-can-see-this)
-16. [Known limitations](#known-limitations)
+12. [Analyzing a camera snapshot](#analyzing-a-camera-snapshot)
+13. [Sharing a view with a teammate](#sharing-a-view-with-a-teammate)
+14. [Moving and resizing a feed/incident window](#moving-and-resizing-a-feedincident-window)
+15. [Keyboard shortcuts](#keyboard-shortcuts)
+16. [Who can see this](#who-can-see-this)
+17. [Known limitations](#known-limitations)
 
 ---
 
@@ -130,6 +131,17 @@ favorited, with a **GO** button that flies to it and reopens its feed directly, 
 camera isn't currently showing on the globe. Favorites are tied to your admin account, not your
 browser, so they follow you across devices and after a page reload.
 
+## Analyzing a camera snapshot
+
+Open any still-image camera's feed and click **ANALYZE** in its window's title bar to get a
+plain-English description of what's currently in the shot (e.g. "light traffic, clear skies," or
+"vehicle stopped in the right lane, otherwise clear"). The button reads "ANALYZING..." while the
+description is generated, which can take a little while depending on local model load — this
+runs against a locally-hosted vision model, not a live security feed, and is a one-time,
+on-demand look rather than continuous monitoring. Live-video (Hls) cameras don't support this
+yet. If nothing happens, a vision model may not be configured — see the SentinelGPT tab in
+Settings.
+
 ## Sharing a view with a teammate
 
 Click **SHARE VIEW** next to the search box to copy a link to your clipboard that encodes exactly
@@ -188,3 +200,8 @@ Overwatch requires the **AdminOnly** policy, same as the rest of the Intelligenc
 - **A shared view link is a snapshot, not a live subscription.** It encodes a position and
   camera(s) at the moment it was copied; it doesn't stay in sync with anything afterward, and a
   hand-edited or corrupted link falls back to the default view instead of erroring.
+- **Camera snapshot analysis is on-demand only, not continuous monitoring.** It analyzes exactly
+  one frame at the moment you click ANALYZE — nothing watches a camera automatically, and it
+  doesn't work on live-video (Hls) cameras. It also requires a vision-capable model configured
+  separately from the main SentinelGPT assistant (see Settings), since the main model is
+  text-only.

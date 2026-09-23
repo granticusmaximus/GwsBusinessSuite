@@ -301,6 +301,31 @@
     cursor: default;
 }
 
+:global(.tg-stream-panel-analyze) {
+    background: none;
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    color: #7dffb0;
+    cursor: pointer;
+    font-size: 0.65rem;
+    line-height: 1;
+    padding: 0.15rem 0.4rem;
+}
+
+:global(.tg-stream-panel-analyze:disabled) {
+    opacity: 0.5;
+    cursor: default;
+}
+
+:global(.tg-stream-panel-analysis) {
+    margin-top: 0.4rem;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid rgba(125, 255, 176, 0.25);
+    border-radius: 0.25rem;
+    font-size: 0.7rem;
+    line-height: 1.3;
+    flex-shrink: 0;
+}
+
 :global(.tg-stream-panel-body) {
     padding: 0.6rem 0.7rem;
     font-size: 0.7rem;

@@ -79,13 +79,16 @@ public interface IOllamaService
 // "tool" role message (Ollama doesn't emit an id on its own tool_calls, so this is the caller's
 // own bookkeeping key - see SentinelGptToolCallLoop). ToolCalls is only meaningful on an
 // "assistant" role message that itself requested tool calls (round-tripped back into the next
-// request's message history, matching Ollama/OpenAI-style chat transcripts).
+// request's message history, matching Ollama/OpenAI-style chat transcripts). Images is only
+// meaningful on a "user" role message sent to a vision-capable model - raw base64-encoded image
+// bytes, no "data:" URI prefix (same convention as GenerateImageAsync's own return value).
 public sealed record OllamaChatMessage(
     string Role,
     string Content,
     string? ToolCallId = null,
     string? Name = null,
-    IReadOnlyList<OllamaToolCall>? ToolCalls = null);
+    IReadOnlyList<OllamaToolCall>? ToolCalls = null,
+    IReadOnlyList<string>? Images = null);
 
 // Mirrors Ollama's /api/chat "tools" array shape (OpenAI-compatible function-calling schema):
 // {"type":"function","function":{"name","description","parameters": <JSON Schema object>}}.

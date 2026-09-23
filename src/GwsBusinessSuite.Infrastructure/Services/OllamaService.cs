@@ -1,5 +1,6 @@
 using GwsBusinessSuite.Application.Abstractions;
 using System.Diagnostics;
+using System.Linq;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -286,6 +287,10 @@ public sealed class OllamaService(
                     });
                 }
                 messageObject["tool_calls"] = toolCallsArray;
+            }
+            if (message.Images is { Count: > 0 } images)
+            {
+                messageObject["images"] = new JsonArray(images.Select(image => (JsonNode)JsonValue.Create(image)!).ToArray());
             }
             messagesArray.Add(messageObject);
         }

@@ -293,6 +293,13 @@ public static class DependencyInjection
         });
         services.AddScoped<CameraDirectoryService>();
         services.AddScoped<ICameraFavoritesService, CameraFavoritesService>();
+        // Separate, short-timeout HttpClient for fetching camera snapshot bytes - distinct from
+        // IOllamaService's own 2-hour client, since the snapshot fetch itself should fail fast;
+        // the vision call's own ~90s budget is enforced separately, inside the service itself.
+        services.AddHttpClient<ICameraSnapshotAnalysisService, CameraSnapshotAnalysisService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
         // NWS's docs ask every consumer for a descriptive User-Agent identifying the app/contact -
         // a browser fetch() can never set this (forbidden header), so alerts are always fetched
         // server-side (see NwsAlertsService's own comment). No API key needed.

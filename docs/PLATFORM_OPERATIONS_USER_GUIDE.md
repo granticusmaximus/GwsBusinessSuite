@@ -343,8 +343,10 @@ downloaded — is written into the Security Audit ledger under the `SecurityOper
 - **SentinelGPT** — an Ollama model override and a generation timeout override (both blank =
   server default), a hero image generation model (feeds Content Studio's "Generate with
   SentinelGPT" button; local image generation is experimental and macOS-only today, and leaving
-  this blank disables that button entirely), and the semantic knowledge index status (document
-  count, model, last-indexed time) with a **Rebuild index** button.
+  this blank disables that button entirely), a vision analysis model (feeds Overwatch's camera
+  ANALYZE button; must be a separate, vision-capable model since the main SentinelGPT model is
+  text-only, and leaving this blank disables that button entirely), and the semantic knowledge
+  index status (document count, model, last-indexed time) with a **Rebuild index** button.
 - **Developer API** — issue scoped API keys: name, requests-per-minute rate limit, expiry
   (30/90/365 days or never), and one or more scope checkboxes. The full plaintext key is shown
   exactly once at issuance (with a copy-to-clipboard button) and is never retrievable again. Below

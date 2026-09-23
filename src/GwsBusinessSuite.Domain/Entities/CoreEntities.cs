@@ -1468,6 +1468,10 @@ public sealed class SiteSettings : AuditableEntity
     public int? OllamaTimeoutMinutesOverride { get; set; }
     public string? HeroImageModelOverride { get; set; }
     public int MaxMediaUploadSizeMb { get; set; } = 8;
+    // Feeds Overwatch's camera ANALYZE button. No safe app-wide default exists (the main
+    // sentinelgpt chat model is text-only) - unset means "feature unavailable," matching
+    // HeroImageModelOverride's own no-fallback shape.
+    public string? VisionModelOverride { get; set; }
 }
 
 public sealed class AffiliateOffer : AuditableEntity

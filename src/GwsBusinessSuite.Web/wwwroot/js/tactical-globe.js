@@ -780,6 +780,7 @@ window.tacticalGlobe = (function () {
             '<span>' + escapeHtml(camera.name) + '</span>' +
             '<span class="tg-stream-panel-header-actions">' +
             '<button type="button" class="tg-stream-panel-favorite" aria-label="Toggle favorite" aria-pressed="' + (camera.isFavorite ? 'true' : 'false') + '">' + (camera.isFavorite ? '★' : '☆') + '</button>' +
+            '<button type="button" class="tg-stream-panel-analyze" aria-label="Analyze snapshot">ANALYZE</button>' +
             '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
             '</span>' +
             '</div>' +
@@ -799,6 +800,34 @@ window.tacticalGlobe = (function () {
             });
         } else {
             favoriteButton.disabled = true;
+        }
+
+        const analyzeButton = panel.querySelector('.tg-stream-panel-analyze');
+        if (dotNetRef) {
+            analyzeButton.addEventListener('click', function () {
+                analyzeButton.disabled = true;
+                analyzeButton.textContent = 'ANALYZING...';
+                dotNetRef.invokeMethodAsync('AnalyzeCameraAsync',
+                    camera.id, camera.name, camera.lat, camera.lon, camera.streamUrl, camera.streamKind,
+                    camera.sourceName, camera.sourceAttributionUrl
+                ).then(function (resultText) {
+                    // A slow response can arrive after this exact panel was closed or replaced -
+                    // streamPanel is reassigned to null/a different panel by closeStreamPanel/a
+                    // later openStreamPanel call, so this identity check is enough to detect
+                    // that and silently no-op rather than writing into a detached node.
+                    if (streamPanel !== panel || !panel.isConnected) return;
+                    analyzeButton.disabled = false;
+                    analyzeButton.textContent = 'ANALYZE';
+                    renderAnalysisResult(panel.querySelector('.tg-stream-panel-body'), resultText);
+                }).catch(function () {
+                    if (streamPanel !== panel || !panel.isConnected) return;
+                    analyzeButton.disabled = false;
+                    analyzeButton.textContent = 'ANALYZE';
+                    renderAnalysisResult(panel.querySelector('.tg-stream-panel-body'), 'Analysis failed.');
+                });
+            });
+        } else {
+            analyzeButton.disabled = true;
         }
 
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeStreamPanel);
@@ -867,6 +896,17 @@ window.tacticalGlobe = (function () {
         meta.className = 'tg-stream-panel-meta';
         meta.textContent = 'SOURCE: ' + camera.sourceName;
         body.appendChild(meta);
+    }
+
+    // Replaces-in-place on repeat ANALYZE clicks rather than stacking a new div each time.
+    function renderAnalysisResult(body, text) {
+        let resultDiv = body.querySelector('.tg-stream-panel-analysis');
+        if (!resultDiv) {
+            resultDiv = document.createElement('div');
+            resultDiv.className = 'tg-stream-panel-analysis';
+            body.appendChild(resultDiv);
+        }
+        resultDiv.textContent = text;
     }
 
     function closeStreamPanel() {

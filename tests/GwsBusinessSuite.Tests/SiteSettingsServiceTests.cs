@@ -23,6 +23,7 @@ public sealed class SiteSettingsServiceTests
         Assert.Null(settings.OllamaTimeoutMinutesOverride);
         Assert.Null(settings.HeroImageModelOverride);
         Assert.Equal(8, settings.MaxMediaUploadSizeMb);
+        Assert.Null(settings.VisionModelOverride);
 
         // Reading defaults must not create a row on what's a hot read path (queried on
         // every /blog request, media upload, etc.).
@@ -77,6 +78,43 @@ public sealed class SiteSettingsServiceTests
         Assert.Null(reloaded.OllamaModelOverride);
         Assert.Null(reloaded.OllamaTimeoutMinutesOverride);
         Assert.Null(reloaded.HeroImageModelOverride);
+    }
+
+    [Fact]
+    public async Task SaveSettingsAsync_ShouldPersistAndReload_VisionModelOverride()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new SiteSettingsService(db, new FixedCurrentUserAccessor("grantwatson"));
+
+        await service.SaveSettingsAsync(new SiteSettingsView(
+            PostsPerPage: 12,
+            DefaultArticleCategoryId: null,
+            DefaultAuthorByline: null,
+            OllamaModelOverride: null,
+            OllamaTimeoutMinutesOverride: null,
+            HeroImageModelOverride: null,
+            MaxMediaUploadSizeMb: 8,
+            VisionModelOverride: "  llava  "));
+
+        var reloaded = await service.GetSettingsAsync();
+
+        Assert.Equal("llava", reloaded.VisionModelOverride);
+    }
+
+    [Fact]
+    public async Task SaveSettingsAsync_ShouldClearVisionModelOverride_WhenBlankPassed()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new SiteSettingsService(db, new FixedCurrentUserAccessor("grantwatson"));
+
+        await service.SaveSettingsAsync(new SiteSettingsView(
+            12, null, null, null, null, null, 8, VisionModelOverride: "llava"));
+        await service.SaveSettingsAsync(new SiteSettingsView(
+            12, null, null, null, null, null, 8, VisionModelOverride: "   "));
+
+        var reloaded = await service.GetSettingsAsync();
+
+        Assert.Null(reloaded.VisionModelOverride);
     }
 
     [Fact]

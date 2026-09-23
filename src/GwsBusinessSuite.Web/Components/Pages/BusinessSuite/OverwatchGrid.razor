@@ -12,6 +12,7 @@
 @inject TrafficIncidentDirectoryService TrafficIncidentDirectoryService
 @inject IGeocodingService GeocodingService
 @inject ICameraFavoritesService CameraFavoritesService
+@inject ICameraSnapshotAnalysisService CameraSnapshotAnalysisService
 @inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject Microsoft.Extensions.Options.IOptions<CameraIntelOptions> CameraIntelOptions
 @inject IJSRuntime JS
@@ -312,6 +313,22 @@
         _favorites = (await CameraFavoritesService.GetFavoritesAsync(_username)).ToList();
         StateHasChanged();
         return !wasFavorite;
+    }
+
+    // Called from the stream panel's ANALYZE button. Reconstructs the CameraFeed from the loose
+    // positional camera identity threaded through by tactical-globe.js - same shape as
+    // ToggleCameraFavoriteAsync, for the same JS-interop-marshals-positionally reason. Returns
+    // just the message text (success description or a clear failure reason) so the JS .then()
+    // callback stays a single string write into the result div.
+    [JSInvokable]
+    public async Task<string> AnalyzeCameraAsync(
+        string cameraId, string name, double lat, double lon, string streamUrl, string streamKind,
+        string sourceName, string sourceAttributionUrl)
+    {
+        var camera = new CameraFeed(cameraId, name, lat, lon, streamUrl,
+            Enum.Parse<CameraStreamKind>(streamKind), sourceName, sourceAttributionUrl);
+        var result = await CameraSnapshotAnalysisService.AnalyzeAsync(camera);
+        return result.Message;
     }
 
     private void ToggleFavoritesPanel()

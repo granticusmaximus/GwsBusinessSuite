@@ -90,6 +90,17 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         </html>
         """;
 
+    // Every caller must dispose the returned page (`await using var pageScope = page;` right
+    // after the call) - a real bug found in this file: with 21 tests sharing one IBrowser
+    // (PlaywrightBrowserFixture) and none of them ever closing their page, every prior test's
+    // Cesium globe (its own WebGL context, requestAnimationFrame loop, and setInterval-based
+    // snapshot refresh) stayed alive for the rest of the process, so by the last few tests in a
+    // full run there could be a dozen-plus live globes competing for the same renderer process -
+    // this reproduced as real, non-deterministic click/waitFor timeouts specifically on later
+    // tests, while every test still passed reliably in isolation. Every other Playwright test
+    // file in this repo already uses `await using var page = await fixture.Browser.NewPageAsync();`
+    // directly; this file can't do that inline since page creation lives in this shared helper,
+    // hence the two-line pattern at each call site instead.
     private static async Task<(IPage Page, List<string> ConsoleErrors)> OpenHarnessAsync(IBrowser browser)
     {
         var script = await File.ReadAllTextAsync(ScriptPath);
@@ -147,6 +158,11 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                 if (methodName === 'BuildShareLinkAsync') {
                   return Promise.resolve(window.__mockShareLink || 'https://example.test/admin/osint?v=stub');
                 }
+                if (methodName === 'AnalyzeCameraAsync') {
+                  var analyzeResult = window.__mockAnalyzeResult === undefined ? 'light traffic, clear skies' : window.__mockAnalyzeResult;
+                  var delayMs = window.__mockAnalyzeDelayMs || 0;
+                  return new Promise(function (resolve) { setTimeout(function () { resolve(analyzeResult); }, delayMs); });
+                }
                 return Promise.resolve();
               }
             });
@@ -161,6 +177,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task Init_ShouldSucceed_AgainstTheRealPinnedCesiumBuildAndTheRealCsp()
     {
         var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
 
         var error = await InitAsync(page);
         await page.WaitForTimeoutAsync(500);
@@ -175,6 +192,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task AfterInit_EveryExportedFunction_ShouldRunWithoutThrowing()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
 
         var result = await page.EvaluateAsync<string?>("""
@@ -236,6 +254,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task PinCluster_Click_ShouldZoomIn_RatherThanOpenAStreamPanel()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
 
         // Three pins a hundredth of a degree apart, at the default camera's look-at point, land
@@ -269,6 +288,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task TrafficIncidentClick_ShouldOpenIncidentPanel_WithDescriptionAndType()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
 
         // Placed exactly at the default camera's look-at point (-98.5, 39.8), so it lands dead
@@ -298,6 +318,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task WeatherSnapshot_ShouldRenderCurrentConditionsInThePanel()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
 
         await page.EvaluateAsync("""
@@ -320,6 +341,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task WeatherSnapshot_ShouldHideThePanel_WhenGivenNull()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
 
         await page.EvaluateAsync("() => { window.tacticalGlobe.setWeatherSnapshot({ currentTemperatureFahrenheit: 70, currentConditions: 'Clear', forecastTemperatureFahrenheit: 70, shortForecast: 'Clear', detailedForecast: 'Clear', windSpeed: '0 mph', windDirection: '', chanceOfPrecipitationPercent: null }); }");
@@ -334,6 +356,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task StreamPanel_ShouldBeDraggable_ViaItsHeader()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
         await page.EvaluateAsync("""
             () => {
@@ -371,6 +394,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task StreamPanel_ShouldBeResizable_ViaTheHandle()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
         await page.EvaluateAsync("""
             () => {
@@ -408,6 +432,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task SelectMode_ShouldAddToSelectionInsteadOfOpeningSinglePanel_WhenEnabled()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
         await page.EvaluateAsync("""
             () => {
@@ -437,6 +462,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task WatchWall_ShouldRenderOneTilePerSelectedCamera()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
 
         await page.EvaluateAsync("""
@@ -458,6 +484,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task WatchWall_ShouldBeDraggableAndResizable()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
         await page.EvaluateAsync("""
             () => {
@@ -501,6 +528,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task WatchWall_ClosingThenClickingACamera_ShouldStillOpenANormalStreamPanel()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
 
         // Regression guard on the renderStream singleton -> per-panel dispose refactor: using a
@@ -535,6 +563,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task FavoriteStar_ShouldInvokeToggleCameraFavoriteAsync_AndUpdateItsVisualState()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
         await page.EvaluateAsync("() => { window.__mockToggleFavoriteResult = true; }");
         await page.EvaluateAsync("""
@@ -564,9 +593,83 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     }
 
     [Fact]
+    public async Task AnalyzeButton_ShouldInvokeAnalyzeCameraAsync_AndRenderTheReturnedText()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+        await page.EvaluateAsync("() => { window.__mockAnalyzeResult = 'light traffic, clear skies'; }");
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([{
+                id: 'cam-1', name: 'Test Camera', lat: 39.8, lon: -98.5,
+                streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot',
+                sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org', isFavorite: false
+              }]);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-stream-panel-analyze')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        await page.ClickAsync(".tg-stream-panel-analyze");
+        await page.WaitForFunctionAsync(
+            "!!document.querySelector('.tg-stream-panel-analysis') && document.querySelector('.tg-stream-panel-analysis').textContent === 'light traffic, clear skies'",
+            new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var invoked = await page.EvaluateAsync<bool>(
+            "window.__invokedMethods.some(c => c.methodName === 'AnalyzeCameraAsync' && c.args[0] === 'cam-1')");
+        invoked.Should().BeTrue("clicking ANALYZE should call AnalyzeCameraAsync with the camera's id");
+    }
+
+    [Fact]
+    public async Task AnalyzeButton_ShouldShowADisabledAnalyzingState_WhileTheCallIsInFlight()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+        await page.EvaluateAsync("""
+            () => {
+              window.__mockAnalyzeResult = 'clear skies';
+              window.__mockAnalyzeDelayMs = 300;
+            }
+            """);
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([{
+                id: 'cam-1', name: 'Test Camera', lat: 39.8, lon: -98.5,
+                streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot',
+                sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org', isFavorite: false
+              }]);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-stream-panel-analyze')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        await page.ClickAsync(".tg-stream-panel-analyze");
+
+        var duringText = await page.EvaluateAsync<string>("document.querySelector('.tg-stream-panel-analyze').textContent");
+        var duringDisabled = await page.EvaluateAsync<bool>("document.querySelector('.tg-stream-panel-analyze').disabled");
+        duringText.Should().Be("ANALYZING...");
+        duringDisabled.Should().BeTrue();
+
+        await page.WaitForFunctionAsync(
+            "!!document.querySelector('.tg-stream-panel-analysis') && document.querySelector('.tg-stream-panel-analysis').textContent === 'clear skies'",
+            new PageWaitForFunctionOptions { Timeout = 5000 });
+        var afterText = await page.EvaluateAsync<string>("document.querySelector('.tg-stream-panel-analyze').textContent");
+        afterText.Should().Be("ANALYZE");
+    }
+
+    [Fact]
     public async Task ShareButton_ShouldInvokeBuildShareLinkAsync_WithTheOpenCameraAndCurrentPosition()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
         await page.EvaluateAsync("() => { window.__mockShareLink = 'https://example.test/admin/osint?v=abc123'; }");
         await page.EvaluateAsync("""
@@ -602,6 +705,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task LocationSearch_ShouldFlyToTheGeocodedResult_OnGoClick()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
         await page.EvaluateAsync("() => { window.__mockGeocodeResult = { latitude: 33.7490, longitude: -84.3880 }; }");
 
@@ -617,6 +721,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task LocationSearch_ShouldShowNotFound_WhenGeocodingReturnsNoResult()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
         await page.EvaluateAsync("() => { window.__mockGeocodeResult = null; }");
 
@@ -642,6 +747,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task HoverIdentify_ShouldShowTooltip_WhenZoomedInAndAPlaceIsFound()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
         await ZoomInBelowHoverThresholdAsync(page);
         await page.EvaluateAsync("""
@@ -664,6 +770,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task HoverIdentify_ShouldNotCallReverseGeocode_WhenZoomedOut()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
         await InitAsync(page);
         // No zoom - stays at init's own far default view (18,000 km altitude).
 
@@ -682,6 +789,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     public async Task CoverageBanner_ShouldStayDismissed_AfterDismissAndReload()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
 
         var dismissedBeforeInit = await page.EvaluateAsync<bool>("() => window.tacticalGlobe.isCoverageBannerDismissed()");
         dismissedBeforeInit.Should().BeFalse("a fresh browser/profile has never dismissed the banner");
