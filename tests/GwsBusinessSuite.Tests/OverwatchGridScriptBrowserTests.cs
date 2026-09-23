@@ -209,6 +209,8 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                   rings: [[[-122.5, 47.5], [-122.0, 47.5], [-122.0, 48.0], [-122.5, 48.0], [-122.5, 47.5]]]
                 }]);
                 window.tacticalGlobe.clearWeatherAlerts();
+                window.tacticalGlobe.setCameraAlertHighlights([{ cameraId: 'a', severity: 'Severe' }]);
+                window.tacticalGlobe.getCameraAlertSeverity('tg-viewport', 'a');
                 window.tacticalGlobe.setTrafficIncidents([{
                   id: 'incident-1', roadwayName: 'SR 101', description: 'Crash blocking left lane.',
                   eventType: 'accidentsAndIncidents', severity: 'minor', lat: 47.6, lon: -122.3,
@@ -282,6 +284,82 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         var hasStreamPanel = await page.EvaluateAsync<bool>("!!document.querySelector('.tg-stream-panel')");
         hasStreamPanel.Should().BeFalse(
             "clicking a clustered group of pins should zoom the camera in, not open any single camera's stream panel");
+    }
+
+    [Fact]
+    public async Task SetCameraAlertHighlights_ShouldHighlightOnlyTheMatchingCamera()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([
+                { id: 'cam-1', name: 'Camera 1', lat: 39.80, lon: -98.50, streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot', sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org' },
+                { id: 'cam-2', name: 'Camera 2', lat: 34.05, lon: -84.29, streamUrl: 'https://example.test/b.jpg', streamKind: 'Snapshot', sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org' }
+              ]);
+              window.tacticalGlobe.setCameraAlertHighlights([{ cameraId: 'cam-1', severity: 'Severe' }]);
+            }
+            """);
+
+        var highlighted = await page.EvaluateAsync<string?>(
+            "() => window.tacticalGlobe.getCameraAlertSeverity('tg-viewport', 'cam-1')");
+        var unhighlighted = await page.EvaluateAsync<string?>(
+            "() => window.tacticalGlobe.getCameraAlertSeverity('tg-viewport', 'cam-2')");
+
+        highlighted.Should().Be("Severe");
+        unhighlighted.Should().BeNull("only cam-1 was included in the highlights payload");
+    }
+
+    [Fact]
+    public async Task SelectingAHighlightedPin_ShouldKeepTheAlertHighlight()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([
+                { id: 'cam-1', name: 'Camera 1', lat: 39.80, lon: -98.50, streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot', sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org' }
+              ]);
+              window.tacticalGlobe.setCameraAlertHighlights([{ cameraId: 'cam-1', severity: 'Extreme' }]);
+              window.tacticalGlobe.setSelectModeEnabled('tg-viewport', true);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-selection-indicator')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var severity = await page.EvaluateAsync<string?>(
+            "() => window.tacticalGlobe.getCameraAlertSeverity('tg-viewport', 'cam-1')");
+        severity.Should().Be("Extreme", "selecting a pin (watch-wall mode) must not clear its independent alert highlight");
+    }
+
+    [Fact]
+    public async Task ClearWeatherAlerts_ShouldResetEveryCameraHighlight()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([
+                { id: 'cam-1', name: 'Camera 1', lat: 39.80, lon: -98.50, streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot', sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org' }
+              ]);
+              window.tacticalGlobe.setCameraAlertHighlights([{ cameraId: 'cam-1', severity: 'Moderate' }]);
+              window.tacticalGlobe.clearWeatherAlerts();
+            }
+            """);
+
+        var severity = await page.EvaluateAsync<string?>(
+            "() => window.tacticalGlobe.getCameraAlertSeverity('tg-viewport', 'cam-1')");
+        severity.Should().BeNull("turning ALERTS off must clear every camera pin's highlight, not just the alert polygons");
     }
 
     [Fact]

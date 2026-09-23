@@ -175,7 +175,16 @@ if [[ -n "$(git status --porcelain=v1 --untracked-files=all)" ]]; then
   worktree_state="Modified"
 fi
 
-run_check "Restore" dotnet restore GwsBusinessSuite.slnx
+# -c Release: GwsBusinessSuite.App's MacCatalyst RuntimeIdentifiers are genuinely
+# configuration-dependent (see its own csproj comment - Release gets both maccatalyst-x64 and
+# maccatalyst-arm64, any other configuration gets only the host RID). A configuration-less
+# restore evaluates as Debug and never fetches maccatalyst-x64 on this arm64 machine, so the
+# "Release build" step below (which does pass -c Release, and passes --no-restore to reuse this
+# step's output) then fails with NETSDK1047 on a truly clean obj/ - confirmed reproducible on a
+# fresh checkout, not just a stale-cache artifact. Matching the configuration here avoids that.
+# dotnet restore has no -c/--configuration switch (confirmed: MSB1001 "Unknown switch") -
+# Configuration is an MSBuild property, so it must go through -p: instead.
+run_check "Restore" dotnet restore GwsBusinessSuite.slnx -p:Configuration=Release
 run_check "Dependency vulnerability audit" \
   dotnet list GwsBusinessSuite.slnx package --vulnerable --include-transitive --no-restore
 # RunAOTCompilation=false: GwsBusinessSuite.App's Android target defaults to AOT compilation in
@@ -185,8 +194,26 @@ run_check "Dependency vulnerability audit" \
 # can't be resolved) - clients.yml's own Android publish step already disables it for the exact
 # same reason. This whole-solution build only needs to prove the code compiles, not produce an
 # AOT-optimized binary, so disabling it here carries no real cost.
+# ValidateXcodeVersion=false: this whole-solution build's only job for the iOS/MacCatalyst TFMs
+# is proving the code compiles - real mobile release builds (with the correct pinned Xcode and
+# actual signing) happen separately in clients.yml's macOS job. This script itself only ever
+# runs on ubuntu-latest in CI (see ci.yml/deploy.yml), where those TFMs are excluded from
+# GwsBusinessSuite.App's TargetFrameworks entirely (its .csproj conditions them out on Linux) -
+# so this flag is a no-op there. It only takes effect on a local macOS dev machine, where it
+# stops an installed-Xcode-vs-required-Xcode mismatch (e.g. a newer Xcode beta than the current
+# .NET workload's pinned version) from blocking every push for a reason that has nothing to do
+# with the actual code change being verified.
+# EnableCodeSigning=false: for the same "just prove it compiles" reason, iOS/MacCatalyst codesign
+# is skipped too - clients.yml's macOS job already does this for its own maccatalyst build
+# (`-p:EnableCodeSigning=false`) for the same underlying reason. Confirmed needed on a machine
+# where this repo's location (~/Desktop, under iCloud Drive's "Desktop & Documents Folders" sync -
+# see GwsBusinessSuite.App.csproj's StripICloudExtendedAttributesFromAppBundle target) causes
+# codesign to intermittently refuse a freshly-built net10.0-ios .app bundle ("resource fork,
+# Finder information, or similar detritus not allowed") even after that target strips the
+# offending extended attributes - skipping codesigning here sidesteps the race entirely, and
+# costs nothing since this build's output is never run or distributed.
 run_check "Release build" \
-  dotnet build GwsBusinessSuite.slnx -c Release --no-restore --disable-build-servers -m:1 -p:RunAOTCompilation=false
+  dotnet build GwsBusinessSuite.slnx -c Release --no-restore --disable-build-servers -m:1 -p:RunAOTCompilation=false -p:ValidateXcodeVersion=false -p:EnableCodeSigning=false
 
 if [[ "$install_playwright_deps" == true ]]; then
   # This step normally finishes in well under a minute, but its underlying `apt-get install`

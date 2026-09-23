@@ -545,7 +545,49 @@ window.tacticalGlobe = (function () {
 
     function clearWeatherAlerts(containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
-        if (entry) clearWeatherAlertEntities(entry);
+        if (!entry) return;
+        clearWeatherAlertEntities(entry);
+        entry.cameraEntities.forEach(function (entity) { applyAlertHighlight(entity, null); });
+    }
+
+    // highlights: [{ cameraId, severity }] - cameras currently inside an active alert polygon, as
+    // decided server-side (see OverwatchGrid.razor's PushAlertsAsync/GeoPolygon.Contains). Owns
+    // point.color/pixelSize only - selection (restyleSelectedPin) owns outlineColor/outlineWidth,
+    // so a pin can be selected and alert-highlighted at the same time without either clobbering
+    // the other.
+    function setCameraAlertHighlights(containerIdOrHighlights, maybeHighlights) {
+        let containerId = 'tg-viewport';
+        let highlights = containerIdOrHighlights;
+        if (typeof containerIdOrHighlights === 'string') {
+            containerId = containerIdOrHighlights;
+            highlights = maybeHighlights;
+        }
+        const entry = viewers.get(containerId);
+        if (!entry) return;
+
+        entry.cameraEntities.forEach(function (entity) { applyAlertHighlight(entity, null); });
+        (highlights || []).forEach(function (h) {
+            const entity = entry.cameraEntities.get(h.cameraId);
+            if (entity) applyAlertHighlight(entity, h.severity);
+        });
+    }
+
+    function applyAlertHighlight(entity, severity) {
+        if (!entity || !entity.point) return;
+        entity.point.color = severity ? severityColor(severity) : Cesium.Color.fromCssColorString('#7dffb0');
+        entity.point.pixelSize = severity ? 18 : 14;
+        entity._tacticalGlobeAlertSeverity = severity || null;
+    }
+
+    // Read-only accessor for the alert-highlight state applied above - Cesium's entity styling
+    // lives in WebGL, not the DOM, so this is what a test (or an admin debugging via devtools)
+    // uses to confirm a specific camera pin's current highlight, rather than sampling canvas
+    // pixels.
+    function getCameraAlertSeverity(containerId, cameraId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return null;
+        const entity = entry.cameraEntities.get(cameraId);
+        return entity ? (entity._tacticalGlobeAlertSeverity || null) : null;
     }
 
     function clearWeatherAlertEntities(entry) {
@@ -1113,6 +1155,8 @@ window.tacticalGlobe = (function () {
         setRadarVisible: setRadarVisible,
         setWeatherAlerts: setWeatherAlerts,
         clearWeatherAlerts: clearWeatherAlerts,
+        setCameraAlertHighlights: setCameraAlertHighlights,
+        getCameraAlertSeverity: getCameraAlertSeverity,
         setTrafficIncidents: setTrafficIncidents,
         clearTrafficIncidents: clearTrafficIncidents,
         setWeatherSnapshot: setWeatherSnapshot,

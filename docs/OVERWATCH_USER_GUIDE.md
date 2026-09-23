@@ -112,6 +112,13 @@ currently covers Georgia; see [Known limitations](#known-limitations) for other 
 active NWS severe weather warning as a colored polygon over the area it covers, colored by
 severity (extreme/severe/moderate).
 
+While ALERTS is on, any camera pin that currently falls inside an active alert's polygon is
+itself highlighted — recolored and enlarged to match that alert's severity color — so a camera
+sitting in the middle of a warning stands out on the globe without having to compare pin
+positions against the alert overlay by eye. The highlight clears the moment ALERTS is turned off,
+or if a later refresh shows the alert no longer covers that camera. A camera under more than one
+overlapping alert shows the more severe one.
+
 ## Watch wall: viewing multiple cameras at once
 
 Click **SELECT** (or press **S**) to enter selection mode — clicking a camera pin now adds it to

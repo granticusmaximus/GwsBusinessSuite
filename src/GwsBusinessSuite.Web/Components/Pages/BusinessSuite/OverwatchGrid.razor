@@ -439,7 +439,33 @@
             rings = a.Rings.Select(ring => ring.Select(v => new[] { v.Longitude, v.Latitude }).ToList()).ToList()
         }).ToList();
         await JS.InvokeVoidAsync("tacticalGlobe.setWeatherAlerts", payload);
+
+        // Weather-camera correlation: badge any currently-visible camera pin that falls inside
+        // one of these alert polygons, so the ALERTS and camera layers actually inform each
+        // other instead of just being two independent overlays. Worst severity wins when a
+        // camera sits under more than one overlapping alert.
+        var highlights = _visibleCameras
+            .Select(camera => new
+            {
+                cameraId = camera.Id,
+                severity = alerts
+                    .Where(a => GeoPolygon.Contains(a.Rings, camera.Latitude, camera.Longitude))
+                    .OrderBy(a => AlertSeverityRank(a.Severity))
+                    .Select(a => a.Severity)
+                    .FirstOrDefault()
+            })
+            .Where(h => h.severity is not null)
+            .ToList();
+        await JS.InvokeVoidAsync("tacticalGlobe.setCameraAlertHighlights", highlights);
     }
+
+    private static int AlertSeverityRank(string severity) => severity switch
+    {
+        "Extreme" => 0,
+        "Severe" => 1,
+        "Moderate" => 2,
+        _ => 3
+    };
 
     private async Task ToggleIncidentsAsync()
     {
