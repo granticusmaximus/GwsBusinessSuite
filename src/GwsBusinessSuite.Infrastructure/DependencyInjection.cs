@@ -263,21 +263,38 @@ public static class DependencyInjection
         // its own optional key only raises that limit).
         services.AddOptions<CameraIntelOptions>()
             .Bind(configuration.GetSection(CameraIntelOptions.SectionName));
-        services.AddHttpClient<ICameraFeedProvider, WsdotTrafficCameraProvider>(client =>
+        // Each provider is registered against its own concrete type, not the shared
+        // ICameraFeedProvider interface, as the typed-client's TClient parameter - a real,
+        // confirmed production bug: AddHttpClient<TClient, TImplementation> names its underlying
+        // HttpClient after TClient, and named-client configuration is additive across every
+        // registration sharing that name. With all four providers previously registered as
+        // AddHttpClient<ICameraFeedProvider, ...>, every one of their `configureClient` actions
+        // (including BaseAddress) ran against the SAME named client, so whichever provider was
+        // registered *last* silently won for all of them - confirmed live: GDOT's HttpClient was
+        // actually calling https://datumfeed.com/ (Datumfeed's own BaseAddress, registered last)
+        // instead of ArcGIS, returning zero real cameras for Georgia. Each provider now gets its
+        // own uniquely-named client; the separate AddScoped<ICameraFeedProvider, ...> calls right
+        // after each one keep them all resolvable via IEnumerable<ICameraFeedProvider> exactly as
+        // before, since CameraDirectoryService only depends on that interface, never a concrete
+        // provider type.
+        services.AddHttpClient<WsdotTrafficCameraProvider>(client =>
         {
             client.BaseAddress = new Uri("https://wsdot.wa.gov/Traffic/api/");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
-        services.AddHttpClient<ICameraFeedProvider, WindyWebcamProvider>(client =>
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<WsdotTrafficCameraProvider>());
+        services.AddHttpClient<WindyWebcamProvider>(client =>
         {
             client.BaseAddress = new Uri("https://api.windy.com/");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
-        services.AddHttpClient<ICameraFeedProvider, GdotTrafficCameraProvider>(client =>
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<WindyWebcamProvider>());
+        services.AddHttpClient<GdotTrafficCameraProvider>(client =>
         {
             client.BaseAddress = new Uri("https://services1.arcgis.com/2iUE8l8JKrP2tygQ/");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<GdotTrafficCameraProvider>());
         // Same free, unauthenticated GDOT ArcGIS org as the camera layer above, just a
         // different one (GDOT_511_Events_Public_View) - real-time accidents/roadwork/closures.
         services.AddHttpClient<ITrafficIncidentProvider, GdotTrafficIncidentProvider>(client =>
@@ -286,11 +303,12 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddScoped<TrafficIncidentDirectoryService>();
-        services.AddHttpClient<ICameraFeedProvider, DatumfeedCameraProvider>(client =>
+        services.AddHttpClient<DatumfeedCameraProvider>(client =>
         {
             client.BaseAddress = new Uri("https://datumfeed.com/");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<DatumfeedCameraProvider>());
         services.AddScoped<CameraDirectoryService>();
         services.AddScoped<ICameraFavoritesService, CameraFavoritesService>();
         // Separate, short-timeout HttpClient for fetching camera snapshot bytes - distinct from
