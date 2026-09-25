@@ -42,6 +42,14 @@ services:
       CameraIntel__WsdotAccessCode: ${CAMERA_INTEL_WSDOT_ACCESS_CODE:-}
       CameraIntel__WindyApiKey: ${CAMERA_INTEL_WINDY_API_KEY:-}
       CameraIntel__DatumfeedApiKey: ${CAMERA_INTEL_DATUMFEED_API_KEY:-}
+      # Mapillary's worldwide street-level imagery - free but requires this self-registered
+      # token (mapillary.com/developer); KartaView needs no key at all, so it has no entry here.
+      CameraIntel__MapillaryAccessToken: ${CAMERA_INTEL_MAPILLARY_ACCESS_TOKEN:-}
+      # Threat Intelligence page's optional keys (see ThreatIntelOptions.cs for signup links) -
+      # RDAP and the defend.network feed need no key at all; only OTX pulses and Focsec's IP
+      # reputation classification go blank until their own free key is added.
+      ThreatIntel__OtxApiKey: ${THREAT_INTEL_OTX_API_KEY:-}
+      ThreatIntel__FocsecApiKey: ${THREAT_INTEL_FOCSEC_API_KEY:-}
     restart: always
     volumes:
       - gwssuite-data:/app/data

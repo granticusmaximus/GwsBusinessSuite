@@ -23,4 +23,9 @@ public sealed class CameraIntelOptions
     public string WsdotAccessCode { get; set; } = "";
     public string WindyApiKey { get; set; } = "";
     public string DatumfeedApiKey { get; set; } = "";
+
+    // Free, self-registered access token from a Mapillary developer account
+    // (mapillary.com/developer) - same optional, absent-disables-the-feature shape as the three
+    // above. KartaView (formerly OpenStreetCam) needs no key at all - see KartaViewProvider.
+    public string MapillaryAccessToken { get; set; } = "";
 }

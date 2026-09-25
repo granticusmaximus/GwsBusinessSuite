@@ -294,24 +294,83 @@ window.tacticalGlobe = (function () {
         let debounceHandle = null;
         let requestToken = 0;
         let isDragging = false;
+        let photoIndex = 0;
 
         function hideTooltip() {
             if (tooltip) tooltip.style.display = 'none';
         }
 
-        function showTooltip(x, y, place) {
+        function positionTooltip(x, y) {
+            tooltip.style.left = (x + 16) + 'px';
+            tooltip.style.top = (y + 16) + 'px';
+            tooltip.style.display = 'block';
+        }
+
+        function ensureTooltip() {
             if (!tooltip) {
                 tooltip = document.createElement('div');
                 tooltip.className = 'tg-hover-tooltip';
                 shell.appendChild(tooltip);
             }
+            return tooltip;
+        }
+
+        function showTooltip(x, y, place) {
+            ensureTooltip();
             tooltip.innerHTML =
                 '<div class="tg-hover-tooltip-name">' + escapeHtml(place.displayName) + '</div>' +
                 (place.address ? '<div class="tg-hover-tooltip-meta">' + escapeHtml(place.address) + '</div>' : '') +
                 (place.category ? '<div class="tg-hover-tooltip-meta">' + escapeHtml(place.category) + '</div>' : '');
-            tooltip.style.left = (x + 16) + 'px';
-            tooltip.style.top = (y + 16) + 'px';
-            tooltip.style.display = 'block';
+            positionTooltip(x, y);
+        }
+
+        // Richer variant shown when GetBusinessCardAsync finds a real, named POI nearby -
+        // a clickable website link (opens in a new tab, matching how every other outbound
+        // attribution link on this page already behaves) and a simple click-through photo
+        // strip when Wikimedia Commons had geotagged photos nearby. This div stays interactive
+        // while the cursor is over it: Cesium's own MOUSE_MOVE handler below is bound to
+        // viewer.scene.canvas specifically, so it stops firing (and therefore never calls
+        // hideTooltip) once the cursor leaves the canvas and enters this overlaid DOM element -
+        // no special-casing needed for a click inside the tooltip to not immediately dismiss it.
+        function showBusinessCard(x, y, business) {
+            ensureTooltip();
+            photoIndex = 0;
+            const hasPhotos = business.photoUrls && business.photoUrls.length > 0;
+            tooltip.innerHTML =
+                '<div class="tg-hover-tooltip-name">' + escapeHtml(business.name) + '</div>' +
+                (business.category ? '<div class="tg-hover-tooltip-meta">' + escapeHtml(business.category) + '</div>' : '') +
+                (business.website
+                    ? '<a class="tg-hover-tooltip-website" href="' + escapeHtml(business.website) + '" target="_blank" rel="noopener noreferrer">Visit website &#8599;</a>'
+                    : '') +
+                (hasPhotos ? renderPhotoStrip(business.photoUrls) : '');
+            if (hasPhotos) wirePhotoStrip(tooltip, business.photoUrls);
+            positionTooltip(x, y);
+        }
+
+        function renderPhotoStrip(photoUrls) {
+            return '<div class="tg-hover-tooltip-photos">' +
+                '<button type="button" class="tg-hover-photo-prev" aria-label="Previous photo">&#8249;</button>' +
+                '<img class="tg-hover-photo-current" src="' + escapeHtml(photoUrls[0]) + '" alt="" />' +
+                '<button type="button" class="tg-hover-photo-next" aria-label="Next photo">&#8250;</button>' +
+                '<span class="tg-hover-photo-count">1 / ' + photoUrls.length + '</span>' +
+                '</div>';
+        }
+
+        function wirePhotoStrip(container, photoUrls) {
+            const img = container.querySelector('.tg-hover-photo-current');
+            const count = container.querySelector('.tg-hover-photo-count');
+            function render() {
+                img.src = photoUrls[photoIndex];
+                count.textContent = (photoIndex + 1) + ' / ' + photoUrls.length;
+            }
+            container.querySelector('.tg-hover-photo-prev').addEventListener('click', function () {
+                photoIndex = (photoIndex - 1 + photoUrls.length) % photoUrls.length;
+                render();
+            });
+            container.querySelector('.tg-hover-photo-next').addEventListener('click', function () {
+                photoIndex = (photoIndex + 1) % photoUrls.length;
+                render();
+            });
         }
 
         const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
@@ -337,8 +396,18 @@ window.tacticalGlobe = (function () {
                 const lon = Cesium.Math.toDegrees(cartographic.longitude);
 
                 const token = ++requestToken;
-                const place = await dotNetRef.invokeMethodAsync('ReverseGeocodeAsync', lat, lon);
+                // Try a real named business/POI first - only fall back to the plain
+                // reverse-geocoded address when nothing is nearby, keeping this to exactly one
+                // interop round-trip per hover in both cases.
+                const business = await dotNetRef.invokeMethodAsync('GetBusinessCardAsync', lat, lon);
                 if (token !== requestToken) return; // a newer hover already superseded this one
+                if (business) {
+                    showBusinessCard(screenPosition.x, screenPosition.y, business);
+                    return;
+                }
+
+                const place = await dotNetRef.invokeMethodAsync('ReverseGeocodeAsync', lat, lon);
+                if (token !== requestToken) return;
                 if (place) showTooltip(screenPosition.x, screenPosition.y, place);
             }, HOVER_DEBOUNCE_MS);
         }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);

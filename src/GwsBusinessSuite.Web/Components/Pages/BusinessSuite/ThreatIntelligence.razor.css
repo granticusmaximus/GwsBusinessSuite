@@ -1,0 +1,61 @@
+/* Same masthead/token system as Media Watch (NewsIntelligence.razor.css) / Civic Watch
+   (GovernmentIntelligence.razor.css) so every Intelligence-group admin page reads as one
+   product. Raw Bootstrap card/list-group/badge markup is used throughout (no custom
+   .threat-intel-only components), so the overrides below re-theme those classes directly. */
+.threat-intel {
+    --civic-bg: #f3f1eb;
+    --civic-surface: #fffdf9;
+    --civic-surface-raised: #ffffff;
+    --civic-soft: #eeece5;
+    --civic-ink: #18252b;
+    --civic-muted: #68757a;
+    --civic-line: rgba(24, 37, 43, .12);
+    --civic-accent: #c26b3a;
+    --civic-accent-strong: #196453;
+    --civic-accent-soft: #e4f0eb;
+    --civic-radius: 1rem;
+    display: block;
+    min-height: calc(100vh - 3.5rem);
+    margin: -1.5rem;
+    padding: clamp(1rem, 2.5vw, 2.5rem);
+    color: var(--civic-ink);
+    background:
+        radial-gradient(circle at 95% 0, rgba(194,107,58,.10), transparent 24rem),
+        linear-gradient(180deg, #f7f5f0 0, var(--civic-bg) 22rem);
+}
+
+/* Follows the same app-wide data-theme toggle every other Intelligence page reads (see app.js's
+   toggleTheme()) - no local/duplicate theme state. */
+:root:not([data-theme="light"]) .threat-intel {
+    --civic-bg: #141210;
+    --civic-surface: #1c1917;
+    --civic-surface-raised: #231f1d;
+    --civic-soft: #292524;
+    --civic-ink: #fafaf9;
+    --civic-muted: #a8a29e;
+    --civic-line: rgba(250, 250, 249, .14);
+    --civic-accent: #e08a56;
+    --civic-accent-strong: #4ade9d;
+    --civic-accent-soft: rgba(74, 222, 157, .14);
+}
+
+.threat-intel :global(.page-header-eyebrow) {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    font-size: .8rem;
+    font-weight: 600;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--civic-accent-strong);
+}
+
+.threat-intel :global(.card) {
+    background: var(--civic-surface-raised);
+    border-radius: var(--civic-radius);
+}
+
+.threat-intel :global(.card-header) {
+    background: var(--civic-surface) !important;
+    border-color: var(--civic-line) !important;
+}

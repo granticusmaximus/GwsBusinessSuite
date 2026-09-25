@@ -62,6 +62,8 @@ too, not that the update should be skipped.
   Business Intelligence dashboards, and Mind Maps.
 - [Overwatch](OVERWATCH_USER_GUIDE.md) — the live 3D globe for public camera feeds, weather, and
   traffic incidents.
+- [Threat Intelligence](THREAT_INTELLIGENCE_USER_GUIDE.md) — OTX threat pulses, a domain/IP
+  investigation tool, and defend.network's daily briefings.
 
 ### Operations
 

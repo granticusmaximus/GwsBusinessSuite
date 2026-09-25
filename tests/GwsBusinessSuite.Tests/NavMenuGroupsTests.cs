@@ -45,6 +45,7 @@ public class NavMenuGroupsTests
         ["admin/government-intelligence", nameof(NavMenuGroups.IntelligencePrefixes)],
         ["admin/business-intelligence", nameof(NavMenuGroups.IntelligencePrefixes)],
         ["admin/osint", nameof(NavMenuGroups.IntelligencePrefixes)],
+        ["admin/threat-intel", nameof(NavMenuGroups.IntelligencePrefixes)],
 
         // Growth & Monetization
         ["admin/cj-ads", nameof(NavMenuGroups.GrowthMonetizationPrefixes)],

@@ -1,0 +1,324 @@
+@page "/admin/threat-intel"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.ThreatIntel
+@inject IOtxThreatIntelService OtxService
+@inject IDomainIntelService DomainIntelService
+@inject IDefendNetworkFeedService DefendNetworkFeedService
+@inject ILogger<ThreatIntelligence> Logger
+
+<PageTitle>Threat Intelligence</PageTitle>
+
+<main class="threat-intel">
+<div class="page-header page-header-rich d-flex flex-wrap justify-content-between gap-3 align-items-end">
+    <div>
+        <span class="page-header-eyebrow"><i class="bi bi-shield-exclamation"></i> Threat Intelligence</span>
+        <h1>Threat Intelligence</h1>
+        <p>
+            Subscribed OTX threat pulses, a domain/IP investigation panel, and defend.network's daily
+            threat briefings - all from free, publicly-provided sources.
+        </p>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span class="fw-semibold"><i class="bi bi-broadcast"></i> OTX Threat Pulses</span>
+                <form class="d-flex gap-2" @onsubmit="SearchPulsesAsync">
+                    <input class="form-control form-control-sm" style="max-width: 12rem;" placeholder="Search pulses (optional)"
+                           value="@_otxSearchTerm" @oninput="e => _otxSearchTerm = e.Value?.ToString() ?? string.Empty" />
+                    <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@_otxLoading">
+                        <i class="bi bi-search"></i>
+                    </button>
+                </form>
+            </div>
+            <div class="card-body">
+                @if (_otxLoading)
+                {
+                    <p class="text-secondary mb-0"><i class="bi bi-arrow-repeat gws-spin"></i> Loading pulses&hellip;</p>
+                }
+                else if (string.IsNullOrWhiteSpace(Options.Value.OtxApiKey))
+                {
+                    <p class="text-secondary mb-0">
+                        No OTX API key configured - pulses are unavailable until a free, self-registered key
+                        is added (see <code>ThreatIntelOptions.cs</code>).
+                    </p>
+                }
+                else if (_otxPulses.Count == 0)
+                {
+                    <p class="text-secondary mb-0">No pulses found.</p>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush">
+                        @foreach (var pulse in _otxPulses)
+                        {
+                            <li class="list-group-item px-0">
+                                <div class="d-flex justify-content-between align-items-start gap-2">
+                                    <a href="@pulse.PulseUrl" target="_blank" rel="noopener" class="fw-semibold">@pulse.Name</a>
+                                    <span class="badge bg-secondary-subtle text-secondary-emphasis">@pulse.IndicatorCount indicators</span>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(pulse.Description))
+                                {
+                                    <p class="small text-secondary mb-1">@pulse.Description</p>
+                                }
+                                <div class="d-flex flex-wrap gap-1">
+                                    @foreach (var tag in pulse.Tags)
+                                    {
+                                        <span class="badge bg-light text-dark border">@tag</span>
+                                    }
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3">
+                <span class="fw-semibold"><i class="bi bi-search"></i> Domain / IP Investigation</span>
+            </div>
+            <div class="card-body">
+                <form class="d-flex gap-2 mb-3" @onsubmit="InvestigateAsync">
+                    <input class="form-control" placeholder="example.com or 8.8.8.8"
+                           value="@_investigateTarget" @oninput="e => _investigateTarget = e.Value?.ToString() ?? string.Empty" />
+                    <button type="submit" class="btn btn-primary" disabled="@(_investigating || string.IsNullOrWhiteSpace(_investigateTarget))">
+                        @(_investigating ? "Looking up…" : "Investigate")
+                    </button>
+                </form>
+
+                @if (_investigateResult is { } result)
+                {
+                    @if (result.Errors.Count > 0)
+                    {
+                        <div class="alert alert-warning py-2 small">
+                            @foreach (var error in result.Errors)
+                            {
+                                <div>@error</div>
+                            }
+                        </div>
+                    }
+
+                    @if (result.Registration is { } reg)
+                    {
+                        <h6 class="mt-2">Registration</h6>
+                        <dl class="row small mb-2">
+                            <dt class="col-4">Registrar / Org</dt><dd class="col-8">@(reg.Registrar ?? "Unknown")</dd>
+                            @if (reg.Registered is { } registered)
+                            {
+                                <dt class="col-4">Registered</dt><dd class="col-8">@registered.ToString("yyyy-MM-dd")</dd>
+                            }
+                            @if (reg.Expires is { } expires)
+                            {
+                                <dt class="col-4">Expires</dt><dd class="col-8">@expires.ToString("yyyy-MM-dd")</dd>
+                            }
+                            @if (reg.Nameservers.Count > 0)
+                            {
+                                <dt class="col-4">Nameservers</dt><dd class="col-8">@string.Join(", ", reg.Nameservers)</dd>
+                            }
+                            @if (reg.Statuses.Count > 0)
+                            {
+                                <dt class="col-4">Status</dt><dd class="col-8">@string.Join(", ", reg.Statuses)</dd>
+                            }
+                        </dl>
+                    }
+
+                    @if (result.DnsRecords.Count > 0)
+                    {
+                        <h6>DNS (A/AAAA)</h6>
+                        <ul class="small mb-2">
+                            @foreach (var record in result.DnsRecords)
+                            {
+                                <li><span class="badge bg-secondary-subtle text-secondary-emphasis">@record.RecordType</span> @record.Value</li>
+                            }
+                        </ul>
+                    }
+
+                    @if (result.TlsCertificate is { } tls)
+                    {
+                        <h6>TLS Certificate</h6>
+                        <dl class="row small mb-2">
+                            <dt class="col-4">Subject</dt><dd class="col-8">@tls.Subject</dd>
+                            <dt class="col-4">Issuer</dt><dd class="col-8">@tls.Issuer</dd>
+                            <dt class="col-4">Valid</dt><dd class="col-8">@tls.NotBefore.ToString("yyyy-MM-dd") &ndash; @tls.NotAfter.ToString("yyyy-MM-dd")</dd>
+                            @if (tls.SubjectAlternativeNames.Count > 0)
+                            {
+                                <dt class="col-4">SANs</dt><dd class="col-8">@string.Join(", ", tls.SubjectAlternativeNames)</dd>
+                            }
+                        </dl>
+                    }
+
+                    @if (result.IpReputation is { } rep)
+                    {
+                        <h6>IP Reputation (Focsec)</h6>
+                        <div class="d-flex flex-wrap gap-2 mb-2">
+                            <span class="badge @(rep.IsVpn ? "bg-danger" : "bg-success-subtle text-success-emphasis")">VPN: @rep.IsVpn</span>
+                            <span class="badge @(rep.IsProxy ? "bg-danger" : "bg-success-subtle text-success-emphasis")">Proxy: @rep.IsProxy</span>
+                            <span class="badge @(rep.IsTor ? "bg-danger" : "bg-success-subtle text-success-emphasis")">Tor: @rep.IsTor</span>
+                            <span class="badge @(rep.IsBot ? "bg-danger" : "bg-success-subtle text-success-emphasis")">Bot: @rep.IsBot</span>
+                            @if (!string.IsNullOrWhiteSpace(rep.CountryCode))
+                            {
+                                <span class="badge bg-light text-dark border">@rep.CountryCode</span>
+                            }
+                        </div>
+                    }
+                    else if (result.IsIpAddress && string.IsNullOrWhiteSpace(Options.Value.FocsecApiKey))
+                    {
+                        <p class="text-secondary small mb-0">
+                            No Focsec API key configured - IP reputation is unavailable until a free,
+                            self-registered key is added (see <code>ThreatIntelOptions.cs</code>).
+                        </p>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3">
+                <span class="fw-semibold"><i class="bi bi-newspaper"></i> defend.network Threat Briefings</span>
+            </div>
+            <div class="card-body">
+                @if (_briefingsLoading)
+                {
+                    <p class="text-secondary mb-0"><i class="bi bi-arrow-repeat gws-spin"></i> Loading briefings&hellip;</p>
+                }
+                else if (_briefings.Count == 0)
+                {
+                    <p class="text-secondary mb-0">No briefings available right now.</p>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush">
+                        @foreach (var briefing in _briefings)
+                        {
+                            <li class="list-group-item px-0">
+                                <div class="d-flex justify-content-between align-items-start gap-2">
+                                    <a href="@briefing.Url" target="_blank" rel="noopener" class="fw-semibold">@briefing.Title</a>
+                                    @if (briefing.PublishedAt is { } published)
+                                    {
+                                        <span class="text-secondary small text-nowrap">@published.ToString("yyyy-MM-dd")</span>
+                                    }
+                                </div>
+                                <p class="small text-secondary mb-1">@briefing.Description</p>
+                                <div class="d-flex flex-wrap gap-1">
+                                    @if (!string.IsNullOrWhiteSpace(briefing.Severity))
+                                    {
+                                        <span class="badge bg-danger-subtle text-danger-emphasis">@briefing.Severity</span>
+                                    }
+                                    @foreach (var tag in briefing.Tags)
+                                    {
+                                        <span class="badge bg-light text-dark border">@tag</span>
+                                    }
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+</main>
+
+@code {
+    private string _otxSearchTerm = string.Empty;
+    private bool _otxLoading;
+    private IReadOnlyList<OtxPulse> _otxPulses = [];
+
+    private string _investigateTarget = string.Empty;
+    private bool _investigating;
+    private DomainIntelResult? _investigateResult;
+
+    private bool _briefingsLoading;
+    private IReadOnlyList<ThreatBriefing> _briefings = [];
+
+    [Inject] private Microsoft.Extensions.Options.IOptions<ThreatIntelOptions> Options { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.WhenAll(LoadPulsesAsync(), LoadBriefingsAsync());
+    }
+
+    private async Task LoadPulsesAsync()
+    {
+        _otxLoading = true;
+        try
+        {
+            _otxPulses = await OtxService.GetPulsesAsync(null);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load OTX pulses");
+            _otxPulses = [];
+        }
+        finally
+        {
+            _otxLoading = false;
+        }
+    }
+
+    private async Task SearchPulsesAsync()
+    {
+        _otxLoading = true;
+        StateHasChanged();
+        try
+        {
+            _otxPulses = await OtxService.GetPulsesAsync(string.IsNullOrWhiteSpace(_otxSearchTerm) ? null : _otxSearchTerm);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to search OTX pulses");
+            _otxPulses = [];
+        }
+        finally
+        {
+            _otxLoading = false;
+        }
+    }
+
+    private async Task InvestigateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_investigateTarget)) return;
+
+        _investigating = true;
+        StateHasChanged();
+        try
+        {
+            _investigateResult = await DomainIntelService.InvestigateAsync(_investigateTarget.Trim());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to investigate {Target}", _investigateTarget);
+            _investigateResult = null;
+        }
+        finally
+        {
+            _investigating = false;
+        }
+    }
+
+    private async Task LoadBriefingsAsync()
+    {
+        _briefingsLoading = true;
+        try
+        {
+            _briefings = await DefendNetworkFeedService.GetRecentBriefingsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load defend.network briefings");
+            _briefings = [];
+        }
+        finally
+        {
+            _briefingsLoading = false;
+        }
+    }
+}

@@ -17,7 +17,7 @@ public static class NavMenuGroups
         ["admin/sentinel", "admin/wiki", "admin/mind-maps", "admin/cms-knowledge"];
 
     public static readonly IReadOnlyList<string> IntelligencePrefixes =
-        ["admin/news-intelligence", "admin/government-intelligence", "admin/business-intelligence", "admin/osint"];
+        ["admin/news-intelligence", "admin/government-intelligence", "admin/business-intelligence", "admin/osint", "admin/threat-intel"];
 
     public static readonly IReadOnlyList<string> GrowthMonetizationPrefixes =
         ["admin/cj-ads", "admin/affiliate"];

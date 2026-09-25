@@ -9,6 +9,7 @@ using GwsBusinessSuite.Application.AppGeneration;
 using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Billing;
 using GwsBusinessSuite.Application.CameraIntel;
+using GwsBusinessSuite.Application.ThreatIntel;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Comments;
@@ -309,8 +310,56 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<DatumfeedCameraProvider>());
+        // KartaView - genuinely no API key required (verified directly), worldwide but
+        // sparse/uneven street-level photo coverage.
+        services.AddHttpClient<KartaViewProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.openstreetcam.org/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<KartaViewProvider>());
+        // Mapillary - free but requires a self-registered access token (MapillaryAccessToken);
+        // returns no cameras for this source when unconfigured, same as WSDOT/Windy.
+        services.AddHttpClient<MapillaryImageryProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://graph.mapillary.com/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<MapillaryImageryProvider>());
         services.AddScoped<CameraDirectoryService>();
+        // Overpass + Wikimedia Commons - both called via a plain IHttpClientFactory.CreateClient()
+        // client with full absolute URLs (two different hosts, neither needs a dedicated
+        // BaseAddress/timeout), so no AddHttpClient<T> registration is needed here.
+        services.AddScoped<IBusinessInfoService, OverpassBusinessInfoService>();
         services.AddScoped<ICameraFavoritesService, CameraFavoritesService>();
+        // Threat Intelligence page. OtxApiKey/FocsecApiKey are optional, self-registered keys
+        // (same "absent disables just that section" shape as CameraIntelOptions) - RDAP and the
+        // defend.network feed need no key at all and already work on a fresh deployment.
+        services.AddOptions<ThreatIntelOptions>()
+            .Bind(configuration.GetSection(ThreatIntelOptions.SectionName));
+        services.AddHttpClient<IOtxThreatIntelService, OtxThreatIntelService>(client =>
+        {
+            client.BaseAddress = new Uri("https://otx.alienvault.com/api/v1/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        // No BaseAddress - RDAP (rdap.org) and Focsec (api.focsec.com) are two different hosts
+        // called with full absolute URLs from within the same service. A User-Agent is required
+        // here, not just polite: confirmed directly that rdap.org's Cloudflare front returns a
+        // real 403 for a request with no User-Agent at all (the .NET HttpClient default), while
+        // the exact same request with any User-Agent set succeeds with its normal 302 redirect.
+        services.AddHttpClient<IDomainIntelService, DomainIntelService>(client =>
+        {
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-ThreatIntel/1.0 (+https://www.gwsapp.net)");
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        // Thin seams around System.Net.Dns / a live SslStream handshake, purely so
+        // DomainIntelService's DNS/TLS lookups are exercisable in tests without a real network
+        // call - see IDnsResolver/ITlsCertificateFetcher's own doc comments.
+        services.AddScoped<IDnsResolver, SystemDnsResolver>();
+        services.AddScoped<ITlsCertificateFetcher, SslStreamTlsCertificateFetcher>();
+        // Plain IHttpClientFactory.CreateClient() default client - same rationale as
+        // OverpassBusinessInfoService above (one absolute-URL host, no dedicated config needed).
+        services.AddScoped<IDefendNetworkFeedService, DefendNetworkFeedService>();
         // Separate, short-timeout HttpClient for fetching camera snapshot bytes - distinct from
         // IOllamaService's own 2-hour client, since the snapshot fetch itself should fail fast;
         // the vision call's own ~90s budget is enforced separately, inside the service itself.

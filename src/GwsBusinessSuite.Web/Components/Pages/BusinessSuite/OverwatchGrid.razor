@@ -13,6 +13,7 @@
 @inject IGeocodingService GeocodingService
 @inject ICameraFavoritesService CameraFavoritesService
 @inject ICameraSnapshotAnalysisService CameraSnapshotAnalysisService
+@inject IBusinessInfoService BusinessInfoService
 @inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject Microsoft.Extensions.Options.IOptions<CameraIntelOptions> CameraIntelOptions
 @inject IJSRuntime JS
@@ -38,11 +39,13 @@
     <div class="alert alert-info alert-dismissible d-flex gap-2 align-items-start" role="note">
         <i class="bi bi-info-circle-fill mt-1" aria-hidden="true"></i>
         <div>
-            No setup required: Georgia (GDOT) and Datumfeed's coverage (Austin, California,
-            Ontario, Ottawa, Toronto, London, and Washington State) already work with zero
-            registration. Optional API keys exist only to add Windy's global public webcams or
-            raise Datumfeed's anonymous rate limit - see <code>CameraIntelOptions.cs</code> if
-            you ever want either; nothing here requires them.
+            No setup required: Georgia (GDOT), Datumfeed's coverage (Austin, California,
+            Ontario, Ottawa, Toronto, London, and Washington State), and KartaView's worldwide
+            crowdsourced street-level imagery already work with zero registration. Optional API
+            keys exist only to add Windy's global public webcams, Mapillary's worldwide street
+            imagery, or raise Datumfeed's anonymous rate limit - see
+            <code>CameraIntelOptions.cs</code> if you ever want any of those; nothing here
+            requires them.
         </div>
         <button type="button" class="btn-close" aria-label="Dismiss" @onclick="DismissBannerAsync"></button>
     </div>
@@ -146,7 +149,7 @@
     }
 
     <div class="tg-attribution">
-        <span>Basemap: Esri, Maxar, Earthstar Geographics &middot; WSDOT &middot; GDOT &middot; Windy &middot; Datumfeed (Austin/Caltrans/Ontario/Ottawa/Toronto/London) &middot; NOAA/NWS &middot; Search: Photon/OSM, US Census Bureau</span>
+        <span>Basemap: Esri, Maxar, Earthstar Geographics &middot; WSDOT &middot; GDOT &middot; Windy &middot; Datumfeed (Austin/Caltrans/Ontario/Ottawa/Toronto/London) &middot; Mapillary &middot; KartaView &middot; Overpass/OSM &middot; Wikimedia Commons &middot; NOAA/NWS &middot; Search: Photon/OSM, US Census Bureau</span>
         <span>ADMIN // AUTHORIZED ACCESS ONLY &middot; R: radar &middot; A: alerts &middot; I: incidents &middot; C: coverage &middot; S: select for watch wall &middot; F: favorites &middot; Esc: close feed</span>
     </div>
 
@@ -196,7 +199,8 @@
     {
         var options = CameraIntelOptions.Value;
         _hasAnyProviderConfigured = !string.IsNullOrWhiteSpace(options.WsdotAccessCode)
-            || !string.IsNullOrWhiteSpace(options.WindyApiKey);
+            || !string.IsNullOrWhiteSpace(options.WindyApiKey)
+            || !string.IsNullOrWhiteSpace(options.MapillaryAccessToken);
 
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
         _favorites = (await CameraFavoritesService.GetFavoritesAsync(_username)).ToList();
@@ -277,6 +281,13 @@
     [JSInvokable]
     public async Task<PlaceInfo?> ReverseGeocodeAsync(double latitude, double longitude) =>
         await GeocodingService.ReverseGeocodeAsync(latitude, longitude);
+
+    // Enriches the same hover-identify gesture above: when a real, named business/POI is nearby,
+    // the hover tooltip shows its name/website/photos instead of the plain address. Also called
+    // from the debounced pointer-move handler, same reasoning as ReverseGeocodeAsync.
+    [JSInvokable]
+    public async Task<BusinessCardInfo?> GetBusinessCardAsync(double latitude, double longitude) =>
+        await BusinessInfoService.GetBusinessCardAsync(latitude, longitude);
 
     // Shared by the bbox pin push, the favorites panel's "GO" action, and shareable view links -
     // one camera-identity/payload shape used everywhere a camera crosses the JS interop boundary.

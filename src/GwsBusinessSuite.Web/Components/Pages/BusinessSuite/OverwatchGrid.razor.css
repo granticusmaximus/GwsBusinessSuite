@@ -580,6 +580,51 @@
     margin-top: 0.15rem;
 }
 
+/* Business-card enrichment (see showBusinessCard) - the only genuinely interactive content this
+   tooltip ever holds, so pointer-events is switched back on just for these two pieces rather
+   than the tooltip as a whole, keeping the plain address tooltip's original click-through
+   behavior unchanged. */
+:global(.tg-hover-tooltip-website) {
+    display: inline-block;
+    margin-top: 0.3rem;
+    color: #7dffb0;
+    text-decoration: underline;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+:global(.tg-hover-tooltip-photos) {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    margin-top: 0.4rem;
+    pointer-events: auto;
+}
+
+:global(.tg-hover-photo-current) {
+    width: 160px;
+    height: 90px;
+    object-fit: cover;
+    border: 1px solid rgba(125, 255, 176, 0.4);
+}
+
+:global(.tg-hover-photo-prev),
+:global(.tg-hover-photo-next) {
+    background: rgba(125, 255, 176, 0.15);
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    color: #7dffb0;
+    font-size: 0.9rem;
+    line-height: 1;
+    padding: 0.2rem 0.4rem;
+    cursor: pointer;
+}
+
+:global(.tg-hover-photo-count) {
+    font-size: 0.62rem;
+    opacity: 0.75;
+    white-space: nowrap;
+}
+
 /* Coverage index - rendered directly by OverwatchGrid.razor's own markup (not built by JS), so
    these stay plain scoped rules, unlike the :global() ones above for JS-injected panels. A
    plain static list, not draggable - there's only ever one and it needs no resizing. */

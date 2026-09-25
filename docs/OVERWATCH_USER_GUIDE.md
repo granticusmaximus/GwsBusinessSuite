@@ -78,11 +78,14 @@ searching or panning — useful as a starting point if you don't already know wh
 ## Hovering to identify a place
 
 Once zoomed in close enough to make it meaningful, hovering the cursor over the globe (and
-pausing briefly) shows a small tooltip naming whatever's there — a business, landmark, or street
-address. This only appears for places that are actually named in the underlying public map data;
-hovering over an ordinary, untagged building will show nothing rather than a guess. See
-[Known limitations](#known-limitations) for why that gap exists and isn't fully fixable with free
-data sources.
+pausing briefly) shows a small tooltip naming whatever's there. When a tagged business or point
+of interest is nearby, the tooltip becomes a business card: its name, category, a website link
+(opens in a new tab, when the business has listed one), and — when geotagged photos exist nearby
+— a small click-through photo strip with previous/next buttons. When no business is found nearby,
+it falls back to a plain place/address label instead. This only appears for places that are
+actually named in the underlying public map data; hovering over an ordinary, untagged building
+will show nothing rather than a guess. See [Known limitations](#known-limitations) for why that
+gap exists and isn't fully fixable with free data sources.
 
 ## Searching for a location
 
@@ -188,10 +191,16 @@ Overwatch requires the **AdminOnly** policy, same as the rest of the Intelligenc
   bug, and isn't something more code tuning alone can fix without switching to a paid, richer
   places database (not currently in place).
 - **Camera coverage is real but regional.** Confirmed, zero-registration coverage today: Georgia
-  (statewide), Washington State, and Datumfeed's aggregated cities (Austin, California, Ontario,
-  Ottawa, Toronto, London). Optional free API keys (see `CameraIntelOptions.cs`) can add Windy's
-  global public webcams or raise Datumfeed's anonymous rate limit, but nothing on the page requires
-  them.
+  (statewide), Washington State, Datumfeed's aggregated cities (Austin, California, Ontario,
+  Ottawa, Toronto, London), and KartaView's worldwide crowdsourced street-level imagery (real
+  coverage depends entirely on whether volunteers have driven and uploaded a given street — dense
+  in some cities, sparse or empty elsewhere). Optional free API keys (see `CameraIntelOptions.cs`)
+  can add Windy's global public webcams, Mapillary's worldwide street-level imagery, or raise
+  Datumfeed's anonymous rate limit, but nothing on the page requires them.
+- **Mapillary and KartaView show still photos, not live video** — they're crowdsourced street-level
+  imagery platforms (dashcam/mapping-rig captures uploaded over time), not real-time cameras, so a
+  pin from either source shows what that spot looked like whenever it was last photographed, not
+  what it looks like right now.
 - **Traffic incidents currently cover Georgia only** (GDOT's real-time events feed). Other states
   publish similar open data, but each one needs its own verified integration — not yet built.
 - **No historical storm-damage layer.** The alerts layer shows currently active severe weather in
