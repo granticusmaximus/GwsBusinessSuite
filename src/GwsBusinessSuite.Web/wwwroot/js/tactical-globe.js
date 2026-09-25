@@ -19,6 +19,41 @@ window.tacticalGlobe = (function () {
     let incidentPanel = null;
     let weatherPanel = null;
 
+    // Camera pins render as billboards (textured quad sprites), not Cesium's `point` graphics
+    // (a raw GL_POINTS primitive) - a real, confirmed production incident: on at least one real
+    // Mac (both Safari and Chrome, ruling out a single browser engine), `point` entities never
+    // rendered at all - zero pixels, zero console errors, zero exceptions - while everything else
+    // (imagery tiles, labels, the base globe) rendered correctly. Imagery tiles use the exact same
+    // textured-quad rendering path billboards do, which is why they kept working; GL_POINTS is a
+    // much less consistently supported primitive across GPU/driver combinations. Confirmed via
+    // direct on-device testing: hardware-accelerated WebGL, no extensions (reproduced in
+    // Incognito), correct canvas size, `Cesium`/`tacticalGlobe` both loaded - a hand-injected
+    // point-graphics test entity still rendered nothing, ruling out data/pipeline causes entirely.
+    // Billboards are also what most real Cesium marker examples use in the first place, so this
+    // is the actually well-trodden path, not a workaround.
+    // White fill + a baked-in outline color, so a runtime `billboard.color` tint (multiplied
+    // against the image) recolors only the fill - a near-black outline stays visually near-black
+    // under any tint (black * anything is still ~black), and a bright outline stays legible too.
+    function createPinBillboardImage(outlineColor, outlineWidth) {
+        const size = 28;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        const radius = (size - outlineWidth) / 2 - 1;
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, radius, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = outlineWidth;
+        ctx.strokeStyle = outlineColor;
+        ctx.stroke();
+        return canvas.toDataURL();
+    }
+
+    const pinBillboardImage = createPinBillboardImage('#05080a', 2);
+    const pinBillboardImageSelected = createPinBillboardImage('#ffe066', 4);
+
     async function init(containerId, dotNetRef) {
         const container = document.getElementById(containerId);
         if (!container || viewers.has(containerId)) return;
@@ -123,14 +158,16 @@ window.tacticalGlobe = (function () {
         cameraDataSource.clustering.minimumClusterSize = 3;
         cameraDataSource.clustering.clusterEvent.addEventListener(function (clusteredEntities, cluster) {
             // Restyle Cesium's default cluster billboard (a stock pin icon) to match the
-            // terminal theme's own camera-pin look instead - a solid point plus a count label.
-            cluster.billboard.show = false;
-            cluster.point.show = true;
-            cluster.point.pixelSize = 20;
-            cluster.point.color = Cesium.Color.fromCssColorString('#7dffb0');
-            cluster.point.outlineColor = Cesium.Color.fromCssColorString('#05080a');
-            cluster.point.outlineWidth = 2;
-            cluster.point.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            // terminal theme's own camera-pin look instead - a solid dot plus a count label.
+            // Uses the same billboard image as individual pins (not Cesium's `point` graphics -
+            // see the top-of-file comment on pinBillboardImage for why) rather than hiding the
+            // billboard and drawing a point instead.
+            cluster.billboard.show = true;
+            cluster.billboard.image = pinBillboardImage;
+            cluster.billboard.width = 20;
+            cluster.billboard.height = 20;
+            cluster.billboard.color = Cesium.Color.fromCssColorString('#7dffb0');
+            cluster.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
             cluster.label.show = true;
             cluster.label.text = clusteredEntities.length.toString();
             cluster.label.font = 'bold 13px "Share Tech Mono", monospace';
@@ -471,15 +508,15 @@ window.tacticalGlobe = (function () {
         (pins || []).forEach(function (pin) {
             const entity = entry.cameraDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(pin.lon, pin.lat),
-                point: {
-                    // Cesium's scene.pick hit-tests against the point's actual rendered size, so
-                    // a bigger point is a genuinely bigger, easier click target, not just a
-                    // cosmetic change - 9px was hard to land precisely, especially in areas with
+                billboard: {
+                    // scene.pick hit-tests against the billboard's actual rendered size, so a
+                    // bigger billboard is a genuinely bigger, easier click target, not just a
+                    // cosmetic change - 14px was hard to land precisely, especially in areas with
                     // hundreds of nearby cameras (e.g. Austin, Georgia).
-                    pixelSize: 14,
+                    image: pinBillboardImage,
+                    width: 14,
+                    height: 14,
                     color: Cesium.Color.fromCssColorString('#7dffb0'),
-                    outlineColor: Cesium.Color.fromCssColorString('#05080a'),
-                    outlineWidth: 2,
                     disableDepthTestDistance: Number.POSITIVE_INFINITY
                 }
             });
@@ -573,9 +610,10 @@ window.tacticalGlobe = (function () {
     }
 
     function applyAlertHighlight(entity, severity) {
-        if (!entity || !entity.point) return;
-        entity.point.color = severity ? severityColor(severity) : Cesium.Color.fromCssColorString('#7dffb0');
-        entity.point.pixelSize = severity ? 18 : 14;
+        if (!entity || !entity.billboard) return;
+        entity.billboard.color = severity ? severityColor(severity) : Cesium.Color.fromCssColorString('#7dffb0');
+        entity.billboard.width = severity ? 18 : 14;
+        entity.billboard.height = severity ? 18 : 14;
         entity._tacticalGlobeAlertSeverity = severity || null;
     }
 
@@ -626,11 +664,11 @@ window.tacticalGlobe = (function () {
         (incidents || []).forEach(function (incident) {
             const entity = entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(incident.lon, incident.lat),
-                point: {
-                    pixelSize: 14,
+                billboard: {
+                    image: pinBillboardImage,
+                    width: 14,
+                    height: 14,
                     color: incidentTypeColor(incident.eventType),
-                    outlineColor: Cesium.Color.fromCssColorString('#05080a'),
-                    outlineWidth: 2,
                     disableDepthTestDistance: Number.POSITIVE_INFINITY
                 }
             });
@@ -1064,9 +1102,13 @@ window.tacticalGlobe = (function () {
 
     function restyleSelectedPin(entry, cameraId, selected) {
         const entity = entry.cameraEntities.get(cameraId);
-        if (!entity || !entity.point) return;
-        entity.point.outlineColor = Cesium.Color.fromCssColorString(selected ? '#ffe066' : '#05080a');
-        entity.point.outlineWidth = selected ? 4 : 2;
+        if (!entity || !entity.billboard) return;
+        // Swapping the underlying image (rather than an outlineColor/outlineWidth property,
+        // which billboards don't have) keeps this fully independent of billboard.color, which
+        // stays reserved for alert-severity tinting (see applyAlertHighlight) - a pin can be
+        // selected and alert-highlighted at the same time without either clobbering the other,
+        // exactly as before.
+        entity.billboard.image = selected ? pinBillboardImageSelected : pinBillboardImage;
     }
 
     function updateSelectionIndicator(entry) {

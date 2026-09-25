@@ -65,6 +65,13 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
           <script src="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Cesium.js"></script>
           <script src="/js/tactical-globe.js"></script>
           <style>
+            /* A real, found-the-hard-way gap: without this, the browser's default 8px <body>
+               margin shifts .tg-shell (and therefore the canvas) 8px away from the (0,0) every
+               hardcoded click coordinate in this file assumes - close enough that a 14px `point`
+               entity's pick tolerance happened to absorb it, but a same-sized `billboard` entity's
+               tighter pick precision (see tactical-globe.js's own comment on pinBillboardImage)
+               does not, surfacing as click/pick timeouts across most of this file's tests. */
+            body { margin: 0; }
             .tg-stream-panel { position: absolute; top: 3.6rem; right: 1.1rem; width: 320px; min-width: 240px; min-height: 160px; }
             .tg-weather-panel { position: absolute; bottom: 2.6rem; left: 1.1rem; display: none; }
             .tg-panel-resize-handle { position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px; }
