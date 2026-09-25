@@ -12,6 +12,25 @@
 // started docs) would simply never run.
 window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/';
 
+// A real, confirmed production incident: this <script> tag lives inline in OverwatchGrid.razor's
+// own markup (not the shared root layout), and Blazor Web Apps that combine server-side
+// prerendering with an InteractiveServer render mode can re-execute an inline <script> tag a
+// second time when the interactive circuit takes over from the initial static-rendered page -
+// the DOM ends up with only ever one <script> element (the old one is replaced, not duplicated,
+// so a simple `document.querySelectorAll(...).length` check reads as 1), but the browser still
+// runs this file's top-level code twice. Without this guard, the second run silently overwrites
+// window.tacticalGlobe with a brand-new closure holding an empty `viewers` Map, while the FIRST
+// run's Cesium Viewer keeps rendering on its own (its render loop and camera.moveEnd listener
+// don't care what window.tacticalGlobe currently equals) - orphaned from every future call.
+// Confirmed directly on a real affected session: the globe kept panning/zooming and correctly
+// reporting camera counts (driven by the orphaned first instance's own listeners), while flyTo/
+// setCameraPins/dispose/every toggle silently no-op'd (all of them look up the *current*
+// window.tacticalGlobe's own `viewers` Map, which was the fresh, empty second instance) - even
+// a bare `tacticalGlobe.dispose('tg-viewport')` had zero visible effect, which would be
+// impossible if it were reaching the real, still-rendering Viewer. Guarding the assignment so a
+// second execution keeps the first (already-initialized) instance fixes this at the source,
+// regardless of why the tag re-executed.
+if (!window.tacticalGlobe) {
 window.tacticalGlobe = (function () {
     const viewers = new Map();
     let streamPanel = null;
@@ -1207,3 +1226,4 @@ window.tacticalGlobe = (function () {
         dismissCoverageBanner: dismissCoverageBanner
     };
 })();
+}
