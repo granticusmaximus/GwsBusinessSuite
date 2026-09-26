@@ -856,6 +856,17 @@ window.tacticalGlobe = (function () {
     function openAsModal(panel, onDismiss) {
         const viewport = document.getElementById('tg-viewport');
         const shell = viewport && viewport.closest('.tg-shell');
+        // TEMPORARY DIAGNOSTIC - remove once root-caused. A confirmed-successful entity pick
+        // (entityIsCamera/entityIsIncident: true in the click diagnostic) still shows no modal
+        // ever appearing - this checks the one remaining unverified step: whether the shell
+        // lookup itself is succeeding, and whether the backdrop is still in the document a moment
+        // after being appended (in case something removes it immediately after).
+        console.log('[tg-modal-diag] openAsModal called', {
+            viewportFound: !!viewport,
+            shellFound: !!shell,
+            duplicateViewportCount: document.querySelectorAll('[id="tg-viewport"]').length,
+            duplicateShellCount: document.querySelectorAll('.tg-shell').length
+        });
         if (!shell) return null;
 
         const backdrop = document.createElement('div');
@@ -866,6 +877,13 @@ window.tacticalGlobe = (function () {
         });
         shell.appendChild(backdrop);
         panel._tgBackdrop = backdrop;
+        setTimeout(function () {
+            console.log('[tg-modal-diag] backdrop state 300ms after append', {
+                stillInDocument: document.body.contains(backdrop),
+                backdropComputedDisplay: window.getComputedStyle(backdrop).display,
+                backdropRect: backdrop.getBoundingClientRect()
+            });
+        }, 300);
         return backdrop;
     }
 
