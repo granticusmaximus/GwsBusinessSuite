@@ -243,17 +243,45 @@ window.tacticalGlobe = (function () {
             const picked = viewer.scene.pick(movement.position);
             const entity = picked && picked.id;
             // TEMPORARY DIAGNOSTIC - remove once the "clicking a pin does nothing" report is
-            // root-caused. Logs exactly what scene.pick() returned so a real click's console can
-            // be compared against expectations without further guessing.
+            // root-caused. Round 1 (pickedExists/pickedId/entityIsCamera) showed every real
+            // production click picking something with no .id (the basemap, not a billboard
+            // entity) - this round adds the raw click position, the canvas's actual vs CSS pixel
+            // size (devicePixelRatio mismatches are a known source of exactly this symptom), and
+            // the on-screen position of the nearest camera entity, so the pixel offset between
+            // "where the click landed" and "where the nearest pin actually renders" can be read
+            // directly instead of inferred.
+            let nearestCameraScreenInfo = null;
+            try {
+                let nearestDistanceSq = Infinity;
+                cameraEntities.forEach(function (camEntity) {
+                    const worldPos = camEntity.position && camEntity.position.getValue(viewer.clock.currentTime);
+                    if (!worldPos) return;
+                    const screenPos = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, worldPos);
+                    if (!screenPos) return;
+                    const dx = screenPos.x - movement.position.x;
+                    const dy = screenPos.y - movement.position.y;
+                    const distSq = dx * dx + dy * dy;
+                    if (distSq < nearestDistanceSq) {
+                        nearestDistanceSq = distSq;
+                        nearestCameraScreenInfo = { screenX: screenPos.x, screenY: screenPos.y, deltaX: dx, deltaY: dy, distance: Math.sqrt(distSq) };
+                    }
+                });
+            } catch (diagErr) {
+                nearestCameraScreenInfo = { error: String(diagErr) };
+            }
+            const canvas = viewer.scene.canvas;
             console.log('[tg-click-diag]', {
-                position: movement.position,
+                clickPosition: { x: movement.position.x, y: movement.position.y },
+                devicePixelRatio: window.devicePixelRatio,
+                canvasClientSize: { width: canvas.clientWidth, height: canvas.clientHeight },
+                canvasBackingSize: { width: canvas.width, height: canvas.height },
                 pickedExists: !!picked,
-                pickedId: picked && picked.id,
+                pickedHasId: !!(picked && picked.id),
                 entityIsArray: Array.isArray(entity),
                 entityIsCamera: !!(entity && entity._tacticalGlobeCamera),
                 entityIsIncident: !!(entity && entity._tacticalGlobeIncident),
-                entityConstructorName: entity && entity.constructor && entity.constructor.name,
-                cameraEntityCount: cameraEntities.size
+                cameraEntityCount: cameraEntities.size,
+                nearestCameraScreenInfo: nearestCameraScreenInfo
             });
             // A clustered pin's pick.id is an array of the entities it groups (Cesium's own
             // clustering behavior), not a single Entity - zoom into the cluster instead of
