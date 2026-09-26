@@ -242,6 +242,19 @@ window.tacticalGlobe = (function () {
         clickHandler.setInputAction(function (movement) {
             const picked = viewer.scene.pick(movement.position);
             const entity = picked && picked.id;
+            // TEMPORARY DIAGNOSTIC - remove once the "clicking a pin does nothing" report is
+            // root-caused. Logs exactly what scene.pick() returned so a real click's console can
+            // be compared against expectations without further guessing.
+            console.log('[tg-click-diag]', {
+                position: movement.position,
+                pickedExists: !!picked,
+                pickedId: picked && picked.id,
+                entityIsArray: Array.isArray(entity),
+                entityIsCamera: !!(entity && entity._tacticalGlobeCamera),
+                entityIsIncident: !!(entity && entity._tacticalGlobeIncident),
+                entityConstructorName: entity && entity.constructor && entity.constructor.name,
+                cameraEntityCount: cameraEntities.size
+            });
             // A clustered pin's pick.id is an array of the entities it groups (Cesium's own
             // clustering behavior), not a single Entity - zoom into the cluster instead of
             // treating it as a camera/incident click.
