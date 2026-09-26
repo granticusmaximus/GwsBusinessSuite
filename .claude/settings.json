@@ -177,7 +177,9 @@
       "Bash(curl -s -I \"https://admin.gwsapp.net/js/tactical-globe.js\")",
       "Bash(curl -s \"https://admin.gwsapp.net/js/tactical-globe.js\")",
       "Bash(mv src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js.bak /dev/null 2>/dev/null; git diff --stat src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js *)",
-      "Bash(kill 31112 30940)"
+      "Bash(kill 31112 30940)",
+      "Bash(curl -s \"https://admin.gwsapp.net/js/tactical-globe.js\" -o /tmp/deployed-tactical-globe.js)",
+      "Bash(kill 41748 41594)"
     ],
     "additionalDirectories": [
       "/dev"
