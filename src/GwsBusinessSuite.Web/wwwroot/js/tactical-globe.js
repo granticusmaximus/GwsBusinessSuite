@@ -781,11 +781,30 @@ window.tacticalGlobe = (function () {
         }
     }
 
+    // Wraps a panel in a full-shell backdrop overlay and centers it as a modal - shared by
+    // openStreamPanel/openIncidentPanel (single-item views only; the watch wall keeps its own
+    // floating/draggable presentation, see its own comment). Clicking the backdrop itself (not
+    // anything inside the panel) invokes onDismiss, matching standard modal-dismiss behavior.
+    // Returns the backdrop, or null if the shell isn't in the DOM (shouldn't normally happen once
+    // a viewer exists, mirrors every other "shell not found" guard in this file).
+    function openAsModal(panel, onDismiss) {
+        const viewport = document.getElementById('tg-viewport');
+        const shell = viewport && viewport.closest('.tg-shell');
+        if (!shell) return null;
+
+        const backdrop = document.createElement('div');
+        backdrop.className = 'tg-modal-backdrop';
+        backdrop.appendChild(panel);
+        backdrop.addEventListener('mousedown', function (event) {
+            if (event.target === backdrop) onDismiss();
+        });
+        shell.appendChild(backdrop);
+        panel._tgBackdrop = backdrop;
+        return backdrop;
+    }
+
     function openIncidentPanel(incident) {
         closeIncidentPanel();
-
-        const shell = document.getElementById('tg-viewport').closest('.tg-shell');
-        if (!shell) return;
 
         const panel = document.createElement('div');
         panel.className = 'tg-stream-panel tg-incident-panel';
@@ -801,14 +820,13 @@ window.tacticalGlobe = (function () {
             '</div>';
 
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
-        shell.appendChild(panel);
+        if (!openAsModal(panel, closeIncidentPanel)) return;
         incidentPanel = panel;
-        makeDraggableAndResizable(panel, panel.querySelector('.tg-stream-panel-header'));
     }
 
     function closeIncidentPanel() {
-        if (incidentPanel && incidentPanel.parentNode) {
-            incidentPanel.parentNode.removeChild(incidentPanel);
+        if (incidentPanel && incidentPanel._tgBackdrop && incidentPanel._tgBackdrop.parentNode) {
+            incidentPanel._tgBackdrop.parentNode.removeChild(incidentPanel._tgBackdrop);
         }
         incidentPanel = null;
     }
@@ -937,9 +955,6 @@ window.tacticalGlobe = (function () {
     function openStreamPanel(camera, dotNetRef) {
         closeStreamPanel();
 
-        const shell = document.getElementById('tg-viewport').closest('.tg-shell');
-        if (!shell) return;
-
         const panel = document.createElement('div');
         panel.className = 'tg-stream-panel';
         panel._tgCamera = camera;
@@ -999,9 +1014,8 @@ window.tacticalGlobe = (function () {
         }
 
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeStreamPanel);
-        shell.appendChild(panel);
+        if (!openAsModal(panel, closeStreamPanel)) return;
         streamPanel = panel;
-        makeDraggableAndResizable(panel, panel.querySelector('.tg-stream-panel-header'));
 
         const body = panel.querySelector('.tg-stream-panel-body');
         panel._tgStreamDispose = renderStream(body, camera);
@@ -1080,7 +1094,9 @@ window.tacticalGlobe = (function () {
     function closeStreamPanel() {
         if (streamPanel) {
             if (streamPanel._tgStreamDispose) streamPanel._tgStreamDispose();
-            if (streamPanel.parentNode) streamPanel.parentNode.removeChild(streamPanel);
+            if (streamPanel._tgBackdrop && streamPanel._tgBackdrop.parentNode) {
+                streamPanel._tgBackdrop.parentNode.removeChild(streamPanel._tgBackdrop);
+            }
         }
         streamPanel = null;
     }
@@ -1240,6 +1256,7 @@ window.tacticalGlobe = (function () {
 
     function dispose(containerId) {
         closeStreamPanel();
+        closeIncidentPanel();
         closeWatchWall();
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;

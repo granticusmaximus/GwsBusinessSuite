@@ -251,26 +251,38 @@
     opacity: 0.7;
 }
 
-/* Camera stream panel and incident-detail panel (which reuses these same classes plus its own
-   .tg-incident-panel) - both built and appended entirely by tactical-globe.js (see
-   setCameraPins'/openIncidentPanel's click handlers), so these rules target their plain,
-   non-scoped class names directly rather than relying on Blazor's isolation attribute. Both are
-   draggable (by the header) and resizable (bottom-right handle) via makeDraggableAndResizable -
-   flex-column so the resize handle's height change actually flows into the body instead of
-   leaving dead space, and a min-height so it can never be resized down to nothing. */
-:global(.tg-stream-panel) {
+/* A single camera's feed or a single incident's detail opens as a centered modal - built and
+   appended entirely by tactical-globe.js (openStreamPanel/openIncidentPanel), wrapped in a
+   .tg-modal-backdrop overlay it creates alongside the panel (see openAsModal). Reuses the plain
+   .tg-stream-panel classes (plus .tg-incident-panel on the incident variant), so these rules
+   target their non-scoped class names directly rather than relying on Blazor's isolation
+   attribute. Neither is draggable/resizable - a centered modal, not a floating window - unlike
+   the watch wall below, which intentionally keeps its own floating/draggable presentation since
+   a grid of several tiles doesn't read as one focused "thing you're looking at" the way a single
+   camera/incident modal does. */
+:global(.tg-modal-backdrop) {
     position: absolute;
+    inset: 0;
     z-index: 20;
-    top: 3.6rem;
-    right: 1.1rem;
-    width: 320px;
-    min-width: 240px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    background: rgba(2, 4, 5, 0.72);
+    backdrop-filter: blur(1px);
+}
+
+:global(.tg-stream-panel) {
+    position: relative;
+    width: 380px;
+    max-width: 100%;
+    max-height: 100%;
     min-height: 160px;
     display: flex;
     flex-direction: column;
-    background: rgba(5, 8, 10, 0.92);
+    background: rgba(5, 8, 10, 0.96);
     border: 1px solid rgba(125, 255, 176, 0.5);
-    box-shadow: 0 0 24px rgba(0, 0, 0, 0.6);
+    box-shadow: 0 0 12px rgba(125, 255, 176, 0.15), 0 24px 70px rgba(0, 0, 0, 0.7);
     color: #7dffb0;
     font-family: "Share Tech Mono", ui-monospace, monospace;
 }
@@ -284,8 +296,6 @@
     font-size: 0.75rem;
     letter-spacing: 0.05em;
     flex-shrink: 0;
-    cursor: move;
-    user-select: none;
 }
 
 :global(.tg-stream-panel-header-actions) {
