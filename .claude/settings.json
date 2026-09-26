@@ -164,7 +164,14 @@
       "WebFetch(domain:docs.oqtane.org)",
       "WebFetch(domain:www.oqtane.org)",
       "WebFetch(domain:www.jocheojeda.com)",
-      "WebFetch(domain:cre8magic.blazor-cms.org)"
+      "WebFetch(domain:cre8magic.blazor-cms.org)",
+      "WebFetch(domain:ryanjagdfeld.com)",
+      "WebFetch(domain:www.oqtane.net)",
+      "Bash(awk '{print $2}')",
+      "Bash(kill 71351 71277)",
+      "Bash(kill 98599 98455)",
+      "Bash(kill 2969 2954)",
+      "Bash(git reset *)"
     ]
   }
 }
