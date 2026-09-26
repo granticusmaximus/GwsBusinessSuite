@@ -179,7 +179,13 @@
       "Bash(mv src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js.bak /dev/null 2>/dev/null; git diff --stat src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js *)",
       "Bash(kill 31112 30940)",
       "Bash(curl -s \"https://admin.gwsapp.net/js/tactical-globe.js\" -o /tmp/deployed-tactical-globe.js)",
-      "Bash(kill 41748 41594)"
+      "Bash(kill 41748 41594)",
+      "Bash(curl -s \"https://admin.gwsapp.net/\" -o /tmp/osint-home.html)",
+      "Bash(curl -s \"https://admin.gwsapp.net/admin/osint\" -I -c /tmp/cookies.txt)",
+      "Bash(curl -s \"https://admin.gwsapp.net/GwsBusinessSuite.Web.styles.css\" -o /tmp/deployed-styles.css -w \"HTTP %{http_code}\\\\n\")",
+      "Bash(dotnet publish *)",
+      "Bash(grep -i \"css$\")",
+      "Bash(ASPNETCORE_ENVIRONMENT=Development AdminAuth__Username=\"localdiag\" AdminAuth__Password=\"Local-Diag-Pw9!Test\" dotnet GwsBusinessSuite.Web.dll --urls \"http://localhost:5215\")"
     ],
     "additionalDirectories": [
       "/dev"

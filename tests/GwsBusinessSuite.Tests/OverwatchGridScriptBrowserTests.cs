@@ -3,8 +3,8 @@ using Microsoft.Playwright;
 
 namespace GwsBusinessSuite.Tests;
 
-// Regression guard for two real incidents, both only reproducible in a real browser against
-// the real shipped script - there is no server-side signal for either class of bug:
+// Regression guard for three real incidents, all only reproducible against the real shipped
+// script/CSS - there is no server-side signal for any of them:
 //
 // 1. OpenStreetMapImageryProvider.fromUrl doesn't exist on the pinned Cesium version (it's
 //    still a plain synchronous constructor, unlike several other Cesium imagery providers), so
@@ -16,6 +16,19 @@ namespace GwsBusinessSuite.Tests;
 //    'wasm-unsafe-eval'). The FIRST fix above shipped without this CSP header applied at all in
 //    its own test, so it still silently passed while the real page kept failing in production -
 //    the exact gap this harness now closes by sending the real header, not a CSP-free stub.
+// 3. Blazor's CSS isolation compiler does not correctly strip the scope attribute from
+//    :global(...) selectors in this project's toolchain - every :global() rule that used to
+//    live in OverwatchGrid.razor.css (targeting the JS-injected modal/panels/tooltips) compiled
+//    to `.some-class[b-xxxxx]`, which never matches an element created via plain
+//    document.createElement. This harness's own hand-duplicated CSS below (see its next
+//    comment) was written independently of that scoped file and never went through Blazor's
+//    isolation pipeline at all, so it accidentally sidestepped the bug entirely - 24+ passing
+//    tests here never caught a production bug that made every stream/incident/watch-wall panel
+//    render unstyled and mispositioned. The real fix moved that styling to a genuinely plain,
+//    non-isolated stylesheet (wwwroot/tactical-globe.css, loaded via a normal <link> tag) - this
+//    harness's duplication is now less likely to silently diverge from a broken source of truth,
+//    but is still worth double-checking against the real file if a future change here passes
+//    while the real page doesn't.
 //
 // The harness loads tactical-globe.js as an external <script src>, exactly like the real page
 // (OverwatchGrid.razor), and drives init()/etc. via page.EvaluateAsync from outside the page's
@@ -52,7 +65,8 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
 
     // Real production styling for the drag/resize/modal-relevant classes lives in
-    // OverwatchGrid.razor.css (a Blazor-scoped stylesheet), which this bare-JS harness never
+    // wwwroot/tactical-globe.css (a genuinely plain, non-Blazor-scoped stylesheet - see incident
+    // 3 above for why it's not in OverwatchGrid.razor.css), which this bare-JS harness never
     // loads - without it, .tg-modal-backdrop/.tg-watch-wall-panel etc. have no `position:
     // absolute`/flex-centering at all, so style.left/top set by makeDraggableAndResizable (watch
     // wall) or the backdrop's centering (single stream/incident panels) would be entirely inert

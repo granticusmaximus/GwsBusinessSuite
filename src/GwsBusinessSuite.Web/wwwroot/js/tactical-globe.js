@@ -242,47 +242,6 @@ window.tacticalGlobe = (function () {
         clickHandler.setInputAction(function (movement) {
             const picked = viewer.scene.pick(movement.position);
             const entity = picked && picked.id;
-            // TEMPORARY DIAGNOSTIC - remove once the "clicking a pin does nothing" report is
-            // root-caused. Round 1 (pickedExists/pickedId/entityIsCamera) showed every real
-            // production click picking something with no .id (the basemap, not a billboard
-            // entity) - this round adds the raw click position, the canvas's actual vs CSS pixel
-            // size (devicePixelRatio mismatches are a known source of exactly this symptom), and
-            // the on-screen position of the nearest camera entity, so the pixel offset between
-            // "where the click landed" and "where the nearest pin actually renders" can be read
-            // directly instead of inferred.
-            let nearestCameraScreenInfo = null;
-            try {
-                let nearestDistanceSq = Infinity;
-                cameraEntities.forEach(function (camEntity) {
-                    const worldPos = camEntity.position && camEntity.position.getValue(viewer.clock.currentTime);
-                    if (!worldPos) return;
-                    const screenPos = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, worldPos);
-                    if (!screenPos) return;
-                    const dx = screenPos.x - movement.position.x;
-                    const dy = screenPos.y - movement.position.y;
-                    const distSq = dx * dx + dy * dy;
-                    if (distSq < nearestDistanceSq) {
-                        nearestDistanceSq = distSq;
-                        nearestCameraScreenInfo = { screenX: screenPos.x, screenY: screenPos.y, deltaX: dx, deltaY: dy, distance: Math.sqrt(distSq) };
-                    }
-                });
-            } catch (diagErr) {
-                nearestCameraScreenInfo = { error: String(diagErr) };
-            }
-            const canvas = viewer.scene.canvas;
-            console.log('[tg-click-diag]', {
-                clickPosition: { x: movement.position.x, y: movement.position.y },
-                devicePixelRatio: window.devicePixelRatio,
-                canvasClientSize: { width: canvas.clientWidth, height: canvas.clientHeight },
-                canvasBackingSize: { width: canvas.width, height: canvas.height },
-                pickedExists: !!picked,
-                pickedHasId: !!(picked && picked.id),
-                entityIsArray: Array.isArray(entity),
-                entityIsCamera: !!(entity && entity._tacticalGlobeCamera),
-                entityIsIncident: !!(entity && entity._tacticalGlobeIncident),
-                cameraEntityCount: cameraEntities.size,
-                nearestCameraScreenInfo: nearestCameraScreenInfo
-            });
             // A clustered pin's pick.id is an array of the entities it groups (Cesium's own
             // clustering behavior), not a single Entity - zoom into the cluster instead of
             // treating it as a camera/incident click.
@@ -856,17 +815,6 @@ window.tacticalGlobe = (function () {
     function openAsModal(panel, onDismiss) {
         const viewport = document.getElementById('tg-viewport');
         const shell = viewport && viewport.closest('.tg-shell');
-        // TEMPORARY DIAGNOSTIC - remove once root-caused. A confirmed-successful entity pick
-        // (entityIsCamera/entityIsIncident: true in the click diagnostic) still shows no modal
-        // ever appearing - this checks the one remaining unverified step: whether the shell
-        // lookup itself is succeeding, and whether the backdrop is still in the document a moment
-        // after being appended (in case something removes it immediately after).
-        console.log('[tg-modal-diag] openAsModal called', {
-            viewportFound: !!viewport,
-            shellFound: !!shell,
-            duplicateViewportCount: document.querySelectorAll('[id="tg-viewport"]').length,
-            duplicateShellCount: document.querySelectorAll('.tg-shell').length
-        });
         if (!shell) return null;
 
         const backdrop = document.createElement('div');
@@ -877,13 +825,6 @@ window.tacticalGlobe = (function () {
         });
         shell.appendChild(backdrop);
         panel._tgBackdrop = backdrop;
-        setTimeout(function () {
-            console.log('[tg-modal-diag] backdrop state 300ms after append', {
-                stillInDocument: document.body.contains(backdrop),
-                backdropComputedDisplay: window.getComputedStyle(backdrop).display,
-                backdropRect: backdrop.getBoundingClientRect()
-            });
-        }, 300);
         return backdrop;
     }
 
