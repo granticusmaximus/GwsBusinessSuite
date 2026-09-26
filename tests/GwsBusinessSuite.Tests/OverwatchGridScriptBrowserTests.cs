@@ -465,6 +465,48 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     }
 
     [Fact]
+    public async Task StreamPanel_ShouldNotDismiss_WhenTheBackdropReceivesTheSecondClickOfADoubleClick()
+    {
+        // Regression test for a real reported bug: the modal is centered on the shell, not at
+        // wherever the user actually clicked to open it (a camera/incident pin is almost never
+        // exactly at the shell's center) - so double-clicking a pin opened the modal on the first
+        // click and immediately dismissed it on the second, since that second click's mousedown
+        // landed on the backdrop (which covers everywhere except the centered panel), not the
+        // panel itself. Dispatching a synthetic mousedown with detail:2 directly on the backdrop
+        // (rather than relying on exact off-center pin/camera-projection geometry) is a more
+        // precise way to test the fix (openAsModal's event.detail <= 1 guard) than orchestrating
+        // a real double-click on a pin that happens to not be at the harness's screen center.
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([{
+                id: 'cam-1', name: 'Test Camera', lat: 39.8, lon: -98.5,
+                streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot',
+                sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org'
+              }]);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-stream-panel')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        await page.EvaluateAsync("""
+            () => {
+              const backdrop = document.querySelector('.tg-modal-backdrop');
+              backdrop.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, detail: 2 }));
+            }
+            """);
+        await page.WaitForTimeoutAsync(200);
+
+        (await page.EvaluateAsync<bool>("!!document.querySelector('.tg-stream-panel')")).Should()
+            .BeTrue("the second click of a double-click on the backdrop must not dismiss a modal that same gesture just opened");
+    }
+
+    [Fact]
     public async Task StreamPanel_ShouldCloseWhenClickingTheBackdrop_ButNotWhenClickingInsideIt()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);

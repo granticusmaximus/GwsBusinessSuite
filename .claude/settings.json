@@ -171,7 +171,16 @@
       "Bash(kill 71351 71277)",
       "Bash(kill 98599 98455)",
       "Bash(kill 2969 2954)",
-      "Bash(git reset *)"
+      "Bash(git reset *)",
+      "WebFetch(domain:themeforest.net)",
+      "WebFetch(domain:preview.codecanyon.net)",
+      "Bash(curl -s -I \"https://admin.gwsapp.net/js/tactical-globe.js\")",
+      "Bash(curl -s \"https://admin.gwsapp.net/js/tactical-globe.js\")",
+      "Bash(mv src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js.bak /dev/null 2>/dev/null; git diff --stat src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js *)",
+      "Bash(kill 31112 30940)"
+    ],
+    "additionalDirectories": [
+      "/dev"
     ]
   }
 }

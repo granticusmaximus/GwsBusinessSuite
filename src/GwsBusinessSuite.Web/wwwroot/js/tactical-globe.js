@@ -129,6 +129,19 @@ window.tacticalGlobe = (function () {
             destination: Cesium.Cartesian3.fromDegrees(-98.5, 39.8, 18000000)
         });
 
+        // Cesium's Viewer wires up a default LEFT_DOUBLE_CLICK handler (double-clicking an
+        // entity sets viewer.trackedEntity and flies/tracks it) on its own
+        // viewer.screenSpaceEventHandler - a completely separate handler instance from this
+        // file's own camera/incident click handler below (a dedicated
+        // ScreenSpaceEventHandler(viewer.scene.canvas)). Never overridden until now, this
+        // produced a real, reported bug: double-clicking a camera pin (an easy, common gesture,
+        // not a deliberate "track this entity" request) started an unrequested camera zoom/track
+        // animation, and separately raced with the stream-panel modal opened by the double-
+        // click's first LEFT_CLICK (see openAsModal's own comment on the event.detail guard) -
+        // together making it look like "double-click does nothing." Overriding with a no-op is
+        // the standard, documented way to disable this specific Cesium default.
+        viewer.screenSpaceEventHandler.setInputAction(function () {}, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+
         // A real, measured problem, not a feel-based guess: Cesium's default zoomFactor (5.0)
         // needs roughly 24 scroll-wheel ticks just to bring the camera from the initial
         // whole-continent view down to 5km - confirmed by directly logging camera height across
@@ -787,6 +800,18 @@ window.tacticalGlobe = (function () {
     // anything inside the panel) invokes onDismiss, matching standard modal-dismiss behavior.
     // Returns the backdrop, or null if the shell isn't in the DOM (shouldn't normally happen once
     // a viewer exists, mirrors every other "shell not found" guard in this file).
+    //
+    // event.detail >= 2 guard: a real, reported bug - the modal is centered on the shell, not at
+    // wherever the user actually clicked to open it (a camera/incident pin is almost never
+    // exactly at the shell's center), so the backdrop covers the pin's own screen position the
+    // instant the modal appears. Double-clicking a pin (a natural, common gesture - not a
+    // deliberate "dismiss" click) therefore opened the modal on the first click and immediately
+    // dismissed it on the second, since that second click's mousedown landed on the backdrop, not
+    // the panel - from the user's perspective, "double-clicking a node does nothing." event.detail
+    // is the DOM's own multi-click counter (2 for the second click of a double-click, within the
+    // browser's own double-click timing/distance thresholds); only dismissing on detail === 1
+    // means a double/triple-click on the pin still opens and keeps the modal open, while a
+    // single deliberate click elsewhere on the backdrop still closes it normally.
     function openAsModal(panel, onDismiss) {
         const viewport = document.getElementById('tg-viewport');
         const shell = viewport && viewport.closest('.tg-shell');
@@ -796,7 +821,7 @@ window.tacticalGlobe = (function () {
         backdrop.className = 'tg-modal-backdrop';
         backdrop.appendChild(panel);
         backdrop.addEventListener('mousedown', function (event) {
-            if (event.target === backdrop) onDismiss();
+            if (event.target === backdrop && event.detail <= 1) onDismiss();
         });
         shell.appendChild(backdrop);
         panel._tgBackdrop = backdrop;
