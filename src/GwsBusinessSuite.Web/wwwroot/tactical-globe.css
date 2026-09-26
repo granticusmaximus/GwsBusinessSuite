@@ -17,31 +17,29 @@
    OverwatchGrid.razor, sidesteps the toolchain bug entirely rather than working around its
    exact compiled output. */
 
-/* A single camera's feed or a single incident's detail opens as a centered modal - built and
-   appended entirely by tactical-globe.js (openStreamPanel/openIncidentPanel), wrapped in a
+/* A single camera's feed or a single incident's detail opens as a modal - built and appended
+   entirely by tactical-globe.js (openStreamPanel/openIncidentPanel), wrapped in a
    .tg-modal-backdrop overlay it creates alongside the panel (see openAsModal). Reuses the plain
-   .tg-stream-panel classes (plus .tg-incident-panel on the incident variant). Neither is
-   draggable/resizable - a centered modal, not a floating window - unlike the watch wall below,
-   which intentionally keeps its own floating/draggable presentation since a grid of several
-   tiles doesn't read as one focused "thing you're looking at" the way a single camera/incident
-   modal does. */
+   .tg-stream-panel classes (plus .tg-incident-panel on the incident variant). Opens centered
+   (position computed once in JS, not CSS flex-centering - see openAsModal), then draggable by
+   its header and resizable via a corner handle, same as the watch wall below and the old
+   pre-modal floating-panel design - only the darkened, click-outside-to-dismiss backdrop is new.
+   The backdrop itself is NOT a flex container for this reason: an absolutely-positioned panel
+   (needed so drag/resize's own left/top math works) is unaffected by a flex parent's centering,
+   so centering has to be done once in JS instead. */
 .tg-modal-backdrop {
     position: absolute;
     inset: 0;
     z-index: 20;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 1.5rem;
     background: rgba(2, 4, 5, 0.72);
     backdrop-filter: blur(1px);
 }
 
 .tg-stream-panel {
-    position: relative;
+    position: absolute;
     width: 380px;
-    max-width: 100%;
-    max-height: 100%;
+    max-width: calc(100% - 3rem);
+    max-height: calc(100% - 3rem);
     min-height: 160px;
     display: flex;
     flex-direction: column;
@@ -61,6 +59,8 @@
     font-size: 0.75rem;
     letter-spacing: 0.05em;
     flex-shrink: 0;
+    cursor: move;
+    user-select: none;
 }
 
 .tg-stream-panel-header-actions {

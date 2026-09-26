@@ -67,11 +67,12 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     // Real production styling for the drag/resize/modal-relevant classes lives in
     // wwwroot/tactical-globe.css (a genuinely plain, non-Blazor-scoped stylesheet - see incident
     // 3 above for why it's not in OverwatchGrid.razor.css), which this bare-JS harness never
-    // loads - without it, .tg-modal-backdrop/.tg-watch-wall-panel etc. have no `position:
-    // absolute`/flex-centering at all, so style.left/top set by makeDraggableAndResizable (watch
-    // wall) or the backdrop's centering (single stream/incident panels) would be entirely inert
-    // (a real gap this duplicates just enough of to make both testable, confirmed empirically:
-    // the drag/resize tests read a stale, unpositioned 0-diff before this was added).
+    // loads - without it, .tg-modal-backdrop/.tg-stream-panel/.tg-watch-wall-panel etc. have no
+    // `position: absolute` at all, so style.left/top set by makeDraggableAndResizable (all three:
+    // the watch wall and, since drag/resize was added back to the single-camera/incident modal,
+    // openAsModal's own initial-centering math too) would be entirely inert (a real gap this
+    // duplicates just enough of to make both testable, confirmed empirically: the drag/resize
+    // tests read a stale, unpositioned 0-diff before this was added).
     private const string HarnessHtml = """
         <!doctype html>
         <html>
@@ -87,8 +88,8 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                tighter pick precision (see tactical-globe.js's own comment on pinBillboardImage)
                does not, surfacing as click/pick timeouts across most of this file's tests. */
             body { margin: 0; }
-            .tg-modal-backdrop { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
-            .tg-stream-panel { width: 320px; min-width: 240px; min-height: 160px; }
+            .tg-modal-backdrop { position: absolute; inset: 0; }
+            .tg-stream-panel { position: absolute; width: 320px; min-width: 240px; min-height: 160px; }
             .tg-weather-panel { position: absolute; bottom: 2.6rem; left: 1.1rem; display: none; }
             .tg-panel-resize-handle { position: absolute; right: 2px; bottom: 2px; width: 14px; height: 14px; }
             .tg-watch-wall-panel { position: absolute; top: 3.6rem; right: 1.1rem; width: 560px; height: 420px; min-width: 320px; min-height: 240px; }
@@ -475,7 +476,60 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await page.WaitForFunctionAsync("!!document.querySelector('.tg-stream-panel')", new PageWaitForFunctionOptions { Timeout = 5000 });
 
         var isInsideBackdrop = await page.EvaluateAsync<bool>("!!document.querySelector('.tg-modal-backdrop .tg-stream-panel')");
-        isInsideBackdrop.Should().BeTrue("a single camera's feed opens as a centered modal, not a floating draggable panel");
+        isInsideBackdrop.Should().BeTrue("a single camera's feed opens inside a dark backdrop overlay, centered on open");
+    }
+
+    [Fact]
+    public async Task StreamPanel_ShouldBeDraggableAndResizable()
+    {
+        // The modal opens centered but stays fully interactive - drag by the header, resize via
+        // the corner handle - same as the pre-modal floating-panel design and the watch wall
+        // below, per explicit user request after the backdrop/centering conversion shipped.
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setCameraPins([{
+                id: 'cam-1', name: 'Test Camera', lat: 39.8, lon: -98.5,
+                streamUrl: 'https://example.test/a.jpg', streamKind: 'Snapshot',
+                sourceName: 'GDOT', sourceAttributionUrl: 'https://511ga.org'
+              }]);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.UpAsync();
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-stream-panel')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var beforeTop = await page.EvaluateAsync<double>("document.querySelector('.tg-stream-panel').getBoundingClientRect().top");
+        var headerBox = await page.EvaluateAsync<double[]>("""
+            () => {
+              const r = document.querySelector('.tg-stream-panel-header').getBoundingClientRect();
+              return [r.left + r.width / 2, r.top + r.height / 2];
+            }
+            """);
+        await page.Mouse.MoveAsync((float)headerBox[0], (float)headerBox[1]);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync((float)(headerBox[0] + 30), (float)(headerBox[1] + 70), new MouseMoveOptions { Steps = 5 });
+        await page.Mouse.UpAsync();
+        var afterTop = await page.EvaluateAsync<double>("document.querySelector('.tg-stream-panel').getBoundingClientRect().top");
+        (afterTop - beforeTop).Should().BeApproximately(70, 5, "dragging the header should move the modal panel");
+
+        var beforeWidth = await page.EvaluateAsync<double>("document.querySelector('.tg-stream-panel').getBoundingClientRect().width");
+        var handleBox = await page.EvaluateAsync<double[]>("""
+            () => {
+              const r = document.querySelector('.tg-stream-panel .tg-panel-resize-handle').getBoundingClientRect();
+              return [r.left + r.width / 2, r.top + r.height / 2];
+            }
+            """);
+        await page.Mouse.MoveAsync((float)handleBox[0], (float)handleBox[1]);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync((float)(handleBox[0] + 60), (float)(handleBox[1] + 40), new MouseMoveOptions { Steps = 5 });
+        await page.Mouse.UpAsync();
+        var afterWidth = await page.EvaluateAsync<double>("document.querySelector('.tg-stream-panel').getBoundingClientRect().width");
+        (afterWidth - beforeWidth).Should().BeApproximately(60, 5, "dragging the resize handle should widen the modal panel");
     }
 
     [Fact]

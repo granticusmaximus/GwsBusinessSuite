@@ -825,6 +825,19 @@ window.tacticalGlobe = (function () {
         });
         shell.appendChild(backdrop);
         panel._tgBackdrop = backdrop;
+
+        // The panel is position:absolute (needed for makeDraggableAndResizable's own left/top
+        // math) rather than flex-centered by the backdrop, so it starts wherever an
+        // absolutely-positioned element with no left/top naturally lands (the backdrop's
+        // top-left corner) unless centered explicitly here, once, using its real rendered size.
+        const backdropRect = backdrop.getBoundingClientRect();
+        const panelRect = panel.getBoundingClientRect();
+        panel.style.left = Math.max(0, (backdropRect.width - panelRect.width) / 2) + 'px';
+        panel.style.top = Math.max(0, (backdropRect.height - panelRect.height) / 2) + 'px';
+
+        const header = panel.querySelector('.tg-stream-panel-header');
+        if (header) makeDraggableAndResizable(panel, header);
+
         return backdrop;
     }
 
