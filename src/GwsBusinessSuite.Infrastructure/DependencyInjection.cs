@@ -31,6 +31,8 @@ using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Application.SemanticSearch;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.TrafficIncidents;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 using GwsBusinessSuite.Application.SshTerminal;
 using GwsBusinessSuite.Application.Users;
 using GwsBusinessSuite.Application.Weather;
@@ -298,12 +300,17 @@ public static class DependencyInjection
         services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<GdotTrafficCameraProvider>());
         // Same free, unauthenticated GDOT ArcGIS org as the camera layer above, just a
         // different one (GDOT_511_Events_Public_View) - real-time accidents/roadwork/closures.
-        services.AddHttpClient<ITrafficIncidentProvider, GdotTrafficIncidentProvider>(client =>
+        // Registered against its own concrete type, not the shared ITrafficIncidentProvider
+        // interface as TClient - the exact same fix already applied to the camera providers
+        // above, now applied here too since more incident providers are being added below and
+        // would otherwise silently collide on the same named HttpClient the same way the camera
+        // providers once did.
+        services.AddHttpClient<GdotTrafficIncidentProvider>(client =>
         {
             client.BaseAddress = new Uri("https://services1.arcgis.com/2iUE8l8JKrP2tygQ/");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
-        services.AddScoped<TrafficIncidentDirectoryService>();
+        services.AddScoped<ITrafficIncidentProvider>(sp => sp.GetRequiredService<GdotTrafficIncidentProvider>());
         services.AddHttpClient<DatumfeedCameraProvider>(client =>
         {
             client.BaseAddress = new Uri("https://datumfeed.com/");
@@ -326,6 +333,92 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<MapillaryImageryProvider>());
+
+        // Nationwide/worldwide coverage expansion - every source below is genuinely free with no
+        // API key or registration, confirmed directly against each live endpoint before being
+        // built (never assumed from documentation alone). Sources needing a free-but-gated key
+        // (Ohio/Arizona/Wisconsin/Singapore/NSW Australia) are deliberately not built here - see
+        // CameraIntelOptions.cs for the established "optional key, absent disables the feature"
+        // pattern they'd follow if ever added.
+        services.AddHttpClient<NycDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://webcams.nyctmc.org/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<NycDotCameraProvider>());
+        services.AddHttpClient<NzTransportAgencyCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://services.arcgis.com/XTtANUDT8Va4DLwI/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<NzTransportAgencyCameraProvider>());
+        services.AddHttpClient<QueenslandTrafficCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://data.qldtraffic.qld.gov.au/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<QueenslandTrafficCameraProvider>());
+        services.AddHttpClient<QueenslandTrafficIncidentProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://data.qldtraffic.qld.gov.au/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ITrafficIncidentProvider>(sp => sp.GetRequiredService<QueenslandTrafficIncidentProvider>());
+        // Iowa DOT's ArcGIS Hub download endpoint - a fixed absolute item URL, not a per-org
+        // "BaseAddress + relative path" shape like the other ArcGIS providers, but AddHttpClient
+        // still needs some BaseAddress to construct a valid HttpClient; the provider itself
+        // passes the full path including host-relative query string against this base.
+        services.AddHttpClient<IowaDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://hub.arcgis.com/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<IowaDotCameraProvider>());
+        services.AddHttpClient<CaltransCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://cwwp2.dot.ca.gov/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<CaltransCameraProvider>());
+        services.AddHttpClient<FloridaDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://services.arcgis.com/3wFbqsFPLeKqOlIK/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<FloridaDotCameraProvider>());
+        services.AddHttpClient<IllinoisDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://services2.arcgis.com/aIrBD8yn1TDTEXoz/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<IllinoisDotCameraProvider>());
+        services.AddHttpClient<OregonDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://services.arcgis.com/uUvqNMGPm7axC2dD/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<OregonDotCameraProvider>());
+        // CARS511 (Minnesota + Nebraska incidents) - both states share the identical ArcGIS org
+        // and schema (confirmed live), so one named HttpClient covers both; each state gets its
+        // own Cars511IncidentProvider instance via a factory rather than plain DI construction,
+        // since the class takes plain string parameters (state code / display name / attribution
+        // URL) that aren't themselves services.
+        services.AddHttpClient("cars511", client =>
+        {
+            client.BaseAddress = new Uri("https://services.arcgis.com/8lRhdTsQyJpO52F1/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ITrafficIncidentProvider>(sp => new Cars511IncidentProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("cars511"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<Cars511IncidentProvider>>(),
+            stateCode: "MN", sourceName: "511MN", sourceAttributionUrl: "https://511mn.org"));
+        services.AddScoped<ITrafficIncidentProvider>(sp => new Cars511IncidentProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("cars511"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<Cars511IncidentProvider>>(),
+            stateCode: "NE", sourceName: "511NE", sourceAttributionUrl: "https://511.nebraska.gov"));
+        services.AddScoped<TrafficIncidentDirectoryService>();
         services.AddScoped<CameraDirectoryService>();
         // Overpass + Wikimedia Commons - both called via a plain IHttpClientFactory.CreateClient()
         // client with full absolute URLs (two different hosts, neither needs a dedicated

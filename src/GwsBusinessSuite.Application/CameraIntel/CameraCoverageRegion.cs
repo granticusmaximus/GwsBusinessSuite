@@ -29,5 +29,14 @@ public static class CameraCoverageRegions
         new("Ottawa (Datumfeed)", "Datumfeed", 45.42, -75.70, 150_000),
         new("Toronto (Datumfeed / RESCU)", "Datumfeed", 43.65, -79.38, 150_000),
         new("London (Datumfeed / JamCams)", "Datumfeed", 51.51, -0.13, 150_000),
+        new("Florida (FL511)", "FL511", 28.10, -81.60, 900_000),
+        new("Illinois (IDOT)", "IDOT", 40.00, -89.20, 700_000),
+        new("Iowa (Iowa DOT)", "Iowa DOT", 41.90, -93.60, 500_000),
+        new("Oregon (ODOT / TripCheck)", "ODOT", 44.00, -120.50, 600_000),
+        new("New York City (NYC DOT)", "NYC DOT", 40.71, -74.01, 150_000),
+        new("Minnesota (511MN Incidents)", "511MN", 46.30, -94.30, 500_000),
+        new("Nebraska (511NE Incidents)", "511NE", 41.50, -99.90, 500_000),
+        new("New Zealand (NZTA)", "NZTA", -41.00, 174.80, 1_800_000),
+        new("Queensland, Australia (QLD Traffic)", "QLD Traffic", -23.00, 144.00, 2_200_000),
     ];
 }
