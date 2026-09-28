@@ -768,6 +768,51 @@ else
                                        @oninput='(e) => SetProp(selWidget, "authorRole", e.Value?.ToString() ?? string.Empty)' />
                             </div>
                         }
+                        else if (selWidget.WidgetType == "author-box")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Name</label>
+                                <input class="form-control" value='@GetProp(selWidget, "name")'
+                                       @oninput='(e) => SetProp(selWidget, "name", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Role / Title</label>
+                                <input class="form-control" value='@GetProp(selWidget, "roleOrTitle")'
+                                       @oninput='(e) => SetProp(selWidget, "roleOrTitle", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Bio</label>
+                                <ProfessionalWysiwygEditor Value='@GetProp(selWidget, "bio")'
+                                                           ValueChanged='value => SetProp(selWidget, "bio", value)'
+                                                           Compact="true" MinHeight="110px" AriaLabel="Author bio" />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Avatar URL</label>
+                                <input class="form-control font-monospace" value='@GetProp(selWidget, "avatarUrl")'
+                                       @oninput='(e) => SetProp(selWidget, "avatarUrl", e.Value?.ToString() ?? string.Empty)'
+                                       placeholder="https://…" />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Website URL</label>
+                                <input class="form-control font-monospace" value='@GetProp(selWidget, "websiteUrl")'
+                                       @oninput='(e) => SetProp(selWidget, "websiteUrl", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Twitter / X URL</label>
+                                <input class="form-control font-monospace" value='@GetProp(selWidget, "twitterUrl")'
+                                       @oninput='(e) => SetProp(selWidget, "twitterUrl", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">LinkedIn URL</label>
+                                <input class="form-control font-monospace" value='@GetProp(selWidget, "linkedinUrl")'
+                                       @oninput='(e) => SetProp(selWidget, "linkedinUrl", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Email Address</label>
+                                <input class="form-control" type="email" value='@GetProp(selWidget, "emailAddress")'
+                                       @oninput='(e) => SetProp(selWidget, "emailAddress", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                        }
                         else if (selWidget.WidgetType == "accordion")
                         {
                             <div>
@@ -802,6 +847,37 @@ else
                                         </div>
                                     }
                                 }
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "callout")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Variant</label>
+                                <select class="form-select" value='@GetProp(selWidget, "variant", "info")'
+                                        @onchange='(e) => SetProp(selWidget, "variant", e.Value?.ToString() ?? "info")'>
+                                    <option value="info">Info</option>
+                                    <option value="success">Success</option>
+                                    <option value="warning">Warning</option>
+                                    <option value="danger">Danger</option>
+                                    <option value="note">Note</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Title (optional)</label>
+                                <input class="form-control" value='@GetProp(selWidget, "title")'
+                                       @oninput='(e) => SetProp(selWidget, "title", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Body</label>
+                                <ProfessionalWysiwygEditor Value='@GetProp(selWidget, "body")'
+                                                           ValueChanged='value => SetProp(selWidget, "body", value)'
+                                                           Compact="true" MinHeight="110px" AriaLabel="Callout body" />
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="calloutShowIcon"
+                                       checked="@(GetProp(selWidget, "showIcon", "true") == "true")"
+                                       @onchange='(e) => SetProp(selWidget, "showIcon", ((bool)(e.Value ?? true)) ? "true" : "false")' />
+                                <label class="form-check-label small" for="calloutShowIcon">Show icon</label>
                             </div>
                         }
                         else if (selWidget.WidgetType == "spacer")
@@ -1615,7 +1691,9 @@ else
         new("image",       "bi bi-image",                  "Image",       "Photo or graphic",                    GroupMedia),
         new("card",        "bi bi-card-heading",           "Card",        "Title + body + optional image",       GroupMedia),
         new("testimonial", "bi bi-chat-quote",             "Testimonial", "Quote + author",                      GroupMedia),
+        new("author-box",  "bi bi-person-badge",           "Author Box",  "Bio card with avatar + social links", GroupMedia),
         new("accordion",   "bi bi-list-nested",            "Accordion",   "Collapsible FAQ-style items",         GroupLayout),
+        new("callout",     "bi bi-megaphone",              "Callout",     "Highlighted info/warning/note box",   GroupLayout),
         new("spacer",      "bi bi-arrows-expand-vertical", "Spacer",      "Vertical whitespace",                 GroupLayout),
         new("divider",     "bi bi-dash-lg",                "Divider",     "Horizontal rule",                     GroupLayout),
         new("form",        "bi bi-ui-checks",              "Form",        "Custom fields, posts to submissions", GroupDynamic),
@@ -3688,6 +3766,8 @@ else
         "divider"   => new() { WidgetType = "divider",   Props = new() { ["style"] = "solid" } },
         "html"      => new() { WidgetType = "html",      Props = new() { ["content"] = "<p>Custom HTML content here.</p>" } },
         "posts-grid" => new() { WidgetType = "posts-grid", Props = new() { ["count"] = "3", ["columns"] = "3", ["showImage"] = "true", ["showExcerpt"] = "true", ["ctaLabel"] = "Read More" } },
+        "author-box" => new() { WidgetType = "author-box", Props = new() { ["name"] = "Jane Doe", ["roleOrTitle"] = "Senior Editor", ["bio"] = "A short bio about this author goes here.", ["avatarUrl"] = "", ["websiteUrl"] = "", ["twitterUrl"] = "", ["linkedinUrl"] = "", ["emailAddress"] = "" } },
+        "callout"    => new() { WidgetType = "callout", Props = new() { ["variant"] = "info", ["title"] = "", ["body"] = "Add your callout text here.", ["showIcon"] = "true" } },
         _           => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Content", ["align"] = "left" } }
     };
 
@@ -3731,6 +3811,8 @@ else
         "divider"     => "Divider",
         "html"        => "HTML",
         "posts-grid"  => "Posts Grid",
+        "author-box"  => "Author Box",
+        "callout"     => "Callout",
         _             => type
     };
 
@@ -3758,6 +3840,8 @@ else
         "divider"     => "bi bi-dash-lg",
         "html"        => "bi bi-code-slash",
         "posts-grid"  => "bi bi-grid-3x3-gap",
+        "author-box"  => "bi bi-person-badge",
+        "callout"     => "bi bi-megaphone",
         _             => "bi bi-square"
     };
 
@@ -3778,6 +3862,8 @@ else
             "spacer"      => $"{GetPropStatic(w, "height", "48")}px",
             "html"        => "Custom HTML",
             "posts-grid"  => $"{GetPropStatic(w, "count", "3")} latest post(s)",
+            "author-box"  => GetPropStatic(w, "name", "Author Box"),
+            "callout"     => GetPropStatic(w, "title", GetPropStatic(w, "body", "Callout")),
             _             => w.WidgetType
         };
         return raw.Length <= 38 ? raw : raw[..38] + "…";

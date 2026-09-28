@@ -23,6 +23,8 @@ public static class GlobalBlockOverridableFields
         ["card"] = ["title", "body", "link", "imageSrc"],
         ["testimonial"] = ["quote", "authorName", "authorRole"],
         ["image"] = ["src", "alt", "caption"],
+        ["author-box"] = ["name", "bio", "roleOrTitle", "avatarUrl"],
+        ["callout"] = ["title", "body"],
     };
 
     public static IReadOnlyList<string> CandidatesFor(string widgetType) =>

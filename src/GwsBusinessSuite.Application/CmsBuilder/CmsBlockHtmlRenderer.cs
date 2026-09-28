@@ -58,6 +58,8 @@ public static class CmsBlockHtmlRenderer
             "form" => "[form]",
             "posts-grid" => "[posts grid]",
             "accordion" => "[accordion]",
+            "author-box" => Get(p, "name"),
+            "callout" => Get(p, "title", Get(p, "body", "[callout]")),
             _ => string.Empty
         };
         text = text.Replace('\n', ' ').Trim();
@@ -563,8 +565,72 @@ public static class CmsBlockHtmlRenderer
             "html" => Get(p, "content"),
             "form" => RenderForm(p, siteSlug, pageSlug, editMode),
             "posts-grid" => RenderPostsGrid(p, articles),
+            "author-box" => RenderAuthorBox(p, editMode),
+            "callout" => RenderCallout(p, editMode),
             _ => string.Empty
         };
+    }
+
+    // Static content widget - no DB access, no live data - a bio card for an article's or
+    // page's author. Each social link Prop is independently optional (empty = hidden),
+    // matching the hero widget's cta2Label/cta2Href convention above.
+    private static string RenderAuthorBox(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var name = Get(p, "name");
+        var socialLinks = new StringBuilder();
+        AppendAuthorBoxSocialLink(socialLinks, Get(p, "websiteUrl"), "bi-globe2", "Website");
+        AppendAuthorBoxSocialLink(socialLinks, Get(p, "twitterUrl"), "bi-twitter-x", "Twitter/X");
+        AppendAuthorBoxSocialLink(socialLinks, Get(p, "linkedinUrl"), "bi-linkedin", "LinkedIn");
+        if (HasValue(p, "emailAddress"))
+        {
+            socialLinks.Append($"""<a href="mailto:{Html(Get(p, "emailAddress"))}" class="gws-author-box-social-link" aria-label="Email"><i class="bi bi-envelope" aria-hidden="true"></i></a>""");
+        }
+
+        return $"""
+            <div class="gws-author-box">
+              {(HasValue(p, "avatarUrl") ? $"""<img src="{Html(Get(p, "avatarUrl"))}" alt="{Html(name)}" class="gws-author-box-avatar" />""" : "")}
+              <div class="gws-author-box-body">
+                <div class="gws-author-box-name"{InlineEditAttrs(editMode, "name")}>{Html(name)}</div>
+                {(HasValue(p, "roleOrTitle") ? $"""<div class="gws-author-box-role"{InlineEditAttrs(editMode, "roleOrTitle")}>{Html(Get(p, "roleOrTitle"))}</div>""" : "")}
+                {(HasValue(p, "bio") ? $"""<div class="gws-author-box-bio"{InlineRichAttrs(editMode, "bio", Get(p, "bio"))}>{Markdown.ToHtml(Get(p, "bio"), MarkdownPipeline)}</div>""" : "")}
+                {(socialLinks.Length > 0 ? $"""<div class="gws-author-box-social">{socialLinks}</div>""" : "")}
+              </div>
+            </div>
+            """;
+    }
+
+    private static void AppendAuthorBoxSocialLink(StringBuilder sb, string url, string iconClass, string label)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return;
+        sb.Append($"""<a href="{Html(HrefOrHash(url))}" class="gws-author-box-social-link" target="_blank" rel="noopener noreferrer" aria-label="{Html(label)}"><i class="bi {iconClass}" aria-hidden="true"></i></a>""");
+    }
+
+    // variant is validated against this fixed dictionary rather than interpolated directly -
+    // BlocksJson is just a text column, so an unrecognized/hand-crafted value falls back to
+    // "info" rather than emitting an arbitrary CSS class name.
+    private static readonly IReadOnlyDictionary<string, (string CssClass, string Icon)> CalloutVariants = new Dictionary<string, (string, string)>
+    {
+        ["info"] = ("gws-callout-info", "bi-info-circle-fill"),
+        ["success"] = ("gws-callout-success", "bi-check-circle-fill"),
+        ["warning"] = ("gws-callout-warning", "bi-exclamation-triangle-fill"),
+        ["danger"] = ("gws-callout-danger", "bi-x-octagon-fill"),
+        ["note"] = ("gws-callout-note", "bi-sticky-fill"),
+    };
+
+    private static string RenderCallout(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var (cssClass, icon) = CalloutVariants.TryGetValue(Get(p, "variant", "info"), out var variant) ? variant : CalloutVariants["info"];
+        var showIcon = Get(p, "showIcon", "true") == "true";
+
+        return $"""
+            <div class="gws-callout {cssClass}">
+              {(showIcon ? $"""<i class="bi {icon} gws-callout-icon" aria-hidden="true"></i>""" : "")}
+              <div class="gws-callout-body">
+                {(HasValue(p, "title") ? $"""<div class="gws-callout-title"{InlineEditAttrs(editMode, "title")}>{Html(Get(p, "title"))}</div>""" : "")}
+                <div class="gws-callout-text"{InlineRichAttrs(editMode, "body", Get(p, "body"))}>{Markdown.ToHtml(Get(p, "body"), MarkdownPipeline)}</div>
+              </div>
+            </div>
+            """;
     }
 
     // WordPress "loop"-equivalent: a live grid of the most recently published Articles,

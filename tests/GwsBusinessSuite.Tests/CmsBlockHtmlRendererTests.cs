@@ -506,6 +506,132 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void Render_ShouldRenderAuthorBoxWidget_WithNameRoleBioAndAvatar()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"author-box","props":{"name":"Jane Doe","roleOrTitle":"Senior Editor","bio":"Writes about **things**.","avatarUrl":"https://example.com/jane.jpg"}}"""));
+
+        Assert.Contains("gws-author-box", html);
+        Assert.Contains("Jane Doe", html);
+        Assert.Contains("Senior Editor", html);
+        Assert.Contains("<strong>things</strong>", html);
+        Assert.Contains("src=\"https://example.com/jane.jpg\"", html);
+    }
+
+    [Theory]
+    [InlineData("websiteUrl", "https://jane.example")]
+    [InlineData("twitterUrl", "https://x.com/jane")]
+    [InlineData("linkedinUrl", "https://linkedin.com/in/jane")]
+    [InlineData("emailAddress", "jane@example.com")]
+    public void Render_ShouldHideAuthorBoxSocialLink_WhenItsOwnPropIsEmpty(string emptyField, string valueWhenPresent)
+    {
+        var props = new Dictionary<string, string>
+        {
+            ["name"] = "Jane Doe",
+            ["websiteUrl"] = "https://jane.example",
+            ["twitterUrl"] = "https://x.com/jane",
+            ["linkedinUrl"] = "https://linkedin.com/in/jane",
+            ["emailAddress"] = "jane@example.com",
+        };
+        props[emptyField] = "";
+        var widget = new LayoutWidget { WidgetType = "author-box", Props = props };
+
+        var html = CmsBlockHtmlRenderer.Render(new PageLayout
+        {
+            Sections = [new LayoutSection { Columns = [new LayoutColumn { Widgets = [widget] }] }]
+        });
+
+        Assert.DoesNotContain(valueWhenPresent, html);
+        var socialLinkCount = System.Text.RegularExpressions.Regex.Matches(html, "gws-author-box-social-link").Count;
+        Assert.Equal(3, socialLinkCount);
+    }
+
+    [Fact]
+    public void Render_ShouldShowAllFourAuthorBoxSocialLinks_WhenEveryFieldIsSet()
+    {
+        var widget = new LayoutWidget
+        {
+            WidgetType = "author-box",
+            Props = new()
+            {
+                ["name"] = "Jane Doe",
+                ["websiteUrl"] = "https://jane.example",
+                ["twitterUrl"] = "https://x.com/jane",
+                ["linkedinUrl"] = "https://linkedin.com/in/jane",
+                ["emailAddress"] = "jane@example.com",
+            }
+        };
+
+        var html = CmsBlockHtmlRenderer.Render(new PageLayout
+        {
+            Sections = [new LayoutSection { Columns = [new LayoutColumn { Widgets = [widget] }] }]
+        });
+
+        var socialLinkCount = System.Text.RegularExpressions.Regex.Matches(html, "gws-author-box-social-link").Count;
+        Assert.Equal(4, socialLinkCount);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldReturnTheAuthorName_ForAuthorBoxWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "author-box", Props = new() { ["name"] = "Jane Doe" } };
+
+        Assert.Equal("Jane Doe", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    [Theory]
+    [InlineData("info", "gws-callout-info")]
+    [InlineData("success", "gws-callout-success")]
+    [InlineData("warning", "gws-callout-warning")]
+    [InlineData("danger", "gws-callout-danger")]
+    [InlineData("note", "gws-callout-note")]
+    public void Render_ShouldRenderCalloutWidget_WithTheVariantsOwnCssClass(string variant, string expectedClass)
+    {
+        var json = """{"id":"w1","widgetType":"callout","props":{"variant":"__VARIANT__","title":"Heads up","body":"Read this."}}"""
+            .Replace("__VARIANT__", variant);
+        var html = CmsBlockHtmlRenderer.Render(Layout(json));
+
+        Assert.Contains(expectedClass, html);
+        Assert.Contains("Heads up", html);
+        Assert.Contains("Read this.", html);
+    }
+
+    [Fact]
+    public void Render_ShouldFallBackToInfoVariant_ForAnUnrecognizedCalloutVariant()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"callout","props":{"variant":"not-a-real-variant","body":"Text"}}"""));
+
+        Assert.Contains("gws-callout-info", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitTheCalloutTitleElement_WhenTitleIsNotSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"callout","props":{"body":"Text only."}}"""));
+
+        Assert.DoesNotContain("gws-callout-title", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitTheCalloutIcon_WhenShowIconIsFalse()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"callout","props":{"body":"Text","showIcon":"false"}}"""));
+
+        Assert.DoesNotContain("gws-callout-icon", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldReturnTheTitle_ForCalloutWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "callout", Props = new() { ["title"] = "Heads up", ["body"] = "Details" } };
+
+        Assert.Equal("Heads up", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    [Fact]
     public void Render_ShouldRenderAccordionWidget_WithCollapsibleItems()
     {
         var html = CmsBlockHtmlRenderer.Render(Layout(
