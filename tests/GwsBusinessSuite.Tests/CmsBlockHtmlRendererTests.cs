@@ -1629,6 +1629,177 @@ public sealed class CmsBlockHtmlRendererTests
         Assert.Equal("[team grid]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
     }
 
+    // ── Workstream C, Tier 2 (logo cloud) ────────────────────────────────────
+
+    [Fact]
+    public void Render_ShouldRenderLogoCloud_WithLinkedAndUnlinkedLogos()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"logo-cloud","props":{"itemsJson":"[{\"logoUrl\":\"/media/a.png\",\"name\":\"Acme\",\"linkUrl\":\"https://acme.test\"},{\"logoUrl\":\"/media/b.png\",\"name\":\"Beta\",\"linkUrl\":\"\"}]"}}"""));
+
+        Assert.Contains("gws-logo-cloud gws-logo-cloud-grayscale", html);
+        Assert.Contains("""<a href="https://acme.test" class="gws-logo-cloud-item" target="_blank" rel="noopener noreferrer">""", html);
+        Assert.Contains("""<div class="gws-logo-cloud-item">""", html);
+        Assert.Contains("src=\"/media/a.png\"", html);
+        Assert.Contains("alt=\"Beta\"", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitGrayscaleClass_ForLogoCloud_WhenGrayscaleIsFalse()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"logo-cloud","props":{"grayscale":"false","itemsJson":"[{\"logoUrl\":\"/media/a.png\"}]"}}"""));
+
+        Assert.DoesNotContain("gws-logo-cloud-grayscale", html);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipLogoCloudItemsWithNoLogoUrl()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"logo-cloud","props":{"itemsJson":"[{\"logoUrl\":\"\",\"name\":\"Skipped\"},{\"logoUrl\":\"/media/b.png\",\"name\":\"Kept\"}]"}}"""));
+
+        Assert.DoesNotContain("Skipped", html);
+        Assert.Contains("Kept", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderNothingForLogoCloud_WithNoItems()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"logo-cloud","props":{"itemsJson":"[]"}}"""));
+
+        Assert.DoesNotContain("gws-logo-cloud", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribeLogoCloudWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "logo-cloud" };
+
+        Assert.Equal("[logo cloud]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    // ── Workstream C, Tier 2 (process/steps widget) ──────────────────────────
+
+    [Fact]
+    public void Render_ShouldRenderProcessSteps_WithDerivedSequentialNumbers()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"process-steps","props":{"itemsJson":"[{\"title\":\"First\",\"description\":\"Do this.\"},{\"title\":\"Second\",\"description\":\"Then this.\"}]"}}"""));
+
+        Assert.Contains(">1<", html);
+        Assert.Contains(">2<", html);
+        var firstIndex = html.IndexOf("First", StringComparison.Ordinal);
+        var secondIndex = html.IndexOf("Second", StringComparison.Ordinal);
+        Assert.True(firstIndex >= 0 && secondIndex > firstIndex);
+        Assert.Contains("Do this.", html);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipProcessStepsWithNoTitle()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"process-steps","props":{"itemsJson":"[{\"title\":\"\",\"description\":\"Skipped\"},{\"title\":\"Kept\",\"description\":\"\"}]"}}"""));
+
+        Assert.DoesNotContain("Skipped", html);
+        Assert.Contains("Kept", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitProcessStepDescription_WhenNotSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"process-steps","props":{"itemsJson":"[{\"title\":\"Only a title\"}]"}}"""));
+
+        Assert.DoesNotContain("gws-process-step-description", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribeProcessStepsWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "process-steps" };
+
+        Assert.Equal("[process steps]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    // ── Workstream C, Tier 2 (tabs widget) ────────────────────────────────────
+
+    [Fact]
+    public void Render_ShouldRenderTabs_WithFirstTabActiveByDefault()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"tabs","props":{"itemsJson":"[{\"label\":\"Features\",\"content\":\"Feature content.\"},{\"label\":\"Pricing\",\"content\":\"Pricing content.\"}]"}}"""));
+
+        Assert.Contains("data-gws-tabs", html);
+        Assert.Contains("gws-tabs-tab is-active", html);
+        Assert.Contains("Features", html);
+        Assert.Contains("Pricing", html);
+        Assert.Contains("Feature content.", html);
+        Assert.Contains("Pricing content.", html);
+        Assert.Contains("aria-selected=\"true\"", html);
+        Assert.Contains("aria-selected=\"false\"", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOnlyMarkTheFirstPanelActive_ForTabsWidget()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"tabs","props":{"itemsJson":"[{\"label\":\"A\",\"content\":\"Content A\"},{\"label\":\"B\",\"content\":\"Content B\"}]"}}"""));
+
+        var activePanelCount = System.Text.RegularExpressions.Regex.Matches(html, "gws-tabs-panel is-active").Count;
+        Assert.Equal(1, activePanelCount);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipTabsWithNoLabel()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"tabs","props":{"itemsJson":"[{\"label\":\"\",\"content\":\"Skipped\"},{\"label\":\"Kept\",\"content\":\"Content\"}]"}}"""));
+
+        Assert.DoesNotContain("Skipped", html);
+        Assert.Contains("Kept", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderNothingForTabsWidget_WithNoItems()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"tabs","props":{"itemsJson":"[]"}}"""));
+
+        Assert.DoesNotContain("gws-tabs", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribeTabsWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "tabs" };
+
+        Assert.Equal("[tabs]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    [Fact]
+    public void LayoutContainsTabs_ShouldReturnTrue_WhenAWidgetIsTabs()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"tabs","props":{}}"""));
+
+        Assert.True(CmsBlockHtmlRenderer.LayoutContainsTabs(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsTabs_ShouldReturnFalse_WhenNoWidgetIsTabs()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"paragraph","props":{}}"""));
+
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsTabs(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsTabs_ShouldReturnFalse_ForNullLayout()
+    {
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsTabs(null));
+    }
+
     private static PageLayout ButtonLayout(string href) => new()
     {
         Sections =

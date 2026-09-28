@@ -1937,6 +1937,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     var tocScriptTag = CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout) ? CmsBlockHtmlRenderer.BuildTableOfContentsRuntimeScript() : string.Empty;
     var readingProgressScriptTag = CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout) ? CmsBlockHtmlRenderer.BuildReadingProgressRuntimeScript() : string.Empty;
     var statsScriptTag = CmsBlockHtmlRenderer.LayoutContainsStats(layout) ? CmsBlockHtmlRenderer.BuildStatsCounterRuntimeScript() : string.Empty;
+    var tabsScriptTag = CmsBlockHtmlRenderer.LayoutContainsTabs(layout) ? CmsBlockHtmlRenderer.BuildTabsRuntimeScript() : string.Empty;
 
     var html = $"""
         <!DOCTYPE html>
@@ -1957,6 +1958,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
           {tocScriptTag}
           {readingProgressScriptTag}
           {statsScriptTag}
+          {tabsScriptTag}
         </body>
         </html>
         """;
@@ -2776,6 +2778,7 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
               {(CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout) ? CmsBlockHtmlRenderer.BuildTableOfContentsRuntimeScript() : "")}
               {(CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout) ? CmsBlockHtmlRenderer.BuildReadingProgressRuntimeScript() : "")}
               {(CmsBlockHtmlRenderer.LayoutContainsStats(layout) ? CmsBlockHtmlRenderer.BuildStatsCounterRuntimeScript() : "")}
+              {(CmsBlockHtmlRenderer.LayoutContainsTabs(layout) ? CmsBlockHtmlRenderer.BuildTabsRuntimeScript() : "")}
             </body>
             </html>
             """;
@@ -3418,6 +3421,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     if (CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildTableOfContentsRuntimeScript();
     if (CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildReadingProgressRuntimeScript();
     if (CmsBlockHtmlRenderer.LayoutContainsStats(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildStatsCounterRuntimeScript();
+    if (CmsBlockHtmlRenderer.LayoutContainsTabs(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildTabsRuntimeScript();
     var wrappedBody = string.IsNullOrWhiteSpace(customCss)
         ? bodyHtml
         : $"<style>{SanitizeInlineCss(customCss)}</style>{bodyHtml}";

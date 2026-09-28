@@ -74,6 +74,10 @@ public static class CmsBlockHtmlRenderer
     public static bool LayoutContainsStats(PageLayout? layout) =>
         layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "stats")));
 
+    // Workstream C, Tier 2 (tabs widget) - same payload-size-guard reasoning as the guards above.
+    public static bool LayoutContainsTabs(PageLayout? layout) =>
+        layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "tabs")));
+
     // A short single-line preview of a widget's content, used by the structural revision diff
     // (PageRevisionService.BuildStructuralDiff) - never HTML, just text. Mirrors
     // WikiBlockHtmlRenderer.PlainTextPreview's role for wiki blocks.
@@ -105,6 +109,9 @@ public static class CmsBlockHtmlRenderer
             "stats" => "[stats]",
             "cta-banner" => Get(p, "headline", "[CTA banner]"),
             "team-grid" => "[team grid]",
+            "logo-cloud" => "[logo cloud]",
+            "process-steps" => "[process steps]",
+            "tabs" => "[tabs]",
             _ => string.Empty
         };
         text = text.Replace('\n', ' ').Trim();
@@ -702,6 +709,34 @@ public static class CmsBlockHtmlRenderer
         </script>
         """;
 
+    // Workstream C, Tier 2 (tabs widget) - same no-op-when-absent pattern as the other runtime
+    // scripts. Each .gws-tabs container is wired independently, so multiple tab widgets on one
+    // page never interfere with each other.
+    public static string BuildTabsRuntimeScript() => """
+        <script>
+        (function () {
+          var containers = document.querySelectorAll('[data-gws-tabs]');
+          if (!containers.length) return;
+
+          containers.forEach(function (container) {
+            var tabs = container.querySelectorAll('.gws-tabs-tab');
+            var panels = container.querySelectorAll('.gws-tabs-panel');
+            tabs.forEach(function (tab) {
+              tab.addEventListener('click', function () {
+                var index = tab.getAttribute('data-gws-tab-index');
+                tabs.forEach(function (t) { t.classList.remove('is-active'); t.setAttribute('aria-selected', 'false'); });
+                panels.forEach(function (p) { p.classList.remove('is-active'); });
+                tab.classList.add('is-active');
+                tab.setAttribute('aria-selected', 'true');
+                var panel = container.querySelector('[data-gws-tab-panel="' + index + '"]');
+                if (panel) panel.classList.add('is-active');
+              });
+            });
+          });
+        })();
+        </script>
+        """;
+
     private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug, DesignTokenSet? tokens = null)
     {
         var p = widget.Props;
@@ -766,6 +801,9 @@ public static class CmsBlockHtmlRenderer
             "stats" => RenderStats(p, editMode),
             "cta-banner" => RenderCtaBanner(p, editMode),
             "team-grid" => RenderTeamGrid(p, editMode),
+            "logo-cloud" => RenderLogoCloud(p),
+            "process-steps" => RenderProcessSteps(p, editMode),
+            "tabs" => RenderTabs(p, editMode),
             _ => string.Empty
         };
     }
@@ -873,6 +911,128 @@ public static class CmsBlockHtmlRenderer
             }
             sb.Append("</div>");
             return sb.ToString();
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    // Workstream C, Tier 2 (logo cloud / integration showcase) - a static row of partner/client/
+    // integration logos, each independently optionally wrapped in a link. "grayscale" defaults
+    // to true (the common pattern of desaturating logos until hover) but is opt-out, not opt-in,
+    // since a genuinely colorful logo row is a real style choice some sites want.
+    private static string RenderLogoCloud(IReadOnlyDictionary<string, string> p)
+    {
+        var itemsJson = Get(p, "itemsJson");
+        var grayscaleClass = Get(p, "grayscale", "true") == "false" ? "" : " gws-logo-cloud-grayscale";
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson) as JsonArray;
+            if (node is null || node.Count == 0) return string.Empty;
+
+            var sb = new StringBuilder($"""<div class="gws-logo-cloud{grayscaleClass}">""");
+            foreach (var item in node.OfType<JsonObject>())
+            {
+                var logoUrl = item["logoUrl"]?.GetValue<string>() ?? string.Empty;
+                var name = item["name"]?.GetValue<string>() ?? string.Empty;
+                var linkUrl = item["linkUrl"]?.GetValue<string>() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(logoUrl)) continue;
+
+                var img = $"""<img src="{Html(logoUrl)}" alt="{Html(name)}" class="gws-logo-cloud-img" loading="lazy" />""";
+                sb.Append(string.IsNullOrWhiteSpace(linkUrl)
+                    ? $"""<div class="gws-logo-cloud-item">{img}</div>"""
+                    : $"""<a href="{Html(HrefOrHash(linkUrl))}" class="gws-logo-cloud-item" target="_blank" rel="noopener noreferrer">{img}</a>""");
+            }
+            sb.Append("</div>");
+            return sb.ToString();
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    // Workstream C, Tier 2 (process/steps widget) - the step number is derived from the item's
+    // position, never stored in itemsJson - it's real sequence information (per this codebase's
+    // "structure is information" convention), and deriving it means reordering/removing a step
+    // can never leave a stale "3" sitting where step 2 now is.
+    private static string RenderProcessSteps(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var itemsJson = Get(p, "itemsJson");
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson) as JsonArray;
+            if (node is null || node.Count == 0) return string.Empty;
+
+            var sb = new StringBuilder("""<div class="gws-process-steps">""");
+            var index = -1;
+            foreach (var item in node.OfType<JsonObject>())
+            {
+                index++;
+                var title = item["title"]?.GetValue<string>() ?? string.Empty;
+                var description = item["description"]?.GetValue<string>() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(title)) continue;
+
+                sb.Append($"""
+                    <div class="gws-process-step">
+                      <div class="gws-process-step-number" aria-hidden="true">{index + 1}</div>
+                      <div class="gws-process-step-body">
+                        <div class="gws-process-step-title"{InlineEditAttrs(editMode, $"itemsJson[{index}].title")}>{Html(title)}</div>
+                        {(!string.IsNullOrWhiteSpace(description) ? $"""<div class="gws-process-step-description"{InlineEditAttrs(editMode, $"itemsJson[{index}].description")}>{Html(description)}</div>""" : "")}
+                      </div>
+                    </div>
+                    """);
+            }
+            sb.Append("</div>");
+            return sb.ToString();
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    // Workstream C, Tier 2 (tabs widget) - a generic tabbed container over Markdown content
+    // panels. Static shell for both the nav buttons and the panels (SEO-visible, all panels'
+    // real content is in the DOM from first render, just visually hidden past the first) with
+    // BuildTabsRuntimeScript doing the click-to-switch behavior - plain click listeners, no
+    // IntersectionObserver/scroll involved, so (unlike the counter/scrollspy scripts) it's safe
+    // to run identically in edit mode too rather than being skipped there.
+    private static string RenderTabs(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var itemsJson = Get(p, "itemsJson");
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson) as JsonArray;
+            if (node is null || node.Count == 0) return string.Empty;
+
+            var tabs = new StringBuilder();
+            var panels = new StringBuilder();
+            var index = -1;
+            foreach (var item in node.OfType<JsonObject>())
+            {
+                var label = item["label"]?.GetValue<string>() ?? string.Empty;
+                var content = item["content"]?.GetValue<string>() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(label)) continue;
+                index++;
+
+                var activeClass = index == 0 ? " is-active" : "";
+                tabs.Append($"""
+                    <button type="button" class="gws-tabs-tab{activeClass}" role="tab" aria-selected="{(index == 0 ? "true" : "false")}" data-gws-tab-index="{index}"{InlineEditAttrs(editMode, $"itemsJson[{index}].label")}>{Html(label)}</button>
+                    """);
+                panels.Append($"""
+                    <div class="gws-tabs-panel{activeClass}" role="tabpanel" data-gws-tab-panel="{index}"{InlineRichAttrs(editMode, $"itemsJson[{index}].content", content)}>{Markdown.ToHtml(content, MarkdownPipeline)}</div>
+                    """);
+            }
+            if (index < 0) return string.Empty;
+
+            return $"""
+                <div class="gws-tabs" data-gws-tabs>
+                  <div class="gws-tabs-nav" role="tablist">{tabs}</div>
+                  <div class="gws-tabs-panels">{panels}</div>
+                </div>
+                """;
         }
         catch
         {

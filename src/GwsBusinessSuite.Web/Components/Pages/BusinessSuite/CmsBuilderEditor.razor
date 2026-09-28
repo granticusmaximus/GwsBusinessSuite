@@ -1303,6 +1303,123 @@ else
                                 </select>
                             </div>
                         }
+                        else if (selWidget.WidgetType == "logo-cloud")
+                        {
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="@($"logo-cloud-grayscale-{selWidget.Id}")"
+                                       checked='@(GetProp(selWidget, "grayscale", "true") == "true")'
+                                       @onchange='(e) => SetProp(selWidget, "grayscale", (bool)(e.Value ?? true) ? "true" : "false")' />
+                                <label class="form-check-label small" for="@($"logo-cloud-grayscale-{selWidget.Id}")">Grayscale until hover</label>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Logos
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddLogoCloudItem(selWidget)">
+                                        <i class="bi bi-plus-lg"></i> Add logo
+                                    </button>
+                                </label>
+                                @{ var logoItems = GetLogoCloudItems(selWidget); }
+                                @if (logoItems.Count == 0)
+                                {
+                                    <p class="small text-secondary mb-0">No logos yet — click "Add logo" to build this row.</p>
+                                }
+                                else
+                                {
+                                    @for (var i = 0; i < logoItems.Count; i++)
+                                    {
+                                        var index = i;
+                                        var item = logoItems[index];
+                                        <div class="studio-form-field-editor">
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm font-monospace" placeholder="Logo image URL" value="@item.LogoUrl"
+                                                       @oninput="(e) => UpdateLogoCloudItem(selWidget, index, i => i with { LogoUrl = e.Value?.ToString() ?? string.Empty })" />
+                                                <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" @onclick="() => RemoveLogoCloudItem(selWidget, index)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                            <div class="d-flex gap-2">
+                                                <input class="form-control form-control-sm" placeholder="Name (alt text)" value="@item.Name"
+                                                       @oninput="(e) => UpdateLogoCloudItem(selWidget, index, i => i with { Name = e.Value?.ToString() ?? string.Empty })" />
+                                                <input class="form-control form-control-sm font-monospace" placeholder="Link URL (optional)" value="@item.LinkUrl"
+                                                       @oninput="(e) => UpdateLogoCloudItem(selWidget, index, i => i with { LinkUrl = e.Value?.ToString() ?? string.Empty })" />
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "process-steps")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Steps
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddProcessStepsItem(selWidget)">
+                                        <i class="bi bi-plus-lg"></i> Add step
+                                    </button>
+                                </label>
+                                @{ var stepItems = GetProcessStepsItems(selWidget); }
+                                @if (stepItems.Count == 0)
+                                {
+                                    <p class="small text-secondary mb-0">No steps yet — click "Add step" to build this sequence.</p>
+                                }
+                                else
+                                {
+                                    @for (var i = 0; i < stepItems.Count; i++)
+                                    {
+                                        var index = i;
+                                        var item = stepItems[index];
+                                        <div class="studio-form-field-editor">
+                                            <div class="d-flex gap-2 mb-2">
+                                                <span class="badge text-bg-secondary align-self-center">@(index + 1)</span>
+                                                <input class="form-control form-control-sm" placeholder="Step title" value="@item.Title"
+                                                       @oninput="(e) => UpdateProcessStepsItem(selWidget, index, i => i with { Title = e.Value?.ToString() ?? string.Empty })" />
+                                                <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" @onclick="() => RemoveProcessStepsItem(selWidget, index)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                            <input class="form-control form-control-sm" placeholder="Description" value="@item.Description"
+                                                   @oninput="(e) => UpdateProcessStepsItem(selWidget, index, i => i with { Description = e.Value?.ToString() ?? string.Empty })" />
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "tabs")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Tabs
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddTabsItem(selWidget)">
+                                        <i class="bi bi-plus-lg"></i> Add tab
+                                    </button>
+                                </label>
+                                @{ var tabItems = GetTabsItems(selWidget); }
+                                @if (tabItems.Count == 0)
+                                {
+                                    <p class="small text-secondary mb-0">No tabs yet — click "Add tab" to build this container.</p>
+                                }
+                                else
+                                {
+                                    @for (var i = 0; i < tabItems.Count; i++)
+                                    {
+                                        var index = i;
+                                        var item = tabItems[index];
+                                        <div class="studio-form-field-editor">
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Tab label" value="@item.Label"
+                                                       @oninput="(e) => UpdateTabsItem(selWidget, index, i => i with { Label = e.Value?.ToString() ?? string.Empty })" />
+                                                <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" @onclick="() => RemoveTabsItem(selWidget, index)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                            <ProfessionalWysiwygEditor Value="@item.Content"
+                                                                       ValueChanged="value => UpdateTabsItem(selWidget, index, i => i with { Content = value })"
+                                                                       Compact="true" MinHeight="90px" Placeholder="Tab content" AriaLabel="Tab content" />
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        }
                         else if (selWidget.WidgetType == "form")
                         {
                             <div>
@@ -2057,6 +2174,9 @@ else
         new("stats",       "bi bi-graph-up-arrow",         "Stats",       "Animated number counters for key metrics", GroupMedia),
         new("team-grid",   "bi bi-people",                 "Team Grid",   "Photo cards for introducing your team", GroupMedia),
         new("cta-banner",  "bi bi-bullseye",                "CTA Banner",  "Centered headline, copy, and one button", GroupLayout),
+        new("logo-cloud",  "bi bi-grid-1x2",                "Logo Cloud",  "A row of partner/client/integration logos", GroupMedia),
+        new("process-steps", "bi bi-diagram-3",             "Process Steps", "A numbered step-by-step sequence",  GroupLayout),
+        new("tabs",        "bi bi-folder2-open",            "Tabs",        "A tabbed container of Markdown content", GroupLayout),
         new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block",                      GroupAdvanced),
     ];
 
@@ -4216,6 +4336,168 @@ else
         SaveTeamGridItems(widget, items, forceNewUndoStep: true);
     }
 
+    // ── Logo cloud items ─────────────────────────────────────────────────
+    private sealed record LogoCloudItemDef(string LogoUrl, string Name, string LinkUrl);
+
+    private static List<LogoCloudItemDef> GetLogoCloudItems(LayoutWidget widget)
+    {
+        try
+        {
+            var raw = GetProp(widget, "itemsJson");
+            if (string.IsNullOrWhiteSpace(raw)) return [];
+
+            var parsed = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(raw);
+            if (parsed is null) return [];
+
+            return parsed.Select(i => new LogoCloudItemDef(
+                i.TryGetValue("logoUrl", out var l) ? l.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("name", out var n) ? n.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("linkUrl", out var u) ? u.GetString() ?? string.Empty : string.Empty
+            )).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void SaveLogoCloudItems(LayoutWidget widget, List<LogoCloudItemDef> items, bool forceNewUndoStep = false)
+    {
+        var json = JsonSerializer.Serialize(items.Select(i => new { logoUrl = i.LogoUrl, name = i.Name, linkUrl = i.LinkUrl }));
+        SetProp(widget, "itemsJson", json, forceNewUndoStep);
+    }
+
+    private void AddLogoCloudItem(LayoutWidget widget)
+    {
+        var items = GetLogoCloudItems(widget);
+        items.Add(new LogoCloudItemDef("", "Logo", ""));
+        SaveLogoCloudItems(widget, items, forceNewUndoStep: true);
+    }
+
+    private void UpdateLogoCloudItem(LayoutWidget widget, int index, Func<LogoCloudItemDef, LogoCloudItemDef> update)
+    {
+        var items = GetLogoCloudItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items[index] = update(items[index]);
+        SaveLogoCloudItems(widget, items);
+    }
+
+    private void RemoveLogoCloudItem(LayoutWidget widget, int index)
+    {
+        var items = GetLogoCloudItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
+        SaveLogoCloudItems(widget, items, forceNewUndoStep: true);
+    }
+
+    // ── Process steps items ──────────────────────────────────────────────
+    private sealed record ProcessStepDef(string Title, string Description);
+
+    private static List<ProcessStepDef> GetProcessStepsItems(LayoutWidget widget)
+    {
+        try
+        {
+            var raw = GetProp(widget, "itemsJson");
+            if (string.IsNullOrWhiteSpace(raw)) return [];
+
+            var parsed = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(raw);
+            if (parsed is null) return [];
+
+            return parsed.Select(i => new ProcessStepDef(
+                i.TryGetValue("title", out var t) ? t.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("description", out var d) ? d.GetString() ?? string.Empty : string.Empty
+            )).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void SaveProcessStepsItems(LayoutWidget widget, List<ProcessStepDef> items, bool forceNewUndoStep = false)
+    {
+        var json = JsonSerializer.Serialize(items.Select(i => new { title = i.Title, description = i.Description }));
+        SetProp(widget, "itemsJson", json, forceNewUndoStep);
+    }
+
+    private void AddProcessStepsItem(LayoutWidget widget)
+    {
+        var items = GetProcessStepsItems(widget);
+        var n = items.Count + 1;
+        items.Add(new ProcessStepDef($"Step {n}", "Describe this step."));
+        SaveProcessStepsItems(widget, items, forceNewUndoStep: true);
+    }
+
+    private void UpdateProcessStepsItem(LayoutWidget widget, int index, Func<ProcessStepDef, ProcessStepDef> update)
+    {
+        var items = GetProcessStepsItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items[index] = update(items[index]);
+        SaveProcessStepsItems(widget, items);
+    }
+
+    private void RemoveProcessStepsItem(LayoutWidget widget, int index)
+    {
+        var items = GetProcessStepsItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
+        SaveProcessStepsItems(widget, items, forceNewUndoStep: true);
+    }
+
+    // ── Tabs items ───────────────────────────────────────────────────────
+    private sealed record TabItemDef(string Label, string Content);
+
+    private static List<TabItemDef> GetTabsItems(LayoutWidget widget)
+    {
+        try
+        {
+            var raw = GetProp(widget, "itemsJson");
+            if (string.IsNullOrWhiteSpace(raw)) return [];
+
+            var parsed = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(raw);
+            if (parsed is null) return [];
+
+            return parsed.Select(i => new TabItemDef(
+                i.TryGetValue("label", out var l) ? l.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("content", out var c) ? c.GetString() ?? string.Empty : string.Empty
+            )).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void SaveTabsItems(LayoutWidget widget, List<TabItemDef> items, bool forceNewUndoStep = false)
+    {
+        var json = JsonSerializer.Serialize(items.Select(i => new { label = i.Label, content = i.Content }));
+        SetProp(widget, "itemsJson", json, forceNewUndoStep);
+    }
+
+    private void AddTabsItem(LayoutWidget widget)
+    {
+        var items = GetTabsItems(widget);
+        var n = items.Count + 1;
+        items.Add(new TabItemDef($"Tab {n}", "Tab content."));
+        SaveTabsItems(widget, items, forceNewUndoStep: true);
+    }
+
+    private void UpdateTabsItem(LayoutWidget widget, int index, Func<TabItemDef, TabItemDef> update)
+    {
+        var items = GetTabsItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items[index] = update(items[index]);
+        SaveTabsItems(widget, items);
+    }
+
+    private void RemoveTabsItem(LayoutWidget widget, int index)
+    {
+        var items = GetTabsItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
+        SaveTabsItems(widget, items, forceNewUndoStep: true);
+    }
+
     // ── Media library picker ────────────────────────────────────────────────
     private bool _showMediaPicker;
     private string _mediaPickerError = string.Empty;
@@ -4278,6 +4560,9 @@ else
         "stats"      => new() { WidgetType = "stats", Props = new() { ["itemsJson"] = """[{"value":"500","suffix":"+","label":"Projects Delivered"},{"value":"98","suffix":"%","label":"Client Satisfaction"},{"value":"12","suffix":"","label":"Years in Business"}]""" } },
         "team-grid"  => new() { WidgetType = "team-grid", Props = new() { ["itemsJson"] = """[{"name":"Jane Doe","role":"Role or title","photoUrl":"","linkedinUrl":"","twitterUrl":"","emailAddress":""}]""" } },
         "cta-banner" => new() { WidgetType = "cta-banner", Props = new() { ["headline"] = "Ready to get started?", ["body"] = "Tell visitors what happens next and give them a clear next step.", ["buttonLabel"] = "Get started", ["buttonHref"] = "#", ["buttonVariant"] = "primary", ["align"] = "center" } },
+        "logo-cloud" => new() { WidgetType = "logo-cloud", Props = new() { ["itemsJson"] = "[]", ["grayscale"] = "true" } },
+        "process-steps" => new() { WidgetType = "process-steps", Props = new() { ["itemsJson"] = """[{"title":"Step one","description":"Describe the first step here."},{"title":"Step two","description":"Describe the second step here."}]""" } },
+        "tabs" => new() { WidgetType = "tabs", Props = new() { ["itemsJson"] = """[{"label":"Tab one","content":"Content for the first tab."},{"label":"Tab two","content":"Content for the second tab."}]""" } },
         _           => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Content", ["align"] = "left" } }
     };
 
@@ -4330,6 +4615,9 @@ else
         "stats"       => "Stats",
         "team-grid"   => "Team Grid",
         "cta-banner"  => "CTA Banner",
+        "logo-cloud"  => "Logo Cloud",
+        "process-steps" => "Process Steps",
+        "tabs"        => "Tabs",
         _             => type
     };
 
@@ -4366,6 +4654,9 @@ else
         "stats"       => "bi bi-graph-up-arrow",
         "team-grid"   => "bi bi-people",
         "cta-banner"  => "bi bi-bullseye",
+        "logo-cloud"  => "bi bi-grid-1x2",
+        "process-steps" => "bi bi-diagram-3",
+        "tabs"        => "bi bi-folder2-open",
         _             => "bi bi-square"
     };
 
@@ -4395,6 +4686,9 @@ else
             "stats"       => $"{GetStatsItems(w).Count} stat(s)",
             "team-grid"   => $"{GetTeamGridItems(w).Count} member(s)",
             "cta-banner"  => GetPropStatic(w, "headline", "CTA Banner"),
+            "logo-cloud"  => $"{GetLogoCloudItems(w).Count} logo(s)",
+            "process-steps" => $"{GetProcessStepsItems(w).Count} step(s)",
+            "tabs"        => $"{GetTabsItems(w).Count} tab(s)",
             _             => w.WidgetType
         };
         return raw.Length <= 38 ? raw : raw[..38] + "…";

@@ -229,6 +229,28 @@ else
                     }
                 </div>
                 break;
+            case "logo-cloud":
+                <span class="cms-block-chip">Logo Cloud</span>
+                <div class="small text-secondary">@ParseLogoCloudItems(Get(p, "itemsJson")).Count logo(s)</div>
+                break;
+            case "process-steps":
+                <span class="cms-block-chip">Process Steps</span>
+                <div class="cms-block-form-grid">
+                    @foreach (var (step, i) in ParseProcessStepsItems(Get(p, "itemsJson")).Select((s, i) => (s, i)))
+                    {
+                        <div class="small text-secondary">@(i + 1). @step.Title</div>
+                    }
+                </div>
+                break;
+            case "tabs":
+                <span class="cms-block-chip">Tabs</span>
+                <div class="cms-block-form-grid">
+                    @foreach (var tab in ParseTabsItems(Get(p, "itemsJson")))
+                    {
+                        <div class="small text-secondary">@tab.Label</div>
+                    }
+                </div>
+                break;
             default:
                 <span class="cms-block-chip">Unknown widget</span>
                 <div class="small text-secondary mb-2">Widget type: @widget.WidgetType</div>
@@ -294,6 +316,64 @@ else
                 i.TryGetValue("name", out var n) ? n.GetString() ?? string.Empty : string.Empty,
                 i.TryGetValue("role", out var r) ? r.GetString() ?? string.Empty : string.Empty
             )).Where(i => !string.IsNullOrWhiteSpace(i.Name)).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private sealed record LogoCloudItemPreview(string LogoUrl);
+    private sealed record ProcessStepPreview(string Title);
+    private sealed record TabItemPreview(string Label);
+
+    private static List<LogoCloudItemPreview> ParseLogoCloudItems(string itemsJson)
+    {
+        try
+        {
+            var nodes = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
+                string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson);
+            if (nodes is null) return [];
+
+            return nodes.Select(i => new LogoCloudItemPreview(
+                i.TryGetValue("logoUrl", out var l) ? l.GetString() ?? string.Empty : string.Empty
+            )).Where(i => !string.IsNullOrWhiteSpace(i.LogoUrl)).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static List<ProcessStepPreview> ParseProcessStepsItems(string itemsJson)
+    {
+        try
+        {
+            var nodes = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
+                string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson);
+            if (nodes is null) return [];
+
+            return nodes.Select(i => new ProcessStepPreview(
+                i.TryGetValue("title", out var t) ? t.GetString() ?? string.Empty : string.Empty
+            )).Where(i => !string.IsNullOrWhiteSpace(i.Title)).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static List<TabItemPreview> ParseTabsItems(string itemsJson)
+    {
+        try
+        {
+            var nodes = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
+                string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson);
+            if (nodes is null) return [];
+
+            return nodes.Select(i => new TabItemPreview(
+                i.TryGetValue("label", out var l) ? l.GetString() ?? string.Empty : string.Empty
+            )).Where(i => !string.IsNullOrWhiteSpace(i.Label)).ToList();
         }
         catch
         {
