@@ -1297,4 +1297,163 @@ public sealed class CmsBlockHtmlRendererTests
             }
         ]
     };
+
+    // ── Phase 4 (table-of-contents / reading-progress) ──────────────────────
+
+    [Fact]
+    public void Render_ShouldRenderTableOfContentsShell_WithTitleAndDataAttrs()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"table-of-contents","props":{"title":"In This Guide","minLevel":"h2","maxLevel":"h4","showNumbers":"true"}}"""));
+
+        Assert.Contains("gws-toc", html);
+        Assert.Contains("In This Guide", html);
+        Assert.Contains("data-gws-toc=", html);
+        Assert.Contains("&quot;minLevel&quot;:&quot;h2&quot;", html);
+        Assert.Contains("&quot;maxLevel&quot;:&quot;h4&quot;", html);
+        Assert.Contains("&quot;showNumbers&quot;:true", html);
+        Assert.Contains("gws-toc-list", html);
+    }
+
+    [Fact]
+    public void Render_ShouldDefaultTableOfContentsTitleAndLevels_WhenUnset()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"table-of-contents","props":{}}"""));
+
+        Assert.Contains("On This Page", html);
+        Assert.Contains("&quot;minLevel&quot;:&quot;h2&quot;", html);
+        Assert.Contains("&quot;maxLevel&quot;:&quot;h3&quot;", html);
+    }
+
+    [Fact]
+    public void Render_ShouldFallBackToDefaultLevels_ForAnUnrecognizedTableOfContentsLevel()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"table-of-contents","props":{"minLevel":"h1","maxLevel":"h9"}}"""));
+
+        Assert.Contains("&quot;minLevel&quot;:&quot;h2&quot;", html);
+        Assert.Contains("&quot;maxLevel&quot;:&quot;h3&quot;", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribeTableOfContents()
+    {
+        var widget = new LayoutWidget { WidgetType = "table-of-contents" };
+
+        Assert.Equal("[table of contents]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    [Fact]
+    public void LayoutContainsTableOfContents_ShouldReturnTrue_WhenAWidgetIsTableOfContents()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"table-of-contents","props":{}}"""));
+
+        Assert.True(CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsTableOfContents_ShouldReturnFalse_WhenNoWidgetIsTableOfContents()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"paragraph","props":{}}"""));
+
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsTableOfContents_ShouldReturnFalse_ForNullLayout()
+    {
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsTableOfContents(null));
+    }
+
+    [Fact]
+    public void Render_ShouldRenderReadingProgressShell_WithHeightAndPosition()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"reading-progress","props":{"height":"6","position":"bottom"}}"""));
+
+        Assert.Contains("gws-reading-progress-bottom", html);
+        Assert.Contains("data-gws-reading-progress", html);
+        Assert.Contains("--gws-reading-progress-height:6px", html);
+        Assert.Contains("gws-reading-progress-bar", html);
+    }
+
+    [Fact]
+    public void Render_ShouldDefaultReadingProgressToTop_WhenPositionIsUnrecognized()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"reading-progress","props":{"position":"sideways"}}"""));
+
+        Assert.Contains("gws-reading-progress-top", html);
+    }
+
+    [Fact]
+    public void Render_ShouldClampReadingProgressHeight_ToAReasonableRange()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"reading-progress","props":{"height":"999"}}"""));
+
+        Assert.Contains("--gws-reading-progress-height:24px", html);
+    }
+
+    [Fact]
+    public void Render_ShouldNotSetReadingProgressColor_WhenNeitherColorNorTokenIsSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"reading-progress","props":{}}"""));
+
+        Assert.DoesNotContain("--gws-reading-progress-color", html);
+    }
+
+    [Fact]
+    public void Render_ShouldResolveReadingProgressColor_FromRawHex()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"reading-progress","props":{"color":"#ff0000"}}"""));
+
+        Assert.Contains("--gws-reading-progress-color:#ff0000", html);
+    }
+
+    [Fact]
+    public void Render_ShouldPreferReadingProgressColorToken_OverRawColor_WhenItResolves()
+    {
+        var tokens = new DesignTokenSet([new DesignToken("Accent", "#1c3d5a")], [], []);
+
+        var html = CmsBlockHtmlRenderer.Render(
+            Layout("""{"id":"w1","widgetType":"reading-progress","props":{"color":"#ff0000","colorToken":"Accent"}}"""),
+            tokens: tokens);
+
+        Assert.Contains("--gws-reading-progress-color:#1c3d5a", html);
+        Assert.DoesNotContain("#ff0000", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribeReadingProgress()
+    {
+        var widget = new LayoutWidget { WidgetType = "reading-progress" };
+
+        Assert.Equal("[reading progress bar]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    [Fact]
+    public void LayoutContainsReadingProgress_ShouldReturnTrue_WhenAWidgetIsReadingProgress()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"reading-progress","props":{}}"""));
+
+        Assert.True(CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsReadingProgress_ShouldReturnFalse_WhenNoWidgetIsReadingProgress()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"paragraph","props":{}}"""));
+
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsReadingProgress_ShouldReturnFalse_ForNullLayout()
+    {
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsReadingProgress(null));
+    }
 }

@@ -1004,6 +1004,89 @@ else
                                 <label class="form-check-label small" for="relatedPostsShowImage">Show hero image</label>
                             </div>
                         }
+                        else if (selWidget.WidgetType == "table-of-contents")
+                        {
+                            <div class="small text-secondary mb-2">
+                                Scans this page's own headings at load time and links to them - nothing to
+                                pick manually. Add a Heading widget or two below it to see entries appear.
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Title</label>
+                                <input class="form-control" value='@GetProp(selWidget, "title", "On This Page")'
+                                       @oninput='(e) => SetProp(selWidget, "title", e.Value?.ToString() ?? "On This Page")' />
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold">From level</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "minLevel", "h2")'
+                                            @onchange='(e) => SetProp(selWidget, "minLevel", e.Value?.ToString() ?? "h2")'>
+                                        <option value="h2">H2</option>
+                                        <option value="h3">H3</option>
+                                        <option value="h4">H4</option>
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold">To level</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "maxLevel", "h3")'
+                                            @onchange='(e) => SetProp(selWidget, "maxLevel", e.Value?.ToString() ?? "h3")'>
+                                        <option value="h2">H2</option>
+                                        <option value="h3">H3</option>
+                                        <option value="h4">H4</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="@($"toc-show-numbers-{selWidget.Id}")"
+                                       checked='@(GetProp(selWidget, "showNumbers", "false") == "true")'
+                                       @onchange='(e) => SetProp(selWidget, "showNumbers", (bool)(e.Value ?? false) ? "true" : "false")' />
+                                <label class="form-check-label small" for="@($"toc-show-numbers-{selWidget.Id}")">Number the entries</label>
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "reading-progress")
+                        {
+                            <div class="small text-secondary mb-2">
+                                A thin bar that fills as the visitor scrolls the page. Usually placed once,
+                                at the very top or bottom of the layout.
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Position</label>
+                                <select class="form-select" value='@GetProp(selWidget, "position", "top")'
+                                        @onchange='(e) => SetProp(selWidget, "position", e.Value?.ToString() ?? "top")'>
+                                    <option value="top">Top of viewport</option>
+                                    <option value="bottom">Bottom of viewport</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Height (px)</label>
+                                <input class="form-control" type="number" min="1" max="24"
+                                       value='@GetProp(selWidget, "height", "4")'
+                                       @oninput='(e) => SetProp(selWidget, "height", e.Value?.ToString() ?? "4")' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Color
+                                    @if (!string.IsNullOrWhiteSpace(GetProp(selWidget, "color")))
+                                    {
+                                        <button type="button" class="btn btn-link btn-xs p-0" @onclick='() => SetProp(selWidget, "color", string.Empty)'>Reset</button>
+                                    }
+                                </label>
+                                <input type="color" class="form-control form-control-color w-100"
+                                       value="@(string.IsNullOrWhiteSpace(GetProp(selWidget, "color")) ? "#0d6efd" : GetProp(selWidget, "color"))"
+                                       @oninput='(e) => SetProp(selWidget, "color", e.Value?.ToString() ?? string.Empty)' />
+                                @if (SiteTokens.Colors.Count > 0)
+                                {
+                                    <select class="form-select form-select-sm mt-1" value='@GetProp(selWidget, "colorToken")'
+                                            @onchange='(e) => SetProp(selWidget, "colorToken", e.Value?.ToString() ?? string.Empty)'
+                                            title="A token, when set, overrides the color picker above and updates everywhere it's used if the token changes.">
+                                        <option value="">No token (use color above)</option>
+                                        @foreach (var token in SiteTokens.Colors)
+                                        {
+                                            <option value="@token.Name">@token.Name</option>
+                                        }
+                                    </select>
+                                }
+                            </div>
+                        }
                         else if (selWidget.WidgetType == "form")
                         {
                             <div>
@@ -1752,6 +1835,8 @@ else
         new("form",        "bi bi-ui-checks",              "Form",        "Custom fields, posts to submissions", GroupDynamic),
         new("posts-grid",  "bi bi-grid-3x3-gap",           "Posts Grid",  "Live grid of your latest blog posts", GroupDynamic),
         new("related-posts", "bi bi-link-45deg",           "Related Posts", "Recommendations for a specific article", GroupDynamic),
+        new("table-of-contents", "bi bi-list-ol",          "Table of Contents", "Auto-generated links to this page's headings", GroupDynamic),
+        new("reading-progress", "bi bi-hourglass-split",   "Reading Progress", "A scroll-position progress bar",      GroupDynamic),
         new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block",                      GroupAdvanced),
     ];
 
@@ -3841,6 +3926,8 @@ else
         "related-posts" => new() { WidgetType = "related-posts", Props = new() { ["sourceArticleSlug"] = "", ["count"] = "3", ["showImage"] = "true" } },
         "author-box" => new() { WidgetType = "author-box", Props = new() { ["name"] = "Jane Doe", ["roleOrTitle"] = "Senior Editor", ["bio"] = "A short bio about this author goes here.", ["avatarUrl"] = "", ["websiteUrl"] = "", ["twitterUrl"] = "", ["linkedinUrl"] = "", ["emailAddress"] = "" } },
         "callout"    => new() { WidgetType = "callout", Props = new() { ["variant"] = "info", ["title"] = "", ["body"] = "Add your callout text here.", ["showIcon"] = "true" } },
+        "table-of-contents" => new() { WidgetType = "table-of-contents", Props = new() { ["title"] = "On This Page", ["minLevel"] = "h2", ["maxLevel"] = "h3", ["showNumbers"] = "false" } },
+        "reading-progress" => new() { WidgetType = "reading-progress", Props = new() { ["color"] = "", ["colorToken"] = "", ["height"] = "4", ["position"] = "top" } },
         _           => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Content", ["align"] = "left" } }
     };
 
@@ -3887,6 +3974,8 @@ else
         "related-posts" => "Related Posts",
         "author-box"  => "Author Box",
         "callout"     => "Callout",
+        "table-of-contents" => "Table of Contents",
+        "reading-progress"  => "Reading Progress",
         _             => type
     };
 
@@ -3917,6 +4006,8 @@ else
         "related-posts" => "bi bi-link-45deg",
         "author-box"  => "bi bi-person-badge",
         "callout"     => "bi bi-megaphone",
+        "table-of-contents" => "bi bi-list-ol",
+        "reading-progress"  => "bi bi-hourglass-split",
         _             => "bi bi-square"
     };
 
@@ -3940,6 +4031,8 @@ else
             "related-posts" => string.IsNullOrWhiteSpace(GetPropStatic(w, "sourceArticleSlug", "")) ? "No source article picked" : $"Related to: {GetPropStatic(w, "sourceArticleSlug", "")}",
             "author-box"  => GetPropStatic(w, "name", "Author Box"),
             "callout"     => GetPropStatic(w, "title", GetPropStatic(w, "body", "Callout")),
+            "table-of-contents" => GetPropStatic(w, "title", "On This Page"),
+            "reading-progress"  => $"{GetPropStatic(w, "position", "top")} bar",
             _             => w.WidgetType
         };
         return raw.Length <= 38 ? raw : raw[..38] + "…";

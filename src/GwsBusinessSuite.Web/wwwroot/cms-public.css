@@ -220,6 +220,23 @@ body {
 .gws-related-posts-title { display: block; padding: 0.85rem; font-size: 0.95rem; font-weight: 600; color: var(--cms-text); }
 .gws-related-posts-empty { color: var(--cms-text-faint); font-style: italic; }
 
+/* Phase 4 (table-of-contents / reading-progress) - both widgets render a static shell here;
+   BuildTableOfContentsRuntimeScript/BuildReadingProgressRuntimeScript (CmsBlockHtmlRenderer)
+   fill and animate them at load/scroll time. */
+.gws-toc { border: 1px solid var(--cms-border); border-radius: 10px; padding: 1rem 1.25rem; background: var(--cms-surface); }
+.gws-toc[hidden] { display: none; }
+.gws-toc-title { font-weight: 700; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--cms-text-soft); margin-bottom: 0.6rem; }
+.gws-toc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.gws-toc-item a { color: var(--cms-text); text-decoration: none; }
+.gws-toc-item a:hover, .gws-toc-item a.is-active { color: var(--cms-accent); text-decoration: underline; }
+.gws-toc-level-h3 { padding-left: 1rem; }
+.gws-toc-level-h4 { padding-left: 2rem; }
+
+.gws-reading-progress { position: fixed; left: 0; right: 0; z-index: 1050; height: var(--gws-reading-progress-height, 4px); background: transparent; pointer-events: none; }
+.gws-reading-progress-top { top: 0; }
+.gws-reading-progress-bottom { bottom: 0; }
+.gws-reading-progress-bar { height: 100%; width: 0%; background: var(--gws-reading-progress-color, var(--cms-accent)); transition: width 0.1s linear; }
+
 .gws-divider { border: none; border-top: 1px solid var(--cms-border); margin: 0; }
 .gws-divider-dashed { border-top-style: dashed; }
 .gws-divider-dotted { border-top-style: dotted; }

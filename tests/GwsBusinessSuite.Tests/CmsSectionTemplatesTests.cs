@@ -52,6 +52,18 @@ public sealed class CmsSectionTemplatesTests
         }
     }
 
+    [Fact]
+    public void NewsletterSignup_ShouldSeedAnEmailRoleFieldAndAutoCreateContact()
+    {
+        var section = CmsSectionTemplates.Find("newsletter-signup")!.Build();
+        section.Background.Should().Be("accent");
+
+        var form = section.Columns.SelectMany(c => c.Widgets).Single(w => w.WidgetType == "form");
+        form.Props["autoCreateContact"].Should().Be("true");
+        form.Props["submitLabel"].Should().Be("Subscribe");
+        form.Props["fieldsJson"].Should().Contain("\"role\":\"email\"").And.Contain("\"type\":\"email\"");
+    }
+
     private static List<string> AllIds(LayoutSection section)
     {
         var ids = new List<string> { section.Id };

@@ -17,7 +17,8 @@ public static class CmsSectionTemplates
         new CmsSectionTemplate("cta-banner", "📣", "CTA banner", "Centered headline, copy, and a call-to-action button", CtaBanner),
         new CmsSectionTemplate("team-grid", "🧑‍🤝‍🧑", "Team/people grid", "Photo cards for introducing people", TeamGrid),
         new CmsSectionTemplate("faq", "❓", "FAQ", "An accordion pre-seeded with sample questions", Faq),
-        new CmsSectionTemplate("pricing-table", "💳", "Pricing table", "Three-column pricing cards with a button each", PricingTable)
+        new CmsSectionTemplate("pricing-table", "💳", "Pricing table", "Three-column pricing cards with a button each", PricingTable),
+        new CmsSectionTemplate("newsletter-signup", "📧", "Newsletter signup", "Email capture styled as an accent-background callout", NewsletterSignup)
     ];
 
     public static CmsSectionTemplate? Find(string key) =>
@@ -125,6 +126,46 @@ public static class CmsSectionTemplates
             PricingCard("Starter", "$9/mo"),
             PricingCard("Pro", "$29/mo"),
             PricingCard("Enterprise", "Contact us")
+        ];
+        return section;
+    }
+
+    private static LayoutSection NewsletterSignup()
+    {
+        var section = new LayoutSection { Label = "Newsletter signup", ColumnLayout = "full", Background = "accent" };
+        var fieldsJson = JsonSerializer.Serialize(new[]
+        {
+            new { key = "email", label = "Email Address", type = "email", required = true, optionsJson = "", role = "email" }
+        });
+        section.Columns =
+        [
+            new LayoutColumn
+            {
+                Span = 12,
+                Widgets =
+                [
+                    new LayoutWidget
+                    {
+                        WidgetType = "heading",
+                        Props = new Dictionary<string, string> { ["text"] = "Stay in the loop", ["level"] = "h2", ["align"] = "center" }
+                    },
+                    new LayoutWidget
+                    {
+                        WidgetType = "paragraph",
+                        Props = new Dictionary<string, string> { ["text"] = "Subscribe for updates - no spam, unsubscribe anytime.", ["align"] = "center" }
+                    },
+                    new LayoutWidget
+                    {
+                        WidgetType = "form",
+                        Props = new Dictionary<string, string>
+                        {
+                            ["fieldsJson"] = fieldsJson,
+                            ["submitLabel"] = "Subscribe",
+                            ["autoCreateContact"] = "true"
+                        }
+                    }
+                ]
+            }
         ];
         return section;
     }

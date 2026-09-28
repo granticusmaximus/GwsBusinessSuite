@@ -183,6 +183,15 @@ else
                     </div>
                 </div>
                 break;
+            case "table-of-contents":
+                <span class="cms-block-chip">Table of Contents</span>
+                <h3>@Get(p, "title", "On This Page")</h3>
+                <div class="small text-secondary">Links to this page's own headings (built at page-load, not previewable here).</div>
+                break;
+            case "reading-progress":
+                <span class="cms-block-chip">Reading Progress</span>
+                <div class="small text-secondary">A @Get(p, "height", "4")px bar at the @Get(p, "position", "top") of the viewport.</div>
+                break;
             default:
                 <span class="cms-block-chip">Unknown widget</span>
                 <div class="small text-secondary mb-2">Widget type: @widget.WidgetType</div>

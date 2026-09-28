@@ -147,7 +147,7 @@ settings screen, not the Pages list).
 
 ## Adding and arranging widgets
 
-The 14 widget types, from the Widgets palette:
+The 19 widget types, from the Widgets palette:
 
 | Widget | What it holds |
 |---|---|
@@ -159,16 +159,28 @@ The 14 widget types, from the Widgets palette:
 | Image | Source URL (or pick from the Media Library), alt text, caption, full/auto width |
 | Card | Title, rich-text body, image URL, link URL |
 | Testimonial | Rich-text quote, author name, author role/company |
+| Author Box | A bio card — name, role/title, Markdown bio, avatar, and independently-optional website/Twitter-X/LinkedIn/email links |
 | Accordion | An ordered list of question/answer items you add/remove/reorder freely |
-| Form | A submit label plus a list of fields (text/email/tel/textarea/select/checkbox, each with a required flag; select fields also get comma-separated options) |
+| Callout | A highlighted info/success/warning/danger/note box with an optional title and an icon toggle |
+| Form | A submit label plus a list of fields (text/email/tel/textarea/select/checkbox, each with a required flag and an optional identity role — Email/Full Name/Company/Phone — that maps a submission into that structured column; select fields also get comma-separated options), plus a "create CRM contacts from submissions" toggle |
 | Spacer | A configurable height in pixels (0–400) |
 | Divider | Solid/dashed/dotted horizontal rule |
 | HTML | Raw HTML, typed directly into a textarea — no sanitization, use with care |
-| Posts Grid | A live grid of your most recently published blog posts — nothing to pick manually, it always reflects whatever's published when a visitor loads the page. Configurable count, columns, whether to show the hero image/excerpt, and the CTA label |
+| Posts Grid | A live grid of your most recently published blog posts — nothing to pick manually, it always reflects whatever's published when a visitor loads the page. Four layouts (grid/list/classic/image-overlay), configurable count, columns (grid layout only), whether to show the hero image/excerpt/publish date, and the CTA label |
+| Related Posts | Scored recommendations (same category +2, each shared tag +1) for one specific article you pick from a dropdown — reusable anywhere, not tied to the page it sits on. Configurable count (1–6) and a hero-image toggle |
+| Table of Contents | An auto-generated, scrollspy-highlighted list of links to the page's own H2–H4 headings, built client-side at load time — nothing to pick manually. Configurable title, heading range, and numbering |
+| Reading Progress | A thin fixed bar (top or bottom of the viewport) that fills as the visitor scrolls the page. Configurable height, position, and color (raw hex or a design token) |
 
 **Adding a widget**: click a palette card to drop it after whatever's currently selected (or at
 the end of the last section if nothing is), or drag it directly onto a spot in the live preview,
 or drag it onto a specific position in the Layers tree.
+
+**Adding a pre-composed section**: the **Add Section** gallery offers ready-made, multi-widget
+starting points instead of building one widget at a time — Feature Grid, Testimonial Row, CTA
+Banner, Team/People Grid, FAQ, Pricing Table, and Newsletter Signup (an accent-background section
+with a heading, supporting copy, and an email-capture form pre-wired to create CRM contacts).
+Every section from the gallery drops in fully editable — nothing about it is locked to the
+template it came from.
 
 **Arranging widgets**: drag a widget's grip handle in the Layers tree to reorder it within a
 column, into a different column, or into a different section entirely. The Inspector's action row
@@ -497,7 +509,7 @@ website, so an uploaded brand asset can be reused without storing duplicate copi
   doesn't record which staff member made a given revision.
 - **No page duplication.** You can duplicate a section or a widget inside Studio, but there's no
   "Duplicate Page" action from the Pages list or settings screen.
-- **Fixed widget catalog.** 14 built-in types, no custom/plugin widgets, and no nested-container
+- **Fixed widget catalog.** 19 built-in types, no custom/plugin widgets, and no nested-container
   widget (a section's columns can't themselves contain another section) beyond what Freeform
   positioning offers within one section.
 - **Menus are single-level.** No dropdown/nested sub-menus in either the Primary or Footer list.

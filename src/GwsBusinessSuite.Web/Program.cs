@@ -1934,6 +1934,8 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
         ? string.Empty
         : $"<style>{SanitizeInlineCss(customCss)}</style>";
     var editModeTag = editMode ? CmsBlockHtmlRenderer.BuildEditModeScript() : string.Empty;
+    var tocScriptTag = CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout) ? CmsBlockHtmlRenderer.BuildTableOfContentsRuntimeScript() : string.Empty;
+    var readingProgressScriptTag = CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout) ? CmsBlockHtmlRenderer.BuildReadingProgressRuntimeScript() : string.Empty;
 
     var html = $"""
         <!DOCTYPE html>
@@ -1951,6 +1953,8 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
           {bodyHtml}
           {editModeTag}
           {CmsBlockHtmlRenderer.BuildInteractionRuntimeScript()}
+          {tocScriptTag}
+          {readingProgressScriptTag}
         </body>
         </html>
         """;
@@ -2767,6 +2771,8 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
             <body>
               {bodySections}
               {CmsBlockHtmlRenderer.BuildInteractionRuntimeScript()}
+              {(CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout) ? CmsBlockHtmlRenderer.BuildTableOfContentsRuntimeScript() : "")}
+              {(CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout) ? CmsBlockHtmlRenderer.BuildReadingProgressRuntimeScript() : "")}
             </body>
             </html>
             """;
@@ -3400,6 +3406,14 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     }
 
     var customCss = string.Join('\n', new[] { site.CustomCss, page.CustomCss }.Where(css => !string.IsNullOrWhiteSpace(css)));
+    // This call site renders through PublicSiteHtmlRenderer.Layout(), which (unlike the other
+    // two CmsBlockHtmlRenderer.Render() call sites' own hand-rolled <html> templates) has no
+    // {CmsBlockHtmlRenderer.BuildInteractionRuntimeScript()} of its own - append it to the body
+    // here so scroll/click animations and the Phase 4 TOC/reading-progress scripts work
+    // identically on every render path instead of silently doing nothing on this one.
+    bodyHtml += CmsBlockHtmlRenderer.BuildInteractionRuntimeScript();
+    if (CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildTableOfContentsRuntimeScript();
+    if (CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildReadingProgressRuntimeScript();
     var wrappedBody = string.IsNullOrWhiteSpace(customCss)
         ? bodyHtml
         : $"<style>{SanitizeInlineCss(customCss)}</style>{bodyHtml}";

@@ -56,6 +56,17 @@ public static class CmsBlockHtmlRenderer
             .ToList();
     }
 
+    // Phase 4 (JS-requiring widgets) - lets Program.cs skip emitting the (small but non-zero)
+    // TOC/reading-progress runtime scripts on the majority of pages that use neither, same
+    // "skip work nothing on the page needs" reasoning as LayoutContainsPostsGrid above. Unlike
+    // posts-grid/related-posts this gates no DB query - both scripts are pure static strings -
+    // it's purely a payload-size guard.
+    public static bool LayoutContainsTableOfContents(PageLayout? layout) =>
+        layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "table-of-contents")));
+
+    public static bool LayoutContainsReadingProgress(PageLayout? layout) =>
+        layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "reading-progress")));
+
     // A short single-line preview of a widget's content, used by the structural revision diff
     // (PageRevisionService.BuildStructuralDiff) - never HTML, just text. Mirrors
     // WikiBlockHtmlRenderer.PlainTextPreview's role for wiki blocks.
@@ -81,6 +92,8 @@ public static class CmsBlockHtmlRenderer
             "author-box" => Get(p, "name"),
             "callout" => Get(p, "title", Get(p, "body", "[callout]")),
             "related-posts" => HasValue(p, "sourceArticleSlug") ? $"[related posts: {Get(p, "sourceArticleSlug")}]" : "[related posts]",
+            "table-of-contents" => "[table of contents]",
+            "reading-progress" => "[reading progress bar]",
             _ => string.Empty
         };
         text = text.Replace('\n', ' ').Trim();
@@ -359,7 +372,7 @@ public static class CmsBlockHtmlRenderer
                 // (BuildInteractionRuntimeScript, never injected into the Canvas Studio
                 // preview iframe) reveals it, which would otherwise make the widget disappear
                 // in the editor with nothing to ever bring it back.
-                var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles, relatedPostsByAnchorSlug), widget, tokens);
+                var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles, relatedPostsByAnchorSlug, tokens), widget, tokens);
                 if (!editMode) inner = WrapWithInteraction(inner, widget.Interaction);
                 // Both badges share one absolutely-positioned corner slot (see .gws-visibility-
                 // hint), so a widget with both a visibility rule and a lock setting gets ONE
@@ -416,7 +429,7 @@ public static class CmsBlockHtmlRenderer
             }
 
             var position = widget.Freeform ?? FreeformPosition.DefaultFor(i);
-            var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles, relatedPostsByAnchorSlug), widget, tokens);
+            var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles, relatedPostsByAnchorSlug, tokens), widget, tokens);
             if (!editMode) inner = WrapWithInteraction(inner, widget.Interaction);
             var widgetBadgeText = editMode
                 ? string.Join(" | ", new[] { VisibilityBadgeText(widget.Visibility), EditPermissionBadgeText(widget.EditPermission) }
@@ -526,7 +539,106 @@ public static class CmsBlockHtmlRenderer
         </script>
         """;
 
-    private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug)
+    // Phase 4 (JS-requiring widgets) - matching BuildInteractionRuntimeScript's pattern: inline
+    // <script>, injected once per public page response, no-ops immediately when the page has no
+    // [data-gws-toc] element at all. Decision 4 in the master plan: a client-side DOM scan
+    // rather than server-side sibling-widget awareness, since the renderer has no visibility
+    // into what other widgets on the page will actually render as headings (a "heading" widget,
+    // a richtext block's own h2/h3s, an author-box, etc. all produce real headings it can't see
+    // ahead of time).
+    public static string BuildTableOfContentsRuntimeScript() => """
+        <script>
+        (function () {
+          var tocs = document.querySelectorAll('[data-gws-toc]');
+          if (!tocs.length) return;
+          var levelOrder = ['h2', 'h3', 'h4'];
+          var usedIds = {};
+
+          function slugify(text) {
+            var base = text.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'section';
+            var slug = base, n = 2;
+            while (usedIds[slug]) { slug = base + '-' + n; n++; }
+            usedIds[slug] = true;
+            return slug;
+          }
+
+          tocs.forEach(function (nav) {
+            var config;
+            try { config = JSON.parse(nav.getAttribute('data-gws-toc')); } catch (e) { config = {}; }
+            var minIdx = Math.max(0, levelOrder.indexOf(config.minLevel || 'h2'));
+            var maxIdx = Math.max(minIdx, levelOrder.indexOf(config.maxLevel || 'h3'));
+            var selector = levelOrder.slice(minIdx, maxIdx + 1).join(',');
+            var headings = selector ? Array.prototype.slice.call(document.querySelectorAll(selector)) : [];
+            headings = headings.filter(function (h) { return !h.closest('[data-gws-toc]'); });
+
+            var list = nav.querySelector('.gws-toc-list');
+            if (!list || !headings.length) { nav.hidden = true; return; }
+
+            var links = [];
+            headings.forEach(function (heading, index) {
+              if (!heading.id) heading.id = slugify(heading.textContent || ('section-' + index));
+              var li = document.createElement('li');
+              li.className = 'gws-toc-item gws-toc-level-' + heading.tagName.toLowerCase();
+              var a = document.createElement('a');
+              a.href = '#' + heading.id;
+              a.textContent = (config.showNumbers ? (index + 1) + '. ' : '') + (heading.textContent || '');
+              li.appendChild(a);
+              list.appendChild(li);
+              links.push({ heading: heading, link: a });
+            });
+
+            if ('IntersectionObserver' in window) {
+              var observer = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                  var match = links.find(function (l) { return l.heading === entry.target; });
+                  if (!match) return;
+                  if (entry.isIntersecting) {
+                    links.forEach(function (l) { l.link.classList.remove('is-active'); });
+                    match.link.classList.add('is-active');
+                  }
+                });
+              }, { rootMargin: '0px 0px -70% 0px' });
+              headings.forEach(function (h) { observer.observe(h); });
+            }
+          });
+        })();
+        </script>
+        """;
+
+    // Phase 4 (JS-requiring widgets) - same no-op-when-absent pattern as the interaction/TOC
+    // scripts above. One rAF-throttled scroll handler drives every reading-progress bar on the
+    // page (there is realistically ever only one, but nothing stops an admin adding more).
+    public static string BuildReadingProgressRuntimeScript() => """
+        <script>
+        (function () {
+          var bars = document.querySelectorAll('[data-gws-reading-progress]');
+          if (!bars.length) return;
+          var ticking = false;
+
+          function update() {
+            ticking = false;
+            var scrollable = document.documentElement.scrollHeight - window.innerHeight;
+            var progress = scrollable > 0 ? Math.min(1, Math.max(0, window.scrollY / scrollable)) : 0;
+            bars.forEach(function (bar) {
+              var fill = bar.querySelector('.gws-reading-progress-bar');
+              if (fill) fill.style.width = (progress * 100) + '%';
+            });
+          }
+
+          function onScroll() {
+            if (ticking) return;
+            ticking = true;
+            requestAnimationFrame(update);
+          }
+
+          window.addEventListener('scroll', onScroll, { passive: true });
+          window.addEventListener('resize', onScroll);
+          update();
+        })();
+        </script>
+        """;
+
+    private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug, DesignTokenSet? tokens = null)
     {
         var p = widget.Props;
         return widget.WidgetType switch
@@ -593,6 +705,8 @@ public static class CmsBlockHtmlRenderer
             "related-posts" => RenderRelatedPosts(p, relatedPostsByAnchorSlug, editMode),
             "author-box" => RenderAuthorBox(p, editMode),
             "callout" => RenderCallout(p, editMode),
+            "table-of-contents" => RenderTableOfContents(p),
+            "reading-progress" => RenderReadingProgress(p, tokens),
             _ => string.Empty
         };
     }
@@ -655,6 +769,48 @@ public static class CmsBlockHtmlRenderer
                 {(HasValue(p, "title") ? $"""<div class="gws-callout-title"{InlineEditAttrs(editMode, "title")}>{Html(Get(p, "title"))}</div>""" : "")}
                 <div class="gws-callout-text"{InlineRichAttrs(editMode, "body", Get(p, "body"))}>{Markdown.ToHtml(Get(p, "body"), MarkdownPipeline)}</div>
               </div>
+            </div>
+            """;
+    }
+
+    private static readonly IReadOnlyList<string> HeadingLevels = ["h2", "h3", "h4"];
+
+    private static string HeadingLevel(IReadOnlyDictionary<string, string> p, string key, string fallback) =>
+        HeadingLevels.Contains(Get(p, key, fallback)) ? Get(p, key, fallback) : fallback;
+
+    // Phase 4 (JS-requiring widgets) - static shell only, matching decision 4 in the master
+    // plan ("client-side DOM scan, not server-side sibling-widget awareness"). The renderer has
+    // no idea what headings actually exist on the rendered page - BuildTableOfContentsRuntimeScript
+    // (injected once per page, same precedent as BuildInteractionRuntimeScript) scans the DOM at
+    // load time and fills the empty <ol> in here.
+    private static string RenderTableOfContents(IReadOnlyDictionary<string, string> p)
+    {
+        var minLevel = HeadingLevel(p, "minLevel", "h2");
+        var maxLevel = HeadingLevel(p, "maxLevel", "h3");
+        var showNumbers = Get(p, "showNumbers", "false") == "true";
+        var config = $$"""{"minLevel":"{{minLevel}}","maxLevel":"{{maxLevel}}","showNumbers":{{(showNumbers ? "true" : "false")}}}""";
+
+        return $"""
+            <nav class="gws-toc" data-gws-toc="{Html(config)}" aria-label="Table of contents">
+              <div class="gws-toc-title">{Html(Get(p, "title", "On This Page"))}</div>
+              <ol class="gws-toc-list"></ol>
+            </nav>
+            """;
+    }
+
+    // Phase 4 (JS-requiring widgets) - static shell only; BuildReadingProgressRuntimeScript
+    // sizes the fill bar on scroll. colorToken takes precedence over the raw color, same
+    // precedence rule as WidgetStyle.ToInlineStyle's TextColorToken/TextColor pair.
+    private static string RenderReadingProgress(IReadOnlyDictionary<string, string> p, DesignTokenSet? tokens)
+    {
+        var color = WidgetStyle.ResolveColor(Get(p, "colorToken"), Get(p, "color"), tokens);
+        var height = Math.Clamp(GetInt(p, "height", 4), 1, 24);
+        var position = Get(p, "position", "top") == "bottom" ? "bottom" : "top";
+        var colorStyle = string.IsNullOrWhiteSpace(color) ? "" : $"--gws-reading-progress-color:{Html(color)};";
+
+        return $"""
+            <div class="gws-reading-progress gws-reading-progress-{Html(position)}" data-gws-reading-progress style="{colorStyle}--gws-reading-progress-height:{height}px">
+              <div class="gws-reading-progress-bar"></div>
             </div>
             """;
     }
