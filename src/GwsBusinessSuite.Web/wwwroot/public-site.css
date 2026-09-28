@@ -1143,6 +1143,54 @@ a { color: inherit; }
 .gws-carousel-testimonial-name { font-weight: 700; color: var(--text-1); display: block; }
 .gws-carousel-testimonial-role { color: var(--text-3); font-size: 0.9rem; }
 
+/* Workstream C, Tier 3 (portfolio/project grid) - BuildPortfolioRuntimeScript builds the detail
+   overlay (.gws-portfolio-lightbox) dynamically and appends it to <body>, so its styling lives
+   here even though no server-rendered HTML ever carries that class directly. */
+.gws-portfolio-filters { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-bottom: 2rem; }
+.gws-portfolio-filter { padding: 0.5rem 1.1rem; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-surface); color: var(--text-2); font-weight: 600; font-size: 0.9rem; cursor: pointer; }
+.gws-portfolio-filter.is-active { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.gws-portfolio-grid { display: grid; gap: 1.25rem; }
+.gws-portfolio-grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
+.gws-portfolio-grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
+.gws-portfolio-grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 640px) { .gws-portfolio-grid { grid-template-columns: repeat(2, 1fr) !important; } }
+.gws-portfolio-item { position: relative; display: block; padding: 0; border: none; background: none; cursor: pointer; border-radius: var(--radius); overflow: hidden; }
+.gws-portfolio-img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
+.gws-portfolio-item-overlay {
+  position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end;
+  padding: 1.1rem; text-align: left; color: #fff;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.8) 0%, transparent 60%);
+}
+.gws-portfolio-item-title { font-family: var(--font-serif); font-weight: 700; }
+.gws-portfolio-item-category { font-size: 0.8rem; opacity: 0.85; }
+.gws-portfolio-lightbox {
+  display: none; position: fixed; inset: 0; z-index: 2000; background: rgba(0, 0, 0, 0.88);
+  align-items: center; justify-content: center; padding: 1.5rem; overflow-y: auto;
+}
+.gws-portfolio-lightbox.is-open { display: flex; }
+.gws-portfolio-lightbox-panel { background: var(--bg-surface); border-radius: var(--radius); max-width: 680px; width: 100%; overflow: hidden; position: relative; }
+.gws-portfolio-lightbox-img { display: block; width: 100%; max-height: 380px; object-fit: cover; }
+.gws-portfolio-lightbox-body { padding: 2rem; }
+.gws-portfolio-lightbox-category { color: var(--accent); font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.5rem; }
+.gws-portfolio-lightbox-title { font-family: var(--font-serif); color: var(--text-1); margin: 0 0 0.75rem; }
+.gws-portfolio-lightbox-description { color: var(--text-2); margin-bottom: 1.25rem; }
+.gws-portfolio-lightbox-tags { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 1.25rem; }
+.gws-portfolio-lightbox-tag { background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 0.25rem 0.8rem; font-size: 0.8rem; color: var(--text-2); }
+.gws-portfolio-lightbox-close {
+  position: absolute; top: 0.75rem; right: 0.9rem; background: rgba(0, 0, 0, 0.5); color: #fff;
+  border: none; border-radius: 50%; width: 2.2rem; height: 2.2rem; font-size: 1.5rem; line-height: 1; cursor: pointer; z-index: 1;
+}
+
+/* Workstream C, Tier 3 (case study block) */
+.gws-case-study-cover { display: block; width: 100%; max-height: 460px; object-fit: cover; border-radius: var(--radius); margin-bottom: 2rem; }
+.gws-case-study-title { font-family: var(--font-serif); color: var(--text-1); margin: 0 0 0.5rem; }
+.gws-case-study-client { color: var(--text-2); font-weight: 600; margin-bottom: 1.5rem; }
+.gws-case-study-summary { color: var(--text-2); font-size: 1.1rem; margin-bottom: 2.5rem; }
+.gws-case-study-section { margin-bottom: 2rem; }
+.gws-case-study-section-heading { font-family: var(--font-serif); color: var(--text-1); margin: 0 0 0.6rem; }
+.gws-case-study-section-body { color: var(--text-2); }
+.gws-case-study-cta { margin-top: 1.25rem; }
+
 .gws-callout { display: flex; gap: 0.85rem; padding: 1.1rem 1.25rem; border-radius: var(--radius); border: 1px solid var(--border); border-left-width: 4px; background: var(--bg-surface); }
 .gws-callout-icon { font-size: 1.15rem; line-height: 1.5; flex-shrink: 0; }
 .gws-callout-title { font-family: var(--font-serif); font-weight: 700; color: var(--text-1); margin-bottom: 0.25rem; }

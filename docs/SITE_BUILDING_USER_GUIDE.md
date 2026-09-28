@@ -147,7 +147,7 @@ settings screen, not the Pages list).
 
 ## Adding and arranging widgets
 
-The 30 widget types, from the Widgets palette:
+The 32 widget types, from the Widgets palette:
 
 | Widget | What it holds |
 |---|---|
@@ -181,6 +181,8 @@ The 30 widget types, from the Widgets palette:
 | Gallery | An image grid (2/3/4 columns) you add/remove/reorder freely, each with an optional caption — clicking any image opens a full-size lightbox with keyboard (Escape) and click-outside-to-close support |
 | Carousel | A sliding sequence of slides (image, title, body, button) you add/remove/reorder freely, with prev/next arrows and dot navigation — arrows/dots are hidden automatically for a single-slide carousel |
 | Testimonial Slider | The interactive counterpart to the static Testimonial Row section — a sliding sequence of customer quotes (quote, author, role, avatar) you add/remove/reorder freely, using the same slider mechanism as Carousel |
+| Portfolio Grid | A project grid (title, category, image, description, tags, an optional link) you add/remove/reorder freely — clicking a project opens a detail overlay, and a filter bar appears automatically once 2+ distinct categories exist |
+| Case Study | One project told as a structured story — a cover image, an intro, then a flexible sequence of heading/body sections (e.g. Challenge/Solution/Results) you add/remove/reorder freely, plus an optional "visit project" button |
 
 **Adding a widget**: click a palette card to drop it after whatever's currently selected (or at
 the end of the last section if nothing is), or drag it directly onto a spot in the live preview,
@@ -522,7 +524,7 @@ website, so an uploaded brand asset can be reused without storing duplicate copi
   doesn't record which staff member made a given revision.
 - **No page duplication.** You can duplicate a section or a widget inside Studio, but there's no
   "Duplicate Page" action from the Pages list or settings screen.
-- **Fixed widget catalog.** 30 built-in types, no custom/plugin widgets, and no nested-container
+- **Fixed widget catalog.** 32 built-in types, no custom/plugin widgets, and no nested-container
   widget (a section's columns can't themselves contain another section) beyond what Freeform
   positioning offers within one section.
 - **Menus are single-level.** No dropdown/nested sub-menus in either the Primary or Footer list.

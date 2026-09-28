@@ -277,6 +277,19 @@ else
                 <span class="cms-block-chip">Testimonial Slider</span>
                 <div class="small text-secondary">@ParseTestimonialSliderItems(Get(p, "itemsJson")).Count testimonial(s)</div>
                 break;
+            case "portfolio-grid":
+                <span class="cms-block-chip">Portfolio Grid</span>
+                <div class="cms-block-form-grid">
+                    @foreach (var proj in ParsePortfolioGridItems(Get(p, "itemsJson")))
+                    {
+                        <div class="small text-secondary">@proj.Title</div>
+                    }
+                </div>
+                break;
+            case "case-study":
+                <span class="cms-block-chip">Case Study</span>
+                <h3>@Get(p, "title", "Project Name")</h3>
+                break;
             default:
                 <span class="cms-block-chip">Unknown widget</span>
                 <div class="small text-secondary mb-2">Widget type: @widget.WidgetType</div>
@@ -480,6 +493,26 @@ else
             return nodes.Select(i => new TestimonialSlidePreview(
                 i.TryGetValue("quote", out var q) ? q.GetString() ?? string.Empty : string.Empty
             )).Where(i => !string.IsNullOrWhiteSpace(i.Quote)).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private sealed record PortfolioItemPreview(string Title);
+
+    private static List<PortfolioItemPreview> ParsePortfolioGridItems(string itemsJson)
+    {
+        try
+        {
+            var nodes = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
+                string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson);
+            if (nodes is null) return [];
+
+            return nodes.Select(i => new PortfolioItemPreview(
+                i.TryGetValue("title", out var t) ? t.GetString() ?? string.Empty : string.Empty
+            )).Where(i => !string.IsNullOrWhiteSpace(i.Title)).ToList();
         }
         catch
         {

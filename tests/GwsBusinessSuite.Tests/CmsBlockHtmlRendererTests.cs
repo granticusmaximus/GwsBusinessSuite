@@ -2086,6 +2086,146 @@ public sealed class CmsBlockHtmlRendererTests
         Assert.False(CmsBlockHtmlRenderer.LayoutContainsCarousel(null));
     }
 
+    // ── Workstream C, Tier 3 (portfolio/project grid) ────────────────────────
+
+    [Fact]
+    public void Render_ShouldRenderPortfolioGrid_WithTriggerDataAttributesAndFilters()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"portfolio-grid","props":{"columns":"4","itemsJson":"[{\"title\":\"Project A\",\"category\":\"Web\",\"imageUrl\":\"/media/a.jpg\",\"description\":\"Desc A\",\"tags\":\"react, node\",\"linkUrl\":\"https://a.test\"},{\"title\":\"Project B\",\"category\":\"Mobile\",\"imageUrl\":\"/media/b.jpg\"}]"}}"""));
+
+        Assert.Contains("data-gws-portfolio", html);
+        Assert.Contains("gws-portfolio-grid-cols-4", html);
+        Assert.Contains("data-gws-portfolio-trigger", html);
+        Assert.Contains("data-gws-portfolio-title=\"Project A\"", html);
+        Assert.Contains("data-gws-portfolio-category=\"Web\"", html);
+        Assert.Contains("data-gws-portfolio-description=\"Desc A\"", html);
+        Assert.Contains("data-gws-portfolio-tags=\"react, node\"", html);
+        Assert.Contains("data-gws-portfolio-link=\"https://a.test\"", html);
+        Assert.Contains("gws-portfolio-filters", html);
+        Assert.Contains("data-gws-portfolio-filter=\"Web\"", html);
+        Assert.Contains("data-gws-portfolio-filter=\"Mobile\"", html);
+        Assert.Contains("data-gws-portfolio-filter=\"all\"", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitFilters_ForPortfolioGrid_WhenOnlyOneDistinctCategoryExists()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"portfolio-grid","props":{"itemsJson":"[{\"title\":\"A\",\"category\":\"Web\",\"imageUrl\":\"/media/a.jpg\"},{\"title\":\"B\",\"category\":\"Web\",\"imageUrl\":\"/media/b.jpg\"}]"}}"""));
+
+        Assert.DoesNotContain("gws-portfolio-filters", html);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipPortfolioItemsWithNoTitleOrImage()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"portfolio-grid","props":{"itemsJson":"[{\"title\":\"\",\"imageUrl\":\"/media/a.jpg\"},{\"title\":\"NoImage\",\"imageUrl\":\"\"},{\"title\":\"Kept\",\"imageUrl\":\"/media/c.jpg\"}]"}}"""));
+
+        Assert.DoesNotContain("NoImage", html);
+        Assert.Contains("Kept", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderNothingForPortfolioGrid_WithNoItems()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"portfolio-grid","props":{"itemsJson":"[]"}}"""));
+
+        Assert.DoesNotContain("gws-portfolio", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribePortfolioGridWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "portfolio-grid" };
+
+        Assert.Equal("[portfolio grid]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    [Fact]
+    public void LayoutContainsPortfolioGrid_ShouldReturnTrue_WhenAWidgetIsPortfolioGrid()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"portfolio-grid","props":{}}"""));
+
+        Assert.True(CmsBlockHtmlRenderer.LayoutContainsPortfolioGrid(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsPortfolioGrid_ShouldReturnFalse_WhenNoWidgetIsPortfolioGrid()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"paragraph","props":{}}"""));
+
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsPortfolioGrid(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsPortfolioGrid_ShouldReturnFalse_ForNullLayout()
+    {
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsPortfolioGrid(null));
+    }
+
+    // ── Workstream C, Tier 3 (case study block) ──────────────────────────────
+
+    [Fact]
+    public void Render_ShouldRenderCaseStudy_WithHeaderSummaryAndSections()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"case-study","props":{"title":"Acme Redesign","clientName":"Acme Corp","imageUrl":"/media/cover.jpg","summary":"A full redesign.","sectionsJson":"[{\"heading\":\"The Challenge\",\"body\":\"It was hard.\"},{\"heading\":\"The Solution\",\"body\":\"We fixed it.\"}]","externalUrl":"https://acme.test","externalLabel":"View live site"}}"""));
+
+        Assert.Contains("Acme Redesign", html);
+        Assert.Contains("Acme Corp", html);
+        Assert.Contains("src=\"/media/cover.jpg\"", html);
+        Assert.Contains("A full redesign.", html);
+        Assert.Contains("The Challenge", html);
+        Assert.Contains("It was hard.", html);
+        Assert.Contains("The Solution", html);
+        Assert.Contains("We fixed it.", html);
+        Assert.Contains("href=\"https://acme.test\"", html);
+        Assert.Contains("View live site", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitOptionalCaseStudyFields_WhenNotSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"case-study","props":{"title":"Minimal Case Study"}}"""));
+
+        Assert.DoesNotContain("gws-case-study-cover", html);
+        Assert.DoesNotContain("gws-case-study-client", html);
+        Assert.DoesNotContain("gws-case-study-summary", html);
+        Assert.DoesNotContain("gws-case-study-cta", html);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipEmptyCaseStudySections()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"case-study","props":{"title":"T","sectionsJson":"[{\"heading\":\"\",\"body\":\"\"},{\"heading\":\"Kept\",\"body\":\"Body\"}]"}}"""));
+
+        var sectionCount = System.Text.RegularExpressions.Regex.Matches(html, "gws-case-study-section\"").Count;
+        Assert.Equal(1, sectionCount);
+        Assert.Contains("Kept", html);
+    }
+
+    [Fact]
+    public void Render_ShouldNotThrow_ForCaseStudy_WithMalformedSectionsJson()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"case-study","props":{"title":"T","sectionsJson":"not json"}}"""));
+
+        Assert.Contains("T", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldReturnTheTitle_ForCaseStudyWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "case-study", Props = new() { ["title"] = "Acme Redesign" } };
+
+        Assert.Equal("Acme Redesign", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
     private static PageLayout ButtonLayout(string href) => new()
     {
         Sections =

@@ -1941,6 +1941,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     var pricingTableScriptTag = CmsBlockHtmlRenderer.LayoutContainsPricingTable(layout) ? CmsBlockHtmlRenderer.BuildPricingTableRuntimeScript() : string.Empty;
     var galleryScriptTag = CmsBlockHtmlRenderer.LayoutContainsGallery(layout) ? CmsBlockHtmlRenderer.BuildGalleryRuntimeScript() : string.Empty;
     var carouselScriptTag = CmsBlockHtmlRenderer.LayoutContainsCarousel(layout) ? CmsBlockHtmlRenderer.BuildCarouselRuntimeScript() : string.Empty;
+    var portfolioScriptTag = CmsBlockHtmlRenderer.LayoutContainsPortfolioGrid(layout) ? CmsBlockHtmlRenderer.BuildPortfolioRuntimeScript() : string.Empty;
 
     var html = $"""
         <!DOCTYPE html>
@@ -1965,6 +1966,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
           {pricingTableScriptTag}
           {galleryScriptTag}
           {carouselScriptTag}
+          {portfolioScriptTag}
         </body>
         </html>
         """;
@@ -2788,6 +2790,7 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
               {(CmsBlockHtmlRenderer.LayoutContainsPricingTable(layout) ? CmsBlockHtmlRenderer.BuildPricingTableRuntimeScript() : "")}
               {(CmsBlockHtmlRenderer.LayoutContainsGallery(layout) ? CmsBlockHtmlRenderer.BuildGalleryRuntimeScript() : "")}
               {(CmsBlockHtmlRenderer.LayoutContainsCarousel(layout) ? CmsBlockHtmlRenderer.BuildCarouselRuntimeScript() : "")}
+              {(CmsBlockHtmlRenderer.LayoutContainsPortfolioGrid(layout) ? CmsBlockHtmlRenderer.BuildPortfolioRuntimeScript() : "")}
             </body>
             </html>
             """;
@@ -3434,6 +3437,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     if (CmsBlockHtmlRenderer.LayoutContainsPricingTable(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildPricingTableRuntimeScript();
     if (CmsBlockHtmlRenderer.LayoutContainsGallery(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildGalleryRuntimeScript();
     if (CmsBlockHtmlRenderer.LayoutContainsCarousel(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildCarouselRuntimeScript();
+    if (CmsBlockHtmlRenderer.LayoutContainsPortfolioGrid(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildPortfolioRuntimeScript();
     var wrappedBody = string.IsNullOrWhiteSpace(customCss)
         ? bodyHtml
         : $"<style>{SanitizeInlineCss(customCss)}</style>{bodyHtml}";

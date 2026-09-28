@@ -95,6 +95,11 @@ public static class CmsBlockHtmlRenderer
     public static bool LayoutContainsCarousel(PageLayout? layout) =>
         layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType is "carousel" or "testimonial-slider")));
 
+    // Workstream C, Tier 3 (portfolio/project grid) - same payload-size-guard reasoning as the
+    // guards above.
+    public static bool LayoutContainsPortfolioGrid(PageLayout? layout) =>
+        layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "portfolio-grid")));
+
     // A short single-line preview of a widget's content, used by the structural revision diff
     // (PageRevisionService.BuildStructuralDiff) - never HTML, just text. Mirrors
     // WikiBlockHtmlRenderer.PlainTextPreview's role for wiki blocks.
@@ -133,6 +138,8 @@ public static class CmsBlockHtmlRenderer
             "gallery" => "[gallery]",
             "carousel" => "[carousel]",
             "testimonial-slider" => "[testimonial slider]",
+            "portfolio-grid" => "[portfolio grid]",
+            "case-study" => Get(p, "title", "[case study]"),
             _ => string.Empty
         };
         text = text.Replace('\n', ' ').Trim();
@@ -858,6 +865,93 @@ public static class CmsBlockHtmlRenderer
         </script>
         """;
 
+    // Workstream C, Tier 3 (portfolio/project grid) - same no-op-when-absent pattern as the
+    // other runtime scripts. Builds exactly ONE shared detail overlay for the whole page (same
+    // approach as BuildGalleryRuntimeScript's lightbox) and repoints it at whichever item was
+    // clicked; category filtering is scoped per-widget since a page could carry more than one
+    // portfolio grid with different category sets.
+    public static string BuildPortfolioRuntimeScript() => """
+        <script>
+        (function () {
+          var portfolios = document.querySelectorAll('[data-gws-portfolio]');
+          if (!portfolios.length) return;
+
+          var overlay = document.createElement('div');
+          overlay.className = 'gws-portfolio-lightbox';
+          overlay.setAttribute('role', 'dialog');
+          overlay.setAttribute('aria-modal', 'true');
+          overlay.innerHTML =
+            '<div class="gws-portfolio-lightbox-panel">' +
+              '<button type="button" class="gws-portfolio-lightbox-close" aria-label="Close">&times;</button>' +
+              '<img class="gws-portfolio-lightbox-img" alt="" />' +
+              '<div class="gws-portfolio-lightbox-body">' +
+                '<div class="gws-portfolio-lightbox-category"></div>' +
+                '<h3 class="gws-portfolio-lightbox-title"></h3>' +
+                '<p class="gws-portfolio-lightbox-description"></p>' +
+                '<div class="gws-portfolio-lightbox-tags"></div>' +
+                '<a class="gws-portfolio-lightbox-link btn btn-primary" target="_blank" rel="noopener noreferrer">Visit project</a>' +
+              '</div>' +
+            '</div>';
+          document.body.appendChild(overlay);
+          var img = overlay.querySelector('.gws-portfolio-lightbox-img');
+          var categoryEl = overlay.querySelector('.gws-portfolio-lightbox-category');
+          var titleEl = overlay.querySelector('.gws-portfolio-lightbox-title');
+          var descriptionEl = overlay.querySelector('.gws-portfolio-lightbox-description');
+          var tagsEl = overlay.querySelector('.gws-portfolio-lightbox-tags');
+          var linkEl = overlay.querySelector('.gws-portfolio-lightbox-link');
+
+          function close() { overlay.classList.remove('is-open'); }
+          function open(trigger) {
+            img.src = trigger.getAttribute('data-gws-portfolio-image') || '';
+            var title = trigger.getAttribute('data-gws-portfolio-title') || '';
+            img.alt = title;
+            titleEl.textContent = title;
+            var category = trigger.getAttribute('data-gws-portfolio-category') || '';
+            categoryEl.textContent = category;
+            categoryEl.hidden = !category;
+            var description = trigger.getAttribute('data-gws-portfolio-description') || '';
+            descriptionEl.textContent = description;
+            descriptionEl.hidden = !description;
+            var tags = (trigger.getAttribute('data-gws-portfolio-tags') || '').split(',').map(function (t) { return t.trim(); }).filter(Boolean);
+            tagsEl.innerHTML = '';
+            tags.forEach(function (tag) {
+              var pill = document.createElement('span');
+              pill.className = 'gws-portfolio-lightbox-tag';
+              pill.textContent = tag;
+              tagsEl.appendChild(pill);
+            });
+            var link = trigger.getAttribute('data-gws-portfolio-link') || '';
+            linkEl.href = link;
+            linkEl.hidden = !link;
+            overlay.classList.add('is-open');
+          }
+
+          document.querySelectorAll('[data-gws-portfolio-trigger]').forEach(function (trigger) {
+            trigger.addEventListener('click', function () { open(trigger); });
+          });
+          overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+          overlay.querySelector('.gws-portfolio-lightbox-close').addEventListener('click', close);
+          document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+
+          portfolios.forEach(function (portfolio) {
+            var filters = portfolio.querySelectorAll('[data-gws-portfolio-filter]');
+            var items = portfolio.querySelectorAll('[data-gws-portfolio-trigger]');
+            filters.forEach(function (filterBtn) {
+              filterBtn.addEventListener('click', function () {
+                var filter = filterBtn.getAttribute('data-gws-portfolio-filter');
+                filters.forEach(function (f) { f.classList.remove('is-active'); });
+                filterBtn.classList.add('is-active');
+                items.forEach(function (item) {
+                  var category = item.getAttribute('data-gws-portfolio-category');
+                  item.style.display = (filter === 'all' || category === filter) ? '' : 'none';
+                });
+              });
+            });
+          });
+        })();
+        </script>
+        """;
+
     private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug, DesignTokenSet? tokens = null)
     {
         var p = widget.Props;
@@ -929,6 +1023,8 @@ public static class CmsBlockHtmlRenderer
             "gallery" => RenderGallery(p, editMode),
             "carousel" => RenderCarousel(p, editMode),
             "testimonial-slider" => RenderTestimonialSlider(p, editMode),
+            "portfolio-grid" => RenderPortfolioGrid(p),
+            "case-study" => RenderCaseStudy(p, editMode),
             _ => string.Empty
         };
     }
@@ -1377,6 +1473,136 @@ public static class CmsBlockHtmlRenderer
         {
             return string.Empty;
         }
+    }
+
+    // Workstream C, Tier 3 (portfolio/project grid) - decision: detail expands in an overlay
+    // (same "expand in place" pattern as the Gallery widget's lightbox) rather than linking to a
+    // real separate page per item, keeping this at the same effort tier as the other Tier 3
+    // widgets instead of adding new routing/page-per-item infrastructure. Filter buttons only
+    // render when there are 2+ distinct categories - filtering a single-category grid has
+    // nothing to filter.
+    private static string RenderPortfolioGrid(IReadOnlyDictionary<string, string> p)
+    {
+        var itemsJson = Get(p, "itemsJson");
+        var columns = GalleryColumnCounts.Contains(Get(p, "columns", "3")) ? Get(p, "columns", "3") : "3";
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson) as JsonArray;
+            if (node is null || node.Count == 0) return string.Empty;
+
+            var items = new List<(string Title, string Category, string ImageUrl, string Description, string Tags, string LinkUrl)>();
+            foreach (var item in node.OfType<JsonObject>())
+            {
+                var title = item["title"]?.GetValue<string>() ?? string.Empty;
+                var imageUrl = item["imageUrl"]?.GetValue<string>() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(imageUrl)) continue;
+
+                items.Add((
+                    title,
+                    item["category"]?.GetValue<string>() ?? string.Empty,
+                    imageUrl,
+                    item["description"]?.GetValue<string>() ?? string.Empty,
+                    item["tags"]?.GetValue<string>() ?? string.Empty,
+                    item["linkUrl"]?.GetValue<string>() ?? string.Empty));
+            }
+            if (items.Count == 0) return string.Empty;
+
+            var categories = items.Select(i => i.Category).Where(c => !string.IsNullOrWhiteSpace(c))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            var filters = new StringBuilder();
+            if (categories.Count > 1)
+            {
+                filters.Append("""<button type="button" class="gws-portfolio-filter is-active" data-gws-portfolio-filter="all">All</button>""");
+                foreach (var category in categories)
+                {
+                    filters.Append($"""<button type="button" class="gws-portfolio-filter" data-gws-portfolio-filter="{Html(category)}">{Html(category)}</button>""");
+                }
+            }
+
+            var grid = new StringBuilder();
+            foreach (var item in items)
+            {
+                var tagsDisplay = string.Join(", ", item.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+                grid.Append($"""
+                    <button type="button" class="gws-portfolio-item" data-gws-portfolio-trigger
+                            data-gws-portfolio-category="{Html(item.Category)}"
+                            data-gws-portfolio-title="{Html(item.Title)}"
+                            data-gws-portfolio-description="{Html(item.Description)}"
+                            data-gws-portfolio-image="{Html(item.ImageUrl)}"
+                            data-gws-portfolio-tags="{Html(tagsDisplay)}"
+                            data-gws-portfolio-link="{Html(item.LinkUrl)}">
+                      <img src="{Html(item.ImageUrl)}" alt="{Html(item.Title)}" loading="lazy" class="gws-portfolio-img" />
+                      <div class="gws-portfolio-item-overlay">
+                        <div class="gws-portfolio-item-title">{Html(item.Title)}</div>
+                        {(!string.IsNullOrWhiteSpace(item.Category) ? $"""<div class="gws-portfolio-item-category">{Html(item.Category)}</div>""" : "")}
+                      </div>
+                    </button>
+                    """);
+            }
+
+            return $"""
+                <div class="gws-portfolio" data-gws-portfolio>
+                  {(filters.Length > 0 ? $"""<div class="gws-portfolio-filters" role="tablist">{filters}</div>""" : "")}
+                  <div class="gws-portfolio-grid gws-portfolio-grid-cols-{columns}">{grid}</div>
+                </div>
+                """;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    // Workstream C, Tier 3 (case study block) - the heavier narrative variant of Portfolio Grid,
+    // per the master plan's own framing: one project told as a structured story (a cover image,
+    // an intro, then a flexible sequence of heading/body sections - Problem/Solution/Results, or
+    // whatever shape a given case study needs) rather than a grid tile. Fully static - no
+    // runtime script, no guard, matching author-box/callout's own "static content" pattern.
+    private static string RenderCaseStudy(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var title = Get(p, "title");
+        var sectionsJson = Get(p, "sectionsJson");
+        var sections = new StringBuilder();
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(sectionsJson) ? "[]" : sectionsJson) as JsonArray;
+            if (node is not null)
+            {
+                var index = -1;
+                foreach (var item in node.OfType<JsonObject>())
+                {
+                    index++;
+                    var heading = item["heading"]?.GetValue<string>() ?? string.Empty;
+                    var body = item["body"]?.GetValue<string>() ?? string.Empty;
+                    if (string.IsNullOrWhiteSpace(heading) && string.IsNullOrWhiteSpace(body)) continue;
+
+                    sections.Append($"""
+                        <div class="gws-case-study-section">
+                          {(!string.IsNullOrWhiteSpace(heading) ? $"""<h3 class="gws-case-study-section-heading"{InlineEditAttrs(editMode, $"sectionsJson[{index}].heading")}>{Html(heading)}</h3>""" : "")}
+                          {(!string.IsNullOrWhiteSpace(body) ? $"""<div class="gws-case-study-section-body"{InlineRichAttrs(editMode, $"sectionsJson[{index}].body", body)}>{Markdown.ToHtml(body, MarkdownPipeline)}</div>""" : "")}
+                        </div>
+                        """);
+                }
+            }
+        }
+        catch
+        {
+            // Malformed sectionsJson - skip the narrative sections, still render the header/summary.
+        }
+
+        return $"""
+            <div class="gws-case-study">
+              {(HasValue(p, "imageUrl") ? $"""<img src="{Html(Get(p, "imageUrl"))}" alt="{Html(title)}" class="gws-case-study-cover" />""" : "")}
+              <div class="gws-case-study-header">
+                <h2 class="gws-case-study-title"{InlineEditAttrs(editMode, "title")}>{Html(title)}</h2>
+                {(HasValue(p, "clientName") ? $"""<div class="gws-case-study-client"{InlineEditAttrs(editMode, "clientName")}>{Html(Get(p, "clientName"))}</div>""" : "")}
+              </div>
+              {(HasValue(p, "summary") ? $"""<div class="gws-case-study-summary"{InlineRichAttrs(editMode, "summary", Get(p, "summary"))}>{Markdown.ToHtml(Get(p, "summary"), MarkdownPipeline)}</div>""" : "")}
+              {sections}
+              {(HasValue(p, "externalUrl") ? $"""<a href="{Html(HrefOrHash(Get(p, "externalUrl")))}" class="btn btn-primary gws-case-study-cta" target="_blank" rel="noopener noreferrer">{Html(Get(p, "externalLabel", "Visit project"))}</a>""" : "")}
+            </div>
+            """;
     }
 
     // variant is validated against this fixed dictionary rather than interpolated directly -

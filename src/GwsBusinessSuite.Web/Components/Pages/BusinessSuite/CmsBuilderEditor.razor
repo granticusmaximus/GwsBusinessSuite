@@ -1606,6 +1606,134 @@ else
                                 }
                             </div>
                         }
+                        else if (selWidget.WidgetType == "portfolio-grid")
+                        {
+                            <div class="small text-secondary mb-2">
+                                Set the same Category text on multiple projects to enable filter buttons
+                                automatically - no filter list to manage separately.
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Columns</label>
+                                <select class="form-select" value='@GetProp(selWidget, "columns", "3")'
+                                        @onchange='(e) => SetProp(selWidget, "columns", e.Value?.ToString() ?? "3")'>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Projects
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddPortfolioGridItem(selWidget)">
+                                        <i class="bi bi-plus-lg"></i> Add project
+                                    </button>
+                                </label>
+                                @{ var portfolioItems = GetPortfolioGridItems(selWidget); }
+                                @if (portfolioItems.Count == 0)
+                                {
+                                    <p class="small text-secondary mb-0">No projects yet — click "Add project" to build this grid.</p>
+                                }
+                                else
+                                {
+                                    @for (var i = 0; i < portfolioItems.Count; i++)
+                                    {
+                                        var index = i;
+                                        var item = portfolioItems[index];
+                                        <div class="studio-form-field-editor">
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Title" value="@item.Title"
+                                                       @oninput="(e) => UpdatePortfolioGridItem(selWidget, index, i => i with { Title = e.Value?.ToString() ?? string.Empty })" />
+                                                <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" @onclick="() => RemovePortfolioGridItem(selWidget, index)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Category (optional)" value="@item.Category"
+                                                       @oninput="(e) => UpdatePortfolioGridItem(selWidget, index, i => i with { Category = e.Value?.ToString() ?? string.Empty })" />
+                                                <input class="form-control form-control-sm font-monospace" placeholder="Image URL" value="@item.ImageUrl"
+                                                       @oninput="(e) => UpdatePortfolioGridItem(selWidget, index, i => i with { ImageUrl = e.Value?.ToString() ?? string.Empty })" />
+                                            </div>
+                                            <textarea class="form-control form-control-sm mb-2" rows="2" placeholder="Description (optional)"
+                                                      @oninput="(e) => UpdatePortfolioGridItem(selWidget, index, i => i with { Description = e.Value?.ToString() ?? string.Empty })">@item.Description</textarea>
+                                            <input class="form-control form-control-sm mb-2" placeholder="Tags, comma-separated (optional)" value="@item.Tags"
+                                                   @oninput="(e) => UpdatePortfolioGridItem(selWidget, index, i => i with { Tags = e.Value?.ToString() ?? string.Empty })" />
+                                            <input class="form-control form-control-sm font-monospace" placeholder="Project link (optional)" value="@item.LinkUrl"
+                                                   @oninput="(e) => UpdatePortfolioGridItem(selWidget, index, i => i with { LinkUrl = e.Value?.ToString() ?? string.Empty })" />
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "case-study")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Title</label>
+                                <input class="form-control" value='@GetProp(selWidget, "title")'
+                                       @oninput='(e) => SetProp(selWidget, "title", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Client Name (optional)</label>
+                                <input class="form-control" value='@GetProp(selWidget, "clientName")'
+                                       @oninput='(e) => SetProp(selWidget, "clientName", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Cover Image URL (optional)</label>
+                                <input class="form-control font-monospace" value='@GetProp(selWidget, "imageUrl")'
+                                       @oninput='(e) => SetProp(selWidget, "imageUrl", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Summary (optional)</label>
+                                <ProfessionalWysiwygEditor Value='@GetProp(selWidget, "summary")'
+                                                           ValueChanged='value => SetProp(selWidget, "summary", value)'
+                                                           Compact="true" MinHeight="80px" AriaLabel="Case study summary" />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Story Sections
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddCaseStudySection(selWidget)">
+                                        <i class="bi bi-plus-lg"></i> Add section
+                                    </button>
+                                </label>
+                                @{ var caseStudySections = GetCaseStudySections(selWidget); }
+                                @if (caseStudySections.Count == 0)
+                                {
+                                    <p class="small text-secondary mb-0">No sections yet — click "Add section" for e.g. Challenge/Solution/Results.</p>
+                                }
+                                else
+                                {
+                                    @for (var i = 0; i < caseStudySections.Count; i++)
+                                    {
+                                        var index = i;
+                                        var item = caseStudySections[index];
+                                        <div class="studio-form-field-editor">
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Section heading" value="@item.Heading"
+                                                       @oninput="(e) => UpdateCaseStudySection(selWidget, index, i => i with { Heading = e.Value?.ToString() ?? string.Empty })" />
+                                                <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" @onclick="() => RemoveCaseStudySection(selWidget, index)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                            <ProfessionalWysiwygEditor Value="@item.Body"
+                                                                       ValueChanged="value => UpdateCaseStudySection(selWidget, index, i => i with { Body = value })"
+                                                                       Compact="true" MinHeight="90px" Placeholder="Section body" AriaLabel="Case study section body" />
+                                        </div>
+                                    }
+                                }
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">External Link (optional)</label>
+                                <input class="form-control font-monospace" value='@GetProp(selWidget, "externalUrl")'
+                                       @oninput='(e) => SetProp(selWidget, "externalUrl", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(GetProp(selWidget, "externalUrl")))
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">Link Button Label</label>
+                                    <input class="form-control" value='@GetProp(selWidget, "externalLabel", "Visit project")'
+                                           @oninput='(e) => SetProp(selWidget, "externalLabel", e.Value?.ToString() ?? "Visit project")' />
+                                </div>
+                            }
+                        }
                         else if (selWidget.WidgetType == "form")
                         {
                             <div>
@@ -2367,6 +2495,8 @@ else
         new("gallery",     "bi bi-images",                 "Gallery",     "An image grid with a click-to-enlarge lightbox", GroupMedia),
         new("carousel",    "bi bi-arrow-left-right",       "Carousel",    "A sliding sequence of images/content",GroupMedia),
         new("testimonial-slider", "bi bi-chat-square-quote", "Testimonial Slider", "A sliding sequence of customer quotes", GroupMedia),
+        new("portfolio-grid", "bi bi-kanban",               "Portfolio Grid", "A filterable project grid with a detail overlay", GroupMedia),
+        new("case-study",  "bi bi-journal-richtext",        "Case Study",  "A single project told as a structured story", GroupMedia),
         new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block",                      GroupAdvanced),
     ];
 
@@ -4921,6 +5051,119 @@ else
         SaveTestimonialSliderItems(widget, items, forceNewUndoStep: true);
     }
 
+    // ── Portfolio grid projects ──────────────────────────────────────────
+    private sealed record PortfolioItemDef(string Title, string Category, string ImageUrl, string Description, string Tags, string LinkUrl);
+
+    private static List<PortfolioItemDef> GetPortfolioGridItems(LayoutWidget widget)
+    {
+        try
+        {
+            var raw = GetProp(widget, "itemsJson");
+            if (string.IsNullOrWhiteSpace(raw)) return [];
+
+            var parsed = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(raw);
+            if (parsed is null) return [];
+
+            return parsed.Select(i => new PortfolioItemDef(
+                i.TryGetValue("title", out var t) ? t.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("category", out var c) ? c.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("imageUrl", out var u) ? u.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("description", out var d) ? d.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("tags", out var g) ? g.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("linkUrl", out var l) ? l.GetString() ?? string.Empty : string.Empty
+            )).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void SavePortfolioGridItems(LayoutWidget widget, List<PortfolioItemDef> items, bool forceNewUndoStep = false)
+    {
+        var json = JsonSerializer.Serialize(items.Select(i => new
+        {
+            title = i.Title, category = i.Category, imageUrl = i.ImageUrl, description = i.Description, tags = i.Tags, linkUrl = i.LinkUrl
+        }));
+        SetProp(widget, "itemsJson", json, forceNewUndoStep);
+    }
+
+    private void AddPortfolioGridItem(LayoutWidget widget)
+    {
+        var items = GetPortfolioGridItems(widget);
+        items.Add(new PortfolioItemDef("New Project", "", "", "", "", ""));
+        SavePortfolioGridItems(widget, items, forceNewUndoStep: true);
+    }
+
+    private void UpdatePortfolioGridItem(LayoutWidget widget, int index, Func<PortfolioItemDef, PortfolioItemDef> update)
+    {
+        var items = GetPortfolioGridItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items[index] = update(items[index]);
+        SavePortfolioGridItems(widget, items);
+    }
+
+    private void RemovePortfolioGridItem(LayoutWidget widget, int index)
+    {
+        var items = GetPortfolioGridItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
+        SavePortfolioGridItems(widget, items, forceNewUndoStep: true);
+    }
+
+    // ── Case study sections ──────────────────────────────────────────────
+    private sealed record CaseStudySectionDef(string Heading, string Body);
+
+    private static List<CaseStudySectionDef> GetCaseStudySections(LayoutWidget widget)
+    {
+        try
+        {
+            var raw = GetProp(widget, "sectionsJson");
+            if (string.IsNullOrWhiteSpace(raw)) return [];
+
+            var parsed = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(raw);
+            if (parsed is null) return [];
+
+            return parsed.Select(i => new CaseStudySectionDef(
+                i.TryGetValue("heading", out var h) ? h.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("body", out var b) ? b.GetString() ?? string.Empty : string.Empty
+            )).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void SaveCaseStudySections(LayoutWidget widget, List<CaseStudySectionDef> items, bool forceNewUndoStep = false)
+    {
+        var json = JsonSerializer.Serialize(items.Select(i => new { heading = i.Heading, body = i.Body }));
+        SetProp(widget, "sectionsJson", json, forceNewUndoStep);
+    }
+
+    private void AddCaseStudySection(LayoutWidget widget)
+    {
+        var items = GetCaseStudySections(widget);
+        items.Add(new CaseStudySectionDef("New Section", ""));
+        SaveCaseStudySections(widget, items, forceNewUndoStep: true);
+    }
+
+    private void UpdateCaseStudySection(LayoutWidget widget, int index, Func<CaseStudySectionDef, CaseStudySectionDef> update)
+    {
+        var items = GetCaseStudySections(widget);
+        if (index < 0 || index >= items.Count) return;
+        items[index] = update(items[index]);
+        SaveCaseStudySections(widget, items);
+    }
+
+    private void RemoveCaseStudySection(LayoutWidget widget, int index)
+    {
+        var items = GetCaseStudySections(widget);
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
+        SaveCaseStudySections(widget, items, forceNewUndoStep: true);
+    }
+
     // ── Media library picker ────────────────────────────────────────────────
     private bool _showMediaPicker;
     private string _mediaPickerError = string.Empty;
@@ -4990,6 +5233,8 @@ else
         "gallery" => new() { WidgetType = "gallery", Props = new() { ["columns"] = "3", ["itemsJson"] = "[]" } },
         "carousel" => new() { WidgetType = "carousel", Props = new() { ["itemsJson"] = """[{"imageUrl":"","title":"Slide one","body":"Describe this slide.","buttonLabel":"","buttonHref":"#"},{"imageUrl":"","title":"Slide two","body":"Describe this slide.","buttonLabel":"","buttonHref":"#"}]""" } },
         "testimonial-slider" => new() { WidgetType = "testimonial-slider", Props = new() { ["itemsJson"] = """[{"quote":"This product changed how we work.","authorName":"Alex Rivera","authorRole":"Operations Lead","avatarUrl":""},{"quote":"Support has been fantastic from day one.","authorName":"Jordan Lee","authorRole":"Customer","avatarUrl":""}]""" } },
+        "portfolio-grid" => new() { WidgetType = "portfolio-grid", Props = new() { ["columns"] = "3", ["itemsJson"] = "[]" } },
+        "case-study" => new() { WidgetType = "case-study", Props = new() { ["title"] = "Project Name", ["clientName"] = "", ["imageUrl"] = "", ["summary"] = "A short intro to this project.", ["sectionsJson"] = """[{"heading":"The Challenge","body":"Describe the problem here."},{"heading":"The Solution","body":"Describe what you built here."},{"heading":"The Results","body":"Describe the outcome here."}]""", ["externalUrl"] = "", ["externalLabel"] = "Visit project" } },
         _           => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Content", ["align"] = "left" } }
     };
 
@@ -5049,6 +5294,8 @@ else
         "gallery"     => "Gallery",
         "carousel"    => "Carousel",
         "testimonial-slider" => "Testimonial Slider",
+        "portfolio-grid" => "Portfolio Grid",
+        "case-study"  => "Case Study",
         _             => type
     };
 
@@ -5092,6 +5339,8 @@ else
         "gallery"     => "bi bi-images",
         "carousel"    => "bi bi-arrow-left-right",
         "testimonial-slider" => "bi bi-chat-square-quote",
+        "portfolio-grid" => "bi bi-kanban",
+        "case-study"  => "bi bi-journal-richtext",
         _             => "bi bi-square"
     };
 
@@ -5128,6 +5377,8 @@ else
             "gallery"     => $"{GetGalleryItems(w).Count} image(s)",
             "carousel"    => $"{GetCarouselItems(w).Count} slide(s)",
             "testimonial-slider" => $"{GetTestimonialSliderItems(w).Count} testimonial(s)",
+            "portfolio-grid" => $"{GetPortfolioGridItems(w).Count} project(s)",
+            "case-study"  => GetPropStatic(w, "title", "Case Study"),
             _             => w.WidgetType
         };
         return raw.Length <= 38 ? raw : raw[..38] + "…";
