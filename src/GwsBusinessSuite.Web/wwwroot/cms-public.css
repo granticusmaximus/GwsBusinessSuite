@@ -237,6 +237,13 @@ body {
 .gws-reading-progress-bottom { bottom: 0; }
 .gws-reading-progress-bar { height: 100%; width: 0%; background: var(--gws-reading-progress-color, var(--cms-accent)); transition: width 0.1s linear; }
 
+/* Workstream C, Tier 1 (booking embed) - the iframe is same-origin (/book/{slug}), so no
+   sandbox attribute is needed; width/height are the only layout concerns here. */
+.gws-booking-embed { display: grid; gap: 0.75rem; }
+.gws-booking-embed-title { margin: 0; }
+.gws-booking-embed-frame { display: block; width: 100%; border: 1px solid var(--cms-border); border-radius: 10px; }
+.gws-booking-embed-placeholder { padding: 1.5rem; text-align: center; border: 1px dashed var(--cms-border); border-radius: 10px; color: var(--cms-text-faint); }
+
 .gws-divider { border: none; border-top: 1px solid var(--cms-border); margin: 0; }
 .gws-divider-dashed { border-top-style: dashed; }
 .gws-divider-dotted { border-top-style: dotted; }

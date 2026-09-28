@@ -19,6 +19,7 @@
 @inject GlobalBlockResolver GlobalBlockResolver
 @inject IMediaLibraryService MediaLibraryService
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject GwsBusinessSuite.Application.Scheduling.IBookingService BookingService
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject ILogger<CmsBuilderEditor> Logger
@@ -818,6 +819,18 @@ else
                         }
                         else if (selWidget.WidgetType == "accordion")
                         {
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="@($"accordion-faq-schema-{selWidget.Id}")"
+                                       checked='@(GetProp(selWidget, "isFaq") == "true")'
+                                       @onchange='(e) => SetProp(selWidget, "isFaq", (bool)(e.Value ?? false) ? "true" : "false")' />
+                                <label class="form-check-label small" for="@($"accordion-faq-schema-{selWidget.Id}")">
+                                    These are real FAQ questions (adds SEO structured data)
+                                </label>
+                                <p class="small text-secondary mb-0">
+                                    Only turn this on if the items are genuine frequently-asked questions about this
+                                    page's own topic - search engines may reject or ignore the markup otherwise.
+                                </p>
+                            </div>
                             <div>
                                 <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
                                     Items
@@ -1085,6 +1098,42 @@ else
                                         }
                                     </select>
                                 }
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "booking")
+                        {
+                            <div class="small text-secondary mb-2">
+                                Embeds your existing public booking page for one booking type - availability,
+                                time-slot picking, and confirmation all work exactly as they do at
+                                <code>/book/&lt;slug&gt;</code>. Manage booking types under Scheduling.
+                            </div>
+                            @if (_bookingTypes.Count == 0)
+                            {
+                                <div class="alert alert-warning small mb-2">
+                                    No active booking types yet - create one under Scheduling first.
+                                </div>
+                            }
+                            <div>
+                                <label class="form-label small fw-semibold">Booking Type</label>
+                                <select class="form-select" value='@GetProp(selWidget, "bookingTypeSlug")'
+                                        @onchange='(e) => SetProp(selWidget, "bookingTypeSlug", e.Value?.ToString() ?? string.Empty)'>
+                                    <option value="">Select a booking type…</option>
+                                    @foreach (var (slug, bookingTitle) in _bookingTypes)
+                                    {
+                                        <option value="@slug">@bookingTitle</option>
+                                    }
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Heading (optional)</label>
+                                <input class="form-control" value='@GetProp(selWidget, "title", "Book a time")'
+                                       @oninput='(e) => SetProp(selWidget, "title", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Embed Height (px)</label>
+                                <input class="form-control" type="number" min="300" max="2000"
+                                       value='@GetProp(selWidget, "height", "720")'
+                                       @oninput='(e) => SetProp(selWidget, "height", e.Value?.ToString() ?? "720")' />
                             </div>
                         }
                         else if (selWidget.WidgetType == "form")
@@ -1837,6 +1886,7 @@ else
         new("related-posts", "bi bi-link-45deg",           "Related Posts", "Recommendations for a specific article", GroupDynamic),
         new("table-of-contents", "bi bi-list-ol",          "Table of Contents", "Auto-generated links to this page's headings", GroupDynamic),
         new("reading-progress", "bi bi-hourglass-split",   "Reading Progress", "A scroll-position progress bar",      GroupDynamic),
+        new("booking",     "bi bi-calendar-check",         "Booking",     "Embed one of your booking types",     GroupDynamic),
         new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block",                      GroupAdvanced),
     ];
 
@@ -1862,6 +1912,7 @@ else
         }
         await LoadAsync();
         await LoadPublishedArticlesAsync();
+        await LoadBookingTypesAsync();
     }
 
     // Powers the "related-posts" widget's sourceArticleSlug picker - loaded once per editor
@@ -1879,6 +1930,17 @@ else
             .Select(a => new { a.Slug, a.Title })
             .ToListAsync();
         _publishedArticles = rows.Select(a => (a.Slug, a.Title)).ToList();
+    }
+
+    // Powers the "booking" widget's bookingTypeSlug picker - same "load once per session" posture
+    // as _publishedArticles above. Site-wide (not filtered per Website) since the admin Scheduling
+    // screen itself has no per-site scoping either.
+    private List<(string Slug, string Title)> _bookingTypes = [];
+
+    private async Task LoadBookingTypesAsync()
+    {
+        var types = await BookingService.ListBookingTypesAsync(includeInactive: false);
+        _bookingTypes = types.Select(t => (t.Slug, t.Title)).ToList();
     }
 
     // ── Live-preview click-to-select bridge ─────────────────────────────────
@@ -3913,7 +3975,7 @@ else
         "paragraph" => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Your paragraph text here.",                       ["align"] = "left" } },
         "richtext"  => new() { WidgetType = "richtext",  Props = new() { ["content"] = "Write **rich** copy here — *italics*, [links](#), lists, and more." } },
         "testimonial" => new() { WidgetType = "testimonial", Props = new() { ["quote"] = "This product changed how we work.", ["authorName"] = "Jane Doe", ["authorRole"] = "CEO, Example Co." } },
-        "accordion" => new() { WidgetType = "accordion", Props = new() { ["itemsJson"] = """[{"question":"Question one?","answer":"Answer one."}]""" } },
+        "accordion" => new() { WidgetType = "accordion", Props = new() { ["itemsJson"] = """[{"question":"Question one?","answer":"Answer one."}]""", ["isFaq"] = "false" } },
         "button"    => new() { WidgetType = "button",    Props = new() { ["label"] = "Click me",  ["href"] = "#", ["variant"] = "primary", ["size"] = "md", ["align"] = "left" } },
         "image"     => new() { WidgetType = "image",     Props = new() { ["src"] = "",  ["alt"] = "", ["caption"] = "", ["width"] = "full" } },
         "hero"      => new() { WidgetType = "hero",      Props = new() { ["headline"] = "Your Headline", ["subline"] = "Your supporting description.", ["cta1Label"] = "Get Started", ["cta1Href"] = "#", ["cta2Label"] = "", ["cta2Href"] = "", ["align"] = "left" } },
@@ -3928,6 +3990,7 @@ else
         "callout"    => new() { WidgetType = "callout", Props = new() { ["variant"] = "info", ["title"] = "", ["body"] = "Add your callout text here.", ["showIcon"] = "true" } },
         "table-of-contents" => new() { WidgetType = "table-of-contents", Props = new() { ["title"] = "On This Page", ["minLevel"] = "h2", ["maxLevel"] = "h3", ["showNumbers"] = "false" } },
         "reading-progress" => new() { WidgetType = "reading-progress", Props = new() { ["color"] = "", ["colorToken"] = "", ["height"] = "4", ["position"] = "top" } },
+        "booking"    => new() { WidgetType = "booking", Props = new() { ["bookingTypeSlug"] = "", ["title"] = "Book a time", ["height"] = "720" } },
         _           => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Content", ["align"] = "left" } }
     };
 
@@ -3976,6 +4039,7 @@ else
         "callout"     => "Callout",
         "table-of-contents" => "Table of Contents",
         "reading-progress"  => "Reading Progress",
+        "booking"     => "Booking",
         _             => type
     };
 
@@ -4008,6 +4072,7 @@ else
         "callout"     => "bi bi-megaphone",
         "table-of-contents" => "bi bi-list-ol",
         "reading-progress"  => "bi bi-hourglass-split",
+        "booking"     => "bi bi-calendar-check",
         _             => "bi bi-square"
     };
 
@@ -4033,6 +4098,7 @@ else
             "callout"     => GetPropStatic(w, "title", GetPropStatic(w, "body", "Callout")),
             "table-of-contents" => GetPropStatic(w, "title", "On This Page"),
             "reading-progress"  => $"{GetPropStatic(w, "position", "top")} bar",
+            "booking"     => string.IsNullOrWhiteSpace(GetPropStatic(w, "bookingTypeSlug", "")) ? "No booking type picked" : GetPropStatic(w, "bookingTypeSlug", ""),
             _             => w.WidgetType
         };
         return raw.Length <= 38 ? raw : raw[..38] + "…";

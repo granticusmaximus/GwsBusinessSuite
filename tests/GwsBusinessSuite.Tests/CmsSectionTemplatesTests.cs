@@ -64,6 +64,28 @@ public sealed class CmsSectionTemplatesTests
         form.Props["fieldsJson"].Should().Contain("\"role\":\"email\"").And.Contain("\"type\":\"email\"");
     }
 
+    [Fact]
+    public void QuoteRequestForm_ShouldSeedContactAndProjectFields()
+    {
+        var section = CmsSectionTemplates.Find("quote-request-form")!.Build();
+        var form = section.Columns.SelectMany(c => c.Widgets).Single(w => w.WidgetType == "form");
+
+        form.Props["submitLabel"].Should().Be("Request Quote");
+        form.Props["autoCreateContact"].Should().Be("true");
+        form.Props["fieldsJson"].Should().Contain("\"role\":\"email\"").And.Contain("\"role\":\"name\"").And.Contain("\"role\":\"phone\"").And.Contain("\"role\":\"company\"");
+    }
+
+    [Fact]
+    public void AppointmentRequestForm_ShouldSeedContactAndPreferredTimeFields()
+    {
+        var section = CmsSectionTemplates.Find("appointment-request-form")!.Build();
+        var form = section.Columns.SelectMany(c => c.Widgets).Single(w => w.WidgetType == "form");
+
+        form.Props["submitLabel"].Should().Be("Request Appointment");
+        form.Props["autoCreateContact"].Should().Be("true");
+        form.Props["fieldsJson"].Should().Contain("preferredDate").And.Contain("preferredTime").And.Contain("Morning");
+    }
+
     private static List<string> AllIds(LayoutSection section)
     {
         var ids = new List<string> { section.Id };

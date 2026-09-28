@@ -192,6 +192,17 @@ else
                 <span class="cms-block-chip">Reading Progress</span>
                 <div class="small text-secondary">A @Get(p, "height", "4")px bar at the @Get(p, "position", "top") of the viewport.</div>
                 break;
+            case "booking":
+                <span class="cms-block-chip">Booking</span>
+                @if (string.IsNullOrWhiteSpace(Get(p, "bookingTypeSlug")))
+                {
+                    <div class="small text-secondary">No booking type picked yet.</div>
+                }
+                else
+                {
+                    <div class="small text-secondary">Embeds /book/@Get(p, "bookingTypeSlug")</div>
+                }
+                break;
             default:
                 <span class="cms-block-chip">Unknown widget</span>
                 <div class="small text-secondary mb-2">Widget type: @widget.WidgetType</div>

@@ -652,6 +652,62 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void Render_ShouldNotEmitFaqSchema_WhenIsFaqIsNotSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"accordion","props":{"itemsJson":"[{\"question\":\"Q1?\",\"answer\":\"A1.\"}]"}}"""));
+
+        Assert.DoesNotContain("application/ld+json", html);
+    }
+
+    [Fact]
+    public void Render_ShouldEmitFaqPageSchema_WhenIsFaqIsTrue()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"accordion","props":{"isFaq":"true","itemsJson":"[{\"question\":\"Q1?\",\"answer\":\"A1.\"},{\"question\":\"Q2?\",\"answer\":\"A2.\"}]"}}"""));
+
+        Assert.Contains("""<script type="application/ld+json">""", html);
+        Assert.Contains("\"@context\":\"https://schema.org\"", html);
+        Assert.Contains("\"@type\":\"FAQPage\"", html);
+        Assert.Contains("Q1?", html);
+        Assert.Contains("Q2?", html);
+        Assert.Contains("\"@type\":\"Question\"", html);
+        Assert.Contains("\"@type\":\"Answer\"", html);
+    }
+
+    [Fact]
+    public void Render_ShouldNotEmitFaqSchema_InEditMode_EvenWhenIsFaqIsTrue()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"accordion","props":{"isFaq":"true","itemsJson":"[{\"question\":\"Q1?\",\"answer\":\"A1.\"}]"}}"""),
+            editMode: true);
+
+        Assert.DoesNotContain("application/ld+json", html);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipEmptyAnswerQuestions_InFaqSchema()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"accordion","props":{"isFaq":"true","itemsJson":"[{\"question\":\"Q1?\",\"answer\":\"\"},{\"question\":\"Q2?\",\"answer\":\"A2.\"}]"}}"""));
+
+        // Q1 still renders as a normal (empty-answer) accordion item - only excluded from the
+        // FAQPage schema, since an unanswered question is not real structured FAQ data.
+        var schemaCount = System.Text.RegularExpressions.Regex.Matches(html, "\"@type\":\"Question\"").Count;
+        Assert.Equal(1, schemaCount);
+        Assert.Contains("Q2?", html);
+    }
+
+    [Fact]
+    public void Render_FaqSchema_ShouldEscapeHtmlSoScriptTagCannotBeBrokenOut()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"accordion","props":{"isFaq":"true","itemsJson":"[{\"question\":\"Q1</script><script>alert(1)</script>\",\"answer\":\"A1.\"}]"}}"""));
+
+        Assert.DoesNotContain("</script><script>alert(1)</script>", html);
+    }
+
+    [Fact]
     public void Render_ShouldRenderPostsGridWidget_WithSuppliedArticles()
     {
         var articles = new List<PublicArticleSummary>
@@ -1272,6 +1328,75 @@ public sealed class CmsBlockHtmlRendererTests
         var html = CmsBlockHtmlRenderer.Render(CmsBuilderJson.Serialize(layout), editMode: false, isLoggedIn: false);
 
         Assert.DoesNotContain("Members only", html);
+    }
+
+    // ── Workstream C, Tier 1 (booking embed) ─────────────────────────────────
+
+    [Fact]
+    public void Render_ShouldRenderBookingEmbed_WithIframeAndTitle()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"booking","props":{"bookingTypeSlug":"consult","title":"Book a consult","height":"800"}}"""));
+
+        Assert.Contains("gws-booking-embed", html);
+        Assert.Contains("src=\"/book/consult\"", html);
+        Assert.Contains("Book a consult", html);
+        Assert.Contains("height:800px", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderNothingForBookingEmbed_WhenNoSlugIsPicked()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"booking","props":{}}"""));
+
+        Assert.DoesNotContain("gws-booking-embed", html);
+        Assert.DoesNotContain("<iframe", html);
+    }
+
+    [Fact]
+    public void Render_ShouldShowAPlaceholder_ForBookingEmbed_WhenNoSlugIsPicked_InEditMode()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"booking","props":{}}"""), editMode: true);
+
+        Assert.Contains("gws-booking-embed-placeholder", html);
+        Assert.Contains("Pick a booking type", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitTheBookingHeading_WhenTitleIsNotSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"booking","props":{"bookingTypeSlug":"consult"}}"""));
+
+        Assert.DoesNotContain("gws-booking-embed-title", html);
+    }
+
+    [Fact]
+    public void Render_ShouldClampBookingEmbedHeight_ToAReasonableRange()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"booking","props":{"bookingTypeSlug":"consult","height":"50"}}"""));
+
+        Assert.Contains("height:300px", html);
+    }
+
+    [Fact]
+    public void Render_ShouldEscapeTheBookingSlug_InTheIframeSrc()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"booking","props":{"bookingTypeSlug":"a slug\" onload=\"alert(1)"}}"""));
+
+        Assert.DoesNotContain("onload=", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribeBookingWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "booking", Props = new() { ["bookingTypeSlug"] = "consult" } };
+
+        Assert.Equal("[booking: consult]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
     }
 
     private static PageLayout ButtonLayout(string href) => new()

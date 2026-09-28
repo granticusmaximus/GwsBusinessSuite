@@ -1,6 +1,8 @@
 using System.Net;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Markdig;
 
@@ -94,6 +96,7 @@ public static class CmsBlockHtmlRenderer
             "related-posts" => HasValue(p, "sourceArticleSlug") ? $"[related posts: {Get(p, "sourceArticleSlug")}]" : "[related posts]",
             "table-of-contents" => "[table of contents]",
             "reading-progress" => "[reading progress bar]",
+            "booking" => HasValue(p, "bookingTypeSlug") ? $"[booking: {Get(p, "bookingTypeSlug")}]" : "[booking]",
             _ => string.Empty
         };
         text = text.Replace('\n', ' ').Trim();
@@ -696,7 +699,7 @@ public static class CmsBlockHtmlRenderer
                   </footer>
                 </blockquote>
                 """,
-            "accordion" => RenderAccordion(Get(p, "itemsJson"), editMode),
+            "accordion" => RenderAccordion(p, editMode),
             "spacer" => $"""<div class="gws-spacer" style="height:{GetInt(p, "height", 48)}px"></div>""",
             "divider" => $"""<hr class="gws-divider gws-divider-{Html(Get(p, "style", "solid"))}" />""",
             "html" => Get(p, "content"),
@@ -707,6 +710,7 @@ public static class CmsBlockHtmlRenderer
             "callout" => RenderCallout(p, editMode),
             "table-of-contents" => RenderTableOfContents(p),
             "reading-progress" => RenderReadingProgress(p, tokens),
+            "booking" => RenderBooking(p, editMode),
             _ => string.Empty
         };
     }
@@ -811,6 +815,35 @@ public static class CmsBlockHtmlRenderer
         return $"""
             <div class="gws-reading-progress gws-reading-progress-{Html(position)}" data-gws-reading-progress style="{colorStyle}--gws-reading-progress-height:{height}px">
               <div class="gws-reading-progress-bar"></div>
+            </div>
+            """;
+    }
+
+    // Workstream C, Tier 1 (booking/scheduling embed) - deliberately NOT a data-fetching widget
+    // like posts-grid/related-posts: it embeds the app's own already-public /book/{slug} page
+    // (Components/Pages/Booking/BookingPublic.razor) via a same-origin <iframe> rather than
+    // re-rendering booking-type/availability data here, so this stays true to the renderer's
+    // "zero DB access of its own" contract with no Program.cs wiring at all. bookingTypeSlug is
+    // trusted admin input (same trust boundary as every other widget Prop), so it goes straight
+    // into the iframe src path segment - Uri.EscapeDataString still guards against it breaking
+    // out of the src="" attribute via a stray quote/space.
+    private static string RenderBooking(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var slug = Get(p, "bookingTypeSlug");
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            return editMode
+                ? """<div class="gws-booking-embed-placeholder">Pick a booking type in the Inspector.</div>"""
+                : string.Empty;
+        }
+
+        var height = Math.Clamp(GetInt(p, "height", 720), 300, 2000);
+        var title = Get(p, "title", "Book a time");
+
+        return $"""
+            <div class="gws-booking-embed">
+              {(HasValue(p, "title") ? $"""<h3 class="gws-booking-embed-title"{InlineEditAttrs(editMode, "title")}>{Html(title)}</h3>""" : "")}
+              <iframe class="gws-booking-embed-frame" src="/book/{Html(Uri.EscapeDataString(slug))}" style="height:{height}px" loading="lazy" title="{Html(title)}"></iframe>
             </div>
             """;
     }
@@ -977,14 +1010,20 @@ public static class CmsBlockHtmlRenderer
 
     // <details>/<summary> gives collapsible behavior natively, no JS needed — matches this
     // codebase's preference for the simplest mechanism that actually works.
-    private static string RenderAccordion(string itemsJson, bool editMode = false)
+    // Workstream C, Tier 1 (FAQ + schema markup) - "isFaq" is an admin opt-in, off by default,
+    // since an accordion is also used for plenty of genuinely non-FAQ collapsible content (a
+    // spec sheet, a changelog) that would be actively wrong to mark up as Google FAQPage data.
+    private static string RenderAccordion(IReadOnlyDictionary<string, string> p, bool editMode = false)
     {
+        var itemsJson = Get(p, "itemsJson");
+        var isFaq = Get(p, "isFaq") == "true";
         try
         {
             var node = JsonNode.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson) as JsonArray;
             if (node is null || node.Count == 0) return string.Empty;
 
             var sb = new StringBuilder("""<div class="gws-accordion">""");
+            var faqEntries = new List<FaqQuestionSchema>();
             var index = -1;
             foreach (var item in node.OfType<JsonObject>())
             {
@@ -999,8 +1038,24 @@ public static class CmsBlockHtmlRenderer
                       <div class="gws-accordion-answer"{InlineRichAttrs(editMode, $"itemsJson[{index}].answer", answer)}>{Markdown.ToHtml(answer, MarkdownPipeline)}</div>
                     </details>
                     """);
+
+                if (isFaq && !string.IsNullOrWhiteSpace(answer))
+                {
+                    faqEntries.Add(new FaqQuestionSchema("Question", question, new FaqAnswerSchema("Answer", Markdown.ToHtml(answer, MarkdownPipeline))));
+                }
             }
             sb.Append("</div>");
+
+            // Not emitted in edit mode - it's SEO metadata for the public page, not something
+            // an author needs to see reflected in the Studio's own live-preview iframe.
+            if (isFaq && !editMode && faqEntries.Count > 0)
+            {
+                var schema = new FaqPageSchema("https://schema.org", "FAQPage", faqEntries);
+                // System.Text.Json's default encoder escapes '<'/'>'/'&' to \uXXXX, so this can
+                // never accidentally close the surrounding <script> tag early.
+                sb.Append($"""<script type="application/ld+json">{JsonSerializer.Serialize(schema)}</script>""");
+            }
+
             return sb.ToString();
         }
         catch
@@ -1008,6 +1063,20 @@ public static class CmsBlockHtmlRenderer
             return string.Empty;
         }
     }
+
+    private sealed record FaqPageSchema(
+        [property: JsonPropertyName("@context")] string Context,
+        [property: JsonPropertyName("@type")] string Type,
+        [property: JsonPropertyName("mainEntity")] List<FaqQuestionSchema> MainEntity);
+
+    private sealed record FaqQuestionSchema(
+        [property: JsonPropertyName("@type")] string Type,
+        [property: JsonPropertyName("name")] string Name,
+        [property: JsonPropertyName("acceptedAnswer")] FaqAnswerSchema AcceptedAnswer);
+
+    private sealed record FaqAnswerSchema(
+        [property: JsonPropertyName("@type")] string Type,
+        [property: JsonPropertyName("text")] string Text);
 
     // Posts to /cms/{siteSlug}/{pageSlug}/submit (see Program.cs), which stores the
     // submission via IFormSubmissionService. The "company" field is a honeypot: hidden

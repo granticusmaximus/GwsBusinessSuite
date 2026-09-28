@@ -18,7 +18,9 @@ public static class CmsSectionTemplates
         new CmsSectionTemplate("team-grid", "🧑‍🤝‍🧑", "Team/people grid", "Photo cards for introducing people", TeamGrid),
         new CmsSectionTemplate("faq", "❓", "FAQ", "An accordion pre-seeded with sample questions", Faq),
         new CmsSectionTemplate("pricing-table", "💳", "Pricing table", "Three-column pricing cards with a button each", PricingTable),
-        new CmsSectionTemplate("newsletter-signup", "📧", "Newsletter signup", "Email capture styled as an accent-background callout", NewsletterSignup)
+        new CmsSectionTemplate("newsletter-signup", "📧", "Newsletter signup", "Email capture styled as an accent-background callout", NewsletterSignup),
+        new CmsSectionTemplate("quote-request-form", "📝", "Quote request form", "A form pre-seeded with contact + project details fields", QuoteRequestForm),
+        new CmsSectionTemplate("appointment-request-form", "🗓️", "Appointment request form", "A form pre-seeded with contact + preferred-time fields", AppointmentRequestForm)
     ];
 
     public static CmsSectionTemplate? Find(string key) =>
@@ -110,7 +112,7 @@ public static class CmsSectionTemplates
                     new LayoutWidget
                     {
                         WidgetType = "accordion",
-                        Props = new Dictionary<string, string> { ["itemsJson"] = itemsJson }
+                        Props = new Dictionary<string, string> { ["itemsJson"] = itemsJson, ["isFaq"] = "true" }
                     }
                 ]
             }
@@ -163,6 +165,90 @@ public static class CmsSectionTemplates
                             ["submitLabel"] = "Subscribe",
                             ["autoCreateContact"] = "true"
                         }
+                    }
+                ]
+            }
+        ];
+        return section;
+    }
+
+    // Workstream C, Tier 1 (form presets) - identical pattern to NewsletterSignup above: no new
+    // renderer/widget code, just a pre-seeded generic "form" widget. Field "role" values (email/
+    // name/phone/company) match Program.cs's ResolveFormFieldMetadata / FormSubmissionService's
+    // structured columns - see CmsBuilderEditor.razor's FormFieldRoles for the full set.
+    private static LayoutSection QuoteRequestForm()
+    {
+        var section = new LayoutSection { Label = "Quote request form", ColumnLayout = "full" };
+        var fieldsJson = JsonSerializer.Serialize(new[]
+        {
+            new { key = "fullName", label = "Full Name", type = "text", required = true, optionsJson = "", role = "name" },
+            new { key = "email", label = "Email Address", type = "email", required = true, optionsJson = "", role = "email" },
+            new { key = "phone", label = "Phone Number", type = "tel", required = false, optionsJson = "", role = "phone" },
+            new { key = "company", label = "Company (if applicable)", type = "text", required = false, optionsJson = "", role = "company" },
+            new { key = "projectDetails", label = "Tell us about your project", type = "textarea", required = true, optionsJson = "", role = "none" }
+        });
+        section.Columns =
+        [
+            new LayoutColumn
+            {
+                Span = 12,
+                Widgets =
+                [
+                    new LayoutWidget
+                    {
+                        WidgetType = "heading",
+                        Props = new Dictionary<string, string> { ["text"] = "Request a Quote", ["level"] = "h2", ["align"] = "center" }
+                    },
+                    new LayoutWidget
+                    {
+                        WidgetType = "paragraph",
+                        Props = new Dictionary<string, string> { ["text"] = "Tell us a bit about what you need and we'll follow up with pricing.", ["align"] = "center" }
+                    },
+                    new LayoutWidget
+                    {
+                        WidgetType = "form",
+                        Props = new Dictionary<string, string> { ["fieldsJson"] = fieldsJson, ["submitLabel"] = "Request Quote", ["autoCreateContact"] = "true" }
+                    }
+                ]
+            }
+        ];
+        return section;
+    }
+
+    private static LayoutSection AppointmentRequestForm()
+    {
+        var section = new LayoutSection { Label = "Appointment request form", ColumnLayout = "full" };
+        var timeOptionsJson = JsonSerializer.Serialize(new[] { "Morning", "Afternoon", "Evening" });
+        var fieldsJson = JsonSerializer.Serialize(new[]
+        {
+            new { key = "fullName", label = "Full Name", type = "text", required = true, optionsJson = "", role = "name" },
+            new { key = "email", label = "Email Address", type = "email", required = true, optionsJson = "", role = "email" },
+            new { key = "phone", label = "Phone Number", type = "tel", required = true, optionsJson = "", role = "phone" },
+            new { key = "preferredDate", label = "Preferred Date", type = "text", required = true, optionsJson = "", role = "none" },
+            new { key = "preferredTime", label = "Preferred Time", type = "select", required = true, optionsJson = timeOptionsJson, role = "none" },
+            new { key = "notes", label = "Anything we should know beforehand?", type = "textarea", required = false, optionsJson = "", role = "none" }
+        });
+        section.Columns =
+        [
+            new LayoutColumn
+            {
+                Span = 12,
+                Widgets =
+                [
+                    new LayoutWidget
+                    {
+                        WidgetType = "heading",
+                        Props = new Dictionary<string, string> { ["text"] = "Request an Appointment", ["level"] = "h2", ["align"] = "center" }
+                    },
+                    new LayoutWidget
+                    {
+                        WidgetType = "paragraph",
+                        Props = new Dictionary<string, string> { ["text"] = "Let us know when works for you and we'll confirm a time.", ["align"] = "center" }
+                    },
+                    new LayoutWidget
+                    {
+                        WidgetType = "form",
+                        Props = new Dictionary<string, string> { ["fieldsJson"] = fieldsJson, ["submitLabel"] = "Request Appointment", ["autoCreateContact"] = "true" }
                     }
                 ]
             }
