@@ -17,7 +17,12 @@ namespace GwsBusinessSuite.Application.CmsBuilder;
 /// Contact/etc.) are still rendered by <see cref="CmsBlockHtmlRenderer"/> and just get
 /// wrapped in <see cref="Layout"/> here.
 /// </summary>
-public sealed record RelatedArticleView(string Title, string Slug);
+// HeroImageUrl is additive (trailing, defaulted) so existing call sites - this file's own
+// BlogPostBody usage, and PublicSiteHtmlRendererTests.cs's 2-arg constructions - keep compiling
+// unchanged. Added for the CMS page-editor's own "related-posts" widget
+// (CmsBlockHtmlRenderer.RenderRelatedPosts), which shows a thumbnail per related article;
+// BlogPostBody's own plain-text link list below never reads it.
+public sealed record RelatedArticleView(string Title, string Slug, string? HeroImageUrl = null);
 
 public static class PublicSiteHtmlRenderer
 {

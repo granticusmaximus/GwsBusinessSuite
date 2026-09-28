@@ -9,6 +9,8 @@
 @using GwsBusinessSuite.Application.CmsBuilder
 @using GwsBusinessSuite.Application.CmsKnowledge
 @using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Infrastructure.Data
+@using Microsoft.EntityFrameworkCore
 @using System.Text.Json
 @using System.Globalization
 @inject ICmsBuilderService CmsBuilderService
@@ -16,6 +18,7 @@
 @inject IGlobalBlockService GlobalBlockService
 @inject GlobalBlockResolver GlobalBlockResolver
 @inject IMediaLibraryService MediaLibraryService
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject ILogger<CmsBuilderEditor> Logger
@@ -924,15 +927,28 @@ else
                                        @oninput='(e) => SetProp(selWidget, "count", e.Value?.ToString() ?? "3")' />
                             </div>
                             <div>
-                                <label class="form-label small fw-semibold">Columns</label>
-                                <select class="form-select" value='@GetProp(selWidget, "columns", "3")'
-                                        @onchange='(e) => SetProp(selWidget, "columns", e.Value?.ToString() ?? "3")'>
-                                    <option value="1">1</option>
-                                    <option value="2">2</option>
-                                    <option value="3">3</option>
-                                    <option value="4">4</option>
+                                <label class="form-label small fw-semibold">Layout</label>
+                                <select class="form-select" value='@GetProp(selWidget, "layout", "grid")'
+                                        @onchange='(e) => SetProp(selWidget, "layout", e.Value?.ToString() ?? "grid")'>
+                                    <option value="grid">Grid</option>
+                                    <option value="list">List</option>
+                                    <option value="classic">Classic</option>
+                                    <option value="overlay">Image overlay</option>
                                 </select>
                             </div>
+                            @if (GetProp(selWidget, "layout", "grid") == "grid")
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">Columns</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "columns", "3")'
+                                            @onchange='(e) => SetProp(selWidget, "columns", e.Value?.ToString() ?? "3")'>
+                                        <option value="1">1</option>
+                                        <option value="2">2</option>
+                                        <option value="3">3</option>
+                                        <option value="4">4</option>
+                                    </select>
+                                </div>
+                            }
                             <div class="form-check">
                                 <input class="form-check-input" type="checkbox" id="postsGridShowImage"
                                        checked="@(GetProp(selWidget, "showImage", "true") == "true")"
@@ -945,10 +961,47 @@ else
                                        @onchange='(e) => SetProp(selWidget, "showExcerpt", ((bool)(e.Value ?? true)) ? "true" : "false")' />
                                 <label class="form-check-label small" for="postsGridShowExcerpt">Show excerpt</label>
                             </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="postsGridShowDate"
+                                       checked="@(GetProp(selWidget, "showDate", "true") == "true")"
+                                       @onchange='(e) => SetProp(selWidget, "showDate", ((bool)(e.Value ?? true)) ? "true" : "false")' />
+                                <label class="form-check-label small" for="postsGridShowDate">Show publish date</label>
+                            </div>
                             <div>
                                 <label class="form-label small fw-semibold">Call-to-Action Label</label>
                                 <input class="form-control" value='@GetProp(selWidget, "ctaLabel", "Read More")'
                                        @oninput='(e) => SetProp(selWidget, "ctaLabel", e.Value?.ToString() ?? "Read More")' />
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "related-posts")
+                        {
+                            <div class="small text-secondary mb-2">
+                                Shows recommendations for a specific article you pick below - not the
+                                page this block sits on. Reusable anywhere, e.g. a landing page built
+                                around one cornerstone piece.
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Source Article</label>
+                                <select class="form-select" value='@GetProp(selWidget, "sourceArticleSlug")'
+                                        @onchange='(e) => SetProp(selWidget, "sourceArticleSlug", e.Value?.ToString() ?? string.Empty)'>
+                                    <option value="">Select an article…</option>
+                                    @foreach (var (slug, title) in _publishedArticles)
+                                    {
+                                        <option value="@slug">@title</option>
+                                    }
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Number of Posts</label>
+                                <input class="form-control" type="number" min="1" max="6"
+                                       value='@GetProp(selWidget, "count", "3")'
+                                       @oninput='(e) => SetProp(selWidget, "count", e.Value?.ToString() ?? "3")' />
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="relatedPostsShowImage"
+                                       checked="@(GetProp(selWidget, "showImage", "true") == "true")"
+                                       @onchange='(e) => SetProp(selWidget, "showImage", ((bool)(e.Value ?? true)) ? "true" : "false")' />
+                                <label class="form-check-label small" for="relatedPostsShowImage">Show hero image</label>
                             </div>
                         }
                         else if (selWidget.WidgetType == "form")
@@ -1698,6 +1751,7 @@ else
         new("divider",     "bi bi-dash-lg",                "Divider",     "Horizontal rule",                     GroupLayout),
         new("form",        "bi bi-ui-checks",              "Form",        "Custom fields, posts to submissions", GroupDynamic),
         new("posts-grid",  "bi bi-grid-3x3-gap",           "Posts Grid",  "Live grid of your latest blog posts", GroupDynamic),
+        new("related-posts", "bi bi-link-45deg",           "Related Posts", "Recommendations for a specific article", GroupDynamic),
         new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block",                      GroupAdvanced),
     ];
 
@@ -1722,6 +1776,24 @@ else
             _isAdmin = authState.User.IsInRole(AppRoles.Admin);
         }
         await LoadAsync();
+        await LoadPublishedArticlesAsync();
+    }
+
+    // Powers the "related-posts" widget's sourceArticleSlug picker - loaded once per editor
+    // session (not per-widget-selection), same "small, bounded" posture as
+    // LoadPublicArticleSummariesAsync's own public-facing equivalent.
+    private List<(string Slug, string Title)> _publishedArticles = [];
+
+    private async Task LoadPublishedArticlesAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var rows = await db.Articles
+            .AsNoTracking()
+            .Where(a => a.TrashedAt == null && a.Status == ArticleStatuses.Published)
+            .OrderBy(a => a.Title)
+            .Select(a => new { a.Slug, a.Title })
+            .ToListAsync();
+        _publishedArticles = rows.Select(a => (a.Slug, a.Title)).ToList();
     }
 
     // ── Live-preview click-to-select bridge ─────────────────────────────────
@@ -3765,7 +3837,8 @@ else
         "spacer"    => new() { WidgetType = "spacer",    Props = new() { ["height"] = "48" } },
         "divider"   => new() { WidgetType = "divider",   Props = new() { ["style"] = "solid" } },
         "html"      => new() { WidgetType = "html",      Props = new() { ["content"] = "<p>Custom HTML content here.</p>" } },
-        "posts-grid" => new() { WidgetType = "posts-grid", Props = new() { ["count"] = "3", ["columns"] = "3", ["showImage"] = "true", ["showExcerpt"] = "true", ["ctaLabel"] = "Read More" } },
+        "posts-grid" => new() { WidgetType = "posts-grid", Props = new() { ["count"] = "3", ["columns"] = "3", ["layout"] = "grid", ["showImage"] = "true", ["showExcerpt"] = "true", ["showDate"] = "true", ["ctaLabel"] = "Read More" } },
+        "related-posts" => new() { WidgetType = "related-posts", Props = new() { ["sourceArticleSlug"] = "", ["count"] = "3", ["showImage"] = "true" } },
         "author-box" => new() { WidgetType = "author-box", Props = new() { ["name"] = "Jane Doe", ["roleOrTitle"] = "Senior Editor", ["bio"] = "A short bio about this author goes here.", ["avatarUrl"] = "", ["websiteUrl"] = "", ["twitterUrl"] = "", ["linkedinUrl"] = "", ["emailAddress"] = "" } },
         "callout"    => new() { WidgetType = "callout", Props = new() { ["variant"] = "info", ["title"] = "", ["body"] = "Add your callout text here.", ["showIcon"] = "true" } },
         _           => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Content", ["align"] = "left" } }
@@ -3811,6 +3884,7 @@ else
         "divider"     => "Divider",
         "html"        => "HTML",
         "posts-grid"  => "Posts Grid",
+        "related-posts" => "Related Posts",
         "author-box"  => "Author Box",
         "callout"     => "Callout",
         _             => type
@@ -3840,6 +3914,7 @@ else
         "divider"     => "bi bi-dash-lg",
         "html"        => "bi bi-code-slash",
         "posts-grid"  => "bi bi-grid-3x3-gap",
+        "related-posts" => "bi bi-link-45deg",
         "author-box"  => "bi bi-person-badge",
         "callout"     => "bi bi-megaphone",
         _             => "bi bi-square"
@@ -3862,6 +3937,7 @@ else
             "spacer"      => $"{GetPropStatic(w, "height", "48")}px",
             "html"        => "Custom HTML",
             "posts-grid"  => $"{GetPropStatic(w, "count", "3")} latest post(s)",
+            "related-posts" => string.IsNullOrWhiteSpace(GetPropStatic(w, "sourceArticleSlug", "")) ? "No source article picked" : $"Related to: {GetPropStatic(w, "sourceArticleSlug", "")}",
             "author-box"  => GetPropStatic(w, "name", "Author Box"),
             "callout"     => GetPropStatic(w, "title", GetPropStatic(w, "body", "Callout")),
             _             => w.WidgetType

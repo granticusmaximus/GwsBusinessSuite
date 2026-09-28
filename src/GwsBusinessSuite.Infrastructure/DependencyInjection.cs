@@ -179,6 +179,7 @@ public static class DependencyInjection
         services.AddScoped<IMediaLibraryService, MediaLibraryService>();
         services.AddScoped<IFormSubmissionService, FormSubmissionService>();
         services.AddScoped<ICommentService, CommentService>();
+        services.AddScoped<IRelatedArticlesService, RelatedArticlesService>();
         services.AddScoped<IDockerHealthService, DockerHealthService>();
         services.AddSingleton<DockerHealthNotifier>();
         services.AddHostedService<DockerHealthMonitorBackgroundService>();

@@ -1865,7 +1865,8 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     ICmsBuilderService cmsBuilderService,
     IContentLocalizationService contentLocalizationService,
     GlobalBlockResolver globalBlockResolver,
-    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IRelatedArticlesService relatedArticlesService) =>
 {
     var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
     if (site is null) return Results.NotFound();
@@ -1915,7 +1916,10 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     var articles = CmsBlockHtmlRenderer.LayoutContainsPostsGrid(layout)
         ? await LoadPublicArticleSummariesAsync(dbFactory)
         : [];
-    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, pageSlug, editMode, articles, isLoggedIn: includeUnpublished, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson));
+    var relatedPosts = CmsBlockHtmlRenderer.LayoutContainsRelatedPosts(layout)
+        ? await LoadRelatedPostsByAnchorSlugAsync(layout, dbFactory, relatedArticlesService)
+        : null;
+    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, pageSlug, editMode, articles, isLoggedIn: includeUnpublished, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson), relatedPostsByAnchorSlug: relatedPosts);
     var pageTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
     var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
     var ogImageTag = string.IsNullOrWhiteSpace(page.OgImageUrl)
@@ -2194,8 +2198,9 @@ app.MapGet("/{**pageSlug}", (
         ICmsBuilderService cmsBuilderService,
         GlobalBlockResolver globalBlockResolver,
         IConfiguration configuration,
-        IDbContextFactory<ApplicationDbContext> dbFactory) =>
-        RenderPublicCanvasPageAsync(pageSlug, request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration, dbFactory))
+        IDbContextFactory<ApplicationDbContext> dbFactory,
+        IRelatedArticlesService relatedArticlesService) =>
+        RenderPublicCanvasPageAsync(pageSlug, request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration, dbFactory, relatedArticlesService))
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read")
     .CacheOutput(OutputCachePublicContentInvalidator.Tag);
 
@@ -2299,6 +2304,7 @@ app.MapGet("/blog/{slug}", async (
         ICommentService commentService,
         IAffiliateRotationService affiliateRotationService,
         IContentLocalizationService contentLocalizationService,
+        IRelatedArticlesService relatedArticlesService,
         IConfiguration configuration) =>
     {
         await using var db = await dbFactory.CreateDbContextAsync();
@@ -2352,7 +2358,7 @@ app.MapGet("/blog/{slug}", async (
         var approvedComments = await commentService.ListApprovedForArticleAsync(a.Id);
         var replyToCommentId = Guid.TryParse(request.Query["replyTo"], out var parsedReplyToId) ? parsedReplyToId : (Guid?)null;
         var replyComment = replyToCommentId.HasValue ? FindCommentById(approvedComments, replyToCommentId.Value) : null;
-        var relatedArticles = await GetRelatedArticlesAsync(db, a);
+        var relatedArticles = await relatedArticlesService.GetRelatedArticlesAsync(a);
 
         var bodyHtml = PublicSiteHtmlRenderer.BlogPostBody(
             a.Title, a.MetaDescription, a.Author, a.PublishedAt, a.EstimatedReadingTime, a.PrimaryKeyword,
@@ -2690,7 +2696,8 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
     IWebHostEnvironment env,
     GlobalBlockResolver globalBlockResolver,
     IMediaLibraryService mediaLibraryService,
-    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IRelatedArticlesService relatedArticlesService) =>
 {
     // The posts-grid widget always pulls from this app's own blog (not the exported
     // CmsSite), so a static export can't bundle those articles - they still live on the
@@ -2726,10 +2733,15 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
         {
             await globalBlockResolver.ResolveAsync(site.Id, layout);
         }
+        // Resolved after global-block resolution (above), since a related-posts widget could
+        // live inside a Global Block whose real sourceArticleSlug prop only exists post-resolve.
+        var relatedPosts = CmsBlockHtmlRenderer.LayoutContainsRelatedPosts(layout)
+            ? await LoadRelatedPostsByAnchorSlugAsync(layout, dbFactory, relatedArticlesService)
+            : null;
         // The full nested path (not just the leaf slug) so a form widget's hidden "_path"
         // field matches what the live /cms/{siteSlug}/{**pageSlug} route would have passed.
         var fullPath = cmsBuilderService.BuildFullPath(page, allPages);
-        var bodySections = CmsBlockHtmlRenderer.Render(layout, site.Slug, fullPath, articles: articles, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson));
+        var bodySections = CmsBlockHtmlRenderer.Render(layout, site.Slug, fullPath, articles: articles, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson), relatedPostsByAnchorSlug: relatedPosts);
         var pageTitle = System.Net.WebUtility.HtmlEncode(
             string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
         var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
@@ -3297,9 +3309,10 @@ app.MapGet("/", (
     ICmsBuilderService cmsBuilderService,
     GlobalBlockResolver globalBlockResolver,
     IConfiguration configuration,
-    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IRelatedArticlesService relatedArticlesService) =>
     IsPublicHost(httpContext)
-        ? RenderPublicCanvasPageAsync("home", request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration, dbFactory)
+        ? RenderPublicCanvasPageAsync("home", request, request.Query["submitted"] == "1", cmsBuilderService, globalBlockResolver, configuration, dbFactory, relatedArticlesService)
         : Task.FromResult(Results.Redirect("/admin")))
     .AllowAnonymous().RequireRateLimiting("public-read")
     .CacheOutput(OutputCachePublicContentInvalidator.Tag);
@@ -3333,7 +3346,8 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     ICmsBuilderService cmsBuilderService,
     GlobalBlockResolver globalBlockResolver,
     IConfiguration configuration,
-    IDbContextFactory<ApplicationDbContext> dbFactory)
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IRelatedArticlesService relatedArticlesService)
 {
     var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
     var site = await GetConfiguredCanvasSiteAsync(cmsBuilderService, configuration);
@@ -3376,7 +3390,10 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     var articles = CmsBlockHtmlRenderer.LayoutContainsPostsGrid(layout)
         ? await LoadPublicArticleSummariesAsync(dbFactory)
         : [];
-    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath, articles: articles, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson));
+    var relatedPosts = CmsBlockHtmlRenderer.LayoutContainsRelatedPosts(layout)
+        ? await LoadRelatedPostsByAnchorSlugAsync(layout, dbFactory, relatedArticlesService)
+        : null;
+    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath, articles: articles, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson), relatedPostsByAnchorSlug: relatedPosts);
     if (showSubmittedBanner)
     {
         bodyHtml = PublicSiteHtmlRenderer.SubmittedModal() + bodyHtml;
@@ -3506,6 +3523,32 @@ static async Task<IReadOnlyList<PublicArticleSummary>> LoadPublicArticleSummarie
         .ToListAsync();
 }
 
+// Feeds the CMS builder's "related-posts" widget (see CmsBlockHtmlRenderer.RenderRelatedPosts).
+// A page can carry more than one related-posts block pointed at different anchor articles (e.g.
+// a landing page built around two different cornerstone pieces), so this resolves every distinct
+// anchor slug on the page - one query per anchor, not one global query like posts-grid, since
+// each anchor's own scored recommendations are genuinely different.
+static async Task<IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>>> LoadRelatedPostsByAnchorSlugAsync(
+    PageLayout? layout, IDbContextFactory<ApplicationDbContext> dbFactory, IRelatedArticlesService relatedArticlesService)
+{
+    var anchorSlugs = CmsBlockHtmlRenderer.GetRelatedPostsAnchorSlugs(layout);
+    var result = new Dictionary<string, IReadOnlyList<RelatedArticleView>>(StringComparer.OrdinalIgnoreCase);
+    if (anchorSlugs.Count == 0) return result;
+
+    await using var db = await dbFactory.CreateDbContextAsync();
+    foreach (var slug in anchorSlugs)
+    {
+        var article = await db.Articles.AsNoTracking().FirstOrDefaultAsync(a => a.Slug == slug && a.TrashedAt == null);
+        if (article is null) continue;
+        // Always fetch the widget's own maximum possible count (6), not the service's own
+        // default of 3 - more than one related-posts block on a page can point at the same
+        // anchor with different "count" props, and RenderRelatedPosts slices this shared,
+        // per-anchor list down to each individual widget's own configured count.
+        result[slug] = await relatedArticlesService.GetRelatedArticlesAsync(article, take: 6);
+    }
+    return result;
+}
+
 static CommentView? FindCommentById(IEnumerable<CommentView> comments, Guid commentId)
 {
     foreach (var comment in comments)
@@ -3535,37 +3578,6 @@ static string SanitizeInlineCss(string css) =>
 // WatchedTopic.Keywords) - parsed on read rather than normalized into a join table.
 static List<string> ParseTags(string tags) =>
     tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-
-// Scored by shared category (weighted higher) plus shared tags, entirely from data every
-// article already carries - no embedding index required. Verified finding: the site's
-// semantic search index only covers CMS pages, wiki pages, and CRM records, not blog
-// Articles, so building this on IHybridSearchService would have meant standing up a new
-// indexing path rather than reusing an existing one.
-static async Task<List<RelatedArticleView>> GetRelatedArticlesAsync(ApplicationDbContext db, Article article)
-{
-    var currentTags = ParseTags(article.Tags).ToHashSet(StringComparer.OrdinalIgnoreCase);
-    var candidates = await db.Articles
-        .AsNoTracking()
-        .Where(x => x.Id != article.Id && x.TrashedAt == null && x.PublishedAt != null)
-        .Select(x => new { x.Title, x.Slug, x.CategoryId, x.Tags, x.PublishedAtUnixSeconds })
-        .ToListAsync();
-
-    return candidates
-        .Select(x => new
-        {
-            x.Title,
-            x.Slug,
-            x.PublishedAtUnixSeconds,
-            Score = (x.CategoryId.HasValue && x.CategoryId == article.CategoryId ? 2 : 0)
-                  + ParseTags(x.Tags).Count(t => currentTags.Contains(t))
-        })
-        .Where(x => x.Score > 0)
-        .OrderByDescending(x => x.Score)
-        .ThenByDescending(x => x.PublishedAtUnixSeconds)
-        .Take(3)
-        .Select(x => new RelatedArticleView(x.Title, x.Slug))
-        .ToList();
-}
 
 // A misconfigured deploy that ships a blank/trivial AdminAuth:Password previously seeded
 // it without any complaint — the admin login would then be guessable on day one. This is

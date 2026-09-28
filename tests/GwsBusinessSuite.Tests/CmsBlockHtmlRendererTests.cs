@@ -713,6 +713,289 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void Render_ShouldRenderListLayout_ForPostsGridWidget()
+    {
+        var articles = new List<PublicArticleSummary>
+        {
+            new("first-post", "First Post", "First summary", "/media/first.jpg", DateTimeOffset.UtcNow)
+        };
+
+        var html = CmsBlockHtmlRenderer.Render(
+            Layout("""{"id":"w1","widgetType":"posts-grid","props":{"layout":"list"}}"""),
+            articles: articles);
+
+        Assert.Contains("gws-posts-grid-list", html);
+        Assert.Contains("gws-posts-grid-list-item", html);
+        Assert.Contains("gws-posts-grid-list-img", html);
+        Assert.DoesNotContain("gws-posts-grid-cols", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderClassicLayout_ForPostsGridWidget()
+    {
+        var articles = new List<PublicArticleSummary>
+        {
+            new("first-post", "First Post", "First summary", "/media/first.jpg", DateTimeOffset.UtcNow)
+        };
+
+        var html = CmsBlockHtmlRenderer.Render(
+            Layout("""{"id":"w1","widgetType":"posts-grid","props":{"layout":"classic"}}"""),
+            articles: articles);
+
+        Assert.Contains("gws-posts-grid-classic", html);
+        Assert.Contains("gws-posts-grid-classic-item", html);
+        Assert.Contains("gws-posts-grid-classic-img", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderOverlayLayout_ForPostsGridWidget()
+    {
+        var articles = new List<PublicArticleSummary>
+        {
+            new("first-post", "First Post", "First summary", "/media/first.jpg", DateTimeOffset.UtcNow)
+        };
+
+        var html = CmsBlockHtmlRenderer.Render(
+            Layout("""{"id":"w1","widgetType":"posts-grid","props":{"layout":"overlay"}}"""),
+            articles: articles);
+
+        Assert.Contains("gws-posts-grid-overlay-item", html);
+        Assert.Contains("gws-posts-grid-overlay-img", html);
+        Assert.Contains("gws-posts-grid-overlay-scrim", html);
+        Assert.DoesNotContain("gws-posts-grid-overlay-noimage", html);
+    }
+
+    [Fact]
+    public void Render_ShouldFallBackToAPlainCard_ForOverlayLayout_WhenTheArticleHasNoHeroImage()
+    {
+        var articles = new List<PublicArticleSummary>
+        {
+            new("first-post", "First Post", "First summary", null, DateTimeOffset.UtcNow)
+        };
+
+        var html = CmsBlockHtmlRenderer.Render(
+            Layout("""{"id":"w1","widgetType":"posts-grid","props":{"layout":"overlay"}}"""),
+            articles: articles);
+
+        Assert.Contains("gws-posts-grid-overlay-noimage", html);
+        Assert.DoesNotContain("<img", html);
+    }
+
+    [Fact]
+    public void Render_ShouldShowPublishDate_ForPostsGridWidget_WhenShowDateIsOnByDefault()
+    {
+        var publishedAt = new DateTimeOffset(2026, 3, 5, 0, 0, 0, TimeSpan.Zero);
+        var articles = new List<PublicArticleSummary> { new("first-post", "First Post", "", null, publishedAt) };
+
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"posts-grid","props":{}}"""), articles: articles);
+
+        Assert.Contains("gws-posts-grid-date", html);
+        Assert.Contains("March 5, 2026", html);
+    }
+
+    [Fact]
+    public void Render_ShouldHidePublishDate_ForPostsGridWidget_WhenShowDateIsOff()
+    {
+        var articles = new List<PublicArticleSummary> { new("first-post", "First Post", "", null, DateTimeOffset.UtcNow) };
+
+        var html = CmsBlockHtmlRenderer.Render(
+            Layout("""{"id":"w1","widgetType":"posts-grid","props":{"showDate":"false"}}"""),
+            articles: articles);
+
+        Assert.DoesNotContain("gws-posts-grid-date", html);
+    }
+
+    [Theory]
+    [InlineData("grid")]
+    [InlineData("list")]
+    [InlineData("classic")]
+    [InlineData("overlay")]
+    public void Render_PostsGridLayouts_ShouldHonorCountAndDateToggle(string presentation)
+    {
+        var articles = Enumerable.Range(1, 4)
+            .Select(i => new PublicArticleSummary($"post-{i}", $"Post {i}", "Summary", null,
+                new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero))).ToList();
+        var html = CmsBlockHtmlRenderer.Render(Layout($$$"""
+            {"widgetType":"posts-grid","props":{"layout":"{{{presentation}}}","count":"2","showDate":"false"}}
+            """), articles: articles);
+
+        Assert.Contains("/blog/post-1", html);
+        Assert.Contains("/blog/post-2", html);
+        Assert.DoesNotContain("/blog/post-3", html);
+        Assert.DoesNotContain("gws-posts-grid-date", html);
+    }
+
+    [Theory]
+    [InlineData("list")]
+    [InlineData("classic")]
+    public void Render_PostsGridLayouts_ShouldHonorImageAndExcerptToggles(string presentation)
+    {
+        var articles = new[] { new PublicArticleSummary("post", "Title", "Hidden summary", "/hidden.jpg", null) };
+        var html = CmsBlockHtmlRenderer.Render(Layout($$$"""
+            {"widgetType":"posts-grid","props":{"layout":"{{{presentation}}}","showImage":"false","showExcerpt":"false"}}
+            """), articles: articles);
+
+        Assert.Contains("Title", html);
+        Assert.DoesNotContain("<img", html);
+        Assert.DoesNotContain("Hidden summary", html);
+        Assert.DoesNotContain("gws-posts-grid-date", html);
+    }
+
+    [Fact]
+    public void Render_PostsGrid_ShouldFallBackToGridForAnUnknownLayout()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"widgetType":"posts-grid","props":{"layout":"unknown"}}"""),
+            articles: [new("post", "Title", "", null, null)]);
+
+        Assert.Contains("gws-posts-grid-cols-3", html);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Render_RelatedPosts_ShouldPassDataThroughBothOverloadsAndLayoutModes(bool jsonOverload, bool freeform)
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout(
+            """{"widgetType":"related-posts","props":{"sourceArticleSlug":"anchor"}}"""))!;
+        if (freeform) layout.Sections[0].LayoutMode = CmsSectionLayoutModes.Freeform;
+        var data = RelatedData(new RelatedArticleView("Related title", "related-slug", "/media/related.jpg"));
+
+        var html = jsonOverload
+            ? CmsBlockHtmlRenderer.Render(CmsBuilderJson.Serialize(layout), relatedPostsByAnchorSlug: data)
+            : CmsBlockHtmlRenderer.Render(layout, relatedPostsByAnchorSlug: data);
+
+        Assert.Contains("gws-related-posts", html);
+        Assert.Contains("gws-related-posts-item", html);
+        Assert.Contains("Related title", html);
+        Assert.Contains("href=\"/blog/related-slug\"", html);
+        Assert.Contains("src=\"/media/related.jpg\"", html);
+    }
+
+    [Theory]
+    [InlineData("-1", 1)]
+    [InlineData("0", 1)]
+    [InlineData("4", 4)]
+    [InlineData("6", 6)]
+    [InlineData("99", 6)]
+    [InlineData("invalid", 3)]
+    public void Render_RelatedPosts_ShouldClampCount(string count, int expected)
+    {
+        var data = RelatedData(Enumerable.Range(1, 8).Select(i => new RelatedArticleView($"Title {i}", $"related-{i}")).ToArray());
+        var html = CmsBlockHtmlRenderer.Render(Layout($$$"""
+            {"widgetType":"related-posts","props":{"sourceArticleSlug":"anchor","count":"{{{count}}}"}}
+            """), relatedPostsByAnchorSlug: data);
+
+        for (var i = 1; i <= expected; i++) Assert.Contains($"/blog/related-{i}", html);
+        Assert.DoesNotContain($"/blog/related-{expected + 1}", html);
+    }
+
+    [Theory]
+    [InlineData("false", "/media/related.jpg")]
+    [InlineData("true", null)]
+    [InlineData("true", "")]
+    public void Render_RelatedPosts_ShouldOmitDisabledOrMissingImages(string showImage, string? imageUrl)
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout($$$"""
+            {"widgetType":"related-posts","props":{"sourceArticleSlug":"anchor","showImage":"{{{showImage}}}"}}
+            """), relatedPostsByAnchorSlug: RelatedData(new RelatedArticleView("Title", "related", imageUrl)));
+
+        Assert.Contains("/blog/related", html);
+        Assert.DoesNotContain("<img", html);
+    }
+
+    [Theory]
+    [InlineData("", true, "Pick a source article in the Inspector")]
+    [InlineData("", false, "No related posts yet.")]
+    [InlineData("missing", false, "No related posts yet.")]
+    [InlineData("anchor", false, "No related posts yet.")]
+    public void Render_RelatedPosts_ShouldExplainUnsetOrEmptyAnchors(string anchor, bool editMode, string message)
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout($$$"""
+            {"widgetType":"related-posts","props":{"sourceArticleSlug":"{{{anchor}}}"}}
+            """), editMode: editMode, relatedPostsByAnchorSlug: RelatedData());
+
+        Assert.Contains(message, html);
+    }
+
+    [Fact]
+    public void Render_RelatedPosts_ShouldUseEachWidgetsOwnAnchor()
+    {
+        var data = new Dictionary<string, IReadOnlyList<RelatedArticleView>>
+        {
+            ["first"] = [new("First recommendation", "first-result")],
+            ["second"] = [new("Second recommendation", "second-result")]
+        };
+        var html = CmsBlockHtmlRenderer.Render(Layout("""
+            {"widgetType":"related-posts","props":{"sourceArticleSlug":"first"}},
+            {"widgetType":"related-posts","props":{"sourceArticleSlug":"second"}}
+            """), relatedPostsByAnchorSlug: data);
+
+        Assert.Contains("/blog/first-result", html);
+        Assert.Contains("/blog/second-result", html);
+    }
+
+    [Fact]
+    public void Render_RelatedPosts_ShouldEncodeTitlesAndAttributes()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"widgetType":"related-posts","props":{"sourceArticleSlug":"anchor"}}"""),
+            relatedPostsByAnchorSlug: RelatedData(new RelatedArticleView("<script>unsafe</script>", "slug\" data-injected=\"yes", "/hero.jpg\" onerror=\"alert(1)")));
+
+        Assert.Contains("&lt;script&gt;unsafe&lt;/script&gt;", html);
+        Assert.DoesNotContain("<script>", html);
+        Assert.DoesNotContain(" data-injected=\"yes", html);
+        Assert.DoesNotContain(" onerror=\"alert", html);
+    }
+
+    [Fact]
+    public void RelatedPostsGuards_ShouldFindWidgetsAcrossSectionsAndColumnsAndDeduplicateAnchors()
+    {
+        var layout = CmsBuilderJson.ParseLayout("""
+            {"sections":[
+              {"columns":[
+                {"widgets":[{"widgetType":"related-posts","props":{"sourceArticleSlug":"first"}}]},
+                {"widgets":[{"widgetType":"related-posts","props":{"sourceArticleSlug":"FIRST"}}]}]},
+              {"columns":[{"widgets":[
+                {"widgetType":"related-posts","props":{"sourceArticleSlug":"second"}},
+                {"widgetType":"related-posts","props":{"sourceArticleSlug":"  "}},
+                {"widgetType":"posts-grid","props":{"sourceArticleSlug":"ignored"}}]}]}
+            ]}
+            """);
+
+        Assert.True(CmsBlockHtmlRenderer.LayoutContainsRelatedPosts(layout));
+        Assert.Equal(new[] { "first", "second" }, CmsBlockHtmlRenderer.GetRelatedPostsAnchorSlugs(layout));
+    }
+
+    [Fact]
+    public void RelatedPostsGuards_ShouldHandleNullEmptyAndNonRelatedLayouts()
+    {
+        foreach (var layout in new PageLayout?[] { null, new(), CmsBuilderJson.ParseLayout(Layout("""{"widgetType":"posts-grid"}""")) })
+        {
+            Assert.False(CmsBlockHtmlRenderer.LayoutContainsRelatedPosts(layout));
+            Assert.Empty(CmsBlockHtmlRenderer.GetRelatedPostsAnchorSlugs(layout));
+        }
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribeRelatedPostsWithoutMarkup()
+    {
+        var preview = CmsBlockHtmlRenderer.PlainTextPreview(new LayoutWidget
+        {
+            WidgetType = "related-posts", Props = new() { ["sourceArticleSlug"] = "anchor" }
+        });
+
+        Assert.Contains("related posts", preview);
+        Assert.DoesNotContain("<", preview);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> RelatedData(params RelatedArticleView[] items) =>
+        new Dictionary<string, IReadOnlyList<RelatedArticleView>> { ["anchor"] = items };
+
+    [Fact]
     public void LayoutContainsPostsGrid_ShouldReturnTrue_WhenAWidgetIsPostsGrid()
     {
         var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"posts-grid","props":{}}"""));

@@ -36,6 +36,26 @@ public static class CmsBlockHtmlRenderer
     public static bool LayoutContainsPostsGrid(PageLayout? layout) =>
         layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "posts-grid")));
 
+    // Same "skip the query when nothing on the page needs it" reasoning as LayoutContainsPostsGrid
+    // above, but a page can carry more than one related-posts block pointed at different anchor
+    // articles (e.g. a landing page built around two different cornerstone pieces), so the caller
+    // needs the distinct set of anchors to resolve, not just a yes/no.
+    public static bool LayoutContainsRelatedPosts(PageLayout? layout) =>
+        layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "related-posts")));
+
+    public static IReadOnlyList<string> GetRelatedPostsAnchorSlugs(PageLayout? layout)
+    {
+        if (layout is null) return [];
+        return layout.Sections
+            .SelectMany(s => s.Columns)
+            .SelectMany(c => c.Widgets)
+            .Where(w => w.WidgetType == "related-posts")
+            .Select(w => Get(w.Props, "sourceArticleSlug"))
+            .Where(slug => !string.IsNullOrWhiteSpace(slug))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     // A short single-line preview of a widget's content, used by the structural revision diff
     // (PageRevisionService.BuildStructuralDiff) - never HTML, just text. Mirrors
     // WikiBlockHtmlRenderer.PlainTextPreview's role for wiki blocks.
@@ -60,6 +80,7 @@ public static class CmsBlockHtmlRenderer
             "accordion" => "[accordion]",
             "author-box" => Get(p, "name"),
             "callout" => Get(p, "title", Get(p, "body", "[callout]")),
+            "related-posts" => HasValue(p, "sourceArticleSlug") ? $"[related posts: {Get(p, "sourceArticleSlug")}]" : "[related posts]",
             _ => string.Empty
         };
         text = text.Replace('\n', ' ').Trim();
@@ -71,10 +92,13 @@ public static class CmsBlockHtmlRenderer
     // canvas route - that have no concept of a logged-in visitor at all). The one route that
     // does (admin.gwsapp.net's /cms/{siteSlug}/{**pageSlug} preview route) passes its own
     // already-computed IsAuthenticated check through explicitly.
-    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false, DesignTokenSet? tokens = null)
-        => Render(CmsBuilderJson.ParseLayout(blocksJson), siteSlug, pageSlug, editMode, articles, isLoggedIn, tokens);
+    private static readonly IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> NoRelatedPosts =
+        new Dictionary<string, IReadOnlyList<RelatedArticleView>>();
 
-    public static string Render(PageLayout? layout, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false, DesignTokenSet? tokens = null)
+    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false, DesignTokenSet? tokens = null, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>>? relatedPostsByAnchorSlug = null)
+        => Render(CmsBuilderJson.ParseLayout(blocksJson), siteSlug, pageSlug, editMode, articles, isLoggedIn, tokens, relatedPostsByAnchorSlug);
+
+    public static string Render(PageLayout? layout, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false, DesignTokenSet? tokens = null, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>>? relatedPostsByAnchorSlug = null)
     {
         if (layout is null || layout.Sections.Count == 0)
         {
@@ -84,10 +108,11 @@ public static class CmsBlockHtmlRenderer
         }
 
         var effectiveArticles = articles ?? NoArticles;
+        var effectiveRelatedPosts = relatedPostsByAnchorSlug ?? NoRelatedPosts;
         var html = new StringBuilder();
         foreach (var section in layout.Sections)
         {
-            html.Append(RenderSection(section, siteSlug, pageSlug, editMode, effectiveArticles, isLoggedIn, tokens));
+            html.Append(RenderSection(section, siteSlug, pageSlug, editMode, effectiveArticles, isLoggedIn, tokens, effectiveRelatedPosts));
         }
 
         return html.ToString();
@@ -290,7 +315,7 @@ public static class CmsBlockHtmlRenderer
         return string.Join(';', parts);
     }
 
-    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens = null)
+    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug)
     {
         var sectionClass = $"gws-section {BgClass(section.Background)} {PadClass(section.Padding)} {HiddenClasses(section.HiddenOnMobile, section.HiddenOnTablet)}".TrimEnd();
         var sectionStyle = SectionInlineStyle(section, tokens);
@@ -299,7 +324,7 @@ public static class CmsBlockHtmlRenderer
 
         if (section.LayoutMode == CmsSectionLayoutModes.Freeform)
         {
-            return RenderFreeformSection(section, sectionClass, sectionAttrs, siteSlug, pageSlug, editMode, articles, isLoggedIn, tokens);
+            return RenderFreeformSection(section, sectionClass, sectionAttrs, siteSlug, pageSlug, editMode, articles, isLoggedIn, tokens, relatedPostsByAnchorSlug);
         }
 
         var columnsClass = ColsClass(section.ColumnLayout);
@@ -334,7 +359,7 @@ public static class CmsBlockHtmlRenderer
                 // (BuildInteractionRuntimeScript, never injected into the Canvas Studio
                 // preview iframe) reveals it, which would otherwise make the widget disappear
                 // in the editor with nothing to ever bring it back.
-                var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget, tokens);
+                var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles, relatedPostsByAnchorSlug), widget, tokens);
                 if (!editMode) inner = WrapWithInteraction(inner, widget.Interaction);
                 // Both badges share one absolutely-positioned corner slot (see .gws-visibility-
                 // hint), so a widget with both a visibility rule and a lock setting gets ONE
@@ -367,7 +392,7 @@ public static class CmsBlockHtmlRenderer
     // inside a fixed-height canvas via its own LayoutWidget.Freeform box instead of flowing
     // through a grid. See cms-public.css/public-site.css's .gws-section-freeform-canvas /
     // .gws-freeform-item rules for the actual positioning + the small-viewport stack fallback.
-    private static string RenderFreeformSection(LayoutSection section, string sectionClass, string sectionAttrs, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens)
+    private static string RenderFreeformSection(LayoutSection section, string sectionClass, string sectionAttrs, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug)
     {
         var widgets = section.Columns.Count > 0 ? section.Columns[0].Widgets : [];
         var canvasAttrs = editMode
@@ -391,7 +416,7 @@ public static class CmsBlockHtmlRenderer
             }
 
             var position = widget.Freeform ?? FreeformPosition.DefaultFor(i);
-            var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles), widget, tokens);
+            var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles, relatedPostsByAnchorSlug), widget, tokens);
             if (!editMode) inner = WrapWithInteraction(inner, widget.Interaction);
             var widgetBadgeText = editMode
                 ? string.Join(" | ", new[] { VisibilityBadgeText(widget.Visibility), EditPermissionBadgeText(widget.EditPermission) }
@@ -501,7 +526,7 @@ public static class CmsBlockHtmlRenderer
         </script>
         """;
 
-    private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles)
+    private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug)
     {
         var p = widget.Props;
         return widget.WidgetType switch
@@ -565,6 +590,7 @@ public static class CmsBlockHtmlRenderer
             "html" => Get(p, "content"),
             "form" => RenderForm(p, siteSlug, pageSlug, editMode),
             "posts-grid" => RenderPostsGrid(p, articles),
+            "related-posts" => RenderRelatedPosts(p, relatedPostsByAnchorSlug, editMode),
             "author-box" => RenderAuthorBox(p, editMode),
             "callout" => RenderCallout(p, editMode),
             _ => string.Empty
@@ -636,12 +662,16 @@ public static class CmsBlockHtmlRenderer
     // WordPress "loop"-equivalent: a live grid of the most recently published Articles,
     // not a static block - articles is whatever the caller (Program.cs) fetched for this
     // request, already filtered to publicly-visible ones and ordered newest-first.
+    // Phase 2 (Blog Block Library) - "layout" picks one of 4 presentations over the identical
+    // underlying data/guard logic, rather than 4 separate widget types, matching the existing
+    // button.variant/divider.style convention of style-variants-as-a-prop.
     private static string RenderPostsGrid(IReadOnlyDictionary<string, string> p, IReadOnlyList<PublicArticleSummary> articles)
     {
         var count = Math.Clamp(GetInt(p, "count", 3), 1, 12);
         var columns = Get(p, "columns", "3");
         var showImage = Get(p, "showImage", "true") == "true";
         var showExcerpt = Get(p, "showExcerpt", "true") == "true";
+        var showDate = Get(p, "showDate", "true") == "true";
         var ctaLabel = Get(p, "ctaLabel", "Read More");
 
         var items = articles.Take(count).ToList();
@@ -650,6 +680,17 @@ public static class CmsBlockHtmlRenderer
             return """<div class="gws-posts-grid-empty">No published posts yet.</div>""";
         }
 
+        return Get(p, "layout", "grid") switch
+        {
+            "list" => RenderPostsGridList(items, showImage, showExcerpt, showDate, ctaLabel),
+            "classic" => RenderPostsGridClassic(items, showImage, showExcerpt, showDate, ctaLabel),
+            "overlay" => RenderPostsGridOverlay(items, showDate, ctaLabel),
+            _ => RenderPostsGridDefault(items, columns, showImage, showExcerpt, showDate, ctaLabel)
+        };
+    }
+
+    private static string RenderPostsGridDefault(List<PublicArticleSummary> items, string columns, bool showImage, bool showExcerpt, bool showDate, string ctaLabel)
+    {
         var sb = new StringBuilder($"""<div class="gws-posts-grid gws-posts-grid-cols-{Html(columns)}">""");
         foreach (var article in items)
         {
@@ -658,12 +699,121 @@ public static class CmsBlockHtmlRenderer
             {
                 sb.Append($"""<img src="{Html(article.HeroImageUrl)}" alt="" class="gws-posts-grid-img" />""");
             }
-            sb.Append($"""<div class="gws-posts-grid-body"><h3 class="gws-posts-grid-title">{Html(article.Title)}</h3>""");
+            sb.Append($"""<div class="gws-posts-grid-body">{PostDate(article, showDate)}<h3 class="gws-posts-grid-title">{Html(article.Title)}</h3>""");
             if (showExcerpt && !string.IsNullOrWhiteSpace(article.MetaDescription))
             {
                 sb.Append($"""<p class="gws-posts-grid-excerpt">{Html(article.MetaDescription)}</p>""");
             }
             sb.Append($"""<span class="gws-posts-grid-cta">{Html(ctaLabel)}</span></div></a>""");
+        }
+        sb.Append("</div>");
+        return sb.ToString();
+    }
+
+    // Horizontal thumbnail-left, text-right rows - the "list" layout news/magazine themes
+    // typically offer as a denser alternative to a card grid.
+    private static string RenderPostsGridList(List<PublicArticleSummary> items, bool showImage, bool showExcerpt, bool showDate, string ctaLabel)
+    {
+        var sb = new StringBuilder("""<div class="gws-posts-grid-list">""");
+        foreach (var article in items)
+        {
+            sb.Append($"""<a class="gws-posts-grid-list-item" href="/blog/{Html(article.Slug)}">""");
+            if (showImage && !string.IsNullOrWhiteSpace(article.HeroImageUrl))
+            {
+                sb.Append($"""<img src="{Html(article.HeroImageUrl)}" alt="" class="gws-posts-grid-list-img" />""");
+            }
+            sb.Append($"""<div class="gws-posts-grid-body">{PostDate(article, showDate)}<h3 class="gws-posts-grid-title">{Html(article.Title)}</h3>""");
+            if (showExcerpt && !string.IsNullOrWhiteSpace(article.MetaDescription))
+            {
+                sb.Append($"""<p class="gws-posts-grid-excerpt">{Html(article.MetaDescription)}</p>""");
+            }
+            sb.Append($"""<span class="gws-posts-grid-cta">{Html(ctaLabel)}</span></div></a>""");
+        }
+        sb.Append("</div>");
+        return sb.ToString();
+    }
+
+    // Single-column, large top image per post - a traditional blog-list template, denser
+    // presentation than the default grid's cards but richer than the "list" layout's small thumb.
+    private static string RenderPostsGridClassic(List<PublicArticleSummary> items, bool showImage, bool showExcerpt, bool showDate, string ctaLabel)
+    {
+        var sb = new StringBuilder("""<div class="gws-posts-grid-classic">""");
+        foreach (var article in items)
+        {
+            sb.Append($"""<a class="gws-posts-grid-classic-item" href="/blog/{Html(article.Slug)}">""");
+            if (showImage && !string.IsNullOrWhiteSpace(article.HeroImageUrl))
+            {
+                sb.Append($"""<img src="{Html(article.HeroImageUrl)}" alt="" class="gws-posts-grid-classic-img" />""");
+            }
+            sb.Append($"""<div class="gws-posts-grid-body">{PostDate(article, showDate)}<h3 class="gws-posts-grid-title">{Html(article.Title)}</h3>""");
+            if (showExcerpt && !string.IsNullOrWhiteSpace(article.MetaDescription))
+            {
+                sb.Append($"""<p class="gws-posts-grid-excerpt">{Html(article.MetaDescription)}</p>""");
+            }
+            sb.Append($"""<span class="gws-posts-grid-cta">{Html(ctaLabel)}</span></div></a>""");
+        }
+        sb.Append("</div>");
+        return sb.ToString();
+    }
+
+    // Image with the title/date/CTA overlaid directly on it via an absolute gradient scrim -
+    // ignores showImage/showExcerpt (the whole point of this layout is the image), and an
+    // article with no HeroImageUrl falls back to a plain dark card rather than an empty box.
+    private static string RenderPostsGridOverlay(List<PublicArticleSummary> items, bool showDate, string ctaLabel)
+    {
+        var sb = new StringBuilder("""<div class="gws-posts-grid gws-posts-grid-overlay">""");
+        foreach (var article in items)
+        {
+            var hasImage = !string.IsNullOrWhiteSpace(article.HeroImageUrl);
+            sb.Append($"""<a class="gws-posts-grid-overlay-item{(hasImage ? "" : " gws-posts-grid-overlay-noimage")}" href="/blog/{Html(article.Slug)}">""");
+            if (hasImage)
+            {
+                sb.Append($"""<img src="{Html(article.HeroImageUrl!)}" alt="" class="gws-posts-grid-overlay-img" />""");
+            }
+            sb.Append($"""<div class="gws-posts-grid-overlay-scrim"><div class="gws-posts-grid-body">{PostDate(article, showDate)}<h3 class="gws-posts-grid-title">{Html(article.Title)}</h3><span class="gws-posts-grid-cta">{Html(ctaLabel)}</span></div></div></a>""");
+        }
+        sb.Append("</div>");
+        return sb.ToString();
+    }
+
+    private static string PostDate(PublicArticleSummary article, bool showDate) =>
+        showDate && article.PublishedAt.HasValue
+            ? $"""<span class="gws-posts-grid-date">{Html(article.PublishedAt.Value.ToString("MMMM d, yyyy"))}</span>"""
+            : "";
+
+    // Recommendations for a SPECIFIC, admin-picked anchor article (sourceArticleSlug), not the
+    // current page - there's no ambient "current article" concept outside the hardcoded
+    // /blog/{slug} route, so this widget is reusable anywhere (e.g. a landing page built around a
+    // cornerstone piece). relatedPostsByAnchorSlug is precomputed by the caller (Program.cs) via
+    // IRelatedArticlesService, once per distinct anchor slug on the whole page - this function
+    // itself does no DB access, matching this renderer's own "zero DB dependency" contract.
+    private static string RenderRelatedPosts(IReadOnlyDictionary<string, string> p, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug, bool editMode)
+    {
+        var sourceSlug = Get(p, "sourceArticleSlug");
+        if (string.IsNullOrWhiteSpace(sourceSlug))
+        {
+            return editMode
+                ? """<div class="gws-related-posts-empty">Pick a source article in the Inspector.</div>"""
+                : """<div class="gws-related-posts-empty">No related posts yet.</div>""";
+        }
+
+        if (!relatedPostsByAnchorSlug.TryGetValue(sourceSlug, out var related) || related.Count == 0)
+        {
+            return """<div class="gws-related-posts-empty">No related posts yet.</div>""";
+        }
+
+        var count = Math.Clamp(GetInt(p, "count", 3), 1, 6);
+        var showImage = Get(p, "showImage", "true") == "true";
+
+        var sb = new StringBuilder("""<div class="gws-related-posts">""");
+        foreach (var article in related.Take(count))
+        {
+            sb.Append($"""<a class="gws-related-posts-item" href="/blog/{Html(article.Slug)}">""");
+            if (showImage && !string.IsNullOrWhiteSpace(article.HeroImageUrl))
+            {
+                sb.Append($"""<img src="{Html(article.HeroImageUrl!)}" alt="" class="gws-related-posts-img" />""");
+            }
+            sb.Append($"""<span class="gws-related-posts-title">{Html(article.Title)}</span></a>""");
         }
         sb.Append("</div>");
         return sb.ToString();

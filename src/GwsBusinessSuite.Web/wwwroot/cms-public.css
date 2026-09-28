@@ -171,6 +171,54 @@ body {
 .gws-posts-grid-excerpt { color: var(--cms-text-soft); margin: 0 0 0.75rem; font-size: 0.92rem; }
 .gws-posts-grid-cta { color: var(--cms-accent); font-weight: 600; font-size: 0.88rem; }
 .gws-posts-grid-empty { color: var(--cms-text-faint); font-style: italic; }
+.gws-posts-grid-date { display: block; color: var(--cms-text-faint); font-size: 0.8rem; margin-bottom: 0.35rem; }
+
+/* Phase 2 (posts-grid layout variants) - "list": horizontal thumbnail-left rows. */
+.gws-posts-grid-list { display: flex; flex-direction: column; gap: 1rem; }
+.gws-posts-grid-list-item {
+  display: flex; gap: 1rem; align-items: flex-start; text-decoration: none; color: inherit;
+  border: 1px solid var(--cms-border); border-radius: 10px; padding: 0.85rem;
+  background: var(--cms-surface); transition: box-shadow 0.15s ease;
+}
+.gws-posts-grid-list-item:hover { box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08); }
+.gws-posts-grid-list-img { width: 140px; height: 100px; flex-shrink: 0; object-fit: cover; border-radius: 8px; }
+@media (max-width: 560px) { .gws-posts-grid-list-item { flex-direction: column; } .gws-posts-grid-list-img { width: 100%; height: auto; aspect-ratio: 16 / 9; } }
+
+/* "classic": single column, large top image per post. */
+.gws-posts-grid-classic { display: flex; flex-direction: column; gap: 2rem; }
+.gws-posts-grid-classic-item { display: block; text-decoration: none; color: inherit; }
+.gws-posts-grid-classic-img { display: block; width: 100%; aspect-ratio: 21 / 9; object-fit: cover; border-radius: 10px; margin-bottom: 1rem; }
+
+/* "overlay": title/date/CTA overlaid directly on the hero image via a dark gradient scrim. */
+.gws-posts-grid-overlay { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.gws-posts-grid-overlay-item {
+  position: relative; display: block; text-decoration: none; color: #fff;
+  border-radius: 10px; overflow: hidden; aspect-ratio: 4 / 3; background: var(--cms-dark);
+}
+.gws-posts-grid-overlay-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.gws-posts-grid-overlay-scrim {
+  position: absolute; inset: 0; display: flex; align-items: flex-end;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.78) 0%, rgba(0, 0, 0, 0.15) 55%, transparent 100%);
+}
+.gws-posts-grid-overlay-scrim .gws-posts-grid-body { padding: 1.1rem; }
+.gws-posts-grid-overlay-scrim .gws-posts-grid-title,
+.gws-posts-grid-overlay-scrim .gws-posts-grid-date { color: #fff; }
+.gws-posts-grid-overlay-scrim .gws-posts-grid-cta { color: #fff; text-decoration: underline; }
+.gws-posts-grid-overlay-noimage .gws-posts-grid-overlay-scrim { background: var(--cms-dark); position: static; height: 100%; }
+
+/* Phase 2 (related-posts widget) - a small recommendation grid for a specific, admin-picked
+   anchor article. Reuses the same auto-fit + 768px single-column collapse pattern as
+   .gws-posts-grid so it never causes horizontal overflow on narrow viewports. */
+.gws-related-posts { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+@media (max-width: 480px) { .gws-related-posts { grid-template-columns: 1fr; } }
+.gws-related-posts-item {
+  display: block; min-width: 0; border: 1px solid var(--cms-border); border-radius: 10px; overflow: hidden;
+  background: var(--cms-surface); text-decoration: none; color: inherit; transition: box-shadow 0.15s ease;
+}
+.gws-related-posts-item:hover { box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08); }
+.gws-related-posts-img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+.gws-related-posts-title { display: block; padding: 0.85rem; font-size: 0.95rem; font-weight: 600; color: var(--cms-text); }
+.gws-related-posts-empty { color: var(--cms-text-faint); font-style: italic; }
 
 .gws-divider { border: none; border-top: 1px solid var(--cms-border); margin: 0; }
 .gws-divider-dashed { border-top-style: dashed; }
