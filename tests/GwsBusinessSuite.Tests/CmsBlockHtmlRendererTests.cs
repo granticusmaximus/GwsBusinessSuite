@@ -1800,6 +1800,94 @@ public sealed class CmsBlockHtmlRendererTests
         Assert.False(CmsBlockHtmlRenderer.LayoutContainsTabs(null));
     }
 
+    // ── Workstream C, Tier 3 (pricing table monthly/yearly toggle) ──────────────
+
+    [Fact]
+    public void Render_ShouldRenderPricingTable_WithBothPricesAsDataAttributes()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"pricing-table","props":{"yearlyDiscountLabel":"Save 20%","itemsJson":"[{\"name\":\"Pro\",\"monthlyPrice\":\"$29/mo\",\"yearlyPrice\":\"$290/yr\",\"features\":\"Feature A\\nFeature B\",\"ctaLabel\":\"Choose\",\"ctaHref\":\"/signup\",\"highlighted\":true}]"}}"""));
+
+        Assert.Contains("data-gws-pricing-table", html);
+        Assert.Contains("Save 20%", html);
+        Assert.Contains("Pro", html);
+        Assert.Contains("data-monthly=\"$29/mo\"", html);
+        Assert.Contains("data-yearly=\"$290/yr\"", html);
+        Assert.Contains(">$29/mo<", html);
+        Assert.Contains("Feature A", html);
+        Assert.Contains("Feature B", html);
+        Assert.Contains("href=\"/signup\"", html);
+        Assert.Contains("Choose", html);
+        Assert.Contains("gws-pricing-card-highlighted", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitHighlightedClass_ForPricingTable_WhenNotHighlighted()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"pricing-table","props":{"itemsJson":"[{\"name\":\"Starter\",\"monthlyPrice\":\"$9/mo\",\"yearlyPrice\":\"$90/yr\",\"highlighted\":false}]"}}"""));
+
+        Assert.DoesNotContain("gws-pricing-card-highlighted", html);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipPricingPlansWithNoName()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"pricing-table","props":{"itemsJson":"[{\"name\":\"\",\"monthlyPrice\":\"Skipped\"},{\"name\":\"Kept\",\"monthlyPrice\":\"$9/mo\"}]"}}"""));
+
+        Assert.DoesNotContain("Skipped", html);
+        Assert.Contains("Kept", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderNothingForPricingTable_WithNoItems()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"pricing-table","props":{"itemsJson":"[]"}}"""));
+
+        Assert.DoesNotContain("gws-pricing-table", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitFeatureList_ForPricingTable_WhenFeaturesIsEmpty()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"pricing-table","props":{"itemsJson":"[{\"name\":\"Starter\",\"monthlyPrice\":\"$9/mo\"}]"}}"""));
+
+        Assert.DoesNotContain("gws-pricing-card-features", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribePricingTableWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "pricing-table" };
+
+        Assert.Equal("[pricing table]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    [Fact]
+    public void LayoutContainsPricingTable_ShouldReturnTrue_WhenAWidgetIsPricingTable()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"pricing-table","props":{}}"""));
+
+        Assert.True(CmsBlockHtmlRenderer.LayoutContainsPricingTable(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsPricingTable_ShouldReturnFalse_WhenNoWidgetIsPricingTable()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"paragraph","props":{}}"""));
+
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsPricingTable(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsPricingTable_ShouldReturnFalse_ForNullLayout()
+    {
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsPricingTable(null));
+    }
+
     private static PageLayout ButtonLayout(string href) => new()
     {
         Sections =

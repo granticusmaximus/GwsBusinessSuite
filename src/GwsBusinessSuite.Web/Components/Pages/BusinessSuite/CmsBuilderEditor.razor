@@ -1420,6 +1420,64 @@ else
                                 }
                             </div>
                         }
+                        else if (selWidget.WidgetType == "pricing-table")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Yearly Discount Badge (optional)</label>
+                                <input class="form-control" placeholder="e.g. Save 20%" value='@GetProp(selWidget, "yearlyDiscountLabel")'
+                                       @oninput='(e) => SetProp(selWidget, "yearlyDiscountLabel", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Plans
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddPricingTableItem(selWidget)">
+                                        <i class="bi bi-plus-lg"></i> Add plan
+                                    </button>
+                                </label>
+                                @{ var planItems = GetPricingTableItems(selWidget); }
+                                @if (planItems.Count == 0)
+                                {
+                                    <p class="small text-secondary mb-0">No plans yet — click "Add plan" to build this table.</p>
+                                }
+                                else
+                                {
+                                    @for (var i = 0; i < planItems.Count; i++)
+                                    {
+                                        var index = i;
+                                        var item = planItems[index];
+                                        <div class="studio-form-field-editor">
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Plan name" value="@item.Name"
+                                                       @oninput="(e) => UpdatePricingTableItem(selWidget, index, i => i with { Name = e.Value?.ToString() ?? string.Empty })" />
+                                                <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" @onclick="() => RemovePricingTableItem(selWidget, index)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Monthly price" value="@item.MonthlyPrice"
+                                                       @oninput="(e) => UpdatePricingTableItem(selWidget, index, i => i with { MonthlyPrice = e.Value?.ToString() ?? string.Empty })" />
+                                                <input class="form-control form-control-sm" placeholder="Yearly price" value="@item.YearlyPrice"
+                                                       @oninput="(e) => UpdatePricingTableItem(selWidget, index, i => i with { YearlyPrice = e.Value?.ToString() ?? string.Empty })" />
+                                            </div>
+                                            <textarea class="form-control form-control-sm mb-2" rows="3" placeholder="One feature per line"
+                                                      @oninput="(e) => UpdatePricingTableItem(selWidget, index, i => i with { Features = e.Value?.ToString() ?? string.Empty })">@item.Features</textarea>
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Button label" value="@item.CtaLabel"
+                                                       @oninput="(e) => UpdatePricingTableItem(selWidget, index, i => i with { CtaLabel = e.Value?.ToString() ?? string.Empty })" />
+                                                <input class="form-control form-control-sm font-monospace" placeholder="Button URL" value="@item.CtaHref"
+                                                       @oninput="(e) => UpdatePricingTableItem(selWidget, index, i => i with { CtaHref = e.Value?.ToString() ?? string.Empty })" />
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" id="@($"pricing-highlighted-{selWidget.Id}-{index}")"
+                                                       checked="@item.Highlighted"
+                                                       @onchange="(e) => UpdatePricingTableItem(selWidget, index, i => i with { Highlighted = (bool)(e.Value ?? false) })" />
+                                                <label class="form-check-label small" for="@($"pricing-highlighted-{selWidget.Id}-{index}")">Highlight this plan (e.g. "Most popular")</label>
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        }
                         else if (selWidget.WidgetType == "form")
                         {
                             <div>
@@ -2177,6 +2235,7 @@ else
         new("logo-cloud",  "bi bi-grid-1x2",                "Logo Cloud",  "A row of partner/client/integration logos", GroupMedia),
         new("process-steps", "bi bi-diagram-3",             "Process Steps", "A numbered step-by-step sequence",  GroupLayout),
         new("tabs",        "bi bi-folder2-open",            "Tabs",        "A tabbed container of Markdown content", GroupLayout),
+        new("pricing-table", "bi bi-credit-card",           "Pricing Table", "Plan cards with a monthly/yearly toggle", GroupDynamic),
         new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block",                      GroupAdvanced),
     ];
 
@@ -4498,6 +4557,68 @@ else
         SaveTabsItems(widget, items, forceNewUndoStep: true);
     }
 
+    // ── Pricing table plans ──────────────────────────────────────────────
+    private sealed record PricingPlanDef(string Name, string MonthlyPrice, string YearlyPrice, string Features, string CtaLabel, string CtaHref, bool Highlighted);
+
+    private static List<PricingPlanDef> GetPricingTableItems(LayoutWidget widget)
+    {
+        try
+        {
+            var raw = GetProp(widget, "itemsJson");
+            if (string.IsNullOrWhiteSpace(raw)) return [];
+
+            var parsed = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(raw);
+            if (parsed is null) return [];
+
+            return parsed.Select(i => new PricingPlanDef(
+                i.TryGetValue("name", out var n) ? n.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("monthlyPrice", out var mp) ? mp.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("yearlyPrice", out var yp) ? yp.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("features", out var f) ? f.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("ctaLabel", out var cl) ? cl.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("ctaHref", out var ch) ? ch.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("highlighted", out var h) && h.ValueKind == JsonValueKind.True
+            )).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void SavePricingTableItems(LayoutWidget widget, List<PricingPlanDef> items, bool forceNewUndoStep = false)
+    {
+        var json = JsonSerializer.Serialize(items.Select(i => new
+        {
+            name = i.Name, monthlyPrice = i.MonthlyPrice, yearlyPrice = i.YearlyPrice, features = i.Features,
+            ctaLabel = i.CtaLabel, ctaHref = i.CtaHref, highlighted = i.Highlighted
+        }));
+        SetProp(widget, "itemsJson", json, forceNewUndoStep);
+    }
+
+    private void AddPricingTableItem(LayoutWidget widget)
+    {
+        var items = GetPricingTableItems(widget);
+        items.Add(new PricingPlanDef("New Plan", "$0/mo", "$0/yr", "", "Choose plan", "#", false));
+        SavePricingTableItems(widget, items, forceNewUndoStep: true);
+    }
+
+    private void UpdatePricingTableItem(LayoutWidget widget, int index, Func<PricingPlanDef, PricingPlanDef> update)
+    {
+        var items = GetPricingTableItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items[index] = update(items[index]);
+        SavePricingTableItems(widget, items);
+    }
+
+    private void RemovePricingTableItem(LayoutWidget widget, int index)
+    {
+        var items = GetPricingTableItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
+        SavePricingTableItems(widget, items, forceNewUndoStep: true);
+    }
+
     // ── Media library picker ────────────────────────────────────────────────
     private bool _showMediaPicker;
     private string _mediaPickerError = string.Empty;
@@ -4563,6 +4684,7 @@ else
         "logo-cloud" => new() { WidgetType = "logo-cloud", Props = new() { ["itemsJson"] = "[]", ["grayscale"] = "true" } },
         "process-steps" => new() { WidgetType = "process-steps", Props = new() { ["itemsJson"] = """[{"title":"Step one","description":"Describe the first step here."},{"title":"Step two","description":"Describe the second step here."}]""" } },
         "tabs" => new() { WidgetType = "tabs", Props = new() { ["itemsJson"] = """[{"label":"Tab one","content":"Content for the first tab."},{"label":"Tab two","content":"Content for the second tab."}]""" } },
+        "pricing-table" => new() { WidgetType = "pricing-table", Props = new() { ["yearlyDiscountLabel"] = "Save ~15%", ["itemsJson"] = """[{"name":"Starter","monthlyPrice":"$9/mo","yearlyPrice":"$90/yr","features":"1 project\nEmail support","ctaLabel":"Choose plan","ctaHref":"#","highlighted":false},{"name":"Pro","monthlyPrice":"$29/mo","yearlyPrice":"$290/yr","features":"Unlimited projects\nPriority support","ctaLabel":"Choose plan","ctaHref":"#","highlighted":true}]""" } },
         _           => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Content", ["align"] = "left" } }
     };
 
@@ -4618,6 +4740,7 @@ else
         "logo-cloud"  => "Logo Cloud",
         "process-steps" => "Process Steps",
         "tabs"        => "Tabs",
+        "pricing-table" => "Pricing Table",
         _             => type
     };
 
@@ -4657,6 +4780,7 @@ else
         "logo-cloud"  => "bi bi-grid-1x2",
         "process-steps" => "bi bi-diagram-3",
         "tabs"        => "bi bi-folder2-open",
+        "pricing-table" => "bi bi-credit-card",
         _             => "bi bi-square"
     };
 
@@ -4689,6 +4813,7 @@ else
             "logo-cloud"  => $"{GetLogoCloudItems(w).Count} logo(s)",
             "process-steps" => $"{GetProcessStepsItems(w).Count} step(s)",
             "tabs"        => $"{GetTabsItems(w).Count} tab(s)",
+            "pricing-table" => $"{GetPricingTableItems(w).Count} plan(s)",
             _             => w.WidgetType
         };
         return raw.Length <= 38 ? raw : raw[..38] + "…";

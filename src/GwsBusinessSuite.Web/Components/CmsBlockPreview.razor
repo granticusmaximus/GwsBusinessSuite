@@ -251,6 +251,15 @@ else
                     }
                 </div>
                 break;
+            case "pricing-table":
+                <span class="cms-block-chip">Pricing Table</span>
+                <div class="cms-block-form-grid">
+                    @foreach (var plan in ParsePricingTableItems(Get(p, "itemsJson")))
+                    {
+                        <div class="small text-secondary">@plan.Name — @plan.MonthlyPrice</div>
+                    }
+                </div>
+                break;
             default:
                 <span class="cms-block-chip">Unknown widget</span>
                 <div class="small text-secondary mb-2">Widget type: @widget.WidgetType</div>
@@ -374,6 +383,27 @@ else
             return nodes.Select(i => new TabItemPreview(
                 i.TryGetValue("label", out var l) ? l.GetString() ?? string.Empty : string.Empty
             )).Where(i => !string.IsNullOrWhiteSpace(i.Label)).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private sealed record PricingPlanPreview(string Name, string MonthlyPrice);
+
+    private static List<PricingPlanPreview> ParsePricingTableItems(string itemsJson)
+    {
+        try
+        {
+            var nodes = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
+                string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson);
+            if (nodes is null) return [];
+
+            return nodes.Select(i => new PricingPlanPreview(
+                i.TryGetValue("name", out var n) ? n.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("monthlyPrice", out var mp) ? mp.GetString() ?? string.Empty : string.Empty
+            )).Where(i => !string.IsNullOrWhiteSpace(i.Name)).ToList();
         }
         catch
         {

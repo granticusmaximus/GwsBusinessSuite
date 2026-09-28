@@ -78,6 +78,11 @@ public static class CmsBlockHtmlRenderer
     public static bool LayoutContainsTabs(PageLayout? layout) =>
         layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "tabs")));
 
+    // Workstream C, Tier 3 (pricing table monthly/yearly toggle) - same payload-size-guard
+    // reasoning as the guards above.
+    public static bool LayoutContainsPricingTable(PageLayout? layout) =>
+        layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "pricing-table")));
+
     // A short single-line preview of a widget's content, used by the structural revision diff
     // (PageRevisionService.BuildStructuralDiff) - never HTML, just text. Mirrors
     // WikiBlockHtmlRenderer.PlainTextPreview's role for wiki blocks.
@@ -112,6 +117,7 @@ public static class CmsBlockHtmlRenderer
             "logo-cloud" => "[logo cloud]",
             "process-steps" => "[process steps]",
             "tabs" => "[tabs]",
+            "pricing-table" => "[pricing table]",
             _ => string.Empty
         };
         text = text.Replace('\n', ' ').Trim();
@@ -737,6 +743,34 @@ public static class CmsBlockHtmlRenderer
         </script>
         """;
 
+    // Workstream C, Tier 3 (pricing table monthly/yearly toggle) - same no-op-when-absent
+    // pattern as the other runtime scripts. Both prices already live in the DOM as data
+    // attributes (see RenderPricingTable), so this only ever swaps which one is displayed.
+    public static string BuildPricingTableRuntimeScript() => """
+        <script>
+        (function () {
+          var tables = document.querySelectorAll('[data-gws-pricing-table]');
+          if (!tables.length) return;
+
+          tables.forEach(function (table) {
+            var buttons = table.querySelectorAll('[data-gws-pricing-period]');
+            var values = table.querySelectorAll('[data-gws-pricing-value]');
+            buttons.forEach(function (btn) {
+              btn.addEventListener('click', function () {
+                var period = btn.getAttribute('data-gws-pricing-period');
+                buttons.forEach(function (b) { b.classList.remove('is-active'); });
+                btn.classList.add('is-active');
+                values.forEach(function (v) {
+                  var val = v.getAttribute('data-' + period);
+                  if (val) v.textContent = val;
+                });
+              });
+            });
+          });
+        })();
+        </script>
+        """;
+
     private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug, DesignTokenSet? tokens = null)
     {
         var p = widget.Props;
@@ -804,6 +838,7 @@ public static class CmsBlockHtmlRenderer
             "logo-cloud" => RenderLogoCloud(p),
             "process-steps" => RenderProcessSteps(p, editMode),
             "tabs" => RenderTabs(p, editMode),
+            "pricing-table" => RenderPricingTable(p, editMode),
             _ => string.Empty
         };
     }
@@ -1031,6 +1066,66 @@ public static class CmsBlockHtmlRenderer
                 <div class="gws-tabs" data-gws-tabs>
                   <div class="gws-tabs-nav" role="tablist">{tabs}</div>
                   <div class="gws-tabs-panels">{panels}</div>
+                </div>
+                """;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    // Workstream C, Tier 3 (pricing table monthly/yearly toggle, promoted from the
+    // CmsSectionTemplates "pricing-table" composition of fixed heading/button widgets to a
+    // first-class type) - both prices for every plan are always in the DOM (a data attribute
+    // each), so BuildPricingTableRuntimeScript just swaps which one is displayed - no
+    // server round-trip, and the "wrong" price is never briefly visible while JS loads since
+    // the visible text starts as whichever period is selected by default (monthly).
+    private static string RenderPricingTable(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var itemsJson = Get(p, "itemsJson");
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson) as JsonArray;
+            if (node is null || node.Count == 0) return string.Empty;
+
+            var cards = new StringBuilder();
+            var index = -1;
+            foreach (var item in node.OfType<JsonObject>())
+            {
+                index++;
+                var name = item["name"]?.GetValue<string>() ?? string.Empty;
+                var monthlyPrice = item["monthlyPrice"]?.GetValue<string>() ?? string.Empty;
+                var yearlyPrice = item["yearlyPrice"]?.GetValue<string>() ?? string.Empty;
+                var features = item["features"]?.GetValue<string>() ?? string.Empty;
+                var ctaLabel = item["ctaLabel"]?.GetValue<string>() ?? string.Empty;
+                var ctaHref = item["ctaHref"]?.GetValue<string>() ?? string.Empty;
+                var highlighted = item["highlighted"]?.GetValue<bool>() ?? false;
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                var featureItems = features.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var featuresHtml = featureItems.Length == 0
+                    ? ""
+                    : $"""<ul class="gws-pricing-card-features">{string.Concat(featureItems.Select(f => $"""<li>{Html(f)}</li>"""))}</ul>""";
+
+                cards.Append($"""
+                    <div class="gws-pricing-card{(highlighted ? " gws-pricing-card-highlighted" : "")}">
+                      <div class="gws-pricing-card-name"{InlineEditAttrs(editMode, $"itemsJson[{index}].name")}>{Html(name)}</div>
+                      <div class="gws-pricing-card-price"><span data-gws-pricing-value data-monthly="{Html(monthlyPrice)}" data-yearly="{Html(yearlyPrice)}">{Html(monthlyPrice)}</span></div>
+                      {featuresHtml}
+                      {(!string.IsNullOrWhiteSpace(ctaLabel) ? $"""<a href="{Html(HrefOrHash(ctaHref))}" class="btn btn-{(highlighted ? "primary" : "outline-primary")}">{Html(ctaLabel)}</a>""" : "")}
+                    </div>
+                    """);
+            }
+            if (cards.Length == 0) return string.Empty;
+
+            return $"""
+                <div class="gws-pricing-table" data-gws-pricing-table>
+                  <div class="gws-pricing-toggle" role="tablist">
+                    <button type="button" class="gws-pricing-toggle-btn is-active" data-gws-pricing-period="monthly">Monthly</button>
+                    <button type="button" class="gws-pricing-toggle-btn" data-gws-pricing-period="yearly">Yearly{(HasValue(p, "yearlyDiscountLabel") ? $"""<span class="gws-pricing-toggle-badge">{Html(Get(p, "yearlyDiscountLabel"))}</span>""" : "")}</button>
+                  </div>
+                  <div class="gws-pricing-cards">{cards}</div>
                 </div>
                 """;
         }

@@ -132,14 +132,25 @@ public static class CmsSectionTemplates
         return section;
     }
 
+    // Workstream C, Tier 3 - promoted to the first-class "pricing-table" widget type (was 3
+    // fixed Card-less heading/heading/button columns with no monthly/yearly concept at all).
+    // Only affects NEW insertions of this template; existing pages keep their old composition.
     private static LayoutSection PricingTable()
     {
-        var section = new LayoutSection { Label = "Pricing", ColumnLayout = "thirds" };
+        var section = new LayoutSection { Label = "Pricing", ColumnLayout = "full" };
+        var itemsJson = JsonSerializer.Serialize(new[]
+        {
+            new { name = "Starter", monthlyPrice = "$9/mo", yearlyPrice = "$90/yr", features = "1 project\nEmail support", ctaLabel = "Choose plan", ctaHref = "#", highlighted = false },
+            new { name = "Pro", monthlyPrice = "$29/mo", yearlyPrice = "$290/yr", features = "Unlimited projects\nPriority support\nAdvanced analytics", ctaLabel = "Choose plan", ctaHref = "#", highlighted = true },
+            new { name = "Enterprise", monthlyPrice = "Contact us", yearlyPrice = "Contact us", features = "Custom contract\nDedicated support", ctaLabel = "Contact sales", ctaHref = "#", highlighted = false }
+        });
         section.Columns =
         [
-            PricingCard("Starter", "$9/mo"),
-            PricingCard("Pro", "$29/mo"),
-            PricingCard("Enterprise", "Contact us")
+            new LayoutColumn
+            {
+                Span = 12,
+                Widgets = [new LayoutWidget { WidgetType = "pricing-table", Props = new Dictionary<string, string> { ["itemsJson"] = itemsJson, ["yearlyDiscountLabel"] = "Save ~15%" } }]
+            }
         ];
         return section;
     }
@@ -283,15 +294,4 @@ public static class CmsSectionTemplates
         Props = new Dictionary<string, string> { ["quote"] = quote, ["authorName"] = authorName, ["authorRole"] = authorRole }
     };
 
-    private static LayoutColumn PricingCard(string plan, string price)
-    {
-        var column = new LayoutColumn { Span = 4 };
-        column.Widgets =
-        [
-            new LayoutWidget { WidgetType = "heading", Props = new Dictionary<string, string> { ["text"] = plan, ["level"] = "h3", ["align"] = "center" } },
-            new LayoutWidget { WidgetType = "heading", Props = new Dictionary<string, string> { ["text"] = price, ["level"] = "h2", ["align"] = "center" } },
-            new LayoutWidget { WidgetType = "button", Props = new Dictionary<string, string> { ["label"] = "Choose plan", ["href"] = "#", ["variant"] = "outline-primary", ["size"] = "md", ["align"] = "center" } }
-        ];
-        return column;
-    }
 }

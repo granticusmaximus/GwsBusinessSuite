@@ -147,7 +147,7 @@ settings screen, not the Pages list).
 
 ## Adding and arranging widgets
 
-The 26 widget types, from the Widgets palette:
+The 27 widget types, from the Widgets palette:
 
 | Widget | What it holds |
 |---|---|
@@ -177,6 +177,7 @@ The 26 widget types, from the Widgets palette:
 | Logo Cloud | A row of partner/client/integration logos you add/remove/reorder freely, each independently optionally linked. Grayscale-until-hover on by default |
 | Process Steps | A numbered step-by-step sequence you add/remove/reorder freely — the number is always derived from position, so reordering never leaves a stale number behind |
 | Tabs | A tabbed container of Markdown content panels you add/remove/reorder freely — switching tabs is instant (no page reload) |
+| Pricing Table | Plan cards (name, features, a button) you add/remove/reorder freely, with a Monthly/Yearly toggle above them — both prices are always in the page, the toggle just switches which one shows, so there's no reload or flicker |
 
 **Adding a widget**: click a palette card to drop it after whatever's currently selected (or at
 the end of the last section if nothing is), or drag it directly onto a spot in the live preview,
@@ -518,7 +519,7 @@ website, so an uploaded brand asset can be reused without storing duplicate copi
   doesn't record which staff member made a given revision.
 - **No page duplication.** You can duplicate a section or a widget inside Studio, but there's no
   "Duplicate Page" action from the Pages list or settings screen.
-- **Fixed widget catalog.** 26 built-in types, no custom/plugin widgets, and no nested-container
+- **Fixed widget catalog.** 27 built-in types, no custom/plugin widgets, and no nested-container
   widget (a section's columns can't themselves contain another section) beyond what Freeform
   positioning offers within one section.
 - **Menus are single-level.** No dropdown/nested sub-menus in either the Primary or Footer list.
