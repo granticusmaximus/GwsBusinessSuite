@@ -147,11 +147,11 @@ settings screen, not the Pages list).
 
 ## Adding and arranging widgets
 
-The 20 widget types, from the Widgets palette:
+The 21 widget types, from the Widgets palette:
 
 | Widget | What it holds |
 |---|---|
-| Hero | Full-width headline, subline, up to two CTA buttons, left/center alignment |
+| Hero | Full-width headline, subline, up to two CTA buttons, left/center alignment. Three layouts: default, video background (an .mp4 URL plays muted/looped behind the text, with an adjustable dark overlay), and split (image beside the text, left or right) |
 | Heading | H1–H4 text with alignment |
 | Paragraph | Body copy (rich text editor) with alignment |
 | Rich Text | A larger Markdown block (bold, links, lists, etc.) with a live rendered preview beneath the editor |
@@ -171,6 +171,7 @@ The 20 widget types, from the Widgets palette:
 | Table of Contents | An auto-generated, scrollspy-highlighted list of links to the page's own H2–H4 headings, built client-side at load time — nothing to pick manually. Configurable title, heading range, and numbering |
 | Reading Progress | A thin fixed bar (top or bottom of the viewport) that fills as the visitor scrolls the page. Configurable height, position, and color (raw hex or a design token) |
 | Booking | Embeds one of your Scheduling booking types' public `/book/{slug}` page in an iframe — availability, slot-picking, and confirmation work exactly as they do standalone. Configurable heading and embed height |
+| Stats | An animated number-counter grid for key metrics you add/remove/reorder freely — each counts up from zero once scrolled into view. Configurable value, suffix (e.g. "+", "%"), and label per stat |
 
 **Adding a widget**: click a palette card to drop it after whatever's currently selected (or at
 the end of the last section if nothing is), or drag it directly onto a spot in the live preview,
@@ -512,7 +513,7 @@ website, so an uploaded brand asset can be reused without storing duplicate copi
   doesn't record which staff member made a given revision.
 - **No page duplication.** You can duplicate a section or a widget inside Studio, but there's no
   "Duplicate Page" action from the Pages list or settings screen.
-- **Fixed widget catalog.** 20 built-in types, no custom/plugin widgets, and no nested-container
+- **Fixed widget catalog.** 21 built-in types, no custom/plugin widgets, and no nested-container
   widget (a section's columns can't themselves contain another section) beyond what Freeform
   positioning offers within one section.
 - **Menus are single-level.** No dropdown/nested sub-menus in either the Primary or Footer list.

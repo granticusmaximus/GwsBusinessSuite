@@ -69,6 +69,11 @@ public static class CmsBlockHtmlRenderer
     public static bool LayoutContainsReadingProgress(PageLayout? layout) =>
         layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "reading-progress")));
 
+    // Workstream C, Tier 2 (stats/counter block) - same payload-size-guard reasoning as the
+    // table-of-contents/reading-progress guards above.
+    public static bool LayoutContainsStats(PageLayout? layout) =>
+        layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "stats")));
+
     // A short single-line preview of a widget's content, used by the structural revision diff
     // (PageRevisionService.BuildStructuralDiff) - never HTML, just text. Mirrors
     // WikiBlockHtmlRenderer.PlainTextPreview's role for wiki blocks.
@@ -97,6 +102,7 @@ public static class CmsBlockHtmlRenderer
             "table-of-contents" => "[table of contents]",
             "reading-progress" => "[reading progress bar]",
             "booking" => HasValue(p, "bookingTypeSlug") ? $"[booking: {Get(p, "bookingTypeSlug")}]" : "[booking]",
+            "stats" => "[stats]",
             _ => string.Empty
         };
         text = text.Replace('\n', ' ').Trim();
@@ -641,21 +647,65 @@ public static class CmsBlockHtmlRenderer
         </script>
         """;
 
+    // Workstream C, Tier 2 (stats/counter block) - same no-op-when-absent pattern as the other
+    // runtime scripts. Each counter animates independently once its own element scrolls into
+    // view (IntersectionObserver, matching BuildInteractionRuntimeScript's scrollIntoView
+    // trigger), rather than all counters starting together when the page loads regardless of
+    // scroll position. Decimal places are inferred from the target string itself (e.g. "99.9"
+    // keeps one decimal place throughout the animation) rather than always formatting as a
+    // whole number.
+    public static string BuildStatsCounterRuntimeScript() => """
+        <script>
+        (function () {
+          var counters = document.querySelectorAll('[data-gws-counter-target]');
+          if (!counters.length) return;
+          var prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+          function animate(el, target, decimals) {
+            if (prefersReducedMotion) { el.textContent = target.toFixed(decimals); return; }
+            var duration = 1500;
+            var start = null;
+            function step(ts) {
+              if (start === null) start = ts;
+              var progress = Math.min((ts - start) / duration, 1);
+              var eased = 1 - Math.pow(1 - progress, 3);
+              el.textContent = (target * eased).toFixed(decimals);
+              if (progress < 1) requestAnimationFrame(step);
+              else el.textContent = target.toFixed(decimals);
+            }
+            requestAnimationFrame(step);
+          }
+
+          if (!('IntersectionObserver' in window)) {
+            counters.forEach(function (el) {
+              var raw = el.getAttribute('data-gws-counter-target');
+              var decimals = raw.includes('.') ? raw.split('.')[1].length : 0;
+              animate(el, parseFloat(raw), decimals);
+            });
+            return;
+          }
+
+          var observer = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+              if (!entry.isIntersecting) return;
+              var el = entry.target;
+              var raw = el.getAttribute('data-gws-counter-target');
+              var decimals = raw.includes('.') ? raw.split('.')[1].length : 0;
+              animate(el, parseFloat(raw), decimals);
+              observer.unobserve(el);
+            });
+          }, { threshold: 0.4 });
+          counters.forEach(function (el) { observer.observe(el); });
+        })();
+        </script>
+        """;
+
     private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug, DesignTokenSet? tokens = null)
     {
         var p = widget.Props;
         return widget.WidgetType switch
         {
-            "hero" => $"""
-                <div class="gws-hero gws-align-{Html(Align(p))}">
-                  <h1 class="gws-hero-headline"{InlineEditAttrs(editMode, "headline")}>{Html(Get(p, "headline"))}</h1>
-                  {(HasValue(p, "subline") ? $"""<div class="gws-hero-subline"{InlineRichAttrs(editMode, "subline", Get(p, "subline"))}>{Markdown.ToHtml(Get(p, "subline"), MarkdownPipeline)}</div>""" : "")}
-                  <div class="gws-hero-actions">
-                    {HeroCta(Get(p, "cta1Label"), Get(p, "cta1Href"), "btn-primary", editMode, "cta1Label")}
-                    {HeroCta(Get(p, "cta2Label"), Get(p, "cta2Href"), "btn-ghost", editMode, "cta2Label")}
-                  </div>
-                </div>
-                """,
+            "hero" => RenderHero(p, editMode),
             "heading" => $"""<{Tag(p)} class="gws-heading gws-align-{Html(Align(p))}"{InlineEditAttrs(editMode, "text")}>{Html(Get(p, "text"))}</{Tag(p)}>""",
             "paragraph" => $"""<div class="gws-paragraph gws-align-{Html(Align(p))}"{InlineRichAttrs(editMode, "text", Get(p, "text"))}>{Markdown.ToHtml(Get(p, "text"), MarkdownPipeline)}</div>""",
             // Same trust boundary as blog articles: only authenticated Contributor/Author/
@@ -711,6 +761,7 @@ public static class CmsBlockHtmlRenderer
             "table-of-contents" => RenderTableOfContents(p),
             "reading-progress" => RenderReadingProgress(p, tokens),
             "booking" => RenderBooking(p, editMode),
+            "stats" => RenderStats(p, editMode),
             _ => string.Empty
         };
     }
@@ -1078,6 +1129,50 @@ public static class CmsBlockHtmlRenderer
         [property: JsonPropertyName("@type")] string Type,
         [property: JsonPropertyName("text")] string Text);
 
+    // Workstream C, Tier 2 (stats/counter block) - static shell only (matching decision 4's
+    // "client-side, not server-rendered" precedent from the TOC/reading-progress widgets); the
+    // number starts at "0" with its real target in a data attribute, and
+    // BuildStatsCounterRuntimeScript animates it up once scrolled into view. In edit mode the
+    // real value renders directly instead (no animation, no data attribute) - counting up from
+    // zero every time an admin clicks around the Studio would be distracting, not helpful, and
+    // the runtime script is never guaranteed to run inside that preview.
+    private static string RenderStats(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var itemsJson = Get(p, "itemsJson");
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson) as JsonArray;
+            if (node is null || node.Count == 0) return string.Empty;
+
+            var sb = new StringBuilder("""<div class="gws-stats">""");
+            var index = -1;
+            foreach (var item in node.OfType<JsonObject>())
+            {
+                index++;
+                var value = item["value"]?.GetValue<string>() ?? string.Empty;
+                var suffix = item["suffix"]?.GetValue<string>() ?? string.Empty;
+                var label = item["label"]?.GetValue<string>() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(value)) continue;
+
+                var numberAttrs = editMode ? "" : $" data-gws-counter-target=\"{Html(value)}\"";
+                var numberText = editMode ? Html(value) : "0";
+
+                sb.Append($"""
+                    <div class="gws-stats-item">
+                      <div class="gws-stats-value"><span class="gws-stats-number"{numberAttrs}>{numberText}</span><span class="gws-stats-suffix"{InlineEditAttrs(editMode, $"itemsJson[{index}].suffix")}>{Html(suffix)}</span></div>
+                      <div class="gws-stats-label"{InlineEditAttrs(editMode, $"itemsJson[{index}].label")}>{Html(label)}</div>
+                    </div>
+                    """);
+            }
+            sb.Append("</div>");
+            return sb.ToString();
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
     // Posts to /cms/{siteSlug}/{pageSlug}/submit (see Program.cs), which stores the
     // submission via IFormSubmissionService. The "company" field is a honeypot: hidden
     // from real visitors via CSS, so a filled-in value marks the request as a bot without
@@ -1181,6 +1276,56 @@ public static class CmsBlockHtmlRenderer
         string.IsNullOrWhiteSpace(label)
             ? string.Empty
             : $"""<a href="{Html(HrefOrHash(href))}" class="btn {cssClass}"{InlineEditAttrs(editMode, inlinePropKey)}>{Html(label)}</a>""";
+
+    // Workstream C, Tier 2 (hero variants) - "layout" picks one of 3 presentations over the
+    // identical headline/subline/CTA content, same style-variant-as-a-prop convention as
+    // posts-grid's own "layout" Prop. Falls back to the plain "default" markup whenever the
+    // variant-specific media Prop it needs isn't set yet, so a half-configured hero never
+    // renders a broken/empty background.
+    private static string RenderHero(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var content = $"""
+            <h1 class="gws-hero-headline"{InlineEditAttrs(editMode, "headline")}>{Html(Get(p, "headline"))}</h1>
+            {(HasValue(p, "subline") ? $"""<div class="gws-hero-subline"{InlineRichAttrs(editMode, "subline", Get(p, "subline"))}>{Markdown.ToHtml(Get(p, "subline"), MarkdownPipeline)}</div>""" : "")}
+            <div class="gws-hero-actions">
+              {HeroCta(Get(p, "cta1Label"), Get(p, "cta1Href"), "btn-primary", editMode, "cta1Label")}
+              {HeroCta(Get(p, "cta2Label"), Get(p, "cta2Href"), "btn-ghost", editMode, "cta2Label")}
+            </div>
+            """;
+
+        if (Get(p, "layout") == "video-background" && HasValue(p, "backgroundVideoUrl"))
+        {
+            var overlay = Math.Clamp(GetInt(p, "overlayOpacity", 40), 0, 100);
+            var posterAttr = HasValue(p, "posterImageUrl") ? $" poster=\"{Html(Get(p, "posterImageUrl"))}\"" : "";
+            return $"""
+                <div class="gws-hero gws-hero-video gws-align-{Html(Align(p))}">
+                  <video class="gws-hero-video-bg" autoplay muted loop playsinline{posterAttr}>
+                    <source src="{Html(Get(p, "backgroundVideoUrl"))}" />
+                  </video>
+                  <div class="gws-hero-video-overlay" style="opacity:{overlay}%"></div>
+                  <div class="gws-hero-video-content">{content}</div>
+                </div>
+                """;
+        }
+
+        if (Get(p, "layout") == "split" && HasValue(p, "splitImageUrl"))
+        {
+            var imagePosition = Get(p, "splitImagePosition", "right") == "left" ? "left" : "right";
+            var imageEl = $"""<img class="gws-hero-split-img" src="{Html(Get(p, "splitImageUrl"))}" alt="" />""";
+            var textEl = $"""<div class="gws-hero-split-text">{content}</div>""";
+            return $"""
+                <div class="gws-hero gws-hero-split gws-hero-split-{Html(imagePosition)} gws-align-{Html(Align(p))}">
+                  {(imagePosition == "left" ? imageEl + textEl : textEl + imageEl)}
+                </div>
+                """;
+        }
+
+        return $"""
+            <div class="gws-hero gws-align-{Html(Align(p))}">
+              {content}
+            </div>
+            """;
+    }
 
     // Emitted only in edit mode - lets the click-to-select script's contenteditable
     // affordance target the right widget prop when the user types directly on canvas.

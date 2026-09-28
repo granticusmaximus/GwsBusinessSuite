@@ -87,6 +87,17 @@ body {
 .gws-align-center .gws-hero-actions { justify-content: center; }
 .gws-align-right .gws-hero-actions { justify-content: flex-end; }
 
+/* Workstream C, Tier 2 (hero variants) */
+.gws-hero-video { position: relative; overflow: hidden; min-height: 420px; display: flex; align-items: center; color: #fff; }
+.gws-hero-video-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+.gws-hero-video-overlay { position: absolute; inset: 0; background: #000; z-index: 1; }
+.gws-hero-video-content { position: relative; z-index: 2; width: 100%; }
+.gws-hero-video .gws-hero-headline, .gws-hero-video .gws-hero-subline { color: #fff; }
+.gws-hero-split { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: center; text-align: left; }
+.gws-hero-split .gws-hero-actions, .gws-hero-split .gws-align-center .gws-hero-actions { justify-content: flex-start; }
+.gws-hero-split-img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+@media (max-width: 720px) { .gws-hero-split { grid-template-columns: 1fr; } .gws-hero-split-img { order: -1; } }
+
 .gws-heading { line-height: 1.2; margin: 0; }
 .gws-paragraph { color: var(--cms-text-soft); line-height: 1.6; margin: 0; }
 .gws-bg-dark .gws-paragraph { color: rgba(255, 255, 255, 0.75); }
@@ -243,6 +254,12 @@ body {
 .gws-booking-embed-title { margin: 0; }
 .gws-booking-embed-frame { display: block; width: 100%; border: 1px solid var(--cms-border); border-radius: 10px; }
 .gws-booking-embed-placeholder { padding: 1.5rem; text-align: center; border: 1px dashed var(--cms-border); border-radius: 10px; color: var(--cms-text-faint); }
+
+/* Workstream C, Tier 2 (stats/counter block) */
+.gws-stats { display: grid; gap: 1.5rem; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); text-align: center; }
+.gws-stats-value { font-size: clamp(1.8rem, 4vw, 2.6rem); font-weight: 800; color: var(--cms-accent); line-height: 1; }
+.gws-stats-suffix { font-size: 0.7em; }
+.gws-stats-label { margin-top: 0.4rem; color: var(--cms-text-soft); font-size: 0.95rem; }
 
 .gws-divider { border: none; border-top: 1px solid var(--cms-border); margin: 0; }
 .gws-divider-dashed { border-top-style: dashed; }

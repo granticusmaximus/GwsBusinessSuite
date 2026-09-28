@@ -1936,6 +1936,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     var editModeTag = editMode ? CmsBlockHtmlRenderer.BuildEditModeScript() : string.Empty;
     var tocScriptTag = CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout) ? CmsBlockHtmlRenderer.BuildTableOfContentsRuntimeScript() : string.Empty;
     var readingProgressScriptTag = CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout) ? CmsBlockHtmlRenderer.BuildReadingProgressRuntimeScript() : string.Empty;
+    var statsScriptTag = CmsBlockHtmlRenderer.LayoutContainsStats(layout) ? CmsBlockHtmlRenderer.BuildStatsCounterRuntimeScript() : string.Empty;
 
     var html = $"""
         <!DOCTYPE html>
@@ -1955,6 +1956,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
           {CmsBlockHtmlRenderer.BuildInteractionRuntimeScript()}
           {tocScriptTag}
           {readingProgressScriptTag}
+          {statsScriptTag}
         </body>
         </html>
         """;
@@ -2773,6 +2775,7 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
               {CmsBlockHtmlRenderer.BuildInteractionRuntimeScript()}
               {(CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout) ? CmsBlockHtmlRenderer.BuildTableOfContentsRuntimeScript() : "")}
               {(CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout) ? CmsBlockHtmlRenderer.BuildReadingProgressRuntimeScript() : "")}
+              {(CmsBlockHtmlRenderer.LayoutContainsStats(layout) ? CmsBlockHtmlRenderer.BuildStatsCounterRuntimeScript() : "")}
             </body>
             </html>
             """;
@@ -3414,6 +3417,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     bodyHtml += CmsBlockHtmlRenderer.BuildInteractionRuntimeScript();
     if (CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildTableOfContentsRuntimeScript();
     if (CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildReadingProgressRuntimeScript();
+    if (CmsBlockHtmlRenderer.LayoutContainsStats(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildStatsCounterRuntimeScript();
     var wrappedBody = string.IsNullOrWhiteSpace(customCss)
         ? bodyHtml
         : $"<style>{SanitizeInlineCss(customCss)}</style>{bodyHtml}";

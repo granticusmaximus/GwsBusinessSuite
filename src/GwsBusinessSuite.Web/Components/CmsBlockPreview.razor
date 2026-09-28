@@ -203,6 +203,15 @@ else
                     <div class="small text-secondary">Embeds /book/@Get(p, "bookingTypeSlug")</div>
                 }
                 break;
+            case "stats":
+                <span class="cms-block-chip">Stats</span>
+                <div class="cms-block-form-grid">
+                    @foreach (var item in ParseStatsItems(Get(p, "itemsJson")))
+                    {
+                        <div class="small text-secondary">@item.Value@item.Suffix — @item.Label</div>
+                    }
+                </div>
+                break;
             default:
                 <span class="cms-block-chip">Unknown widget</span>
                 <div class="small text-secondary mb-2">Widget type: @widget.WidgetType</div>
@@ -225,6 +234,28 @@ else
                 i.TryGetValue("question", out var q) ? q.GetString() ?? string.Empty : string.Empty,
                 i.TryGetValue("answer", out var a) ? a.GetString() ?? string.Empty : string.Empty
             )).Where(i => !string.IsNullOrWhiteSpace(i.Question)).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private sealed record StatsItemPreview(string Value, string Suffix, string Label);
+
+    private static List<StatsItemPreview> ParseStatsItems(string itemsJson)
+    {
+        try
+        {
+            var nodes = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
+                string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson);
+            if (nodes is null) return [];
+
+            return nodes.Select(i => new StatsItemPreview(
+                i.TryGetValue("value", out var v) ? v.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("suffix", out var s) ? s.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("label", out var l) ? l.GetString() ?? string.Empty : string.Empty
+            )).Where(i => !string.IsNullOrWhiteSpace(i.Value)).ToList();
         }
         catch
         {

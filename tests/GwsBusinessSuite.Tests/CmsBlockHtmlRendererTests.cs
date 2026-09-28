@@ -22,6 +22,61 @@ public sealed class CmsBlockHtmlRendererTests
     }
 
     [Fact]
+    public void Render_ShouldRenderHeroVideoBackground_WhenLayoutIsVideoBackgroundAndUrlIsSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"hero","props":{"headline":"Welcome","layout":"video-background","backgroundVideoUrl":"/media/hero.mp4","posterImageUrl":"/media/poster.jpg","overlayOpacity":"60"}}"""));
+
+        Assert.Contains("gws-hero-video", html);
+        Assert.Contains("src=\"/media/hero.mp4\"", html);
+        Assert.Contains("poster=\"/media/poster.jpg\"", html);
+        Assert.Contains("opacity:60%", html);
+        Assert.Contains("autoplay", html);
+        Assert.Contains("Welcome", html);
+    }
+
+    [Fact]
+    public void Render_ShouldFallBackToDefaultHero_WhenVideoBackgroundLayoutHasNoVideoUrl()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"hero","props":{"headline":"Welcome","layout":"video-background"}}"""));
+
+        Assert.DoesNotContain("gws-hero-video", html);
+        Assert.DoesNotContain("<video", html);
+    }
+
+    [Fact]
+    public void Render_ShouldClampHeroOverlayOpacity_ToZeroToOneHundred()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"hero","props":{"headline":"Welcome","layout":"video-background","backgroundVideoUrl":"/media/hero.mp4","overlayOpacity":"999"}}"""));
+
+        Assert.Contains("opacity:100%", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderHeroSplitLayout_WithImageAndTextInThePickedOrder()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"hero","props":{"headline":"Welcome","layout":"split","splitImageUrl":"/media/side.jpg","splitImagePosition":"left"}}"""));
+
+        Assert.Contains("gws-hero-split gws-hero-split-left", html);
+        Assert.Contains("src=\"/media/side.jpg\"", html);
+        var imgIndex = html.IndexOf("gws-hero-split-img", StringComparison.Ordinal);
+        var headlineIndex = html.IndexOf("Welcome", StringComparison.Ordinal);
+        Assert.True(imgIndex < headlineIndex, "the image should come before the text when splitImagePosition is 'left'");
+    }
+
+    [Fact]
+    public void Render_ShouldFallBackToDefaultHero_WhenSplitLayoutHasNoImageUrl()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"hero","props":{"headline":"Welcome","layout":"split"}}"""));
+
+        Assert.DoesNotContain("gws-hero-split", html);
+    }
+
+    [Fact]
     public void Render_ShouldRenderWysiwygMarkdownAndEscapeRawHtml()
     {
         var html = CmsBlockHtmlRenderer.Render(Layout(
@@ -1397,6 +1452,93 @@ public sealed class CmsBlockHtmlRendererTests
         var widget = new LayoutWidget { WidgetType = "booking", Props = new() { ["bookingTypeSlug"] = "consult" } };
 
         Assert.Equal("[booking: consult]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    // ── Workstream C, Tier 2 (stats/counter block) ──────────────────────────
+
+    [Fact]
+    public void Render_ShouldRenderStatsWidget_WithCounterTargetAndSuffixAndLabel()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"stats","props":{"itemsJson":"[{\"value\":\"500\",\"suffix\":\"+\",\"label\":\"Projects\"}]"}}"""));
+
+        Assert.Contains("gws-stats", html);
+        Assert.Contains("data-gws-counter-target=\"500\"", html);
+        Assert.Contains(">0<", html);
+        Assert.Contains("+", html);
+        Assert.Contains("Projects", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderTheRealValueDirectly_ForStatsWidget_InEditMode()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"stats","props":{"itemsJson":"[{\"value\":\"500\",\"suffix\":\"+\",\"label\":\"Projects\"}]"}}"""),
+            editMode: true);
+
+        Assert.DoesNotContain("data-gws-counter-target", html);
+        Assert.Contains(">500<", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderMultipleStatsItems_InOrder()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"stats","props":{"itemsJson":"[{\"value\":\"500\",\"suffix\":\"\",\"label\":\"First\"},{\"value\":\"99.9\",\"suffix\":\"%\",\"label\":\"Second\"}]"}}"""));
+
+        var firstIndex = html.IndexOf("First", StringComparison.Ordinal);
+        var secondIndex = html.IndexOf("Second", StringComparison.Ordinal);
+        Assert.True(firstIndex >= 0 && secondIndex > firstIndex);
+        Assert.Contains("data-gws-counter-target=\"99.9\"", html);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipItemsWithNoValue_ForStatsWidget()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"stats","props":{"itemsJson":"[{\"value\":\"\",\"suffix\":\"\",\"label\":\"Skipped\"},{\"value\":\"10\",\"suffix\":\"\",\"label\":\"Kept\"}]"}}"""));
+
+        Assert.DoesNotContain("Skipped", html);
+        Assert.Contains("Kept", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderNothingForStatsWidget_WithNoItems()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"stats","props":{"itemsJson":"[]"}}"""));
+
+        Assert.DoesNotContain("gws-stats", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribeStatsWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "stats" };
+
+        Assert.Equal("[stats]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    [Fact]
+    public void LayoutContainsStats_ShouldReturnTrue_WhenAWidgetIsStats()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"stats","props":{}}"""));
+
+        Assert.True(CmsBlockHtmlRenderer.LayoutContainsStats(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsStats_ShouldReturnFalse_WhenNoWidgetIsStats()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"paragraph","props":{}}"""));
+
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsStats(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsStats_ShouldReturnFalse_ForNullLayout()
+    {
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsStats(null));
     }
 
     private static PageLayout ButtonLayout(string href) => new()

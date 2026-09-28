@@ -519,6 +519,51 @@ else
                         @if (selWidget.WidgetType == "hero")
                         {
                             <div>
+                                <label class="form-label small fw-semibold">Layout</label>
+                                <select class="form-select" value='@GetProp(selWidget, "layout", "default")'
+                                        @onchange='(e) => SetProp(selWidget, "layout", e.Value?.ToString() ?? "default")'>
+                                    <option value="default">Default</option>
+                                    <option value="video-background">Video background</option>
+                                    <option value="split">Split (text + image)</option>
+                                </select>
+                            </div>
+                            @if (GetProp(selWidget, "layout", "default") == "video-background")
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">Background Video URL</label>
+                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "backgroundVideoUrl")'
+                                           @oninput='(e) => SetProp(selWidget, "backgroundVideoUrl", e.Value?.ToString() ?? string.Empty)' />
+                                    <p class="small text-secondary mb-0">An .mp4 URL - plays muted, looped, autoplay.</p>
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Poster Image URL (optional)</label>
+                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "posterImageUrl")'
+                                           @oninput='(e) => SetProp(selWidget, "posterImageUrl", e.Value?.ToString() ?? string.Empty)' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Overlay Darkness (%)</label>
+                                    <input class="form-control" type="number" min="0" max="100"
+                                           value='@GetProp(selWidget, "overlayOpacity", "40")'
+                                           @oninput='(e) => SetProp(selWidget, "overlayOpacity", e.Value?.ToString() ?? "40")' />
+                                </div>
+                            }
+                            else if (GetProp(selWidget, "layout", "default") == "split")
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold">Image URL</label>
+                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "splitImageUrl")'
+                                           @oninput='(e) => SetProp(selWidget, "splitImageUrl", e.Value?.ToString() ?? string.Empty)' />
+                                </div>
+                                <div>
+                                    <label class="form-label small fw-semibold">Image Position</label>
+                                    <select class="form-select" value='@GetProp(selWidget, "splitImagePosition", "right")'
+                                            @onchange='(e) => SetProp(selWidget, "splitImagePosition", e.Value?.ToString() ?? "right")'>
+                                        <option value="right">Right</option>
+                                        <option value="left">Left</option>
+                                    </select>
+                                </div>
+                            }
+                            <div>
                                 <label class="form-label small fw-semibold">Headline</label>
                                 <input class="form-control" value='@GetProp(selWidget, "headline")'
                                        @oninput='(e) => SetProp(selWidget, "headline", e.Value?.ToString() ?? string.Empty)' />
@@ -1134,6 +1179,43 @@ else
                                 <input class="form-control" type="number" min="300" max="2000"
                                        value='@GetProp(selWidget, "height", "720")'
                                        @oninput='(e) => SetProp(selWidget, "height", e.Value?.ToString() ?? "720")' />
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "stats")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Stats
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddStatsItem(selWidget)">
+                                        <i class="bi bi-plus-lg"></i> Add stat
+                                    </button>
+                                </label>
+                                @{ var statsItems = GetStatsItems(selWidget); }
+                                @if (statsItems.Count == 0)
+                                {
+                                    <p class="small text-secondary mb-0">No stats yet — click "Add stat" to build this block.</p>
+                                }
+                                else
+                                {
+                                    @for (var i = 0; i < statsItems.Count; i++)
+                                    {
+                                        var index = i;
+                                        var item = statsItems[index];
+                                        <div class="studio-form-field-editor">
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Value (e.g. 500)" value="@item.Value"
+                                                       @oninput="(e) => UpdateStatsItem(selWidget, index, i => i with { Value = e.Value?.ToString() ?? string.Empty })" />
+                                                <input class="form-control form-control-sm" placeholder="Suffix (e.g. +, %)" style="max-width:6rem" value="@item.Suffix"
+                                                       @oninput="(e) => UpdateStatsItem(selWidget, index, i => i with { Suffix = e.Value?.ToString() ?? string.Empty })" />
+                                                <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" @onclick="() => RemoveStatsItem(selWidget, index)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                            <input class="form-control form-control-sm" placeholder="Label (e.g. Projects Delivered)" value="@item.Label"
+                                                   @oninput="(e) => UpdateStatsItem(selWidget, index, i => i with { Label = e.Value?.ToString() ?? string.Empty })" />
+                                        </div>
+                                    }
+                                }
                             </div>
                         }
                         else if (selWidget.WidgetType == "form")
@@ -1887,6 +1969,7 @@ else
         new("table-of-contents", "bi bi-list-ol",          "Table of Contents", "Auto-generated links to this page's headings", GroupDynamic),
         new("reading-progress", "bi bi-hourglass-split",   "Reading Progress", "A scroll-position progress bar",      GroupDynamic),
         new("booking",     "bi bi-calendar-check",         "Booking",     "Embed one of your booking types",     GroupDynamic),
+        new("stats",       "bi bi-graph-up-arrow",         "Stats",       "Animated number counters for key metrics", GroupMedia),
         new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block",                      GroupAdvanced),
     ];
 
@@ -3932,6 +4015,60 @@ else
         SaveAccordionItems(widget, items, forceNewUndoStep: true);
     }
 
+    // ── Stats/counter block items ─────────────────────────────────────────
+    private sealed record StatsItemDef(string Value, string Suffix, string Label);
+
+    private static List<StatsItemDef> GetStatsItems(LayoutWidget widget)
+    {
+        try
+        {
+            var raw = GetProp(widget, "itemsJson");
+            if (string.IsNullOrWhiteSpace(raw)) return [];
+
+            var parsed = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(raw);
+            if (parsed is null) return [];
+
+            return parsed.Select(i => new StatsItemDef(
+                i.TryGetValue("value", out var v) ? v.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("suffix", out var s) ? s.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("label", out var l) ? l.GetString() ?? string.Empty : string.Empty
+            )).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void SaveStatsItems(LayoutWidget widget, List<StatsItemDef> items, bool forceNewUndoStep = false)
+    {
+        var json = JsonSerializer.Serialize(items.Select(i => new { value = i.Value, suffix = i.Suffix, label = i.Label }));
+        SetProp(widget, "itemsJson", json, forceNewUndoStep);
+    }
+
+    private void AddStatsItem(LayoutWidget widget)
+    {
+        var items = GetStatsItems(widget);
+        items.Add(new StatsItemDef("100", "+", "New Metric"));
+        SaveStatsItems(widget, items, forceNewUndoStep: true);
+    }
+
+    private void UpdateStatsItem(LayoutWidget widget, int index, Func<StatsItemDef, StatsItemDef> update)
+    {
+        var items = GetStatsItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items[index] = update(items[index]);
+        SaveStatsItems(widget, items);
+    }
+
+    private void RemoveStatsItem(LayoutWidget widget, int index)
+    {
+        var items = GetStatsItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
+        SaveStatsItems(widget, items, forceNewUndoStep: true);
+    }
+
     // ── Media library picker ────────────────────────────────────────────────
     private bool _showMediaPicker;
     private string _mediaPickerError = string.Empty;
@@ -3978,7 +4115,7 @@ else
         "accordion" => new() { WidgetType = "accordion", Props = new() { ["itemsJson"] = """[{"question":"Question one?","answer":"Answer one."}]""", ["isFaq"] = "false" } },
         "button"    => new() { WidgetType = "button",    Props = new() { ["label"] = "Click me",  ["href"] = "#", ["variant"] = "primary", ["size"] = "md", ["align"] = "left" } },
         "image"     => new() { WidgetType = "image",     Props = new() { ["src"] = "",  ["alt"] = "", ["caption"] = "", ["width"] = "full" } },
-        "hero"      => new() { WidgetType = "hero",      Props = new() { ["headline"] = "Your Headline", ["subline"] = "Your supporting description.", ["cta1Label"] = "Get Started", ["cta1Href"] = "#", ["cta2Label"] = "", ["cta2Href"] = "", ["align"] = "left" } },
+        "hero"      => new() { WidgetType = "hero",      Props = new() { ["headline"] = "Your Headline", ["subline"] = "Your supporting description.", ["cta1Label"] = "Get Started", ["cta1Href"] = "#", ["cta2Label"] = "", ["cta2Href"] = "", ["align"] = "left", ["layout"] = "default", ["backgroundVideoUrl"] = "", ["posterImageUrl"] = "", ["overlayOpacity"] = "40", ["splitImageUrl"] = "", ["splitImagePosition"] = "right" } },
         "card"      => new() { WidgetType = "card",      Props = new() { ["title"] = "Card Title", ["body"] = "Card description text.", ["imageSrc"] = "", ["link"] = "" } },
         "form"      => new() { WidgetType = "form",      Props = new() { ["submitLabel"] = "Submit", ["fieldsJson"] = "[]" } },
         "spacer"    => new() { WidgetType = "spacer",    Props = new() { ["height"] = "48" } },
@@ -3991,6 +4128,7 @@ else
         "table-of-contents" => new() { WidgetType = "table-of-contents", Props = new() { ["title"] = "On This Page", ["minLevel"] = "h2", ["maxLevel"] = "h3", ["showNumbers"] = "false" } },
         "reading-progress" => new() { WidgetType = "reading-progress", Props = new() { ["color"] = "", ["colorToken"] = "", ["height"] = "4", ["position"] = "top" } },
         "booking"    => new() { WidgetType = "booking", Props = new() { ["bookingTypeSlug"] = "", ["title"] = "Book a time", ["height"] = "720" } },
+        "stats"      => new() { WidgetType = "stats", Props = new() { ["itemsJson"] = """[{"value":"500","suffix":"+","label":"Projects Delivered"},{"value":"98","suffix":"%","label":"Client Satisfaction"},{"value":"12","suffix":"","label":"Years in Business"}]""" } },
         _           => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Content", ["align"] = "left" } }
     };
 
@@ -4040,6 +4178,7 @@ else
         "table-of-contents" => "Table of Contents",
         "reading-progress"  => "Reading Progress",
         "booking"     => "Booking",
+        "stats"       => "Stats",
         _             => type
     };
 
@@ -4073,6 +4212,7 @@ else
         "table-of-contents" => "bi bi-list-ol",
         "reading-progress"  => "bi bi-hourglass-split",
         "booking"     => "bi bi-calendar-check",
+        "stats"       => "bi bi-graph-up-arrow",
         _             => "bi bi-square"
     };
 
@@ -4099,6 +4239,7 @@ else
             "table-of-contents" => GetPropStatic(w, "title", "On This Page"),
             "reading-progress"  => $"{GetPropStatic(w, "position", "top")} bar",
             "booking"     => string.IsNullOrWhiteSpace(GetPropStatic(w, "bookingTypeSlug", "")) ? "No booking type picked" : GetPropStatic(w, "bookingTypeSlug", ""),
+            "stats"       => $"{GetStatsItems(w).Count} stat(s)",
             _             => w.WidgetType
         };
         return raw.Length <= 38 ? raw : raw[..38] + "…";
