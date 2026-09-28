@@ -83,6 +83,11 @@ public static class CmsBlockHtmlRenderer
     public static bool LayoutContainsPricingTable(PageLayout? layout) =>
         layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "pricing-table")));
 
+    // Workstream C, Tier 3 (gallery/image grid lightbox) - same payload-size-guard reasoning as
+    // the guards above.
+    public static bool LayoutContainsGallery(PageLayout? layout) =>
+        layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "gallery")));
+
     // A short single-line preview of a widget's content, used by the structural revision diff
     // (PageRevisionService.BuildStructuralDiff) - never HTML, just text. Mirrors
     // WikiBlockHtmlRenderer.PlainTextPreview's role for wiki blocks.
@@ -118,6 +123,7 @@ public static class CmsBlockHtmlRenderer
             "process-steps" => "[process steps]",
             "tabs" => "[tabs]",
             "pricing-table" => "[pricing table]",
+            "gallery" => "[gallery]",
             _ => string.Empty
         };
         text = text.Replace('\n', ' ').Trim();
@@ -771,6 +777,47 @@ public static class CmsBlockHtmlRenderer
         </script>
         """;
 
+    // Workstream C, Tier 3 (gallery/image grid) - same no-op-when-absent pattern as the other
+    // runtime scripts. Builds exactly one shared lightbox overlay for the whole page (not one
+    // per gallery widget) and repoints its image/caption at whichever thumbnail was clicked.
+    public static string BuildGalleryRuntimeScript() => """
+        <script>
+        (function () {
+          var triggers = document.querySelectorAll('[data-gws-gallery-trigger]');
+          if (!triggers.length) return;
+
+          var overlay = document.createElement('div');
+          overlay.className = 'gws-gallery-lightbox';
+          overlay.setAttribute('role', 'dialog');
+          overlay.setAttribute('aria-modal', 'true');
+          overlay.innerHTML =
+            '<button type="button" class="gws-gallery-lightbox-close" aria-label="Close">&times;</button>' +
+            '<img class="gws-gallery-lightbox-img" alt="" />' +
+            '<div class="gws-gallery-lightbox-caption"></div>';
+          document.body.appendChild(overlay);
+          var img = overlay.querySelector('.gws-gallery-lightbox-img');
+          var caption = overlay.querySelector('.gws-gallery-lightbox-caption');
+
+          function close() { overlay.classList.remove('is-open'); }
+          function open(src, captionText) {
+            img.src = src;
+            caption.textContent = captionText || '';
+            caption.hidden = !captionText;
+            overlay.classList.add('is-open');
+          }
+
+          triggers.forEach(function (trigger) {
+            trigger.addEventListener('click', function () {
+              open(trigger.getAttribute('data-gws-gallery-src'), trigger.getAttribute('data-gws-gallery-caption'));
+            });
+          });
+          overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+          overlay.querySelector('.gws-gallery-lightbox-close').addEventListener('click', close);
+          document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+        })();
+        </script>
+        """;
+
     private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug, DesignTokenSet? tokens = null)
     {
         var p = widget.Props;
@@ -839,6 +886,7 @@ public static class CmsBlockHtmlRenderer
             "process-steps" => RenderProcessSteps(p, editMode),
             "tabs" => RenderTabs(p, editMode),
             "pricing-table" => RenderPricingTable(p, editMode),
+            "gallery" => RenderGallery(p, editMode),
             _ => string.Empty
         };
     }
@@ -1128,6 +1176,43 @@ public static class CmsBlockHtmlRenderer
                   <div class="gws-pricing-cards">{cards}</div>
                 </div>
                 """;
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    private static readonly IReadOnlyList<string> GalleryColumnCounts = ["2", "3", "4"];
+
+    // Workstream C, Tier 3 (gallery/image grid) - each thumbnail is a real <button> (keyboard-
+    // and screen-reader-operable, unlike a bare clickable <div>) carrying its full-size src and
+    // caption as data attributes; BuildGalleryRuntimeScript builds ONE shared lightbox overlay
+    // per page (not one per gallery widget) and repoints it at whichever thumbnail was clicked.
+    private static string RenderGallery(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var itemsJson = Get(p, "itemsJson");
+        var columns = GalleryColumnCounts.Contains(Get(p, "columns", "3")) ? Get(p, "columns", "3") : "3";
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson) as JsonArray;
+            if (node is null || node.Count == 0) return string.Empty;
+
+            var sb = new StringBuilder($"""<div class="gws-gallery gws-gallery-cols-{columns}">""");
+            foreach (var item in node.OfType<JsonObject>())
+            {
+                var imageUrl = item["imageUrl"]?.GetValue<string>() ?? string.Empty;
+                var caption = item["caption"]?.GetValue<string>() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(imageUrl)) continue;
+
+                sb.Append($"""
+                    <button type="button" class="gws-gallery-item" data-gws-gallery-trigger data-gws-gallery-src="{Html(imageUrl)}" data-gws-gallery-caption="{Html(caption)}">
+                      <img src="{Html(imageUrl)}" alt="{Html(caption)}" loading="lazy" class="gws-gallery-img" />
+                    </button>
+                    """);
+            }
+            sb.Append("</div>");
+            return sb.ToString();
         }
         catch
         {

@@ -260,6 +260,10 @@ else
                     }
                 </div>
                 break;
+            case "gallery":
+                <span class="cms-block-chip">Gallery</span>
+                <div class="small text-secondary">@ParseGalleryItems(Get(p, "itemsJson")).Count image(s)</div>
+                break;
             default:
                 <span class="cms-block-chip">Unknown widget</span>
                 <div class="small text-secondary mb-2">Widget type: @widget.WidgetType</div>
@@ -404,6 +408,26 @@ else
                 i.TryGetValue("name", out var n) ? n.GetString() ?? string.Empty : string.Empty,
                 i.TryGetValue("monthlyPrice", out var mp) ? mp.GetString() ?? string.Empty : string.Empty
             )).Where(i => !string.IsNullOrWhiteSpace(i.Name)).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private sealed record GalleryItemPreview(string ImageUrl);
+
+    private static List<GalleryItemPreview> ParseGalleryItems(string itemsJson)
+    {
+        try
+        {
+            var nodes = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
+                string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson);
+            if (nodes is null) return [];
+
+            return nodes.Select(i => new GalleryItemPreview(
+                i.TryGetValue("imageUrl", out var u) ? u.GetString() ?? string.Empty : string.Empty
+            )).Where(i => !string.IsNullOrWhiteSpace(i.ImageUrl)).ToList();
         }
         catch
         {

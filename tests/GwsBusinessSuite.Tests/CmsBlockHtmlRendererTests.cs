@@ -1888,6 +1888,79 @@ public sealed class CmsBlockHtmlRendererTests
         Assert.False(CmsBlockHtmlRenderer.LayoutContainsPricingTable(null));
     }
 
+    // ── Workstream C, Tier 3 (gallery/image grid) ────────────────────────────
+
+    [Fact]
+    public void Render_ShouldRenderGallery_WithTriggerDataAttributesAndColumnCount()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"gallery","props":{"columns":"4","itemsJson":"[{\"imageUrl\":\"/media/a.jpg\",\"caption\":\"A caption\"}]"}}"""));
+
+        Assert.Contains("gws-gallery gws-gallery-cols-4", html);
+        Assert.Contains("data-gws-gallery-trigger", html);
+        Assert.Contains("data-gws-gallery-src=\"/media/a.jpg\"", html);
+        Assert.Contains("data-gws-gallery-caption=\"A caption\"", html);
+        Assert.Contains("src=\"/media/a.jpg\"", html);
+    }
+
+    [Fact]
+    public void Render_ShouldFallBackToThreeColumns_ForGallery_WhenColumnsIsUnrecognized()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"gallery","props":{"columns":"99","itemsJson":"[{\"imageUrl\":\"/media/a.jpg\"}]"}}"""));
+
+        Assert.Contains("gws-gallery-cols-3", html);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipGalleryItemsWithNoImageUrl()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"gallery","props":{"itemsJson":"[{\"imageUrl\":\"\",\"caption\":\"Skipped\"},{\"imageUrl\":\"/media/b.jpg\",\"caption\":\"Kept\"}]"}}"""));
+
+        Assert.DoesNotContain("Skipped", html);
+        Assert.Contains("Kept", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderNothingForGallery_WithNoItems()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"gallery","props":{"itemsJson":"[]"}}"""));
+
+        Assert.DoesNotContain("gws-gallery", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribeGalleryWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "gallery" };
+
+        Assert.Equal("[gallery]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    [Fact]
+    public void LayoutContainsGallery_ShouldReturnTrue_WhenAWidgetIsGallery()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"gallery","props":{}}"""));
+
+        Assert.True(CmsBlockHtmlRenderer.LayoutContainsGallery(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsGallery_ShouldReturnFalse_WhenNoWidgetIsGallery()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"paragraph","props":{}}"""));
+
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsGallery(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsGallery_ShouldReturnFalse_ForNullLayout()
+    {
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsGallery(null));
+    }
+
     private static PageLayout ButtonLayout(string href) => new()
     {
         Sections =

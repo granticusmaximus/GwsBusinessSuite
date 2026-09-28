@@ -1094,6 +1094,28 @@ a { color: inherit; }
 .gws-pricing-card-features li { padding: 0.35rem 0; border-top: 1px solid var(--border); }
 .gws-pricing-card-features li:first-child { border-top: none; }
 
+/* Workstream C, Tier 3 (gallery/image grid) - BuildGalleryRuntimeScript builds the lightbox
+   overlay (.gws-gallery-lightbox) dynamically and appends it to <body>, so its styling lives
+   here even though no server-rendered HTML ever carries that class directly. */
+.gws-gallery { display: grid; gap: 1rem; }
+.gws-gallery-cols-2 { grid-template-columns: repeat(2, 1fr); }
+.gws-gallery-cols-3 { grid-template-columns: repeat(3, 1fr); }
+.gws-gallery-cols-4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 640px) { .gws-gallery { grid-template-columns: repeat(2, 1fr) !important; } }
+.gws-gallery-item { display: block; padding: 0; border: none; background: none; cursor: zoom-in; border-radius: var(--radius); overflow: hidden; }
+.gws-gallery-img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
+.gws-gallery-lightbox {
+  display: none; position: fixed; inset: 0; z-index: 2000; background: rgba(0, 0, 0, 0.92);
+  align-items: center; justify-content: center; flex-direction: column; padding: 2rem;
+}
+.gws-gallery-lightbox.is-open { display: flex; }
+.gws-gallery-lightbox-img { max-width: min(90vw, 1100px); max-height: 80vh; object-fit: contain; }
+.gws-gallery-lightbox-caption { color: #fff; margin-top: 1rem; text-align: center; font-family: var(--font-serif); }
+.gws-gallery-lightbox-close {
+  position: absolute; top: 1rem; right: 1.5rem; background: none; border: none; color: #fff;
+  font-size: 2rem; line-height: 1; cursor: pointer;
+}
+
 .gws-callout { display: flex; gap: 0.85rem; padding: 1.1rem 1.25rem; border-radius: var(--radius); border: 1px solid var(--border); border-left-width: 4px; background: var(--bg-surface); }
 .gws-callout-icon { font-size: 1.15rem; line-height: 1.5; flex-shrink: 0; }
 .gws-callout-title { font-family: var(--font-serif); font-weight: 700; color: var(--text-1); margin-bottom: 0.25rem; }

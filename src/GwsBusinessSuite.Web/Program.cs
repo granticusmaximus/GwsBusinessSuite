@@ -1939,6 +1939,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     var statsScriptTag = CmsBlockHtmlRenderer.LayoutContainsStats(layout) ? CmsBlockHtmlRenderer.BuildStatsCounterRuntimeScript() : string.Empty;
     var tabsScriptTag = CmsBlockHtmlRenderer.LayoutContainsTabs(layout) ? CmsBlockHtmlRenderer.BuildTabsRuntimeScript() : string.Empty;
     var pricingTableScriptTag = CmsBlockHtmlRenderer.LayoutContainsPricingTable(layout) ? CmsBlockHtmlRenderer.BuildPricingTableRuntimeScript() : string.Empty;
+    var galleryScriptTag = CmsBlockHtmlRenderer.LayoutContainsGallery(layout) ? CmsBlockHtmlRenderer.BuildGalleryRuntimeScript() : string.Empty;
 
     var html = $"""
         <!DOCTYPE html>
@@ -1961,6 +1962,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
           {statsScriptTag}
           {tabsScriptTag}
           {pricingTableScriptTag}
+          {galleryScriptTag}
         </body>
         </html>
         """;
@@ -2782,6 +2784,7 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
               {(CmsBlockHtmlRenderer.LayoutContainsStats(layout) ? CmsBlockHtmlRenderer.BuildStatsCounterRuntimeScript() : "")}
               {(CmsBlockHtmlRenderer.LayoutContainsTabs(layout) ? CmsBlockHtmlRenderer.BuildTabsRuntimeScript() : "")}
               {(CmsBlockHtmlRenderer.LayoutContainsPricingTable(layout) ? CmsBlockHtmlRenderer.BuildPricingTableRuntimeScript() : "")}
+              {(CmsBlockHtmlRenderer.LayoutContainsGallery(layout) ? CmsBlockHtmlRenderer.BuildGalleryRuntimeScript() : "")}
             </body>
             </html>
             """;
@@ -3426,6 +3429,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     if (CmsBlockHtmlRenderer.LayoutContainsStats(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildStatsCounterRuntimeScript();
     if (CmsBlockHtmlRenderer.LayoutContainsTabs(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildTabsRuntimeScript();
     if (CmsBlockHtmlRenderer.LayoutContainsPricingTable(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildPricingTableRuntimeScript();
+    if (CmsBlockHtmlRenderer.LayoutContainsGallery(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildGalleryRuntimeScript();
     var wrappedBody = string.IsNullOrWhiteSpace(customCss)
         ? bodyHtml
         : $"<style>{SanitizeInlineCss(customCss)}</style>{bodyHtml}";
