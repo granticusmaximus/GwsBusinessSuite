@@ -104,6 +104,42 @@
 		applySidebarState();
 	}
 
+	// Client-side-only "focus mode" toggle - deliberately not routed through Blazor Server (no
+	// @onclick, no circuit round-trip) since it's a pure layout change with zero server-side
+	// state. Reuses .gws-builder-mode/.gws-content-builder, the exact same classes
+	// MainLayout.razor's IsChromelessRoute already applies for the canvas editor's own permanent
+	// chromeless route - the only addition needed was a CSS rule to actually hide the admin
+	// bar/sidebar (see app.css), since on a route where IsChromelessRoute is false those elements
+	// are real DOM nodes, unlike the canvas route where they're never rendered at all. Not
+	// persisted to localStorage on purpose (unlike gws-sidebar-collapsed) - this is a transient,
+	// per-visit focus state, not a standing layout preference, so it always resets to normal chrome
+	// on a fresh page load.
+	function isFocusModeOn() {
+		var layout = shell();
+		return !!layout && layout.classList.contains('gws-focus-mode');
+	}
+
+	function setFocusMode(on) {
+		var layout = shell();
+		var content = document.querySelector('.gws-content');
+		if (!layout) return;
+		layout.classList.toggle('gws-builder-mode', on);
+		layout.classList.toggle('gws-focus-mode', on);
+		if (content) content.classList.toggle('gws-content-builder', on);
+		document.querySelectorAll('[data-gws-focus-toggle]').forEach(function (button) {
+			button.classList.toggle('is-active', on);
+			button.title = on ? 'Exit fullscreen' : 'Fullscreen';
+			button.setAttribute('aria-label', button.title);
+			button.setAttribute('aria-pressed', on ? 'true' : 'false');
+			var icon = button.querySelector('i');
+			if (icon) icon.className = on ? 'bi bi-fullscreen-exit' : 'bi bi-arrows-fullscreen';
+		});
+	}
+
+	function toggleFocusMode() {
+		setFocusMode(!isFocusModeOn());
+	}
+
 	function commandElements() {
 		return {
 			layer: document.querySelector('[data-gws-command-layer]'),
@@ -261,6 +297,7 @@
 			if (event.target.closest('[data-gws-command-open]')) openCommand();
 			if (event.target.closest('[data-gws-command-close]')) closeCommand();
 			if (event.target.closest('[data-gws-theme-toggle]')) toggleTheme();
+			if (event.target.closest('[data-gws-focus-toggle]')) toggleFocusMode();
 		});
 
 		document.addEventListener('input', function (event) {

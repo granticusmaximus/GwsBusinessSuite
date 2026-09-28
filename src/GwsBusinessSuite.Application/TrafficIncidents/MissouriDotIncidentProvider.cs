@@ -7,18 +7,16 @@ using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Application.TrafficIncidents;
 
-// MoDOT's statewide incident layer via ArcGIS - genuinely free with no API key, confirmed
-// directly. Real, confirmed gotcha: this layer's schema is much thinner than most other incident
-// providers in this project - only STYLE/MESSAGE/HEADLINE plus OBJECTID exist, no Route, no
-// StartTime/EndTime, no Priority field at all. RoadwayName and Severity are always "Unknown"/
-// "unknown" here since the source genuinely doesn't publish that structured data, not because of
-// a mapping bug - the incident's own message/headline text carries whatever location detail
-// exists.
+// MoDOT's traffic-impact and planned-event point layers. NWSDATA/0 contains cameras,
+// not incidents. TravelerInformationMod publishes roadway/type/impact fields for these
+// six layers; work-zone layers use a different schema and are not queried here.
 public sealed class MissouriDotIncidentProvider(
     HttpClient httpClient,
     IMemoryCache cache,
     ILogger<MissouriDotIncidentProvider> logger) : ITrafficIncidentProvider
 {
+    private static readonly int[] IncidentLayers = [0, 3, 5, 8, 9, 11];
+    private const int PageSize = 1000;
     private const string CacheKey = "traffic-incidents:modot:all";
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(3);
 
@@ -37,45 +35,60 @@ public sealed class MissouriDotIncidentProvider(
 
     private async Task<IReadOnlyList<TrafficIncident>> FetchAllAsync(CancellationToken cancellationToken)
     {
-        try
+        var results = new Dictionary<long, TrafficIncident>();
+        foreach (var layer in IncidentLayers)
         {
-            const string url = "arcgis/rest/services/TravelerInformation/NWSDATA/MapServer/0/query" +
-                "?where=1=1&outFields=OBJECTID,STYLE,MESSAGE,HEADLINE&outSR=4326&f=json";
-            var response = await httpClient.GetFromJsonAsync<ArcGisFeatureCollection>(url, cancellationToken);
-            var features = response?.Features;
-            if (features is null) return [];
-
-            var results = new List<TrafficIncident>();
-            foreach (var feature in features)
+            try
             {
-                var attrs = feature.Attributes;
-                var geometry = feature.Geometry;
-                if (geometry is null) continue;
+                var offset = 0;
+                while (true)
+                {
+                    var url = $"arcgis/rest/services/TravelerInformation/TravelerInformationMod/MapServer/{layer}/query" +
+                        $"?where=1=1&outFields=DATA_ID,ROUTE,TYPE_CODE,LEVEL_OF_IMPACT_CODE,EXT_COMMENT&outSR=4326&orderByFields=OBJECT_ID&resultOffset={offset}&resultRecordCount={PageSize}&f=json";
+                    var response = await httpClient.GetFromJsonAsync<ArcGisFeatureCollection>(url, cancellationToken);
+                    if (response?.Error is not null)
+                        throw new HttpRequestException($"MoDOT layer {layer} returned an ArcGIS query error.");
+                    var features = response?.Features;
+                    if (features is null || features.Count == 0) break;
 
-                results.Add(new TrafficIncident(
-                    Id: $"modot-event-{attrs.ObjectId}",
-                    RoadwayName: "Unknown roadway",
-                    Description: attrs.Message ?? attrs.Headline ?? "",
-                    EventType: attrs.Style ?? "unknown",
-                    Severity: "unknown",
-                    Latitude: geometry.Y,
-                    Longitude: geometry.X,
-                    SourceName: SourceName,
-                    SourceAttributionUrl: "https://www.modot.org"));
+                    foreach (var feature in features)
+                    {
+                        var attrs = feature.Attributes;
+                        var geometry = feature.Geometry;
+                        if (geometry is null || attrs?.DataId is not { } id) continue;
+
+                        results[id] = new TrafficIncident(
+                            Id: $"modot-event-{id}",
+                            RoadwayName: attrs.Route ?? "Unknown roadway",
+                            Description: attrs.Comment ?? "",
+                            EventType: attrs.TypeCode ?? "unknown",
+                            Severity: attrs.Impact ?? "unknown",
+                            Latitude: geometry.Y,
+                            Longitude: geometry.X,
+                            SourceName: SourceName,
+                            SourceAttributionUrl: "https://www.modot.org");
+                    }
+
+                    if (response!.ExceededTransferLimit != true && features.Count < PageSize) break;
+                    offset += features.Count;
+                }
             }
-            return results;
+            catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
+            {
+                logger.LogWarning(ex, "Failed to fetch MoDOT traffic incidents from layer {Layer}.", layer);
+                if (cancellationToken.IsCancellationRequested) break;
+            }
         }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
-        {
-            logger.LogWarning(ex, "Failed to fetch MoDOT traffic incidents.");
-            return [];
-        }
+        return results.Values.ToList();
     }
 
-    private sealed record ArcGisFeatureCollection([property: JsonPropertyName("features")] List<ArcGisFeature>? Features);
+    private sealed record ArcGisFeatureCollection(
+        [property: JsonPropertyName("features")] List<ArcGisFeature>? Features,
+        [property: JsonPropertyName("exceededTransferLimit")] bool? ExceededTransferLimit,
+        [property: JsonPropertyName("error")] JsonElement? Error);
 
     private sealed record ArcGisFeature(
-        [property: JsonPropertyName("attributes")] ModotEventAttributes Attributes,
+        [property: JsonPropertyName("attributes")] ModotEventAttributes? Attributes,
         [property: JsonPropertyName("geometry")] ArcGisPoint? Geometry);
 
     private sealed record ArcGisPoint(
@@ -83,8 +96,9 @@ public sealed class MissouriDotIncidentProvider(
         [property: JsonPropertyName("y")] double Y);
 
     private sealed record ModotEventAttributes(
-        [property: JsonPropertyName("OBJECTID")] long ObjectId,
-        [property: JsonPropertyName("STYLE")] string? Style,
-        [property: JsonPropertyName("MESSAGE")] string? Message,
-        [property: JsonPropertyName("HEADLINE")] string? Headline);
+        [property: JsonPropertyName("DATA_ID")] long? DataId,
+        [property: JsonPropertyName("ROUTE")] string? Route,
+        [property: JsonPropertyName("TYPE_CODE")] string? TypeCode,
+        [property: JsonPropertyName("LEVEL_OF_IMPACT_CODE")] string? Impact,
+        [property: JsonPropertyName("EXT_COMMENT")] string? Comment);
 }

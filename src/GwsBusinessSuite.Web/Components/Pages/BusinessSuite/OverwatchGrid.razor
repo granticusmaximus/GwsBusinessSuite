@@ -96,6 +96,13 @@
                 <button type="button" data-tg-toggle="favorites" class="tg-toggle @(_favoritesOpen ? "tg-toggle-on" : "")" title="Show your favorited cameras (F)" @onclick="ToggleFavoritesPanel">
                     FAVORITES
                 </button>
+                @* Purely client-side (app.js's toggleFocusMode) - deliberately no @onclick/Blazor
+                   state, since hiding the admin bar/sidebar is a pure layout change with nothing
+                   for the server to track. See app.css/app.js for how this reuses
+                   MainLayout.razor's existing chromeless-mode classes. *@
+                <button type="button" data-gws-focus-toggle class="tg-toggle tg-toggle-focus" title="Fullscreen" aria-pressed="false">
+                    <i class="bi bi-arrows-fullscreen" aria-hidden="true"></i>
+                </button>
             </div>
         </div>
     </div>

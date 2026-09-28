@@ -39,7 +39,6 @@ public static class CameraCoverageRegions
         new("New Zealand (NZTA)", "NZTA", -41.00, 174.80, 1_800_000),
         new("Queensland, Australia (QLD Traffic)", "QLD Traffic", -23.00, 144.00, 2_200_000),
         new("Delaware (DelDOT)", "DelDOT", 39.00, -75.50, 250_000),
-        new("Maryland (MDOT SHA)", "MDOT SHA", 39.00, -76.70, 350_000),
         new("Rhode Island (RIDOT)", "RIDOT", 41.70, -71.50, 150_000),
         new("Virginia (VDOT)", "VDOT", 37.50, -78.60, 700_000),
         new("Kentucky (KYTC)", "KYTC", 37.80, -85.00, 600_000),

@@ -438,12 +438,6 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<DelawareDotCameraProvider>());
-        services.AddHttpClient<MarylandDotCameraProvider>(client =>
-        {
-            client.BaseAddress = new Uri("https://mdgeodata.md.gov/");
-            client.Timeout = TimeSpan.FromSeconds(20);
-        });
-        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<MarylandDotCameraProvider>());
         services.AddHttpClient<RhodeIslandDotCameraProvider>(client =>
         {
             client.BaseAddress = new Uri("https://risegis.ri.gov/");

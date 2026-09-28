@@ -62,8 +62,8 @@ broken image.
 
 If a region shows no cameras at all after the view settles, a hint explains that this is a
 genuine coverage gap, not a loading failure — open the **COVERAGE** panel for the full, current
-list of over 25 US states plus British Columbia, Madrid, Finland, New Zealand, and Queensland
-(Australia) with guaranteed coverage, or see [Known limitations](#known-limitations) below for
+list of integrated camera and incident regions, including British Columbia, Madrid, Finland,
+New Zealand, and Queensland (Australia), or see [Known limitations](#known-limitations) below for
 the complete source-by-source breakdown.
 
 At a wide zoom, cameras that are close together on screen group into a single numbered marker
@@ -196,8 +196,8 @@ Overwatch requires the **AdminOnly** policy, same as the rest of the Intelligenc
   bug, and isn't something more code tuning alone can fix without switching to a paid, richer
   places database (not currently in place).
 - **Camera coverage is real but regional.** Confirmed, zero-registration coverage today spans
-  over 25 US states — Georgia, Florida, Illinois, Iowa, California (all 12 Caltrans districts),
-  Oregon, New York City, Washington State, Delaware, Maryland, Rhode Island, Virginia, Kentucky,
+  20 US states (some with partial coverage) — Georgia, Florida, Illinois, Iowa, California (all 12 Caltrans districts),
+  Oregon, New York City, Washington State, Delaware, Rhode Island, Virginia, Kentucky,
   South Carolina, Missouri (statewide), Michigan, North Dakota, Colorado, Hawaii (Oahu only, a
   frozen 2019/2021 location list whose images still resolve live), Texas (statewide, ~892 cameras
   with real images), and Alabama — plus New Zealand (nationwide), Queensland Australia
@@ -220,7 +220,10 @@ Overwatch requires the **AdminOnly** policy, same as the rest of the Intelligenc
   Mexico. The Netherlands (Rijkswaterstaat) enforces a Referer check this app's client-side image
   loading can't satisfy without new server-side proxy infrastructure. Quebec publishes a real,
   free camera location feed but only an embed-page URL per camera, not a direct image link, so it
-  isn't usable with this app's current `<img>`-based rendering.
+  isn't usable with this app's current `<img>`-based rendering. Maryland's iMap camera layer
+  likewise supplies CHART HTML player pages rather than direct image or HLS URLs; that integration
+  is excluded until a compatible public media feed is verified. Source availability can change;
+  a listed region does not guarantee every camera is online.
 - **Mapillary and KartaView show still photos, not live video** — they're crowdsourced street-level
   imagery platforms (dashcam/mapping-rig captures uploaded over time), not real-time cameras, so a
   pin from either source shows what that spot looked like whenever it was last photographed, not
@@ -232,7 +235,8 @@ Overwatch requires the **AdminOnly** policy, same as the rest of the Intelligenc
   Hawaii, and Idaho surface construction/work-zone events (not crash-style incidents) via the
   federally-standardized WZDx format, which several state DOTs publish for free even when their own
   camera API is key-gated. Other states publish similar open data, but each one needs its own
-  verified integration — not yet built.
+  verified integration — not yet built. Missouri currently uses the traffic-impact and planned-event
+  point layers; its separate work-zone layers are not included.
 - **No historical storm-damage layer.** The alerts layer shows currently active severe weather in
   real time; a separate "what actually got damaged after the fact" dataset exists (NOAA's Storm
   Events database) but is a slow-changing historical/bulk dataset, a poor fit for this page's

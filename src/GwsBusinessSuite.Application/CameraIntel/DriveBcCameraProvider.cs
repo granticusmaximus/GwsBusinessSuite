@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
@@ -58,8 +59,8 @@ public sealed class DriveBcCameraProvider(
 
                 var imageUrl = Field(row, imageIdx);
                 if (string.IsNullOrWhiteSpace(imageUrl)) continue;
-                if (!double.TryParse(Field(row, latIdx).Trim(), out var lat)) continue;
-                if (!double.TryParse(Field(row, lonIdx).Trim(), out var lon)) continue;
+                if (!double.TryParse(Field(row, latIdx), NumberStyles.Float, CultureInfo.InvariantCulture, out var lat)) continue;
+                if (!double.TryParse(Field(row, lonIdx), NumberStyles.Float, CultureInfo.InvariantCulture, out var lon)) continue;
 
                 var name = Field(row, camNameIdx);
                 if (string.IsNullOrWhiteSpace(name)) name = Field(row, highwayIdx);

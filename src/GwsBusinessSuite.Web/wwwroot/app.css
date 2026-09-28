@@ -423,6 +423,17 @@ h1:focus { outline: none; }
     height: 100vh;
 }
 
+/* Client-side "focus mode" (Overwatch's fullscreen toggle, see app.js's toggleFocusMode) reuses
+   .gws-builder-mode/.gws-content-builder above, but on this route the admin bar/sidebar are real
+   rendered DOM (unlike the canvas editor's own permanently chromeless route, where
+   MainLayout.razor's IsChromelessRoute never renders them at all) - hide them explicitly here so
+   the class means the same "no chrome" thing regardless of which mechanism turned it on. A no-op
+   on the canvas route itself, since these elements don't exist there to begin with. */
+.gws-builder-mode .gws-admin-bar,
+.gws-builder-mode .gws-sidebar {
+    display: none;
+}
+
 /* ── Sidebar nav ─────────────────────────────────────────── */
 .gws-nav {
     display: flex;

@@ -9,57 +9,106 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class MissouriDotIncidentProviderTests
 {
-    // This layer's schema is genuinely thinner than most other incident providers - no Route, no
-    // StartTime/EndTime, no Priority field exists at all, confirmed live.
+    // Fields and values from TravelerInformationMod/0, fetched during resume verification.
     private const string SampleJson = """
-        {
-          "features": [
-            { "attributes": { "OBJECTID": 1, "STYLE": "roadwork", "MESSAGE": "Lane closure on MO 13.", "HEADLINE": "Roadwork" }, "geometry": { "x": -93.31, "y": 37.26 } }
-          ]
-        }
+        { "features": [
+          { "attributes": { "DATA_ID": 821953, "ROUTE": "RT VV S", "TYPE_CODE": "BRIDGE CLOSED", "LEVEL_OF_IMPACT_CODE": "CLOSED", "EXT_COMMENT": "Please use alternate route." }, "geometry": { "x": -92.809158893, "y": 39.857016956 } }
+        ] }
         """;
-
-    private static readonly BoundingBox MissouriBbox = new(North: 40, South: 36, East: -89, West: -95);
+    private const string EmptyJson = """{ "features": [] }""";
+    private static readonly BoundingBox MissouriBbox = new(North: 41, South: 36, East: -89, West: -96);
 
     [Fact]
-    public async Task GetIncidentsAsync_ShouldMapIncidents_WithRoadwayNameAlwaysUnknown()
+    public async Task GetIncidentsAsync_ShouldQueryIncidentLayersAndMapTheActualFields()
     {
-        var provider = CreateProvider(_ => JsonResponse(SampleJson));
+        var requests = new List<Uri>();
+        var provider = CreateProvider(request =>
+        {
+            requests.Add(request.RequestUri!);
+            return JsonResponse(request.RequestUri!.AbsolutePath.EndsWith("/0/query") ? SampleJson : EmptyJson);
+        });
+
+        var result = await provider.GetIncidentsAsync(MissouriBbox);
+
+        var incident = result.Should().ContainSingle().Subject;
+        incident.Id.Should().Be("modot-event-821953");
+        incident.RoadwayName.Should().Be("RT VV S");
+        incident.Description.Should().Be("Please use alternate route.");
+        incident.EventType.Should().Be("BRIDGE CLOSED");
+        incident.Severity.Should().Be("CLOSED");
+        incident.Latitude.Should().Be(39.857016956);
+        incident.Longitude.Should().Be(-92.809158893);
+        requests.Select(u => u.AbsolutePath.Split('/')[^2]).Should().Equal("0", "3", "5", "8", "9", "11");
+        requests.Should().OnlyContain(u => u.AbsolutePath.Contains("TravelerInformationMod/MapServer/")
+            && u.Query.Contains("outSR=4326") && u.Query.Contains("outFields=DATA_ID,ROUTE,"));
+    }
+
+    [Fact]
+    public async Task GetIncidentsAsync_ShouldFollowTransferLimitAndDeduplicateAcrossLayers()
+    {
+        var requests = new List<Uri>();
+        var provider = CreateProvider(request =>
+        {
+            var uri = request.RequestUri!;
+            requests.Add(uri);
+            if (uri.AbsolutePath.EndsWith("/0/query") && uri.Query.Contains("resultOffset=0&"))
+                return JsonResponse(SampleJson.Replace("{ \"features\":", "{ \"exceededTransferLimit\": true, \"features\":"));
+            if (uri.AbsolutePath.EndsWith("/0/query"))
+                return JsonResponse(SampleJson.Replace("821953", "821954"));
+            return JsonResponse(SampleJson);
+        });
+
+        var result = await provider.GetIncidentsAsync(MissouriBbox);
+
+        result.Select(i => i.Id).Should().BeEquivalentTo("modot-event-821953", "modot-event-821954");
+        requests.Should().Contain(u => u.AbsolutePath.EndsWith("/0/query") && u.Query.Contains("resultOffset=1&"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GetIncidentsAsync_ShouldRetainOtherLayersWhenOneLayerFails(bool arcGisError)
+    {
+        var provider = CreateProvider(request => request.RequestUri!.AbsolutePath.EndsWith("/0/query")
+            ? arcGisError ? JsonResponse("""{ "error": { "code": 400, "message": "Failed to execute query." } }""")
+                : new HttpResponseMessage(HttpStatusCode.InternalServerError)
+            : JsonResponse(SampleJson));
 
         var result = await provider.GetIncidentsAsync(MissouriBbox);
 
         result.Should().ContainSingle();
-        var incident = result[0];
-        incident.Id.Should().Be("modot-event-1");
-        incident.RoadwayName.Should().Be("Unknown roadway", "this layer genuinely has no roadway field");
-        incident.Description.Should().Be("Lane closure on MO 13.");
-        incident.EventType.Should().Be("roadwork");
-        incident.SourceName.Should().Be("MoDOT");
     }
 
     [Fact]
-    public async Task GetIncidentsAsync_ShouldFallBackToHeadline_WhenMessageIsMissing()
+    public async Task GetIncidentsAsync_ShouldCacheAllLayersAndFilterEachBoundingBox()
     {
-        const string json = """
-            { "features": [ { "attributes": { "OBJECTID": 2, "STYLE": null, "MESSAGE": null, "HEADLINE": "Crash" }, "geometry": { "x": -93.3, "y": 37.2 } } ] }
-            """;
-        var provider = CreateProvider(_ => JsonResponse(json));
+        var requests = 0;
+        var provider = CreateProvider(_ => { requests++; return JsonResponse(SampleJson); });
+        (await provider.GetIncidentsAsync(MissouriBbox)).Should().ContainSingle();
 
-        var result = await provider.GetIncidentsAsync(new BoundingBox(90, -90, 180, -180));
+        (await provider.GetIncidentsAsync(new BoundingBox(10, 0, 10, 0))).Should().BeEmpty();
 
-        var incident = result.Single();
-        incident.Description.Should().Be("Crash");
-        incident.EventType.Should().Be("unknown");
+        requests.Should().Be(6);
     }
 
     [Fact]
-    public async Task GetIncidentsAsync_ShouldReturnEmpty_RatherThanThrow_WhenTheApiCallFails()
+    public async Task GetIncidentsAsync_ShouldSkipMissingIdentifiersAndGeometry()
+    {
+        var provider = CreateProvider(_ => JsonResponse("""
+            { "features": [
+              { "attributes": { "ROUTE": "MO 13" }, "geometry": { "x": -93.3, "y": 37.2 } },
+              { "attributes": { "DATA_ID": 2 }, "geometry": null }
+            ] }
+            """));
+
+        (await provider.GetIncidentsAsync(MissouriBbox)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetIncidentsAsync_ShouldReturnEmptyWhenAllRequestsFail()
     {
         var provider = CreateProvider(_ => new HttpResponseMessage(HttpStatusCode.InternalServerError));
-
-        var result = await provider.GetIncidentsAsync(MissouriBbox);
-
-        result.Should().BeEmpty();
+        (await provider.GetIncidentsAsync(MissouriBbox)).Should().BeEmpty();
     }
 
     private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)

@@ -155,6 +155,34 @@
     box-shadow: 0 0 10px rgba(125, 255, 176, 0.5);
 }
 
+/* Fullscreen/focus-mode toggle - a solid-filled icon button rather than the translucent
+   outline style every other HUD toggle uses, so it reads as a distinct "window chrome" control
+   (matching a video player's own fullscreen button) instead of another data-layer toggle. Purely
+   client-side (see app.js's toggleFocusMode) - its is-active class/icon swap is applied directly
+   by that script, not through Blazor state. */
+.tg-toggle-focus {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.9rem;
+    height: 1.9rem;
+    padding: 0;
+    background: rgba(125, 255, 176, 0.85);
+    border: 1px solid rgba(125, 255, 176, 0.9);
+    border-radius: 4px;
+    color: #04120a;
+    font-size: 0.85rem;
+}
+
+.tg-toggle-focus:hover {
+    background: #7dffb0;
+}
+
+.tg-toggle-focus.is-active {
+    background: #7dffb0;
+    box-shadow: 0 0 10px rgba(125, 255, 176, 0.6);
+}
+
 .tg-viewport {
     position: absolute;
     inset: 0;

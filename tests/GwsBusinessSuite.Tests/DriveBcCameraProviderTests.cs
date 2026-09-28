@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using FluentAssertions;
 using GwsBusinessSuite.Application.CameraIntel;
@@ -33,6 +34,27 @@ public sealed class DriveBcCameraProviderTests
         camera.Latitude.Should().Be(49.596374, "trailing spaces in the CSV lat/lon values must be trimmed");
         camera.Longitude.Should().Be(-121.159832);
         camera.SourceName.Should().Be("DriveBC");
+    }
+
+    [Fact]
+    public async Task GetCamerasAsync_ShouldParseCoordinatesUnderACommaDecimalCulture()
+    {
+        var originalCulture = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+            var provider = CreateProvider(_ => CsvResponse(SampleCsv));
+
+            var result = await provider.GetCamerasAsync(BcBbox);
+
+            result.Should().ContainSingle();
+            result[0].Latitude.Should().Be(49.596374);
+            result[0].Longitude.Should().Be(-121.159832);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = originalCulture;
+        }
     }
 
     [Fact]
