@@ -15,10 +15,16 @@ namespace GwsBusinessSuite.Application.TrafficIncidents;
 // family - only the layer name (and therefore SourceName/attribution) differs. Native geometry
 // is Web Mercator (EPSG:3857); outSR=4326 is requested explicitly so geometry.x/y are always
 // plain WGS84 degrees (confirmed directly: without it, coordinates are Mercator meters).
+// layerName is passed explicitly rather than derived from stateCode - confirmed live that this
+// org's own naming isn't a consistent "CARS511_{2-letter-code}_Events_View" pattern (Iowa's own
+// layer is "CARS511_Iowa_View", using the full state name, not "IA") - a full 467-service catalog
+// query confirmed ND/SD/WI/KS/WY/MT are simply not tenants of this org at all, so this pattern
+// only ever needs three explicit callers (MN, NE, Iowa), not a generic per-state lookup.
 public sealed class Cars511IncidentProvider(
     HttpClient httpClient,
     IMemoryCache cache,
     ILogger<Cars511IncidentProvider> logger,
+    string layerName,
     string stateCode,
     string sourceName,
     string sourceAttributionUrl) : ITrafficIncidentProvider
@@ -43,7 +49,7 @@ public sealed class Cars511IncidentProvider(
     {
         try
         {
-            var url = $"arcgis/rest/services/CARS511_{stateCode}_Events_View/FeatureServer/0/query" +
+            var url = $"arcgis/rest/services/{layerName}/FeatureServer/0/query" +
                 "?where=1=1&outFields=ID,Route,headline,phrase,cause,STYLE&outSR=4326&f=json";
             var response = await httpClient.GetFromJsonAsync<ArcGisFeatureCollection>(url, cancellationToken);
             var features = response?.Features;

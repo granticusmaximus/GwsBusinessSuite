@@ -61,9 +61,10 @@ camera's source provides. If a feed goes down, the window shows "FEED UNAVAILABL
 broken image.
 
 If a region shows no cameras at all after the view settles, a hint explains that this is a
-genuine coverage gap, not a loading failure — try Georgia, Florida, Illinois, Iowa, California,
-Oregon, New York City, Washington State, New Zealand, Queensland (Australia), or Datumfeed's
-covered cities (Austin, California, Ontario, Ottawa, Toronto, London) for guaranteed coverage.
+genuine coverage gap, not a loading failure — open the **COVERAGE** panel for the full, current
+list of over 25 US states plus British Columbia, Madrid, Finland, New Zealand, and Queensland
+(Australia) with guaranteed coverage, or see [Known limitations](#known-limitations) below for
+the complete source-by-source breakdown.
 
 At a wide zoom, cameras that are close together on screen group into a single numbered marker
 instead of covering the view in overlapping dots — this matters most over Georgia and Datumfeed's
@@ -108,7 +109,9 @@ station's current reading can't be reached at that moment.
 Click **INCIDENTS** (or press **I**) to show real-time accidents, roadwork, and road closures as
 colored dots — red for accidents/incidents, orange for closures, yellow for roadwork. Click one to
 see its full description, affected roadway, and lane/closure details in its own window. This
-currently covers Georgia, Minnesota, Nebraska, and Queensland (Australia); see
+currently covers Georgia, Missouri, North Dakota, Tennessee, the New York Thruway, Maine, New
+Hampshire, Vermont, Minnesota, Nebraska, Iowa, Queensland (Australia), plus construction/work-zone
+events (via the federal WZDx standard) for Arizona, Nevada, Utah, Oklahoma, Hawaii, and Idaho; see
 [Known limitations](#known-limitations) for other states.
 
 ## NOAA radar and severe weather alerts
@@ -192,27 +195,43 @@ Overwatch requires the **AdminOnly** policy, same as the rest of the Intelligenc
   hovering over them shows nothing — this is a real gap in free, crowd-sourced map data, not a
   bug, and isn't something more code tuning alone can fix without switching to a paid, richer
   places database (not currently in place).
-- **Camera coverage is real but regional.** Confirmed, zero-registration coverage today: Georgia
-  (statewide, GDOT), Florida (FL511), Illinois (IDOT), Iowa (Iowa DOT), California (Caltrans, all
-  12 districts), Oregon (ODOT/TripCheck), New York City (NYC DOT), Washington State (WSDOT), New
-  Zealand (NZTA, nationwide), Queensland Australia (QLD Traffic, statewide), Datumfeed's
-  aggregated cities (Austin, California, Ontario, Ottawa, Toronto, London), and KartaView's
-  worldwide crowdsourced street-level imagery (real coverage depends entirely on whether
-  volunteers have driven and uploaded a given street — dense in some cities, sparse or empty
-  elsewhere). Optional free API keys (see `CameraIntelOptions.cs`) can add Windy's global public
-  webcams, Mapillary's worldwide street-level imagery, or raise Datumfeed's anonymous rate limit,
-  but nothing on the page requires them. Some states with real, free open-data camera feeds still
-  aren't integrated: Ohio, Arizona, Wisconsin, Singapore, and New South Wales (Australia) each need
-  a free but self-registered API key the app doesn't request on your behalf — a genuine future
-  option, not a dead end. The Netherlands (Rijkswaterstaat) was investigated and excluded: its
-  camera feed enforces a Referer check this app's client-side image loading can't satisfy without
-  new server-side proxy infrastructure.
+- **Camera coverage is real but regional.** Confirmed, zero-registration coverage today spans
+  over 25 US states — Georgia, Florida, Illinois, Iowa, California (all 12 Caltrans districts),
+  Oregon, New York City, Washington State, Delaware, Maryland, Rhode Island, Virginia, Kentucky,
+  South Carolina, Missouri (statewide), Michigan, North Dakota, Colorado, Hawaii (Oahu only, a
+  frozen 2019/2021 location list whose images still resolve live), Texas (statewide, ~892 cameras
+  with real images), and Alabama — plus New Zealand (nationwide), Queensland Australia
+  (statewide), British Columbia (DriveBC), Madrid (Spain), and Finland (Fintraffic, nationwide).
+  Datumfeed's aggregated cities (Austin, California, Ontario, Ottawa, Toronto, London) and
+  KartaView's worldwide crowdsourced street-level imagery round this out (real KartaView coverage
+  depends entirely on whether volunteers have driven and uploaded a given street — dense in some
+  cities, sparse or empty elsewhere). Optional free API keys (see `CameraIntelOptions.cs`) can add
+  Windy's global public webcams, Mapillary's worldwide street-level imagery, or raise Datumfeed's
+  anonymous rate limit, but nothing on the page requires them.
+  Some states/countries with real, free open-data camera feeds still aren't integrated because the
+  only path needs a free but self-registered key the app doesn't request on your behalf (a genuine
+  future option, not a dead end): Ohio, Arizona, Wisconsin, Nevada, Utah, Louisiana, North
+  Carolina, Connecticut, New Jersey, Pennsylvania, Ontario (511 Developer API), Alberta, Singapore,
+  South Korea, India, Sweden, and New South Wales (Australia). Some were investigated and confirmed
+  as genuine dead ends (no usable free API found, or a real technical blocker): Montana, Wyoming
+  (statewide — a trivial 12-camera Cheyenne exception exists), Arkansas, Mississippi, Indiana,
+  Kansas, Puerto Rico, Guam, the UK (National Highways/Scotland/Wales/Northern Ireland all require
+  either an application process or a login-gated FTP feed, not a public API), Ireland, Brazil, and
+  Mexico. The Netherlands (Rijkswaterstaat) enforces a Referer check this app's client-side image
+  loading can't satisfy without new server-side proxy infrastructure. Quebec publishes a real,
+  free camera location feed but only an embed-page URL per camera, not a direct image link, so it
+  isn't usable with this app's current `<img>`-based rendering.
 - **Mapillary and KartaView show still photos, not live video** — they're crowdsourced street-level
   imagery platforms (dashcam/mapping-rig captures uploaded over time), not real-time cameras, so a
   pin from either source shows what that spot looked like whenever it was last photographed, not
   what it looks like right now.
-- **Traffic incidents currently cover Georgia, Minnesota, Nebraska (via the shared CARS511 feed),
-  and Queensland Australia.** Other states publish similar open data, but each one needs its own
+- **Traffic incidents currently cover Georgia, Missouri, North Dakota, Tennessee, the New York
+  Thruway (a partial-NY, incidents-only source — statewide NY cameras remain key-gated), Maine,
+  New Hampshire, Vermont (via a shared New England "Compass" portal), Minnesota, Nebraska, and Iowa
+  (via the shared CARS511 feed), and Queensland Australia.** Arizona, Nevada, Utah, Oklahoma,
+  Hawaii, and Idaho surface construction/work-zone events (not crash-style incidents) via the
+  federally-standardized WZDx format, which several state DOTs publish for free even when their own
+  camera API is key-gated. Other states publish similar open data, but each one needs its own
   verified integration — not yet built.
 - **No historical storm-damage layer.** The alerts layer shows currently active severe weather in
   real time; a separate "what actually got damaged after the fact" dataset exists (NOAA's Storm

@@ -412,12 +412,218 @@ public static class DependencyInjection
             sp.GetRequiredService<IHttpClientFactory>().CreateClient("cars511"),
             sp.GetRequiredService<IMemoryCache>(),
             sp.GetRequiredService<ILogger<Cars511IncidentProvider>>(),
-            stateCode: "MN", sourceName: "511MN", sourceAttributionUrl: "https://511mn.org"));
+            layerName: "CARS511_MN_Events_View", stateCode: "MN", sourceName: "511MN", sourceAttributionUrl: "https://511mn.org"));
         services.AddScoped<ITrafficIncidentProvider>(sp => new Cars511IncidentProvider(
             sp.GetRequiredService<IHttpClientFactory>().CreateClient("cars511"),
             sp.GetRequiredService<IMemoryCache>(),
             sp.GetRequiredService<ILogger<Cars511IncidentProvider>>(),
-            stateCode: "NE", sourceName: "511NE", sourceAttributionUrl: "https://511.nebraska.gov"));
+            layerName: "CARS511_NE_Events_View", stateCode: "NE", sourceName: "511NE", sourceAttributionUrl: "https://511.nebraska.gov"));
+        // Iowa's own layer on the same shared org uses the full state name, not a 2-letter code
+        // (confirmed live via this org's full service catalog) - a real naming inconsistency, not
+        // a typo, which is why layerName is passed explicitly rather than derived from stateCode.
+        services.AddScoped<ITrafficIncidentProvider>(sp => new Cars511IncidentProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("cars511"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<Cars511IncidentProvider>>(),
+            layerName: "CARS511_Iowa_View", stateCode: "IA", sourceName: "511IA", sourceAttributionUrl: "https://511ia.org"));
+
+        // Second nationwide/worldwide coverage expansion batch (2026-09-27) - every source below
+        // is genuinely free with no API key, confirmed directly against each live endpoint by a
+        // parallel research sweep before being built. See the Overwatch master plan
+        // (.claude/plans - "Workstream A") for the full research trail, confirmed leads, and
+        // documented exclusions (key-gated and dead-end states) this batch is based on.
+        services.AddHttpClient<DelawareDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://enterprise.firstmaptest.delaware.gov/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<DelawareDotCameraProvider>());
+        services.AddHttpClient<MarylandDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://mdgeodata.md.gov/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<MarylandDotCameraProvider>());
+        services.AddHttpClient<RhodeIslandDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://risegis.ri.gov/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<RhodeIslandDotCameraProvider>());
+        services.AddHttpClient<VirginiaDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://services.arcgis.com/hRUr1F8lE8Jq2uJo/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<VirginiaDotCameraProvider>());
+        services.AddHttpClient<KentuckyDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://kygisserver.ky.gov/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<KentuckyDotCameraProvider>());
+        services.AddHttpClient<SouthCarolinaDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://sc.cdn.iteris-atis.com/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<SouthCarolinaDotCameraProvider>());
+        services.AddHttpClient<MissouriDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://mapping.modot.org/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<MissouriDotCameraProvider>());
+        services.AddHttpClient<MissouriDotIncidentProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://mapping.modot.org/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ITrafficIncidentProvider>(sp => sp.GetRequiredService<MissouriDotIncidentProvider>());
+        services.AddHttpClient<MichiganDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://services2.arcgis.com/67lKNkQ2TO1I3lhR/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<MichiganDotCameraProvider>());
+        services.AddHttpClient<NorthDakotaDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://travelfiles.dot.nd.gov/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<NorthDakotaDotCameraProvider>());
+        services.AddHttpClient<NorthDakotaDotIncidentProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://travelfiles.dot.nd.gov/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ITrafficIncidentProvider>(sp => sp.GetRequiredService<NorthDakotaDotIncidentProvider>());
+        services.AddHttpClient<ColoradoDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://services.arcgis.com/DO4gTjwJVIJ7O9Ca/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<ColoradoDotCameraProvider>());
+        services.AddHttpClient<HawaiiDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://services.arcgis.com/6I1ysurtNWNxkuwd/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<HawaiiDotCameraProvider>());
+        services.AddHttpClient<TexasDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://services7.arcgis.com/bF49JeI2xZRhCsD9/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<TexasDotCameraProvider>());
+        services.AddHttpClient<AlabamaDotCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.algotraffic.com/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<AlabamaDotCameraProvider>());
+        services.AddHttpClient<TennesseeDotIncidentProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://spatial.tdot.tn.gov/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ITrafficIncidentProvider>(sp => sp.GetRequiredService<TennesseeDotIncidentProvider>());
+        services.AddHttpClient<NewYorkThruwayIncidentProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://webdataapi.thruway.ny.gov/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ITrafficIncidentProvider>(sp => sp.GetRequiredService<NewYorkThruwayIncidentProvider>());
+
+        // New England Compass (Maine/New Hampshire/Vermont incidents) - same shared-HttpClient +
+        // per-state-factory pattern as CARS511 above; only incidents are built from this portal
+        // (see NewEnglandCompassIncidentProvider's own doc comment for why cameras aren't).
+        services.AddHttpClient("necompass", client =>
+        {
+            client.BaseAddress = new Uri("https://nec-por.ne-compass.com/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ITrafficIncidentProvider>(sp => new NewEnglandCompassIncidentProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("necompass"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<NewEnglandCompassIncidentProvider>>(),
+            network: "Maine", sourceName: "511ME", sourceAttributionUrl: "https://newengland511.org"));
+        services.AddScoped<ITrafficIncidentProvider>(sp => new NewEnglandCompassIncidentProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("necompass"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<NewEnglandCompassIncidentProvider>>(),
+            network: "NewHampshire", sourceName: "511NH", sourceAttributionUrl: "https://newengland511.org"));
+        services.AddScoped<ITrafficIncidentProvider>(sp => new NewEnglandCompassIncidentProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("necompass"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<NewEnglandCompassIncidentProvider>>(),
+            network: "Vermont", sourceName: "511VT", sourceAttributionUrl: "https://newengland511.org"));
+
+        // WZDx (Work Zone Data Exchange, a federal standard) - one shared, BaseAddress-less named
+        // HttpClient since each state's feed lives on a completely different domain and this
+        // provider is always called with a full absolute feed URL (GetFromJsonAsync supports an
+        // absolute URI with no BaseAddress set). Per an explicit decision, these work-zone events
+        // are surfaced as regular Overwatch incidents.
+        services.AddHttpClient("wzdx", client => client.Timeout = TimeSpan.FromSeconds(20));
+        services.AddScoped<ITrafficIncidentProvider>(sp => new WzdxIncidentProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("wzdx"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<WzdxIncidentProvider>>(),
+            feedUrl: "https://az511.gov/api/wzdx", sourceKey: "az", sourceName: "AZ511 WZDx", sourceAttributionUrl: "https://az511.gov"));
+        services.AddScoped<ITrafficIncidentProvider>(sp => new WzdxIncidentProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("wzdx"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<WzdxIncidentProvider>>(),
+            feedUrl: "https://www.nvroads.com/api/wzdx", sourceKey: "nv", sourceName: "NVRoads WZDx", sourceAttributionUrl: "https://nvroads.com"));
+        services.AddScoped<ITrafficIncidentProvider>(sp => new WzdxIncidentProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("wzdx"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<WzdxIncidentProvider>>(),
+            feedUrl: "https://udottraffic.utah.gov/wzdx/udot/v40/data", sourceKey: "ut", sourceName: "UDOT WZDx", sourceAttributionUrl: "https://udottraffic.utah.gov"));
+        services.AddScoped<ITrafficIncidentProvider>(sp => new WzdxIncidentProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("wzdx"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<WzdxIncidentProvider>>(),
+            feedUrl: "https://oktraffic.org/api/Geojsons/workzones?&access_token=feOPynfHRJ5sdx8tf3IN5yOsGz89TAUuzHsN3V0jo1Fg41LcpoLhIRltaTPmDngD",
+            sourceKey: "ok", sourceName: "OK Traffic WZDx", sourceAttributionUrl: "https://oktraffic.org"));
+        services.AddScoped<ITrafficIncidentProvider>(sp => new WzdxIncidentProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("wzdx"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<WzdxIncidentProvider>>(),
+            feedUrl: "https://ai.blyncsy.io/wzdx/hidot/feed", sourceKey: "hi", sourceName: "HDOT WZDx", sourceAttributionUrl: "https://hidot.hawaii.gov"));
+        services.AddScoped<ITrafficIncidentProvider>(sp => new WzdxIncidentProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("wzdx"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<WzdxIncidentProvider>>(),
+            feedUrl: "https://511.idaho.gov/api/wzdx", sourceKey: "id", sourceName: "Idaho 511 WZDx", sourceAttributionUrl: "https://511.idaho.gov"));
+
+        // International cameras.
+        services.AddHttpClient<DriveBcCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://catalogue.data.gov.bc.ca/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<DriveBcCameraProvider>());
+        services.AddHttpClient<MadridCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://informo.madrid.es/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<MadridCameraProvider>());
+        // Fintraffic's Digitraffic API returns HTTP 406 without an explicit Accept-Encoding: gzip
+        // request header (confirmed live) - AutomaticDecompression is enabled on this client's own
+        // handler so the gzip response body is still transparently decoded back to plain JSON.
+        services.AddHttpClient<FinlandCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://tie.digitraffic.fi/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.AcceptEncoding.Add(new System.Net.Http.Headers.StringWithQualityHeaderValue("gzip"));
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            AutomaticDecompression = System.Net.DecompressionMethods.GZip
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<FinlandCameraProvider>());
+
         services.AddScoped<TrafficIncidentDirectoryService>();
         services.AddScoped<CameraDirectoryService>();
         // Overpass + Wikimedia Commons - both called via a plain IHttpClientFactory.CreateClient()

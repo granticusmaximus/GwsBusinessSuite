@@ -90,7 +90,8 @@ public sealed class Cars511IncidentProviderTests
         {
             BaseAddress = new Uri("https://services.arcgis.com/8lRhdTsQyJpO52F1/")
         };
-        return new Cars511IncidentProvider(http, new MemoryCache(new MemoryCacheOptions()), NullLogger<Cars511IncidentProvider>.Instance, stateCode, sourceName, sourceAttributionUrl);
+        return new Cars511IncidentProvider(http, new MemoryCache(new MemoryCacheOptions()), NullLogger<Cars511IncidentProvider>.Instance,
+            layerName: $"CARS511_{stateCode}_Events_View", stateCode, sourceName, sourceAttributionUrl);
     }
 
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory) : HttpMessageHandler

@@ -27,6 +27,32 @@ public sealed class CameraCoverageRegionsTests
         names.Should().Contain(n => n.Contains("Nebraska"));
         names.Should().Contain(n => n.Contains("New Zealand"));
         names.Should().Contain(n => n.Contains("Queensland"));
+        names.Should().Contain(n => n.Contains("Delaware"));
+        names.Should().Contain(n => n.Contains("Maryland"));
+        names.Should().Contain(n => n.Contains("Rhode Island"));
+        names.Should().Contain(n => n.Contains("Virginia"));
+        names.Should().Contain(n => n.Contains("Kentucky"));
+        names.Should().Contain(n => n.Contains("South Carolina"));
+        names.Should().Contain(n => n.Contains("Missouri"));
+        names.Should().Contain(n => n.Contains("Michigan"));
+        names.Should().Contain(n => n.Contains("North Dakota"));
+        names.Should().Contain(n => n.Contains("Colorado"));
+        names.Should().Contain(n => n.Contains("Hawaii"));
+        names.Should().Contain(n => n.Contains("Texas"));
+        names.Should().Contain(n => n.Contains("Alabama"));
+        names.Should().Contain(n => n.Contains("Tennessee"));
+        names.Should().Contain(n => n.Contains("New York Thruway"));
+        names.Should().Contain(n => n.Contains("Maine"));
+        names.Should().Contain(n => n.Contains("New Hampshire"));
+        names.Should().Contain(n => n.Contains("Vermont"));
+        names.Should().Contain(n => n.Contains("Arizona"));
+        names.Should().Contain(n => n.Contains("Nevada"));
+        names.Should().Contain(n => n.Contains("Utah"));
+        names.Should().Contain(n => n.Contains("Oklahoma"));
+        names.Should().Contain(n => n.Contains("Idaho"));
+        names.Should().Contain(n => n.Contains("British Columbia"));
+        names.Should().Contain(n => n.Contains("Madrid"));
+        names.Should().Contain(n => n.Contains("Finland"));
     }
 
     [Fact]
