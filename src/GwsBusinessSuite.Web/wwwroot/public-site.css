@@ -1116,6 +1116,33 @@ a { color: inherit; }
   font-size: 2rem; line-height: 1; cursor: pointer;
 }
 
+/* Workstream C, Tier 3 (carousel / testimonial slider) - shared shell for both widget types;
+   only .gws-carousel-content vs .gws-carousel-testimonial differ per-widget. */
+.gws-carousel { position: relative; padding-block: 1rem; }
+.gws-carousel-track { position: relative; min-height: 1px; }
+.gws-carousel-slide { display: none; text-align: center; }
+.gws-carousel-slide.is-active { display: block; }
+.gws-carousel-img { display: block; max-width: 100%; max-height: 360px; margin: 0 auto 1.5rem; border-radius: var(--radius); object-fit: cover; }
+.gws-carousel-content { max-width: 680px; margin-inline: auto; }
+.gws-carousel-title { font-family: var(--font-serif); font-weight: 700; font-size: 1.6rem; color: var(--text-1); margin-bottom: 0.6rem; }
+.gws-carousel-body { color: var(--text-2); margin-bottom: 1.25rem; }
+.gws-carousel-arrow {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 1;
+  width: 2.5rem; height: 2.5rem; border-radius: 50%; border: 1px solid var(--border);
+  background: var(--bg-surface); color: var(--text-1); font-size: 1.5rem; line-height: 1; cursor: pointer;
+}
+.gws-carousel-prev { left: -0.75rem; }
+.gws-carousel-next { right: -0.75rem; }
+.gws-carousel-dots { display: flex; justify-content: center; gap: 0.5rem; margin-top: 1.25rem; }
+.gws-carousel-dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; border: none; background: var(--border); cursor: pointer; padding: 0; }
+.gws-carousel-dot.is-active { background: var(--accent); }
+.gws-carousel-testimonial { max-width: 680px; margin-inline: auto; border: none; padding: 0; }
+.gws-carousel-testimonial-quote { font-family: var(--font-serif); font-size: 1.4rem; font-style: italic; color: var(--text-1); margin-bottom: 1.25rem; }
+.gws-carousel-testimonial-author { display: flex; gap: 0.75rem; align-items: center; justify-content: center; }
+.gws-carousel-testimonial-avatar { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; }
+.gws-carousel-testimonial-name { font-weight: 700; color: var(--text-1); display: block; }
+.gws-carousel-testimonial-role { color: var(--text-3); font-size: 0.9rem; }
+
 .gws-callout { display: flex; gap: 0.85rem; padding: 1.1rem 1.25rem; border-radius: var(--radius); border: 1px solid var(--border); border-left-width: 4px; background: var(--bg-surface); }
 .gws-callout-icon { font-size: 1.15rem; line-height: 1.5; flex-shrink: 0; }
 .gws-callout-title { font-family: var(--font-serif); font-weight: 700; color: var(--text-1); margin-bottom: 0.25rem; }

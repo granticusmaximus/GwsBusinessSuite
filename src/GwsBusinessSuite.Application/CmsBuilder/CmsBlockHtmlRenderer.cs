@@ -88,6 +88,13 @@ public static class CmsBlockHtmlRenderer
     public static bool LayoutContainsGallery(PageLayout? layout) =>
         layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "gallery")));
 
+    // Workstream C, Tier 3 (carousel / testimonial slider) - both widget types render into the
+    // identical .gws-carousel DOM shell (see RenderCarousel/RenderTestimonialSlider) and share
+    // ONE runtime script, so one guard covers both rather than two near-duplicate guards each
+    // gating the same script.
+    public static bool LayoutContainsCarousel(PageLayout? layout) =>
+        layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType is "carousel" or "testimonial-slider")));
+
     // A short single-line preview of a widget's content, used by the structural revision diff
     // (PageRevisionService.BuildStructuralDiff) - never HTML, just text. Mirrors
     // WikiBlockHtmlRenderer.PlainTextPreview's role for wiki blocks.
@@ -124,6 +131,8 @@ public static class CmsBlockHtmlRenderer
             "tabs" => "[tabs]",
             "pricing-table" => "[pricing table]",
             "gallery" => "[gallery]",
+            "carousel" => "[carousel]",
+            "testimonial-slider" => "[testimonial slider]",
             _ => string.Empty
         };
         text = text.Replace('\n', ' ').Trim();
@@ -818,6 +827,37 @@ public static class CmsBlockHtmlRenderer
         </script>
         """;
 
+    // Workstream C, Tier 3 (carousel / testimonial slider) - same no-op-when-absent pattern as
+    // the other runtime scripts. Shared by both widget types since they render into the
+    // identical DOM shell (see WrapCarouselSlides) - one script, two content shapes.
+    public static string BuildCarouselRuntimeScript() => """
+        <script>
+        (function () {
+          var carousels = document.querySelectorAll('[data-gws-carousel]');
+          if (!carousels.length) return;
+
+          carousels.forEach(function (carousel) {
+            var slides = carousel.querySelectorAll('.gws-carousel-slide');
+            var dots = carousel.querySelectorAll('.gws-carousel-dot');
+            if (slides.length < 2) return;
+            var current = 0;
+
+            function show(index) {
+              current = (index + slides.length) % slides.length;
+              slides.forEach(function (s, i) { s.classList.toggle('is-active', i === current); });
+              dots.forEach(function (d, i) { d.classList.toggle('is-active', i === current); });
+            }
+
+            var prevBtn = carousel.querySelector('.gws-carousel-prev');
+            var nextBtn = carousel.querySelector('.gws-carousel-next');
+            if (prevBtn) prevBtn.addEventListener('click', function () { show(current - 1); });
+            if (nextBtn) nextBtn.addEventListener('click', function () { show(current + 1); });
+            dots.forEach(function (dot, i) { dot.addEventListener('click', function () { show(i); }); });
+          });
+        })();
+        </script>
+        """;
+
     private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug, DesignTokenSet? tokens = null)
     {
         var p = widget.Props;
@@ -887,6 +927,8 @@ public static class CmsBlockHtmlRenderer
             "tabs" => RenderTabs(p, editMode),
             "pricing-table" => RenderPricingTable(p, editMode),
             "gallery" => RenderGallery(p, editMode),
+            "carousel" => RenderCarousel(p, editMode),
+            "testimonial-slider" => RenderTestimonialSlider(p, editMode),
             _ => string.Empty
         };
     }
@@ -1213,6 +1255,123 @@ public static class CmsBlockHtmlRenderer
             }
             sb.Append("</div>");
             return sb.ToString();
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    // Workstream C, Tier 3 (carousel / testimonial slider) - both widget types share this exact
+    // DOM shell (slides + prev/next arrows + dot indicators) and BuildCarouselRuntimeScript's
+    // single click-driven nav logic; only the per-slide inner content differs between
+    // RenderCarousel and RenderTestimonialSlider below. Arrows/dots are omitted entirely for a
+    // single-slide carousel - there's nothing to navigate to.
+    private static string WrapCarouselSlides(List<string> slides)
+    {
+        if (slides.Count == 0) return string.Empty;
+
+        var slideHtml = new StringBuilder();
+        for (var i = 0; i < slides.Count; i++)
+        {
+            slideHtml.Append($"""<div class="gws-carousel-slide{(i == 0 ? " is-active" : "")}">{slides[i]}</div>""");
+        }
+
+        if (slides.Count == 1)
+        {
+            return $"""<div class="gws-carousel" data-gws-carousel><div class="gws-carousel-track">{slideHtml}</div></div>""";
+        }
+
+        var dots = new StringBuilder();
+        for (var i = 0; i < slides.Count; i++)
+        {
+            dots.Append($"""<button type="button" class="gws-carousel-dot{(i == 0 ? " is-active" : "")}" data-gws-carousel-index="{i}" aria-label="Go to slide {i + 1}"></button>""");
+        }
+
+        return $"""
+            <div class="gws-carousel" data-gws-carousel>
+              <div class="gws-carousel-track">{slideHtml}</div>
+              <button type="button" class="gws-carousel-arrow gws-carousel-prev" aria-label="Previous slide">&lsaquo;</button>
+              <button type="button" class="gws-carousel-arrow gws-carousel-next" aria-label="Next slide">&rsaquo;</button>
+              <div class="gws-carousel-dots">{dots}</div>
+            </div>
+            """;
+    }
+
+    private static string RenderCarousel(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var itemsJson = Get(p, "itemsJson");
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson) as JsonArray;
+            if (node is null || node.Count == 0) return string.Empty;
+
+            var slides = new List<string>();
+            var index = -1;
+            foreach (var item in node.OfType<JsonObject>())
+            {
+                index++;
+                var imageUrl = item["imageUrl"]?.GetValue<string>() ?? string.Empty;
+                var title = item["title"]?.GetValue<string>() ?? string.Empty;
+                var body = item["body"]?.GetValue<string>() ?? string.Empty;
+                var buttonLabel = item["buttonLabel"]?.GetValue<string>() ?? string.Empty;
+                var buttonHref = item["buttonHref"]?.GetValue<string>() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(imageUrl)) continue;
+
+                slides.Add($"""
+                    {(!string.IsNullOrWhiteSpace(imageUrl) ? $"""<img src="{Html(imageUrl)}" alt="{Html(title)}" class="gws-carousel-img" />""" : "")}
+                    <div class="gws-carousel-content">
+                      {(!string.IsNullOrWhiteSpace(title) ? $"""<div class="gws-carousel-title"{InlineEditAttrs(editMode, $"itemsJson[{index}].title")}>{Html(title)}</div>""" : "")}
+                      {(!string.IsNullOrWhiteSpace(body) ? $"""<div class="gws-carousel-body"{InlineRichAttrs(editMode, $"itemsJson[{index}].body", body)}>{Markdown.ToHtml(body, MarkdownPipeline)}</div>""" : "")}
+                      {(!string.IsNullOrWhiteSpace(buttonLabel) ? $"""<a href="{Html(HrefOrHash(buttonHref))}" class="btn btn-primary">{Html(buttonLabel)}</a>""" : "")}
+                    </div>
+                    """);
+            }
+            return WrapCarouselSlides(slides);
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
+    // Reuses the identical carousel shell/script as RenderCarousel above - the interactive-
+    // slider variant of the existing static "testimonial-row" section template (per the master
+    // plan: "reusing the TOC/reading-progress precedent for a lightweight inline script rather
+    // than a JS library dependency").
+    private static string RenderTestimonialSlider(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var itemsJson = Get(p, "itemsJson");
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson) as JsonArray;
+            if (node is null || node.Count == 0) return string.Empty;
+
+            var slides = new List<string>();
+            var index = -1;
+            foreach (var item in node.OfType<JsonObject>())
+            {
+                index++;
+                var quote = item["quote"]?.GetValue<string>() ?? string.Empty;
+                var authorName = item["authorName"]?.GetValue<string>() ?? string.Empty;
+                var authorRole = item["authorRole"]?.GetValue<string>() ?? string.Empty;
+                var avatarUrl = item["avatarUrl"]?.GetValue<string>() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(quote)) continue;
+
+                slides.Add($"""
+                    <blockquote class="gws-carousel-testimonial">
+                      <div class="gws-carousel-testimonial-quote"{InlineRichAttrs(editMode, $"itemsJson[{index}].quote", quote)}>{Markdown.ToHtml(quote, MarkdownPipeline)}</div>
+                      <footer class="gws-carousel-testimonial-author">
+                        {(!string.IsNullOrWhiteSpace(avatarUrl) ? $"""<img src="{Html(avatarUrl)}" alt="{Html(authorName)}" class="gws-carousel-testimonial-avatar" />""" : "")}
+                        <div>
+                          <span class="gws-carousel-testimonial-name"{InlineEditAttrs(editMode, $"itemsJson[{index}].authorName")}>{Html(authorName)}</span>
+                          {(!string.IsNullOrWhiteSpace(authorRole) ? $"""<span class="gws-carousel-testimonial-role"{InlineEditAttrs(editMode, $"itemsJson[{index}].authorRole")}>{Html(authorRole)}</span>""" : "")}
+                        </div>
+                      </footer>
+                    </blockquote>
+                    """);
+            }
+            return WrapCarouselSlides(slides);
         }
         catch
         {

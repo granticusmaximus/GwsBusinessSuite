@@ -1522,6 +1522,90 @@ else
                                 }
                             </div>
                         }
+                        else if (selWidget.WidgetType == "carousel")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Slides
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddCarouselItem(selWidget)">
+                                        <i class="bi bi-plus-lg"></i> Add slide
+                                    </button>
+                                </label>
+                                @{ var carouselItems = GetCarouselItems(selWidget); }
+                                @if (carouselItems.Count == 0)
+                                {
+                                    <p class="small text-secondary mb-0">No slides yet — click "Add slide" to build this carousel.</p>
+                                }
+                                else
+                                {
+                                    @for (var i = 0; i < carouselItems.Count; i++)
+                                    {
+                                        var index = i;
+                                        var item = carouselItems[index];
+                                        <div class="studio-form-field-editor">
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Title" value="@item.Title"
+                                                       @oninput="(e) => UpdateCarouselItem(selWidget, index, i => i with { Title = e.Value?.ToString() ?? string.Empty })" />
+                                                <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" @onclick="() => RemoveCarouselItem(selWidget, index)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                            <input class="form-control form-control-sm mb-2 font-monospace" placeholder="Image URL (optional)" value="@item.ImageUrl"
+                                                   @oninput="(e) => UpdateCarouselItem(selWidget, index, i => i with { ImageUrl = e.Value?.ToString() ?? string.Empty })" />
+                                            <textarea class="form-control form-control-sm mb-2" rows="2" placeholder="Body text (optional)"
+                                                      @oninput="(e) => UpdateCarouselItem(selWidget, index, i => i with { Body = e.Value?.ToString() ?? string.Empty })">@item.Body</textarea>
+                                            <div class="d-flex gap-2">
+                                                <input class="form-control form-control-sm" placeholder="Button label (optional)" value="@item.ButtonLabel"
+                                                       @oninput="(e) => UpdateCarouselItem(selWidget, index, i => i with { ButtonLabel = e.Value?.ToString() ?? string.Empty })" />
+                                                <input class="form-control form-control-sm font-monospace" placeholder="Button URL" value="@item.ButtonHref"
+                                                       @oninput="(e) => UpdateCarouselItem(selWidget, index, i => i with { ButtonHref = e.Value?.ToString() ?? string.Empty })" />
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "testimonial-slider")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Testimonials
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddTestimonialSliderItem(selWidget)">
+                                        <i class="bi bi-plus-lg"></i> Add testimonial
+                                    </button>
+                                </label>
+                                @{ var testimonialItems = GetTestimonialSliderItems(selWidget); }
+                                @if (testimonialItems.Count == 0)
+                                {
+                                    <p class="small text-secondary mb-0">No testimonials yet — click "Add testimonial" to build this slider.</p>
+                                }
+                                else
+                                {
+                                    @for (var i = 0; i < testimonialItems.Count; i++)
+                                    {
+                                        var index = i;
+                                        var item = testimonialItems[index];
+                                        <div class="studio-form-field-editor">
+                                            <div class="d-flex gap-2 mb-2">
+                                                <textarea class="form-control form-control-sm" rows="2" placeholder="Quote"
+                                                          @oninput="(e) => UpdateTestimonialSliderItem(selWidget, index, i => i with { Quote = e.Value?.ToString() ?? string.Empty })">@item.Quote</textarea>
+                                                <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" @onclick="() => RemoveTestimonialSliderItem(selWidget, index)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Author name" value="@item.AuthorName"
+                                                       @oninput="(e) => UpdateTestimonialSliderItem(selWidget, index, i => i with { AuthorName = e.Value?.ToString() ?? string.Empty })" />
+                                                <input class="form-control form-control-sm" placeholder="Author role" value="@item.AuthorRole"
+                                                       @oninput="(e) => UpdateTestimonialSliderItem(selWidget, index, i => i with { AuthorRole = e.Value?.ToString() ?? string.Empty })" />
+                                            </div>
+                                            <input class="form-control form-control-sm font-monospace" placeholder="Avatar URL (optional)" value="@item.AvatarUrl"
+                                                   @oninput="(e) => UpdateTestimonialSliderItem(selWidget, index, i => i with { AvatarUrl = e.Value?.ToString() ?? string.Empty })" />
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        }
                         else if (selWidget.WidgetType == "form")
                         {
                             <div>
@@ -2281,6 +2365,8 @@ else
         new("tabs",        "bi bi-folder2-open",            "Tabs",        "A tabbed container of Markdown content", GroupLayout),
         new("pricing-table", "bi bi-credit-card",           "Pricing Table", "Plan cards with a monthly/yearly toggle", GroupDynamic),
         new("gallery",     "bi bi-images",                 "Gallery",     "An image grid with a click-to-enlarge lightbox", GroupMedia),
+        new("carousel",    "bi bi-arrow-left-right",       "Carousel",    "A sliding sequence of images/content",GroupMedia),
+        new("testimonial-slider", "bi bi-chat-square-quote", "Testimonial Slider", "A sliding sequence of customer quotes", GroupMedia),
         new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block",                      GroupAdvanced),
     ];
 
@@ -4717,6 +4803,124 @@ else
         SaveGalleryItems(widget, items, forceNewUndoStep: true);
     }
 
+    // ── Carousel slides ──────────────────────────────────────────────────
+    private sealed record CarouselSlideDef(string ImageUrl, string Title, string Body, string ButtonLabel, string ButtonHref);
+
+    private static List<CarouselSlideDef> GetCarouselItems(LayoutWidget widget)
+    {
+        try
+        {
+            var raw = GetProp(widget, "itemsJson");
+            if (string.IsNullOrWhiteSpace(raw)) return [];
+
+            var parsed = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(raw);
+            if (parsed is null) return [];
+
+            return parsed.Select(i => new CarouselSlideDef(
+                i.TryGetValue("imageUrl", out var u) ? u.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("title", out var t) ? t.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("body", out var b) ? b.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("buttonLabel", out var bl) ? bl.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("buttonHref", out var bh) ? bh.GetString() ?? string.Empty : string.Empty
+            )).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void SaveCarouselItems(LayoutWidget widget, List<CarouselSlideDef> items, bool forceNewUndoStep = false)
+    {
+        var json = JsonSerializer.Serialize(items.Select(i => new
+        {
+            imageUrl = i.ImageUrl, title = i.Title, body = i.Body, buttonLabel = i.ButtonLabel, buttonHref = i.ButtonHref
+        }));
+        SetProp(widget, "itemsJson", json, forceNewUndoStep);
+    }
+
+    private void AddCarouselItem(LayoutWidget widget)
+    {
+        var items = GetCarouselItems(widget);
+        var n = items.Count + 1;
+        items.Add(new CarouselSlideDef("", $"Slide {n}", "Describe this slide.", "", "#"));
+        SaveCarouselItems(widget, items, forceNewUndoStep: true);
+    }
+
+    private void UpdateCarouselItem(LayoutWidget widget, int index, Func<CarouselSlideDef, CarouselSlideDef> update)
+    {
+        var items = GetCarouselItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items[index] = update(items[index]);
+        SaveCarouselItems(widget, items);
+    }
+
+    private void RemoveCarouselItem(LayoutWidget widget, int index)
+    {
+        var items = GetCarouselItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
+        SaveCarouselItems(widget, items, forceNewUndoStep: true);
+    }
+
+    // ── Testimonial slider items ─────────────────────────────────────────
+    private sealed record TestimonialSlideDef(string Quote, string AuthorName, string AuthorRole, string AvatarUrl);
+
+    private static List<TestimonialSlideDef> GetTestimonialSliderItems(LayoutWidget widget)
+    {
+        try
+        {
+            var raw = GetProp(widget, "itemsJson");
+            if (string.IsNullOrWhiteSpace(raw)) return [];
+
+            var parsed = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(raw);
+            if (parsed is null) return [];
+
+            return parsed.Select(i => new TestimonialSlideDef(
+                i.TryGetValue("quote", out var q) ? q.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("authorName", out var n) ? n.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("authorRole", out var r) ? r.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("avatarUrl", out var a) ? a.GetString() ?? string.Empty : string.Empty
+            )).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void SaveTestimonialSliderItems(LayoutWidget widget, List<TestimonialSlideDef> items, bool forceNewUndoStep = false)
+    {
+        var json = JsonSerializer.Serialize(items.Select(i => new
+        {
+            quote = i.Quote, authorName = i.AuthorName, authorRole = i.AuthorRole, avatarUrl = i.AvatarUrl
+        }));
+        SetProp(widget, "itemsJson", json, forceNewUndoStep);
+    }
+
+    private void AddTestimonialSliderItem(LayoutWidget widget)
+    {
+        var items = GetTestimonialSliderItems(widget);
+        items.Add(new TestimonialSlideDef("A new testimonial.", "Customer Name", "", ""));
+        SaveTestimonialSliderItems(widget, items, forceNewUndoStep: true);
+    }
+
+    private void UpdateTestimonialSliderItem(LayoutWidget widget, int index, Func<TestimonialSlideDef, TestimonialSlideDef> update)
+    {
+        var items = GetTestimonialSliderItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items[index] = update(items[index]);
+        SaveTestimonialSliderItems(widget, items);
+    }
+
+    private void RemoveTestimonialSliderItem(LayoutWidget widget, int index)
+    {
+        var items = GetTestimonialSliderItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
+        SaveTestimonialSliderItems(widget, items, forceNewUndoStep: true);
+    }
+
     // ── Media library picker ────────────────────────────────────────────────
     private bool _showMediaPicker;
     private string _mediaPickerError = string.Empty;
@@ -4784,6 +4988,8 @@ else
         "tabs" => new() { WidgetType = "tabs", Props = new() { ["itemsJson"] = """[{"label":"Tab one","content":"Content for the first tab."},{"label":"Tab two","content":"Content for the second tab."}]""" } },
         "pricing-table" => new() { WidgetType = "pricing-table", Props = new() { ["yearlyDiscountLabel"] = "Save ~15%", ["itemsJson"] = """[{"name":"Starter","monthlyPrice":"$9/mo","yearlyPrice":"$90/yr","features":"1 project\nEmail support","ctaLabel":"Choose plan","ctaHref":"#","highlighted":false},{"name":"Pro","monthlyPrice":"$29/mo","yearlyPrice":"$290/yr","features":"Unlimited projects\nPriority support","ctaLabel":"Choose plan","ctaHref":"#","highlighted":true}]""" } },
         "gallery" => new() { WidgetType = "gallery", Props = new() { ["columns"] = "3", ["itemsJson"] = "[]" } },
+        "carousel" => new() { WidgetType = "carousel", Props = new() { ["itemsJson"] = """[{"imageUrl":"","title":"Slide one","body":"Describe this slide.","buttonLabel":"","buttonHref":"#"},{"imageUrl":"","title":"Slide two","body":"Describe this slide.","buttonLabel":"","buttonHref":"#"}]""" } },
+        "testimonial-slider" => new() { WidgetType = "testimonial-slider", Props = new() { ["itemsJson"] = """[{"quote":"This product changed how we work.","authorName":"Alex Rivera","authorRole":"Operations Lead","avatarUrl":""},{"quote":"Support has been fantastic from day one.","authorName":"Jordan Lee","authorRole":"Customer","avatarUrl":""}]""" } },
         _           => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Content", ["align"] = "left" } }
     };
 
@@ -4841,6 +5047,8 @@ else
         "tabs"        => "Tabs",
         "pricing-table" => "Pricing Table",
         "gallery"     => "Gallery",
+        "carousel"    => "Carousel",
+        "testimonial-slider" => "Testimonial Slider",
         _             => type
     };
 
@@ -4882,6 +5090,8 @@ else
         "tabs"        => "bi bi-folder2-open",
         "pricing-table" => "bi bi-credit-card",
         "gallery"     => "bi bi-images",
+        "carousel"    => "bi bi-arrow-left-right",
+        "testimonial-slider" => "bi bi-chat-square-quote",
         _             => "bi bi-square"
     };
 
@@ -4916,6 +5126,8 @@ else
             "tabs"        => $"{GetTabsItems(w).Count} tab(s)",
             "pricing-table" => $"{GetPricingTableItems(w).Count} plan(s)",
             "gallery"     => $"{GetGalleryItems(w).Count} image(s)",
+            "carousel"    => $"{GetCarouselItems(w).Count} slide(s)",
+            "testimonial-slider" => $"{GetTestimonialSliderItems(w).Count} testimonial(s)",
             _             => w.WidgetType
         };
         return raw.Length <= 38 ? raw : raw[..38] + "…";

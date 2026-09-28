@@ -1961,6 +1961,131 @@ public sealed class CmsBlockHtmlRendererTests
         Assert.False(CmsBlockHtmlRenderer.LayoutContainsGallery(null));
     }
 
+    // ── Workstream C, Tier 3 (carousel) ──────────────────────────────────────
+
+    [Fact]
+    public void Render_ShouldRenderCarousel_WithArrowsAndDots_WhenMultipleSlides()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"carousel","props":{"itemsJson":"[{\"imageUrl\":\"/media/a.jpg\",\"title\":\"Slide A\",\"body\":\"Body A\",\"buttonLabel\":\"Learn more\",\"buttonHref\":\"/a\"},{\"imageUrl\":\"\",\"title\":\"Slide B\"}]"}}"""));
+
+        Assert.Contains("data-gws-carousel", html);
+        Assert.Contains("gws-carousel-slide is-active", html);
+        Assert.Contains("Slide A", html);
+        Assert.Contains("Body A", html);
+        Assert.Contains("href=\"/a\"", html);
+        Assert.Contains("Slide B", html);
+        Assert.Contains("gws-carousel-prev", html);
+        Assert.Contains("gws-carousel-next", html);
+        var dotCount = System.Text.RegularExpressions.Regex.Matches(html, "data-gws-carousel-index").Count;
+        Assert.Equal(2, dotCount);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitArrowsAndDots_ForCarousel_WithOnlyOneSlide()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"carousel","props":{"itemsJson":"[{\"title\":\"Only slide\"}]"}}"""));
+
+        Assert.DoesNotContain("gws-carousel-arrow", html);
+        Assert.DoesNotContain("gws-carousel-dots", html);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipCarouselSlidesWithNoTitleOrImage()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"carousel","props":{"itemsJson":"[{\"title\":\"\",\"body\":\"Skipped\"},{\"title\":\"Kept\"}]"}}"""));
+
+        Assert.DoesNotContain("Skipped", html);
+        Assert.Contains("Kept", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderNothingForCarousel_WithNoItems()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"carousel","props":{"itemsJson":"[]"}}"""));
+
+        Assert.DoesNotContain("gws-carousel", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribeCarouselWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "carousel" };
+
+        Assert.Equal("[carousel]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    // ── Workstream C, Tier 3 (testimonial slider) ────────────────────────────
+
+    [Fact]
+    public void Render_ShouldRenderTestimonialSlider_WithQuoteAuthorAndAvatar()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"testimonial-slider","props":{"itemsJson":"[{\"quote\":\"Great work.\",\"authorName\":\"Jane\",\"authorRole\":\"CEO\",\"avatarUrl\":\"/media/jane.jpg\"},{\"quote\":\"Loved it.\",\"authorName\":\"John\"}]"}}"""));
+
+        Assert.Contains("data-gws-carousel", html);
+        Assert.Contains("Great work.", html);
+        Assert.Contains("Jane", html);
+        Assert.Contains("CEO", html);
+        Assert.Contains("src=\"/media/jane.jpg\"", html);
+        Assert.Contains("Loved it.", html);
+        Assert.Contains("John", html);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipTestimonialSliderItemsWithNoQuote()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"testimonial-slider","props":{"itemsJson":"[{\"quote\":\"\",\"authorName\":\"Skipped\"},{\"quote\":\"Kept quote\",\"authorName\":\"Kept\"}]"}}"""));
+
+        Assert.DoesNotContain("Skipped", html);
+        Assert.Contains("Kept quote", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderNothingForTestimonialSlider_WithNoItems()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"testimonial-slider","props":{"itemsJson":"[]"}}"""));
+
+        Assert.DoesNotContain("gws-carousel", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribeTestimonialSliderWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "testimonial-slider" };
+
+        Assert.Equal("[testimonial slider]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    [Fact]
+    public void LayoutContainsCarousel_ShouldReturnTrue_ForEitherCarouselOrTestimonialSliderWidget()
+    {
+        var carouselLayout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"carousel","props":{}}"""));
+        var testimonialLayout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"testimonial-slider","props":{}}"""));
+
+        Assert.True(CmsBlockHtmlRenderer.LayoutContainsCarousel(carouselLayout));
+        Assert.True(CmsBlockHtmlRenderer.LayoutContainsCarousel(testimonialLayout));
+    }
+
+    [Fact]
+    public void LayoutContainsCarousel_ShouldReturnFalse_WhenNeitherWidgetIsPresent()
+    {
+        var layout = CmsBuilderJson.ParseLayout(Layout("""{"id":"w1","widgetType":"paragraph","props":{}}"""));
+
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsCarousel(layout));
+    }
+
+    [Fact]
+    public void LayoutContainsCarousel_ShouldReturnFalse_ForNullLayout()
+    {
+        Assert.False(CmsBlockHtmlRenderer.LayoutContainsCarousel(null));
+    }
+
     private static PageLayout ButtonLayout(string href) => new()
     {
         Sections =

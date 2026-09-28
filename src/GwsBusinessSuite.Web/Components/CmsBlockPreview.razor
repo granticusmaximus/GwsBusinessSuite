@@ -264,6 +264,19 @@ else
                 <span class="cms-block-chip">Gallery</span>
                 <div class="small text-secondary">@ParseGalleryItems(Get(p, "itemsJson")).Count image(s)</div>
                 break;
+            case "carousel":
+                <span class="cms-block-chip">Carousel</span>
+                <div class="cms-block-form-grid">
+                    @foreach (var slide in ParseCarouselItems(Get(p, "itemsJson")))
+                    {
+                        <div class="small text-secondary">@slide.Title</div>
+                    }
+                </div>
+                break;
+            case "testimonial-slider":
+                <span class="cms-block-chip">Testimonial Slider</span>
+                <div class="small text-secondary">@ParseTestimonialSliderItems(Get(p, "itemsJson")).Count testimonial(s)</div>
+                break;
             default:
                 <span class="cms-block-chip">Unknown widget</span>
                 <div class="small text-secondary mb-2">Widget type: @widget.WidgetType</div>
@@ -428,6 +441,45 @@ else
             return nodes.Select(i => new GalleryItemPreview(
                 i.TryGetValue("imageUrl", out var u) ? u.GetString() ?? string.Empty : string.Empty
             )).Where(i => !string.IsNullOrWhiteSpace(i.ImageUrl)).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private sealed record CarouselSlidePreview(string Title);
+    private sealed record TestimonialSlidePreview(string Quote);
+
+    private static List<CarouselSlidePreview> ParseCarouselItems(string itemsJson)
+    {
+        try
+        {
+            var nodes = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
+                string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson);
+            if (nodes is null) return [];
+
+            return nodes.Select(i => new CarouselSlidePreview(
+                i.TryGetValue("title", out var t) ? t.GetString() ?? string.Empty : string.Empty
+            )).Where(i => !string.IsNullOrWhiteSpace(i.Title)).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static List<TestimonialSlidePreview> ParseTestimonialSliderItems(string itemsJson)
+    {
+        try
+        {
+            var nodes = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
+                string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson);
+            if (nodes is null) return [];
+
+            return nodes.Select(i => new TestimonialSlidePreview(
+                i.TryGetValue("quote", out var q) ? q.GetString() ?? string.Empty : string.Empty
+            )).Where(i => !string.IsNullOrWhiteSpace(i.Quote)).ToList();
         }
         catch
         {
