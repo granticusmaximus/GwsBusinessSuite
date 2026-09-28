@@ -50,6 +50,9 @@ public static class CmsSectionTemplates
         return section;
     }
 
+    // Workstream C, Tier 2 - promoted to the first-class "cta-banner" widget type (was 3
+    // separate heading/paragraph/button widgets). Only affects NEW insertions of this template;
+    // any page that already has the old 3-widget composition keeps it, unchanged.
     private static LayoutSection CtaBanner()
     {
         var section = new LayoutSection { Label = "CTA banner", ColumnLayout = "full" };
@@ -62,18 +65,16 @@ public static class CmsSectionTemplates
                 [
                     new LayoutWidget
                     {
-                        WidgetType = "heading",
-                        Props = new Dictionary<string, string> { ["text"] = "Ready to get started?", ["level"] = "h2", ["align"] = "center" }
-                    },
-                    new LayoutWidget
-                    {
-                        WidgetType = "paragraph",
-                        Props = new Dictionary<string, string> { ["text"] = "Tell visitors what happens next and give them a clear next step.", ["align"] = "center" }
-                    },
-                    new LayoutWidget
-                    {
-                        WidgetType = "button",
-                        Props = new Dictionary<string, string> { ["label"] = "Get started", ["href"] = "#", ["variant"] = "primary", ["size"] = "lg", ["align"] = "center" }
+                        WidgetType = "cta-banner",
+                        Props = new Dictionary<string, string>
+                        {
+                            ["headline"] = "Ready to get started?",
+                            ["body"] = "Tell visitors what happens next and give them a clear next step.",
+                            ["buttonLabel"] = "Get started",
+                            ["buttonHref"] = "#",
+                            ["buttonVariant"] = "primary",
+                            ["align"] = "center"
+                        }
                     }
                 ]
             }
@@ -81,14 +82,25 @@ public static class CmsSectionTemplates
         return section;
     }
 
+    // Workstream C, Tier 2 - promoted to the first-class "team-grid" widget type (was 3
+    // separate Card widgets in 3 columns). Same non-breaking-for-existing-pages note as
+    // CtaBanner above.
     private static LayoutSection TeamGrid()
     {
-        var section = new LayoutSection { Label = "Team", ColumnLayout = "thirds" };
+        var section = new LayoutSection { Label = "Team", ColumnLayout = "full" };
+        var itemsJson = JsonSerializer.Serialize(new[]
+        {
+            new { name = "Jane Doe", role = "Role or title", photoUrl = "", linkedinUrl = "", twitterUrl = "", emailAddress = "" },
+            new { name = "John Smith", role = "Role or title", photoUrl = "", linkedinUrl = "", twitterUrl = "", emailAddress = "" },
+            new { name = "Alex Kim", role = "Role or title", photoUrl = "", linkedinUrl = "", twitterUrl = "", emailAddress = "" }
+        });
         section.Columns =
         [
-            OneWidgetColumn(4, Card("Jane Doe", "Role or title")),
-            OneWidgetColumn(4, Card("John Smith", "Role or title")),
-            OneWidgetColumn(4, Card("Alex Kim", "Role or title"))
+            new LayoutColumn
+            {
+                Span = 12,
+                Widgets = [new LayoutWidget { WidgetType = "team-grid", Props = new Dictionary<string, string> { ["itemsJson"] = itemsJson } }]
+            }
         ];
         return section;
     }

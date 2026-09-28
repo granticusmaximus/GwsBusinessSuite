@@ -212,6 +212,23 @@ else
                     }
                 </div>
                 break;
+            case "cta-banner":
+                <span class="cms-block-chip">CTA Banner</span>
+                <h3>@Get(p, "headline", "Ready to get started?")</h3>
+                @if (!string.IsNullOrWhiteSpace(Get(p, "buttonLabel")))
+                {
+                    <button type="button" class="btn btn-primary btn-sm">@Get(p, "buttonLabel")</button>
+                }
+                break;
+            case "team-grid":
+                <span class="cms-block-chip">Team Grid</span>
+                <div class="cms-block-form-grid">
+                    @foreach (var member in ParseTeamGridItems(Get(p, "itemsJson")))
+                    {
+                        <div class="small text-secondary">@member.Name — @member.Role</div>
+                    }
+                </div>
+                break;
             default:
                 <span class="cms-block-chip">Unknown widget</span>
                 <div class="small text-secondary mb-2">Widget type: @widget.WidgetType</div>
@@ -256,6 +273,27 @@ else
                 i.TryGetValue("suffix", out var s) ? s.GetString() ?? string.Empty : string.Empty,
                 i.TryGetValue("label", out var l) ? l.GetString() ?? string.Empty : string.Empty
             )).Where(i => !string.IsNullOrWhiteSpace(i.Value)).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private sealed record TeamMemberPreview(string Name, string Role);
+
+    private static List<TeamMemberPreview> ParseTeamGridItems(string itemsJson)
+    {
+        try
+        {
+            var nodes = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(
+                string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson);
+            if (nodes is null) return [];
+
+            return nodes.Select(i => new TeamMemberPreview(
+                i.TryGetValue("name", out var n) ? n.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("role", out var r) ? r.GetString() ?? string.Empty : string.Empty
+            )).Where(i => !string.IsNullOrWhiteSpace(i.Name)).ToList();
         }
         catch
         {

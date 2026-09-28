@@ -147,7 +147,7 @@ settings screen, not the Pages list).
 
 ## Adding and arranging widgets
 
-The 21 widget types, from the Widgets palette:
+The 23 widget types, from the Widgets palette:
 
 | Widget | What it holds |
 |---|---|
@@ -172,6 +172,8 @@ The 21 widget types, from the Widgets palette:
 | Reading Progress | A thin fixed bar (top or bottom of the viewport) that fills as the visitor scrolls the page. Configurable height, position, and color (raw hex or a design token) |
 | Booking | Embeds one of your Scheduling booking types' public `/book/{slug}` page in an iframe — availability, slot-picking, and confirmation work exactly as they do standalone. Configurable heading and embed height |
 | Stats | An animated number-counter grid for key metrics you add/remove/reorder freely — each counts up from zero once scrolled into view. Configurable value, suffix (e.g. "+", "%"), and label per stat |
+| Team Grid | Photo cards introducing your team, add/remove/reorder freely — name, role, optional photo, and independently-optional LinkedIn/Twitter-X/email links per member |
+| CTA Banner | A centered or left-aligned headline, optional body copy, and one optional button — the single-widget version of building a call-to-action from separate Heading/Paragraph/Button widgets |
 
 **Adding a widget**: click a palette card to drop it after whatever's currently selected (or at
 the end of the last section if nothing is), or drag it directly onto a spot in the live preview,
@@ -513,7 +515,7 @@ website, so an uploaded brand asset can be reused without storing duplicate copi
   doesn't record which staff member made a given revision.
 - **No page duplication.** You can duplicate a section or a widget inside Studio, but there's no
   "Duplicate Page" action from the Pages list or settings screen.
-- **Fixed widget catalog.** 21 built-in types, no custom/plugin widgets, and no nested-container
+- **Fixed widget catalog.** 23 built-in types, no custom/plugin widgets, and no nested-container
   widget (a section's columns can't themselves contain another section) beyond what Freeform
   positioning offers within one section.
 - **Menus are single-level.** No dropdown/nested sub-menus in either the Primary or Footer list.

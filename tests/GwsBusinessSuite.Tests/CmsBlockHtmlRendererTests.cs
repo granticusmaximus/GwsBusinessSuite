@@ -1541,6 +1541,94 @@ public sealed class CmsBlockHtmlRendererTests
         Assert.False(CmsBlockHtmlRenderer.LayoutContainsStats(null));
     }
 
+    // ── Workstream C, Tier 2 (CTA banner - promoted to a first-class widget type) ───────────
+
+    [Fact]
+    public void Render_ShouldRenderCtaBanner_WithHeadlineBodyAndButton()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"cta-banner","props":{"headline":"Ready?","body":"Let's talk.","buttonLabel":"Get started","buttonHref":"/contact","buttonVariant":"outline-primary","align":"left"}}"""));
+
+        Assert.Contains("gws-cta-banner gws-align-left", html);
+        Assert.Contains("Ready?", html);
+        Assert.Contains("Let's talk.", html);
+        Assert.Contains("href=\"/contact\"", html);
+        Assert.Contains("btn-outline-primary", html);
+        Assert.Contains("Get started", html);
+    }
+
+    [Fact]
+    public void Render_ShouldOmitCtaBannerBodyAndButton_WhenNotSet()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"cta-banner","props":{"headline":"Ready?"}}"""));
+
+        Assert.DoesNotContain("gws-cta-banner-body", html);
+        Assert.DoesNotContain("gws-cta-banner-actions", html);
+    }
+
+    [Fact]
+    public void Render_ShouldDefaultCtaBannerAlignmentToCenter()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"cta-banner","props":{"headline":"Ready?"}}"""));
+
+        Assert.Contains("gws-align-center", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldReturnTheHeadline_ForCtaBannerWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "cta-banner", Props = new() { ["headline"] = "Ready?" } };
+
+        Assert.Equal("Ready?", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
+    // ── Workstream C, Tier 2 (team grid - promoted to a first-class widget type) ────────────
+
+    [Fact]
+    public void Render_ShouldRenderTeamGridWidget_WithNamePhotoRoleAndSocialLinks()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"team-grid","props":{"itemsJson":"[{\"name\":\"Jane Doe\",\"role\":\"CEO\",\"photoUrl\":\"/media/jane.jpg\",\"linkedinUrl\":\"https://linkedin.com/in/jane\",\"twitterUrl\":\"\",\"emailAddress\":\"jane@example.com\"}]"}}"""));
+
+        Assert.Contains("gws-team-grid", html);
+        Assert.Contains("Jane Doe", html);
+        Assert.Contains("CEO", html);
+        Assert.Contains("src=\"/media/jane.jpg\"", html);
+        Assert.Contains("linkedin.com/in/jane", html);
+        Assert.Contains("mailto:jane@example.com", html);
+        var socialLinkCount = System.Text.RegularExpressions.Regex.Matches(html, "gws-team-grid-social-link").Count;
+        Assert.Equal(2, socialLinkCount);
+    }
+
+    [Fact]
+    public void Render_ShouldSkipTeamGridMembersWithNoName()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"team-grid","props":{"itemsJson":"[{\"name\":\"\",\"role\":\"Skipped\"},{\"name\":\"Kept\",\"role\":\"Role\"}]"}}"""));
+
+        Assert.DoesNotContain("Skipped", html);
+        Assert.Contains("Kept", html);
+    }
+
+    [Fact]
+    public void Render_ShouldRenderNothingForTeamGridWidget_WithNoItems()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"team-grid","props":{"itemsJson":"[]"}}"""));
+
+        Assert.DoesNotContain("gws-team-grid", html);
+    }
+
+    [Fact]
+    public void PlainTextPreview_ShouldDescribeTeamGridWidget()
+    {
+        var widget = new LayoutWidget { WidgetType = "team-grid" };
+
+        Assert.Equal("[team grid]", CmsBlockHtmlRenderer.PlainTextPreview(widget));
+    }
+
     private static PageLayout ButtonLayout(string href) => new()
     {
         Sections =

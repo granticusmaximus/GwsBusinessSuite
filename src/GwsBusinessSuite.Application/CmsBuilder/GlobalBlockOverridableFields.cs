@@ -26,6 +26,7 @@ public static class GlobalBlockOverridableFields
         ["author-box"] = ["name", "bio", "roleOrTitle", "avatarUrl"],
         ["callout"] = ["title", "body"],
         ["table-of-contents"] = ["title"],
+        ["cta-banner"] = ["headline", "body", "buttonLabel", "buttonHref"],
     };
 
     public static IReadOnlyList<string> CandidatesFor(string widgetType) =>

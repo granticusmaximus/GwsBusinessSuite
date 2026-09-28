@@ -103,6 +103,8 @@ public static class CmsBlockHtmlRenderer
             "reading-progress" => "[reading progress bar]",
             "booking" => HasValue(p, "bookingTypeSlug") ? $"[booking: {Get(p, "bookingTypeSlug")}]" : "[booking]",
             "stats" => "[stats]",
+            "cta-banner" => Get(p, "headline", "[CTA banner]"),
+            "team-grid" => "[team grid]",
             _ => string.Empty
         };
         text = text.Replace('\n', ' ').Trim();
@@ -762,6 +764,8 @@ public static class CmsBlockHtmlRenderer
             "reading-progress" => RenderReadingProgress(p, tokens),
             "booking" => RenderBooking(p, editMode),
             "stats" => RenderStats(p, editMode),
+            "cta-banner" => RenderCtaBanner(p, editMode),
+            "team-grid" => RenderTeamGrid(p, editMode),
             _ => string.Empty
         };
     }
@@ -773,9 +777,9 @@ public static class CmsBlockHtmlRenderer
     {
         var name = Get(p, "name");
         var socialLinks = new StringBuilder();
-        AppendAuthorBoxSocialLink(socialLinks, Get(p, "websiteUrl"), "bi-globe2", "Website");
-        AppendAuthorBoxSocialLink(socialLinks, Get(p, "twitterUrl"), "bi-twitter-x", "Twitter/X");
-        AppendAuthorBoxSocialLink(socialLinks, Get(p, "linkedinUrl"), "bi-linkedin", "LinkedIn");
+        AppendSocialLink(socialLinks, Get(p, "websiteUrl"), "bi-globe2", "Website", "gws-author-box-social-link");
+        AppendSocialLink(socialLinks, Get(p, "twitterUrl"), "bi-twitter-x", "Twitter/X", "gws-author-box-social-link");
+        AppendSocialLink(socialLinks, Get(p, "linkedinUrl"), "bi-linkedin", "LinkedIn", "gws-author-box-social-link");
         if (HasValue(p, "emailAddress"))
         {
             socialLinks.Append($"""<a href="mailto:{Html(Get(p, "emailAddress"))}" class="gws-author-box-social-link" aria-label="Email"><i class="bi bi-envelope" aria-hidden="true"></i></a>""");
@@ -794,10 +798,86 @@ public static class CmsBlockHtmlRenderer
             """;
     }
 
-    private static void AppendAuthorBoxSocialLink(StringBuilder sb, string url, string iconClass, string label)
+    // Shared by author-box and team-grid - both render a row of independently-optional social
+    // links (empty URL = hidden) off the same small set of Props. cssClass is passed explicitly
+    // rather than hardcoded so each widget's CSS stays self-contained instead of the two widgets
+    // fighting over one shared class's sizing/spacing assumptions.
+    private static void AppendSocialLink(StringBuilder sb, string url, string iconClass, string label, string cssClass)
     {
         if (string.IsNullOrWhiteSpace(url)) return;
-        sb.Append($"""<a href="{Html(HrefOrHash(url))}" class="gws-author-box-social-link" target="_blank" rel="noopener noreferrer" aria-label="{Html(label)}"><i class="bi {iconClass}" aria-hidden="true"></i></a>""");
+        sb.Append($"""<a href="{Html(HrefOrHash(url))}" class="{cssClass}" target="_blank" rel="noopener noreferrer" aria-label="{Html(label)}"><i class="bi {iconClass}" aria-hidden="true"></i></a>""");
+    }
+
+    // Workstream C, Tier 2 (CTA banner, promoted from a CmsSectionTemplates composition of 3
+    // separate widgets to one first-class type) - a centered/left headline, optional body copy,
+    // and one optional button, all as a single insertable/reusable widget instead of 3 that have
+    // to be selected, styled, and moved together. Existing pages built from the OLD 3-widget
+    // composition are completely unaffected - those heading/paragraph/button widgets still
+    // render exactly as they always have; only NEW section-template insertions use this type now.
+    private static string RenderCtaBanner(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var align = Get(p, "align", "center") == "left" ? "left" : "center";
+        var variant = Get(p, "buttonVariant", "primary") == "outline-primary" ? "outline-primary" : "primary";
+
+        return $"""
+            <div class="gws-cta-banner gws-align-{Html(align)}">
+              <h2 class="gws-cta-banner-headline"{InlineEditAttrs(editMode, "headline")}>{Html(Get(p, "headline"))}</h2>
+              {(HasValue(p, "body") ? $"""<div class="gws-cta-banner-body"{InlineRichAttrs(editMode, "body", Get(p, "body"))}>{Markdown.ToHtml(Get(p, "body"), MarkdownPipeline)}</div>""" : "")}
+              {(HasValue(p, "buttonLabel") ? $"""<div class="gws-cta-banner-actions"><a href="{Html(HrefOrHash(Get(p, "buttonHref")))}" class="btn btn-{Html(variant)}"{InlineEditAttrs(editMode, "buttonLabel")}>{Html(Get(p, "buttonLabel"))}</a></div>""" : "")}
+            </div>
+            """;
+    }
+
+    // Workstream C, Tier 2 (team/people grid, promoted from a CmsSectionTemplates composition of
+    // N separate Card widgets to one first-class type) - same non-breaking promotion note as
+    // RenderCtaBanner above: existing pages built from the old per-person Card widgets are
+    // unaffected. Deliberately no bio field (the original template was photo+name+role only) -
+    // social links are the one addition, reusing AppendSocialLink at near-zero marginal cost.
+    private static string RenderTeamGrid(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var itemsJson = Get(p, "itemsJson");
+        try
+        {
+            var node = JsonNode.Parse(string.IsNullOrWhiteSpace(itemsJson) ? "[]" : itemsJson) as JsonArray;
+            if (node is null || node.Count == 0) return string.Empty;
+
+            var sb = new StringBuilder("""<div class="gws-team-grid">""");
+            var index = -1;
+            foreach (var item in node.OfType<JsonObject>())
+            {
+                index++;
+                var name = item["name"]?.GetValue<string>() ?? string.Empty;
+                var role = item["role"]?.GetValue<string>() ?? string.Empty;
+                var photoUrl = item["photoUrl"]?.GetValue<string>() ?? string.Empty;
+                var linkedinUrl = item["linkedinUrl"]?.GetValue<string>() ?? string.Empty;
+                var twitterUrl = item["twitterUrl"]?.GetValue<string>() ?? string.Empty;
+                var emailAddress = item["emailAddress"]?.GetValue<string>() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(name)) continue;
+
+                var socialLinks = new StringBuilder();
+                AppendSocialLink(socialLinks, twitterUrl, "bi-twitter-x", "Twitter/X", "gws-team-grid-social-link");
+                AppendSocialLink(socialLinks, linkedinUrl, "bi-linkedin", "LinkedIn", "gws-team-grid-social-link");
+                if (!string.IsNullOrWhiteSpace(emailAddress))
+                {
+                    socialLinks.Append($"""<a href="mailto:{Html(emailAddress)}" class="gws-team-grid-social-link" aria-label="Email"><i class="bi bi-envelope" aria-hidden="true"></i></a>""");
+                }
+
+                sb.Append($"""
+                    <div class="gws-team-grid-item">
+                      {(!string.IsNullOrWhiteSpace(photoUrl) ? $"""<img src="{Html(photoUrl)}" alt="{Html(name)}" class="gws-team-grid-photo" />""" : "")}
+                      <div class="gws-team-grid-name"{InlineEditAttrs(editMode, $"itemsJson[{index}].name")}>{Html(name)}</div>
+                      {(!string.IsNullOrWhiteSpace(role) ? $"""<div class="gws-team-grid-role"{InlineEditAttrs(editMode, $"itemsJson[{index}].role")}>{Html(role)}</div>""" : "")}
+                      {(socialLinks.Length > 0 ? $"""<div class="gws-team-grid-social">{socialLinks}</div>""" : "")}
+                    </div>
+                    """);
+            }
+            sb.Append("</div>");
+            return sb.ToString();
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     // variant is validated against this fixed dictionary rather than interpolated directly -

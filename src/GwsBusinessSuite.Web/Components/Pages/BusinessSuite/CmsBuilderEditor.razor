@@ -1218,6 +1218,91 @@ else
                                 }
                             </div>
                         }
+                        else if (selWidget.WidgetType == "team-grid")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold d-flex align-items-center justify-content-between">
+                                    Team Members
+                                    <button type="button" class="btn btn-xs btn-outline-primary" @onclick="() => AddTeamGridItem(selWidget)">
+                                        <i class="bi bi-plus-lg"></i> Add member
+                                    </button>
+                                </label>
+                                @{ var teamItems = GetTeamGridItems(selWidget); }
+                                @if (teamItems.Count == 0)
+                                {
+                                    <p class="small text-secondary mb-0">No team members yet — click "Add member" to build this grid.</p>
+                                }
+                                else
+                                {
+                                    @for (var i = 0; i < teamItems.Count; i++)
+                                    {
+                                        var index = i;
+                                        var item = teamItems[index];
+                                        <div class="studio-form-field-editor">
+                                            <div class="d-flex gap-2 mb-2">
+                                                <input class="form-control form-control-sm" placeholder="Name" value="@item.Name"
+                                                       @oninput="(e) => UpdateTeamGridItem(selWidget, index, i => i with { Name = e.Value?.ToString() ?? string.Empty })" />
+                                                <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" @onclick="() => RemoveTeamGridItem(selWidget, index)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </div>
+                                            <input class="form-control form-control-sm mb-2" placeholder="Role or title" value="@item.Role"
+                                                   @oninput="(e) => UpdateTeamGridItem(selWidget, index, i => i with { Role = e.Value?.ToString() ?? string.Empty })" />
+                                            <input class="form-control form-control-sm mb-2 font-monospace" placeholder="Photo URL (optional)" value="@item.PhotoUrl"
+                                                   @oninput="(e) => UpdateTeamGridItem(selWidget, index, i => i with { PhotoUrl = e.Value?.ToString() ?? string.Empty })" />
+                                            <div class="d-flex gap-2">
+                                                <input class="form-control form-control-sm font-monospace" placeholder="LinkedIn URL" value="@item.LinkedinUrl"
+                                                       @oninput="(e) => UpdateTeamGridItem(selWidget, index, i => i with { LinkedinUrl = e.Value?.ToString() ?? string.Empty })" />
+                                                <input class="form-control form-control-sm font-monospace" placeholder="Twitter/X URL" value="@item.TwitterUrl"
+                                                       @oninput="(e) => UpdateTeamGridItem(selWidget, index, i => i with { TwitterUrl = e.Value?.ToString() ?? string.Empty })" />
+                                                <input class="form-control form-control-sm" placeholder="Email" value="@item.EmailAddress"
+                                                       @oninput="(e) => UpdateTeamGridItem(selWidget, index, i => i with { EmailAddress = e.Value?.ToString() ?? string.Empty })" />
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            </div>
+                        }
+                        else if (selWidget.WidgetType == "cta-banner")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Headline</label>
+                                <input class="form-control" value='@GetProp(selWidget, "headline")'
+                                       @oninput='(e) => SetProp(selWidget, "headline", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Body (optional)</label>
+                                <ProfessionalWysiwygEditor Value='@GetProp(selWidget, "body")'
+                                                           ValueChanged='value => SetProp(selWidget, "body", value)'
+                                                           Compact="true" MinHeight="90px" AriaLabel="CTA banner body" />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Button Label (optional)</label>
+                                <input class="form-control" value='@GetProp(selWidget, "buttonLabel")'
+                                       @oninput='(e) => SetProp(selWidget, "buttonLabel", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Button URL</label>
+                                <input class="form-control font-monospace" value='@GetProp(selWidget, "buttonHref", "#")'
+                                       @oninput='(e) => SetProp(selWidget, "buttonHref", e.Value?.ToString() ?? "#")' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Button Style</label>
+                                <select class="form-select" value='@GetProp(selWidget, "buttonVariant", "primary")'
+                                        @onchange='(e) => SetProp(selWidget, "buttonVariant", e.Value?.ToString() ?? "primary")'>
+                                    <option value="primary">Solid</option>
+                                    <option value="outline-primary">Outline</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Alignment</label>
+                                <select class="form-select" value='@GetProp(selWidget, "align", "center")'
+                                        @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "center")'>
+                                    <option value="center">Center</option>
+                                    <option value="left">Left</option>
+                                </select>
+                            </div>
+                        }
                         else if (selWidget.WidgetType == "form")
                         {
                             <div>
@@ -1970,6 +2055,8 @@ else
         new("reading-progress", "bi bi-hourglass-split",   "Reading Progress", "A scroll-position progress bar",      GroupDynamic),
         new("booking",     "bi bi-calendar-check",         "Booking",     "Embed one of your booking types",     GroupDynamic),
         new("stats",       "bi bi-graph-up-arrow",         "Stats",       "Animated number counters for key metrics", GroupMedia),
+        new("team-grid",   "bi bi-people",                 "Team Grid",   "Photo cards for introducing your team", GroupMedia),
+        new("cta-banner",  "bi bi-bullseye",                "CTA Banner",  "Centered headline, copy, and one button", GroupLayout),
         new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block",                      GroupAdvanced),
     ];
 
@@ -4069,6 +4156,66 @@ else
         SaveStatsItems(widget, items, forceNewUndoStep: true);
     }
 
+    // ── Team grid members ────────────────────────────────────────────────
+    private sealed record TeamMemberDef(string Name, string Role, string PhotoUrl, string LinkedinUrl, string TwitterUrl, string EmailAddress);
+
+    private static List<TeamMemberDef> GetTeamGridItems(LayoutWidget widget)
+    {
+        try
+        {
+            var raw = GetProp(widget, "itemsJson");
+            if (string.IsNullOrWhiteSpace(raw)) return [];
+
+            var parsed = JsonSerializer.Deserialize<List<Dictionary<string, JsonElement>>>(raw);
+            if (parsed is null) return [];
+
+            return parsed.Select(i => new TeamMemberDef(
+                i.TryGetValue("name", out var n) ? n.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("role", out var r) ? r.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("photoUrl", out var p) ? p.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("linkedinUrl", out var li) ? li.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("twitterUrl", out var tw) ? tw.GetString() ?? string.Empty : string.Empty,
+                i.TryGetValue("emailAddress", out var em) ? em.GetString() ?? string.Empty : string.Empty
+            )).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void SaveTeamGridItems(LayoutWidget widget, List<TeamMemberDef> items, bool forceNewUndoStep = false)
+    {
+        var json = JsonSerializer.Serialize(items.Select(i => new
+        {
+            name = i.Name, role = i.Role, photoUrl = i.PhotoUrl, linkedinUrl = i.LinkedinUrl, twitterUrl = i.TwitterUrl, emailAddress = i.EmailAddress
+        }));
+        SetProp(widget, "itemsJson", json, forceNewUndoStep);
+    }
+
+    private void AddTeamGridItem(LayoutWidget widget)
+    {
+        var items = GetTeamGridItems(widget);
+        items.Add(new TeamMemberDef("New Member", "Role or title", "", "", "", ""));
+        SaveTeamGridItems(widget, items, forceNewUndoStep: true);
+    }
+
+    private void UpdateTeamGridItem(LayoutWidget widget, int index, Func<TeamMemberDef, TeamMemberDef> update)
+    {
+        var items = GetTeamGridItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items[index] = update(items[index]);
+        SaveTeamGridItems(widget, items);
+    }
+
+    private void RemoveTeamGridItem(LayoutWidget widget, int index)
+    {
+        var items = GetTeamGridItems(widget);
+        if (index < 0 || index >= items.Count) return;
+        items.RemoveAt(index);
+        SaveTeamGridItems(widget, items, forceNewUndoStep: true);
+    }
+
     // ── Media library picker ────────────────────────────────────────────────
     private bool _showMediaPicker;
     private string _mediaPickerError = string.Empty;
@@ -4129,6 +4276,8 @@ else
         "reading-progress" => new() { WidgetType = "reading-progress", Props = new() { ["color"] = "", ["colorToken"] = "", ["height"] = "4", ["position"] = "top" } },
         "booking"    => new() { WidgetType = "booking", Props = new() { ["bookingTypeSlug"] = "", ["title"] = "Book a time", ["height"] = "720" } },
         "stats"      => new() { WidgetType = "stats", Props = new() { ["itemsJson"] = """[{"value":"500","suffix":"+","label":"Projects Delivered"},{"value":"98","suffix":"%","label":"Client Satisfaction"},{"value":"12","suffix":"","label":"Years in Business"}]""" } },
+        "team-grid"  => new() { WidgetType = "team-grid", Props = new() { ["itemsJson"] = """[{"name":"Jane Doe","role":"Role or title","photoUrl":"","linkedinUrl":"","twitterUrl":"","emailAddress":""}]""" } },
+        "cta-banner" => new() { WidgetType = "cta-banner", Props = new() { ["headline"] = "Ready to get started?", ["body"] = "Tell visitors what happens next and give them a clear next step.", ["buttonLabel"] = "Get started", ["buttonHref"] = "#", ["buttonVariant"] = "primary", ["align"] = "center" } },
         _           => new() { WidgetType = "paragraph", Props = new() { ["text"] = "Content", ["align"] = "left" } }
     };
 
@@ -4179,6 +4328,8 @@ else
         "reading-progress"  => "Reading Progress",
         "booking"     => "Booking",
         "stats"       => "Stats",
+        "team-grid"   => "Team Grid",
+        "cta-banner"  => "CTA Banner",
         _             => type
     };
 
@@ -4213,6 +4364,8 @@ else
         "reading-progress"  => "bi bi-hourglass-split",
         "booking"     => "bi bi-calendar-check",
         "stats"       => "bi bi-graph-up-arrow",
+        "team-grid"   => "bi bi-people",
+        "cta-banner"  => "bi bi-bullseye",
         _             => "bi bi-square"
     };
 
@@ -4240,6 +4393,8 @@ else
             "reading-progress"  => $"{GetPropStatic(w, "position", "top")} bar",
             "booking"     => string.IsNullOrWhiteSpace(GetPropStatic(w, "bookingTypeSlug", "")) ? "No booking type picked" : GetPropStatic(w, "bookingTypeSlug", ""),
             "stats"       => $"{GetStatsItems(w).Count} stat(s)",
+            "team-grid"   => $"{GetTeamGridItems(w).Count} member(s)",
+            "cta-banner"  => GetPropStatic(w, "headline", "CTA Banner"),
             _             => w.WidgetType
         };
         return raw.Length <= 38 ? raw : raw[..38] + "…";
