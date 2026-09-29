@@ -35,7 +35,6 @@ public sealed class CameraCoverageRegionsTests
         names.Should().Contain(n => n.Contains("Missouri"));
         names.Should().Contain(n => n.Contains("Michigan"));
         names.Should().Contain(n => n.Contains("North Dakota"));
-        names.Should().Contain(n => n.Contains("Colorado"));
         names.Should().Contain(n => n.Contains("Hawaii"));
         names.Should().Contain(n => n.Contains("Texas"));
         names.Should().Contain(n => n.Contains("Alabama"));
@@ -75,5 +74,13 @@ public sealed class CameraCoverageRegionsTests
         // Windy's webcams are globally scattered, not a fixed region - deliberately excluded,
         // see CameraCoverageRegion.cs's own comment.
         CameraCoverageRegions.All.Should().NotContain(r => r.SourceName == "Windy");
+    }
+
+    [Fact]
+    public void All_ShouldNotIncludeColorado()
+    {
+        // CDOT (cotrip.org) is disabled in DI - its image endpoint was retired and every camera
+        // returned "FEED UNAVAILABLE", see CameraCoverageRegion.cs's own comment.
+        CameraCoverageRegions.All.Should().NotContain(r => r.SourceName == "CDOT");
     }
 }

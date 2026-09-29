@@ -196,12 +196,17 @@ Overwatch requires the **AdminOnly** policy, same as the rest of the Intelligenc
   bug, and isn't something more code tuning alone can fix without switching to a paid, richer
   places database (not currently in place).
 - **Camera coverage is real but regional.** Confirmed, zero-registration coverage today spans
-  20 US states (some with partial coverage) — Georgia, Florida, Illinois, Iowa, California (all 12 Caltrans districts),
+  19 US states (some with partial coverage) — Georgia, Florida, Illinois, Iowa, California (all 12 Caltrans districts),
   Oregon, New York City, Washington State, Delaware, Rhode Island, Virginia, Kentucky,
-  South Carolina, Missouri (statewide), Michigan, North Dakota, Colorado, Hawaii (Oahu only, a
+  South Carolina, Missouri (statewide), Michigan, North Dakota, Hawaii (Oahu only, a
   frozen 2019/2021 location list whose images still resolve live), Texas (statewide, ~892 cameras
   with real images), and Alabama — plus New Zealand (nationwide), Queensland Australia
   (statewide), British Columbia (DriveBC), Madrid (Spain), and Finland (Fintraffic, nationwide).
+  Colorado (CDOT) was removed 2026-09-29: cotrip.org retired the raw-image endpoint its ~908
+  cameras depended on (`www.cotrip.org/images/camera?imageURL=...` now returns their new
+  511.cotrip.org SPA's HTML shell instead of a JPEG, with no error status), so every camera showed
+  "FEED UNAVAILABLE" — disabled in DI rather than left showing broken pins. A real successor API
+  exists at `api-511x-co.carsprogram.org` but its camera endpoint isn't publicly documented yet.
   Datumfeed's aggregated cities (Austin, California, Ontario, Ottawa, Toronto, London) and
   KartaView's worldwide crowdsourced street-level imagery round this out (real KartaView coverage
   depends entirely on whether volunteers have driven and uploaded a given street — dense in some

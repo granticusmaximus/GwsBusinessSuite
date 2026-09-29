@@ -497,12 +497,21 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddScoped<ITrafficIncidentProvider>(sp => sp.GetRequiredService<NorthDakotaDotIncidentProvider>());
+        // Not registered as an active ICameraFeedProvider (2026-09-29): CDOT retired the
+        // www.cotrip.org/images/camera?imageURL=... endpoint this class's URL_Cam field points
+        // at - every request now returns their new 511.cotrip.org SPA's HTML shell instead of a
+        // JPEG (confirmed live: HTTP 200, content-type text/html), so every one of ~908 Colorado
+        // cameras showed "FEED UNAVAILABLE" on click. The provider class and its JSON-parsing
+        // tests are kept as-is (the parsing logic is still correct); only the DI wiring that
+        // surfaces it on the map is disabled. A real replacement API exists at
+        // https://api-511x-co.carsprogram.org (CARS511/511.cotrip.org's new backend) but its
+        // camera endpoint isn't publicly documented - re-enable once a working image URL pattern
+        // is found. See docs/OVERWATCH_USER_GUIDE.md's Known Limitations.
         services.AddHttpClient<ColoradoDotCameraProvider>(client =>
         {
             client.BaseAddress = new Uri("https://services.arcgis.com/DO4gTjwJVIJ7O9Ca/");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
-        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<ColoradoDotCameraProvider>());
         services.AddHttpClient<HawaiiDotCameraProvider>(client =>
         {
             client.BaseAddress = new Uri("https://services.arcgis.com/6I1ysurtNWNxkuwd/");

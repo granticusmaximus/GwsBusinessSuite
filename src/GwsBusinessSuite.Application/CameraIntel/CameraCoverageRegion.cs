@@ -46,7 +46,8 @@ public static class CameraCoverageRegions
         new("Missouri (MoDOT)", "MoDOT", 38.50, -92.50, 700_000),
         new("Michigan (MDOT MiDrive)", "MDOT MiDrive", 43.30, -84.50, 700_000),
         new("North Dakota (NDDOT)", "NDDOT", 47.50, -100.50, 600_000),
-        new("Colorado (CDOT)", "CDOT", 39.00, -105.50, 700_000),
+        // Colorado (CDOT) removed 2026-09-29: its camera source is disabled in DI (see
+        // DependencyInjection.cs) because cotrip.org's image endpoint was retired.
         new("Hawaii - Oahu (HDOT)", "HDOT", 21.45, -157.98, 150_000),
         new("Texas (TxDOT)", "TxDOT", 31.00, -99.00, 1_400_000),
         new("Alabama (ALDOT)", "ALDOT", 32.80, -86.80, 600_000),
