@@ -15,6 +15,20 @@ public sealed class CmsThemePresetsTests
     }
 
     [Fact]
+    public void All_ShouldOfferTheFull15CuratedThemes_WithDistinctNamesAndPalettes()
+    {
+        // Workstream D, Phase 2 - the master plan's own target count, spanning distinct niches
+        // rather than 15 re-skins of the same palette.
+        CmsThemePresets.All.Should().HaveCount(15);
+        CmsThemePresets.All.Select(preset => preset.Name).Should().OnlyHaveUniqueItems();
+
+        var primaryHexes = CmsThemePresets.All
+            .Select(preset => preset.Tokens.Colors.First(c => c.Name == "Primary").Hex)
+            .ToList();
+        primaryHexes.Should().OnlyHaveUniqueItems("every theme should have its own distinct primary color, not share one with another preset");
+    }
+
+    [Fact]
     public void Find_ShouldBeCaseInsensitiveAndReturnNullForAnUnknownKey()
     {
         CmsThemePresets.Find("MINIMAL-NEUTRAL").Should().NotBeNull();

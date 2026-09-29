@@ -17,10 +17,11 @@ public sealed record CmsThemePreset(
 
 public static class CmsThemePresets
 {
-    // Phase 1 ships 3 presets to prove the apply-a-theme mechanism end to end, deliberately
-    // spanning distinct visual directions (per decision 4's variety requirement) rather than 3
-    // similar-looking starting points. Phase 2 (once this mechanism is confirmed working) fills
-    // out the remaining ~12 to reach 15.
+    // Phase 1 shipped 3 presets to prove the apply-a-theme mechanism end to end. Phase 2 (below)
+    // fills out the remaining 12 to reach the full 15, spanning the niches decision 4 called for
+    // plus the market-research niches Workstream C's own research already covered (agency, IT
+    // services, SaaS) - each one deliberately distinct in palette/type/voice, not a re-skin of
+    // another entry on this list.
     public static readonly IReadOnlyList<CmsThemePreset> All =
     [
         new CmsThemePreset(
@@ -96,7 +97,308 @@ public static class CmsThemePresets
             () => DefaultHomepageLayout(
                 "Your neighborhood's favorite for a reason",
                 "Family-owned, community-loved, and open every day to serve you.",
-                "Visit us today"))
+                "Visit us today")),
+
+        new CmsThemePreset(
+            "soft-pastel-wellness",
+            "Soft Pastel Wellness",
+            "Calm and welcoming - muted mauve and blush pink on a soft cream surface, ideal for wellness/spa practices.",
+            new DesignTokenSet(
+                [
+                    new DesignToken("Primary", "#6b5b73"),
+                    new DesignToken("Accent", "#f2a5b8"),
+                    new DesignToken("Surface", "#fdf4f5"),
+                    new DesignToken("Text", "#4a3f47")
+                ],
+                [
+                    new TypeScaleStep("Display", "2.5rem"),
+                    new TypeScaleStep("Heading", "1.4rem"),
+                    new TypeScaleStep("Body", "1rem")
+                ],
+                [
+                    new SpacingScaleStep("Section", "3.5rem"),
+                    new SpacingScaleStep("Element", "1.25rem")
+                ]),
+            () => DefaultHomepageLayout(
+                "Feel better, one small step at a time",
+                "A calm, welcoming space for your wellness practice - breathe easier, starting today.",
+                "Book a session")),
+
+        new CmsThemePreset(
+            "dark-tech-saas",
+            "Dark Tech SaaS",
+            "Dark-mode-first and modern - near-black navy with a bright cyan accent, built for developer-facing products.",
+            new DesignTokenSet(
+                [
+                    new DesignToken("Primary", "#e2e8f0"),
+                    new DesignToken("Accent", "#22d3ee"),
+                    new DesignToken("Surface", "#0b1220"),
+                    new DesignToken("Text", "#e2e8f0")
+                ],
+                [
+                    new TypeScaleStep("Display", "3.25rem"),
+                    new TypeScaleStep("Heading", "1.75rem"),
+                    new TypeScaleStep("Body", "1rem")
+                ],
+                [
+                    new SpacingScaleStep("Section", "4.5rem"),
+                    new SpacingScaleStep("Element", "1.5rem")
+                ]),
+            () => DefaultHomepageLayout(
+                "Ship faster with infrastructure that just works",
+                "The developer platform trusted by teams who'd rather build than babysit servers.",
+                "Start free")),
+
+        new CmsThemePreset(
+            "classic-editorial",
+            "Classic Editorial",
+            "A serif-led, newsroom feel - near-black text and a deep masthead red on warm paper white.",
+            new DesignTokenSet(
+                [
+                    new DesignToken("Primary", "#1a1a1a"),
+                    new DesignToken("Accent", "#a8342a"),
+                    new DesignToken("Surface", "#fdfbf7"),
+                    new DesignToken("Text", "#1a1a1a")
+                ],
+                [
+                    new TypeScaleStep("Display", "3.5rem"),
+                    new TypeScaleStep("Heading", "1.6rem"),
+                    new TypeScaleStep("Body", "1.05rem")
+                ],
+                [
+                    new SpacingScaleStep("Section", "4rem"),
+                    new SpacingScaleStep("Element", "1.5rem")
+                ]),
+            () => DefaultHomepageLayout(
+                "Stories worth your time",
+                "Independent reporting and essays, published without the noise.",
+                "Start reading")),
+
+        new CmsThemePreset(
+            "ultra-minimal",
+            "Ultra Minimal",
+            "Stark monochrome and oversized type - black on white, nothing else competing for attention.",
+            new DesignTokenSet(
+                [
+                    new DesignToken("Primary", "#000000"),
+                    new DesignToken("Accent", "#000000"),
+                    new DesignToken("Surface", "#ffffff"),
+                    new DesignToken("Text", "#000000")
+                ],
+                [
+                    new TypeScaleStep("Display", "4.5rem"),
+                    new TypeScaleStep("Heading", "1.5rem"),
+                    new TypeScaleStep("Body", "1rem")
+                ],
+                [
+                    new SpacingScaleStep("Section", "5rem"),
+                    new SpacingScaleStep("Element", "1.5rem")
+                ]),
+            () => DefaultHomepageLayout(
+                "Less, but better",
+                "Everything you need. Nothing you don't.",
+                "Explore")),
+
+        new CmsThemePreset(
+            "vibrant-startup",
+            "Vibrant Startup",
+            "Energetic and colorful - deep indigo with a purple/pink accent pair, built for an early-stage product launch.",
+            new DesignTokenSet(
+                [
+                    new DesignToken("Primary", "#1e1b4b"),
+                    new DesignToken("Accent", "#8b5cf6"),
+                    new DesignToken("AccentAlt", "#ec4899"),
+                    new DesignToken("Surface", "#f5f3ff"),
+                    new DesignToken("Text", "#1e1b4b")
+                ],
+                [
+                    new TypeScaleStep("Display", "3.75rem"),
+                    new TypeScaleStep("Heading", "1.75rem"),
+                    new TypeScaleStep("Body", "1.05rem")
+                ],
+                [
+                    new SpacingScaleStep("Section", "4.5rem"),
+                    new SpacingScaleStep("Element", "1.5rem")
+                ]),
+            () => DefaultHomepageLayout(
+                "The fastest way from idea to launch",
+                "Everything early-stage teams need to ship, in one place.",
+                "Get started free")),
+
+        new CmsThemePreset(
+            "corporate-enterprise",
+            "Corporate Enterprise",
+            "Conservative and trustworthy - navy and slate blue on a cool gray surface, built for B2B software.",
+            new DesignTokenSet(
+                [
+                    new DesignToken("Primary", "#0f2440"),
+                    new DesignToken("Accent", "#1d4ed8"),
+                    new DesignToken("Surface", "#f8fafc"),
+                    new DesignToken("Text", "#0f2440")
+                ],
+                [
+                    new TypeScaleStep("Display", "2.75rem"),
+                    new TypeScaleStep("Heading", "1.5rem"),
+                    new TypeScaleStep("Body", "1rem")
+                ],
+                [
+                    new SpacingScaleStep("Section", "4rem"),
+                    new SpacingScaleStep("Element", "1.5rem")
+                ]),
+            () => DefaultHomepageLayout(
+                "Enterprise software your whole organization can trust",
+                "Secure, compliant, and built to scale with teams of any size.",
+                "Request a demo")),
+
+        new CmsThemePreset(
+            "it-services-consulting",
+            "IT Services & Consulting",
+            "Professional and modern - deep teal-blue with a sky-blue accent, built for managed IT/consulting firms.",
+            new DesignTokenSet(
+                [
+                    new DesignToken("Primary", "#0c4a6e"),
+                    new DesignToken("Accent", "#0ea5e9"),
+                    new DesignToken("Surface", "#f0f9ff"),
+                    new DesignToken("Text", "#0c4a6e")
+                ],
+                [
+                    new TypeScaleStep("Display", "2.75rem"),
+                    new TypeScaleStep("Heading", "1.5rem"),
+                    new TypeScaleStep("Body", "1rem")
+                ],
+                [
+                    new SpacingScaleStep("Section", "4rem"),
+                    new SpacingScaleStep("Element", "1.5rem")
+                ]),
+            () => DefaultHomepageLayout(
+                "Technology that works as hard as you do",
+                "Managed IT, cloud, and cybersecurity support for growing businesses.",
+                "Talk to an expert")),
+
+        new CmsThemePreset(
+            "creative-portfolio",
+            "Creative Portfolio",
+            "Bold and high-contrast - white on near-black with a punchy yellow accent, built for a design studio.",
+            new DesignTokenSet(
+                [
+                    new DesignToken("Primary", "#ffffff"),
+                    new DesignToken("Accent", "#fde047"),
+                    new DesignToken("Surface", "#0a0a0a"),
+                    new DesignToken("Text", "#ffffff")
+                ],
+                [
+                    new TypeScaleStep("Display", "4rem"),
+                    new TypeScaleStep("Heading", "1.75rem"),
+                    new TypeScaleStep("Body", "1rem")
+                ],
+                [
+                    new SpacingScaleStep("Section", "4.5rem"),
+                    new SpacingScaleStep("Element", "1.5rem")
+                ]),
+            () => DefaultHomepageLayout(
+                "Design that gets noticed",
+                "A freelance studio for brands who want to stand out.",
+                "View portfolio")),
+
+        new CmsThemePreset(
+            "restaurant-hospitality",
+            "Restaurant & Hospitality",
+            "Warm and appetizing - espresso brown with a burnt-terracotta accent, built for restaurants and hospitality.",
+            new DesignTokenSet(
+                [
+                    new DesignToken("Primary", "#2b1a12"),
+                    new DesignToken("Accent", "#c2410c"),
+                    new DesignToken("Surface", "#fff7ed"),
+                    new DesignToken("Text", "#2b1a12")
+                ],
+                [
+                    new TypeScaleStep("Display", "3rem"),
+                    new TypeScaleStep("Heading", "1.5rem"),
+                    new TypeScaleStep("Body", "1rem")
+                ],
+                [
+                    new SpacingScaleStep("Section", "4rem"),
+                    new SpacingScaleStep("Element", "1.5rem")
+                ]),
+            () => DefaultHomepageLayout(
+                "Good food, good company",
+                "Fresh, seasonal dishes served with genuine hospitality.",
+                "Reserve a table")),
+
+        new CmsThemePreset(
+            "nonprofit-community",
+            "Nonprofit & Community",
+            "Approachable and earnest - deep green with a leaf-green accent, built for nonprofits and community groups.",
+            new DesignTokenSet(
+                [
+                    new DesignToken("Primary", "#14532d"),
+                    new DesignToken("Accent", "#65a30d"),
+                    new DesignToken("Surface", "#f7fdf2"),
+                    new DesignToken("Text", "#14532d")
+                ],
+                [
+                    new TypeScaleStep("Display", "2.75rem"),
+                    new TypeScaleStep("Heading", "1.5rem"),
+                    new TypeScaleStep("Body", "1.05rem")
+                ],
+                [
+                    new SpacingScaleStep("Section", "4rem"),
+                    new SpacingScaleStep("Element", "1.5rem")
+                ]),
+            () => DefaultHomepageLayout(
+                "Together, we can change more than we think",
+                "Join a community working toward a better future for everyone.",
+                "Get involved")),
+
+        new CmsThemePreset(
+            "real-estate-professional",
+            "Real Estate & Professional Services",
+            "Trustworthy and refined - navy with a muted-gold accent, built for real estate and professional services.",
+            new DesignTokenSet(
+                [
+                    new DesignToken("Primary", "#1c2b3a"),
+                    new DesignToken("Accent", "#b08d57"),
+                    new DesignToken("Surface", "#f9f8f6"),
+                    new DesignToken("Text", "#1c2b3a")
+                ],
+                [
+                    new TypeScaleStep("Display", "2.75rem"),
+                    new TypeScaleStep("Heading", "1.5rem"),
+                    new TypeScaleStep("Body", "1rem")
+                ],
+                [
+                    new SpacingScaleStep("Section", "4rem"),
+                    new SpacingScaleStep("Element", "1.5rem")
+                ]),
+            () => DefaultHomepageLayout(
+                "Find a place to call home",
+                "Trusted local expertise for buyers, sellers, and everyone in between.",
+                "Browse listings")),
+
+        new CmsThemePreset(
+            "fitness-sports",
+            "Fitness & Sports",
+            "Energetic and bold - near-black with a fire-red accent, built for gyms, coaches, and sports programs.",
+            new DesignTokenSet(
+                [
+                    new DesignToken("Primary", "#18181b"),
+                    new DesignToken("Accent", "#ef4444"),
+                    new DesignToken("Surface", "#fafafa"),
+                    new DesignToken("Text", "#18181b")
+                ],
+                [
+                    new TypeScaleStep("Display", "3.5rem"),
+                    new TypeScaleStep("Heading", "1.75rem"),
+                    new TypeScaleStep("Body", "1.05rem")
+                ],
+                [
+                    new SpacingScaleStep("Section", "4.5rem"),
+                    new SpacingScaleStep("Element", "1.5rem")
+                ]),
+            () => DefaultHomepageLayout(
+                "Train harder. Recover smarter.",
+                "Personalized coaching and programs built around your goals.",
+                "Start your free trial"))
     ];
 
     public static CmsThemePreset? Find(string key) =>
