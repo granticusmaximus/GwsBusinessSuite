@@ -603,10 +603,31 @@ window.tacticalGlobe = (function () {
         const entry = viewers.get(containerId);
         if (!entry) return;
 
-        entry.cameraEntities.forEach(function (entity) { entry.cameraDataSource.entities.remove(entity); });
-        entry.cameraEntities.clear();
+        // Diffs against the previous frame instead of removing every entity and re-adding every
+        // pin from scratch on every settle. With this app's now much larger per-state camera
+        // counts (some sources run into the hundreds/thousands nationwide), a small pan used to
+        // rebuild the ENTIRE visible set - a real, visible stutter - even though most pins hadn't
+        // actually moved or changed. Now only the pins that left or entered the view are
+        // touched; everything still in view keeps its existing Cesium entity untouched.
+        const nextPins = pins || [];
+        const nextIds = new Set(nextPins.map(function (p) { return p.id; }));
 
-        (pins || []).forEach(function (pin) {
+        entry.cameraEntities.forEach(function (entity, id) {
+            if (!nextIds.has(id)) {
+                entry.cameraDataSource.entities.remove(entity);
+                entry.cameraEntities.delete(id);
+            }
+        });
+
+        nextPins.forEach(function (pin) {
+            const existing = entry.cameraEntities.get(pin.id);
+            if (existing) {
+                // Same camera, same position - just keep its payload (e.g. isFavorite) current
+                // for anything that reads it straight off the entity, without touching Cesium's
+                // scene graph at all.
+                existing._tacticalGlobeCamera = pin;
+                return;
+            }
             const entity = entry.cameraDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(pin.lon, pin.lat),
                 billboard: {

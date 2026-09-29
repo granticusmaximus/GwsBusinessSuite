@@ -383,15 +383,38 @@
 
     public sealed record SharedCameraDto(string Id, string Name, double Lat, double Lon, string StreamUrl, string StreamKind, string SourceName, string SourceAttributionUrl);
 
+    private static readonly Task<IReadOnlyList<WeatherAlert>> NoAlerts = Task.FromResult<IReadOnlyList<WeatherAlert>>([]);
+    private static readonly Task<IReadOnlyList<TrafficIncident>> NoIncidents = Task.FromResult<IReadOnlyList<TrafficIncident>>([]);
+
     // Raised by tactical-globe.js's camera.moveEnd handler once the view settles after a
     // drag/zoom (see initGlobe) - degrees, matching Cesium's own Rectangle-to-degrees output.
+    //
+    // Perf note: cameras/alerts/incidents/weather are 4 independent external lookups - none
+    // needs another's result to start - but this used to await them one at a time (camera fetch,
+    // then a JS round trip, then alerts, then incidents, then weather), so every pan/zoom paid
+    // roughly the SUM of every enabled layer's latency instead of just the slowest one. That
+    // chain got materially worse as this session's Overwatch coverage expansion grew the camera/
+    // incident provider count well past what it was when this handler was first written (each
+    // directory service already fans out across its own providers in parallel - see
+    // CameraDirectoryService/TrafficIncidentDirectoryService - the serialization was only ever
+    // at this level). Fanning all 4 out together and awaiting them as a group cuts the
+    // steady-state per-settle latency to roughly the slowest single one.
     [JSInvokable]
     public async Task OnGlobeViewChanged(double north, double south, double east, double west)
     {
         _lastBbox = new BoundingBox(north, south, east, west);
         _hasSettledOnce = true;
-        var cameras = await CameraDirectoryService.GetCamerasInBoundingBoxAsync(_lastBbox);
-        _visibleCameras = cameras.ToList();
+
+        var centerLatitude = (north + south) / 2.0;
+        var centerLongitude = (east + west) / 2.0;
+
+        var camerasTask = CameraDirectoryService.GetCamerasInBoundingBoxAsync(_lastBbox);
+        var alertsTask = _alertsOn ? NwsAlertsService.GetActiveAlertsAsync(_lastBbox) : NoAlerts;
+        var incidentsTask = _incidentsOn ? TrafficIncidentDirectoryService.GetIncidentsInBoundingBoxAsync(_lastBbox) : NoIncidents;
+        var weatherTask = NwsForecastService.GetSnapshotAsync(centerLatitude, centerLongitude);
+        await Task.WhenAll(camerasTask, alertsTask, incidentsTask, weatherTask);
+
+        _visibleCameras = camerasTask.Result.ToList();
         // Reset the dismiss so a future empty area shows the hint again - this isn't a
         // one-time app-level notice like the provider-setup banner, it's per-location
         // information that should reappear whenever it becomes true again.
@@ -401,29 +424,22 @@
         }
         StateHasChanged();
 
-        var pins = cameras.Select(ToPinPayload).ToList();
+        var pins = _visibleCameras.Select(ToPinPayload).ToList();
         await JS.InvokeVoidAsync("tacticalGlobe.setCameraPins", pins);
 
-        // The alert set is independent of any one view, but re-filtering it against the new
-        // bbox on every settle keeps what's drawn matching what's actually visible - cheap,
-        // since NwsAlertsService caches the underlying nationwide fetch (see its own comment).
         if (_alertsOn)
         {
-            await PushAlertsAsync();
+            await ApplyAlertsAsync(alertsTask.Result);
         }
 
         if (_incidentsOn)
         {
-            await PushIncidentsAsync();
+            await ApplyIncidentsAsync(incidentsTask.Result);
         }
 
         // Weather-on-zoom: always kept current for wherever the view is centered, not gated
-        // behind a toggle - matches cameras/pins being always-on rather than opt-in. Uses the
-        // bbox's own center rather than asking the client for one, since the server already has
-        // the settled bbox right here.
-        var centerLatitude = (north + south) / 2.0;
-        var centerLongitude = (east + west) / 2.0;
-        var weather = await NwsForecastService.GetSnapshotAsync(centerLatitude, centerLongitude);
+        // behind a toggle - matches cameras/pins being always-on rather than opt-in.
+        var weather = weatherTask.Result;
         await JS.InvokeVoidAsync("tacticalGlobe.setWeatherSnapshot", weather is null ? null : new
         {
             currentTemperatureFahrenheit = weather.CurrentTemperatureFahrenheit,
@@ -461,6 +477,14 @@
     private async Task PushAlertsAsync()
     {
         var alerts = await NwsAlertsService.GetActiveAlertsAsync(_lastBbox);
+        await ApplyAlertsAsync(alerts);
+    }
+
+    // Split from PushAlertsAsync so OnGlobeViewChanged can fetch alerts in parallel with
+    // cameras/incidents/weather and only pay for this (JS-facing) part sequentially, once the
+    // fetch it depends on has actually landed.
+    private async Task ApplyAlertsAsync(IReadOnlyList<WeatherAlert> alerts)
+    {
         var payload = alerts.Select(a => new
         {
             id = a.Id,
@@ -535,6 +559,13 @@
     private async Task PushIncidentsAsync()
     {
         var incidents = await TrafficIncidentDirectoryService.GetIncidentsInBoundingBoxAsync(_lastBbox);
+        await ApplyIncidentsAsync(incidents);
+    }
+
+    // Split from PushIncidentsAsync for the same reason as ApplyAlertsAsync above - lets
+    // OnGlobeViewChanged fetch incidents in parallel with cameras/alerts/weather.
+    private async Task ApplyIncidentsAsync(IReadOnlyList<TrafficIncident> incidents)
+    {
         var payload = incidents.Select(i => new
         {
             id = i.Id,
