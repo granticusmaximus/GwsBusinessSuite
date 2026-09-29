@@ -683,6 +683,44 @@ public sealed class CmsBuilderService(
         return page;
     }
 
+    // Workstream D, Phase 1 (15 unique visual themes) - a direct DbContext update rather than a
+    // round-trip through SaveSiteAsync/SavePageAsync's full editor models, matching
+    // ApplyWorkflowBlueprintAsync's own directness just above: this only ever touches the two
+    // fields a theme actually owns (DesignTokensJson, and optionally the homepage's BlocksJson),
+    // never the rest of the site/page's own settings.
+    public async Task<CmsSite> ApplyThemePresetAsync(Guid siteId, string presetKey, bool replaceHomepageLayout, string? actor = null, CancellationToken cancellationToken = default)
+    {
+        var preset = CmsThemePresets.Find(presetKey)
+            ?? throw new InvalidOperationException($"Theme preset '{presetKey}' was not found.");
+
+        var site = await dbContext.CmsSites.FirstOrDefaultAsync(s => s.Id == siteId, cancellationToken)
+            ?? throw new InvalidOperationException("The selected site no longer exists.");
+
+        site.DesignTokensJson = DesignTokenJson.Serialize(preset.Tokens);
+        site.UpdatedAt = _timeProvider.GetUtcNow();
+        site.UpdatedBy = actor ?? "theme-preset";
+
+        if (replaceHomepageLayout)
+        {
+            var homepage = await dbContext.CmsPages.FirstOrDefaultAsync(
+                p => p.SiteId == siteId && p.ParentPageId == null && p.Slug == "home" && p.TrashedAt == null,
+                cancellationToken);
+            if (homepage is not null)
+            {
+                homepage.BlocksJson = CmsBuilderJson.Serialize(preset.HomepageLayout());
+                // Applying a theme should take effect immediately, not sit as a pending draft
+                // behind whatever the live homepage currently shows - see DraftBlocksJson's own
+                // "null means no unpublished changes" contract.
+                homepage.DraftBlocksJson = null;
+                homepage.UpdatedAt = _timeProvider.GetUtcNow();
+                homepage.UpdatedBy = actor ?? "theme-preset";
+            }
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return site;
+    }
+
     public async Task<IReadOnlyList<CmsPagePropertyView>> ListPagePropertiesAsync(Guid siteId, CancellationToken cancellationToken = default)
     {
         var properties = await dbContext.CmsPageProperties.AsNoTracking()

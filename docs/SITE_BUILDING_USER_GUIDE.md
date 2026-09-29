@@ -435,6 +435,13 @@ how long that selection sticks around.
 `/admin/appearance/customize` holds everything that applies site-wide, across every page and the
 blog:
 
+- **Theme presets** — a curated starting point (colors, a type scale, and optionally a starter
+  homepage layout built from the same blocks used elsewhere on this site). Applying a theme is a
+  **one-time copy**, not an ongoing link — it overwrites the site's Design Tokens below (and, only
+  if you check the box, the "home" page's layout) once, then you're free to keep customizing.
+  Selecting the homepage-layout option is confirmed separately since it can overwrite real page
+  content. Themes are a fixed, code-defined set (not user-created) — see
+  `CmsThemePresets.All` if you need to add more.
 - **Global Design** — an accent color and one of three built-in font pairings (Elegant:
   Playfair+Inter, Modern: Manrope+Inter, Classic: Merriweather+Source Sans).
 - **Site-wide Custom CSS** — applies to every page; a page's own Custom CSS (from its settings

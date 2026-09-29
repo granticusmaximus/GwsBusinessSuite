@@ -2934,6 +2934,7 @@ public sealed class AutomationWorkflowTests
         public Task<CmsSite?> GetSiteBySlugAsync(string siteSlug, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<CmsSite> SaveSiteAsync(CmsSiteEditorModel editor, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task DeleteSiteAsync(Guid siteId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public Task<CmsSite> ApplyThemePresetAsync(Guid siteId, string presetKey, bool replaceHomepageLayout, string? actor = null, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<CmsPage>> ListPagesAsync(Guid? siteId = null, bool includeTrashed = false, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<CmsPage>> ListTrashedPagesAsync(Guid siteId, CancellationToken cancellationToken = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<CmsPageCategory>> ListPageCategoriesAsync(Guid siteId, CancellationToken cancellationToken = default) => throw new NotImplementedException();

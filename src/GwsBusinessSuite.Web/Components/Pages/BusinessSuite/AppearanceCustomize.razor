@@ -33,6 +33,54 @@
 
 <div class="card border-0 shadow-sm" style="max-width: 640px;">
     <div class="card-body">
+        <label class="form-label fw-semibold small">Theme presets</label>
+        <p class="text-secondary small">
+            A curated starting point - colors and a type scale, optionally paired with a starter
+            homepage layout built from the same blocks used elsewhere on this site. Applying is a
+            one-time copy: it doesn't keep this site "linked" to the preset, so you're free to
+            keep customizing afterward.
+        </p>
+        <div class="row g-2">
+            @foreach (var preset in CmsThemePresets.All)
+            {
+                <div class="col-12 col-md-6">
+                    <div class="border rounded p-2 h-100 d-flex flex-column gap-2">
+                        <div class="d-flex gap-1">
+                            @foreach (var color in preset.Tokens.Colors.Take(4))
+                            {
+                                <span class="d-inline-block rounded-circle" style="width:1.1rem;height:1.1rem;background:@color.Hex;border:1px solid rgba(0,0,0,.15);" title="@color.Name"></span>
+                            }
+                        </div>
+                        <div>
+                            <div class="fw-semibold small">@preset.Name</div>
+                            <div class="text-secondary small">@preset.Description</div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary mt-auto align-self-start" disabled="@IsBusy" @onclick="() => OpenApplyThemeConfirm(preset)">Apply</button>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+<ConfirmModal Show="@(_themeToApply is not null)"
+              Title="@($"Apply \"{_themeToApply?.Name}\"?")"
+              ConfirmText="Apply theme"
+              ConfirmButtonClass="btn-primary"
+              Busy="@IsBusy"
+              OnConfirm="ApplyThemeAsync"
+              OnCancel="@(() => _themeToApply = null)">
+    <p>This replaces @(CurrentSite?.Name ?? "this site")'s colors and type scale with "@(_themeToApply?.Name)"'s.</p>
+    <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="replace-homepage" @bind="_replaceHomepageLayout" />
+        <label class="form-check-label small" for="replace-homepage">
+            Also replace the homepage layout with this theme's starter layout (overwrites whatever is on the "home" page now)
+        </label>
+    </div>
+</ConfirmModal>
+
+<div class="card border-0 shadow-sm mt-3" style="max-width: 640px;">
+    <div class="card-body">
         <label class="form-label fw-semibold small">Global Design</label>
         <div class="row g-2 mb-3">
             <div class="col-6">
@@ -240,6 +288,42 @@
         CurrentSite is { } site ? $"/admin/api/cms/{site.Slug}/recipe.json" : null;
     private string RecipeImportMessage { get; set; } = string.Empty;
     private bool RecipeImportSucceeded { get; set; }
+
+    private CmsThemePreset? _themeToApply;
+    private bool _replaceHomepageLayout;
+
+    private void OpenApplyThemeConfirm(CmsThemePreset preset)
+    {
+        _themeToApply = preset;
+        _replaceHomepageLayout = false;
+    }
+
+    private async Task ApplyThemeAsync()
+    {
+        if (CurrentSite is null || _themeToApply is null) return;
+        var preset = _themeToApply;
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var actor = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var updated = await CmsBuilderService.ApplyThemePresetAsync(CurrentSite.Id, preset.Key, _replaceHomepageLayout, actor);
+            await LoadSiteAsync(updated);
+            StatusMessage = _replaceHomepageLayout
+                ? $"""Applied "{preset.Name}" and replaced the homepage layout."""
+                : $"""Applied "{preset.Name}".""";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to apply theme preset {PresetKey}.", preset.Key);
+            ErrorMessage = $"Unable to apply theme. {ex.Message}";
+        }
+        finally
+        {
+            _themeToApply = null;
+            IsBusy = false;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {

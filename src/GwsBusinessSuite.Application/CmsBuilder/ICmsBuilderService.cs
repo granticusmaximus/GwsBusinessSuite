@@ -10,6 +10,13 @@ public interface ICmsBuilderService
     Task<CmsSite> SaveSiteAsync(CmsSiteEditorModel editor, CancellationToken cancellationToken = default);
     Task DeleteSiteAsync(Guid siteId, CancellationToken cancellationToken = default);
 
+    // Workstream D, Phase 1 (15 unique visual themes) - applying a theme is a one-time copy, not
+    // a live binding (master plan decision 3): it overwrites the site's DesignTokensJson and,
+    // only when replaceHomepageLayout is true, the site's "home" page BlocksJson. There is no
+    // ongoing "this site follows theme X" relationship afterward - editing the site later never
+    // reverts if the preset itself changes.
+    Task<CmsSite> ApplyThemePresetAsync(Guid siteId, string presetKey, bool replaceHomepageLayout, string? actor = null, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<CmsPage>> ListPagesAsync(Guid? siteId = null, bool includeTrashed = false, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CmsPage>> ListTrashedPagesAsync(Guid siteId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<CmsPageCategory>> ListPageCategoriesAsync(Guid siteId, CancellationToken cancellationToken = default);

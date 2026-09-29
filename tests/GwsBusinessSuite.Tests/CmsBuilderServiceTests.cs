@@ -324,6 +324,92 @@ public sealed class CmsBuilderServiceTests
     }
 
     [Fact]
+    public async Task ApplyThemePresetAsync_ShouldCopyThePresetsDesignTokensOntoTheSite()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Acme" });
+        var preset = CmsThemePresets.All[0];
+
+        var updated = await service.ApplyThemePresetAsync(site.Id, preset.Key, replaceHomepageLayout: false);
+
+        var tokens = DesignTokenJson.ParseOrEmpty(updated.DesignTokensJson);
+        tokens.Colors.Should().BeEquivalentTo(preset.Tokens.Colors);
+        tokens.TypeScale.Should().BeEquivalentTo(preset.Tokens.TypeScale);
+    }
+
+    [Fact]
+    public async Task ApplyThemePresetAsync_ShouldLeaveTheHomepageUntouched_WhenReplaceHomepageLayoutIsFalse()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Acme" });
+        var homepage = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Home",
+            Slug = "home",
+            BlocksJson = "{\"sections\":[{\"id\":\"my-custom-section\",\"columns\":[]}]}"
+        });
+
+        await service.ApplyThemePresetAsync(site.Id, CmsThemePresets.All[0].Key, replaceHomepageLayout: false);
+
+        var reloaded = await service.GetPageAsync(homepage.Id);
+        reloaded!.BlocksJson.Should().Contain("my-custom-section");
+    }
+
+    [Fact]
+    public async Task ApplyThemePresetAsync_ShouldReplaceTheHomepageLayout_WhenRequested()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Acme" });
+        var homepage = await service.SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = site.Id,
+            Title = "Home",
+            Slug = "home",
+            BlocksJson = "{\"sections\":[{\"id\":\"my-custom-section\",\"columns\":[]}]}"
+        });
+
+        var preset = CmsThemePresets.All[0];
+        await service.ApplyThemePresetAsync(site.Id, preset.Key, replaceHomepageLayout: true);
+
+        var reloaded = await service.GetPageAsync(homepage.Id);
+        reloaded!.BlocksJson.Should().NotContain("my-custom-section");
+        reloaded.BlocksJson.Should().Contain("\"hero\"");
+        reloaded.DraftBlocksJson.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ApplyThemePresetAsync_ShouldNotThrow_WhenNoHomepageExists()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Acme" });
+
+        var action = async () => await service.ApplyThemePresetAsync(site.Id, CmsThemePresets.All[0].Key, replaceHomepageLayout: true);
+
+        await action.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task ApplyThemePresetAsync_ShouldThrow_ForAnUnknownPresetKey()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new CmsBuilderService(db);
+        var site = await service.SaveSiteAsync(new CmsSiteEditorModel { Name = "Acme" });
+
+        var action = async () => await service.ApplyThemePresetAsync(site.Id, "not-a-real-preset", replaceHomepageLayout: false);
+
+        await action.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
     public async Task GetSiteBySlugAndGetPageBySlugAsync_ShouldResolveThePublishedPage()
     {
         await using var db = await CreateDbAsync();
