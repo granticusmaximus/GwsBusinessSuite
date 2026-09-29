@@ -4053,6 +4053,7 @@ static async Task EnsureUserGuidesInSentinelAsync(IServiceProvider services, IHo
         ("SITE_BUILDING_USER_GUIDE.md", "Site Building", "🏗️"),
         ("CRM_USER_GUIDE.md", "CRM & Relationships", "🤝"),
         ("SUPPORT_USER_GUIDE.md", "Support", "🛟"),
+        ("COMMUNITY_USER_GUIDE.md", "Community", "🧑‍🤝‍🧑"),
         ("SENTINEL_USER_GUIDE.md", "Sentinel & SentinelGPT", "📚"),
         ("INTELLIGENCE_USER_GUIDE.md", "Intelligence & BI", "🛰️"),
         ("OVERWATCH_USER_GUIDE.md", "Overwatch", "🌍"),

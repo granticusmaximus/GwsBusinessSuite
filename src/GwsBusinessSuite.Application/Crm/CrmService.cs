@@ -16,7 +16,11 @@ public sealed class CrmService(
     // subscribers after a deal's stage actually changes, skipped when actor is
     // "automation-engine" (see SetDealStageAsync) to prevent an automation-caused stage
     // change from re-triggering itself.
-    IAutomationTriggerService? automationTriggerService = null) : ICrmService
+    IAutomationTriggerService? automationTriggerService = null,
+    // Optional, resolved by DI in production - Workstream E (community activity feed). Only
+    // fired for a brand-new contact, not every field edit - a clean, unambiguous single moment
+    // rather than instrumenting every CRM mutation path.
+    Community.IActivityFeedService? activityFeedService = null) : ICrmService
 {
     private readonly ICurrentUserAccessor _currentUserAccessor = currentUserAccessor ?? FixedCurrentUserAccessor.Unknown;
     // Falls back to a private, per-instance cache when constructed without DI (existing
@@ -118,6 +122,13 @@ public sealed class CrmService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
         _cache.Remove(DashboardCacheKey);
+
+        if (isNew && activityFeedService is not null && performedBy != "automation-engine")
+        {
+            await activityFeedService.RecordAsync(
+                performedBy, "created a new CRM contact", contact.FullName, $"/admin/crm/contacts/{contact.Id}", cancellationToken);
+        }
+
         return contact;
     }
 

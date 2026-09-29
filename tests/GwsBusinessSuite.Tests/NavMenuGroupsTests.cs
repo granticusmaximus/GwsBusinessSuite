@@ -33,6 +33,13 @@ public class NavMenuGroupsTests
         ["admin/email-campaigns", nameof(NavMenuGroups.RelationshipPrefixes)],
         ["admin/users", nameof(NavMenuGroups.RelationshipPrefixes)],
 
+        // Community
+        ["admin/community", nameof(NavMenuGroups.CommunityPrefixes)],
+        ["admin/community/activity", nameof(NavMenuGroups.CommunityPrefixes)],
+        ["admin/community/messages", nameof(NavMenuGroups.CommunityPrefixes)],
+        ["admin/community/departments", nameof(NavMenuGroups.CommunityPrefixes)],
+        ["admin/community/profile/jdoe", nameof(NavMenuGroups.CommunityPrefixes)],
+
         // Knowledge - admin/wiki has no NavLink of its own (Wiki.razor also routes at
         // admin/sentinel, which does) but must still keep the Knowledge group expanded.
         ["admin/sentinel", nameof(NavMenuGroups.KnowledgePrefixes)],
@@ -66,6 +73,7 @@ public class NavMenuGroupsTests
     {
         [nameof(NavMenuGroups.ContentPublishingPrefixes)] = NavMenuGroups.ContentPublishingPrefixes,
         [nameof(NavMenuGroups.RelationshipPrefixes)] = NavMenuGroups.RelationshipPrefixes,
+        [nameof(NavMenuGroups.CommunityPrefixes)] = NavMenuGroups.CommunityPrefixes,
         [nameof(NavMenuGroups.KnowledgePrefixes)] = NavMenuGroups.KnowledgePrefixes,
         [nameof(NavMenuGroups.IntelligencePrefixes)] = NavMenuGroups.IntelligencePrefixes,
         [nameof(NavMenuGroups.GrowthMonetizationPrefixes)] = NavMenuGroups.GrowthMonetizationPrefixes,

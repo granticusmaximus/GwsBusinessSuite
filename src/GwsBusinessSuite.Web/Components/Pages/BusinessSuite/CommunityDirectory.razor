@@ -1,0 +1,210 @@
+@page "/admin/community"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "PortalAccess")]
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Community
+@using GwsBusinessSuite.Domain.Entities
+@using Microsoft.AspNetCore.Components.Authorization
+@inject ICommunityDirectoryService DirectoryService
+@inject IChatService ChatService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject ILogger<CommunityDirectory> Logger
+
+<PageTitle>Staff Directory</PageTitle>
+
+<div class="page-header d-flex align-items-start justify-content-between flex-wrap gap-2">
+    <div>
+        <h1><i class="bi bi-people-fill me-2 text-primary"></i>Staff Directory</h1>
+        <p>Find teammates, see who's in which department, and start a conversation.</p>
+    </div>
+    <div class="d-flex gap-2">
+        <a href="/admin/community/activity" class="btn btn-sm btn-outline-secondary"><i class="bi bi-activity me-1"></i>Activity Feed</a>
+        <a href="/admin/community/messages" class="btn btn-sm btn-outline-secondary"><i class="bi bi-chat-left-text me-1"></i>Messages</a>
+        @if (IsAdmin)
+        {
+            <a href="/admin/community/departments" class="btn btn-sm btn-outline-secondary"><i class="bi bi-diagram-3 me-1"></i>Departments</a>
+        }
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
+}
+
+<div class="row g-2 mb-4">
+    <div class="col-md-6">
+        <input class="form-control" placeholder="Search by name or job title…"
+               value="@SearchText" @oninput="e => OnSearchChanged(e.Value?.ToString() ?? string.Empty)" />
+    </div>
+    <div class="col-md-4">
+        <select class="form-select" value="@(SelectedDepartmentId?.ToString() ?? string.Empty)" @onchange="e => OnDepartmentChangedAsync(e.Value?.ToString())">
+            <option value="">All departments</option>
+            @foreach (var department in Departments)
+            {
+                <option value="@department.Id">@department.Name (@department.MemberCount)</option>
+            }
+        </select>
+    </div>
+</div>
+
+@if (IsLoading)
+{
+    <LoadingIndicator Message="Loading staff directory…" />
+}
+else if (Profiles.Count == 0)
+{
+    <EmptyState Icon="bi-people" Message="No staff members match your filters." />
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var profile in Profiles)
+        {
+            <div class="col-md-6 col-lg-4">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center gap-3 mb-2">
+                            @if (!string.IsNullOrWhiteSpace(profile.AvatarUrl))
+                            {
+                                <img src="@profile.AvatarUrl" alt="@profile.DisplayName" class="rounded-circle" style="width:48px;height:48px;object-fit:cover;" />
+                            }
+                            else
+                            {
+                                <div class="rounded-circle bg-primary-subtle text-primary d-flex align-items-center justify-content-center fw-semibold" style="width:48px;height:48px;">
+                                    @GetInitials(profile.DisplayName)
+                                </div>
+                            }
+                            <div>
+                                <a href="/admin/community/profile/@profile.Username" class="fw-semibold text-decoration-none">@profile.DisplayName</a>
+                                @if (!string.IsNullOrWhiteSpace(profile.JobTitle))
+                                {
+                                    <div class="small text-secondary">@profile.JobTitle</div>
+                                }
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(profile.DepartmentName))
+                        {
+                            <span class="badge text-bg-light mb-2">@profile.DepartmentName</span>
+                        }
+                        <div class="d-flex gap-2 mt-2">
+                            <a href="/admin/community/profile/@profile.Username" class="btn btn-sm btn-outline-secondary">View profile</a>
+                            @if (!string.Equals(profile.Username, CurrentUsername, StringComparison.OrdinalIgnoreCase))
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => MessageAsync(profile.Username)" disabled="@IsBusy">
+                                    <i class="bi bi-chat-dots me-1"></i>Message
+                                </button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private List<DepartmentView> Departments { get; set; } = [];
+    private List<MemberProfileView> Profiles { get; set; } = [];
+    private string SearchText { get; set; } = string.Empty;
+    private Guid? SelectedDepartmentId { get; set; }
+    private string CurrentUsername { get; set; } = string.Empty;
+    private bool IsAdmin { get; set; }
+    private bool IsLoading { get; set; } = true;
+    private bool IsBusy { get; set; }
+    private string ErrorMessage { get; set; } = string.Empty;
+    private CancellationTokenSource? _searchDebounce;
+
+    protected override async Task OnInitializedAsync()
+    {
+        CurrentUsername = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        IsAdmin = AuthState is not null && (await AuthState).User.IsInRole(AppRoles.Admin);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        IsLoading = true;
+        try
+        {
+            Departments = (await DirectoryService.ListDepartmentsAsync()).ToList();
+            Profiles = (await DirectoryService.ListProfilesAsync(SelectedDepartmentId, SearchText)).ToList();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't load the staff directory.";
+            Logger.LogError(ex, "Failed to load the community staff directory.");
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private void OnSearchChanged(string value)
+    {
+        SearchText = value;
+        _searchDebounce?.Cancel();
+        var cts = new CancellationTokenSource();
+        _searchDebounce = cts;
+        _ = DebounceSearchAsync(cts.Token);
+    }
+
+    private async Task DebounceSearchAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(300, cancellationToken);
+            await InvokeAsync(async () =>
+            {
+                await LoadAsync();
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task OnDepartmentChangedAsync(string? value)
+    {
+        SelectedDepartmentId = string.IsNullOrWhiteSpace(value) ? null : Guid.Parse(value);
+        await LoadAsync();
+    }
+
+    private async Task MessageAsync(string username)
+    {
+        IsBusy = true;
+        try
+        {
+            var threadId = await ChatService.GetOrCreateDirectThreadAsync(CurrentUsername, username);
+            Navigation.NavigateTo($"/admin/community/messages/{threadId}");
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't start a conversation with that person.";
+            Logger.LogError(ex, "Failed to start a direct-message thread with {Username}.", username);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static string GetInitials(string displayName)
+    {
+        var parts = displayName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length switch
+        {
+            0 => "?",
+            1 => parts[0][..1].ToUpperInvariant(),
+            _ => $"{parts[0][0]}{parts[^1][0]}".ToUpperInvariant()
+        };
+    }
+}

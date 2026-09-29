@@ -13,6 +13,7 @@ using GwsBusinessSuite.Application.ThreatIntel;
 using GwsBusinessSuite.Application.CmsBuilder;
 using GwsBusinessSuite.Application.CmsKnowledge;
 using GwsBusinessSuite.Application.Comments;
+using GwsBusinessSuite.Application.Community;
 using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.DockerHealth;
 using GwsBusinessSuite.Application.DigitalOcean;
@@ -180,6 +181,9 @@ public static class DependencyInjection
         services.AddScoped<IFormSubmissionService, FormSubmissionService>();
         services.AddScoped<ICommentService, CommentService>();
         services.AddScoped<IRelatedArticlesService, RelatedArticlesService>();
+        services.AddScoped<ICommunityDirectoryService, CommunityDirectoryService>();
+        services.AddScoped<IActivityFeedService, ActivityFeedService>();
+        services.AddScoped<IChatService, ChatService>();
         services.AddScoped<IDockerHealthService, DockerHealthService>();
         services.AddSingleton<DockerHealthNotifier>();
         services.AddHostedService<DockerHealthMonitorBackgroundService>();

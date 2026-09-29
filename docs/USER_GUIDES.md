@@ -52,6 +52,11 @@ too, not that the update should be skipped.
 - [Support](SUPPORT_USER_GUIDE.md) — the admin ticket inbox and the Client Portal support
   experience.
 
+### Community
+
+- [Community](COMMUNITY_USER_GUIDE.md) — the internal staff directory, departments, activity
+  feed, and direct messaging.
+
 ### Intelligence
 
 - [Sentinel & SentinelGPT](SENTINEL_USER_GUIDE.md) — the internal Notion-style workspace and its

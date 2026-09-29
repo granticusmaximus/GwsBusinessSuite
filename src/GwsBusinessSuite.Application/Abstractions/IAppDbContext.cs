@@ -124,6 +124,12 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<CongressionalFloorTranscript> CongressionalFloorTranscripts { get; }
     DbSet<WikiSyncedBlockSource> WikiSyncedBlockSources { get; }
     DbSet<MobileDeviceRegistration> MobileDeviceRegistrations { get; }
+    DbSet<MemberProfile> MemberProfiles { get; }
+    DbSet<Department> Departments { get; }
+    DbSet<ActivityEvent> ActivityEvents { get; }
+    DbSet<ChatThread> ChatThreads { get; }
+    DbSet<ChatThreadParticipant> ChatThreadParticipants { get; }
+    DbSet<ChatMessage> ChatMessages { get; }
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 
     // For multi-step writes that must be all-or-nothing (e.g. AppGenerationService.ApproveAsync

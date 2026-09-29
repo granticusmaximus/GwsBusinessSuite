@@ -21,7 +21,10 @@ public sealed class WikiService(
     // audit stream (Part 4.9), but only for checkpoint-worthy saves (createRevisionCheckpoint),
     // not every silent debounced autosave tick, which would flood the audit log with noise.
     ISecurityAuditService? securityAudit = null,
-    IAutomationTriggerService? automationTriggerService = null) : IWikiService
+    IAutomationTriggerService? automationTriggerService = null,
+    // Optional, resolved by DI in production - Workstream E (community activity feed). Same
+    // "checkpoint saves only, not every silent autosave tick" gating as securityAudit above.
+    Application.Community.IActivityFeedService? activityFeedService = null) : IWikiService
 {
     // Was a flat 20-revision cap (hard-deleted anything past it); replaced in Phase 4.4 with a
     // time-tiered policy closer to Notion's own page history - see TrimOldRevisionsAsync.
@@ -272,6 +275,15 @@ public sealed class WikiService(
                     TargetType: "WikiPage",
                     TargetId: page.Id.ToString(),
                     ActorUsername: performedBy), cancellationToken);
+            }
+            if (activityFeedService is not null && performedBy != "automation-engine")
+            {
+                await activityFeedService.RecordAsync(
+                    performedBy,
+                    isNew ? "created the wiki page" : "edited the wiki page",
+                    page.Title,
+                    $"/admin/wiki?page={page.Id}",
+                    cancellationToken);
             }
         }
 

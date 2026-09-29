@@ -1,0 +1,254 @@
+@page "/admin/community/profile/{Username}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "PortalAccess")]
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Community
+@inject ICommunityDirectoryService DirectoryService
+@inject IChatService ChatService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject ILogger<CommunityProfile> Logger
+
+<PageTitle>@(Profile?.DisplayName ?? "Profile") · Community</PageTitle>
+
+<div class="page-header">
+    <p class="mb-1"><a href="/admin/community"><i class="bi bi-arrow-left me-1"></i>Back to Staff Directory</a></p>
+    <h1><i class="bi bi-person-badge me-2 text-primary"></i>@(Profile?.DisplayName ?? "Profile")</h1>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-success d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
+}
+
+@if (IsLoading)
+{
+    <LoadingIndicator Message="Loading profile…" />
+}
+else if (Profile is null)
+{
+    <div class="alert alert-warning" role="alert">No staff member was found with that username.</div>
+}
+else
+{
+    <div class="row g-4">
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+                    <span class="fw-semibold">Details</span>
+                    @if (!IsSelf)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="MessageAsync" disabled="@IsBusy">
+                            <i class="bi bi-chat-dots me-1"></i>Message
+                        </button>
+                    }
+                </div>
+                <div class="card-body">
+                    @if (CanEdit)
+                    {
+                        <EditForm Model="Editor" OnValidSubmit="SaveAsync">
+                            <DataAnnotationsValidator />
+                            <ValidationSummary />
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="form-label fw-semibold small">Display Name</label>
+                                    <InputText class="form-control" @bind-Value="Editor.DisplayName" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label fw-semibold small">Job Title</label>
+                                    <InputText class="form-control" @bind-Value="Editor.JobTitle" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label fw-semibold small">Department</label>
+                                    <InputSelect class="form-select" @bind-Value="EditorDepartmentIdValue">
+                                        <option value="">No department</option>
+                                        @foreach (var department in Departments)
+                                        {
+                                            <option value="@department.Id">@department.Name</option>
+                                        }
+                                    </InputSelect>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label fw-semibold small">Phone</label>
+                                    <InputText class="form-control" @bind-Value="Editor.Phone" />
+                                </div>
+                                <div class="col-md-12">
+                                    <label class="form-label fw-semibold small">Avatar URL</label>
+                                    <InputText class="form-control" @bind-Value="Editor.AvatarUrl" />
+                                </div>
+                                <div class="col-md-12">
+                                    <label class="form-label fw-semibold small">Bio</label>
+                                    <InputTextArea class="form-control" rows="3" @bind-Value="Editor.Bio" />
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label fw-semibold small">LinkedIn URL</label>
+                                    <InputText class="form-control" @bind-Value="Editor.LinkedInUrl" />
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label fw-semibold small">Twitter/X URL</label>
+                                    <InputText class="form-control" @bind-Value="Editor.TwitterUrl" />
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label fw-semibold small">Website URL</label>
+                                    <InputText class="form-control" @bind-Value="Editor.WebsiteUrl" />
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <button type="submit" class="btn btn-primary" disabled="@IsBusy">
+                                    <i class="bi bi-floppy-fill me-1"></i>Save
+                                </button>
+                            </div>
+                        </EditForm>
+                    }
+                    else
+                    {
+                        <dl class="row mb-0">
+                            <dt class="col-sm-4">Job Title</dt>
+                            <dd class="col-sm-8">@(string.IsNullOrWhiteSpace(Profile.JobTitle) ? "—" : Profile.JobTitle)</dd>
+                            <dt class="col-sm-4">Department</dt>
+                            <dd class="col-sm-8">@(Profile.DepartmentName ?? "—")</dd>
+                            <dt class="col-sm-4">Bio</dt>
+                            <dd class="col-sm-8">@(string.IsNullOrWhiteSpace(Profile.Bio) ? "—" : Profile.Bio)</dd>
+                            <dt class="col-sm-4">Phone</dt>
+                            <dd class="col-sm-8">@(string.IsNullOrWhiteSpace(Profile.Phone) ? "—" : Profile.Phone)</dd>
+                            <dt class="col-sm-4">Links</dt>
+                            <dd class="col-sm-8">
+                                @if (string.IsNullOrWhiteSpace(Profile.LinkedInUrl) && string.IsNullOrWhiteSpace(Profile.TwitterUrl) && string.IsNullOrWhiteSpace(Profile.WebsiteUrl))
+                                {
+                                    <span>—</span>
+                                }
+                                else
+                                {
+                                    <div class="d-flex gap-2">
+                                        @if (!string.IsNullOrWhiteSpace(Profile.LinkedInUrl))
+                                        {
+                                            <a href="@Profile.LinkedInUrl" target="_blank" rel="noopener"><i class="bi bi-linkedin"></i></a>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(Profile.TwitterUrl))
+                                        {
+                                            <a href="@Profile.TwitterUrl" target="_blank" rel="noopener"><i class="bi bi-twitter-x"></i></a>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(Profile.WebsiteUrl))
+                                        {
+                                            <a href="@Profile.WebsiteUrl" target="_blank" rel="noopener"><i class="bi bi-globe"></i></a>
+                                        }
+                                    </div>
+                                }
+                            </dd>
+                        </dl>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string Username { get; set; } = string.Empty;
+
+    private MemberProfileView? Profile { get; set; }
+    private MemberProfileEditorModel Editor { get; set; } = new();
+    private List<DepartmentView> Departments { get; set; } = [];
+    private string CurrentUsername { get; set; } = string.Empty;
+    private bool CanEdit { get; set; }
+    private bool IsSelf { get; set; }
+    private bool IsLoading { get; set; } = true;
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    private string EditorDepartmentIdValue
+    {
+        get => Editor.DepartmentId?.ToString() ?? string.Empty;
+        set => Editor.DepartmentId = string.IsNullOrWhiteSpace(value) ? null : Guid.Parse(value);
+    }
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        IsLoading = true;
+        try
+        {
+            CurrentUsername = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            Profile = await DirectoryService.GetProfileByUsernameAsync(Username);
+            if (Profile is null) return;
+
+            IsSelf = string.Equals(Profile.Username, CurrentUsername, StringComparison.OrdinalIgnoreCase);
+            CanEdit = await DirectoryService.CanEditProfileAsync(CurrentUsername, Profile.Username);
+            Departments = (await DirectoryService.ListDepartmentsAsync()).ToList();
+
+            Editor = new MemberProfileEditorModel
+            {
+                Username = Profile.Username,
+                DisplayName = Profile.DisplayName,
+                AvatarUrl = Profile.AvatarUrl,
+                Bio = Profile.Bio,
+                JobTitle = Profile.JobTitle,
+                DepartmentId = Profile.DepartmentId,
+                Phone = Profile.Phone,
+                LinkedInUrl = Profile.LinkedInUrl,
+                TwitterUrl = Profile.TwitterUrl,
+                WebsiteUrl = Profile.WebsiteUrl
+            };
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't load that profile.";
+            Logger.LogError(ex, "Failed to load community profile for {Username}.", Username);
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            Profile = await DirectoryService.SaveProfileAsync(Editor, CurrentUsername);
+            StatusMessage = "Profile updated.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't save that profile.";
+            Logger.LogError(ex, "Failed to save community profile for {Username}.", Username);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task MessageAsync()
+    {
+        IsBusy = true;
+        try
+        {
+            var threadId = await ChatService.GetOrCreateDirectThreadAsync(CurrentUsername, Username);
+            Navigation.NavigateTo($"/admin/community/messages/{threadId}");
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't start a conversation with that person.";
+            Logger.LogError(ex, "Failed to start a direct-message thread with {Username}.", Username);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}

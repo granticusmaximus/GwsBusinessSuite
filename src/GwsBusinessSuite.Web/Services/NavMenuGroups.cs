@@ -13,6 +13,9 @@ public static class NavMenuGroups
     public static readonly IReadOnlyList<string> RelationshipPrefixes =
         ["admin/crm", "admin/deal-scoring", "admin/billing", "admin/support", "admin/scheduling", "admin/email-campaigns", "admin/users"];
 
+    public static readonly IReadOnlyList<string> CommunityPrefixes =
+        ["admin/community"];
+
     public static readonly IReadOnlyList<string> KnowledgePrefixes =
         ["admin/sentinel", "admin/wiki", "admin/mind-maps", "admin/cms-knowledge"];
 

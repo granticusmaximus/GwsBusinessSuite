@@ -1,0 +1,303 @@
+@page "/admin/community/messages"
+@page "/admin/community/messages/{ThreadId:guid}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "PortalAccess")]
+@implements IAsyncDisposable
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Community
+@inject IChatService ChatService
+@inject ICommunityDirectoryService DirectoryService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject ILogger<CommunityMessages> Logger
+
+<PageTitle>Messages · Community</PageTitle>
+
+<div class="page-header">
+    <p class="mb-1"><a href="/admin/community"><i class="bi bi-arrow-left me-1"></i>Back to Staff Directory</a></p>
+    <h1><i class="bi bi-chat-left-text me-2 text-primary"></i>Messages</h1>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
+}
+
+<div class="row g-3">
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+                <span class="fw-semibold">Conversations</span>
+                <button class="btn btn-sm btn-outline-primary" @onclick="() => ShowNewMessage = !ShowNewMessage">
+                    <i class="bi bi-plus-lg"></i>
+                </button>
+            </div>
+            @if (ShowNewMessage)
+            {
+                <div class="card-body border-bottom py-3">
+                    <select class="form-select form-select-sm" @onchange="e => StartThreadAsync(e.Value?.ToString())">
+                        <option value="">Choose a teammate…</option>
+                        @foreach (var profile in OtherProfiles)
+                        {
+                            <option value="@profile.Username">@profile.DisplayName</option>
+                        }
+                    </select>
+                </div>
+            }
+            <div class="card-body p-0" style="max-height:520px;overflow-y:auto;">
+                @if (IsLoadingThreads)
+                {
+                    <LoadingIndicator Message="Loading conversations…" />
+                }
+                else if (Threads.Count == 0)
+                {
+                    <EmptyState Icon="bi-chat-left-text" Message="No conversations yet." />
+                }
+                else
+                {
+                    <div class="list-group list-group-flush">
+                        @foreach (var thread in Threads)
+                        {
+                            <button type="button" class="list-group-item list-group-item-action @(thread.ThreadId == ThreadId ? "active" : string.Empty)"
+                                    @onclick="() => OpenThreadAsync(thread.ThreadId)">
+                                <div class="d-flex justify-content-between align-items-center gap-2">
+                                    <span class="fw-semibold">@thread.Title</span>
+                                    @if (thread.UnreadCount > 0)
+                                    {
+                                        <span class="badge text-bg-primary rounded-pill">@thread.UnreadCount</span>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(thread.LastMessagePreview))
+                                {
+                                    <div class="small text-truncate @(thread.ThreadId == ThreadId ? "text-white-50" : "text-secondary")">@thread.LastMessagePreview</div>
+                                }
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-0 d-flex flex-column" style="height:600px;">
+                @if (ThreadId is null)
+                {
+                    <EmptyState Icon="bi-chat-square-text" Message="Pick a conversation, or start a new one." CssClass="p-5 text-secondary m-auto" />
+                }
+                else
+                {
+                    <div class="flex-grow-1 overflow-auto p-3" @ref="MessageListRef">
+                        @if (IsLoadingMessages)
+                        {
+                            <LoadingIndicator Message="Loading messages…" />
+                        }
+                        else if (Messages.Count == 0)
+                        {
+                            <EmptyState Icon="bi-chat-dots" Message="Say hello!" />
+                        }
+                        else
+                        {
+                            @foreach (var message in Messages)
+                            {
+                                var isMine = string.Equals(message.SenderUsername, CurrentUsername, StringComparison.OrdinalIgnoreCase);
+                                <div class="d-flex flex-column mb-2 @(isMine ? "align-items-end" : "align-items-start")">
+                                    <div class="small text-secondary">@message.SenderDisplayName · @message.SentAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
+                                    <div class="p-2 rounded-3 @(isMine ? "bg-primary text-white" : "bg-body-tertiary")" style="max-width:75%;white-space:pre-wrap;">@message.Body</div>
+                                </div>
+                            }
+                        }
+                    </div>
+                    <div class="border-top p-2 d-flex gap-2">
+                        <input class="form-control" placeholder="Write a message…" value="@ComposeBody"
+                               @oninput="e => ComposeBody = e.Value?.ToString() ?? string.Empty"
+                               @onkeydown="OnComposeKeyDownAsync" />
+                        <button class="btn btn-primary" @onclick="SendAsync" disabled="@(IsSending || string.IsNullOrWhiteSpace(ComposeBody))">
+                            <i class="bi bi-send-fill"></i>
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public Guid? ThreadId { get; set; }
+
+    private List<ChatThreadSummary> Threads { get; set; } = [];
+    private List<ChatMessageView> Messages { get; set; } = [];
+    private List<MemberProfileView> OtherProfiles { get; set; } = [];
+    private string CurrentUsername { get; set; } = string.Empty;
+    private string ComposeBody { get; set; } = string.Empty;
+    private bool ShowNewMessage { get; set; }
+    private bool IsLoadingThreads { get; set; } = true;
+    private bool IsLoadingMessages { get; set; }
+    private bool IsSending { get; set; }
+    private string ErrorMessage { get; set; } = string.Empty;
+    private ElementReference MessageListRef;
+
+    private readonly CancellationTokenSource _pollLifetime = new();
+    private Task? _pollTask;
+    private Guid? _loadedThreadId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        CurrentUsername = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await LoadThreadsAsync();
+        var allProfiles = await DirectoryService.ListProfilesAsync();
+        OtherProfiles = allProfiles.Where(p => !string.Equals(p.Username, CurrentUsername, StringComparison.OrdinalIgnoreCase)).ToList();
+        _pollTask = PollAsync(_pollLifetime.Token);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ThreadId == _loadedThreadId) return;
+        _loadedThreadId = ThreadId;
+        if (ThreadId is { } id)
+        {
+            await LoadMessagesAsync(id);
+        }
+    }
+
+    private async Task LoadThreadsAsync()
+    {
+        try
+        {
+            Threads = (await ChatService.ListThreadsForUserAsync(CurrentUsername)).ToList();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't load your conversations.";
+            Logger.LogError(ex, "Failed to load chat threads for {Username}.", CurrentUsername);
+        }
+        finally
+        {
+            IsLoadingThreads = false;
+        }
+    }
+
+    private async Task LoadMessagesAsync(Guid threadId)
+    {
+        IsLoadingMessages = true;
+        try
+        {
+            Messages = (await ChatService.GetMessagesAsync(threadId, CurrentUsername)).ToList();
+            await ChatService.MarkThreadReadAsync(threadId, CurrentUsername);
+            await LoadThreadsAsync();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            ErrorMessage = "You don't have access to that conversation.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't load that conversation.";
+            Logger.LogError(ex, "Failed to load chat messages for thread {ThreadId}.", threadId);
+        }
+        finally
+        {
+            IsLoadingMessages = false;
+        }
+    }
+
+    private Task OpenThreadAsync(Guid threadId)
+    {
+        Navigation.NavigateTo($"/admin/community/messages/{threadId}");
+        return Task.CompletedTask;
+    }
+
+    private async Task StartThreadAsync(string? username)
+    {
+        if (string.IsNullOrWhiteSpace(username)) return;
+        ShowNewMessage = false;
+        try
+        {
+            var threadId = await ChatService.GetOrCreateDirectThreadAsync(CurrentUsername, username);
+            Navigation.NavigateTo($"/admin/community/messages/{threadId}");
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't start that conversation.";
+            Logger.LogError(ex, "Failed to start a chat thread with {Username}.", username);
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        if (ThreadId is not { } id || string.IsNullOrWhiteSpace(ComposeBody)) return;
+        IsSending = true;
+        try
+        {
+            await ChatService.SendMessageAsync(id, CurrentUsername, ComposeBody);
+            ComposeBody = string.Empty;
+            await LoadMessagesAsync(id);
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't send that message.";
+            Logger.LogError(ex, "Failed to send a chat message in thread {ThreadId}.", id);
+        }
+        finally
+        {
+            IsSending = false;
+        }
+    }
+
+    private async Task OnComposeKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await SendAsync();
+        }
+    }
+
+    private async Task PollAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await InvokeAsync(async () =>
+                {
+                    try
+                    {
+                        await LoadThreadsAsync();
+                        if (ThreadId is { } id)
+                        {
+                            Messages = (await ChatService.GetMessagesAsync(id, CurrentUsername)).ToList();
+                        }
+                        StateHasChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogDebug(ex, "Community messages poll was skipped.");
+                    }
+                });
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _pollLifetime.Cancel();
+        if (_pollTask is not null)
+        {
+            try
+            {
+                await _pollTask;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+        _pollLifetime.Dispose();
+    }
+}

@@ -1,0 +1,249 @@
+@page "/admin/community/departments"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.Community
+@inject ICommunityDirectoryService DirectoryService
+@inject ILogger<CommunityDepartments> Logger
+
+<PageTitle>Departments · Community</PageTitle>
+
+<div class="page-header">
+    <p class="mb-1"><a href="/admin/community"><i class="bi bi-arrow-left me-1"></i>Back to Staff Directory</a></p>
+    <h1><i class="bi bi-diagram-3 me-2 text-primary"></i>Departments</h1>
+    <p>Create departments, assign a lead, and see who belongs where.</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+        <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+        <div>@ErrorMessage</div>
+    </div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-success d-flex align-items-center gap-2 mb-4" role="alert">
+        <i class="bi bi-check-circle-fill flex-shrink-0"></i>
+        <div>@StatusMessage</div>
+    </div>
+}
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+        <span class="fw-semibold">Departments</span>
+        <button class="btn btn-sm btn-outline-primary" @onclick="() => ShowNewDepartmentForm = !ShowNewDepartmentForm" disabled="@IsBusy">
+            <i class="bi bi-plus-lg me-1"></i>New Department
+        </button>
+    </div>
+    @if (ShowNewDepartmentForm)
+    {
+        <div class="card-body border-bottom py-3">
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <input class="form-control form-control-sm" placeholder="Department name"
+                           value="@NewName" @oninput="e => NewName = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <div class="col-md-4">
+                    <input class="form-control form-control-sm" placeholder="Description (optional)"
+                           value="@NewDescription" @oninput="e => NewDescription = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <div class="col-md-3">
+                    <input class="form-control form-control-sm" placeholder="Lead username (optional)"
+                           value="@NewLeadUsername" @oninput="e => NewLeadUsername = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <div class="col-md-1">
+                    <button class="btn btn-sm btn-primary w-100" @onclick="CreateDepartmentAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewName))">Save</button>
+                </div>
+            </div>
+        </div>
+    }
+    <div class="card-body p-0">
+        @if (IsLoading)
+        {
+            <LoadingIndicator Message="Loading departments…" />
+        }
+        else if (Departments.Count == 0)
+        {
+            <EmptyState Icon="bi-diagram-3" Message="No departments yet." />
+        }
+        else
+        {
+            <div class="list-group list-group-flush">
+                @foreach (var department in Departments)
+                {
+                    <div class="list-group-item">
+                        @if (EditingDepartmentId == department.Id)
+                        {
+                            <div class="row g-2 align-items-center">
+                                <div class="col-md-3">
+                                    <input class="form-control form-control-sm" value="@EditName" @oninput="e => EditName = e.Value?.ToString() ?? string.Empty" />
+                                </div>
+                                <div class="col-md-4">
+                                    <input class="form-control form-control-sm" value="@EditDescription" @oninput="e => EditDescription = e.Value?.ToString() ?? string.Empty" />
+                                </div>
+                                <div class="col-md-3">
+                                    <input class="form-control form-control-sm" placeholder="Lead username" value="@EditLeadUsername" @oninput="e => EditLeadUsername = e.Value?.ToString() ?? string.Empty" />
+                                </div>
+                                <div class="col-md-2 d-flex gap-2">
+                                    <button class="btn btn-sm btn-primary" @onclick="SaveEditAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(EditName))">Save</button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="CancelEdit" disabled="@IsBusy">Cancel</button>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                                <div>
+                                    <div class="fw-semibold">@department.Name <span class="badge text-bg-light">@department.MemberCount member(s)</span></div>
+                                    @if (!string.IsNullOrWhiteSpace(department.Description))
+                                    {
+                                        <div class="small text-secondary">@department.Description</div>
+                                    }
+                                    <div class="small text-secondary">
+                                        Lead: @(department.LeadDisplayName ?? department.LeadUsername ?? "None assigned")
+                                    </div>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => StartEdit(department)" disabled="@IsBusy">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteDepartmentAsync(department.Id)" disabled="@IsBusy">
+                                        <i class="bi bi-trash3"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<DepartmentView> Departments { get; set; } = [];
+    private bool IsLoading { get; set; } = true;
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private string ErrorMessage { get; set; } = string.Empty;
+
+    private bool ShowNewDepartmentForm { get; set; }
+    private string NewName { get; set; } = string.Empty;
+    private string NewDescription { get; set; } = string.Empty;
+    private string NewLeadUsername { get; set; } = string.Empty;
+
+    private Guid? EditingDepartmentId { get; set; }
+    private string EditName { get; set; } = string.Empty;
+    private string EditDescription { get; set; } = string.Empty;
+    private string EditLeadUsername { get; set; } = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        IsLoading = true;
+        try
+        {
+            Departments = (await DirectoryService.ListDepartmentsAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't load departments.";
+            Logger.LogError(ex, "Failed to load community departments.");
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task CreateDepartmentAsync()
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            await DirectoryService.SaveDepartmentAsync(new DepartmentEditorModel
+            {
+                Name = NewName,
+                Description = NewDescription,
+                LeadUsername = string.IsNullOrWhiteSpace(NewLeadUsername) ? null : NewLeadUsername
+            });
+            NewName = string.Empty;
+            NewDescription = string.Empty;
+            NewLeadUsername = string.Empty;
+            ShowNewDepartmentForm = false;
+            StatusMessage = "Department created.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't create that department.";
+            Logger.LogError(ex, "Failed to create a community department.");
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void StartEdit(DepartmentView department)
+    {
+        EditingDepartmentId = department.Id;
+        EditName = department.Name;
+        EditDescription = department.Description;
+        EditLeadUsername = department.LeadUsername ?? string.Empty;
+    }
+
+    private void CancelEdit() => EditingDepartmentId = null;
+
+    private async Task SaveEditAsync()
+    {
+        if (EditingDepartmentId is not { } id) return;
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            await DirectoryService.SaveDepartmentAsync(new DepartmentEditorModel
+            {
+                DepartmentId = id,
+                Name = EditName,
+                Description = EditDescription,
+                LeadUsername = string.IsNullOrWhiteSpace(EditLeadUsername) ? null : EditLeadUsername
+            });
+            EditingDepartmentId = null;
+            StatusMessage = "Department updated.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't update that department.";
+            Logger.LogError(ex, "Failed to update community department {DepartmentId}.", id);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DeleteDepartmentAsync(Guid departmentId)
+    {
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            await DirectoryService.DeleteDepartmentAsync(departmentId);
+            StatusMessage = "Department deleted. Its members were kept, just unassigned.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't delete that department.";
+            Logger.LogError(ex, "Failed to delete community department {DepartmentId}.", departmentId);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}
