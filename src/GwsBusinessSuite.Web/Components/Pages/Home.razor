@@ -11,6 +11,7 @@
 @inject IMissionControlService MissionControlService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IJSRuntime JS
+@inject ILogger<Home> Logger
 
 <PageTitle>Dashboard · GWS Business Suite</PageTitle>
 
@@ -178,7 +179,14 @@
     private async Task DismissCommandPaletteHint()
     {
         _showCommandPaletteHint = false;
-        await JS.InvokeVoidAsync("gwsDashboardHints.dismiss", CommandPaletteHintKey);
+        try
+        {
+            await JS.InvokeVoidAsync("gwsDashboardHints.dismiss", CommandPaletteHintKey);
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "Unable to persist the command palette hint's dismissed state.");
+        }
     }
 
     private IReadOnlyList<AttentionItem> AttentionItems
@@ -250,11 +258,22 @@
     {
         if (!firstRender) return;
 
-        var dismissed = await JS.InvokeAsync<bool>("gwsDashboardHints.isDismissed", CommandPaletteHintKey);
-        if (!dismissed)
+        // dashboard-hints.js is loaded once, globally, from App.razor - but an uncaught
+        // JSException here would otherwise crash this component's whole circuit (same class of
+        // incident as OverwatchGrid.razor's own JS-init try/catch). Worst case without it: the
+        // hint just doesn't show.
+        try
         {
-            _showCommandPaletteHint = true;
-            StateHasChanged();
+            var dismissed = await JS.InvokeAsync<bool>("gwsDashboardHints.isDismissed", CommandPaletteHintKey);
+            if (!dismissed)
+            {
+                _showCommandPaletteHint = true;
+                StateHasChanged();
+            }
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "Unable to check the command palette hint's dismissed state.");
         }
     }
 
@@ -275,5 +294,3 @@
     private sealed record AttentionItem(string Title, string Description, int Count, string Url, string Icon, string IconClass);
     private sealed record DashboardModule(string Title, string Description, string Url, string Icon, string IconClass);
 }
-
-<script src="js/dashboard-hints.js"></script>

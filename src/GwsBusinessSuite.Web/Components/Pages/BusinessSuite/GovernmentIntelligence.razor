@@ -407,8 +407,6 @@
     }
 </main>
 
-<script src="js/dashboard-hints.js"></script>
-
 @code {
     private const string IntroHintKey = "gws-civicwatch-intro-hint-dismissed";
     private bool _showIntroHint;
@@ -432,18 +430,36 @@
     {
         if (!firstRender) return;
 
-        var dismissed = await JS.InvokeAsync<bool>("gwsDashboardHints.isDismissed", IntroHintKey);
-        if (!dismissed)
+        // dashboard-hints.js is loaded once, globally, from App.razor - but an uncaught
+        // JSException here (e.g. a future script-loading regression) would otherwise crash this
+        // component's whole circuit, same class of incident as OverwatchGrid.razor's own
+        // JS-init try/catch. Worst case without it: the intro hint just doesn't show.
+        try
         {
-            _showIntroHint = true;
-            StateHasChanged();
+            var dismissed = await JS.InvokeAsync<bool>("gwsDashboardHints.isDismissed", IntroHintKey);
+            if (!dismissed)
+            {
+                _showIntroHint = true;
+                StateHasChanged();
+            }
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "Unable to check the Civic Watch intro hint's dismissed state.");
         }
     }
 
     private async Task DismissIntroHint()
     {
         _showIntroHint = false;
-        await JS.InvokeVoidAsync("gwsDashboardHints.dismiss", IntroHintKey);
+        try
+        {
+            await JS.InvokeVoidAsync("gwsDashboardHints.dismiss", IntroHintKey);
+        }
+        catch (JSException ex)
+        {
+            Logger.LogWarning(ex, "Unable to persist the Civic Watch intro hint's dismissed state.");
+        }
     }
 
     private const string CommunitySignalDescription = "Local announcements, public meetings, and events found for your area.";
