@@ -36,7 +36,7 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.11" />
     <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.9.0" />
     <PackageReference Include="SkiaSharp" Version="4.153.0" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.151.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.153.0" />
     <!-- Community license (free for individuals/small companies) - accepted at
          startup via QuestPDF.Settings.License in ResumePdfService. -->
     <PackageReference Include="QuestPDF" Version="2026.8.0" />
