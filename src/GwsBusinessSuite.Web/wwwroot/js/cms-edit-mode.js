@@ -56,7 +56,8 @@
 
   function hasExternalDragType(dataTransfer) {
     return hasType(dataTransfer, 'application/x-gws-widget-type')
-      || hasType(dataTransfer, 'application/x-gws-global-block-id');
+      || hasType(dataTransfer, 'application/x-gws-global-block-id')
+      || hasType(dataTransfer, 'application/x-gws-existing-widget');
   }
 
   function resolveDropTarget(clientX, clientY, draggedWidgetId) {
@@ -267,7 +268,7 @@
     var target = resolveDropTarget(e.clientX, e.clientY, null);
     if (!target) return;
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    e.dataTransfer.dropEffect = hasType(e.dataTransfer, 'application/x-gws-existing-widget') ? 'move' : 'copy';
     if (!html5Indicator) html5Indicator = createIndicator();
     paletteDragTarget = target;
     reportExternalDragTarget(target);
@@ -279,10 +280,19 @@
     e.preventDefault();
     var widgetType = e.dataTransfer.getData('application/x-gws-widget-type') || e.dataTransfer.getData('text/plain');
     var globalBlockId = e.dataTransfer.getData('application/x-gws-global-block-id');
+    var existingWidgetId = e.dataTransfer.getData('application/x-gws-existing-widget');
     var target = resolveDropTarget(e.clientX, e.clientY, null) || paletteDragTarget;
     clearDropVisuals(html5Indicator);
     paletteDragTarget = null;
     paletteDragTargetKey = '';
+    if (existingWidgetId) {
+      if (target && target.widgetId !== existingWidgetId) {
+        send({ type: 'cms:drop', widgetId: existingWidgetId, sectionId: target.sectionId || '',
+          columnId: target.columnId || '', targetWidgetId: target.widgetId || '', insertAfter: !!target.insertAfter });
+      }
+      send({ type: 'cms:external-drag-committed' });
+      return;
+    }
     if (globalBlockId) {
       send({
         type: 'cms:insert-global',

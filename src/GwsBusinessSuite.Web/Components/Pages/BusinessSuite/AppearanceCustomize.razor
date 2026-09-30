@@ -31,6 +31,53 @@
     <div class="alert alert-info" role="alert">@StatusMessage</div>
 }
 
+@if (_previewTheme is not null && CurrentSite is not null)
+{
+    <section class="theme-preview card border-0 shadow-sm mb-3" aria-label="Theme preview" tabindex="-1" @ref="_previewPanel">
+        <div class="card-body">
+            <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+                <div>
+                    <h2 class="h5 mb-1">@CurrentSite.Name — @_previewTheme.Name</h2>
+                    <p class="small text-secondary mb-0">Preview only. Your saved website is unchanged. Choose a page to explore.</p>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseThemePreview">Close preview</button>
+            </div>
+            <div class="d-flex flex-wrap align-items-end gap-3 mb-3">
+                <div>
+                    <label class="form-label small" for="preview-theme">Theme</label>
+                    <select id="preview-theme" class="form-select form-select-sm" value="@_previewTheme.Key" @onchange="ChangePreviewTheme">
+                        @foreach (var preset in CmsThemePresets.All) { <option value="@preset.Key">@preset.Name</option> }
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label small" for="preview-page">Page</label>
+                    <select id="preview-page" class="form-select form-select-sm" @bind="_previewPagePath">
+                        @foreach (var previewPage in _previewPages) { <option value="@previewPage.Path">@previewPage.Title</option> }
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label small" for="preview-width">View</label>
+                    <select id="preview-width" class="form-select form-select-sm" @bind="_previewSize">
+                        <option value="desktop">Desktop</option><option value="mobile">Mobile</option>
+                    </select>
+                </div>
+                <button type="button" class="btn btn-sm btn-primary" disabled="@IsBusy" @onclick="() => OpenApplyThemeConfirm(_previewTheme)">Apply this theme…</button>
+            </div>
+            @if (_previewPages.Count == 0)
+            {
+                <p class="text-secondary">Add a page to this website to preview a theme with your content.</p>
+            }
+            else
+            {
+                <div class="theme-preview-stage">
+                    <iframe @key="ThemePreviewUrl" class="theme-preview-frame @(_previewSize == "mobile" ? "is-mobile" : "")"
+                            src="@ThemePreviewUrl" title="@($"{CurrentSite.Name} with {_previewTheme.Name}")" sandbox="allow-scripts allow-same-origin"></iframe>
+                </div>
+            }
+        </div>
+    </section>
+}
+
 <div class="card border-0 shadow-sm" style="max-width: 640px;">
     <div class="card-body">
         <label class="form-label fw-semibold small">Theme presets</label>
@@ -55,7 +102,10 @@
                             <div class="fw-semibold small">@preset.Name</div>
                             <div class="text-secondary small">@preset.Description</div>
                         </div>
-                        <button type="button" class="btn btn-sm btn-outline-primary mt-auto align-self-start" disabled="@IsBusy" @onclick="() => OpenApplyThemeConfirm(preset)">Apply</button>
+                        <div class="d-flex gap-2 mt-auto">
+                            <button type="button" class="btn btn-sm btn-primary" disabled="@(IsBusy || CurrentSite is null)" @onclick="() => OpenThemePreviewAsync(preset)">Preview</button>
+                            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(IsBusy || CurrentSite is null)" @onclick="() => OpenApplyThemeConfirm(preset)">Apply</button>
+                        </div>
                     </div>
                 </div>
             }
@@ -289,6 +339,52 @@
     private string RecipeImportMessage { get; set; } = string.Empty;
     private bool RecipeImportSucceeded { get; set; }
 
+    private CmsThemePreset? _previewTheme;
+    private List<(string Path, string Title)> _previewPages = [];
+    private string _previewPagePath = "home";
+    private string _previewSize = "desktop";
+    private ElementReference _previewPanel;
+    private bool _focusPreview;
+    private string ThemePreviewUrl => CurrentSite is null || _previewTheme is null ? "" :
+        $"/admin/api/cms/{Uri.EscapeDataString(CurrentSite.Slug)}/theme-preview/{Uri.EscapeDataString(_previewTheme.Key)}/{string.Join('/', _previewPagePath.Split('/').Select(Uri.EscapeDataString))}";
+
+    private async Task OpenThemePreviewAsync(CmsThemePreset preset)
+    {
+        if (CurrentSite is null) return;
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var pages = await CmsBuilderService.ListPagesAsync(CurrentSite.Id);
+            _previewPages = pages.Where(p => p.TrashedAt is null)
+                .Select(p => (Path: CmsBuilderService.BuildFullPath(p, pages), Title: p.Title))
+                .OrderBy(p => p.Path == "home" ? 0 : 1).ThenBy(p => p.Title).ToList();
+            _previewPagePath = _previewPages.FirstOrDefault().Path ?? "home";
+            _previewTheme = preset;
+            _focusPreview = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load theme preview pages.");
+            ErrorMessage = "Unable to load the preview. Please try again.";
+        }
+        finally { IsBusy = false; }
+    }
+
+    private void ChangePreviewTheme(ChangeEventArgs args) =>
+        _previewTheme = CmsThemePresets.Find(args.Value?.ToString() ?? "");
+
+    private void CloseThemePreview() => _previewTheme = null;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_focusPreview && _previewTheme is not null)
+        {
+            _focusPreview = false;
+            await _previewPanel.FocusAsync();
+        }
+    }
+
     private CmsThemePreset? _themeToApply;
     private bool _replaceHomepageLayout;
 
@@ -333,6 +429,7 @@
 
     private async Task LoadSiteAsync(CmsSite site)
     {
+        CloseThemePreview();
         CurrentSite = site;
         CustomCssInput = site.CustomCss;
         AccentColorInput = site.AccentColorHex;

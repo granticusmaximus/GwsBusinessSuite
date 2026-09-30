@@ -130,7 +130,7 @@ public static class PublicSiteHtmlRenderer
         string pageTitle, string metaDescription, string? ogImageUrl, string bodyHtml,
         IReadOnlyList<NavMenuItem>? navItems = null, IReadOnlyList<NavMenuItem>? footerNavItems = null,
         string? accentColorHex = null, string? fontPairingKey = null,
-        string? canonicalUrl = null, string? siteName = null, string? logoUrl = null, string? faviconUrl = null)
+        string? canonicalUrl = null, string? siteName = null, string? logoUrl = null, string? faviconUrl = null, DesignTokenSet? tokens = null)
     {
         var ogImageTag = string.IsNullOrWhiteSpace(ogImageUrl)
             ? string.Empty
@@ -177,6 +177,7 @@ public static class PublicSiteHtmlRenderer
               <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
               <link rel="stylesheet" href="/public-site.css" />
               {designTokensStyle}
+              <style>{CmsThemeCss.Build(tokens)}</style>
               {ReducedMotionRevealScript}
             </head>
             <body>

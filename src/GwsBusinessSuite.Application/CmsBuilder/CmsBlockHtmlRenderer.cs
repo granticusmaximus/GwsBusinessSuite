@@ -318,13 +318,13 @@ public static class CmsBlockHtmlRenderer
           .gws-canvas-empty.is-drop-target { border-color: #2563eb; background: rgba(219, 234, 254, 0.55); }
           .gws-drag-handle {
             position: absolute; top: 4px; left: 4px; z-index: 40;
-            width: 22px; height: 22px; border-radius: 6px;
+            width: 28px; height: 28px; border-radius: 6px;
             background: #2563eb; color: #fff;
             display: flex; align-items: center; justify-content: center;
             font-size: 13px; line-height: 1; cursor: grab;
             opacity: 0; transition: opacity 0.1s ease;
           }
-          .gws-editable:hover .gws-drag-handle { opacity: 1; }
+          .gws-editable:hover .gws-drag-handle, .gws-editor-selected .gws-drag-handle { opacity: 1; }
           .gws-drag-handle:active { cursor: grabbing; }
           .gws-visibility-hint {
             position: absolute; top: 4px; right: 4px; z-index: 39;
@@ -435,7 +435,7 @@ public static class CmsBlockHtmlRenderer
                 // widget-id]') in the edit-mode script always resolves reliably regardless
                 // of per-widget style config.
                 sb.Append(editMode
-                    ? $"""<div class="gws-editable" data-gws-widget-id="{Html(widget.Id)}" data-gws-widget-type="{Html(widget.WidgetType)}">{hiddenHint}<div class="gws-drag-handle" data-gws-drag-handle-for="{Html(widget.Id)}">&#10247;</div>{inner}</div>"""
+                    ? $"""<div class="gws-editable" data-gws-widget-id="{Html(widget.Id)}" data-gws-widget-type="{Html(widget.WidgetType)}">{hiddenHint}<div class="gws-drag-handle" title="Drag to move block" data-gws-drag-handle-for="{Html(widget.Id)}">&#10247;</div>{inner}</div>"""
                     : inner);
             }
             sb.Append("</div>");

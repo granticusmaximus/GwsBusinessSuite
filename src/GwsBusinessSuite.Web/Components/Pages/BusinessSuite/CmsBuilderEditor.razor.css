@@ -1,17 +1,4 @@
-/* This studio previously hardcoded a light glass-panel palette (white cards, slate-900
-   text) while every other admin page renders against the app's single permanent dark theme
-   (--gws-*/--bs-* tokens defined globally in wwwroot/app.css - there is no light variant to
-   fall back to anywhere else in the suite). Retheme the studio CHROME onto those tokens.
-   The blue accent is kept (this editor's own identity, distinct from the sidebar's amber
-   accent) but lightened where it sits on dark neutrals so it stays legible.
-
-   Deliberately NOT retouched: .studio-stage-shell's inner .studio-stage-frame /
-   .studio-live-iframe / .studio-stage-browser / .studio-stage-route. Those render an actual
-   mock browser window (traffic-light dots, address pill) wrapped around the real, same-origin
-   CMS page preview - a light frame is correct there since it's mimicking real browser chrome
-   around a real (light-themed) public page, not part of the admin shell's own UI.
-*/
-
+/* Site Desk: a page navigator, broad canvas, contextual inspector, and module dock. */
 /* ── Studio chrome (shared with previous layout) ─────────────────────────── */
 
 .studio-shell {
@@ -809,3 +796,115 @@
 .studio-media-picker-item:hover {
 	border-color: #3b82f6;
 }
+
+.studio-column-drop { margin: 0.4rem 0 0.25rem 1rem; padding: 0.5rem; border: 1px dashed #64748b; border-radius: 5px; color: var(--gws-text-soft); font-size: 0.75rem; }
+.studio-column-drop:hover { border-color: #93c5fd; background: rgba(59, 130, 246, 0.12); }
+
+/* Site Desk owns its chrome palette; the iframe keeps the website's own theme. */
+.studio-shell {
+    --gws-panel-bg: #ffffff;
+    --gws-panel-bg-2: #ffffff;
+    --gws-panel-border: #dce2eb;
+    --gws-text-strong: #253349;
+    --gws-text-soft: #617087;
+    --bs-body-color: #253349;
+    --bs-secondary-color: #617087;
+    --bs-body-bg: #ffffff;
+    --bs-tertiary-bg: #f1f4f8;
+    color: #253349;
+    color-scheme: light;
+    background: #eff2f7;
+    padding: 0;
+    gap: 0;
+    border: 1px solid #dce2eb;
+    border-radius: 10px;
+    overflow: hidden;
+    height: calc(100dvh - 2rem);
+    min-height: 720px;
+}
+.studio-header { background: #fff; padding: 1rem 1.1rem; gap: 1rem; margin: 0; border-bottom: 1px solid #dce2eb; align-items: center; flex-wrap: wrap; }
+.studio-header > div:first-child { min-width: 0; }
+.studio-header h1 { font-size: 1.25rem; margin: 0.2rem 0; color: #253349; }
+.studio-header p { font-size: 0.76rem; }
+.studio-kicker { color: #35669e; }
+.studio-header-actions { gap: 0.45rem; flex-shrink: 1; }
+.studio-header-actions .btn { font-size: 0.8rem; }
+.studio-pills { gap: 0.3rem; }
+.studio-pill { padding: 0.2rem 0.5rem; font-size: 0.68rem; color: #35669e; background: #edf3fa; border: 1px solid #dce2eb; }
+.studio-pill-draft { background: #fff4de; color: #805e21; border-color: #ead5ad; }
+.desk-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.65rem 1.1rem; background: #fff; border-bottom: 1px solid #dce2eb; }
+.desk-site-name { display: flex; align-items: center; gap: 0.5rem; margin-right: auto; color: #617087; font-size: 0.82rem; overflow-wrap: anywhere; }
+.desk-nav-button { background: transparent; color: #44546c; border: 1px solid transparent; border-radius: 5px; padding: 0.45rem 0.7rem; font-size: 0.82rem; }
+.desk-nav-button:hover, .desk-nav-button.is-active { background: #edf3fa; color: #35669e; }
+.studio-workspace { grid-template-columns: 220px minmax(0, 1fr); gap: 0; position: relative; }
+.studio-workspace.has-inspector { grid-template-columns: 220px minmax(0, 1fr) 300px; }
+.studio-panel { border: 0; border-radius: 0; background: #fff; box-shadow: none; backdrop-filter: none; }
+.studio-panel-left { border-right: 1px solid #dce2eb; }
+.studio-panel-right { border-left: 1px solid #dce2eb; }
+.studio-panel-right[hidden] { display: none; }
+.desk-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 1rem 0.85rem; border-bottom: 1px solid #dce2eb; font-size: 0.82rem; color: #253349; }
+.studio-panel-section { padding: 0.85rem; }
+.desk-page-list { display: grid; gap: 0.3rem; margin-bottom: 1.25rem; padding-bottom: 1rem; border-bottom: 1px solid #dce2eb; }
+.desk-page { display: flex; align-items: center; gap: 0.5rem; width: 100%; border: 0; background: transparent; padding: 0.55rem 0.35rem; text-align: left; color: #44546c; border-radius: 5px; }
+.desk-page > span { display: grid; min-width: 0; }
+.desk-page strong { font-size: 0.8rem; font-weight: 600; overflow-wrap: anywhere; }
+.desk-page small { font-size: 0.68rem; color: #617087; overflow-wrap: anywhere; }
+.desk-page-draft { margin-left: auto; }
+.desk-page.is-active, .desk-page:hover { background: #edf3fa; color: #35669e; }
+.studio-stage-panel { background: #eff2f7; padding: 0.8rem 1.1rem; gap: 0.6rem; }
+.studio-stage-header { margin: 0; flex-wrap: wrap; gap: 0.5rem; }
+.studio-stage-header-right { display: flex; align-items: center; gap: 0.5rem; }
+.studio-stage-url { color: #617087; overflow-wrap: anywhere; }
+.studio-stage-shell { border-radius: 0; background: transparent; padding: 0.5rem 0; }
+.studio-stage-frame { border-radius: 0; box-shadow: 0 3px 16px rgba(35, 52, 75, 0.08); }
+.studio-stage-frame.is-desktop { width: 100%; }
+.studio-stage-frame.is-mobile { width: min(100%, 390px); }
+.studio-stage-panel > p { font-size: 0.7rem; }
+.studio-tab.is-active { color: #35669e; border-bottom-color: #35669e; }
+.studio-device-button { color: #617087; }
+.studio-device-button.is-active { color: #35669e; background: #edf3fa; box-shadow: none; }
+.studio-widget-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem; }
+.studio-widget-card { flex-direction: column; padding: 0.65rem 0.3rem; min-height: 84px; border-radius: 5px; gap: 0.4rem; text-align: center; background: #fff; }
+.studio-widget-icon { color: #35669e; background: #edf3fa; border-radius: 5px; }
+.studio-widget-copy strong { font-size: 0.76rem; }
+.studio-widget-copy small { display: none; }
+.studio-layer-item { border-radius: 5px; background: transparent; }
+.studio-layer-item.is-active { background: #edf3fa; border-color: #bdd0e6; }
+.studio-layer-icon { color: #35669e; background: #edf3fa; }
+.studio-layer-copy strong { color: #253349; }
+.studio-layer-item-main, .studio-layer-collapse-toggle, .studio-icon-btn { color: #44546c; }
+.studio-column-drop { margin-left: 0.35rem; border-color: #c0ccdc; }
+.desk-module-dock { flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.85rem 1.1rem; border-top: 1px solid #dce2eb; background: #fff; }
+.desk-module-dock > strong { font-size: 0.8rem; margin-right: 0.3rem; }
+.desk-module-button { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.7rem; border: 1px solid #dce2eb; border-radius: 5px; background: #fff; color: #44546c; font-size: 0.8rem; }
+.desk-module-button:hover { border-color: #35669e; background: #edf3fa; }
+.desk-module-button[draggable=true] { cursor: grab; }
+.desk-module-button[draggable=true]:active { cursor: grabbing; }
+.desk-module-dock > span { margin-left: auto; font-size: 0.7rem; color: #617087; }
+.studio-shell .form-control, .studio-shell .form-select { background-color: #f6f8fb; color: #253349; border-color: #cdd6e2; }
+.studio-shell .form-control::placeholder { color: #718096; }
+.studio-shell .form-label { color: #44546c; }
+.studio-shell .btn-outline-secondary { color: #526279; border-color: #cdd6e2; }
+.studio-shell .btn-outline-secondary:hover { background: #edf3fa; color: #253349; }
+.studio-shell .text-secondary, .studio-shell .form-text { color: #617087 !important; }
+@media(max-width:1199.98px) {
+    .studio-workspace, .studio-workspace.has-inspector { grid-template-columns: 190px minmax(0, 1fr); }
+    .studio-panel-right { grid-column: 1 / -1; max-height: 340px; border-top: 1px solid #dce2eb; }
+    .studio-workspace.has-inspector { overflow-y: auto; grid-template-rows: minmax(400px, 1fr) auto; }
+    .studio-stage-shell { min-height: 340px; }
+    .studio-shell { height: auto; min-height: 90dvh; }
+    .studio-panel-left { max-height: 650px; }
+}
+@media(max-width:767.98px) {
+    .studio-workspace, .studio-workspace.has-inspector { grid-template-columns: minmax(0, 1fr); }
+    .studio-panel-left { max-height: 280px; border-bottom: 1px solid #dce2eb; }
+    .studio-header { align-items: stretch; }
+    .studio-header-actions { justify-content: flex-start; }
+    .studio-stage-panel { padding: 0.75rem; }
+    .desk-module-dock > span { width: 100%; margin-left: 0; }
+    .studio-workspace.has-inspector { grid-template-rows: auto; }
+}
+.studio-shell .btn-primary { background: #35669e; border-color: #35669e; color: #fff; }
+.studio-shell .btn-primary:hover { background: #284f7c; border-color: #284f7c; }
+.studio-shell .btn-outline-primary { color: #35669e; border-color: #bdd0e6; }
+.studio-shell .btn-outline-primary:hover { background: #edf3fa; color: #284f7c; }

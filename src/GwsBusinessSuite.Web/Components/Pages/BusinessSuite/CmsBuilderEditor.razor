@@ -31,9 +31,9 @@
 @* ── Header ─────────────────────────────────────────────────────────────── *@
 <div class="studio-header page-header">
     <div>
-        <div class="studio-kicker">Page editor</div>
+        <div class="studio-kicker">Site Desk</div>
         <h1><i class="bi bi-grid-1x2 me-2 text-primary"></i>@(_page?.Title ?? "Page editor")</h1>
-        <p class="mb-0">Add sections and blocks and edit their content. Your work autosaves as a draft; publishing puts it on the live site.</p>
+        <p class="mb-0">Manage pages, arrange modules, and edit directly on your website.</p>
         @if (_site is not null && _page is not null)
         {
             <p class="small text-secondary mb-0 mt-1">Website: @_site.Name · Live at: <span class="font-monospace">/@CurrentFullPath</span></p>
@@ -123,22 +123,18 @@ else if (_layoutParseFailed)
 else
 {
 @* ── Workspace ───────────────────────────────────────────────────────────── *@
-<div class="studio-workspace">
-
-    @* ── LEFT PANEL ─────────────────────────────────────────────────────── *@
-    <aside class="studio-panel studio-panel-left">
-        <div class="studio-tab-strip">
-            <button class="studio-tab @(_leftTab == "widgets" ? "is-active" : "")" @onclick='() => _leftTab = "widgets"'>
-                <i class="bi bi-plus-square me-1"></i>Insert
-            </button>
-            <button class="studio-tab @(_leftTab == "layers" ? "is-active" : "")" @onclick='() => _leftTab = "layers"'>
-                <i class="bi bi-layers me-1"></i>Layers
-            </button>
-            <button class="studio-tab @(_leftTab == "global" ? "is-active" : "")" @onclick='() => _leftTab = "global"'>
-                <i class="bi bi-globe2 me-1"></i>Library
-            </button>
+<nav class="desk-navigation" aria-label="Editor workspace">
+    <span class="desk-site-name"><i class="bi bi-globe2"></i>@_site?.Name</span>
+    <button type="button" class="desk-nav-button @(_leftTab == "layers" ? "is-active" : "")" @onclick='() => _leftTab = "layers"' aria-pressed='@(_leftTab == "layers")'>Pages</button>
+    <button type="button" class="desk-nav-button @(_leftTab == "widgets" || _leftTab == "global" ? "is-active" : "")" @onclick='() => _leftTab = "widgets"' aria-pressed='@(_leftTab == "widgets" || _leftTab == "global")'>Modules</button>
+    <button type="button" class="desk-nav-button @(_inspectorOpen && _rightTab == "page" ? "is-active" : "")" @onclick="OpenPageSettings" aria-expanded="@_inspectorOpen" aria-controls="desk-inspector">Page settings</button>
+</nav>
+<div class="studio-workspace @(_inspectorOpen ? "has-inspector" : "")">
+    <aside class="studio-panel studio-panel-left" aria-label="Site navigation and modules">
+        <div class="desk-panel-heading">
+            <strong>@(_leftTab == "layers" ? "Site navigator" : _leftTab == "global" ? "Reusable modules" : "Module library")</strong>
+            <i class="bi bi-layout-sidebar"></i>
         </div>
-
         @if (_leftTab == "widgets")
         {
             <div class="studio-panel-section">
@@ -160,11 +156,9 @@ else
                     <div class="studio-widget-grid mb-2">
                         @foreach (var wt in groupWidgets)
                         {
-                            <button class="studio-widget-card"
+                            <button class="studio-widget-card" title="@wt.Tagline"
                                     draggable="true"
                                     data-gws-palette-widget="@wt.Type"
-                                    ondragstart="window.gwsCmsBuilderBridge.beginPaletteDrag(event)"
-                                    ondragend="window.gwsCmsBuilderBridge.endExternalDrag()"
                                     @onclick="() => QuickAddWidget(wt.Type)">
                                 <span class="studio-widget-icon"><i class="@wt.Icon"></i></span>
                                 <span class="studio-widget-copy">
@@ -203,8 +197,6 @@ else
                                         draggable="true"
                                         data-gws-global-block-id="@globalBlock.Id"
                                         data-gws-global-block-kind="@globalBlock.Kind"
-                                        ondragstart="window.gwsCmsBuilderBridge.beginGlobalBlockDrag(event)"
-                                        ondragend="window.gwsCmsBuilderBridge.endExternalDrag()"
                                         @onclick="() => InsertGlobalBlock(globalBlock)">
                                     <span class="studio-widget-icon">
                                         <i class="@(globalBlock.Kind == GlobalBlockKinds.Section ? "bi bi-layout-text-window" : GetWidgetIconClass(globalBlock.WidgetType ?? "paragraph"))"></i>
@@ -231,6 +223,19 @@ else
         else
         {
             <div class="studio-panel-section">
+                <nav class="desk-page-list" aria-label="Website pages">
+                    @foreach (var sitePage in _allPagesInSite.Where(p => p.TrashedAt is null).OrderBy(p => CmsBuilderService.BuildFullPath(p, _allPagesInSite)))
+                    {
+                        <button type="button" class="desk-page @(_page.Id == sitePage.Id ? "is-active" : "")"
+                                aria-current="@(_page.Id == sitePage.Id ? "page" : null)" disabled="@_isBusy"
+                                @onclick="() => OpenSitePageAsync(sitePage.Id)">
+                            <i class="bi bi-file-earmark-text"></i>
+                            <span><strong>@sitePage.Title</strong><small>/@CmsBuilderService.BuildFullPath(sitePage, _allPagesInSite)</small></span>
+                            @if (sitePage.Status != CmsPageStatuses.Published) { <small class="desk-page-draft">Draft</small> }
+                        </button>
+                    }
+                </nav>
+                <div class="studio-section-eyebrow mb-2">On this page</div>
                 <div class="btn-group w-100 mb-3">
                     <button class="btn btn-sm btn-outline-primary" @onclick="AddSectionAtEnd">
                         <i class="bi bi-plus-lg me-1"></i>Add Section
@@ -290,9 +295,14 @@ else
                                 {
                                     @foreach (var col in section.Columns)
                                     {
+                                        <div class="studio-column-drop" @ondragover:preventDefault @ondrop:stopPropagation
+                                             @ondrop="() => DropWidgetIntoColumnAsync(section.Id, col.Id)">
+                                            <i class="bi bi-layout-split me-1"></i>Column @(section.Columns.IndexOf(col) + 1)
+                                            @if (col.Widgets.Count == 0) { <span> · Drop a block here</span> }
+                                        </div>
                                         @foreach (var w in col.Widgets)
                                         {
-                                            <button class="studio-layer-item studio-layer-widget-item @(_selectedWidgetId == w.Id ? "is-active" : "") @(_draggedWidgetId == w.Id ? "is-dragging" : "")"
+                                            <button data-gws-existing-widget="@w.Id" class="studio-layer-item studio-layer-widget-item @(_selectedWidgetId == w.Id ? "is-active" : "") @(_draggedWidgetId == w.Id ? "is-dragging" : "")"
                                                     draggable="true"
                                                     @onclick="() => SelectWidget(section.Id, w.Id)"
                                                     @ondragstart="() => StartDragWidget(w, col)"
@@ -353,11 +363,6 @@ else
 
         <div class="studio-stage-shell">
             <div class="studio-stage-frame @GetViewportClass()">
-                <div class="studio-stage-browser">
-                    <span></span><span></span><span></span>
-                    <div class="studio-stage-route">/@CurrentFullPath</div>
-                </div>
-
                 <iframe id="cms-builder-iframe" class="studio-live-iframe"
                         src="@BuildIframeUrl()"
                         title="Live preview — @_page.Title"></iframe>
@@ -369,7 +374,11 @@ else
     </section>
 
     @* ── RIGHT PANEL — Inspector ──────────────────────────────────────────── *@
-    <aside class="studio-panel studio-panel-right">
+    <aside id="desk-inspector" class="studio-panel studio-panel-right" hidden="@(!_inspectorOpen)" aria-label="Selection settings">
+        <div class="desk-panel-heading">
+            <strong>@(_rightTab == "page" ? "Page settings" : "Selection settings")</strong>
+            <button type="button" class="studio-icon-btn" aria-label="Close settings" @onclick="() => _inspectorOpen = false"><i class="bi bi-x-lg"></i></button>
+        </div>
         @* Page vs Block, the split WordPress uses for Document vs Block. Page settings used to
            live on a separate screen that this editor could only carry forward blindly. *@
         <div class="studio-tab-strip">
@@ -2287,6 +2296,19 @@ else
         </div>
     </aside>
 </div>
+<div class="desk-module-dock" aria-label="Add modules">
+    <strong>Add module</strong>
+    @foreach (var module in WidgetCatalog.Where(w => DockModuleTypes.Contains(w.Type)))
+    {
+        <button type="button" class="desk-module-button" draggable="true" data-gws-palette-widget="@module.Type"
+                title="@module.Tagline" @onclick="() => QuickAddWidget(module.Type)">
+            <i class="@module.Icon"></i>@module.Title
+        </button>
+    }
+    <button type="button" class="desk-module-button" @onclick='() => _leftTab = "global"'><i class="bi bi-globe2"></i>Reusable</button>
+    <button type="button" class="desk-module-button" @onclick='() => _leftTab = "widgets"'><i class="bi bi-grid"></i>All modules</button>
+    <span>Drag onto your page or click to add</span>
+</div>
 }
 
 </div>
@@ -2416,7 +2438,9 @@ else
     private string _selectedWidgetId = string.Empty;
 
     // ── UI panels ─────────────────────────────────────────────────────────
-    private string _leftTab = "widgets";
+    private string _leftTab = "layers";
+    private bool _inspectorOpen;
+    private static readonly HashSet<string> DockModuleTypes = ["heading", "paragraph", "image", "form", "posts-grid"];
     private string _previewViewport = "desktop";
     private long _previewTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
     // ── Computed ──────────────────────────────────────────────────────────
@@ -2564,7 +2588,7 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && _page is not null)
+        if (!_bridgeInitialized && _page is not null && !_isLoading && !_layoutParseFailed)
         {
             _bridgeRef = DotNetObjectReference.Create(this);
             try
@@ -2719,7 +2743,7 @@ else
     [JSInvokable]
     public async Task OnCanvasDropAsync(string draggedWidgetId, string targetSectionId, string targetColumnId, string targetWidgetId, bool insertAfter)
     {
-        if (string.IsNullOrEmpty(draggedWidgetId))
+        if (string.IsNullOrEmpty(draggedWidgetId) || draggedWidgetId == targetWidgetId)
         {
             return;
         }
@@ -3422,11 +3446,27 @@ else
     // Selecting anything on the canvas has to bring the Block tab forward, or the click looks
     // like it did nothing: the inspector is hidden while the Page tab is showing, so the
     // selection would land silently in a panel the user can't see.
+    private void OpenPageSettings()
+    {
+        _rightTab = "page";
+        _inspectorOpen = true;
+    }
+
+    private async Task OpenSitePageAsync(Guid pageId)
+    {
+        if (_isBusy || pageId == PageId) return;
+        // Flush the pending draft before leaving this editor instance.
+        await SaveAsync(reloadPreview: false);
+        if (!string.IsNullOrEmpty(_errorMessage)) return;
+        Navigation.NavigateTo($"/admin/pages/{pageId}/edit", forceLoad: true);
+    }
+
     private void SelectSection(string sectionId)
     {
         _selectedSectionId = sectionId;
         _selectedWidgetId = string.Empty;
         _rightTab = "block";
+        _inspectorOpen = true;
     }
 
     private void SelectWidget(string sectionId, string widgetId)
@@ -3434,6 +3474,7 @@ else
         _selectedSectionId = sectionId;
         _selectedWidgetId = widgetId;
         _rightTab = "block";
+        _inspectorOpen = true;
     }
 
     private void ClearSelection()
@@ -3754,6 +3795,14 @@ else
     {
         _draggedWidgetId = widget.Id;
         _draggedFromColumn = fromColumn;
+    }
+
+    private async Task DropWidgetIntoColumnAsync(string sectionId, string columnId)
+    {
+        if (_draggedWidgetId is null) return;
+        var widgetId = _draggedWidgetId;
+        EndDragWidget();
+        await OnCanvasDropAsync(widgetId, sectionId, columnId, string.Empty, false);
     }
 
     private void EndDragWidget()

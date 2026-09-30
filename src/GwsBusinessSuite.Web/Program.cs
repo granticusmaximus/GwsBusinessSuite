@@ -1953,6 +1953,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
           <meta name="description" content="{metaDescription}" />
           {ogImageTag}
           <link rel="stylesheet" href="/cms-public.css" />
+          <style>{CmsThemeCss.Build(DesignTokenJson.ParseOrEmpty(site.DesignTokensJson))}</style>
           {customStyleTag}
         </head>
         <body>
@@ -1987,6 +1988,24 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
         .Expire(TimeSpan.FromMinutes(2))
         .Tag(OutputCachePublicContentInvalidator.Tag)
         .With(ctx => ctx.HttpContext.User.Identity?.IsAuthenticated != true));
+
+// A read-only, authenticated rendering of an existing page with temporary theme tokens.
+app.MapGet("/admin/api/cms/{siteSlug}/theme-preview/{presetKey}/{**pageSlug}", async (
+    string siteSlug, string presetKey, string? pageSlug, HttpContext context,
+    ICmsBuilderService cmsBuilderService, GlobalBlockResolver globalBlockResolver,
+    IConfiguration configuration, IDbContextFactory<ApplicationDbContext> dbFactory,
+    IRelatedArticlesService relatedArticlesService) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    context.Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
+    var preset = CmsThemePresets.Find(presetKey);
+    if (preset is null) return Results.NotFound();
+    var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+    if (site is null) return Results.NotFound();
+    return await RenderPublicCanvasPageAsync(pageSlug ?? "home", context.Request, false,
+        cmsBuilderService, globalBlockResolver, configuration, dbFactory, relatedArticlesService,
+        previewSite: site, previewTheme: preset);
+}).RequireAuthorization("ContributorAccess").RequireRateLimiting("public-read");
 
 // Handles "form" widget submissions (see CmsBlockHtmlRenderer's "form" case). Fixed URL
 // per site rather than per page — the submitted page's (possibly nested) full path travels
@@ -2307,7 +2326,7 @@ app.MapGet("/blog", async (
             canonicalUrl: CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), $"{request.Path}{request.QueryString}"),
             siteName: navMenus.SiteName,
             logoUrl: navMenus.LogoUrl,
-            faviconUrl: navMenus.FaviconUrl);
+            faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
@@ -2401,7 +2420,7 @@ app.MapGet("/blog/{slug}", async (
             canonicalUrl: CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), $"/blog/{a.Slug}"),
             siteName: navMenus.SiteName,
             logoUrl: navMenus.LogoUrl,
-            faviconUrl: navMenus.FaviconUrl);
+            faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
@@ -2655,7 +2674,7 @@ app.MapGet("/__not-found", async (HttpContext httpContext, ICmsBuilderService cm
                 navMenus.FontPairingKey,
                 siteName: navMenus.SiteName,
                 logoUrl: navMenus.LogoUrl,
-                faviconUrl: navMenus.FaviconUrl);
+                faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens);
             return Results.Content(html, "text/html");
         }
 
@@ -2766,7 +2785,7 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
             : $"""<meta property="og:image" content="{System.Net.WebUtility.HtmlEncode(page.OgImageUrl)}" />""";
 
         // Combine base + site + page CSS inline so the HTML file is self-contained.
-        var combinedCss = string.Join('\n', new[] { baseStylesheet, site.CustomCss, page.CustomCss }
+        var combinedCss = string.Join('\n', new[] { baseStylesheet, CmsThemeCss.Build(DesignTokenJson.ParseOrEmpty(site.DesignTokensJson)), site.CustomCss, page.CustomCss }
             .Where(css => !string.IsNullOrWhiteSpace(css)));
 
         var pageHtml = $"""
@@ -3357,7 +3376,8 @@ static async Task<PublicNavMenus> GetPublicNavMenusAsync(ICmsBuilderService cmsB
         site?.FontPairingKey,
         site?.Name,
         site?.LogoUrl,
-        site?.FaviconUrl);
+        site?.FaviconUrl,
+        DesignTokenJson.ParseOrEmpty(site?.DesignTokensJson));
 }
 
 // Renders a Canvas page (by full path, under the Canvas:SiteSlug-configured site) as a full
@@ -3371,10 +3391,11 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     GlobalBlockResolver globalBlockResolver,
     IConfiguration configuration,
     IDbContextFactory<ApplicationDbContext> dbFactory,
-    IRelatedArticlesService relatedArticlesService)
+    IRelatedArticlesService relatedArticlesService,
+    CmsSite? previewSite = null, CmsThemePreset? previewTheme = null)
 {
     var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
-    var site = await GetConfiguredCanvasSiteAsync(cmsBuilderService, configuration);
+    var site = previewSite ?? await GetConfiguredCanvasSiteAsync(cmsBuilderService, configuration);
     if (site is null)
     {
         return Results.Content(
@@ -3382,12 +3403,13 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
             "text/html", statusCode: StatusCodes.Status404NotFound);
     }
 
+    siteSlug = site.Slug;
+    var renderTokens = previewTheme?.Tokens ?? DesignTokenJson.ParseOrEmpty(site.DesignTokensJson);
     var navItems = PublicSiteHtmlRenderer.ParseNavItems(site.NavMenuJson);
     var footerNavItems = PublicSiteHtmlRenderer.ParseFooterNavItems(site.FooterNavMenuJson);
     var normalizedPath = fullPath.Trim('/');
-    // includeUnpublished stays false here — real visitors on grantwatson.dev never see
-    // drafts, only the auth-aware /cms/{siteSlug}/{**pageSlug} preview route does.
-    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, normalizedPath, includeUnpublished: false);
+    // Only the authenticated theme preview may include unpublished pages.
+    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, normalizedPath, includeUnpublished: previewTheme is not null);
     if (page is null)
     {
         return Results.Content(
@@ -3417,7 +3439,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     var relatedPosts = CmsBlockHtmlRenderer.LayoutContainsRelatedPosts(layout)
         ? await LoadRelatedPostsByAnchorSlugAsync(layout, dbFactory, relatedArticlesService)
         : null;
-    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath, articles: articles, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson), relatedPostsByAnchorSlug: relatedPosts);
+    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath, articles: articles, tokens: renderTokens, relatedPostsByAnchorSlug: relatedPosts);
     if (showSubmittedBanner)
     {
         bodyHtml = PublicSiteHtmlRenderer.SubmittedModal() + bodyHtml;
@@ -3438,6 +3460,8 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     if (CmsBlockHtmlRenderer.LayoutContainsGallery(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildGalleryRuntimeScript();
     if (CmsBlockHtmlRenderer.LayoutContainsCarousel(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildCarouselRuntimeScript();
     if (CmsBlockHtmlRenderer.LayoutContainsPortfolioGrid(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildPortfolioRuntimeScript();
+    if (previewTheme is not null)
+        bodyHtml += "<script src=\"/js/cms-theme-preview.js\"></script>";
     var wrappedBody = string.IsNullOrWhiteSpace(customCss)
         ? bodyHtml
         : $"<style>{SanitizeInlineCss(customCss)}</style>{bodyHtml}";
@@ -3459,7 +3483,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
         canonicalUrl: canonicalUrl,
         siteName: site.Name,
         logoUrl: site.LogoUrl,
-        faviconUrl: site.FaviconUrl);
+        faviconUrl: site.FaviconUrl, tokens: renderTokens);
     return Results.Content(html, "text/html");
 }
 
@@ -4489,4 +4513,5 @@ sealed record PublicNavMenus(
     string? FontPairingKey,
     string? SiteName,
     string? LogoUrl,
-    string? FaviconUrl);
+    string? FaviconUrl,
+    DesignTokenSet Tokens);

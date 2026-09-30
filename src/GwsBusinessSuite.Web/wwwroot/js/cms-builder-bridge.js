@@ -17,6 +17,7 @@ window.gwsCmsBuilderBridge = (function () {
     }
 
     function init(dotNetRef) {
+        dispose();
         _dotNetRef = dotNetRef;
         _boundHandler = handleMessage;
         window.addEventListener('message', _boundHandler);
@@ -49,6 +50,8 @@ window.gwsCmsBuilderBridge = (function () {
             _dragRaf = window.requestAnimationFrame(processParentDrag);
         };
         document.addEventListener('drag', _boundParentDrag, true);
+        document.addEventListener('dragstart', handleExternalDragStart);
+        document.addEventListener('dragend', endExternalDrag);
     }
 
     function processParentDrag() {
@@ -80,6 +83,8 @@ window.gwsCmsBuilderBridge = (function () {
             _boundHandler = null;
         }
         window.removeEventListener('keydown', handleKeydown);
+        document.removeEventListener('dragstart', handleExternalDragStart);
+        document.removeEventListener('dragend', endExternalDrag);
         if (_boundParentDrag) {
             document.removeEventListener('drag', _boundParentDrag, true);
             _boundParentDrag = null;
@@ -133,6 +138,24 @@ window.gwsCmsBuilderBridge = (function () {
         }
     }
 
+    // Delegation survives Blazor rerenders and complies with script-src 'self'. Inline
+    // ondragstart attributes are blocked by the app's CSP before a payload can be set.
+    function handleExternalDragStart(event) {
+        const source = event.target instanceof Element
+            ? event.target.closest('[data-gws-palette-widget], [data-gws-global-block-id], [data-gws-existing-widget]') : null;
+        if (!source || !event.dataTransfer) return;
+        const existingId = source.getAttribute('data-gws-existing-widget');
+        if (existingId) {
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('application/x-gws-existing-widget', existingId);
+            _externalDrag = { kind: 'existing', id: existingId, target: null, committed: false };
+        } else if (source.hasAttribute('data-gws-palette-widget')) {
+            beginPaletteDrag({ target: source, dataTransfer: event.dataTransfer });
+        } else {
+            beginGlobalBlockDrag({ target: source, dataTransfer: event.dataTransfer });
+        }
+    }
+
     function beginPaletteDrag(event) {
         const source = event.currentTarget || event.target;
         const widgetType = source && source.getAttribute
@@ -177,7 +200,10 @@ window.gwsCmsBuilderBridge = (function () {
         window.setTimeout(function () {
             if (completedDrag && !completedDrag.committed && completedDrag.target && _dotNetRef) {
                 const target = completedDrag.target;
-                if (completedDrag.kind === 'global') {
+                if (completedDrag.kind === 'existing') {
+                    _dotNetRef.invokeMethodAsync('OnCanvasDropAsync', completedDrag.id,
+                        target.sectionId || '', target.columnId || '', target.targetWidgetId || '', !!target.insertAfter);
+                } else if (completedDrag.kind === 'global') {
                     _dotNetRef.invokeMethodAsync('OnCanvasInsertGlobalAsync',
                         completedDrag.id,
                         target.sectionId || '',
@@ -202,7 +228,7 @@ window.gwsCmsBuilderBridge = (function () {
     }
 
     function handleMessage(event) {
-        if (event.origin !== window.location.origin) return;
+        if (event.origin !== window.location.origin || event.source !== iframe()?.contentWindow) return;
         const data = event.data;
         if (!data || typeof data !== 'object' || !_dotNetRef) return;
 
