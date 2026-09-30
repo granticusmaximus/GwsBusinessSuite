@@ -73,6 +73,9 @@ services:
 
   ollama:
     image: ollama/ollama:latest
+    # Keep a model load from exhausting the droplet and dropping the Cloudflare
+    # tunnel. The current 8 GiB host cannot fit gemma4 alongside the web app.
+    mem_limit: 5g
     environment:
       # SentinelGPT may consult Qwen and DeepSeek before its final answer. Load
       # only one model at a time so a small droplet cannot retain all three large
