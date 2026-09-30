@@ -2724,7 +2724,7 @@ else
             _suppressCanvasSync = false;
         }
 
-        SelectWidget(sectionId, widgetId);
+        // A delayed blur must not reopen a closed inspector or steal a newer selection.
         StateHasChanged();
         return Task.CompletedTask;
     }
@@ -2902,7 +2902,7 @@ else
                 }
             }
 
-            _statusMessage = $"Loaded '{_page.Title}'.";
+            _statusMessage = string.Empty;
         }
         catch (Exception ex)
         {

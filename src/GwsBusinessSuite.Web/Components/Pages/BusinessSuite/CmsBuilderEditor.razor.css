@@ -819,7 +819,7 @@
     border: 1px solid #dce2eb;
     border-radius: 10px;
     overflow: hidden;
-    height: calc(100dvh - 2rem);
+    height: calc(100dvh - 8rem);
     min-height: 720px;
 }
 .studio-header { background: #fff; padding: 1rem 1.1rem; gap: 1rem; margin: 0; border-bottom: 1px solid #dce2eb; align-items: center; flex-wrap: wrap; }
@@ -908,3 +908,9 @@
 .studio-shell .btn-primary:hover { background: #284f7c; border-color: #284f7c; }
 .studio-shell .btn-outline-primary { color: #35669e; border-color: #bdd0e6; }
 .studio-shell .btn-outline-primary:hover { background: #edf3fa; color: #284f7c; }
+.studio-layer-section-group, .studio-layer-list, .studio-layer-item-main { min-width: 0; }
+.studio-layer-widget-item { width: calc(100% - 0.65rem); margin-left: 0.65rem; padding: 0.55rem 0.4rem; gap: 0.4rem; }
+.studio-layer-section-item { padding: 0.55rem 0.4rem; gap: 0.3rem; }
+.studio-layer-copy { flex: 1; }
+.studio-layer-copy strong { overflow-wrap: anywhere; }
+.studio-layer-icon { flex-shrink: 0; }
