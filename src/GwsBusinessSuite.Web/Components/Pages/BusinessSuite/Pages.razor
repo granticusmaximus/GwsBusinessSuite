@@ -1,4 +1,8 @@
 @page "/admin/pages"
+@* /admin/pages (the nav's "Pages" link) opens the Site Desk editor directly, where every page of
+   the site is one click away; this full list - creating pages, trash, bulk actions, switching
+   sites - stays at /admin/pages/all and is linked from the Site Desk. *@
+@page "/admin/pages/all"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "ContributorAccess")]
 @using Microsoft.AspNetCore.Authorization
@@ -196,10 +200,19 @@ else
     {
         IsLoading = true;
         CmsErrorMessage = string.Empty;
+        Guid? siteDeskPageId = null;
 
         try
         {
             await LoadCurrentSiteAsync();
+            if (!IsAllPagesRoute)
+            {
+                siteDeskPageId = CmsPages
+                    .Where(page => page.TrashedAt is null)
+                    .OrderByDescending(page => page.UpdatedAt ?? page.CreatedAt)
+                    .Select(page => (Guid?)page.Id)
+                    .FirstOrDefault();
+            }
         }
         catch (Exception ex)
         {
@@ -210,7 +223,19 @@ else
         {
             IsLoading = false;
         }
+
+        // Outside the try: during prerendering NavigateTo signals the redirect by throwing,
+        // which the catch above would otherwise swallow as a load failure. A site with no pages
+        // yet stays on this list so the first one can be created.
+        if (siteDeskPageId is { } pageId)
+        {
+            Navigation.NavigateTo($"/admin/pages/{pageId}/edit", replace: true);
+        }
     }
+
+    private bool IsAllPagesRoute =>
+        Navigation.ToBaseRelativePath(Navigation.Uri).Split('?', '#')[0].TrimEnd('/')
+            .Equals("admin/pages/all", StringComparison.OrdinalIgnoreCase);
 
     private async Task LoadCurrentSiteAsync()
     {

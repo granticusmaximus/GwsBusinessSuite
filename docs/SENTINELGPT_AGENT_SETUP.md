@@ -34,6 +34,26 @@ The application uses `sentinelgpt` by default when no model override has been se
 Recreating the profile updates its behavior without altering the underlying `llama3.2`
 weights.
 
+### Production droplet: light server-AI mode
+
+`docker-compose.yml` runs production with `ServerAi__Mode: Light` and a separate, smaller model
+manifest, `ollama/server-models.txt` (`llama3.2` + `embeddinggemma`). `ollama-init.sh` rebuilds
+the same `sentinelgpt` profile on `llama3.2` with an 8k context (`SENTINELGPT_BASE_MODEL`,
+`SENTINELGPT_NUM_CTX`) and removes any installed model not in that manifest
+(`OLLAMA_PRUNE_UNLISTED`). In light mode the server:
+
+- keeps Media Watch summaries, Civic Watch overviews, Content Studio trend research, semantic
+  search, the editor writing assistant, and the panel's **Summarize** action;
+- refuses SentinelGPT chat/agents and the other panel actions, the `ai.*` model automation nodes
+  (including the Qwen/DeepSeek teacher panel), app generation, and server-side article/hero-image
+  generation — each with a message saying where to do it instead;
+- relays Content Studio drafts and revisions to the browser machine's own Ollama (see
+  `BrowserLocalOllamaService` and `wwwroot/js/local-ollama.js`).
+
+`ollama/required-models.txt` and `SentinelGPT.Modelfile` are unchanged and still drive the Mac
+app and SentinelCLI, so the full local gemma4 `sentinelgpt` and the advisor models stay as they
+are on your Mac. Do not trim `required-models.txt` to slim the server — use `server-models.txt`.
+
 The same SentinelGPT profile is also the default for Content Studio, news summaries,
 affiliate suggestions, trend research, and app generation. Reusing one model name avoids
 routine GWS workloads unloading the chat model when Ollama is configured to keep only one

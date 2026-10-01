@@ -65,6 +65,7 @@ public static class DependencyInjection
             .SetApplicationName("GwsBusinessSuite");
 
         services.Configure<ContentStudioOptions>(configuration.GetSection(ContentStudioOptions.SectionName));
+        services.Configure<ServerAiOptions>(configuration.GetSection(ServerAiOptions.SectionName));
         services.AddOptions<StripeBillingOptions>()
             .Bind(configuration.GetSection(StripeBillingOptions.SectionName));
         services.AddOptions<AnalyticsGeoIpOptions>()

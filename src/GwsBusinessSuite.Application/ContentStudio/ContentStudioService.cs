@@ -20,8 +20,13 @@ public sealed class ContentStudioService(
     IAffiliateSuggestionService affiliateSuggestionService,
     ISiteSettingsService siteSettingsService,
     IOptions<ContentStudioOptions> options,
-    ILogger<ContentStudioService> logger) : IContentStudioService
+    ILogger<ContentStudioService> logger,
+    IOptions<ServerAiOptions>? serverAi = null) : IContentStudioService
 {
+    private const string GenerationFeature = "Article generation on the server";
+    private const string GenerationAlternative =
+        "Content Studio runs drafts and revisions on the Ollama of the computer you're using instead - start Ollama there and try again.";
+
     private static readonly string[] AffiliateSlotTokens = ["{{CJ_AD_SLOT_1}}", "{{CJ_AD_SLOT_2}}", "{{CJ_AD_SLOT_3}}"];
 
     public async Task<IReadOnlyList<ContentStudioDraftSummary>> ListDraftsAsync(CancellationToken cancellationToken = default)
@@ -179,6 +184,7 @@ public sealed class ContentStudioService(
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Topic);
+        serverAi.EnsureHeavyAiAllowed(GenerationFeature, GenerationAlternative);
 
         var scoredOffers = await offerScoringService.ScoreOffersAsync(request, maxOffers: AffiliateSlotTokens.Length, cancellationToken);
         var existingArticles = await GetExistingArticleLinksAsync(cancellationToken);
@@ -205,17 +211,36 @@ public sealed class ContentStudioService(
             throw new InvalidOperationException("SentinelGPT returned an empty draft. Try again or switch models.");
         }
 
-        markdown = await CompileAndRepairAsync(model, markdown, timeoutCts.Token);
+        markdown = await CompileAndRepairAsync(ollama, model, markdown, timeoutCts.Token);
 
         var (saved, _) = await PersistGeneratedDraftAsync(request, markdown, scoredOffers, cancellationToken);
         return saved;
     }
 
-    public async IAsyncEnumerable<ContentStudioGenerationChunk> GenerateArticleStreamAsync(
+    public IAsyncEnumerable<ContentStudioGenerationChunk> GenerateArticleStreamAsync(
         ArticleGenerationRequest request,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Topic);
+        serverAi.EnsureHeavyAiAllowed(GenerationFeature, GenerationAlternative);
+        return GenerateArticleStreamCoreAsync(request, ollama, cancellationToken);
+    }
+
+    public IAsyncEnumerable<ContentStudioGenerationChunk> GenerateArticleStreamAsync(
+        ArticleGenerationRequest request,
+        IOllamaService modelRuntime,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Topic);
+        ArgumentNullException.ThrowIfNull(modelRuntime);
+        return GenerateArticleStreamCoreAsync(request, modelRuntime, cancellationToken);
+    }
+
+    private async IAsyncEnumerable<ContentStudioGenerationChunk> GenerateArticleStreamCoreAsync(
+        ArticleGenerationRequest request,
+        IOllamaService modelRuntime,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
 
         var scoredOffers = await offerScoringService.ScoreOffersAsync(request, maxOffers: AffiliateSlotTokens.Length, cancellationToken);
         var existingArticles = await GetExistingArticleLinksAsync(cancellationToken);
@@ -232,7 +257,7 @@ public sealed class ContentStudioService(
         timeoutCts.CancelAfter(timeout);
 
         var builder = new StringBuilder();
-        var stream = ollama.GenerateStreamAsync(model, BuildSystemPrompt(), prompt, timeoutCts.Token);
+        var stream = modelRuntime.GenerateStreamAsync(model, BuildSystemPrompt(), prompt, timeoutCts.Token);
         await foreach (var fragment in stream.WithCancellation(timeoutCts.Token))
         {
             builder.Append(fragment);
@@ -254,7 +279,7 @@ public sealed class ContentStudioService(
         {
             yield return new ContentStudioGenerationChunk(
                 $"\n\n_Checking code… {verified.Problems.Count} compile error(s) found, fixing._\n", null);
-            markdown = await CompileAndRepairAsync(model, markdown, timeoutCts.Token);
+            markdown = await CompileAndRepairAsync(modelRuntime, model, markdown, timeoutCts.Token);
         }
 
         var (saved, flaggedClaimCount) = await PersistGeneratedDraftAsync(request, markdown, scoredOffers, cancellationToken);
@@ -373,9 +398,27 @@ public sealed class ContentStudioService(
             .Take(20)
             .ToList();
 
-    public async Task<ArticleGenerationResult?> RequestRevisionAsync(
+    public Task<ArticleGenerationResult?> RequestRevisionAsync(
         DraftRevisionRequest request,
         CancellationToken cancellationToken = default)
+    {
+        serverAi.EnsureHeavyAiAllowed("Revisions on the server", GenerationAlternative);
+        return RequestRevisionCoreAsync(request, ollama, cancellationToken);
+    }
+
+    public Task<ArticleGenerationResult?> RequestRevisionAsync(
+        DraftRevisionRequest request,
+        IOllamaService modelRuntime,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(modelRuntime);
+        return RequestRevisionCoreAsync(request, modelRuntime, cancellationToken);
+    }
+
+    private async Task<ArticleGenerationResult?> RequestRevisionCoreAsync(
+        DraftRevisionRequest request,
+        IOllamaService modelRuntime,
+        CancellationToken cancellationToken)
     {
         var draft = await db.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
         if (draft is null)
@@ -410,12 +453,12 @@ public sealed class ContentStudioService(
         // reusing the entity tracked by the original context.
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(timeout);
-        var revisedMarkdown = (await ollama.GenerateAsync(configuredModel, BuildSystemPrompt(), prompt, timeoutCts.Token)).Trim();
+        var revisedMarkdown = (await modelRuntime.GenerateAsync(configuredModel, BuildSystemPrompt(), prompt, timeoutCts.Token)).Trim();
         // A revision can reintroduce a hallucination the first pass had fixed, so it gets the
         // same compile-and-repair treatment rather than being trusted because it came second.
         if (!string.IsNullOrWhiteSpace(revisedMarkdown))
         {
-            revisedMarkdown = await CompileAndRepairAsync(configuredModel, revisedMarkdown, timeoutCts.Token);
+            revisedMarkdown = await CompileAndRepairAsync(modelRuntime, configuredModel, revisedMarkdown, timeoutCts.Token);
         }
         if (string.IsNullOrWhiteSpace(revisedMarkdown))
         {
@@ -491,6 +534,10 @@ public sealed class ContentStudioService(
         {
             throw new ArgumentException("A prompt (or a draft title to fall back to) is required to generate a hero image.", nameof(request));
         }
+
+        serverAi.EnsureHeavyAiAllowed(
+            "Hero image generation",
+            "Upload a hero image instead, or generate one locally and upload it.");
 
         var configuredModel = await GetEffectiveImageModelAsync(cancellationToken);
         if (string.IsNullOrWhiteSpace(configuredModel))
@@ -893,7 +940,11 @@ public sealed class ContentStudioService(
     // second reviewing agent: the model is not asked to introspect (which is what the system
     // prompt's self-check already does, unreliably, on the same weights that produced the error)
     // but handed ground truth from a compiler that cannot be persuaded an API exists.
-    private async Task<string> CompileAndRepairAsync(string model, string markdown, CancellationToken cancellationToken)
+    private async Task<string> CompileAndRepairAsync(
+        IOllamaService modelRuntime,
+        string model,
+        string markdown,
+        CancellationToken cancellationToken)
     {
         for (var attempt = 1; attempt <= MaxRepairAttempts; attempt++)
         {
@@ -916,7 +967,7 @@ public sealed class ContentStudioService(
             string repaired;
             try
             {
-                repaired = (await ollama.GenerateAsync(
+                repaired = (await modelRuntime.GenerateAsync(
                     model, BuildSystemPrompt(), BuildRepairPrompt(markdown, report), cancellationToken)).Trim();
             }
             catch (OperationCanceledException)

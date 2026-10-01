@@ -913,6 +913,32 @@ public sealed class AutomationWorkflowTests
     }
 
     [Fact]
+    public async Task AiModelNodes_ShouldBeRefused_InLightServerAiMode()
+    {
+        var ollama = new FakeOllamaService();
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(
+            services,
+            Microsoft.Extensions.Options.Options.Create(new GwsBusinessSuite.Application.Abstractions.ServerAiOptions
+            {
+                Mode = GwsBusinessSuite.Application.Abstractions.ServerAiMode.Light
+            }));
+        var registry = new AutomationNodeRegistry(
+            new FakeHttpClient(),
+            ollama,
+            serviceProvider: Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services));
+        var input = System.Text.Json.JsonSerializer.SerializeToElement(new { prompt = "Review this." });
+
+        var act = () => registry.ExecuteAsync(
+            Node("ai.modelAdvisor", "{\"model\":\"qwen2.5-coder\",\"role\":\"Review.\",\"promptPath\":\"prompt\",\"outputField\":\"advice\"}"),
+            input,
+            null);
+
+        await act.Should().ThrowAsync<GwsBusinessSuite.Application.Abstractions.ServerAiUnavailableException>();
+        ollama.RequestedModels.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task AiAllInstalledModelsAdvisor_ShouldDiscoverModelsDynamically_AndFeedSentinelSynthesizeEndToEnd()
     {
         await using var db = await CreateDbAsync();

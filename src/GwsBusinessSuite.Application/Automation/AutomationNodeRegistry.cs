@@ -188,6 +188,15 @@ public sealed partial class AutomationNodeRegistry(
             return SingleOutput("main", historicalOutput);
         }
 
+        // ai.saveApprovedLesson only writes a wiki page; every other ai.* node runs one or more
+        // model generations, which the light-mode server deliberately doesn't do.
+        if (node.TypeKey.StartsWith("ai.", StringComparison.Ordinal) && node.TypeKey != "ai.saveApprovedLesson")
+        {
+            (serviceProvider?.GetService(typeof(Microsoft.Extensions.Options.IOptions<ServerAiOptions>))
+                as Microsoft.Extensions.Options.IOptions<ServerAiOptions>)
+                .EnsureHeavyAiAllowed($"The '{node.TypeKey}' automation node", "Run AI workflows from a local copy of the suite.");
+        }
+
         return node.TypeKey switch
         {
             "core.manualTrigger" => SingleOutput("main", input),

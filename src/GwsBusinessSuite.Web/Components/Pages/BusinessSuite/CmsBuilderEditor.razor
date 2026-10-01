@@ -109,7 +109,7 @@ else if (_page is null)
     <div class="canvas-empty-state">
         <div class="canvas-empty-icon"><i class="bi bi-exclamation-triangle"></i></div>
         <h3>Page not found</h3>
-        <p>This page may have been deleted. <a href="/admin/pages">Back to Pages</a>.</p>
+        <p>This page may have been deleted. <a href="/admin/pages/all">Back to all pages</a>.</p>
     </div>
 }
 else if (_layoutParseFailed)
@@ -117,7 +117,7 @@ else if (_layoutParseFailed)
     <div class="canvas-empty-state">
         <div class="canvas-empty-icon"><i class="bi bi-exclamation-triangle"></i></div>
         <h3>Content could not be loaded</h3>
-        <p>See the message above. <a href="/admin/pages">Back to Pages</a>.</p>
+        <p>See the message above. <a href="/admin/pages/all">Back to all pages</a>.</p>
     </div>
 }
 else
@@ -223,6 +223,11 @@ else
         else
         {
             <div class="studio-panel-section">
+                <div class="d-flex justify-content-end mb-1">
+                    <a class="small" href="/admin/pages/all" title="Create pages, restore from trash, or switch websites">
+                        <i class="bi bi-list-ul me-1"></i>All pages
+                    </a>
+                </div>
                 <nav class="desk-page-list" aria-label="Website pages">
                     @foreach (var sitePage in _allPagesInSite.Where(p => p.TrashedAt is null).OrderBy(p => CmsBuilderService.BuildFullPath(p, _allPagesInSite)))
                     {

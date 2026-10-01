@@ -14,6 +14,10 @@ services:
       # These override the localhost defaults in appsettings.json.
       ContentStudio__BaseUrl: http://ollama:11434
       ExternalServices__OllamaBaseUrl: http://ollama:11434
+      # Light server-AI mode: this droplet only runs short summaries on a small model. Content
+      # Studio drafts/revisions run on the Ollama of the computer the browser is on, and
+      # SentinelGPT chat/agents run in the Mac app. Remove to restore full server-side AI.
+      ServerAi__Mode: Light
       # Optional live internet research for SentinelGPT. Keep the actual key in the
       # gitignored .env file as OLLAMA_WEB_API_KEY, never in this Compose file.
       OllamaWeb__ApiKey: ${OLLAMA_WEB_API_KEY:-}
@@ -77,14 +81,21 @@ services:
     # tunnel. The current 8 GiB host cannot fit gemma4 alongside the web app.
     mem_limit: 5g
     environment:
-      # SentinelGPT may consult Qwen and DeepSeek before its final answer. Load
-      # only one model at a time so a small droplet cannot retain all three large
-      # models concurrently and OOM-kill the web origin.
-      OLLAMA_MAX_LOADED_MODELS: "1"
+      # Light model set: llama3.2 (~2 GB) for summaries plus embeddinggemma (~0.6 GB) for
+      # search. The full desktop set in required-models.txt is for the Mac app/SentinelCLI.
+      OLLAMA_MODEL_MANIFEST: /ollama-profiles/server-models.txt
+      # Same SentinelGPT system prompt, rebuilt on the small model with a smaller context
+      # window (the KV cache for the desktop profile's 16k context alone costs gigabytes).
+      SENTINELGPT_BASE_MODEL: llama3.2
+      SENTINELGPT_NUM_CTX: "8192"
+      # Frees the disk held by the old heavy models and stops anything that discovers
+      # installed models dynamically from loading one.
+      OLLAMA_PRUNE_UNLISTED: "true"
+      # Both small models fit together, so summaries and search indexing no longer
+      # evict each other and reload from disk on every switch.
+      OLLAMA_MAX_LOADED_MODELS: "2"
       OLLAMA_NUM_PARALLEL: "1"
       OLLAMA_MAX_QUEUE: "16"
-      # Avoid paying the SentinelGPT model load cost again between nearby chat
-      # messages. Deep-analysis models can still displace it when explicitly used.
       OLLAMA_KEEP_ALIVE: "30m"
     restart: always
     volumes:

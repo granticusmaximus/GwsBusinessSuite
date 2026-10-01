@@ -714,10 +714,63 @@ public sealed class ContentStudioServiceTests
         return (db, new FakeAppDbContextFactory(options));
     }
 
+    [Fact]
+    public async Task LightServerAiMode_ShouldRefuseServerSideGenerationAndRevision()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var serverOllama = new FakeOllamaService { GenerateTextResult = "# Server draft" };
+        var service = CreateService(db, factory, serverOllama, ServerAiMode.Light);
+        var request = new ArticleGenerationRequest { Topic = "Light Mode" };
+
+        await Assert.ThrowsAsync<ServerAiUnavailableException>(() => service.GenerateArticleAsync(request));
+        Assert.Throws<ServerAiUnavailableException>(() => service.GenerateArticleStreamAsync(request));
+        await Assert.ThrowsAsync<ServerAiUnavailableException>(() => service.RequestRevisionAsync(new DraftRevisionRequest
+        {
+            DraftId = Guid.NewGuid(),
+            RequestedModifications = "Anything",
+            PerformedBy = "reviewer"
+        }));
+
+        Assert.Null(serverOllama.LastRequestedModel);
+        Assert.Equal(0, await db.SeoArticleDrafts.CountAsync());
+    }
+
+    [Fact]
+    public async Task LightServerAiMode_ShouldGenerateAndReviseWithTheCallerSuppliedRuntime()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var serverOllama = new FakeOllamaService { GenerateTextResult = "# Server draft" };
+        var localOllama = new FakeOllamaService { GenerateStreamFragments = ["# Local ", "draft"] };
+        var service = CreateService(db, factory, serverOllama, ServerAiMode.Light);
+
+        ArticleGenerationResult? generated = null;
+        await foreach (var chunk in service.GenerateArticleStreamAsync(new ArticleGenerationRequest { Topic = "Local Drafts" }, localOllama))
+        {
+            generated = chunk.CompletedDraft ?? generated;
+        }
+
+        Assert.NotNull(generated);
+        Assert.Contains("# Local draft", generated!.Markdown);
+
+        localOllama.GenerateTextResult = "# Local revision";
+        var revised = await service.RequestRevisionAsync(new DraftRevisionRequest
+        {
+            DraftId = generated.DraftId,
+            RequestedModifications = "Tighten the intro.",
+            PerformedBy = "reviewer"
+        }, localOllama);
+
+        Assert.Contains("# Local revision", revised!.Markdown);
+        Assert.Equal(1, revised.RevisionNumber);
+        Assert.Equal("sentinelgpt", localOllama.LastRequestedModel);
+        Assert.Null(serverOllama.LastRequestedModel);
+    }
+
     private static ContentStudioService CreateService(
         ApplicationDbContext db,
         IAppDbContextFactory factory,
-        IOllamaService ollama)
+        IOllamaService ollama,
+        ServerAiMode serverAiMode = ServerAiMode.Full)
     {
         var options = Options.Create(new ContentStudioOptions());
 
@@ -729,7 +782,8 @@ public sealed class ContentStudioServiceTests
             new AffiliateSuggestionService(db, ollama, options, NullLogger<AffiliateSuggestionService>.Instance),
             new SiteSettingsService(db),
             options,
-            NullLogger<ContentStudioService>.Instance);
+            NullLogger<ContentStudioService>.Instance,
+            Options.Create(new ServerAiOptions { Mode = serverAiMode }));
     }
 
     private sealed class FakeAppDbContextFactory(DbContextOptions<ApplicationDbContext> options) : IAppDbContextFactory

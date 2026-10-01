@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using System.Text;
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Services;
+using Microsoft.Extensions.Options;
 
 namespace GwsBusinessSuite.Web.Services;
 
@@ -50,8 +52,14 @@ public sealed class SentinelGptGenerationCoordinator(
     IHostApplicationLifetime applicationLifetime,
     OllamaWorkloadScheduler ollamaWorkloads,
     TimeProvider timeProvider,
-    ILogger<SentinelGptGenerationCoordinator> logger)
+    ILogger<SentinelGptGenerationCoordinator> logger,
+    IOptions<ServerAiOptions>? serverAi = null)
 {
+    // Short one-shot transforms the server's small light-mode model is good at. Chat, agents,
+    // tools, research, and long-form rewriting run in the Mac app against local models instead.
+    public static bool IsAllowedInLightMode(string? action) =>
+        string.Equals(action, SentinelAiActions.Summarize, StringComparison.Ordinal);
+
     private static readonly TimeSpan CompletedRetention = TimeSpan.FromMinutes(15);
     private readonly ConcurrentDictionary<Guid, GenerationState> _jobs = [];
     private readonly object _startGate = new();
@@ -74,6 +82,7 @@ public sealed class SentinelGptGenerationCoordinator(
             throw new ArgumentException("A requesting user is required.", nameof(requestedBy));
         if (!SentinelGptResponseBudgets.IsSupported(maxOutputTokens))
             throw new ArgumentOutOfRangeException(nameof(maxOutputTokens), "Choose a supported response length.");
+        serverAi.EnsureHeavyAiAllowed("SentinelGPT chat");
 
         var state = Enqueue(
             conversationId,
@@ -107,6 +116,8 @@ public sealed class SentinelGptGenerationCoordinator(
             throw new ArgumentException("An instruction is required.", nameof(instruction));
         if (string.IsNullOrWhiteSpace(requestedBy))
             throw new ArgumentException("A requesting user is required.", nameof(requestedBy));
+        if (!IsAllowedInLightMode(action.Trim()))
+            serverAi.EnsureHeavyAiAllowed($"SentinelGPT '{action.Trim()}'");
 
         var state = Enqueue(
             conversationId: null,

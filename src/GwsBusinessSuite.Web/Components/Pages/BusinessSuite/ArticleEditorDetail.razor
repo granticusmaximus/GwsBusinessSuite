@@ -10,12 +10,16 @@
 @using GwsBusinessSuite.Infrastructure.Data
 @using Microsoft.EntityFrameworkCore
 @using System.Text.RegularExpressions
+@using GwsBusinessSuite.Web.Services
+@implements IAsyncDisposable
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject ISiteSettingsService SiteSettingsService
 @inject IContentStudioService ContentStudioService
 @inject IAffiliateSuggestionService AffiliateSuggestionService
 @inject NavigationManager Navigation
 @inject ILogger<ArticleEditorDetail> Logger
+@inject IJSRuntime JS
+@inject Microsoft.Extensions.Options.IOptions<ServerAiOptions> ServerAi
 
 <PageTitle>@(CurrentArticle?.Title ?? "Article Editor")</PageTitle>
 
@@ -766,12 +770,23 @@ else
 
         try
         {
-            await ContentStudioService.RequestRevisionAsync(new DraftRevisionRequest
+            var revision = new DraftRevisionRequest
             {
                 DraftId = draftId,
                 RequestedModifications = ReviseWithAiNotes,
                 PerformedBy = "article-editor-ui"
-            });
+            };
+            // Light server-AI mode: the revision is written by this computer's Ollama.
+            if (ServerAi.Value.IsLight)
+            {
+                _localModels ??= new BrowserLocalOllamaService(JS);
+                await _localModels.EnsureReachableAsync();
+                await ContentStudioService.RequestRevisionAsync(revision, _localModels);
+            }
+            else
+            {
+                await ContentStudioService.RequestRevisionAsync(revision);
+            }
 
             await ContentStudioService.PublishDraftToSiteAsync(new DraftPublishRequest
             {
@@ -793,6 +808,16 @@ else
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    private BrowserLocalOllamaService? _localModels;
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_localModels is not null)
+        {
+            await _localModels.DisposeAsync();
         }
     }
 

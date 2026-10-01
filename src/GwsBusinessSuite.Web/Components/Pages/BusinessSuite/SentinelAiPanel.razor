@@ -6,6 +6,7 @@
 @inject ISentinelAiService SentinelAiService
 @inject SentinelGptGenerationCoordinator GenerationCoordinator
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject Microsoft.Extensions.Options.IOptions<ServerAiOptions> ServerAi
 
 <div class="sentinel-ai-panel @(_open ? "is-open" : string.Empty)">
     <button type="button" class="sentinel-ai-toggle" @onclick="ToggleAsync">
@@ -20,11 +21,15 @@
     {
         <div class="sentinel-ai-body">
             <div class="sentinel-ai-actions">
-                @foreach (var option in Actions)
+                @foreach (var option in VisibleActions)
                 {
                     <button type="button" class="@(_action == option.Action ? "active" : "")" @onclick="() => _action = option.Action">@option.Label</button>
                 }
             </div>
+            @if (ServerAi.Value.IsLight)
+            {
+                <small class="text-secondary d-block mb-1">This server runs a small model for summaries only. Use SentinelGPT in the GWS Suite Mac app for everything else.</small>
+            }
             <ProfessionalWysiwygEditor @bind-Value="_instruction" Compact="true" MinHeight="120px"
                                        Placeholder="@InstructionPlaceholder" AriaLabel="SentinelGPT instruction" />
             <div class="d-flex align-items-center gap-2">
@@ -93,6 +98,12 @@
         (SentinelAiActions.Rewrite, "Rewrite"), (SentinelAiActions.Translate, "Translate"),
         (SentinelAiActions.Research, "Research"), (SentinelAiActions.MeetingNotes, "Meeting notes")
     ];
+
+    // Light server-AI mode keeps only what the server's small model handles well.
+    private IEnumerable<(string Action, string Label)> VisibleActions =>
+        ServerAi.Value.IsLight
+            ? Actions.Where(option => SentinelGptGenerationCoordinator.IsAllowedInLightMode(option.Action))
+            : Actions;
     // Owns only the polling loop's lifetime, not the generation itself - the coordinator keeps
     // the actual Ollama request running server-side even after this component (and its circuit)
     // is gone, matching the pattern already used by SentinelGpt.razor's chat page.
@@ -121,6 +132,10 @@
     protected override async Task OnInitializedAsync()
     {
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        if (ServerAi.Value.IsLight)
+        {
+            _action = SentinelAiActions.Summarize;
+        }
 
         // Resume an in-flight generation this panel started before a page refresh or a
         // reconnected circuit - the coordinator kept it running the whole time. Scoped to

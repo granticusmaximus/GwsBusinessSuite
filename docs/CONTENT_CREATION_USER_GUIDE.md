@@ -142,6 +142,29 @@ claims it couldn't verify while writing, you're told the count and pointed at th
 Notes to review before publishing. When generation completes you're taken straight into that
 draft's workspace.
 
+### Where the model runs (production)
+
+The production server runs in **light AI mode** (`ServerAi:Mode=Light`): its own Ollama holds
+only a small model for summaries, so it never writes full articles. Instead, **Generate Draft**,
+**Request Revision**, and the Posts editor's **Revise with AI** send the model call to the Ollama
+on **the computer your browser is running on** — your full local `sentinelgpt` (gemma4) — while
+the server still builds the prompt, runs the code check and repair passes, and saves the draft.
+A note under the Generate button says when this is the case. Keep Ollama running on that computer
+until the draft finishes; closing the tab cancels it.
+
+One-time setup on each computer you'll generate from, so Ollama accepts requests from the admin
+site:
+
+```zsh
+launchctl setenv OLLAMA_ORIGINS "https://admin.gwsapp.net"
+# then quit and reopen Ollama (menu bar icon -> Quit Ollama)
+```
+
+If Ollama isn't running, isn't reachable, or doesn't allow the site, generation stops within a
+few seconds with that exact explanation instead of hanging. Hero image generation is hidden in
+light mode — upload a hero image instead. Running the suite locally (`dotnet run`, full AI mode)
+keeps the original server-side generation path.
+
 **Step 3, Persisted Drafts** lists every draft with a Status filter (All/PendingReview/Approved/
 Rejected) and a topic search. Per-draft actions: **Open** (into the draft workspace), **Not
 interested** (rejects the draft with a note, without opening it), and **Delete** (permanent, with

@@ -1,3 +1,5 @@
+using GwsBusinessSuite.Application.Abstractions;
+
 namespace GwsBusinessSuite.Application.ContentStudio;
 
 public interface IContentStudioService
@@ -17,6 +19,21 @@ public interface IContentStudioService
     Task<ArticleGenerationResult?> RequestRevisionAsync(
         DraftRevisionRequest request,
         CancellationToken cancellationToken = default);
+
+    // Same generation/revision pipelines as above (prompt, compile-and-repair, affiliate slots,
+    // persistence), but every model call goes to modelRuntime instead of this server's own Ollama.
+    // Content Studio passes a BrowserLocalOllamaService here so the heavy generation runs on the
+    // Ollama of the machine the browser is on, while the server only builds prompts and saves.
+    IAsyncEnumerable<ContentStudioGenerationChunk> GenerateArticleStreamAsync(
+        ArticleGenerationRequest request,
+        IOllamaService modelRuntime,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This Content Studio implementation does not support a caller-supplied model runtime.");
+    Task<ArticleGenerationResult?> RequestRevisionAsync(
+        DraftRevisionRequest request,
+        IOllamaService modelRuntime,
+        CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This Content Studio implementation does not support a caller-supplied model runtime.");
     Task<ArticleGenerationResult?> GenerateHeroImageAsync(
         DraftHeroImageGenerationRequest request,
         CancellationToken cancellationToken = default);

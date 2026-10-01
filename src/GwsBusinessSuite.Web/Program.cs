@@ -630,8 +630,10 @@ app.Use(async (context, next) =>
             // wikiMapView.js's separate Wiki-page location feature, which still calls them
             // directly and is very likely hitting the same OSM Foundation usage-policy block that
             // this page's own former Nominatim/tile usage did - a real, related issue, not yet
-            // fixed here.
-            "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov;",
+            // fixed here. localhost:11434 / 127.0.0.1:11434: Content Studio relays draft and
+            // revision generation to the Ollama on the user's own machine (local-ollama.js), so
+            // the server never runs the heavy model in light server-AI mode.
+            "connect-src 'self' wss: ws: http://localhost:11434 http://127.0.0.1:11434 https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov;",
             "media-src 'self' blob: https:;",
             // A real incident: script-src trusting cdn.jsdelivr.net does NOT cover Worker
             // scripts - that's worker-src's own directive, and it never included jsdelivr. Cesium

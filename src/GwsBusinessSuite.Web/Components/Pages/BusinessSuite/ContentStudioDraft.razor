@@ -8,6 +8,7 @@
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Data
 @using Microsoft.EntityFrameworkCore
+@using GwsBusinessSuite.Web.Services
 @inject IContentStudioService ContentStudioService
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject ISiteSettingsService SiteSettingsService
@@ -15,6 +16,7 @@
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
 @inject ILogger<ContentStudioDraft> Logger
+@inject Microsoft.Extensions.Options.IOptions<ServerAiOptions> ServerAi
 
 <PageTitle>Content Studio Draft</PageTitle>
 
@@ -127,6 +129,8 @@ else
                     <div class="text-danger small mt-1">@HeroUploadError</div>
                 }
 
+                @if (!ServerAi.Value.IsLight)
+                {
                 <div class="mt-3">
                     <label class="form-label small text-secondary">Or generate with SentinelGPT</label>
                     <ProfessionalWysiwygEditor @bind-Value="HeroImagePromptInput" Compact="true" MinHeight="90px" CssClass="mb-2"
@@ -146,6 +150,7 @@ else
                         <div class="form-text text-warning">Configure a hero image model in Settings &gt; SentinelGPT to enable generation.</div>
                     }
                 </div>
+                }
             </div>
 
                     <div class="row g-3 mb-4">
@@ -469,14 +474,28 @@ else
         }
 
         var user = await CurrentUserNameAsync();
+        var request = new DraftRevisionRequest
+        {
+            DraftId = CurrentDraft.DraftId,
+            RequestedModifications = RevisionNotes,
+            PerformedBy = user
+        };
         await RunWorkflowAction(
-            async () => await ContentStudioService.RequestRevisionAsync(new DraftRevisionRequest
+            async () =>
             {
-                DraftId = CurrentDraft.DraftId,
-                RequestedModifications = RevisionNotes,
-                PerformedBy = user
-            }),
-            "Requesting a revised article draft from SentinelGPT with your revision notes.",
+                // Light server-AI mode: the revision is written by this computer's Ollama.
+                if (!ServerAi.Value.IsLight)
+                {
+                    return await ContentStudioService.RequestRevisionAsync(request);
+                }
+
+                _localModels ??= new BrowserLocalOllamaService(JS);
+                await _localModels.EnsureReachableAsync();
+                return await ContentStudioService.RequestRevisionAsync(request, _localModels);
+            },
+            ServerAi.Value.IsLight
+                ? "Writing a revised draft with SentinelGPT on this computer's Ollama, using your revision notes."
+                : "Requesting a revised article draft from SentinelGPT with your revision notes.",
             _ => "Revision requested and persisted.");
     }
 
@@ -629,10 +648,15 @@ else
         RevisionDiff = null;
     }
 
+    private BrowserLocalOllamaService? _localModels;
+
     public async ValueTask DisposeAsync()
     {
         EndBusy();
-        await Task.CompletedTask;
+        if (_localModels is not null)
+        {
+            await _localModels.DisposeAsync();
+        }
     }
 
     private static string FormatElapsed(TimeSpan elapsed)

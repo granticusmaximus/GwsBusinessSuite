@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using FluentAssertions;
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Services;
@@ -255,8 +256,29 @@ public sealed class SentinelGptGenerationCoordinatorTests
         completed.CompletedRun!.WikiPageId.Should().Be(wikiPageId);
     }
 
+    [Fact]
+    public async Task LightServerAiMode_ShouldAllowOnlySummarize()
+    {
+        var sentinel = new ControllableSentinelAiService();
+        var coordinator = CreateCoordinator(sentinel, serverAiMode: ServerAiMode.Light);
+
+        var chat = () => coordinator.StartAsync(
+            Guid.NewGuid(), null, "Hello", "grant", includeInternet: false, useDeepAnalysis: false);
+        await chat.Should().ThrowAsync<ServerAiUnavailableException>();
+
+        var rewrite = () => coordinator.StartActionAsync(null, SentinelAiActions.Rewrite, "Some text", "grant");
+        await rewrite.Should().ThrowAsync<ServerAiUnavailableException>();
+
+        var summary = await coordinator.StartActionAsync(null, SentinelAiActions.Summarize, "Some text", "grant");
+        sentinel.Release.TrySetResult();
+        var completed = await WaitForTerminalAsync(coordinator, summary.Id, "grant");
+        completed.Status.Should().Be(SentinelGptGenerationStatuses.Completed);
+    }
+
     private static SentinelGptGenerationCoordinator CreateCoordinator(
-        ControllableSentinelAiService sentinel, IAutomationTriggerService? triggerService = null)
+        ControllableSentinelAiService sentinel,
+        IAutomationTriggerService? triggerService = null,
+        ServerAiMode serverAiMode = ServerAiMode.Full)
     {
         var services = new ServiceCollection();
         services.AddSingleton<ISentinelAiService>(sentinel);
@@ -270,7 +292,8 @@ public sealed class SentinelGptGenerationCoordinatorTests
             new TestHostApplicationLifetime(),
             new OllamaWorkloadScheduler(),
             TimeProvider.System,
-            NullLogger<SentinelGptGenerationCoordinator>.Instance);
+            NullLogger<SentinelGptGenerationCoordinator>.Instance,
+            Microsoft.Extensions.Options.Options.Create(new ServerAiOptions { Mode = serverAiMode }));
     }
 
     private static async Task<SentinelGptGenerationSnapshot> WaitForTerminalAsync(

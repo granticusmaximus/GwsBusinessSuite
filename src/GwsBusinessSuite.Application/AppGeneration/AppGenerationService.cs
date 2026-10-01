@@ -5,6 +5,7 @@ using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace GwsBusinessSuite.Application.AppGeneration;
 
@@ -18,7 +19,8 @@ public sealed class AppGenerationService(
     ISiteSettingsService siteSettingsService,
     ICmsBuilderService cmsBuilderService,
     ICmsKnowledgeService cmsKnowledgeService,
-    ICurrentUserAccessor? currentUserAccessor = null) : IAppGenerationService
+    ICurrentUserAccessor? currentUserAccessor = null,
+    IOptions<ServerAiOptions>? serverAi = null) : IAppGenerationService
 {
     private readonly ICurrentUserAccessor _currentUserAccessor = currentUserAccessor ?? FixedCurrentUserAccessor.Unknown;
 
@@ -286,6 +288,7 @@ public sealed class AppGenerationService(
         string raw;
         try
         {
+            serverAi.EnsureHeavyAiAllowed("App generation");
             raw = await ollama.GenerateAsync(model, systemPrompt, userPrompt, cancellationToken);
         }
         catch (Exception ex)

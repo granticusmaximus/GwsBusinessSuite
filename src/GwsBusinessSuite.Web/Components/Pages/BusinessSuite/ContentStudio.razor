@@ -2,13 +2,16 @@
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "ContentAccess")]
 @using Microsoft.AspNetCore.Authorization
-@implements IDisposable
+@implements IAsyncDisposable
 @using GwsBusinessSuite.Application.ContentStudio
+@using GwsBusinessSuite.Web.Services
 @inject IContentStudioService ContentStudioService
 @inject ITrendResearchService TrendResearchService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject ILogger<ContentStudio> Logger
+@inject IJSRuntime JS
+@inject Microsoft.Extensions.Options.IOptions<ServerAiOptions> ServerAi
 
 <PageTitle>Content Studio</PageTitle>
 
@@ -184,6 +187,12 @@
                 <span>Refresh Draft List</span>
             </button>
         </div>
+        @if (RunsOnLocalModels)
+        {
+            <p class="small text-secondary mt-2 mb-0">
+                <i class="bi bi-laptop me-1"></i>Drafts are written by the Ollama on this computer, not the server. Keep Ollama running here while a draft generates.
+            </p>
+        }
 
         @if (_isGeneratingDraft)
         {
@@ -489,6 +498,9 @@
     }
 
     private bool _isGeneratingDraft;
+    private BrowserLocalOllamaService? _localModels;
+
+    private bool RunsOnLocalModels => ServerAi.Value.IsLight;
     private string _generatingMarkdownPreview = string.Empty;
 
     private async Task GenerateDraft()
@@ -517,13 +529,28 @@
             // for a full article) would be needlessly chatty over the SignalR connection. The
             // accumulated text is never lost between renders either way.
             var lastRenderAt = DateTimeOffset.UtcNow;
-            await foreach (var chunk in ContentStudioService.GenerateArticleStreamAsync(new ArticleGenerationRequest
+            var request = new ArticleGenerationRequest
             {
                 Topic = Topic,
                 TargetAudience = TargetAudience,
                 PrimaryKeyword = PrimaryKeyword,
                 SecondaryKeywords = SecondaryKeywords
-            }))
+            };
+            // In light server-AI mode the draft is written by this computer's own Ollama; the
+            // server only builds the prompt, checks the code, and saves the result.
+            IAsyncEnumerable<ContentStudioGenerationChunk> stream;
+            if (RunsOnLocalModels)
+            {
+                _localModels ??= new BrowserLocalOllamaService(JS);
+                await _localModels.EnsureReachableAsync();
+                stream = ContentStudioService.GenerateArticleStreamAsync(request, _localModels);
+            }
+            else
+            {
+                stream = ContentStudioService.GenerateArticleStreamAsync(request);
+            }
+
+            await foreach (var chunk in stream)
             {
                 if (!string.IsNullOrEmpty(chunk.Delta))
                 {
@@ -558,7 +585,9 @@
         {
             Logger.LogError(ex, "Content Studio draft generation failed for topic '{Topic}'.", Topic);
             StatusMessage = string.Empty;
-            ErrorMessage = $"Unable to generate article. Make sure the SentinelGPT local model is running and available. Details: {ex.Message}";
+            ErrorMessage = RunsOnLocalModels
+                ? $"Unable to generate article on this computer's Ollama. Details: {ex.Message}"
+                : $"Unable to generate article. Make sure the SentinelGPT local model is running and available. Details: {ex.Message}";
         }
         finally
         {
@@ -569,9 +598,13 @@
         }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         EndBusy();
+        if (_localModels is not null)
+        {
+            await _localModels.DisposeAsync();
+        }
     }
 
     private static string FormatElapsed(TimeSpan elapsed)

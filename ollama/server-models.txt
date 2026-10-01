@@ -1,0 +1,10 @@
+# Light model set for the production droplet's Ollama (selected by OLLAMA_MODEL_MANIFEST in
+# docker-compose.yml). The droplet only does short summaries - Media Watch, Civic Watch
+# overviews, Content Studio trend research - so it keeps one small chat model plus the search
+# embedder. Heavy generation runs on the user's own machine instead: Content Studio relays drafts
+# and revisions to the browser machine's Ollama, and the Mac app runs SentinelGPT locally.
+#
+# The full desktop set (gemma4, qwen2.5-coder, deepseek-r1, ...) stays in required-models.txt,
+# which the Mac app and SentinelCLI embed - do not trim that file to slim the server.
+llama3.2
+embeddinggemma
