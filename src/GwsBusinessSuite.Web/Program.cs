@@ -70,6 +70,8 @@ SerilogBootstrapper.Configure(builder);
 
 // Add services to the container.
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.Configure<TurnstileOptions>(builder.Configuration.GetSection(TurnstileOptions.SectionName));
+builder.Services.AddHttpClient<TurnstileService>(client => client.Timeout = TimeSpan.FromSeconds(10));
 
 builder.Services.AddOptions<DatabaseBackupOptions>()
     .Bind(builder.Configuration.GetSection(DatabaseBackupOptions.SectionName));
@@ -591,6 +593,8 @@ app.Use(async (context, next) =>
         var scriptSrc = isOverwatchGrid
             ? "script-src 'self' https://cdn.jsdelivr.net 'unsafe-eval' 'wasm-unsafe-eval';"
             : "script-src 'self' https://cdn.jsdelivr.net;";
+        var allowTurnstile = IsPublicHost(context) || context.Request.Path.StartsWithSegments("/cms");
+        if (allowTurnstile) scriptSrc = scriptSrc.TrimEnd(';') + " https://challenges.cloudflare.com;";
         // A real incident: a WKWebView's persistent on-disk cache kept serving this page's
         // pre-fix CSP header indefinitely - surviving a full app quit/relaunch - while a
         // browser without that cache picked up the very same server-side fix immediately.
@@ -638,7 +642,7 @@ app.Use(async (context, next) =>
             // terrain/surface pipeline just never ran, leaving pins/HUD/camera movement (all
             // main-thread work) fully functional while the globe itself stayed invisible.
             "worker-src 'self' blob: https://cdn.jsdelivr.net;",
-            "frame-src 'self';",
+            allowTurnstile ? "frame-src 'self' https://challenges.cloudflare.com;" : "frame-src 'self';",
             "frame-ancestors 'self';",
             "object-src 'none';",
             "base-uri 'self';",
@@ -1864,6 +1868,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     HttpContext httpContext,
     ICmsBuilderService cmsBuilderService,
     IContentLocalizationService contentLocalizationService,
+    IConfiguration configuration,
     GlobalBlockResolver globalBlockResolver,
     IDbContextFactory<ApplicationDbContext> dbFactory,
     IRelatedArticlesService relatedArticlesService) =>
@@ -1919,7 +1924,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     var relatedPosts = CmsBlockHtmlRenderer.LayoutContainsRelatedPosts(layout)
         ? await LoadRelatedPostsByAnchorSlugAsync(layout, dbFactory, relatedArticlesService)
         : null;
-    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, pageSlug, editMode, articles, isLoggedIn: includeUnpublished, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson), relatedPostsByAnchorSlug: relatedPosts);
+    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, pageSlug, editMode, articles, isLoggedIn: includeUnpublished, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson), relatedPostsByAnchorSlug: relatedPosts, turnstileSiteKey: ContactFormProtection.SiteKeyFor(site, page, configuration));
     var pageTitle = System.Net.WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
     var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
     var ogImageTag = string.IsNullOrWhiteSpace(page.OgImageUrl)
@@ -2013,133 +2018,13 @@ app.MapGet("/admin/api/cms/{siteSlug}/theme-preview/{presetKey}/{**pageSlug}", a
 // "/submit" segment once the live site's page route is a catch-all (see RenderForm in
 // CmsBlockHtmlRenderer.cs). Tightly rate-limited since it's an unauthenticated POST that
 // writes to the database — a much smaller budget than ordinary page views.
-app.MapPost("/cms/{siteSlug}/submit", async (
-    string siteSlug,
-    HttpRequest request,
-    HttpContext httpContext,
-    ICmsBuilderService cmsBuilderService,
-    IFormSubmissionService formSubmissionService) =>
-{
-    var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
-    if (site is null) return Results.NotFound();
-
-    var form = await request.ReadFormAsync();
-    var path = form["_path"].ToString();
-
-    // Lets an authenticated admin test a draft page's form from the Studio preview; an
-    // anonymous visitor can never reach that far since the draft page itself already 404s
-    // for them before a form could be submitted.
-    var includeUnpublished = httpContext.User.Identity?.IsAuthenticated == true;
-    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, path, includeUnpublished);
-    if (page is null) return Results.NotFound();
-
-    // The same form widget renders on both the bare /cms/ fallback and the real public
-    // site (RequireHost-gated routes below) — send visitors back to whichever one they
-    // came from instead of always landing on the unstyled fallback.
-    var thanksUrl = IsPublicHost(httpContext) ? $"/{path}?submitted=1" : $"/cms/{siteSlug}/{path}";
-
-    // Honeypot: a hidden field real visitors never see or fill. A non-empty value means a
-    // bot filled every field it found — accept silently so the bot doesn't learn it failed.
-    // "_hp", not a plain word, so it can never collide with an admin-labeled field's own
-    // derived key (see CmsBlockHtmlRenderer's comment on this input for why that happened).
-    if (!string.IsNullOrWhiteSpace(form["_hp"]))
-    {
-        return Results.Redirect(thanksUrl);
-    }
-
-    // The form widget's fields are admin-defined per page, so collect whatever was
-    // actually posted (minus the honeypot and the routing field) rather than assuming
-    // fixed field names. Stored keyed by the field's configured display Label (resolved from
-    // the page's live BlocksJson) rather than the raw posted key/HTML "name" attribute, so a
-    // submission reads as "Full Name: Ada" instead of "fullName: Ada" wherever it's later
-    // shown (admin detail page, notification email). Falls back to the raw key for a field
-    // the resolver can't find (e.g. the widget was edited/removed after this submission).
-    var metadata = ResolveFormFieldMetadata(page.BlocksJson);
-    var fields = form
-        .Where(kvp => kvp.Key != "_hp" && kvp.Key != "_path")
-        .ToDictionary(kvp => metadata.LabelsByKey.GetValueOrDefault(kvp.Key, kvp.Key), kvp => kvp.Value.ToString());
-
-    // Roles are keyed by the field's raw posted key/name (same as labels), not its display
-    // label - resolve role -> submitted value directly from the posted form, not from `fields`
-    // above (which is already relabeled and would need a second lookup either way).
-    var identityFields = new Dictionary<string, string>();
-    foreach (var (key, role) in metadata.RoleByKey)
-    {
-        var value = form[key].ToString();
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            identityFields[role] = value;
-        }
-    }
-
-    try
-    {
-        await formSubmissionService.SubmitAsync(page.Id, fields, identityFields, metadata.AutoCreateContact);
-    }
-    catch (ArgumentException ex)
-    {
-        return Results.BadRequest(new { error = ex.Message });
-    }
-
-    return Results.Redirect(thanksUrl);
-}).AllowAnonymous().RequireRateLimiting("public-write");
-
-// Maps each "form" widget field's posted key (its HTML input "name") to its configured display
-// Label and identity role, across every form widget on the page - a small, single-purpose
-// duplicate of CmsBlockHtmlRenderer's private ParseFormFields rather than exposing that method
-// publicly for this one caller. Malformed/missing fieldsJson on any widget is simply skipped
-// (falls through to the caller's own key fallback), matching this app's established "parse
-// failure -> empty, never throw" convention for admin-authored JSON blobs.
-static FormFieldMetadata ResolveFormFieldMetadata(string blocksJson)
-{
-    var labelsByKey = new Dictionary<string, string>();
-    var roleByKey = new Dictionary<string, string>();
-    var autoCreateContact = false;
-    var layout = CmsBuilderJson.ParseLayout(blocksJson);
-    if (layout is null) return new(labelsByKey, roleByKey, autoCreateContact);
-
-    foreach (var widget in layout.Sections.SelectMany(s => s.Columns).SelectMany(c => c.Widgets))
-    {
-        if (widget.WidgetType != "form" || !widget.Props.TryGetValue("fieldsJson", out var fieldsJson))
-        {
-            continue;
-        }
-
-        if (widget.Props.TryGetValue("autoCreateContact", out var autoCreateRaw)
-            && bool.TryParse(autoCreateRaw, out var widgetAutoCreate) && widgetAutoCreate)
-        {
-            autoCreateContact = true;
-        }
-
-        try
-        {
-            var array = System.Text.Json.Nodes.JsonNode.Parse(
-                string.IsNullOrWhiteSpace(fieldsJson) ? "[]" : fieldsJson) as System.Text.Json.Nodes.JsonArray;
-            if (array is null) continue;
-
-            foreach (var item in array.OfType<System.Text.Json.Nodes.JsonObject>())
-            {
-                var key = item["key"]?.GetValue<string>();
-                var label = item["label"]?.GetValue<string>();
-                var role = item["role"]?.GetValue<string>();
-                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(label))
-                {
-                    labelsByKey[key] = label;
-                }
-                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(role) && role != "none")
-                {
-                    roleByKey[key] = role;
-                }
-            }
-        }
-        catch (System.Text.Json.JsonException)
-        {
-            // Malformed fieldsJson on this widget - callers fall back to the raw posted key.
-        }
-    }
-
-    return new(labelsByKey, roleByKey, autoCreateContact);
-}
+app.MapPost("/cms/{siteSlug}/submit", (
+    string siteSlug, HttpRequest request, HttpContext httpContext,
+    ICmsBuilderService cmsBuilderService, IFormSubmissionService formSubmissionService,
+    TurnstileService turnstile, IConfiguration configuration) =>
+    CmsFormSubmissionEndpoint.HandleAsync(siteSlug, request, httpContext, cmsBuilderService,
+        formSubmissionService, turnstile, configuration, IsPublicHost(httpContext)))
+    .AllowAnonymous().RequireRateLimiting("public-write");
 
 // ── grantwatson.dev — the real public site ──────────────────────────────────────────
 // Same app/process as admin.gwsapp.net, gated to only activate for the public host (see
@@ -2226,6 +2111,14 @@ app.MapPost("/hooks/resume/{token}", async (
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
 }).AllowAnonymous().RequireRateLimiting("public-write");
+
+app.MapGet("/contact/thank-you", (HttpContext context, ICmsBuilderService cms, IConfiguration configuration) =>
+    RenderContactThankYouAsync(context, cms, configuration))
+    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+app.MapGet("/cms/{siteSlug}/contact/thank-you", (string siteSlug, HttpContext context,
+    ICmsBuilderService cms, IConfiguration configuration) =>
+    RenderContactThankYouAsync(context, cms, configuration, siteSlug))
+    .AllowAnonymous().RequireRateLimiting("public-read");
 
 app.MapGet("/{**pageSlug}", (
         string pageSlug,
@@ -3383,6 +3276,26 @@ static async Task<PublicNavMenus> GetPublicNavMenusAsync(ICmsBuilderService cmsB
 // Renders a Canvas page (by full path, under the Canvas:SiteSlug-configured site) as a full
 // grantwatson.dev document — shared by GET "/" (path "home") and GET "/{**pageSlug}".
 // fullPath supports nested pages ("services/web-dev") via GetPageByFullPathAsync.
+static async Task<IResult> RenderContactThankYouAsync(HttpContext context,
+    ICmsBuilderService cms, IConfiguration configuration, string? siteSlug = null)
+{
+    var site = await GetConfiguredCanvasSiteAsync(cms, configuration);
+    if (site is null || siteSlug is not null && !string.Equals(siteSlug, site.Slug, StringComparison.OrdinalIgnoreCase))
+        return Results.NotFound();
+
+    context.Response.Headers.CacheControl = "no-store";
+    context.Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
+    var homeUrl = siteSlug is null ? "/" : $"/cms/{Uri.EscapeDataString(site.Slug)}/home";
+    return Results.Content(PublicSiteHtmlRenderer.Layout(
+        "Thank you for reaching out", "Your message has been received.", null,
+        PublicSiteHtmlRenderer.ContactThankYouBody(homeUrl),
+        PublicSiteHtmlRenderer.ParseNavItems(site.NavMenuJson),
+        PublicSiteHtmlRenderer.ParseFooterNavItems(site.FooterNavMenuJson),
+        site.AccentColorHex, site.FontPairingKey, siteName: site.Name,
+        logoUrl: site.LogoUrl, faviconUrl: site.FaviconUrl,
+        tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson)), "text/html");
+}
+
 static async Task<IResult> RenderPublicCanvasPageAsync(
     string fullPath,
     HttpRequest request,
@@ -3439,7 +3352,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     var relatedPosts = CmsBlockHtmlRenderer.LayoutContainsRelatedPosts(layout)
         ? await LoadRelatedPostsByAnchorSlugAsync(layout, dbFactory, relatedArticlesService)
         : null;
-    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath, articles: articles, tokens: renderTokens, relatedPostsByAnchorSlug: relatedPosts);
+    var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath, articles: articles, tokens: renderTokens, relatedPostsByAnchorSlug: relatedPosts, turnstileSiteKey: ContactFormProtection.SiteKeyFor(site, page, configuration));
     if (showSubmittedBanner)
     {
         bodyHtml = PublicSiteHtmlRenderer.SubmittedModal() + bodyHtml;
@@ -4479,13 +4392,6 @@ static string NormalizePathBase(string? pathBase)
         ? normalized.TrimEnd('/')
         : normalized;
 }
-
-// Everything ResolveFormFieldLabels used to return, plus the two new field-mapping-driven
-// values: RoleByKey (which posted key maps to which identity role - "email"/"name"/"company"/
-// "phone") and AutoCreateContact (the widget's own opt-in checkbox). One combined parse instead
-// of three separate ones over the same BlocksJson.
-sealed record FormFieldMetadata(
-    Dictionary<string, string> LabelsByKey, Dictionary<string, string> RoleByKey, bool AutoCreateContact);
 
 record ArticleUpsertRequest(
     string Title,

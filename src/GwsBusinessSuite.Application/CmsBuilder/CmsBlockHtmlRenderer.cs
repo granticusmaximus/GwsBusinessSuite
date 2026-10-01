@@ -154,10 +154,10 @@ public static class CmsBlockHtmlRenderer
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> NoRelatedPosts =
         new Dictionary<string, IReadOnlyList<RelatedArticleView>>();
 
-    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false, DesignTokenSet? tokens = null, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>>? relatedPostsByAnchorSlug = null)
-        => Render(CmsBuilderJson.ParseLayout(blocksJson), siteSlug, pageSlug, editMode, articles, isLoggedIn, tokens, relatedPostsByAnchorSlug);
+    public static string Render(string blocksJson, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false, DesignTokenSet? tokens = null, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>>? relatedPostsByAnchorSlug = null, string? turnstileSiteKey = null)
+        => Render(CmsBuilderJson.ParseLayout(blocksJson), siteSlug, pageSlug, editMode, articles, isLoggedIn, tokens, relatedPostsByAnchorSlug, turnstileSiteKey);
 
-    public static string Render(PageLayout? layout, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false, DesignTokenSet? tokens = null, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>>? relatedPostsByAnchorSlug = null)
+    public static string Render(PageLayout? layout, string siteSlug = "", string pageSlug = "", bool editMode = false, IReadOnlyList<PublicArticleSummary>? articles = null, bool isLoggedIn = false, DesignTokenSet? tokens = null, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>>? relatedPostsByAnchorSlug = null, string? turnstileSiteKey = null)
     {
         if (layout is null || layout.Sections.Count == 0)
         {
@@ -171,9 +171,14 @@ public static class CmsBlockHtmlRenderer
         var html = new StringBuilder();
         foreach (var section in layout.Sections)
         {
-            html.Append(RenderSection(section, siteSlug, pageSlug, editMode, effectiveArticles, isLoggedIn, tokens, effectiveRelatedPosts));
+            html.Append(RenderSection(section, siteSlug, pageSlug, editMode, effectiveArticles, isLoggedIn, tokens, effectiveRelatedPosts, turnstileSiteKey));
         }
 
+        if (!editMode && !string.IsNullOrWhiteSpace(turnstileSiteKey)
+            && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "form"))))
+        {
+            html.Append("""<script src="/js/contact-form.js"></script><script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=gwsContactTurnstileReady&amp;render=explicit" async defer></script>""");
+        }
         return html.ToString();
     }
 
@@ -374,7 +379,7 @@ public static class CmsBlockHtmlRenderer
         return string.Join(';', parts);
     }
 
-    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug)
+    private static string RenderSection(LayoutSection section, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug, string? turnstileSiteKey)
     {
         var sectionClass = $"gws-section {BgClass(section.Background)} {PadClass(section.Padding)} {HiddenClasses(section.HiddenOnMobile, section.HiddenOnTablet)}".TrimEnd();
         var sectionStyle = SectionInlineStyle(section, tokens);
@@ -383,7 +388,7 @@ public static class CmsBlockHtmlRenderer
 
         if (section.LayoutMode == CmsSectionLayoutModes.Freeform)
         {
-            return RenderFreeformSection(section, sectionClass, sectionAttrs, siteSlug, pageSlug, editMode, articles, isLoggedIn, tokens, relatedPostsByAnchorSlug);
+            return RenderFreeformSection(section, sectionClass, sectionAttrs, siteSlug, pageSlug, editMode, articles, isLoggedIn, tokens, relatedPostsByAnchorSlug, turnstileSiteKey);
         }
 
         var columnsClass = ColsClass(section.ColumnLayout);
@@ -418,7 +423,7 @@ public static class CmsBlockHtmlRenderer
                 // (BuildInteractionRuntimeScript, never injected into the Canvas Studio
                 // preview iframe) reveals it, which would otherwise make the widget disappear
                 // in the editor with nothing to ever bring it back.
-                var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles, relatedPostsByAnchorSlug, tokens), widget, tokens);
+                var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles, relatedPostsByAnchorSlug, tokens, turnstileSiteKey), widget, tokens);
                 if (!editMode) inner = WrapWithInteraction(inner, widget.Interaction);
                 // Both badges share one absolutely-positioned corner slot (see .gws-visibility-
                 // hint), so a widget with both a visibility rule and a lock setting gets ONE
@@ -451,7 +456,7 @@ public static class CmsBlockHtmlRenderer
     // inside a fixed-height canvas via its own LayoutWidget.Freeform box instead of flowing
     // through a grid. See cms-public.css/public-site.css's .gws-section-freeform-canvas /
     // .gws-freeform-item rules for the actual positioning + the small-viewport stack fallback.
-    private static string RenderFreeformSection(LayoutSection section, string sectionClass, string sectionAttrs, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug)
+    private static string RenderFreeformSection(LayoutSection section, string sectionClass, string sectionAttrs, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, bool isLoggedIn, DesignTokenSet? tokens, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug, string? turnstileSiteKey)
     {
         var widgets = section.Columns.Count > 0 ? section.Columns[0].Widgets : [];
         var canvasAttrs = editMode
@@ -475,7 +480,7 @@ public static class CmsBlockHtmlRenderer
             }
 
             var position = widget.Freeform ?? FreeformPosition.DefaultFor(i);
-            var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles, relatedPostsByAnchorSlug, tokens), widget, tokens);
+            var inner = WrapWidget(RenderWidget(widget, siteSlug, pageSlug, editMode, articles, relatedPostsByAnchorSlug, tokens, turnstileSiteKey), widget, tokens);
             if (!editMode) inner = WrapWithInteraction(inner, widget.Interaction);
             var widgetBadgeText = editMode
                 ? string.Join(" | ", new[] { VisibilityBadgeText(widget.Visibility), EditPermissionBadgeText(widget.EditPermission) }
@@ -952,7 +957,7 @@ public static class CmsBlockHtmlRenderer
         </script>
         """;
 
-    private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug, DesignTokenSet? tokens = null)
+    private static string RenderWidget(LayoutWidget widget, string siteSlug, string pageSlug, bool editMode, IReadOnlyList<PublicArticleSummary> articles, IReadOnlyDictionary<string, IReadOnlyList<RelatedArticleView>> relatedPostsByAnchorSlug, DesignTokenSet? tokens = null, string? turnstileSiteKey = null)
     {
         var p = widget.Props;
         return widget.WidgetType switch
@@ -1005,7 +1010,7 @@ public static class CmsBlockHtmlRenderer
             "spacer" => $"""<div class="gws-spacer" style="height:{GetInt(p, "height", 48)}px"></div>""",
             "divider" => $"""<hr class="gws-divider gws-divider-{Html(Get(p, "style", "solid"))}" />""",
             "html" => Get(p, "content"),
-            "form" => RenderForm(p, siteSlug, pageSlug, editMode),
+            "form" => RenderForm(p, siteSlug, pageSlug, editMode, turnstileSiteKey),
             "posts-grid" => RenderPostsGrid(p, articles),
             "related-posts" => RenderRelatedPosts(p, relatedPostsByAnchorSlug, editMode),
             "author-box" => RenderAuthorBox(p, editMode),
@@ -1989,11 +1994,13 @@ public static class CmsBlockHtmlRenderer
     // Field *labels* are prose a visitor reads, so they edit in place like any other text. A
     // field's type / required / key / options are configuration with no visitor-facing text and
     // stay in the Inspector - that is the line, not "flat prop vs structured JSON".
-    private static string RenderForm(IReadOnlyDictionary<string, string> p, string siteSlug, string pageSlug, bool editMode = false)
+    private static string RenderForm(IReadOnlyDictionary<string, string> p, string siteSlug, string pageSlug, bool editMode = false, string? turnstileSiteKey = null)
     {
         var fields = ParseFormFields(Get(p, "fieldsJson"));
         var sb = new StringBuilder();
-        sb.Append($"""<form class="gws-form" method="post" action="/cms/{Html(siteSlug)}/submit">""");
+        var protectedForm = turnstileSiteKey is not null && !editMode;
+        var protectionAttribute = protectedForm ? " data-contact-form" : string.Empty;
+        sb.Append($"""<form class="gws-form" method="post" action="/cms/{Html(siteSlug)}/submit"{protectionAttribute}>""");
         sb.Append($"""<input type="hidden" name="_path" value="{Html(pageSlug)}" />""");
 
         foreach (var field in fields)
@@ -2012,7 +2019,17 @@ public static class CmsBlockHtmlRenderer
         // used "company", which collided with the "Company" FormFieldRole's own derived key and
         // silently dropped every real submission through a field with that exact label.
         sb.Append("""<input type="text" name="_hp" class="gws-form-honeypot" tabindex="-1" autocomplete="off" />""");
-        sb.Append($"""<button type="submit" class="btn btn-primary gws-form-submit"{InlineEditAttrs(editMode, "submitLabel")}>{Html(Get(p, "submitLabel", "Submit"))}</button>""");
+        if (protectedForm)
+        {
+            if (!string.IsNullOrWhiteSpace(turnstileSiteKey))
+                sb.Append($"""<div class="gws-contact-verification" data-sitekey="{Html(turnstileSiteKey)}"></div>""");
+            var message = string.IsNullOrWhiteSpace(turnstileSiteKey)
+                ? "The contact form is temporarily unavailable. Please try again shortly."
+                : "Complete the verification to send your message.";
+            sb.Append($"""<p class="gws-form-status" role="status" aria-live="polite">{message}</p><noscript><p>Please enable JavaScript to verify and send your message.</p></noscript>""");
+        }
+        var disabled = protectedForm ? " disabled" : string.Empty;
+        sb.Append($"""<button type="submit" class="btn btn-primary gws-form-submit"{disabled}{InlineEditAttrs(editMode, "submitLabel")}>{Html(Get(p, "submitLabel", "Submit"))}</button>""");
         sb.Append("</form>");
         return sb.ToString();
     }

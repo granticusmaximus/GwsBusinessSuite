@@ -310,6 +310,19 @@ public static class PublicSiteHtmlRenderer
         </main>
         """;
 
+    public static string ContactThankYouBody(string homeUrl = "/") => $"""
+        <main class="contact-thank-you">
+          <section class="contact-thank-you-card" aria-labelledby="contact-thank-you-title">
+            <span class="contact-thank-you-icon" aria-hidden="true"><i class="bi bi-check2"></i></span>
+            <p class="contact-thank-you-eyebrow">Message received</p>
+            <h1 id="contact-thank-you-title">Thank you for reaching out.</h1>
+            <p>Your message has been received. I’ll review your request and contact you using the details you provided.</p>
+            <p>Thank you for your interest.</p>
+            <a class="contact-thank-you-home" href="{Html(homeUrl)}">Return to home <span aria-hidden="true">&rarr;</span></a>
+          </section>
+        </main>
+        """;
+
     // ── Form submitted modal ─────────────────────────────────────────────────
     // Shown as a dismissible popup over a Canvas page's normal content when it's reached via
     // ?submitted=1 (the contact-form submit handler's redirect target) — replaces a separate
