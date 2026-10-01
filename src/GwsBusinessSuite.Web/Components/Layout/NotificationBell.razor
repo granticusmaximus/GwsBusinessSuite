@@ -6,8 +6,15 @@
 @inject ISocialPublishingService SocialPublishingService
 @inject SocialPublishingNotifier SocialNotifier
 @inject NavigationManager Navigation
+@inject ILogger<NotificationBell> Logger
 
-<div class="notif-bell-wrap">
+@if (IsOpen)
+{
+    @* Transparent full-screen layer under the panel: a click anywhere outside the panel lands
+       here and closes it, instead of the panel staying open until the bell is clicked again. *@
+    <div class="notif-bell-backdrop" @onclick="Close"></div>
+}
+<div class="notif-bell-wrap" @onkeydown="OnKeyDown">
     <button type="button" class="notif-bell-btn" @onclick="ToggleOpen" title="Notifications"
             aria-label="Notifications" aria-expanded="@IsOpen">
         <i class="bi bi-bell-fill" aria-hidden="true"></i>
@@ -36,7 +43,10 @@
                 @foreach (var alert in RecentAlerts)
                 {
                     <div class="notif-bell-item @(alert.IsRead ? "" : "notif-bell-item-unread")">
-                        <a href="javascript:void(0)" class="notif-bell-item-link"
+                        @* A real link to the alert's page rather than href="javascript:void(0)": the
+                           production CSP blocks javascript: URLs, so whenever the Blazor handler
+                           didn't intercept the click, nothing happened at all. *@
+                        <a href="@alert.NavigateTo" class="notif-bell-item-link"
                            @onclick="() => OpenAlertAsync(alert)" @onclick:preventDefault>
                             <div class="notif-bell-item-title">@alert.Title</div>
                             <div class="notif-bell-item-message">@alert.Message</div>
@@ -111,6 +121,16 @@
         IsOpen = !IsOpen;
     }
 
+    private void Close() => IsOpen = false;
+
+    private void OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape")
+        {
+            IsOpen = false;
+        }
+    }
+
     private async Task MarkReadAsync(BellAlert alert)
     {
         if (alert.IsRead)
@@ -140,9 +160,19 @@
 
     private async Task OpenAlertAsync(BellAlert alert)
     {
-        if (!alert.IsRead)
+        // Opening the alert matters more than its read flag - a failed mark-read must neither
+        // block the navigation nor, unhandled, take down the circuit every other admin page's
+        // buttons share.
+        try
         {
-            await MarkReadAsync(alert);
+            if (!alert.IsRead)
+            {
+                await MarkReadAsync(alert);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Marking {Kind} alert {AlertId} read failed; opening it anyway.", alert.Kind, alert.Id);
         }
 
         IsOpen = false;

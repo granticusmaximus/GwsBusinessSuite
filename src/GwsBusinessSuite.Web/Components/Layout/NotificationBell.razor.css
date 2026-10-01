@@ -3,6 +3,13 @@
     display: inline-flex;
 }
 
+.notif-bell-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    background: transparent;
+}
+
 .notif-bell-btn {
     background: none;
     border: none;

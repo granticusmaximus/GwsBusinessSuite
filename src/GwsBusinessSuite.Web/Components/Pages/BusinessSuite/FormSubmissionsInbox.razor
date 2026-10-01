@@ -200,8 +200,19 @@
 
     private async Task DeleteAsync(Guid submissionId)
     {
-        await FormSubmissionService.DeleteAsync(submissionId);
-        _submissions.RemoveAll(s => s.Id == submissionId);
+        // An unhandled exception here would tear down the whole circuit - every other button on
+        // the page (and the header's notification bell) would silently stop responding.
+        _errorMessage = string.Empty;
+        try
+        {
+            await FormSubmissionService.DeleteAsync(submissionId);
+            _submissions.RemoveAll(s => s.Id == submissionId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Deleting form submission {SubmissionId} failed.", submissionId);
+            _errorMessage = $"Unable to delete that submission. {ex.Message}";
+        }
     }
 
     private static Dictionary<string, string> ParseSubmissionFields(string fieldsJson)

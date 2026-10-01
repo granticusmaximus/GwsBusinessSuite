@@ -174,8 +174,19 @@ else
 
     private async Task DeleteAsync()
     {
-        await FormSubmissionService.DeleteAsync(SubmissionId);
-        Navigation.NavigateTo(SourcePage is not null ? $"/admin/pages/edit/{SourcePage.Id}" : "/admin/pages");
+        ErrorMessage = string.Empty;
+        try
+        {
+            await FormSubmissionService.DeleteAsync(SubmissionId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Deleting form submission {SubmissionId} failed.", SubmissionId);
+            ErrorMessage = $"Unable to delete this submission. {ex.Message}";
+            return;
+        }
+
+        Navigation.NavigateTo("/admin/form-submissions");
     }
 
     private async Task CreateContactAsync()
