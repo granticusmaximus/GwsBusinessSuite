@@ -77,14 +77,42 @@ to protect, so edits simply save.
 
 ## The Pages list
 
-`/admin/pages` lists every page on the site as a flat, indented tree (children shown nested under
-their parent with an em-dash prefix). From here you can:
+Clicking **Pages** in the admin menu opens the page editor (the **Site Desk**) on the page you
+edited most recently. Its left-hand **Site navigator** lists every page on the site, so you can
+click between pages without leaving the editor. (A site with no pages yet opens the list below
+instead, with a **Create your first page** button.)
+
+### Creating a new page
+
+Click **Create new page** (top of the Site navigator, or on the All pages list). A dialog asks how
+to start:
+
+- **Create blank page** — creates an empty Draft page and opens it in the builder, ready for you
+  to drag in sections and widgets.
+- **Create from pre-built** — the dialog switches to a gallery of finished, styled pages, each
+  shown as a live miniature using your site's current theme: About Us, Services, Pricing,
+  Contact, Our Team, FAQ / Help, Portfolio / Case Study, Blog / News, Product Landing Page,
+  Coming Soon, Plan Your Visit and Get Involved. Click one to select it (double-click, or Enter,
+  to go straight in) and press **Continue**. The page is created as a Draft with that design and
+  opens in the builder, where every section and widget can be changed. **Back** returns to the
+  first choice.
+
+Either way the new page is a **Draft** — nothing is public until you press **Publish**. Pre-built
+pages carry no colors of their own (they use the light/dark/accent section backgrounds), so they
+always match whatever theme the site uses. The catalog is code-defined in `CmsPageTemplates.All`.
+
+### All pages
+
+`/admin/pages/all` (the **All pages** link in the Site navigator) lists every page on the site as
+a flat, indented tree (children shown nested under their parent with an em-dash prefix). From here
+you can:
 
 - **Search** by title or full path, and **filter** by status (All / Published / Draft).
 - **Select multiple pages** (checkboxes) and **Move to Trash** them in one action. A page with
   active (non-trashed) child pages can't be trashed on its own — that page is skipped and its
   title is reported back to you, so the rest of the batch still goes through.
-- Click **New Page** to create one, or click any row (or its **Edit** link) to open its settings.
+- Click **Create new page** (the same dialog as above), or click any row (or its **Edit** link)
+  to open it in the page editor.
 - Switch to **Trash** to see everything you've moved there, with **Restore** and
   **Delete Permanently** per row.
 
@@ -93,8 +121,8 @@ publish date/time is still in the future — see [Creating and configuring a pag
 
 ## Creating and configuring a page
 
-Click **New Page** (or **Edit** on an existing one) to land on `/admin/pages/edit/{id}` — the
-page's settings screen, distinct from its visual content. Fields here:
+A page's settings (title, slug, parent, SEO and so on) live on the page editor's **Page settings**
+tab; the older `/admin/pages/edit/{id}` settings screen is still reachable from there. Fields:
 
 | Field | Notes |
 |---|---|

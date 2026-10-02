@@ -1,0 +1,183 @@
+@* "Create new page" - shared by the Site Desk and the All pages list. Step one picks a blank page
+   or a pre-built one; the pre-built step swaps the modal body for a gallery of live, themed
+   previews of CmsPageTemplates. Either way the page is created as a Draft straight away and
+   handed back through OnCreated, so the caller decides how to open it (the Site Desk flushes its
+   own pending draft first). Same hand-rolled .modal.d-block markup as ConfirmModal. *@
+@using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Domain.Entities
+@inject ICmsBuilderService CmsBuilderService
+@inject ILogger<CreatePageModal> Logger
+
+@if (Show)
+{
+    <div class="modal-backdrop fade show"></div>
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="create-page-title" @onkeydown="OnKeyDown">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable @(_step == Step.PreBuilt ? "modal-xl" : "")">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="create-page-title">
+                        @(_step == Step.PreBuilt ? "Choose a pre-built page" : "Create new page")
+                    </h2>
+                    <button type="button" class="btn-close" @onclick="CloseAsync" disabled="@_busy" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(_error))
+                    {
+                        <div class="alert alert-danger" role="alert">@_error</div>
+                    }
+
+                    @if (_step == Step.Choose)
+                    {
+                        <div class="create-page-options">
+                            <button type="button" class="create-page-option" disabled="@_busy" @onclick="CreateBlankAsync">
+                                <i class="bi bi-file-earmark-plus" aria-hidden="true"></i>
+                                <strong>Create blank page</strong>
+                                <span>Start with an empty page and build it by dragging in widgets.</span>
+                            </button>
+                            <button type="button" class="create-page-option" disabled="@_busy" @onclick="() => _step = Step.PreBuilt">
+                                <i class="bi bi-grid-1x2" aria-hidden="true"></i>
+                                <strong>Create from pre-built</strong>
+                                <span>Pick a finished, styled page and change whatever you need.</span>
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="small text-secondary">
+                            Each preview uses your site's current theme. Pick one, then <strong>Continue</strong> - it opens in the builder as a draft, ready to edit.
+                        </p>
+                        <div class="create-page-gallery" role="listbox" aria-label="Pre-built pages">
+                            @foreach (var template in CmsPageTemplates.All)
+                            {
+                                var selected = _selectedKey == template.Key;
+                                @* A focusable option, not a <button>: an <iframe> may not sit inside one. *@
+                                <div role="option" tabindex="0" aria-selected="@(selected ? "true" : "false")"
+                                     class="create-page-template @(selected ? "is-selected" : "")"
+                                     @onclick="() => Select(template.Key)"
+                                     @ondblclick="() => ContinueWithAsync(template.Key)"
+                                     @onkeydown="args => OnTemplateKeyDown(args, template.Key)">
+                                    <span class="create-page-thumb" aria-hidden="true">
+                                        <iframe src="@PreviewUrl(template)" loading="lazy" tabindex="-1" title="@template.Name preview"
+                                                sandbox="allow-scripts allow-same-origin"></iframe>
+                                    </span>
+                                    <span class="create-page-template-text">
+                                        <strong>@template.Name</strong>
+                                        <small class="text-secondary">@template.Description</small>
+                                    </span>
+                                    @if (selected)
+                                    {
+                                        <i class="bi bi-check-circle-fill create-page-check" aria-hidden="true"></i>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+                @if (_step == Step.PreBuilt)
+                {
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-secondary me-auto" disabled="@_busy" @onclick="() => _step = Step.Choose">
+                            <i class="bi bi-arrow-left me-1"></i>Back
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" disabled="@_busy" @onclick="CloseAsync">Cancel</button>
+                        <button type="button" class="btn btn-primary" disabled="@(_busy || _selectedKey is null)" @onclick="() => ContinueWithAsync(_selectedKey)">
+                            @if (_busy) { <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span> }
+                            Continue
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private enum Step { Choose, PreBuilt }
+
+    [Parameter] public bool Show { get; set; }
+    [Parameter] public CmsSite? Site { get; set; }
+    [Parameter] public Guid? ParentPageId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<Guid> OnCreated { get; set; }
+
+    private Step _step = Step.Choose;
+    private string? _selectedKey;
+    private bool _busy;
+    private string _error = string.Empty;
+    private bool _wasShown;
+
+    protected override void OnParametersSet()
+    {
+        // Every opening starts fresh at the first step.
+        if (Show && !_wasShown)
+        {
+            _step = Step.Choose;
+            _selectedKey = null;
+            _error = string.Empty;
+            _busy = false;
+        }
+
+        _wasShown = Show;
+    }
+
+    private string PreviewUrl(CmsPageTemplate template) => Site is null ? "about:blank" :
+        $"/admin/api/cms/{Uri.EscapeDataString(Site.Slug)}/page-template-preview/{Uri.EscapeDataString(template.Key)}";
+
+    private Task CreateBlankAsync() =>
+        CreateAsync("Untitled page", CmsBuilderJson.Serialize(new PageLayout()));
+
+    private async Task ContinueWithAsync(string? templateKey)
+    {
+        var template = templateKey is null ? null : CmsPageTemplates.Find(templateKey);
+        if (template is null) return;
+        await CreateAsync(template.DefaultTitle, CmsBuilderJson.Serialize(template.Build()));
+    }
+
+    private async Task CreateAsync(string title, string blocksJson)
+    {
+        if (Site is null || _busy) return;
+        _busy = true;
+        _error = string.Empty;
+        try
+        {
+            // A Draft, so nothing is public until it's published from the builder.
+            var created = await CmsBuilderService.SavePageAsync(new CmsPageEditorModel
+            {
+                SiteId = Site.Id,
+                ParentPageId = ParentPageId,
+                Title = title,
+                BlocksJson = blocksJson,
+                Status = CmsPageStatuses.Draft
+            });
+            await OnCreated.InvokeAsync(created.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to create a new page.");
+            _error = $"Could not create the page. {ex.Message}";
+            _busy = false;
+        }
+    }
+
+    private void Select(string key)
+    {
+        if (!_busy) _selectedKey = key;
+    }
+
+    private async Task OnTemplateKeyDown(KeyboardEventArgs args, string key)
+    {
+        if (args.Key is " " or "Spacebar") Select(key);
+        else if (args.Key == "Enter") await ContinueWithAsync(key);
+    }
+
+    private async Task CloseAsync()
+    {
+        if (_busy) return;
+        await OnClose.InvokeAsync();
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape") await CloseAsync();
+    }
+}

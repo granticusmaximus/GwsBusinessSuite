@@ -2015,6 +2015,26 @@ app.MapGet("/admin/api/cms/{siteSlug}/theme-preview/{presetKey}/{**pageSlug}", a
         previewSite: site, previewTheme: preset);
 }).RequireAuthorization("ContributorAccess").RequireRateLimiting("public-read");
 
+// "Create new page > From a pre-built page" gallery thumbnails: a read-only rendering of a
+// CmsPageTemplates entry with the site's own theme, nav and footer, so each card shows what the
+// page will look like on this site. Nothing is saved.
+app.MapGet("/admin/api/cms/{siteSlug}/page-template-preview/{templateKey}", async (
+    string siteSlug, string templateKey, HttpContext context,
+    ICmsBuilderService cmsBuilderService, GlobalBlockResolver globalBlockResolver,
+    IConfiguration configuration, IDbContextFactory<ApplicationDbContext> dbFactory,
+    IRelatedArticlesService relatedArticlesService) =>
+{
+    context.Response.Headers.CacheControl = "no-store, private";
+    context.Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
+    var template = CmsPageTemplates.Find(templateKey);
+    if (template is null) return Results.NotFound();
+    var site = await cmsBuilderService.GetSiteBySlugAsync(siteSlug);
+    if (site is null) return Results.NotFound();
+    return await RenderPublicCanvasPageAsync(template.Key, context.Request, false,
+        cmsBuilderService, globalBlockResolver, configuration, dbFactory, relatedArticlesService,
+        previewSite: site, previewPageTemplate: template);
+}).RequireAuthorization("ContributorAccess").RequireRateLimiting("public-read");
+
 // Handles "form" widget submissions (see CmsBlockHtmlRenderer's "form" case). Fixed URL
 // per site rather than per page — the submitted page's (possibly nested) full path travels
 // as a hidden "_path" field instead, since it can't appear in the URL before a fixed
@@ -3308,7 +3328,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     IConfiguration configuration,
     IDbContextFactory<ApplicationDbContext> dbFactory,
     IRelatedArticlesService relatedArticlesService,
-    CmsSite? previewSite = null, CmsThemePreset? previewTheme = null)
+    CmsSite? previewSite = null, CmsThemePreset? previewTheme = null, CmsPageTemplate? previewPageTemplate = null)
 {
     var siteSlug = configuration["Canvas:SiteSlug"] ?? string.Empty;
     var site = previewSite ?? await GetConfiguredCanvasSiteAsync(cmsBuilderService, configuration);
@@ -3324,8 +3344,20 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     var navItems = PublicSiteHtmlRenderer.ParseNavItems(site.NavMenuJson);
     var footerNavItems = PublicSiteHtmlRenderer.ParseFooterNavItems(site.FooterNavMenuJson);
     var normalizedPath = fullPath.Trim('/');
-    // Only the authenticated theme preview may include unpublished pages.
-    var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, normalizedPath, includeUnpublished: previewTheme is not null);
+    // Only the authenticated theme preview may include unpublished pages. A pre-built page
+    // template preview renders an unsaved, in-memory page - nothing is read from or written to
+    // the database for it.
+    var page = previewPageTemplate is not null
+        ? new CmsPage
+        {
+            SiteId = site.Id,
+            Title = previewPageTemplate.DefaultTitle,
+            Slug = previewPageTemplate.Key,
+            BlocksJson = CmsBuilderJson.Serialize(previewPageTemplate.Build()),
+            Status = CmsPageStatuses.Published
+        }
+        : await cmsBuilderService.GetPageByFullPathAsync(site.Id, normalizedPath, includeUnpublished: previewTheme is not null);
+    var isReadOnlyPreview = previewTheme is not null || previewPageTemplate is not null;
     if (page is null)
     {
         // Inside the browsable theme preview, a link can lead somewhere that isn't a page-builder
@@ -3386,7 +3418,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     if (CmsBlockHtmlRenderer.LayoutContainsGallery(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildGalleryRuntimeScript();
     if (CmsBlockHtmlRenderer.LayoutContainsCarousel(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildCarouselRuntimeScript();
     if (CmsBlockHtmlRenderer.LayoutContainsPortfolioGrid(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildPortfolioRuntimeScript();
-    if (previewTheme is not null)
+    if (isReadOnlyPreview)
         bodyHtml += "<script src=\"/js/cms-theme-preview.js\"></script>";
     var wrappedBody = string.IsNullOrWhiteSpace(customCss)
         ? bodyHtml

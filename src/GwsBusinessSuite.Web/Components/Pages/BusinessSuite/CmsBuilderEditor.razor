@@ -27,6 +27,7 @@
 <PageTitle>Edit page — @(_page?.Title ?? "Loading…")</PageTitle>
 
 <div class="studio-shell">
+<CreatePageModal Show="_showCreatePage" Site="_site" OnClose="() => _showCreatePage = false" OnCreated="OpenCreatedPageAsync" />
 
 @* ── Header ─────────────────────────────────────────────────────────────── *@
 <div class="studio-header page-header">
@@ -223,8 +224,11 @@ else
         else
         {
             <div class="studio-panel-section">
-                <div class="d-flex justify-content-end mb-1">
-                    <a class="small" href="/admin/pages/all" title="Create pages, restore from trash, or switch websites">
+                <div class="d-flex flex-column align-items-stretch gap-1 mb-2">
+                    <button type="button" class="btn btn-sm btn-primary text-nowrap" disabled="@_isBusy" @onclick="() => _showCreatePage = true">
+                        <i class="bi bi-plus-lg me-1"></i>Create new page
+                    </button>
+                    <a class="small align-self-end" href="/admin/pages/all" title="Restore from trash, bulk actions, or switch websites">
                         <i class="bi bi-list-ul me-1"></i>All pages
                     </a>
                 </div>
@@ -2399,6 +2403,16 @@ else
     private CmsPage? _page;
     private CmsSite? _site;
     private List<CmsPage> _allPagesInSite = new();
+    private bool _showCreatePage;
+
+    // CreatePageModal has already created the draft page - flush this page's own pending draft
+    // (same as switching pages) before opening the new one in the builder.
+    private async Task OpenCreatedPageAsync(Guid pageId)
+    {
+        _showCreatePage = false;
+        await SaveAsync(reloadPreview: false);
+        Navigation.NavigateTo($"/admin/pages/{pageId}/edit", forceLoad: true);
+    }
 
     // Category/Tags/CanonicalUrl/custom field values. These are now editable here too (the Page
     // tab writes straight to them), but they still have to be held as state and sent on every

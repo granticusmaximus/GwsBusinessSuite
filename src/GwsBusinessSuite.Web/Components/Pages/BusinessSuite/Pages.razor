@@ -23,6 +23,8 @@
     <CmsSiteSwitcher SiteChanged="OnSiteChangedAsync" />
 </div>
 
+<CreatePageModal Show="ShowCreatePage" Site="CurrentSite" OnClose="() => ShowCreatePage = false" OnCreated="OpenCreatedPage" />
+
 @if (!string.IsNullOrWhiteSpace(CmsErrorMessage))
 {
     <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
@@ -57,8 +59,8 @@ else
             </button>
             @if (!ShowTrash)
             {
-                <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewPageAsync" disabled="@(IsCmsBusy || !SelectedSiteId.HasValue)">
-                    <i class="bi bi-file-earmark-plus me-1"></i>New Page
+                <button class="btn btn-sm btn-primary" @onclick="() => ShowCreatePage = true" disabled="@(IsCmsBusy || CurrentSite is null)">
+                    <i class="bi bi-plus-lg me-1"></i>Create new page
                 </button>
             }
         </div>
@@ -94,6 +96,11 @@ else
         else if (CmsPages.Count == 0)
         {
             <EmptyState Icon="bi-layout-three-columns" Message="No pages exist for this site yet." />
+            <div class="text-center pb-4">
+                <button class="btn btn-primary" @onclick="() => ShowCreatePage = true" disabled="@(IsCmsBusy || CurrentSite is null)">
+                    <i class="bi bi-plus-lg me-1"></i>Create your first page
+                </button>
+            </div>
         }
         else
         {
@@ -330,33 +337,15 @@ else
         && page.PublishedAt is { } publishAt
         && publishAt > DateTimeOffset.UtcNow;
 
-    // Content-first: create the draft immediately and open the editor on it, rather than making
-    // someone fill in slug/SEO/canonical before they can write anything. The page is a Draft with
-    // no content, so nothing is public until they publish - the same auto-draft move WordPress,
-    // Squarespace and Wikipedia all make.
-    private async Task CreateNewPageAsync()
-    {
-        if (!SelectedSiteId.HasValue) return;
+    // Content-first, same as before: CreatePageModal creates the Draft straight away (blank or
+    // from a pre-built template) and this just opens it in the builder - nothing is public until
+    // it's published there.
+    private bool ShowCreatePage { get; set; }
 
-        IsCmsBusy = true;
-        CmsErrorMessage = string.Empty;
-        try
-        {
-            var created = await CmsBuilderService.SavePageAsync(new CmsPageEditorModel
-            {
-                SiteId = SelectedSiteId,
-                Title = "Untitled page",
-                BlocksJson = "{\"sections\":[]}",
-                Status = CmsPageStatuses.Draft
-            });
-            Navigation.NavigateTo($"/admin/pages/{created.Id}/edit");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to create a new page.");
-            CmsErrorMessage = $"Could not create the page. {ex.Message}";
-            IsCmsBusy = false;
-        }
+    private void OpenCreatedPage(Guid pageId)
+    {
+        ShowCreatePage = false;
+        Navigation.NavigateTo($"/admin/pages/{pageId}/edit");
     }
 
     // Both the row body and the "Edit" action land in the visual editor now; the old

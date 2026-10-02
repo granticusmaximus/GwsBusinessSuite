@@ -1,0 +1,122 @@
+.create-page-options {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+}
+
+.create-page-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+    padding: 1.25rem;
+    text-align: left;
+    color: inherit;
+    background: var(--gws-panel-bg-2);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md);
+    cursor: pointer;
+    transition: border-color 0.12s ease, transform 0.12s ease;
+}
+
+.create-page-option:hover:not(:disabled),
+.create-page-option:focus-visible {
+    border-color: var(--gws-sidebar-accent);
+    transform: translateY(-1px);
+}
+
+.create-page-option i {
+    font-size: 1.6rem;
+    color: var(--gws-sidebar-accent);
+}
+
+.create-page-option span {
+    font-size: 0.85rem;
+    color: var(--gws-text-soft);
+}
+
+.create-page-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+    gap: 1rem;
+}
+
+.create-page-template {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--gws-panel-bg-2);
+    border: 2px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md);
+    cursor: pointer;
+    transition: border-color 0.12s ease;
+}
+
+.create-page-template:hover,
+.create-page-template:focus-visible {
+    border-color: color-mix(in srgb, var(--gws-sidebar-accent) 60%, var(--gws-panel-border));
+    outline: none;
+}
+
+.create-page-template.is-selected {
+    border-color: var(--gws-sidebar-accent);
+    box-shadow: 0 0 0 3px rgba(var(--bs-primary-rgb), 0.25);
+}
+
+/* A real page rendered at 4x the card's size and scaled down, so the thumbnail is the page
+   itself in miniature at any card width. Clicks pass through to the card. */
+.create-page-thumb {
+    position: relative;
+    display: block;
+    height: 200px;
+    overflow: hidden;
+    background: #fff;
+    border-bottom: 1px solid var(--gws-panel-border);
+}
+
+.create-page-thumb iframe {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 400%;
+    height: 400%;
+    border: 0;
+    transform: scale(0.25);
+    transform-origin: 0 0;
+    pointer-events: none;
+}
+
+.create-page-template-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.7rem 0.85rem 0.85rem;
+}
+
+.create-page-template-text small {
+    line-height: 1.35;
+}
+
+.create-page-check {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    font-size: 1.4rem;
+    color: var(--gws-sidebar-accent);
+    background: var(--gws-panel-bg);
+    border-radius: 50%;
+}
+
+/* Follow the admin surface/text tokens rather than Bootstrap's heading color, so the modal reads
+   correctly both on the dark admin pages and inside the Site Desk, which redefines these tokens
+   for its light editing surface. */
+.modal-content {
+    color: var(--gws-text-strong);
+    background: var(--gws-panel-bg);
+    border-color: var(--gws-panel-border);
+}
+
+.modal-title {
+    color: var(--gws-text-strong);
+}
