@@ -445,6 +445,21 @@ blog:
   "home" page's layout) once, then you're free to keep customizing. Selecting the homepage-layout
   option is confirmed separately since it can overwrite real page content. Themes are a fixed,
   code-defined set (not user-created) — see `CmsThemePresets.All` if you need to add more.
+  - **Apply restyles every page** — every page-editor page plus the blog, posts, the contact
+    thank-you/error pages and 404s. The preset the site currently matches shows a **Current
+    theme** badge; once you edit the Design Tokens below, no preset matches and the badge goes
+    away (the site is then "custom").
+  - **Preview** shows the theme on your real content without saving anything. It opens on your
+    homepage; click your site's own menu and links *inside* the preview to see the theme on any
+    other page (**Back to home** returns to the start). Links to pages the page editor doesn't
+    build, like the blog, show a short note instead, and external links and form submits stay
+    disabled. **Apply to all pages…** applies the theme you're previewing.
+  - **The admin portal follows your live website's theme** (the site set as `Canvas:SiteSlug`):
+    its accent (buttons, links, active menu item, badges, focus rings) and its sidebar and top bar
+    take the theme's Accent and Primary colors. Page backgrounds keep following the admin's own
+    light/dark toggle, and text colors are chosen automatically to stay readable in both. Saving
+    or applying a theme on the live site reloads Customize so the new admin colors show at once.
+    Theming a different website doesn't change the admin.
 - **Global Design** — an accent color and one of three built-in font pairings (Elegant:
   Playfair+Inter, Modern: Manrope+Inter, Classic: Merriweather+Source Sans).
 - **Site-wide Custom CSS** — applies to every page; a page's own Custom CSS (from its settings

@@ -112,6 +112,7 @@ builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
 builder.Services.AddScoped<GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor>();
+builder.Services.AddSingleton<GwsBusinessSuite.Web.Services.AdminThemeProvider>();
 builder.Services.AddSignalR();
 
 // Content Studio article generation can take several minutes against Ollama
@@ -2259,7 +2260,7 @@ app.MapGet("/blog/{slug}", async (
                     navMenus.FontPairingKey,
                     siteName: navMenus.SiteName,
                     logoUrl: navMenus.LogoUrl,
-                    faviconUrl: navMenus.FaviconUrl),
+                    faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens),
                 "text/html", statusCode: StatusCodes.Status404NotFound);
         }
 
@@ -3327,19 +3328,29 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
     var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, normalizedPath, includeUnpublished: previewTheme is not null);
     if (page is null)
     {
+        // Inside the browsable theme preview, a link can lead somewhere that isn't a page-builder
+        // page (the blog index, a post) - say so instead of a bare 404, and keep the previewed
+        // theme and the preview's link handling so the visitor can click straight back.
+        var notFoundBody = previewTheme is null
+            ? PublicSiteHtmlRenderer.NotFoundBody("Page not found.", "/", "Back to Home")
+            : PublicSiteHtmlRenderer.NotFoundBody(
+                  "This page isn't built in the page editor (for example the blog or a post), so the preview can't show it. It will still use this theme once you apply it.",
+                  "/", "Back to the preview's home page")
+              + "<script src=\"/js/cms-theme-preview.js\"></script>";
         return Results.Content(
             PublicSiteHtmlRenderer.Layout(
                 "404 — Not Found",
                 string.Empty,
                 null,
-                PublicSiteHtmlRenderer.NotFoundBody("Page not found.", "/", "Back to Home"),
+                notFoundBody,
                 navItems,
                 footerNavItems,
                 site.AccentColorHex,
                 site.FontPairingKey,
                 siteName: site.Name,
                 logoUrl: site.LogoUrl,
-                faviconUrl: site.FaviconUrl),
+                faviconUrl: site.FaviconUrl,
+                tokens: renderTokens),
             "text/html", statusCode: StatusCodes.Status404NotFound);
     }
 

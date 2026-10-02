@@ -11,6 +11,9 @@
 @inject GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor CurrentCmsSiteAccessor
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<AppearanceCustomize> Logger
+@inject GwsBusinessSuite.Web.Services.AdminThemeProvider AdminTheme
+@inject NavigationManager Navigation
+@inject IConfiguration Configuration
 
 <PageTitle>Customize</PageTitle>
 
@@ -38,7 +41,7 @@
             <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
                 <div>
                     <h2 class="h5 mb-1">@CurrentSite.Name — @_previewTheme.Name</h2>
-                    <p class="small text-secondary mb-0">Preview only. Your saved website is unchanged. Choose a page to explore.</p>
+                    <p class="small text-secondary mb-0">Preview only - your saved website is unchanged. Click your site's menu and links inside the preview to see this theme on every page.</p>
                 </div>
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CloseThemePreview">Close preview</button>
             </div>
@@ -50,18 +53,15 @@
                     </select>
                 </div>
                 <div>
-                    <label class="form-label small" for="preview-page">Page</label>
-                    <select id="preview-page" class="form-select form-select-sm" @bind="_previewPagePath">
-                        @foreach (var previewPage in _previewPages) { <option value="@previewPage.Path">@previewPage.Title</option> }
-                    </select>
-                </div>
-                <div>
                     <label class="form-label small" for="preview-width">View</label>
                     <select id="preview-width" class="form-select form-select-sm" @bind="_previewSize">
                         <option value="desktop">Desktop</option><option value="mobile">Mobile</option>
                     </select>
                 </div>
-                <button type="button" class="btn btn-sm btn-primary" disabled="@IsBusy" @onclick="() => OpenApplyThemeConfirm(_previewTheme)">Apply this theme…</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="RestartPreview" title="Return the preview to the first page">
+                    <i class="bi bi-house me-1"></i>Back to home
+                </button>
+                <button type="button" class="btn btn-sm btn-primary" disabled="@IsBusy" @onclick="() => OpenApplyThemeConfirm(_previewTheme)">Apply to all pages…</button>
             </div>
             @if (_previewPages.Count == 0)
             {
@@ -70,7 +70,7 @@
             else
             {
                 <div class="theme-preview-stage">
-                    <iframe @key="ThemePreviewUrl" class="theme-preview-frame @(_previewSize == "mobile" ? "is-mobile" : "")"
+                    <iframe @key="@($"{ThemePreviewUrl}#{_previewGeneration}")" class="theme-preview-frame @(_previewSize == "mobile" ? "is-mobile" : "")"
                             src="@ThemePreviewUrl" title="@($"{CurrentSite.Name} with {_previewTheme.Name}")" sandbox="allow-scripts allow-same-origin"></iframe>
                 </div>
             }
@@ -99,7 +99,13 @@
                             }
                         </div>
                         <div>
-                            <div class="fw-semibold small">@preset.Name</div>
+                            <div class="fw-semibold small">
+                                @preset.Name
+                                @if (ActivePreset?.Key == preset.Key)
+                                {
+                                    <span class="badge text-bg-success ms-1">Current theme</span>
+                                }
+                            </div>
                             <div class="text-secondary small">@preset.Description</div>
                         </div>
                         <div class="d-flex gap-2 mt-auto">
@@ -120,7 +126,12 @@
               Busy="@IsBusy"
               OnConfirm="ApplyThemeAsync"
               OnCancel="@(() => _themeToApply = null)">
-    <p>This replaces @(CurrentSite?.Name ?? "this site")'s colors and type scale with "@(_themeToApply?.Name)"'s.</p>
+    <p>
+        This restyles <strong>every page</strong> of @(CurrentSite?.Name ?? "this site") with "@(_themeToApply?.Name)"'s
+        colors and type scale - all @(_sitePageCount) page-editor page@(_sitePageCount == 1 ? "" : "s"), plus the blog and posts.
+        The admin portal's accent, sidebar and header follow the theme of your live website too.
+    </p>
+    <p class="small text-secondary">Your page content isn't touched unless you tick the box below.</p>
     <div class="form-check">
         <input class="form-check-input" type="checkbox" id="replace-homepage" @bind="_replaceHomepageLayout" />
         <label class="form-check-label small" for="replace-homepage">
@@ -340,6 +351,12 @@
     private bool RecipeImportSucceeded { get; set; }
 
     private CmsThemePreset? _previewTheme;
+    private int _previewGeneration;
+    private int _sitePageCount;
+    private CmsThemePreset? ActivePreset => CmsThemePresets.FindMatching(CurrentSite?.DesignTokensJson);
+
+    // Re-keying the iframe reloads it at the starting page after the visitor has clicked around.
+    private void RestartPreview() => _previewGeneration++;
     private List<(string Path, string Title)> _previewPages = [];
     private string _previewPagePath = "home";
     private string _previewSize = "desktop";
@@ -388,10 +405,22 @@
     private CmsThemePreset? _themeToApply;
     private bool _replaceHomepageLayout;
 
-    private void OpenApplyThemeConfirm(CmsThemePreset preset)
+    private async Task OpenApplyThemeConfirm(CmsThemePreset preset)
     {
         _themeToApply = preset;
         _replaceHomepageLayout = false;
+        if (CurrentSite is not null)
+        {
+            try
+            {
+                _sitePageCount = (await CmsBuilderService.ListPagesAsync(CurrentSite.Id)).Count(p => p.TrashedAt is null);
+            }
+            catch (Exception ex)
+            {
+                // Only feeds the confirmation wording - never block applying a theme on it.
+                Logger.LogWarning(ex, "Unable to count pages for the apply-theme confirmation.");
+            }
+        }
     }
 
     private async Task ApplyThemeAsync()
@@ -406,8 +435,9 @@
             var updated = await CmsBuilderService.ApplyThemePresetAsync(CurrentSite.Id, preset.Key, _replaceHomepageLayout, actor);
             await LoadSiteAsync(updated);
             StatusMessage = _replaceHomepageLayout
-                ? $"""Applied "{preset.Name}" and replaced the homepage layout."""
-                : $"""Applied "{preset.Name}".""";
+                ? $"""Applied "{preset.Name}" to every page and replaced the homepage layout."""
+                : $"""Applied "{preset.Name}" to every page.""";
+            RefreshAdminTheme(StatusMessage);
         }
         catch (Exception ex)
         {
@@ -421,10 +451,31 @@
         }
     }
 
+    // Carries the result message across the full reload in RefreshAdminTheme.
+    [SupplyParameterFromQuery(Name = "status")] public string? StatusFromReload { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         var site = await CurrentCmsSiteAccessor.GetCurrentSiteAsync();
         await LoadSiteAsync(site);
+        if (!string.IsNullOrWhiteSpace(StatusFromReload))
+        {
+            StatusMessage = StatusFromReload;
+        }
+    }
+
+    // The admin portal wears the live website's theme (AdminThemeProvider). Its CSS is emitted by
+    // the static layout, so a change only shows after a full page load - reload straight away when
+    // the edited site is the live one. Another site's colors don't affect the admin, and a reload
+    // would reset this circuit's site selection back to the live site, so stay put then.
+    private void RefreshAdminTheme(string statusMessage)
+    {
+        AdminTheme.Invalidate();
+        var liveSlug = Configuration["Canvas:SiteSlug"] ?? "grantwatson-dev";
+        if (CurrentSite is not null && string.Equals(CurrentSite.Slug, liveSlug, StringComparison.OrdinalIgnoreCase))
+        {
+            Navigation.NavigateTo($"/admin/appearance/customize?status={Uri.EscapeDataString(statusMessage)}", forceLoad: true);
+        }
     }
 
     private async Task LoadSiteAsync(CmsSite site)
@@ -533,6 +584,7 @@
 
             CurrentSite = saved;
             StatusMessage = "Saved design settings.";
+            RefreshAdminTheme(StatusMessage);
         }
         catch (Exception ex)
         {

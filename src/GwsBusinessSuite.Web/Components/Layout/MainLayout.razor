@@ -1,7 +1,14 @@
 @inherits LayoutComponentBase
 @inject NavigationManager Navigation
+@inject GwsBusinessSuite.Web.Services.AdminThemeProvider AdminTheme
 @using System.Security.Claims
 
+@if (!string.IsNullOrEmpty(_adminThemeCss))
+{
+    @* The live website's theme (accent, sidebar, top bar) - see AdminThemeCss. After app.css,
+       so it overrides the built-in admin colors in both light and dark mode. *@
+    <style>@((MarkupString)_adminThemeCss)</style>
+}
 <AuthorizeView>
     <Authorized Context="authState">
         <div class="gws-layout @(IsChromelessRoute ? "gws-builder-mode" : "")">
@@ -107,6 +114,11 @@
 </div>
 
 @code {
+    private string _adminThemeCss = string.Empty;
+
+    protected override async Task OnInitializedAsync() =>
+        _adminThemeCss = await AdminTheme.GetCssAsync();
+
     private bool IsChromelessRoute
     {
         get

@@ -117,6 +117,11 @@ body {
 }
 .btn-primary { background: var(--cms-accent); color: #fff; }
 .btn-ghost, .btn-outline-primary { background: transparent; color: var(--cms-accent); border: 1px solid var(--cms-accent); }
+/* Same look public-site.css gives these on the live site, so the editor/preview render matches. */
+.btn-outline-secondary, .btn-outline { background: transparent; color: var(--cms-text); border: 1px solid var(--cms-border, currentColor); }
+.btn-outline-secondary:hover, .btn-outline:hover { border-color: var(--cms-accent); color: var(--cms-accent); }
+/* Plain content links follow the theme accent instead of the browser's default blue. */
+.gws-section a:not([class]) { color: var(--cms-accent); }
 
 .gws-image img { display: block; max-width: 100%; border-radius: 10px; }
 .gws-image-full img { width: 100%; }

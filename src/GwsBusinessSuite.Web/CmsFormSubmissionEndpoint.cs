@@ -54,7 +54,12 @@ public static class CmsFormSubmissionEndpoint
                 var statusCode = unavailable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status400BadRequest;
                 if (WantsJson(request)) return Results.Json(new { error = message }, statusCode: statusCode);
                 return Results.Content(PublicSiteHtmlRenderer.Layout("Unable to send message", string.Empty, null,
-                    $"<main class=\"page-not-found\"><h1>Unable to send your message</h1><p>{message}</p><p>Use your browser’s Back button to return to the form and try again.</p></main>"),
+                    $"<main class=\"page-not-found\"><h1>Unable to send your message</h1><p>{message}</p><p>Use your browser’s Back button to return to the form and try again.</p></main>",
+                    PublicSiteHtmlRenderer.ParseNavItems(site.NavMenuJson),
+                    PublicSiteHtmlRenderer.ParseFooterNavItems(site.FooterNavMenuJson),
+                    site.AccentColorHex, site.FontPairingKey, siteName: site.Name,
+                    logoUrl: site.LogoUrl, faviconUrl: site.FaviconUrl,
+                    tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson)),
                     "text/html", statusCode: statusCode);
             }
         }

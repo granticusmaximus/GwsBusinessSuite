@@ -404,6 +404,16 @@ public static class CmsThemePresets
     public static CmsThemePreset? Find(string key) =>
         All.FirstOrDefault(preset => string.Equals(preset.Key, key, StringComparison.OrdinalIgnoreCase));
 
+    // Applying a preset is a one-time copy (no stored "site follows preset X" link), so the
+    // active theme is recognized by its tokens: a site whose saved tokens still equal a preset's
+    // is wearing that preset; one edited since then is "custom" and returns null.
+    public static CmsThemePreset? FindMatching(string? designTokensJson)
+    {
+        if (string.IsNullOrWhiteSpace(designTokensJson)) return null;
+        var saved = DesignTokenJson.Serialize(DesignTokenJson.ParseOrEmpty(designTokensJson));
+        return All.FirstOrDefault(preset => DesignTokenJson.Serialize(preset.Tokens) == saved);
+    }
+
     // A hero (theme-specific copy) followed by 3 reused CmsSectionTemplates sections - the same
     // block palette Workstreams B/C already shipped, so a theme's starter homepage looks
     // composed, not like a single hardcoded block. Every CmsSectionTemplate.Build() call here
