@@ -214,9 +214,14 @@ public static class DependencyInjection
         services.AddOptions<EmailCampaignEmailOptions>()
             .Bind(configuration.GetSection(EmailCampaignEmailOptions.SectionName))
             .WithSharedSmtpFallback(configuration);
-        services.AddSingleton<GwsBusinessSuite.Application.Campaigns.IEmailCampaignEmailSender, EmailCampaignEmailSender>();
+        // One sender instance serves both drip steps and article alerts (same SMTP transport).
+        services.AddSingleton<EmailCampaignEmailSender>();
+        services.AddSingleton<GwsBusinessSuite.Application.Campaigns.IEmailCampaignEmailSender>(sp => sp.GetRequiredService<EmailCampaignEmailSender>());
+        services.AddSingleton<GwsBusinessSuite.Application.Campaigns.IArticleAlertEmailSender>(sp => sp.GetRequiredService<EmailCampaignEmailSender>());
         services.AddScoped<GwsBusinessSuite.Application.Campaigns.IEmailCampaignService, EmailCampaignService>();
         services.AddHostedService<EmailCampaignBackgroundService>();
+        services.AddScoped<GwsBusinessSuite.Application.Campaigns.IArticleAlertService, ArticleAlertService>();
+        services.AddHostedService<ArticleAlertBackgroundService>();
         services.AddScoped<GwsBusinessSuite.Application.SeoAudit.ISeoAuditService, SeoAuditService>();
         services.AddScoped<GwsBusinessSuite.Application.Localization.IContentLocalizationService, ContentLocalizationService>();
         services.AddOptions<SlackOAuthOptions>()

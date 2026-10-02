@@ -1,0 +1,40 @@
+.media-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: .75rem;
+}
+
+.media-picker-item {
+    display: flex;
+    flex-direction: column;
+    gap: .35rem;
+    padding: .4rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-sm);
+    background: var(--gws-panel-bg-2);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.media-picker-item:hover,
+.media-picker-item:focus-visible {
+    border-color: var(--gws-sidebar-accent);
+    outline: none;
+}
+
+.media-picker-item img {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: cover;
+    border-radius: 6px;
+    background: #fff;
+}
+
+.media-picker-item span {
+    overflow: hidden;
+    font-size: .75rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--gws-text-soft);
+}

@@ -2035,6 +2035,9 @@ app.MapGet("/admin/api/cms/{siteSlug}/page-template-preview/{templateKey}", asyn
         previewSite: site, previewPageTemplate: template);
 }).RequireAuthorization("ContributorAccess").RequireRateLimiting("public-read");
 
+// "Email signup" widget + article-alert emails: subscribe / confirm / unsubscribe.
+ArticleAlertEndpoints.Map(app);
+
 // Handles "form" widget submissions (see CmsBlockHtmlRenderer's "form" case). Fixed URL
 // per site rather than per page — the submitted page's (possibly nested) full path travels
 // as a hidden "_path" field instead, since it can't appear in the URL before a fixed

@@ -32,10 +32,18 @@ public sealed class TurnstileService(
     HttpClient client, IOptions<TurnstileOptions> options, ILogger<TurnstileService> logger)
 {
     public const string Action = "contact";
+    // The email-signup widget's action - a token minted for one form can't be replayed on the other.
+    public const string SubscribeAction = "subscribe";
     public const string ResponseField = "cf-turnstile-response";
 
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(options.Value.SiteKey) && !string.IsNullOrWhiteSpace(options.Value.SecretKey)
+        && options.Value.AllowedHostnames.Length > 0;
+
+    public string? SiteKey => IsConfigured ? options.Value.SiteKey : null;
+
     public async Task<TurnstileResult> VerifyAsync(
-        string token, string hostname, string? remoteIp, CancellationToken cancellationToken = default)
+        string token, string hostname, string? remoteIp, CancellationToken cancellationToken = default, string expectedAction = Action)
     {
         var settings = options.Value;
         if (string.IsNullOrWhiteSpace(settings.SiteKey) || string.IsNullOrWhiteSpace(settings.SecretKey)
@@ -65,7 +73,7 @@ public sealed class TurnstileService(
             var result = await response.Content.ReadFromJsonAsync<VerificationResponse>(cancellationToken);
             return result is { Success: true }
                 && string.Equals(result.Hostname, hostname, StringComparison.OrdinalIgnoreCase)
-                && result.Action == Action
+                && result.Action == expectedAction
                 ? TurnstileResult.Verified : TurnstileResult.Rejected;
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException

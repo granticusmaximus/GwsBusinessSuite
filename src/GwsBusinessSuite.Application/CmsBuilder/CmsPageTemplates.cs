@@ -220,11 +220,12 @@ public static class CmsPageTemplates
             ("headline", headline), ("body", body), ("buttonLabel", buttonLabel), ("buttonHref", buttonHref),
             ("buttonVariant", "primary"), ("align", "center"))));
 
+    // An Email signup widget: the editor asks which campaign it feeds when the page first opens it.
     private static LayoutSection Signup(string anchorLabel, string headline, string body, string submitLabel) =>
-        Section(anchorLabel, "accent", "lg", "full", Col(12,
-            Heading(headline, "h2", "center"),
-            Paragraph(body, "center"),
-            Form(submitLabel, ("email", "Email Address", "email", true, "email"))));
+        Section(anchorLabel, "accent", "lg", "full", Col(12, Widget("email-signup",
+            ("campaignId", ""), ("heading", headline), ("description", body), ("showFirstName", "true"),
+            ("buttonLabel", submitLabel), ("consentText", "No spam. Unsubscribe any time."),
+            ("successMessage", "Almost done - check your inbox and click the link to confirm."), ("align", "center"))));
 
     private static LayoutWidget Heading(string text, string level = "h2", string align = "left") =>
         Widget("heading", ("text", text), ("level", level), ("align", align));

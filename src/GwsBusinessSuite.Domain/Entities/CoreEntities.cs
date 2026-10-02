@@ -424,7 +424,82 @@ public sealed class EmailCampaign : AuditableEntity
     public required string Name { get; set; }
     public string Description { get; set; } = string.Empty;
     public string Status { get; set; } = EmailCampaignStatuses.Draft;
+    // Sequence = the original drip campaigns (Steps/Enrollments). ArticleAlerts = "email me when
+    // a new article is posted" lists (Subscriptions/ArticleAnnouncements), configured through
+    // ArticleAlertSettingsJson - see ArticleAlertService.
+    public string Kind { get; set; } = EmailCampaignKinds.Sequence;
+    public string ArticleAlertSettingsJson { get; set; } = "{}";
+    // ArticleAlerts only: when the campaign was last switched to Active. Only articles that go
+    // live after this are announced, so activating a list never emails the back catalog.
+    public DateTimeOffset? ActivatedAt { get; set; }
     public ICollection<EmailCampaignStep> Steps { get; set; } = new List<EmailCampaignStep>();
+}
+
+public static class EmailCampaignKinds
+{
+    public const string Sequence = "Sequence";
+    public const string ArticleAlerts = "ArticleAlerts";
+}
+
+public static class EmailCampaignSubscriptionStatuses
+{
+    public const string Pending = "Pending";
+    public const string Confirmed = "Confirmed";
+    public const string Unsubscribed = "Unsubscribed";
+}
+
+// One person's subscription to an ArticleAlerts campaign, double opt-in: Pending until they click
+// the confirmation link, and only Confirmed subscriptions are ever sent alerts. The consent
+// fields are the evidence of what they agreed to and where.
+public sealed class EmailCampaignSubscription : AuditableEntity
+{
+    public Guid CampaignId { get; set; }
+    public Guid ContactId { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public string FirstName { get; set; } = string.Empty;
+    public string Status { get; set; } = EmailCampaignSubscriptionStatuses.Pending;
+    public DateTimeOffset? ConfirmationSentAt { get; set; }
+    public DateTimeOffset? ConfirmedAt { get; set; }
+    public DateTimeOffset? UnsubscribedAt { get; set; }
+    public string SourcePath { get; set; } = string.Empty;
+    public string ConsentText { get; set; } = string.Empty;
+}
+
+public static class ArticleAnnouncementStatuses
+{
+    public const string Scheduled = "Scheduled";
+    public const string Sending = "Sending";
+    public const string Sent = "Sent";
+    // The article was no longer live when its grace period ended (unpublished/trashed/rescheduled).
+    public const string Skipped = "Skipped";
+}
+
+// "Article X is being announced to campaign Y" - unique per (campaign, article), so an article is
+// announced at most once even across restarts. DueAt = went-live time + the grace period.
+public sealed class ArticleAnnouncement : AuditableEntity
+{
+    public Guid CampaignId { get; set; }
+    public Guid ArticleId { get; set; }
+    public string ArticleTitle { get; set; } = string.Empty;
+    public string Status { get; set; } = ArticleAnnouncementStatuses.Scheduled;
+    public DateTimeOffset DueAt { get; set; }
+    public long DueAtUnixSeconds { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public int RecipientCount { get; set; }
+    public int DeliveredCount { get; set; }
+    public int FailedCount { get; set; }
+}
+
+// One recipient of one announcement - unique per (announcement, subscription), so a delivered
+// email is never re-sent and a failed one can be retried.
+public sealed class ArticleAnnouncementDelivery : AuditableEntity
+{
+    public Guid AnnouncementId { get; set; }
+    public Guid SubscriptionId { get; set; }
+    public bool Succeeded { get; set; }
+    public int Attempts { get; set; }
+    public string LastError { get; set; } = string.Empty;
+    public DateTimeOffset? DeliveredAt { get; set; }
 }
 
 public sealed class EmailCampaignStep : AuditableEntity

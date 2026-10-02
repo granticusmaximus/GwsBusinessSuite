@@ -30,7 +30,7 @@ public sealed class EmailCampaignEmailOptions : ISmtpTransportOptions
 
 public sealed class EmailCampaignEmailSender(
     IOptions<EmailCampaignEmailOptions> configuredOptions,
-    ILogger<EmailCampaignEmailSender> logger) : IEmailCampaignEmailSender
+    ILogger<EmailCampaignEmailSender> logger) : IEmailCampaignEmailSender, IArticleAlertEmailSender
 {
     private static readonly MarkdownPipeline EmailMarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
@@ -84,6 +84,57 @@ public sealed class EmailCampaignEmailSender(
             await client.AuthenticateAsync(options.Username, options.Password, cancellationToken);
         await client.SendAsync(message, cancellationToken);
         await client.DisconnectAsync(true, cancellationToken);
+    }
+
+    public bool IsConfigured =>
+        !string.IsNullOrWhiteSpace(options.PickupDirectory) || !string.IsNullOrWhiteSpace(options.Host);
+
+    // Article alerts / confirmations: each campaign sends as its own From name/address (e.g.
+    // "Grant Watson Software" <grant@gwsapp.net>) over the same transport. The SMTP provider must be
+    // allowed to send as that address (SPF/DKIM for its domain), or mail lands in spam.
+    public async Task<bool> SendAsync(OutgoingCampaignEmail email, CancellationToken cancellationToken = default)
+    {
+        if (!IsConfigured)
+        {
+            logger.LogWarning("Campaign email to {Email} not sent: no SMTP server is configured (set Smtp__Host).", email.ToAddress);
+            return false;
+        }
+
+        var fromAddress = string.IsNullOrWhiteSpace(email.FromAddress) ? options.FromAddress : email.FromAddress;
+        if (!MailboxAddress.TryParse(fromAddress, out var from))
+            throw new InvalidOperationException("The campaign's From address is not a valid email address.");
+        if (!MailboxAddress.TryParse(email.ToAddress, out var to))
+            throw new ArgumentException($"'{email.ToAddress}' is not a valid email address.", nameof(email));
+
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress(string.IsNullOrWhiteSpace(email.FromName) ? options.FromName.Trim() : email.FromName.Trim(), from.Address));
+        message.To.Add(to);
+        if (!string.IsNullOrWhiteSpace(email.ReplyTo) && MailboxAddress.TryParse(email.ReplyTo, out var replyTo))
+            message.ReplyTo.Add(replyTo);
+        message.Subject = email.Subject;
+        if (!string.IsNullOrWhiteSpace(email.OneClickUnsubscribeUrl))
+        {
+            // RFC 8058 one-click unsubscribe - required by Gmail/Yahoo for bulk senders since 2024.
+            message.Headers.Add("List-Unsubscribe", $"<{email.OneClickUnsubscribeUrl}>");
+            message.Headers.Add("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
+        }
+        message.Body = new BodyBuilder { TextBody = email.TextBody, HtmlBody = email.HtmlBody }.ToMessageBody();
+
+        if (!string.IsNullOrWhiteSpace(options.PickupDirectory))
+        {
+            Directory.CreateDirectory(options.PickupDirectory);
+            await message.WriteToAsync(Path.Combine(options.PickupDirectory, $"campaign-{Guid.NewGuid():N}.eml"), cancellationToken);
+            return true;
+        }
+
+        TryGetSecurity(options.Security, out var security);
+        using var client = new SmtpClient();
+        await client.ConnectAsync(options.Host.Trim(), options.Port, security, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(options.Username))
+            await client.AuthenticateAsync(options.Username, options.Password, cancellationToken);
+        await client.SendAsync(message, cancellationToken);
+        await client.DisconnectAsync(true, cancellationToken);
+        return true;
     }
 
     private static bool TryGetSecurity(string value, out SecureSocketOptions security)

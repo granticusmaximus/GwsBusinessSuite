@@ -23,11 +23,62 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 @inject ILogger<CmsBuilderEditor> Logger
+@inject GwsBusinessSuite.Application.Campaigns.IArticleAlertService ArticleAlertService
 
 <PageTitle>Edit page — @(_page?.Title ?? "Loading…")</PageTitle>
 
 <div class="studio-shell">
 <CreatePageModal Show="_showCreatePage" Site="_site" OnClose="() => _showCreatePage = false" OnCreated="OpenCreatedPageAsync" />
+@if (_campaignPickerWidget is not null)
+{
+    <div class="modal-backdrop fade show"></div>
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="campaign-picker-title">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content signup-campaign-picker">
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="campaign-picker-title"><i class="bi bi-envelope-paper-heart me-2"></i>Choose an email campaign</h2>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="() => _campaignPickerWidget = null"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-secondary">People who sign up with this form are added to the campaign you choose, after confirming their email address.</p>
+                    @if (!string.IsNullOrEmpty(_campaignPickerError))
+                    {
+                        <div class="alert alert-danger small">@_campaignPickerError</div>
+                    }
+                    @if (_signupCampaigns.Count == 0)
+                    {
+                        <div class="small mb-3">You don't have an article-alert campaign yet. Create one now - you can write its email afterwards.</div>
+                    }
+                    else
+                    {
+                        <label class="form-label small fw-semibold" for="signup-campaign-select">Campaign</label>
+                        <select id="signup-campaign-select" class="form-select mb-2" @bind="_campaignPickerSelection">
+                            <option value="">Select a campaign…</option>
+                            @foreach (var campaign in _signupCampaigns)
+                            {
+                                <option value="@campaign.Id">@campaign.Name (@campaign.Status)</option>
+                            }
+                        </select>
+                        @if (CampaignFor(_campaignPickerSelection) is { } chosen)
+                        {
+                            <div class="small text-secondary mb-2">
+                                @chosen.ConfirmedSubscriberCount confirmed subscriber@(chosen.ConfirmedSubscriberCount == 1 ? "" : "s") ·
+                                emails them whenever a new article goes live@(chosen.Status == "Active" ? "." : " once you activate it.")
+                            </div>
+                        }
+                    }
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_campaignPickerBusy" @onclick="CreateCampaignFromPickerAsync">
+                        <i class="bi bi-plus-lg me-1"></i>Create a new campaign
+                    </button>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="() => _campaignPickerWidget = null">Not now</button>
+                    <button type="button" class="btn btn-primary" disabled="@(!Guid.TryParse(_campaignPickerSelection, out _))" @onclick="ApplyCampaignPicker">Use this campaign</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 @* ── Header ─────────────────────────────────────────────────────────────── *@
 <div class="studio-header page-header">
@@ -1281,6 +1332,74 @@ else
                                 }
                             </div>
                         }
+                        else if (selWidget.WidgetType == "email-signup")
+                        {
+                            var signupCampaign = CampaignFor(GetProp(selWidget, "campaignId"));
+                            <div>
+                                <label class="form-label small fw-semibold">Campaign</label>
+                                @if (signupCampaign is not null)
+                                {
+                                    <div class="small mb-1"><strong>@signupCampaign.Name</strong> <span class="text-secondary">· @signupCampaign.Status · @signupCampaign.ConfirmedSubscriberCount confirmed</span></div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(GetProp(selWidget, "campaignId")) && _signupCampaigns.Count > 0)
+                                {
+                                    <div class="small text-danger mb-1">The campaign this signup used no longer exists - choose another.</div>
+                                }
+                                else if (string.IsNullOrWhiteSpace(GetProp(selWidget, "campaignId")))
+                                {
+                                    <div class="small text-warning mb-1">Not connected yet - hidden on the live site until you choose one.</div>
+                                }
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenCampaignPickerAsync(selWidget)">
+                                        <i class="bi bi-envelope-paper me-1"></i>@(signupCampaign is null ? "Choose campaign…" : "Change campaign…")
+                                    </button>
+                                    @if (signupCampaign is not null)
+                                    {
+                                        <a class="btn btn-sm btn-outline-secondary" href="/admin/email-campaigns/alerts/@signupCampaign.Id" target="_blank" rel="noopener">Edit campaign</a>
+                                    }
+                                </div>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Heading</label>
+                                <input class="form-control" value='@GetProp(selWidget, "heading")'
+                                       @oninput='(e) => SetProp(selWidget, "heading", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Description (optional)</label>
+                                <ProfessionalWysiwygEditor Value='@GetProp(selWidget, "description")'
+                                                           ValueChanged='value => SetProp(selWidget, "description", value)'
+                                                           Compact="true" MinHeight="80px" AriaLabel="Signup description" />
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="signup-first-name" checked='@(GetProp(selWidget, "showFirstName", "true") != "false")'
+                                       @onchange='(e) => SetProp(selWidget, "showFirstName", e.Value is true ? "true" : "false", forceNewUndoStep: true)' />
+                                <label class="form-check-label small" for="signup-first-name">Ask for a first name (optional for visitors)</label>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Button label</label>
+                                <input class="form-control" value='@GetProp(selWidget, "buttonLabel", "Subscribe")'
+                                       @oninput='(e) => SetProp(selWidget, "buttonLabel", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Small print</label>
+                                <input class="form-control" value='@GetProp(selWidget, "consentText")'
+                                       @oninput='(e) => SetProp(selWidget, "consentText", e.Value?.ToString() ?? string.Empty)' />
+                                <div class="form-text">Shown under the form and saved with each signup as the consent they agreed to.</div>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Message after signing up</label>
+                                <input class="form-control" value='@GetProp(selWidget, "successMessage")'
+                                       @oninput='(e) => SetProp(selWidget, "successMessage", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Alignment</label>
+                                <select class="form-select" value='@GetProp(selWidget, "align", "center")'
+                                        @onchange='(e) => SetProp(selWidget, "align", e.Value?.ToString() ?? "center", forceNewUndoStep: true)'>
+                                    <option value="center">Center</option>
+                                    <option value="left">Left</option>
+                                </select>
+                            </div>
+                        }
                         else if (selWidget.WidgetType == "cta-banner")
                         {
                             <div>
@@ -2528,6 +2647,7 @@ else
         new("table-of-contents", "bi bi-list-ol",          "Table of Contents", "Auto-generated links to this page's headings", GroupDynamic),
         new("reading-progress", "bi bi-hourglass-split",   "Reading Progress", "A scroll-position progress bar",      GroupDynamic),
         new("booking",     "bi bi-calendar-check",         "Booking",     "Embed one of your booking types",     GroupDynamic),
+        new("email-signup", "bi bi-envelope-paper-heart",  "Email Signup", "Visitors subscribe to new-article emails", GroupDynamic),
         new("stats",       "bi bi-graph-up-arrow",         "Stats",       "Animated number counters for key metrics", GroupMedia),
         new("team-grid",   "bi bi-people",                 "Team Grid",   "Photo cards for introducing your team", GroupMedia),
         new("cta-banner",  "bi bi-bullseye",                "CTA Banner",  "Centered headline, copy, and one button", GroupLayout),
@@ -2799,6 +2919,7 @@ else
         PushUndo();
         var widget = CreateDefaultWidget(widgetType);
         InsertWidgetIntoLayout(widget, targetSectionId, targetColumnId, targetWidgetId, insertAfter, applyColorSchemeDefault: true);
+        await OpenCampaignPickerIfNeededAsync(widget);
         StateHasChanged();
         await SaveAsync();
     }
@@ -2901,6 +3022,8 @@ else
             _allPagesInSite = (await CmsBuilderService.ListPagesAsync(_page.SiteId)).ToList();
             _globalBlocks = (await GlobalBlockService.ListAsync(_page.SiteId)).ToList();
             await GlobalBlockResolver.ResolveAsync(_page.SiteId, _layout);
+            // So the inspector can name the campaign an Email signup widget is connected to.
+            await LoadSignupCampaignsAsync();
 
             _preservedTags = _page.Tags;
             _preservedCanonicalUrl = _page.CanonicalUrl;
@@ -3524,7 +3647,80 @@ else
         _leftTab = "layers";
         SelectSection(section.Id);
         QueueAutosave(reloadPreview: true, immediate: true);
+        if (section.Columns.SelectMany(c => c.Widgets).FirstOrDefault(w => w.WidgetType == "email-signup") is { } signup)
+        {
+            _ = InvokeAsync(async () => { await OpenCampaignPickerIfNeededAsync(signup); StateHasChanged(); });
+        }
     }
+
+    // ── Email signup: choose the campaign it feeds ───────────────────────
+    private LayoutWidget? _campaignPickerWidget;
+    private List<GwsBusinessSuite.Application.Campaigns.ArticleAlertSignupCampaignView> _signupCampaigns = [];
+    private string _campaignPickerSelection = string.Empty;
+    private string _campaignPickerError = string.Empty;
+    private bool _campaignPickerBusy;
+
+    private async Task LoadSignupCampaignsAsync()
+    {
+        try
+        {
+            _signupCampaigns = (await ArticleAlertService.ListSignupCampaignsAsync()).ToList();
+            _campaignPickerError = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load email campaigns for the signup widget.");
+            _campaignPickerError = $"Unable to load email campaigns. {ex.Message}";
+        }
+    }
+
+    // Dropping an Email signup widget asks straight away which campaign it feeds.
+    private async Task OpenCampaignPickerIfNeededAsync(LayoutWidget widget)
+    {
+        if (widget.WidgetType != "email-signup" || !string.IsNullOrWhiteSpace(GetProp(widget, "campaignId"))) return;
+        await OpenCampaignPickerAsync(widget);
+    }
+
+    private async Task OpenCampaignPickerAsync(LayoutWidget widget)
+    {
+        await LoadSignupCampaignsAsync();
+        _campaignPickerWidget = widget;
+        var current = GetProp(widget, "campaignId");
+        _campaignPickerSelection = !string.IsNullOrWhiteSpace(current)
+            ? current
+            : _signupCampaigns.Count == 1 ? _signupCampaigns[0].Id.ToString() : string.Empty;
+    }
+
+    private void ApplyCampaignPicker()
+    {
+        if (_campaignPickerWidget is null || !Guid.TryParse(_campaignPickerSelection, out _)) return;
+        SetProp(_campaignPickerWidget, "campaignId", _campaignPickerSelection, forceNewUndoStep: true);
+        _campaignPickerWidget = null;
+        QueueAutosave(reloadPreview: true, immediate: true);
+    }
+
+    private async Task CreateCampaignFromPickerAsync()
+    {
+        _campaignPickerBusy = true;
+        try
+        {
+            var created = await ArticleAlertService.CreateCampaignAsync("New article alerts", "page-editor");
+            await LoadSignupCampaignsAsync();
+            _campaignPickerSelection = created.Id.ToString();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to create an email campaign from the signup picker.");
+            _campaignPickerError = $"Unable to create the campaign. {ex.Message}";
+        }
+        finally
+        {
+            _campaignPickerBusy = false;
+        }
+    }
+
+    private GwsBusinessSuite.Application.Campaigns.ArticleAlertSignupCampaignView? CampaignFor(string? id) =>
+        Guid.TryParse(id, out var parsed) ? _signupCampaigns.FirstOrDefault(c => c.Id == parsed) : null;
 
     private void DeleteSection(string sectionId)
     {
@@ -3621,10 +3817,12 @@ else
     }
 
     // ── Widget CRUD ───────────────────────────────────────────────────────
-    private void QuickAddWidget(string widgetType)
+    private async Task QuickAddWidget(string widgetType)
     {
         PushUndo();
-        AddWidgetPlacement(CreateDefaultWidget(widgetType));
+        var widget = CreateDefaultWidget(widgetType);
+        AddWidgetPlacement(widget);
+        await OpenCampaignPickerIfNeededAsync(widget);
     }
 
     private void AddWidgetPlacement(LayoutWidget widget)
@@ -5293,6 +5491,7 @@ else
         "booking"    => new() { WidgetType = "booking", Props = new() { ["bookingTypeSlug"] = "", ["title"] = "Book a time", ["height"] = "720" } },
         "stats"      => new() { WidgetType = "stats", Props = new() { ["itemsJson"] = """[{"value":"500","suffix":"+","label":"Projects Delivered"},{"value":"98","suffix":"%","label":"Client Satisfaction"},{"value":"12","suffix":"","label":"Years in Business"}]""" } },
         "team-grid"  => new() { WidgetType = "team-grid", Props = new() { ["itemsJson"] = """[{"name":"Jane Doe","role":"Role or title","photoUrl":"","linkedinUrl":"","twitterUrl":"","emailAddress":""}]""" } },
+        "email-signup" => new() { WidgetType = "email-signup", Props = new() { ["campaignId"] = "", ["heading"] = "Get new articles by email", ["description"] = "Be the first to know when I publish something new.", ["showFirstName"] = "true", ["buttonLabel"] = "Subscribe", ["consentText"] = "No spam. Unsubscribe any time.", ["successMessage"] = "Almost done - check your inbox and click the link to confirm.", ["align"] = "center" } },
         "cta-banner" => new() { WidgetType = "cta-banner", Props = new() { ["headline"] = "Ready to get started?", ["body"] = "Tell visitors what happens next and give them a clear next step.", ["buttonLabel"] = "Get started", ["buttonHref"] = "#", ["buttonVariant"] = "primary", ["align"] = "center" } },
         "logo-cloud" => new() { WidgetType = "logo-cloud", Props = new() { ["itemsJson"] = "[]", ["grayscale"] = "true" } },
         "process-steps" => new() { WidgetType = "process-steps", Props = new() { ["itemsJson"] = """[{"title":"Step one","description":"Describe the first step here."},{"title":"Step two","description":"Describe the second step here."}]""" } },

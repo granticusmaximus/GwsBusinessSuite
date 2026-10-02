@@ -23,7 +23,11 @@ public sealed class EmailCampaignService(
 
     public async Task<IReadOnlyList<EmailCampaignView>> ListCampaignsAsync(CancellationToken cancellationToken = default)
     {
-        var campaigns = await db.EmailCampaigns.AsNoTracking().Include(campaign => campaign.Steps).ToListAsync(cancellationToken);
+        // Drip sequences only - article-alert lists have their own screen (ArticleAlertService).
+        var campaigns = await db.EmailCampaigns.AsNoTracking()
+            .Where(campaign => campaign.Kind == EmailCampaignKinds.Sequence)
+            .Include(campaign => campaign.Steps)
+            .ToListAsync(cancellationToken);
         var activeCounts = (await db.EmailCampaignEnrollments.AsNoTracking()
             .Where(enrollment => enrollment.Status == EmailCampaignEnrollmentStatuses.Active)
             .Select(enrollment => enrollment.CampaignId)
@@ -195,7 +199,8 @@ public sealed class EmailCampaignService(
     public async Task<bool> EnrollContactAsync(Guid campaignId, Guid contactId, CancellationToken cancellationToken = default)
     {
         var campaign = await db.EmailCampaigns.AsNoTracking().FirstOrDefaultAsync(item => item.Id == campaignId, cancellationToken);
-        if (campaign is null || campaign.Status != EmailCampaignStatuses.Active) return false;
+        // Article-alert lists are opt-in only (double opt-in via the signup widget), never enrolled by hand.
+        if (campaign is null || campaign.Status != EmailCampaignStatuses.Active || campaign.Kind != EmailCampaignKinds.Sequence) return false;
 
         var contact = await db.Contacts.AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == contactId && item.TrashedAt == null, cancellationToken);

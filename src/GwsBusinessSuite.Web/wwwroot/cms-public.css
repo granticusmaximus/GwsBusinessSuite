@@ -511,3 +511,24 @@ body {
     transform: none !important;
   }
 }
+
+/* "Email signup" widget (CmsBlockHtmlRenderer.RenderEmailSignup) */
+.gws-email-signup { max-width: 40rem; margin: 0 auto; }
+.gws-email-signup.gws-align-center { text-align: center; }
+.gws-email-signup-heading { margin: 0 0 .5rem; }
+.gws-email-signup-body { margin-bottom: 1rem; }
+.gws-email-signup-fields { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; }
+.gws-email-signup.gws-align-left .gws-email-signup-fields { justify-content: flex-start; }
+.gws-email-signup-input { flex: 1 1 14rem; min-width: 0; padding: .65rem .85rem; border: 1px solid var(--cms-border, rgba(0,0,0,.2)); border-radius: 8px; background: transparent; color: inherit; font: inherit; }
+.gws-email-signup-name { flex-basis: 10rem; }
+.gws-email-signup-submit { flex: 0 0 auto; }
+.gws-email-signup-verification:not(:empty) { margin-top: .75rem; }
+.gws-email-signup-consent { margin: .6rem 0 0; font-size: .8rem; opacity: .75; }
+.gws-email-signup-status { margin: .6rem 0 0; font-weight: 600; }
+.gws-email-signup-status:empty { display: none; }
+.gws-email-signup-status.is-error { color: #dc2626; }
+.gws-email-signup-form.is-done .gws-email-signup-fields,
+.gws-email-signup-form.is-done .gws-email-signup-verification,
+.gws-email-signup-form.is-done .gws-email-signup-consent { display: none; }
+.gws-email-signup-warning { margin-bottom: .75rem; padding: .6rem .8rem; border: 1px dashed #f59e0b; border-radius: 8px; font-size: .85rem; background: rgba(245, 158, 11, .1); }
+@media (max-width: 480px) { .gws-email-signup-submit { flex-basis: 100%; } }

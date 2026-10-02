@@ -22,6 +22,7 @@ are a related but separate feature with their own full guide:
 5. [Creating and sending an invoice](#creating-and-sending-an-invoice)
 6. [Setting up a bookable meeting type and viewing bookings](#setting-up-a-bookable-meeting-type-and-viewing-bookings)
 7. [Building an email drip campaign](#building-an-email-drip-campaign)
+7a. [New-article email alerts](#new-article-email-alerts)
 8. [Moderating a comment](#moderating-a-comment)
 9. [Managing a user account and role](#managing-a-user-account-and-role)
 10. [Known limitations](#known-limitations)
@@ -247,6 +248,61 @@ on the right.
 - **Delete a campaign**: the **Delete** button (confirmation required) permanently removes the
   campaign, its steps, every enrollment, and every send-log entry for it.
 
+## New-article email alerts
+
+An **alert list** is a second kind of email campaign: instead of a fixed sequence, it emails every
+confirmed subscriber automatically whenever a new article goes live on the blog. Alert lists sit
+in their own **New-article alert lists** card at the top of `/admin/email-campaigns`; drip
+sequences are listed under **Drip sequences** below it and are unaffected.
+
+- **Create a list**: click **New alert list**. You land on its editor
+  (`/admin/email-campaigns/alerts/{id}`), which has four tabs.
+- **Message tab**: the campaign name, the subject line, and the message shown above the article,
+  written in the rich-text editor. Click a token chip to insert it. The tokens are
+  `{{subscriber.firstName}}` (falls back to "there" when the subscriber gave no name),
+  `{{article.title}}`, `{{article.publishedAt}}` and `{{article.url}}`, and they also work in the
+  subject. Below the message you set the footer: a logo and a photo, each picked from the Media
+  Library with **Choose…**, a brand line (default "Grant Watson Software"), a sign-off and an
+  optional mailing address. The right side shows a live preview of the real email, built from
+  your latest article, with a **Send test** box.
+- **What every alert contains**: your message, then an article card with the hero image, the
+  title, the publish date and time (in the list's time zone), and the first 180 characters of the
+  article (cut at a word boundary, ending in "…") followed by a **(Read More)** link. Read More
+  goes to the post with `utm_source=email&utm_medium=article-alert` added. The footer comes after
+  the card, with an unsubscribe link.
+- **Settings tab**:
+  - Sender: From name, From address (default `grant@gwsapp.net`) and Reply-To.
+  - Content: excerpt length, Read More label, and whether to show the hero image.
+  - **Grace period**: default 15 minutes after an article goes live, so a quick typo fix or an
+    accidental publish doesn't email anyone. An article that is unpublished or trashed during the
+    grace period is marked Skipped and never sent.
+  - **Category / tag filter**: optional. Leave both empty to announce every article.
+  - Time zone, and the subject and wording of the confirmation email.
+- **Activate it**: a new list is `Draft` and sends nothing. Click **Activate** to start, or
+  **Pause** to stop. Only articles that go live *after* you activate are announced, so
+  turning a list on never emails people about your existing back catalogue.
+- **How people subscribe**: put an **Email Signup** widget on any page (see the site-building
+  guide). Signup uses **double opt-in**. The visitor gets a "Please confirm your subscription"
+  email, and nothing else is sent until they click its link. The link is valid for 7 days, and
+  asking again within 10 minutes doesn't send a second email. Each subscriber is matched to (or
+  creates) a CRM Contact.
+- **Subscribers tab**: every subscriber with status (`Pending`, `Confirmed`, `Unsubscribed`), when
+  they signed up and confirmed, and the page they signed up on. **Unsubscribe** removes someone by
+  hand. **Re-add** is only for someone who asked to come back.
+- **Sends tab**: one row per announced article, with its status (`Scheduled`, `Sending`, `Sent`,
+  `Skipped`), when it was due, and delivered/failed counts. A background sweep runs every minute
+  and sends up to 40 emails per minute. Each recipient gets up to 3 attempts, and
+  **Retry failed** re-queues the ones that ran out.
+- **Unsubscribing**: every alert has an unsubscribe link, plus standard one-click
+  `List-Unsubscribe` headers so Gmail and Apple Mail show their own Unsubscribe button. This
+  unsubscribe applies to *this list only*. A contact who later uses a drip campaign's global
+  "unsubscribe from all" link is also suppressed from alert lists.
+- **Before it can send in production**: SMTP must be configured (the shared `Smtp__*` settings),
+  with a provider authorised to send as `grant@gwsapp.net` (SPF/DKIM on gwsapp.net). Otherwise the
+  editor shows a warning banner and nothing goes out. Cloudflare Turnstile (`Turnstile__*`) is
+  optional for signups: when it's configured the widget shows the challenge, and without it signups
+  are still protected by double opt-in, rate limiting and a hidden spam-trap field.
+
 ## Moderating a comment
 
 `/admin/comments` moderates visitor comments left on published blog articles before they appear
@@ -335,7 +391,10 @@ These are real gaps observed directly in the current code, not a general disclai
 - **No campaign send-time control beyond the day-delay chain.** There's no "send only during
   business hours" or "skip weekends" option, and the background sweep only runs every 5 minutes,
   so there's no true "send immediately" button.
-- **Campaign unsubscribe and resubscribe are global, not per-campaign.** An unsubscribe suppresses
+- **Alert lists send one email per article, never a digest.** Publishing several articles in a row
+  sends several emails; there's no "weekly roundup" mode.
+- **Campaign unsubscribe and resubscribe are global, not per-campaign** (for drip sequences; alert
+  lists unsubscribe per list). An unsubscribe suppresses
   the contact from every campaign; the admin Resubscribe action restores eligibility for every
   campaign after consent, rather than for one campaign at a time.
 - **Form-to-Contact matching is exact-email-only**, with no fuzzy dedup — a submitter who uses a

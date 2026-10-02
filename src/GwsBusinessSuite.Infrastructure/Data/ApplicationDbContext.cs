@@ -40,6 +40,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<EmailCampaignStep> EmailCampaignSteps => Set<EmailCampaignStep>();
     public DbSet<EmailCampaignEnrollment> EmailCampaignEnrollments => Set<EmailCampaignEnrollment>();
     public DbSet<EmailCampaignSendLog> EmailCampaignSendLogs => Set<EmailCampaignSendLog>();
+    public DbSet<EmailCampaignSubscription> EmailCampaignSubscriptions => Set<EmailCampaignSubscription>();
+    public DbSet<ArticleAnnouncement> ArticleAnnouncements => Set<ArticleAnnouncement>();
+    public DbSet<ArticleAnnouncementDelivery> ArticleAnnouncementDeliveries => Set<ArticleAnnouncementDelivery>();
     public DbSet<SeoAuditRun> SeoAuditRuns => Set<SeoAuditRun>();
     public DbSet<ContentLocalization> ContentLocalizations => Set<ContentLocalization>();
     public DbSet<WikiPage> WikiPages => Set<WikiPage>();
@@ -250,6 +253,39 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<EmailCampaignEnrollment>().HasIndex(x => new { x.CampaignId, x.ContactId }).IsUnique();
         modelBuilder.Entity<EmailCampaignEnrollment>().HasIndex(x => x.Status);
+
+        modelBuilder.Entity<EmailCampaign>().HasIndex(x => x.Kind);
+        modelBuilder.Entity<EmailCampaignSubscription>()
+            .HasOne<EmailCampaign>()
+            .WithMany()
+            .HasForeignKey(x => x.CampaignId)
+            .OnDelete(DeleteBehavior.Cascade);
+        // Erasing a contact (Privacy Operations) takes their subscriptions with it.
+        modelBuilder.Entity<EmailCampaignSubscription>()
+            .HasOne<Contact>()
+            .WithMany()
+            .HasForeignKey(x => x.ContactId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<EmailCampaignSubscription>().HasIndex(x => new { x.CampaignId, x.ContactId }).IsUnique();
+        modelBuilder.Entity<EmailCampaignSubscription>().HasIndex(x => new { x.CampaignId, x.Status });
+        modelBuilder.Entity<ArticleAnnouncement>()
+            .HasOne<EmailCampaign>()
+            .WithMany()
+            .HasForeignKey(x => x.CampaignId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ArticleAnnouncement>().HasIndex(x => new { x.CampaignId, x.ArticleId }).IsUnique();
+        modelBuilder.Entity<ArticleAnnouncement>().HasIndex(x => new { x.Status, x.DueAtUnixSeconds });
+        modelBuilder.Entity<ArticleAnnouncementDelivery>()
+            .HasOne<ArticleAnnouncement>()
+            .WithMany()
+            .HasForeignKey(x => x.AnnouncementId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ArticleAnnouncementDelivery>()
+            .HasOne<EmailCampaignSubscription>()
+            .WithMany()
+            .HasForeignKey(x => x.SubscriptionId)
+            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<ArticleAnnouncementDelivery>().HasIndex(x => new { x.AnnouncementId, x.SubscriptionId }).IsUnique();
 
         modelBuilder.Entity<EmailCampaignSendLog>()
             .HasOne<EmailCampaignEnrollment>()

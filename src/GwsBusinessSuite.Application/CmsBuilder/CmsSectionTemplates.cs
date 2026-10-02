@@ -155,13 +155,11 @@ public static class CmsSectionTemplates
         return section;
     }
 
+    // An "Email signup" widget (double opt-in, feeds an article-alert campaign) - the page editor
+    // asks which campaign as soon as this template is inserted.
     private static LayoutSection NewsletterSignup()
     {
         var section = new LayoutSection { Label = "Newsletter signup", ColumnLayout = "full", Background = "accent" };
-        var fieldsJson = JsonSerializer.Serialize(new[]
-        {
-            new { key = "email", label = "Email Address", type = "email", required = true, optionsJson = "", role = "email" }
-        });
         section.Columns =
         [
             new LayoutColumn
@@ -171,22 +169,17 @@ public static class CmsSectionTemplates
                 [
                     new LayoutWidget
                     {
-                        WidgetType = "heading",
-                        Props = new Dictionary<string, string> { ["text"] = "Stay in the loop", ["level"] = "h2", ["align"] = "center" }
-                    },
-                    new LayoutWidget
-                    {
-                        WidgetType = "paragraph",
-                        Props = new Dictionary<string, string> { ["text"] = "Subscribe for updates - no spam, unsubscribe anytime.", ["align"] = "center" }
-                    },
-                    new LayoutWidget
-                    {
-                        WidgetType = "form",
+                        WidgetType = "email-signup",
                         Props = new Dictionary<string, string>
                         {
-                            ["fieldsJson"] = fieldsJson,
-                            ["submitLabel"] = "Subscribe",
-                            ["autoCreateContact"] = "true"
+                            ["campaignId"] = string.Empty,
+                            ["heading"] = "Stay in the loop",
+                            ["description"] = "Get an email whenever a new article is published.",
+                            ["showFirstName"] = "true",
+                            ["buttonLabel"] = "Subscribe",
+                            ["consentText"] = "No spam. Unsubscribe any time.",
+                            ["successMessage"] = "Almost done - check your inbox and click the link to confirm.",
+                            ["align"] = "center"
                         }
                     }
                 ]

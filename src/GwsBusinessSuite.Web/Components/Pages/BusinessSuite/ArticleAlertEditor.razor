@@ -1,0 +1,489 @@
+@page "/admin/email-campaigns/alerts/{CampaignId:guid}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Campaigns
+@using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Infrastructure.Data
+@using GwsBusinessSuite.Web.Services
+@using Microsoft.EntityFrameworkCore
+@inject IArticleAlertService AlertService
+@inject IArticleAlertEmailSender EmailSender
+@inject TurnstileService Turnstile
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<ArticleAlertEditor> Logger
+
+<PageTitle>@(Campaign?.Name ?? "Article alerts")</PageTitle>
+
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <a class="small" href="/admin/email-campaigns"><i class="bi bi-arrow-left me-1"></i>Email Campaigns</a>
+        <h1 class="mt-1"><i class="bi bi-bell-fill me-2 text-primary"></i>@(Campaign?.Name ?? "Article alerts")</h1>
+        <p class="mb-0">Emails confirmed subscribers @(Settings.GraceMinutes == 0 ? "as soon as" : $"{Settings.GraceMinutes} minutes after") a new article goes live.</p>
+    </div>
+    @if (Campaign is not null)
+    {
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge @(Campaign.Status == EmailCampaignStatuses.Active ? "text-bg-success" : "text-bg-secondary")">@Campaign.Status</span>
+            @if (Campaign.Status == EmailCampaignStatuses.Active)
+            {
+                <button class="btn btn-sm btn-outline-warning" disabled="@_busy" @onclick="() => SetActiveAsync(false)"><i class="bi bi-pause-fill me-1"></i>Pause</button>
+            }
+            else
+            {
+                <button class="btn btn-sm btn-success" disabled="@_busy" @onclick="() => SetActiveAsync(true)"><i class="bi bi-play-fill me-1"></i>Activate</button>
+            }
+            <button class="btn btn-sm btn-primary" disabled="@_busy" @onclick="SaveAsync"><i class="bi bi-check2 me-1"></i>Save</button>
+        </div>
+    }
+</div>
+
+@if (!EmailSender.IsConfigured)
+{
+    <div class="alert alert-warning small" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i><strong>Email isn't set up on this server,</strong> so confirmations and alerts can't be delivered yet.
+        Add the shared <code>Smtp__*</code> settings to the server's <code>.env</code> (see the Platform Operations guide). The provider must be allowed to send as @Settings.FromAddress.
+    </div>
+}
+@if (!Turnstile.IsConfigured)
+{
+    <div class="alert alert-info small" role="alert">
+        <i class="bi bi-shield-check me-1"></i>Cloudflare Turnstile isn't configured, so signups are protected by double opt-in, rate limiting and a hidden spam trap only.
+    </div>
+}
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger small" role="alert">@_error</div>
+}
+@if (!string.IsNullOrEmpty(_status))
+{
+    <div class="alert alert-success small" role="alert">@_status</div>
+}
+
+@if (Campaign is null)
+{
+    @if (_loaded)
+    {
+        <EmptyState Icon="bi-bell-slash" Message="This article-alert campaign doesn't exist." />
+    }
+    else
+    {
+        <LoadingIndicator Message="Loading…" />
+    }
+}
+else
+{
+    <ul class="nav nav-tabs mb-3">
+        @foreach (var (key, label, icon) in Tabs)
+        {
+            <li class="nav-item">
+                <button type="button" class="nav-link @(_tab == key ? "active" : "")" @onclick="() => SwitchTabAsync(key)">
+                    <i class="bi @icon me-1"></i>@label
+                    @if (key == "subscribers") { <span class="badge text-bg-secondary ms-1">@Campaign.ConfirmedSubscriberCount</span> }
+                </button>
+            </li>
+        }
+    </ul>
+
+    @if (_tab == "message")
+    {
+        <div class="row g-4">
+            <div class="col-xl-5">
+                <div class="card border-0 shadow-sm mb-3"><div class="card-body">
+                    <label class="form-label fw-semibold small">Campaign name</label>
+                    <input class="form-control form-control-sm mb-3" @bind="_name" />
+
+                    <label class="form-label fw-semibold small">Subject line</label>
+                    <input class="form-control form-control-sm mb-1" @bind="Settings.SubjectTemplate" @bind:after="RefreshPreviewAsync" />
+                    <div class="form-text mb-3">Tokens work here too, e.g. <code>@ArticleAlertTokens.Title</code>.</div>
+
+                    <label class="form-label fw-semibold small">Your message</label>
+                    <ProfessionalWysiwygEditor @bind-Value="Settings.Message" @bind-Value:after="RefreshPreviewAsync" MinHeight="140px" AriaLabel="Email message" />
+                    <div class="d-flex flex-wrap gap-1 mt-2 mb-1">
+                        @foreach (var (token, meaning) in ArticleAlertTokens.All)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-secondary" title="@meaning" @onclick="() => AppendTokenAsync(token)"><code>@token</code></button>
+                        }
+                    </div>
+                    <div class="form-text">Shown above the article. Click a token to add it.</div>
+                </div></div>
+
+                <div class="card border-0 shadow-sm mb-3"><div class="card-body">
+                    <div class="fw-semibold small mb-2">The article card <span class="text-secondary fw-normal">(filled in automatically)</span></div>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="show-hero" @bind="Settings.ShowHeroImage" @bind:after="RefreshPreviewAsync" />
+                        <label class="form-check-label small" for="show-hero">Show the article's hero image</label>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label small">Excerpt length (characters)</label>
+                            <input type="number" min="40" max="600" class="form-control form-control-sm" @bind="Settings.ExcerptLength" @bind:after="RefreshPreviewAsync" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Link label</label>
+                            <input class="form-control form-control-sm" @bind="Settings.ReadMoreLabel" @bind:after="RefreshPreviewAsync" />
+                        </div>
+                    </div>
+                </div></div>
+
+                <div class="card border-0 shadow-sm mb-3"><div class="card-body">
+                    <div class="fw-semibold small mb-2">Footer</div>
+                    <div class="d-flex gap-3 mb-3">
+                        <div class="article-alert-image-slot">
+                            <span class="small text-secondary">Logo</span>
+                            @if (!string.IsNullOrWhiteSpace(Settings.FooterLogoUrl)) { <img src="@Settings.FooterLogoUrl" alt="Logo" /> }
+                            <div class="d-flex gap-1">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="@(() => _picking = "logo")">Choose…</button>
+                                @if (!string.IsNullOrWhiteSpace(Settings.FooterLogoUrl)) { <button type="button" class="btn btn-sm btn-outline-secondary" title="Remove" @onclick="@(() => ClearImageAsync("logo"))"><i class="bi bi-x-lg"></i></button> }
+                            </div>
+                        </div>
+                        <div class="article-alert-image-slot">
+                            <span class="small text-secondary">Your photo</span>
+                            @if (!string.IsNullOrWhiteSpace(Settings.FooterPhotoUrl)) { <img src="@Settings.FooterPhotoUrl" alt="Photo" class="is-round" /> }
+                            <div class="d-flex gap-1">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="@(() => _picking = "photo")">Choose…</button>
+                                @if (!string.IsNullOrWhiteSpace(Settings.FooterPhotoUrl)) { <button type="button" class="btn btn-sm btn-outline-secondary" title="Remove" @onclick="@(() => ClearImageAsync("photo"))"><i class="bi bi-x-lg"></i></button> }
+                            </div>
+                        </div>
+                    </div>
+                    <label class="form-label small">Name line</label>
+                    <input class="form-control form-control-sm mb-2" @bind="Settings.FooterBrandLine" @bind:after="RefreshPreviewAsync" />
+                    <label class="form-label small">Sign-off <span class="text-secondary">(optional)</span></label>
+                    <input class="form-control form-control-sm mb-2" placeholder="e.g. Software engineer & business analyst" @bind="Settings.FooterSignOff" @bind:after="RefreshPreviewAsync" />
+                    <label class="form-label small">Mailing address</label>
+                    <input class="form-control form-control-sm" placeholder="PO Box or street address" @bind="Settings.MailingAddress" @bind:after="RefreshPreviewAsync" />
+                    <div class="form-text">US anti-spam law (CAN-SPAM) requires a postal address in marketing email. A PO box is fine.</div>
+                </div></div>
+            </div>
+
+            <div class="col-xl-7">
+                <div class="card border-0 shadow-sm"><div class="card-body">
+                    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                        <div class="small">
+                            <span class="text-secondary">Preview with your latest article - subject:</span>
+                            <strong>@_previewSubject</strong>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <input type="email" class="form-control form-control-sm" style="width:14rem" placeholder="you@example.com" @bind="_testAddress" aria-label="Send a test to" />
+                            <button class="btn btn-sm btn-outline-primary text-nowrap" disabled="@(_busy || string.IsNullOrWhiteSpace(_testAddress))" @onclick="SendTestAsync"><i class="bi bi-send me-1"></i>Send test</button>
+                        </div>
+                    </div>
+                    @* sandbox with no allowances: the preview is static email HTML, never scripts. *@
+                    <iframe class="article-alert-preview" sandbox="" srcdoc="@_previewHtml" title="Email preview"></iframe>
+                </div></div>
+            </div>
+        </div>
+    }
+    else if (_tab == "settings")
+    {
+        <div class="row g-4">
+            <div class="col-lg-6">
+                <div class="card border-0 shadow-sm mb-3"><div class="card-body">
+                    <div class="fw-semibold small mb-2">Sender</div>
+                    <label class="form-label small">From name</label>
+                    <input class="form-control form-control-sm mb-2" @bind="Settings.FromName" />
+                    <label class="form-label small">From address</label>
+                    <input type="email" class="form-control form-control-sm mb-2" @bind="Settings.FromAddress" />
+                    <label class="form-label small">Reply-to <span class="text-secondary">(optional)</span></label>
+                    <input type="email" class="form-control form-control-sm" @bind="Settings.ReplyTo" />
+                </div></div>
+                <div class="card border-0 shadow-sm mb-3"><div class="card-body">
+                    <div class="fw-semibold small mb-2">Timing</div>
+                    <label class="form-label small">Wait after an article goes live (minutes)</label>
+                    <input type="number" min="0" max="1440" class="form-control form-control-sm mb-1" @bind="Settings.GraceMinutes" />
+                    <div class="form-text mb-2">Gives you time to fix a typo or unpublish. An article that's no longer live when the wait ends isn't sent.</div>
+                    <label class="form-label small">Time zone for the published date</label>
+                    <select class="form-select form-select-sm" @bind="Settings.TimeZoneId">
+                        @foreach (var (id, label) in TimeZones) { <option value="@id">@label</option> }
+                    </select>
+                </div></div>
+            </div>
+            <div class="col-lg-6">
+                <div class="card border-0 shadow-sm mb-3"><div class="card-body">
+                    <div class="fw-semibold small mb-1">Which articles</div>
+                    <div class="form-text mb-2">Leave everything unticked to announce every new article.</div>
+                    @if (Categories.Count > 0)
+                    {
+                        <div class="d-flex flex-wrap gap-3 mb-2">
+                            @foreach (var category in Categories)
+                            {
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="cat-@category.Id" checked="@Settings.CategoryIds.Contains(category.Id)" @onchange="e => ToggleCategory(category.Id, e.Value is true)" />
+                                    <label class="form-check-label small" for="cat-@category.Id">@category.Name</label>
+                                </div>
+                            }
+                        </div>
+                    }
+                    <label class="form-label small">Or articles tagged <span class="text-secondary">(comma-separated)</span></label>
+                    <input class="form-control form-control-sm" placeholder="e.g. dotnet, blazor" @bind="Settings.TagFilter" />
+                </div></div>
+                <div class="card border-0 shadow-sm mb-3"><div class="card-body">
+                    <div class="fw-semibold small mb-2">Confirmation email</div>
+                    <label class="form-label small">Subject</label>
+                    <input class="form-control form-control-sm mb-2" @bind="Settings.ConfirmationSubject" />
+                    <label class="form-label small">Message</label>
+                    <ProfessionalWysiwygEditor @bind-Value="Settings.ConfirmationMessage" Compact="true" MinHeight="110px" AriaLabel="Confirmation message" />
+                    <div class="form-text">Followed by a "Confirm subscription" button. New subscribers only receive alerts once they click it.</div>
+                </div></div>
+            </div>
+        </div>
+    }
+    else if (_tab == "subscribers")
+    {
+        <div class="card border-0 shadow-sm"><div class="card-body">
+            <div class="small text-secondary mb-2">@Campaign.ConfirmedSubscriberCount confirmed · @Campaign.PendingSubscriberCount waiting to confirm</div>
+            @if (Subscribers.Count == 0)
+            {
+                <EmptyState Icon="bi-people" Message="No subscribers yet. Add an Email signup widget to a page to start collecting them." />
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead><tr><th>Email</th><th>Name</th><th>Status</th><th>Signed up</th><th>Confirmed</th><th>From page</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var subscriber in Subscribers)
+                            {
+                                <tr>
+                                    <td><RelationshipChip ContactId="subscriber.ContactId" ContactName="@subscriber.Email" /></td>
+                                    <td>@subscriber.FirstName</td>
+                                    <td><span class="badge @SubscriberBadge(subscriber.Status)">@subscriber.Status</span></td>
+                                    <td class="small">@subscriber.SubscribedAt.ToLocalTime().ToString("MMM d, yyyy")</td>
+                                    <td class="small">@(subscriber.ConfirmedAt?.ToLocalTime().ToString("MMM d, yyyy") ?? "—")</td>
+                                    <td class="small text-secondary">@subscriber.SourcePath</td>
+                                    <td class="text-end">
+                                        @if (subscriber.Status == EmailCampaignSubscriptionStatuses.Confirmed)
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => SetSubscriberAsync(subscriber, EmailCampaignSubscriptionStatuses.Unsubscribed)">Unsubscribe</button>
+                                        }
+                                        else if (subscriber.Status == EmailCampaignSubscriptionStatuses.Unsubscribed && subscriber.ConfirmedAt is not null)
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary" disabled="@_busy" title="Only if they've asked to be re-added" @onclick="() => SetSubscriberAsync(subscriber, EmailCampaignSubscriptionStatuses.Confirmed)">Re-add</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div></div>
+    }
+    else if (_tab == "sends")
+    {
+        <div class="card border-0 shadow-sm"><div class="card-body">
+            @if (Announcements.Count == 0)
+            {
+                <EmptyState Icon="bi-send" Message="Nothing sent yet. Once the list is active, each new article appears here." />
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead><tr><th>Article</th><th>Status</th><th>Sends at</th><th>Delivered</th><th>Failed</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var announcement in Announcements)
+                            {
+                                <tr>
+                                    <td>@announcement.ArticleTitle</td>
+                                    <td><span class="badge @AnnouncementBadge(announcement.Status)">@announcement.Status</span></td>
+                                    <td class="small">@announcement.DueAt.ToLocalTime().ToString("MMM d, h:mm tt")</td>
+                                    <td>@announcement.DeliveredCount / @announcement.RecipientCount</td>
+                                    <td>@announcement.FailedCount</td>
+                                    <td class="text-end">
+                                        @if (announcement.FailedCount > 0)
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => RetryAsync(announcement)">Retry failed</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div></div>
+    }
+}
+
+<MediaPickerModal Show="_picking is not null" Title="@(_picking == "photo" ? "Choose your photo" : "Choose a logo")"
+                  OnPicked="PickImageAsync" OnClose="() => _picking = null" />
+
+@code {
+    [Parameter] public Guid CampaignId { get; set; }
+
+    private static readonly (string Key, string Label, string Icon)[] Tabs =
+    [
+        ("message", "Message", "bi-pencil-square"),
+        ("settings", "Settings", "bi-sliders"),
+        ("subscribers", "Subscribers", "bi-people"),
+        ("sends", "Sends", "bi-send-check")
+    ];
+
+    private static readonly (string Id, string Label)[] TimeZones =
+    [
+        ("America/New_York", "Eastern (ET)"), ("America/Chicago", "Central (CT)"), ("America/Denver", "Mountain (MT)"),
+        ("America/Los_Angeles", "Pacific (PT)"), ("UTC", "UTC")
+    ];
+
+    private ArticleAlertCampaignView? Campaign { get; set; }
+    private ArticleAlertSettings Settings { get; set; } = new();
+    private List<ArticleCategory> Categories { get; set; } = [];
+    private List<ArticleAlertSubscriberView> Subscribers { get; set; } = [];
+    private List<ArticleAnnouncementView> Announcements { get; set; } = [];
+    private string _name = string.Empty;
+    private string _tab = "message";
+    private string? _picking;
+    private string _previewHtml = string.Empty;
+    private string _previewSubject = string.Empty;
+    private string _testAddress = string.Empty;
+    private bool _busy;
+    private bool _loaded;
+    private string _error = string.Empty;
+    private string _status = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Campaign = await AlertService.GetCampaignAsync(CampaignId);
+        _loaded = true;
+        if (Campaign is null) return;
+        Settings = Campaign.Settings;
+        _name = Campaign.Name;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        Categories = (await db.ArticleCategories.AsNoTracking().ToListAsync()).OrderBy(c => c.Name).ToList();
+        await RefreshPreviewAsync();
+    }
+
+    private async Task SwitchTabAsync(string tab)
+    {
+        _tab = tab;
+        try
+        {
+            if (tab == "subscribers") Subscribers = (await AlertService.ListSubscribersAsync(CampaignId)).ToList();
+            if (tab == "sends") Announcements = (await AlertService.ListAnnouncementsAsync(CampaignId)).ToList();
+            if (tab == "message") await RefreshPreviewAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load the {Tab} tab for article-alert campaign {CampaignId}.", tab, CampaignId);
+            _error = $"Unable to load this tab. {ex.Message}";
+        }
+    }
+
+    private async Task RefreshPreviewAsync()
+    {
+        try
+        {
+            var (subject, html) = await AlertService.RenderPreviewAsync(CampaignId, Settings);
+            _previewSubject = subject;
+            _previewHtml = html;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Article-alert preview failed for campaign {CampaignId}.", CampaignId);
+        }
+    }
+
+    private async Task AppendTokenAsync(string token)
+    {
+        Settings.Message = (Settings.Message ?? string.Empty).TrimEnd() + " " + token;
+        await RefreshPreviewAsync();
+    }
+
+    private async Task PickImageAsync(GwsBusinessSuite.Application.CmsBuilder.MediaAssetSummary asset)
+    {
+        if (_picking == "photo") Settings.FooterPhotoUrl = asset.Url;
+        else Settings.FooterLogoUrl = asset.Url;
+        _picking = null;
+        await RefreshPreviewAsync();
+    }
+
+    private async Task ClearImageAsync(string slot)
+    {
+        if (slot == "photo") Settings.FooterPhotoUrl = string.Empty;
+        else Settings.FooterLogoUrl = string.Empty;
+        await RefreshPreviewAsync();
+    }
+
+    private void ToggleCategory(Guid categoryId, bool selected)
+    {
+        Settings.CategoryIds.Remove(categoryId);
+        if (selected) Settings.CategoryIds.Add(categoryId);
+    }
+
+    private async Task SaveAsync() => await RunAsync(async () =>
+    {
+        Campaign = await AlertService.SaveCampaignAsync(CampaignId, _name, Campaign!.Description, Settings, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        Settings = Campaign.Settings;
+        await RefreshPreviewAsync();
+        _status = "Saved.";
+    });
+
+    private async Task SetActiveAsync(bool active) => await RunAsync(async () =>
+    {
+        var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        // Save first so activation never runs on stale settings.
+        await AlertService.SaveCampaignAsync(CampaignId, _name, Campaign!.Description, Settings, user);
+        Campaign = await AlertService.SetActiveAsync(CampaignId, active, user);
+        Settings = Campaign.Settings;
+        _status = active
+            ? "Active. Articles published from now on will be emailed to confirmed subscribers."
+            : "Paused. Nothing will be sent until you activate the list again.";
+    });
+
+    private async Task SendTestAsync() => await RunAsync(async () =>
+    {
+        await AlertService.SendTestAsync(CampaignId, _testAddress, Settings);
+        _status = $"Test sent to {_testAddress}.";
+    });
+
+    private async Task SetSubscriberAsync(ArticleAlertSubscriberView subscriber, string status) => await RunAsync(async () =>
+    {
+        await AlertService.SetSubscriberStatusAsync(subscriber.Id, status, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        Subscribers = (await AlertService.ListSubscribersAsync(CampaignId)).ToList();
+        Campaign = await AlertService.GetCampaignAsync(CampaignId);
+    });
+
+    private async Task RetryAsync(ArticleAnnouncementView announcement) => await RunAsync(async () =>
+    {
+        await AlertService.RetryFailedAsync(announcement.Id);
+        Announcements = (await AlertService.ListAnnouncementsAsync(CampaignId)).ToList();
+        _status = "Failed sends will be retried within a minute.";
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _busy = true;
+        _error = string.Empty;
+        _status = string.Empty;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Article-alert campaign action failed for {CampaignId}.", CampaignId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string SubscriberBadge(string status) => status switch
+    {
+        EmailCampaignSubscriptionStatuses.Confirmed => "text-bg-success",
+        EmailCampaignSubscriptionStatuses.Pending => "text-bg-warning",
+        _ => "text-bg-secondary"
+    };
+
+    private static string AnnouncementBadge(string status) => status switch
+    {
+        ArticleAnnouncementStatuses.Sent => "text-bg-success",
+        ArticleAnnouncementStatuses.Sending => "text-bg-primary",
+        ArticleAnnouncementStatuses.Scheduled => "text-bg-info",
+        _ => "text-bg-secondary"
+    };
+}

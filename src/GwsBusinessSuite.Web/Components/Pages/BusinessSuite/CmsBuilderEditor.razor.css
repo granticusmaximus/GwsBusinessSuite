@@ -914,3 +914,13 @@
 .studio-layer-copy { flex: 1; }
 .studio-layer-copy strong { overflow-wrap: anywhere; }
 .studio-layer-icon { flex-shrink: 0; }
+
+/* The Site Desk redefines the admin text/surface tokens for its light canvas; follow them (not
+   Bootstrap's heading color) so the campaign picker reads correctly. */
+.signup-campaign-picker {
+    color: var(--gws-text-strong);
+    background: var(--gws-panel-bg);
+    border-color: var(--gws-panel-border);
+}
+
+.signup-campaign-picker .modal-title { color: var(--gws-text-strong); }

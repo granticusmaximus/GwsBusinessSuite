@@ -26,6 +26,7 @@ for why, and how that may change later.
 12. [Undo, redo, and autosave](#undo-redo-and-autosave)
 13. [Workflow blueprints](#workflow-blueprints)
 14. [Forms and form submissions](#forms-and-form-submissions)
+14a. [Email signup for new-article alerts](#email-signup-for-new-article-alerts)
 15. [Revision history](#revision-history)
 16. [Trash and page hierarchy](#trash-and-page-hierarchy)
 17. [Site recipes (export and import)](#site-recipes-export-and-import)
@@ -410,6 +411,30 @@ visible on the page's **settings** screen under **Form Submissions**, showing ev
 pair, a **New** badge for unread ones, **Mark read**, and **Delete**. There's no separate
 form-builder screen; a form only exists as a widget on the page it's attached to, and its
 submissions are scoped to that page.
+
+## Email signup for new-article alerts
+
+The **Email Signup** widget (Modules → Dynamic; the **Newsletter signup** section template and
+the pre-built page templates with a signup section use it too) is a reusable subscribe form that feeds a new-article alert list
+(see the CRM guide's *New-article email alerts*).
+
+- **Choosing the campaign**: when you add the widget by clicking, dragging or inserting a template
+  that contains it, a **Choose an email campaign** modal opens with a dropdown of your alert lists,
+  each showing its status and confirmed-subscriber count. If you have only one list it's already
+  selected. Click **Use this campaign**. **Create a new campaign** makes a new list on the spot,
+  and **Not now** leaves the widget unconnected. You can change it any time from the inspector's
+  **Campaign** field.
+- **Unconnected widgets**: in the editor an unconnected widget shows a yellow warning. On the live
+  site it is hidden completely until you choose a campaign, so visitors never see a form that goes
+  nowhere.
+- **Inspector options**: heading, description, button label, an optional **first name** field
+  (on by default, never required), the consent line shown under the button, the success message,
+  and alignment.
+- **What the visitor sees**: they enter their email and submit. The form updates in place with
+  the success message (default "Almost done - check your inbox and click the link to confirm."). The confirm and unsubscribe pages
+  use your site's theme. The form works without JavaScript too (it falls back to a normal post
+  and a themed result page). If Cloudflare Turnstile is configured, the challenge appears inside
+  the form automatically.
 
 ## Revision history
 

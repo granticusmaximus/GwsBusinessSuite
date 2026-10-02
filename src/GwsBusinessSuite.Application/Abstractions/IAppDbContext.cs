@@ -22,6 +22,9 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<EmailCampaignStep> EmailCampaignSteps { get; }
     DbSet<EmailCampaignEnrollment> EmailCampaignEnrollments { get; }
     DbSet<EmailCampaignSendLog> EmailCampaignSendLogs { get; }
+    DbSet<EmailCampaignSubscription> EmailCampaignSubscriptions { get; }
+    DbSet<ArticleAnnouncement> ArticleAnnouncements { get; }
+    DbSet<ArticleAnnouncementDelivery> ArticleAnnouncementDeliveries { get; }
     DbSet<SeoAuditRun> SeoAuditRuns { get; }
     DbSet<ContentLocalization> ContentLocalizations { get; }
     DbSet<WikiPage> WikiPages { get; }

@@ -1,0 +1,95 @@
+@* Pick an image from the Media Library. Reusable; same hand-rolled .modal.d-block markup as
+   ConfirmModal. Lists image assets only and hands back the chosen asset's URL. *@
+@using GwsBusinessSuite.Application.CmsBuilder
+@inject IMediaLibraryService MediaLibraryService
+@inject ILogger<MediaPickerModal> Logger
+
+@if (Show)
+{
+    <div class="modal-backdrop fade show"></div>
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="media-picker-title" @onkeydown="OnKeyDown">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="media-picker-title">@Title</h2>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="() => OnClose.InvokeAsync()"></button>
+                </div>
+                <div class="modal-body">
+                    <input class="form-control form-control-sm mb-3" placeholder="Search by file name or alt text" @bind="_search" @bind:event="oninput" aria-label="Search media" />
+                    @if (_loading)
+                    {
+                        <LoadingIndicator Message="Loading media…" />
+                    }
+                    else if (!string.IsNullOrEmpty(_error))
+                    {
+                        <div class="alert alert-danger small">@_error</div>
+                    }
+                    else if (Filtered.Count == 0)
+                    {
+                        <EmptyState Icon="bi-images" Message="No images yet - upload some in Media first." />
+                    }
+                    else
+                    {
+                        <div class="media-picker-grid">
+                            @foreach (var asset in Filtered)
+                            {
+                                <button type="button" class="media-picker-item" title="@asset.FileName" @onclick="() => PickAsync(asset)">
+                                    <img src="@(string.IsNullOrWhiteSpace(asset.ThumbnailUrl) ? asset.Url : asset.ThumbnailUrl)" alt="@asset.AltText" loading="lazy" />
+                                    <span>@asset.FileName</span>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Show { get; set; }
+    [Parameter] public string Title { get; set; } = "Choose an image";
+    [Parameter] public EventCallback<MediaAssetSummary> OnPicked { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private List<MediaAssetSummary> _assets = [];
+    private string _search = string.Empty;
+    private bool _loading;
+    private bool _loaded;
+    private string _error = string.Empty;
+
+    private List<MediaAssetSummary> Filtered => _assets
+        .Where(a => _search.Length == 0
+            || a.FileName.Contains(_search, StringComparison.OrdinalIgnoreCase)
+            || a.AltText.Contains(_search, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Show || _loaded) return;
+        _loading = true;
+        try
+        {
+            _assets = (await MediaLibraryService.ListAsync())
+                .Where(a => a.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            _loaded = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load the media library for the picker.");
+            _error = $"Unable to load the media library. {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task PickAsync(MediaAssetSummary asset) => await OnPicked.InvokeAsync(asset);
+
+    private async Task OnKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Escape") await OnClose.InvokeAsync();
+    }
+}

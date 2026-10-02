@@ -75,6 +75,9 @@ public static class CmsBlockHtmlRenderer
         layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "stats")));
 
     // Workstream C, Tier 2 (tabs widget) - same payload-size-guard reasoning as the guards above.
+    public static bool LayoutContainsEmailSignup(PageLayout? layout) =>
+        layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "email-signup")));
+
     public static bool LayoutContainsTabs(PageLayout? layout) =>
         layout is not null && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "tabs")));
 
@@ -130,6 +133,7 @@ public static class CmsBlockHtmlRenderer
             "booking" => HasValue(p, "bookingTypeSlug") ? $"[booking: {Get(p, "bookingTypeSlug")}]" : "[booking]",
             "stats" => "[stats]",
             "cta-banner" => Get(p, "headline", "[CTA banner]"),
+            "email-signup" => Get(p, "heading", "[email signup]"),
             "team-grid" => "[team grid]",
             "logo-cloud" => "[logo cloud]",
             "process-steps" => "[process steps]",
@@ -178,6 +182,12 @@ public static class CmsBlockHtmlRenderer
             && layout.Sections.Any(s => s.Columns.Any(c => c.Widgets.Any(w => w.WidgetType == "form"))))
         {
             html.Append("""<script src="/js/contact-form.js"></script><script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=gwsContactTurnstileReady&amp;render=explicit" async defer></script>""");
+        }
+        // External file (not an inline runtime script) so it runs under the site's CSP. It loads
+        // Turnstile itself, only when the server has it configured.
+        if (!editMode && LayoutContainsEmailSignup(layout))
+        {
+            html.Append("""<script src="/js/email-signup.js" defer></script>""");
         }
         return html.ToString();
     }
@@ -1020,6 +1030,7 @@ public static class CmsBlockHtmlRenderer
             "booking" => RenderBooking(p, editMode),
             "stats" => RenderStats(p, editMode),
             "cta-banner" => RenderCtaBanner(p, editMode),
+            "email-signup" => RenderEmailSignup(p, pageSlug, editMode),
             "team-grid" => RenderTeamGrid(p, editMode),
             "logo-cloud" => RenderLogoCloud(p),
             "process-steps" => RenderProcessSteps(p, editMode),
@@ -1078,6 +1089,47 @@ public static class CmsBlockHtmlRenderer
     // to be selected, styled, and moved together. Existing pages built from the OLD 3-widget
     // composition are completely unaffected - those heading/paragraph/button widgets still
     // render exactly as they always have; only NEW section-template insertions use this type now.
+    // "Email signup" widget: subscribes a visitor to the chosen article-alert campaign (double
+    // opt-in - see ArticleAlertService/ArticleAlertEndpoints). wwwroot/js/email-signup.js submits it
+    // in place and adds Turnstile when configured; without JS it still posts and gets a full page.
+    private static string RenderEmailSignup(IReadOnlyDictionary<string, string> p, string pageSlug, bool editMode)
+    {
+        var campaignId = Guid.TryParse(Get(p, "campaignId"), out var parsed) ? parsed : Guid.Empty;
+        if (campaignId == Guid.Empty && !editMode) return string.Empty; // nothing to subscribe to yet
+        var align = Get(p, "align", "center") == "left" ? "left" : "center";
+        var consent = Get(p, "consentText", "No spam. Unsubscribe any time.");
+        var path = "/" + (pageSlug ?? string.Empty).Trim('/');
+        var disabled = editMode ? " disabled" : string.Empty;
+        var nameField = Get(p, "showFirstName", "true") == "false"
+            ? string.Empty
+            : $"""<input class="gws-email-signup-input gws-email-signup-name" type="text" name="firstName" autocomplete="given-name" maxlength="80" placeholder="{Html(Get(p, "firstNamePlaceholder", "First name (optional)"))}" aria-label="First name (optional)"{disabled} />""";
+        var warning = editMode && campaignId == Guid.Empty
+            ? """<div class="gws-email-signup-warning">Choose which email campaign this signup feeds - select the widget, then use <strong>Campaign</strong> in the inspector. It stays hidden on the live site until you do.</div>"""
+            : string.Empty;
+
+        return $"""
+            <div class="gws-email-signup gws-align-{Html(align)}">
+              {warning}
+              {(HasValue(p, "heading") ? $"""<h2 class="gws-email-signup-heading"{InlineEditAttrs(editMode, "heading")}>{Html(Get(p, "heading"))}</h2>""" : "")}
+              {(HasValue(p, "description") ? $"""<div class="gws-email-signup-body"{InlineRichAttrs(editMode, "description", Get(p, "description"))}>{Markdown.ToHtml(Get(p, "description"), MarkdownPipeline)}</div>""" : "")}
+              <form class="gws-email-signup-form" method="post" action="/campaigns/{campaignId}/subscribe" data-gws-email-signup-form
+                    data-success="{Html(Get(p, "successMessage", "Almost done - check your inbox and click the link to confirm."))}">
+                <input type="hidden" name="_path" value="{Html(path)}" />
+                <input type="hidden" name="_consent" value="{Html(consent)}" />
+                <input type="text" name="_hp" class="gws-form-honeypot" tabindex="-1" autocomplete="off" aria-hidden="true" />
+                <div class="gws-email-signup-fields">
+                  {nameField}
+                  <input class="gws-email-signup-input" type="email" name="email" required autocomplete="email" maxlength="254" placeholder="{Html(Get(p, "emailPlaceholder", "you@example.com"))}" aria-label="Email address"{disabled} />
+                  <button type="submit" class="btn btn-primary gws-email-signup-submit"{disabled}>{Html(Get(p, "buttonLabel", "Subscribe"))}</button>
+                </div>
+                <div class="gws-email-signup-verification"></div>
+                {(string.IsNullOrWhiteSpace(consent) ? "" : $"""<p class="gws-email-signup-consent">{Html(consent)}</p>""")}
+                <p class="gws-email-signup-status" role="status" aria-live="polite"></p>
+              </form>
+            </div>
+            """;
+    }
+
     private static string RenderCtaBanner(IReadOnlyDictionary<string, string> p, bool editMode)
     {
         var align = Get(p, "align", "center") == "left" ? "left" : "center";
