@@ -161,8 +161,19 @@ public sealed class WikiService(
             ? sourceId
             : null;
 
-    public async Task<WikiPage> SavePageAsync(
-        WikiPageEditorModel editor, string performedBy, bool createRevisionCheckpoint = true, CancellationToken cancellationToken = default)
+    public Task<WikiPage> SavePageAsync(
+        WikiPageEditorModel editor, string performedBy, bool createRevisionCheckpoint = true, CancellationToken cancellationToken = default) =>
+        SavePageCoreAsync(editor, performedBy, createRevisionCheckpoint, deferredSideEffects: null, cancellationToken);
+
+    // deferredSideEffects: when non-null, the security-audit record, activity-feed entry and
+    // automation trigger are queued there instead of run inline - for callers saving inside a
+    // database transaction (DuplicatePageAsync). SecurityAuditService writes through its OWN
+    // DbContext/connection, and SQLite allows one writer: inline, it waits on the lock this
+    // transaction holds until "database is locked" (30s), freezing the page and failing the
+    // duplicate. The caller runs the queue after committing.
+    private async Task<WikiPage> SavePageCoreAsync(
+        WikiPageEditorModel editor, string performedBy, bool createRevisionCheckpoint,
+        List<Func<Task>>? deferredSideEffects, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(editor);
 
@@ -263,27 +274,34 @@ public sealed class WikiService(
         {
             await ReanchorDiscussionsAsync(page.Id, previousBlocksJson, page.BlocksJson, cancellationToken);
         }
+        // Inline, or queued for after the caller's transaction commits (see SavePageCoreAsync).
+        async Task RunOrDefer(Func<Task> sideEffect)
+        {
+            if (deferredSideEffects is not null) deferredSideEffects.Add(sideEffect);
+            else await sideEffect();
+        }
+
         if (createRevisionCheckpoint)
         {
             await CreateRevisionAsync(page, performedBy, cancellationToken);
             if (securityAudit is not null)
             {
-                await securityAudit.RecordAsync(new SecurityAuditInput(
+                var auditAction = isNew ? "SentinelPageCreated" : "SentinelPageEdited";
+                var auditTargetId = page.Id.ToString();
+                await RunOrDefer(() => securityAudit.RecordAsync(new SecurityAuditInput(
                     SecurityAuditCategories.DataLifecycle,
-                    isNew ? "SentinelPageCreated" : "SentinelPageEdited",
+                    auditAction,
                     SecurityAuditOutcomes.Succeeded,
                     TargetType: "WikiPage",
-                    TargetId: page.Id.ToString(),
-                    ActorUsername: performedBy), cancellationToken);
+                    TargetId: auditTargetId,
+                    ActorUsername: performedBy), cancellationToken));
             }
             if (activityFeedService is not null && performedBy != "automation-engine")
             {
-                await activityFeedService.RecordAsync(
-                    performedBy,
-                    isNew ? "created the wiki page" : "edited the wiki page",
-                    page.Title,
-                    $"/admin/wiki?page={page.Id}",
-                    cancellationToken);
+                var verb = isNew ? "created the wiki page" : "edited the wiki page";
+                var pageTitle = page.Title;
+                var pageUrl = $"/admin/wiki?page={page.Id}";
+                await RunOrDefer(() => activityFeedService.RecordAsync(performedBy, verb, pageTitle, pageUrl, cancellationToken));
             }
         }
 
@@ -304,7 +322,8 @@ public sealed class WikiService(
                 isNew,
                 blocksJson = page.BlocksJson
             });
-            await automationTriggerService.TriggerWikiPageChangedAsync(page.Id, triggerPayload, cancellationToken);
+            var triggerPageId = page.Id;
+            await RunOrDefer(() => automationTriggerService.TriggerWikiPageChangedAsync(triggerPageId, triggerPayload, cancellationToken));
         }
 
         return page;
@@ -374,40 +393,53 @@ public sealed class WikiService(
                 group => group.Key,
                 group => group.OrderBy(page => page.SortOrder).ThenBy(page => page.Title).ToList());
 
-        await using var transaction = await dbContext.BeginTransactionAsync(cancellationToken);
-        try
+        // Audit/activity/automation side effects for every copied page wait until the copy has
+        // committed - see SavePageCoreAsync for why running them inside this transaction deadlocks.
+        var deferredSideEffects = new List<Func<Task>>();
+        WikiPage duplicated;
+        await using (var transaction = await dbContext.BeginTransactionAsync(cancellationToken))
         {
-            var visited = new HashSet<Guid>();
-            var duplicated = await DuplicateBranchAsync(
-                source,
-                source.ParentWikiPageId,
-                $"{source.Title} (copy)",
-                childrenByParent,
-                visited,
-                performedBy,
-                depth: 0,
-                cancellationToken);
-            await ReorderPageAsync(
-                duplicated.Id,
-                source.ParentWikiPageId,
-                source.SortOrder + 1,
-                performedBy,
-                cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
-            return duplicated;
-        }
-        catch
-        {
-            await transaction.RollbackAsync(cancellationToken);
-            // A Blazor circuit can retain this scoped DbContext after the failed action. EF's
-            // entity states are not rewound by a database rollback, so discard the rolled-back
-            // clones and sibling-order values before any later circuit action reuses the scope.
-            if (dbContext is DbContext efContext)
+            try
             {
-                efContext.ChangeTracker.Clear();
+                var visited = new HashSet<Guid>();
+                duplicated = await DuplicateBranchAsync(
+                    source,
+                    source.ParentWikiPageId,
+                    $"{source.Title} (copy)",
+                    childrenByParent,
+                    visited,
+                    performedBy,
+                    depth: 0,
+                    deferredSideEffects,
+                    cancellationToken);
+                await ReorderPageAsync(
+                    duplicated.Id,
+                    source.ParentWikiPageId,
+                    source.SortOrder + 1,
+                    performedBy,
+                    cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
             }
-            throw;
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                // A Blazor circuit can retain this scoped DbContext after the failed action. EF's
+                // entity states are not rewound by a database rollback, so discard the rolled-back
+                // clones and sibling-order values before any later circuit action reuses the scope.
+                if (dbContext is DbContext efContext)
+                {
+                    efContext.ChangeTracker.Clear();
+                }
+                throw;
+            }
         }
+
+        foreach (var sideEffect in deferredSideEffects)
+        {
+            await sideEffect();
+        }
+
+        return duplicated;
     }
 
     public async Task TrashPageAsync(Guid wikiPageId, string performedBy, CancellationToken cancellationToken = default)
@@ -665,6 +697,7 @@ public sealed class WikiService(
         HashSet<Guid> visited,
         string performedBy,
         int depth,
+        List<Func<Task>> deferredSideEffects,
         CancellationToken cancellationToken)
     {
         if (depth > 128 || !visited.Add(source.Id))
@@ -675,7 +708,7 @@ public sealed class WikiService(
         var clonedBlocks = WikiBlockJson.ParseBlocks(source.BlocksJson)
             .Select(block => block with { Id = Guid.NewGuid() })
             .ToList();
-        var duplicate = await SavePageAsync(new WikiPageEditorModel
+        var duplicate = await SavePageCoreAsync(new WikiPageEditorModel
         {
             Title = title,
             BlocksJson = WikiBlockJson.Serialize(clonedBlocks),
@@ -684,7 +717,7 @@ public sealed class WikiService(
             ParentWikiPageId = newParentWikiPageId,
             IsFullWidth = source.IsFullWidth,
             FontStyle = source.FontStyle
-        }, performedBy, cancellationToken: cancellationToken);
+        }, performedBy, createRevisionCheckpoint: true, deferredSideEffects, cancellationToken);
 
         if (childrenByParent.TryGetValue(source.Id, out var children))
         {
@@ -698,6 +731,7 @@ public sealed class WikiService(
                     visited,
                     performedBy,
                     depth + 1,
+                    deferredSideEffects,
                     cancellationToken);
             }
         }

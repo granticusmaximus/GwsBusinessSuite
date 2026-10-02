@@ -20,7 +20,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["GwsBusinessSuite.Web.styles.css"]" />
-    <ImportMap />
+    @* No <ImportMap />: it renders an inline <script type="importmap">, which this app's CSP
+       (script-src without 'unsafe-inline') blocks on every deployed page - it never took effect
+       and only produced a console error. Modules load by their real paths either way. *@
     <link rel="icon" type="image/svg+xml" href="favicon.svg" />
     <HeadOutlet />
 </head>
@@ -51,6 +53,7 @@
     <script src="js/sshTerminal.js"></script>
     <script src="_content/jsMind.Blazor/jsmind.min.js"></script>
     <script src="_content/jsMind.Blazor/jsmind-interop.min.js"></script>
+    <script src="js/connection-check.js"></script>
     <script src="@Assets["_framework/blazor.web.js"]"></script>
 </body>
 

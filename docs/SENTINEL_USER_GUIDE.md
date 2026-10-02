@@ -67,7 +67,8 @@ Analysis experience (non-admin users still get the smaller in-page assistant pan
 ## Creating and editing a page
 
 Click the **+** button above the sidebar tree for a blank page, or use the dropdown next to it to
-start from a built-in starter template. A new page drops you straight into the editor.
+start from a built-in starter template. The page is created right away - it appears in the
+sidebar and opens with the cursor in its title, ready to type - and autosave takes it from there.
 
 - **Title** — the large text field at the top; typing auto-generates a matching **slug**, which
   you can also edit directly under "Page properties" (a collapsible section that also lets you
@@ -80,15 +81,18 @@ start from a built-in starter template. A new page drops you straight into the e
   reminds you of the three text-entry shortcuts: `/` for commands, `[[` for a page link, `@` for a
   mention.
 
-Edits **autosave** a few seconds after you stop typing — the status next to the page's breadcrumb
-shows "Saved" once it lands — and there's also an explicit **Save changes** button. If someone
+Edits **autosave** a moment after you stop typing — the title as well as the body — and the
+status pill at the top right shows "Saved" once it lands; there's no Save button to press. To mark
+a point you may want to return to, use **⋯ → Save a version**: it adds a restore point to the
+page's version history (autosave itself doesn't, so history isn't flooded with every keystroke). If someone
 else saves the same page while you're still editing, a banner appears with three choices: reload
 their latest version, save your draft as a new copy, or overwrite theirs with yours. Live presence
 (who else currently has this page open) shows next to the title.
 
-Other page-level actions live in the toolbar: **Duplicate**, **Trash** (soft-delete, recoverable —
-see [Version history, trash, and duplication](#version-history-trash-and-duplication)), **Export**
-as Markdown, and a star to toggle **Favorite**. In the sidebar tree itself you can drag a page onto
+Other page-level actions are compact icons at the top right of the page: **Share**, a star to
+toggle **Favorite**, **Duplicate**, **Export** as Markdown, **Trash** (soft-delete, recoverable —
+see [Version history, trash, and duplication](#version-history-trash-and-duplication)), and **⋯**
+for Save a version plus the page's style options (full width, font). In the sidebar tree itself you can drag a page onto
 another to reparent it, use the up/down arrows or drag handle to reorder siblings, and multi-select
 with the row checkboxes to bulk-move or bulk-trash several pages (and their sub-pages) at once.
 Drag a page from that same tree into the open document canvas to insert a visual linked-page card

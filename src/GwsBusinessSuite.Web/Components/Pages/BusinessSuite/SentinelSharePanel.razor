@@ -7,8 +7,8 @@
 @inject NavigationManager Navigation
 
 <div class="sentinel-share-panel">
-    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ToggleAsync">
-        <i class="bi bi-share me-1"></i>Share
+    <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-tool-btn-label" @onclick="ToggleAsync" title="Share this page">
+        <i class="bi bi-share"></i><span>Share</span>
     </button>
     @if (_open)
     {

@@ -48,3 +48,12 @@ export function dispose() {
     shortcutHandler = null;
     searchInput = null;
 }
+
+// The page title box has no Blazor-rendered value (see Wiki.razor's title textarea): Blazor
+// re-applying a value while the user types drops keystrokes over a server round trip. The
+// component calls this only when a different page is loaded into the editor.
+export function setTitleValue(element, value) {
+    if (element && element.value !== value) {
+        element.value = value ?? '';
+    }
+}

@@ -630,25 +630,43 @@
                         <span class="sentinel-breadcrumb-current text-truncate">Untitled</span>
                     }
                 </nav>
-                <div class="d-flex align-items-center gap-2">
+                @* Page actions: compact icon buttons (sentinel-tool-btn). Edits autosave, so there is
+                   no Save button here - "Save a version" in the ⋯ menu adds a version-history
+                   restore point, the one thing autosave deliberately doesn't do on every save. *@
+                <div class="d-flex align-items-center gap-1 sentinel-toolbar-actions">
                     @if (SelectedPageId is { } selectedPageId)
                     {
                         <SentinelPresence WikiPageId="selectedPageId" />
                         <SentinelSharePanel TargetId="selectedPageId" TargetName="@(Editor.Title ?? "page")" />
-                        <button type="button" class="btn btn-sm @(IsFavorite(selectedPageId, false) ? "btn-warning" : "btn-outline-secondary")"
-                                @onclick="() => ToggleFavoriteAsync(selectedPageId, false)" title="Toggle favorite">
+                        <button type="button" class="btn btn-sm sentinel-tool-btn @(IsFavorite(selectedPageId, false) ? "is-active" : string.Empty)"
+                                @onclick="() => ToggleFavoriteAsync(selectedPageId, false)"
+                                title="@(IsFavorite(selectedPageId, false) ? "Remove from favorites" : "Add to favorites")"
+                                aria-label="Toggle favorite" aria-pressed="@(IsFavorite(selectedPageId, false) ? "true" : "false")">
                             <i class="bi @(IsFavorite(selectedPageId, false) ? "bi-star-fill" : "bi-star")"></i>
                         </button>
-                        <a class="btn btn-sm btn-outline-secondary" href="@($"admin/sentinel/pages/{selectedPageId}/export.md")"
-                           title="Export this page as Markdown" download>
+                        <button type="button" class="btn btn-sm sentinel-tool-btn" @onclick="DuplicateSelectedPageAsync"
+                                disabled="@IsBusy" title="Duplicate page" aria-label="Duplicate page">
+                            <i class="bi bi-copy"></i>
+                        </button>
+                        <a class="btn btn-sm sentinel-tool-btn" href="@($"admin/sentinel/pages/{selectedPageId}/export.md")"
+                           title="Export as Markdown" aria-label="Export as Markdown" download>
                             <i class="bi bi-download"></i>
                         </a>
+                        <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-tool-btn-danger" @onclick="DeleteSelectedPageAsync"
+                                disabled="@IsBusy" title="Move to Trash" aria-label="Move to Trash">
+                            <i class="bi bi-trash3"></i>
+                        </button>
                         <div class="dropdown">
-                            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="dropdown"
-                                    aria-expanded="false" title="Page style">
+                            <button type="button" class="btn btn-sm sentinel-tool-btn" data-bs-toggle="dropdown"
+                                    aria-expanded="false" title="More" aria-label="More page options">
                                 <i class="bi bi-three-dots"></i>
                             </button>
                             <div class="dropdown-menu dropdown-menu-end sentinel-style-menu">
+                                <button type="button" class="dropdown-item d-flex align-items-center gap-2" @onclick="SavePageAsync" disabled="@IsBusy">
+                                    <i class="bi bi-clock-history"></i>
+                                    <span>Save a version<small class="d-block text-secondary">Adds a restore point to page history</small></span>
+                                </button>
+                                <div class="dropdown-divider"></div>
                                 <div class="sentinel-style-menu-heading">Style</div>
                                 <button type="button" class="dropdown-item d-flex justify-content-between align-items-center"
                                         @onclick="ToggleFullWidthAsync">
@@ -724,8 +742,15 @@
                                 @Editor.Icon
                             </button>
                         }
-                        <InputTextArea class="sentinel-title-input" @bind-Value="Editor.Title" @bind-Value:after="ScheduleAutosave"
-                                       rows="1" placeholder="Untitled" aria-label="Page title" />
+                        @* Updated on every keystroke (not InputTextArea, which only commits on
+                           change/blur) so a title typed and left in place reaches the debounced
+                           autosave like the page body does. Deliberately has NO Blazor-rendered
+                           value: Blazor syncs its record of an input to the browser's value on each
+                           event, so any render still carrying an older value writes it back and
+                           drops what was just typed. The text is set from JS (setTitleValue) only
+                           when a different page loads; @key gives each page a fresh element. *@
+                        <textarea @key="TitleElementKey" @ref="_titleInput" class="sentinel-title-input" rows="1" placeholder="Untitled"
+                                  aria-label="Page title" @oninput="OnTitleInput"></textarea>
                     </div>
 
                     @if (_showIconPicker)
@@ -811,22 +836,6 @@
                     <SentinelAiPanel @key="SelectedPageId" WikiPageId="SelectedPageId" OnInsert="InsertAiOutputAsync" />
                     <div class="wiki-block-editor" @ref="_blockEditorContainer"></div>
 
-                    <div class="sentinel-editor-actions">
-                        <button type="submit" class="btn btn-primary" disabled="@IsBusy">
-                            <i class="bi bi-check2 me-1"></i>Save changes
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" @onclick="CreateNewPage" disabled="@IsBusy">
-                            Reset
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" @onclick="DuplicateSelectedPageAsync"
-                                disabled="@(IsBusy || !SelectedPageId.HasValue)">
-                            <i class="bi bi-copy me-1"></i>Duplicate
-                        </button>
-                        <button type="button" class="btn btn-outline-danger" @onclick="DeleteSelectedPageAsync"
-                                disabled="@(IsBusy || !SelectedPageId.HasValue)" title="Move to Trash">
-                            <i class="bi bi-trash3 me-1"></i>Trash
-                        </button>
-                    </div>
                 </div>
             </EditForm>
         </div>
@@ -2692,10 +2701,9 @@
         await PerformAutosaveAsync(cancellationToken);
     }
 
-    // Cancels any pending debounce timer, without saving, for resets where the user is
-    // explicitly discarding in-progress edits: the toolbar "Reset" button, or the editor
-    // being pointed at a fresh/blank state because its underlying page was just trashed out
-    // from under it. CreateNewPage always starts here so neither caller has to remember to.
+    // Cancels any pending debounce timer, without saving, for resets where in-progress edits
+    // must be discarded: the editor being pointed at a fresh/blank state because its
+    // underlying page was just trashed out from under it. CreateNewPage always starts here.
     private void DiscardPendingAutosave()
     {
         _autosaveCts?.Cancel();
@@ -2762,6 +2770,13 @@
             _hasUnsavedAutosaveChanges = false;
             _autosaveStatus = "Saved";
 
+            // Keep the sidebar/breadcrumb title in step with an autosaved title edit, without
+            // reloading the whole tree on every debounced save.
+            if (WikiPages.FirstOrDefault(p => p.Id == saved.Id) is { } treePage && treePage.Title != saved.Title)
+            {
+                treePage.Title = saved.Title;
+            }
+
             if (wasNew)
             {
                 // The page just became real - reflect it in the sidebar/breadcrumbs the same
@@ -2795,7 +2810,7 @@
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             Logger.LogError(ex, "Autosave failed for Sentinel page {WikiPageId}.", Editor.WikiPageId);
-            _autosaveStatus = "Autosave failed - use Save changes to retry";
+            _autosaveStatus = "Autosave failed - use ⋯ > Save a version to retry";
             await InvokeAsync(StateHasChanged);
         }
         finally
@@ -3079,11 +3094,76 @@
         _remoteCursors = [];
     }
 
+    private ElementReference _titleInput;
+    private bool _focusTitleAfterRender;
+    private int _titleAppliedVersion;
+
+    private WikiPageEditorModel? _titleSnapshotEditor;
+    private string _titleSnapshot = string.Empty;
+    private int _titleSnapshotVersion;
+
+    // Evaluated as the textarea's @key, which Blazor reads before its other attributes - so the
+    // snapshot (and the element identity) are always up to date by the time value is rendered.
+    // A new Editor (another page, or a just-created one) always gets a new element, even when
+    // both titles are the same (e.g. two empty "Untitled" pages).
+    private int TitleElementKey
+    {
+        get
+        {
+            if (!ReferenceEquals(_titleSnapshotEditor, Editor))
+            {
+                _titleSnapshotEditor = Editor;
+                _titleSnapshot = Editor.Title ?? string.Empty;
+                _titleSnapshotVersion++;
+            }
+
+            return _titleSnapshotVersion;
+        }
+    }
+
+    // For code that rewrites Editor.Title in place (rather than loading a new Editor).
+    private void RefreshRenderedTitle() => _titleSnapshotEditor = null;
+
+    private void OnTitleInput(ChangeEventArgs args)
+    {
+        Editor.Title = args.Value?.ToString() ?? string.Empty;
+        ScheduleAutosave();
+    }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        // Fill the title box when a different page has been loaded (see the textarea's comment).
+        if (_titleAppliedVersion != _titleSnapshotVersion && _titleInput.Context is not null)
+        {
+            try
+            {
+                _workspaceModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-workspace.js");
+                await _workspaceModule.InvokeVoidAsync("setTitleValue", _titleInput, _titleSnapshot);
+                _titleAppliedVersion = _titleSnapshotVersion;
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException)
+            {
+                // Circuit going away; the next render retries.
+            }
+        }
+
+        // A just-created page opens ready to type its title.
+        if (_focusTitleAfterRender && _titleInput.Context is not null)
+        {
+            _focusTitleAfterRender = false;
+            try
+            {
+                await _titleInput.FocusAsync();
+            }
+            catch (Exception ex) when (ex is JSException or InvalidOperationException)
+            {
+                // Focus is a convenience - never fail the page over it.
+            }
+        }
+
         if (firstRender)
         {
-            _workspaceModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-workspace.js");
+            _workspaceModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-workspace.js");
             await _workspaceModule.InvokeVoidAsync("initialize", _workspaceSearchInput);
         }
 
@@ -3517,12 +3597,10 @@
         });
     }
 
-    // Always discards rather than flushes - this doubles as the toolbar "Reset" button
-    // (explicitly discarding the current unsaved edit) and the recovery path after a page was
-    // just trashed out from under the editor, where the stale Editor content must never be
-    // written back. Callers that instead want to preserve prior edits when navigating away to
-    // start a new page (the sidebar's "+ New page" control) flush first via NewBlankPageAsync/
-    // CreateNewPageFromTemplateAsync, before calling this.
+    // Always discards rather than flushes - the recovery path after a page was just trashed
+    // out from under the editor, where the stale Editor content must never be written back.
+    // (The "+ New page" control no longer comes here: it creates a real page and opens it -
+    // see CreateAndOpenPageAsync.)
     private void CreateNewPage()
     {
         DiscardPendingAutosave();
@@ -3539,15 +3617,56 @@
         ErrorMessage = string.Empty;
     }
 
-    private async Task NewBlankPageAsync()
+    // "+ New page" creates a real page straight away and opens it, rather than only clearing
+    // the editor to an unsaved blank: Sentinel already shows that same blank "Untitled" editor
+    // when nothing is selected, so the old behavior looked like nothing happened at all, and the
+    // page only appeared in the sidebar once autosave first fired. Autosave takes over from here.
+    private Task NewBlankPageAsync() => CreateAndOpenPageAsync(string.Empty, null, null, "Unable to create the page.");
+
+    private async Task CreateAndOpenPageAsync(string title, string? blocksJson, string? icon, string failureMessage)
     {
         await FlushAutosaveAsync();
-        CreateNewPage();
+        if (PageConflict is not null) return;
+
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        Guid? createdId = null;
+        try
+        {
+            var user = await CurrentUserNameAsync();
+            var editor = new WikiPageEditorModel { Title = title };
+            if (blocksJson is not null) editor.BlocksJson = blocksJson;
+            if (icon is not null) editor.Icon = icon;
+            var saved = await WikiService.SavePageAsync(editor, user);
+            createdId = saved.Id;
+            await LoadTreeAsync(selectFirstPage: false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Creating a new Sentinel page failed.");
+            ErrorMessage = $"{failureMessage} {ex.Message}";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+
+        if (createdId is { } pageId)
+        {
+            await OpenPageAsync(pageId, recordHistory: true);
+            // OpenPageAsync's "Opened Sentinel page '...'" note reads oddly for a page that was
+            // just created (and usually has no title yet) - the open page says it all.
+            if (StatusMessage.StartsWith("Opened Sentinel page", StringComparison.Ordinal))
+            {
+                StatusMessage = string.Empty;
+            }
+            _focusTitleAfterRender = true;
+        }
     }
 
     // Starter gallery (Phase 5.3) - offered alongside the plain "Blank page" entry from the
-    // sidebar's "+ New page" control only (not the in-editor "Reset" button, which is a
-    // different action - discarding the current unsaved edit, not choosing a new page's shape).
+    // sidebar's "+ New page" control.
     private async Task CreateNewPageFromTemplateAsync(string templateKey)
     {
         var template = SentinelStarterTemplates.Find(templateKey);
@@ -3556,16 +3675,9 @@
             return;
         }
 
-        await FlushAutosaveAsync();
-        CreateNewPage();
-        Editor.Title = template.Title;
-        Editor.BlocksJson = WikiBlockJson.Serialize(template.Blocks);
-        // Verified finding: the starter gallery shows each template's icon in its own menu
-        // item, but the created page never actually got it - CreateNewPage() resets Editor to a
-        // blank model and this method only copied Title/BlocksJson across, leaving Icon at its
-        // default (none) regardless of which template was picked.
-        Editor.Icon = template.Icon;
-        StatusMessage = $"Ready to create a new page from '{template.Name}'.";
+        // Same create-then-open as a blank page, carrying the template's title, blocks and icon.
+        await CreateAndOpenPageAsync(template.Title, WikiBlockJson.Serialize(template.Blocks), template.Icon,
+            $"Unable to create a page from '{template.Name}'.");
     }
 
     private async Task CreateNewDatabaseAsync() => await Work(async () =>
@@ -3894,6 +4006,7 @@
         Editor.Title = string.IsNullOrWhiteSpace(Editor.Title)
             ? "Recovered Sentinel draft"
             : $"{Editor.Title} (conflicted copy)";
+        RefreshRenderedTitle();
         Editor.Slug = string.Empty;
         PageConflict = null;
         await SavePageAsync();
@@ -3919,8 +4032,9 @@
         {
             var user = await CurrentUserNameAsync();
             await WikiService.TrashPageAsync(wikiPageId, user);
-            StatusMessage = "Sentinel page moved to Trash.";
             CreateNewPage();
+            // After CreateNewPage, which sets its own "Ready to create" message.
+            StatusMessage = "Sentinel page moved to Trash.";
             await LoadTreeAsync(selectFirstPage: false);
             await LoadWorkspaceNavigationAsync();
         }

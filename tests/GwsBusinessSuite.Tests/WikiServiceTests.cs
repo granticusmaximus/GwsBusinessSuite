@@ -173,6 +173,48 @@ public sealed class WikiServiceTests
         (await service.GetHistoryAsync(duplicatedChild.Id)).Should().ContainSingle();
     }
 
+    // Regression: SecurityAuditService writes through its own DbContext/connection, and SQLite
+    // allows a single writer - recording audit events while the duplicate's transaction was
+    // still open waited 30s on the lock, then failed the duplicate with "database is locked"
+    // (and froze the Sentinel page meanwhile). Side effects must run only after the commit.
+    [Fact]
+    public async Task DuplicatePageAsync_RecordsAuditEventsOnlyAfterTheCopyHasCommitted()
+    {
+        await using var db = await CreateDbAsync();
+        var audit = new TransactionObservingAudit(db);
+        var service = new WikiService(db, securityAudit: audit);
+        var source = await service.SavePageAsync(new WikiPageEditorModel { Title = "Plan", BlocksJson = ParagraphBlocks("source") }, "owner");
+        await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Child", BlocksJson = ParagraphBlocks("child"), ParentWikiPageId = source.Id
+        }, "owner");
+        audit.Calls.Clear();
+
+        var duplicate = await service.DuplicatePageAsync(source.Id, "member");
+
+        duplicate.Title.Should().Be("Plan (copy)");
+        audit.Calls.Should().HaveCount(2, "the copied page and its copied child are each audited");
+        audit.Calls.Should().OnlyContain(insideTransaction => !insideTransaction,
+            "an audit write inside the open transaction deadlocks on SQLite's single-writer lock");
+    }
+
+    private sealed class TransactionObservingAudit(ApplicationDbContext db) : GwsBusinessSuite.Application.SecurityAudit.ISecurityAuditService
+    {
+        public List<bool> Calls { get; } = [];
+
+        public Task<Guid> RecordAsync(GwsBusinessSuite.Application.SecurityAudit.SecurityAuditInput input, CancellationToken cancellationToken = default)
+        {
+            Calls.Add(db.Database.CurrentTransaction is not null);
+            return Task.FromResult(Guid.NewGuid());
+        }
+
+        public Task<GwsBusinessSuite.Application.SecurityAudit.SecurityAuditPage> QueryAsync(GwsBusinessSuite.Application.SecurityAudit.SecurityAuditQuery query, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<GwsBusinessSuite.Application.SecurityAudit.SecurityAuditIntegrityResult> VerifyIntegrityAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+    }
+
     [Fact]
     public async Task DuplicatePageAsync_ShouldRollbackAndClearTrackedClonesWhenTheTreeContainsACycle()
     {

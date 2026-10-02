@@ -3145,14 +3145,53 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-context-rail-button span { font-size: .58rem; }
 
 .sentinel-editing-state {
-    padding: .25rem .5rem;
+    padding: .2rem .55rem;
     border: 1px solid var(--sentinel-border);
     border-radius: 999px;
     color: var(--sentinel-muted);
     font-size: .64rem;
     font-weight: 700;
     letter-spacing: .03em;
+    white-space: nowrap;
 }
+
+/* Compact, borderless page-action icons in the Sentinel toolbar (top right). */
+.sentinel-tool-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: .35rem;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: .55rem;
+    background: transparent;
+    color: var(--sentinel-muted);
+    font-size: .9rem;
+    line-height: 1;
+    transition: background-color .12s ease, color .12s ease, border-color .12s ease;
+}
+
+.sentinel-tool-btn:hover:not(:disabled),
+.sentinel-tool-btn:focus-visible,
+.sentinel-tool-btn[aria-expanded="true"] {
+    border-color: var(--sentinel-border);
+    background: var(--sentinel-hover);
+    color: var(--gws-text-strong);
+}
+
+.sentinel-tool-btn.is-active { color: var(--gws-sidebar-accent); }
+.sentinel-tool-btn-danger:hover:not(:disabled) { color: #f87171; }
+
+.sentinel-tool-btn-label {
+    width: auto;
+    padding: 0 .6rem;
+    font-size: .74rem;
+    font-weight: 600;
+}
+
+.sentinel-toolbar-actions .sentinel-editing-state { margin-left: .35rem; }
 
 .sentinel-inline-document-form { min-width: 0; }
 
@@ -5149,4 +5188,32 @@ audio.wiki-embed-media { max-width: 100%; }
     .sentinel-gpt-chat-header { padding: .7rem .85rem; }
     .sentinel-gpt-web-status { display: none; }
     .sentinel-gpt-model-pill { max-width: 8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* See js/connection-check.js - shown only when the live (SignalR) connection can't start. */
+.gws-connection-banner {
+    position: fixed;
+    left: 50%;
+    bottom: 1.25rem;
+    z-index: 2200;
+    transform: translateX(-50%);
+    width: min(44rem, calc(100vw - 2rem));
+    padding: 0.85rem 1rem;
+    border: 1px solid rgba(239, 68, 68, 0.55);
+    border-radius: var(--gws-radius-md);
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+    box-shadow: var(--gws-shadow-md);
+    font-size: 0.875rem;
+    line-height: 1.45;
+}
+
+.gws-connection-banner-retry {
+    margin-left: 0.75rem;
+    padding: 0.2rem 0.75rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-sm);
+    background: var(--gws-panel-bg-2);
+    color: inherit;
+    cursor: pointer;
 }
