@@ -18,6 +18,14 @@ services:
       # Studio drafts/revisions run on the Ollama of the computer the browser is on, and
       # SentinelGPT chat/agents run in the Mac app. Remove to restore full server-side AI.
       ServerAi__Mode: Light
+      # Email (form-submission notifications, Growth reports, bookings, campaigns, the client
+      # portal) all fall back to ONE shared SMTP section - set it once in the gitignored .env:
+      #   Smtp__Host=smtp.yourprovider.com   Smtp__Port=587   Smtp__Security=StartTls
+      #   Smtp__Username=...   Smtp__Password=...   Smtp__FromAddress=noreply@grantwatson.dev
+      # A feature's own section (e.g. GrowthReportEmail__Host) still overrides it when set.
+      # The grantwatson.dev /contact form refuses ALL submissions until Cloudflare Turnstile keys
+      # are set (docs/CONTACT_FORM_PROTECTION.md). Put them in .env as Turnstile__SiteKey and
+      # Turnstile__SecretKey - not here: an empty-default entry here would override .env.
       # Optional live internet research for SentinelGPT. Keep the actual key in the
       # gitignored .env file as OLLAMA_WEB_API_KEY, never in this Compose file.
       OllamaWeb__ApiKey: ${OLLAMA_WEB_API_KEY:-}

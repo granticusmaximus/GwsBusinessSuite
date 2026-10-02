@@ -355,6 +355,31 @@ downloaded — is written into the Security Audit ledger under the `SecurityOper
   An API reference panel documents Bearer-token auth and the three resources currently exposed —
   Contacts, Deals, and CMS pages — with example `curl` usage.
 
+### Email delivery (server configuration)
+
+Every feature that sends email - **form-submission notifications** (including the contact form's
+"new message" email), Growth Studio reports, booking confirmations, email campaigns and client
+portal sign-in links - falls back to one shared **`Smtp`** configuration section. Set it once in
+the droplet's gitignored `.env`:
+
+```text
+Smtp__Host=smtp.yourprovider.com
+Smtp__Port=587
+Smtp__Security=StartTls        # or SslOnConnect (port 465), Auto, None
+Smtp__Username=...
+Smtp__Password=...
+Smtp__FromAddress=noreply@grantwatson.dev
+```
+
+then restart the app (`docker compose up -d`). A feature's own section (for example
+`GrowthReportEmail__Host`) still overrides the shared one when you want a different server or
+sender for it. Until a mail server is configured, form submissions are still saved and shown in
+Form Submissions - only the notification email is skipped (the server log says so each time).
+
+The grantwatson.dev contact form separately needs its Cloudflare Turnstile keys
+(`Turnstile__SiteKey`, `Turnstile__SecretKey`) - without them it refuses every submission; see
+`docs/CONTACT_FORM_PROTECTION.md`.
+
 ## Developer Tools
 
 `/admin/dev-tools` — nav label **Dev Tools** — is a bundle of small, self-contained utilities in

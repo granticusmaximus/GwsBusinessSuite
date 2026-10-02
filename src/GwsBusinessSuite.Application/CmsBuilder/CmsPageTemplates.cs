@@ -40,7 +40,7 @@ public static class CmsPageTemplates
     private static PageLayout About() => Page(
         Hero("Built by people who care about the details",
             "We started with a simple idea: do excellent work, be honest about it, and treat every client like a partner.",
-            "Work with us", "/contact", "Meet the team", "/team"),
+            "Work with us", "/contact", "Meet the team", "/team", image: "about-team.jpg"),
         Section("Our story", "transparent", "lg", "half-half",
             Col(6, Heading("Our story"), RichText(
                 "What began as a two-person studio has grown into a team trusted by organizations of every size.\n\n" +
@@ -56,7 +56,7 @@ public static class CmsPageTemplates
     private static PageLayout Services() => Page(
         Hero("Services that move your business forward",
             "From first idea to ongoing support, we bring strategy, design and engineering under one roof.",
-            "Get a quote", "/contact", "See pricing", "/pricing"),
+            "Get a quote", "/contact", "See pricing", "/pricing", image: "services-meeting.jpg"),
         Section("What we do", "transparent", "lg", "thirds",
             Col(4, Card("Strategy", "Workshops and roadmaps that turn goals into a plan everyone can follow.")),
             Col(4, Card("Design", "Clean, accessible interfaces your customers will actually enjoy using.")),
@@ -80,7 +80,7 @@ public static class CmsPageTemplates
         CtaSection("Need something custom?", "Larger teams and special requirements get a plan built around them.", "Talk to sales", "/contact"));
 
     private static PageLayout Contact() => Page(
-        Hero("We'd love to hear from you", "Questions, ideas or a project in mind - send a message and we'll reply within one business day.", "", "", "", "", align: "center"),
+        Hero("We'd love to hear from you", "Questions, ideas or a project in mind - send a message and we'll reply within one business day.", "", "", "", "", image: "contact-office.jpg"),
         Section("Contact", "transparent", "lg", "one-third-two-thirds",
             Col(4, Heading("Get in touch", "h3"), RichText(
                 "**Email**  \nhello@example.com\n\n**Phone**  \n(555) 123-4567\n\n**Office hours**  \nMonday-Friday, 9am-5pm")),
@@ -95,7 +95,7 @@ public static class CmsPageTemplates
             ("Do you work with clients remotely?", "Yes, most of our clients work with us entirely online.")))));
 
     private static PageLayout Team() => Page(
-        Hero("The people behind the work", "A small, experienced team that takes ownership from the first call to the final handoff.", "", "", "", "", align: "center"),
+        Hero("The people behind the work", "A small, experienced team that takes ownership from the first call to the final handoff.", "", "", "", "", image: "team-collaboration.jpg"),
         Section("Team", "transparent", "lg", "full", Col(12, TeamGrid(
             ("Jane Doe", "Founder & CEO"), ("John Smith", "Head of Engineering"), ("Alex Kim", "Design Lead"),
             ("Maria Garcia", "Project Manager"), ("Sam Patel", "Senior Developer"), ("Chris Lee", "Client Success")))),
@@ -134,7 +134,7 @@ public static class CmsPageTemplates
     private static PageLayout Landing() => Page(
         Hero("Work smarter with one simple tool",
             "Everything your team needs to plan, track and ship - without the clutter.",
-            "Start free trial", "/contact", "See pricing", "/pricing"),
+            "Start free trial", "/contact", "See pricing", "/pricing", image: "landing-product.jpg"),
         Section("Proof", "light", "md", "full", Col(12, Stats(("10k", "+", "Teams onboard"), ("4.9", "/5", "Average rating"), ("99.9", "%", "Uptime")))),
         Section("Features", "transparent", "lg", "thirds",
             Col(4, Card("Plan in minutes", "Drag-and-drop boards that keep everyone on the same page.")),
@@ -172,7 +172,7 @@ public static class CmsPageTemplates
         CmsSectionTemplates.Find("faq")!.Build());
 
     private static PageLayout GetInvolved() => Page(
-        Hero("Find your place", "There's room for everyone here. Explore ways to connect, serve and grow.", "Sign up to serve", "/contact", "", ""),
+        Hero("Find your place", "There's room for everyone here. Explore ways to connect, serve and grow.", "Sign up to serve", "/contact", "", "", image: "get-involved-volunteer.jpg"),
         Section("Ways to get involved", "transparent", "lg", "thirds",
             Col(4, Card("Serve", "Join a team that welcomes guests, helps with kids, or runs events.")),
             Col(4, Card("Join a group", "Small groups meet weekly across the city for friendship and support.")),
@@ -203,12 +203,17 @@ public static class CmsPageTemplates
     private static LayoutWidget Widget(string type, params (string Key, string Value)[] props) =>
         new() { WidgetType = type, Props = props.ToDictionary(p => p.Key, p => p.Value) };
 
-    private static LayoutSection Hero(string headline, string subline, string cta1Label, string cta1Href, string cta2Label, string cta2Href, string align = "left") =>
+    // Bundled stock photos (wwwroot/img/page-templates, see its CREDITS.md) - local files, so a
+    // pre-built page never depends on a third-party image host.
+    private const string Photos = "/img/page-templates/";
+
+    // An image switches the hero to its "split" layout (text beside the photo).
+    private static LayoutSection Hero(string headline, string subline, string cta1Label, string cta1Href, string cta2Label, string cta2Href, string align = "left", string image = "") =>
         Section("Hero", "transparent", "xl", "full", Col(12, Widget("hero",
             ("headline", headline), ("subline", subline),
             ("cta1Label", cta1Label), ("cta1Href", cta1Href), ("cta2Label", cta2Label), ("cta2Href", cta2Href),
-            ("align", align), ("layout", "default"), ("backgroundVideoUrl", ""), ("posterImageUrl", ""),
-            ("overlayOpacity", "40"), ("splitImageUrl", ""), ("splitImagePosition", "right"))));
+            ("align", align), ("layout", image.Length > 0 ? "split" : "default"), ("backgroundVideoUrl", ""), ("posterImageUrl", ""),
+            ("overlayOpacity", "40"), ("splitImageUrl", image.Length > 0 ? Photos + image : ""), ("splitImagePosition", "right"))));
 
     private static LayoutSection CtaSection(string headline, string body, string buttonLabel, string buttonHref) =>
         Section("Call to action", "accent", "lg", "full", Col(12, Widget("cta-banner",
@@ -271,7 +276,7 @@ public static class CmsPageTemplates
     })));
 
     private static LayoutWidget CaseStudy() => Widget("case-study",
-        ("title", "Rebuilding checkout for a growing retailer"), ("clientName", "Example Co."), ("imageUrl", ""),
+        ("title", "Rebuilding checkout for a growing retailer"), ("clientName", "Example Co."), ("imageUrl", Photos + "portfolio-dashboard.jpg"),
         ("summary", "A slow, confusing checkout was costing sales. We rebuilt it from the ground up in six weeks."),
         ("sectionsJson", Json(new[]
         {

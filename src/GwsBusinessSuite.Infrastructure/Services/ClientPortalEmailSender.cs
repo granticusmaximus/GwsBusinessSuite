@@ -11,7 +11,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // Same shape as GrowthReportEmailOptions/GrowthReportEmailSender - a dedicated SMTP config per
 // feature, matching this codebase's existing convention rather than forcing a shared mailer
 // abstraction that doesn't otherwise exist here.
-public sealed class ClientPortalEmailOptions
+public sealed class ClientPortalEmailOptions : ISmtpTransportOptions
 {
     public const string SectionName = "ClientPortalEmail";
 

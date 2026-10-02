@@ -2462,8 +2462,13 @@ app.MapGet("/go/{placementId:guid}", async (
     return Results.Redirect(destinationUrl, permanent: false);
 }).RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
 
-app.MapGet("/resume", () => Results.Redirect("/about#resume", permanent: true))
-    .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+// "/cv" and "/my-cv" are the other addresses people type for a resume (the seeded menu labels it
+// "My CV") - send them to the same place instead of a 404.
+foreach (var resumeAlias in new[] { "/resume", "/cv", "/my-cv" })
+{
+    app.MapGet(resumeAlias, () => Results.Redirect("/about#resume", permanent: true))
+        .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
+}
 
 app.MapGet("/resume.pdf", (IResumePdfService resumePdfService) =>
         Results.File(resumePdfService.GenerateResumePdf(), "application/pdf", "Grant-Watson-Resume.pdf"))

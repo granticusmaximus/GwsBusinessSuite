@@ -6,7 +6,7 @@ using MimeKit;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-public sealed class GrowthReportEmailOptions
+public sealed class GrowthReportEmailOptions : ISmtpTransportOptions
 {
     public const string SectionName = "GrowthReportEmail";
 

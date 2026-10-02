@@ -206,12 +206,14 @@ public static class DependencyInjection
         services.AddHostedService<SupportTicketSlaBackgroundService>();
         services.AddScoped<GwsBusinessSuite.Application.Support.ISupportTicketCannedResponseService, SupportTicketCannedResponseService>();
         services.AddOptions<BookingEmailOptions>()
-            .Bind(configuration.GetSection(BookingEmailOptions.SectionName));
+            .Bind(configuration.GetSection(BookingEmailOptions.SectionName))
+            .WithSharedSmtpFallback(configuration);
         services.AddSingleton<GwsBusinessSuite.Application.Scheduling.IBookingEmailSender, BookingEmailSender>();
         services.AddScoped<GwsBusinessSuite.Application.Scheduling.IBookingService, BookingService>();
         services.AddScoped<GwsBusinessSuite.Application.Scoring.IDealScoringService, DealScoringService>();
         services.AddOptions<EmailCampaignEmailOptions>()
-            .Bind(configuration.GetSection(EmailCampaignEmailOptions.SectionName));
+            .Bind(configuration.GetSection(EmailCampaignEmailOptions.SectionName))
+            .WithSharedSmtpFallback(configuration);
         services.AddSingleton<GwsBusinessSuite.Application.Campaigns.IEmailCampaignEmailSender, EmailCampaignEmailSender>();
         services.AddScoped<GwsBusinessSuite.Application.Campaigns.IEmailCampaignService, EmailCampaignService>();
         services.AddHostedService<EmailCampaignBackgroundService>();
@@ -252,12 +254,14 @@ public static class DependencyInjection
         services.AddSingleton<IAnalyticsGeoLocationResolver, AnalyticsGeoLocationResolver>();
         services.AddScoped<IGrowthAnalyticsService, GrowthAnalyticsService>();
         services.AddOptions<GrowthReportEmailOptions>()
-            .Bind(configuration.GetSection(GrowthReportEmailOptions.SectionName));
+            .Bind(configuration.GetSection(GrowthReportEmailOptions.SectionName))
+            .WithSharedSmtpFallback(configuration);
         services.AddSingleton<IGrowthReportEmailSender, GrowthReportEmailSender>();
         services.AddOptions<FormNotificationOptions>()
             .Bind(configuration.GetSection(FormNotificationOptions.SectionName));
         services.AddOptions<ClientPortalEmailOptions>()
-            .Bind(configuration.GetSection(ClientPortalEmailOptions.SectionName));
+            .Bind(configuration.GetSection(ClientPortalEmailOptions.SectionName))
+            .WithSharedSmtpFallback(configuration);
         services.AddSingleton<GwsBusinessSuite.Application.ClientPortal.IClientPortalEmailSender, ClientPortalEmailSender>();
         services.AddScoped<GwsBusinessSuite.Application.ClientPortal.IClientPortalAuthService, ClientPortalAuthService>();
         services.AddOptions<OperationalAlertOptions>()

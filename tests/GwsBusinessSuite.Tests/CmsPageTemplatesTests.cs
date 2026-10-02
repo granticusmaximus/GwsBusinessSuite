@@ -57,6 +57,23 @@ public sealed class CmsPageTemplatesTests
     }
 
     [Fact]
+    public void EveryReferencedLocalImage_ExistsInWwwroot()
+    {
+        var wwwroot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../src/GwsBusinessSuite.Web/wwwroot"));
+        var localImages = CmsPageTemplates.All
+            .SelectMany(t => t.Build().Sections)
+            .SelectMany(s => s.Columns).SelectMany(c => c.Widgets)
+            .SelectMany(w => w.Props.Values)
+            .Where(v => v.StartsWith("/img/", StringComparison.Ordinal))
+            .Distinct()
+            .ToList();
+
+        localImages.Should().NotBeEmpty("pre-built pages ship with bundled photos");
+        localImages.Should().AllSatisfy(url =>
+            File.Exists(Path.Combine(wwwroot, url.TrimStart('/'))).Should().BeTrue($"{url} must be bundled in wwwroot"));
+    }
+
+    [Fact]
     public void EachBuild_GetsFreshIds_SoTwoPagesFromOneTemplateNeverShareSectionIds()
     {
         var template = CmsPageTemplates.Find("about")!;

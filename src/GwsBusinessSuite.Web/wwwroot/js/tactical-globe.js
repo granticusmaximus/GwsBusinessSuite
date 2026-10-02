@@ -650,12 +650,16 @@ window.tacticalGlobe = (function () {
     // Used by the coverage index (jump straight to a known-covered region) - reuses the exact
     // Cartesian3.fromDegrees(lon, lat, height) + camera.flyTo shape already established for
     // location search, just parameterized instead of driven by a geocode result.
-    function flyTo(containerId, lat, lon, heightMeters) {
+    // durationSeconds is optional: omitted keeps Cesium's own distance-based animation (every
+    // existing caller); 0 places the camera immediately.
+    function flyTo(containerId, lat, lon, heightMeters, durationSeconds) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
-        entry.viewer.camera.flyTo({
+        const options = {
             destination: Cesium.Cartesian3.fromDegrees(Number(lon), Number(lat), Number(heightMeters))
-        });
+        };
+        if (typeof durationSeconds === 'number') options.duration = durationSeconds;
+        entry.viewer.camera.flyTo(options);
     }
 
     function setRadarVisible(visibleOrContainerId, maybeVisible) {

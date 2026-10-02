@@ -11,7 +11,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 
 // Same shape as BookingEmailOptions/ClientPortalEmailOptions - a dedicated SMTP config per
 // feature, matching this codebase's existing convention.
-public sealed class EmailCampaignEmailOptions
+public sealed class EmailCampaignEmailOptions : ISmtpTransportOptions
 {
     public const string SectionName = "EmailCampaignEmail";
 

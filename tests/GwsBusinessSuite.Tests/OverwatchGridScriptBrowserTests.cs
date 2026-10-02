@@ -927,14 +927,14 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     // Zooms in via real mouse-wheel input (the same gesture a user performs), rather than a
     // direct camera API call - this is what actually exercises setUpHoverIdentify's own height
     // check against the real Cesium camera, not just an assumption about what "zoomed in" means.
+    // Places the camera at 1.5 km (below the 5 km hover threshold) instantly via flyTo's
+    // zero-duration form. This used to simulate 50 wheel-zoom steps, which was flaky: headless
+    // Chromium renders Cesium in software, and when its main thread was busy the wheel events
+    // weren't processed - the view stayed at whole-globe and a later wheel call hung 30s.
     private static async Task ZoomInBelowHoverThresholdAsync(IPage page)
     {
+        await page.EvaluateAsync("() => window.tacticalGlobe.flyTo('tg-viewport', 38.8977, -77.0365, 1500, 0)");
         await page.Mouse.MoveAsync(400, 300);
-        for (var i = 0; i < 50; i++)
-        {
-            await page.Mouse.WheelAsync(0, -300);
-            await page.WaitForTimeoutAsync(100);
-        }
     }
 
     [Fact]
