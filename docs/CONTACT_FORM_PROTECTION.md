@@ -11,15 +11,16 @@ bypass it.
    The free plan is sufficient; changing DNS or moving hosting is unnecessary.
 2. Add `grantwatson.dev` and `www.grantwatson.dev` as allowed hostnames. Add
    `admin.gwsapp.net` if you want to submit from the CMS preview.
-3. Set these environment variables in the web application's deployment configuration:
+3. The widget is created (2026-10-03) and its **public site key**
+   (`0x4AAAAAAFM91g1Lw0-PZtBZ`) is already set in `appsettings.json`. Add only the secret to
+   the droplet's `.env` (outside source control):
 
    ```text
-   Turnstile__SiteKey=<public site key>
-   Turnstile__SecretKey=<private secret key>
+   Turnstile__SecretKey=<private secret key from the widget's settings>
    ```
 
-   Store the secret in the hosting provider's secret store, outside source control.
-   `Turnstile:AllowedHostnames` already contains the three hostnames above.
+   `Turnstile:AllowedHostnames` already contains the three hostnames above. If you ever rotate
+   the widget, override the site key with `Turnstile__SiteKey` in `.env` too.
 4. Restart the application when deploying the configuration and code together.
 
 **Without valid keys, the Contact form does not accept submissions.** A missing

@@ -26,8 +26,9 @@ services:
       # no SMTP at all, mail goes via the Google account connected under Automation > Credentials.
       # Admin > Settings > Email shows the live route and sends a test.
       # The grantwatson.dev /contact form refuses ALL submissions until Cloudflare Turnstile keys
-      # are set (docs/CONTACT_FORM_PROTECTION.md). Put them in .env as Turnstile__SiteKey and
-      # Turnstile__SecretKey - not here: an empty-default entry here would override .env.
+      # are set (docs/CONTACT_FORM_PROTECTION.md). The public site key ships in appsettings.json;
+      # put the secret in .env as Turnstile__SecretKey - not here: an empty-default entry here
+      # would override .env.
       # Optional live internet research for SentinelGPT. Keep the actual key in the
       # gitignored .env file as OLLAMA_WEB_API_KEY, never in this Compose file.
       OllamaWeb__ApiKey: ${OLLAMA_WEB_API_KEY:-}
