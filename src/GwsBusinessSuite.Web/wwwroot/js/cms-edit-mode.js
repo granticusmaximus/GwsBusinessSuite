@@ -429,13 +429,31 @@
       bar.appendChild(button);
     });
 
-    var previousPosition = window.getComputedStyle(widgetEl).position;
-    if (previousPosition === 'static') widgetEl.style.position = 'relative';
-    bar.style.top = '0px';
-    bar.style.right = '0px';
-    widgetEl.appendChild(bar);
+    // Lives on <body>, not inside the widget: inside, any ancestor that makes its own stacking
+    // context (animated blocks, section backgrounds) or clips overflow could put a neighbouring
+    // block on top of these buttons - visible, but every click landing on something else.
+    document.body.appendChild(bar);
+    bar._gwsAnchor = widgetEl;
     widgetToolbar = bar;
+    positionWidgetToolbar();
   }
+
+  // Above the block's top-right corner when there's room, otherwise just inside it.
+  function positionWidgetToolbar() {
+    var bar = widgetToolbar;
+    if (!bar || !bar._gwsAnchor || !bar._gwsAnchor.isConnected) return;
+    var rect = bar._gwsAnchor.getBoundingClientRect();
+    var height = bar.offsetHeight;
+    var top = rect.top - height;
+    if (top < 0) top = Math.max(0, Math.min(rect.top, window.innerHeight - height)) + (rect.top >= 0 ? 4 : 0);
+    // Clamp into the viewport: a block wider than the canvas would otherwise push it off-screen.
+    var left = Math.max(4, Math.min(rect.right, window.innerWidth - 4) - bar.offsetWidth);
+    bar.style.top = (top + window.scrollY) + 'px';
+    bar.style.left = (left + window.scrollX) + 'px';
+  }
+
+  window.addEventListener('scroll', positionWidgetToolbar, true);
+  window.addEventListener('resize', positionWidgetToolbar);
 
   var sectionToolbar = null;
 
@@ -599,6 +617,19 @@
   // Single-line fields (heading/paragraph/button label/hero headline+CTAs) commit
   // on Enter instead of inserting a line break, matching how a normal text input
   // behaves - blur() below is what actually sends the edit (see the blur listener).
+  // Delete / Backspace removes the selected block - a second way in besides the toolbar. Never
+  // while typing: inline-editable text, form fields and anything contenteditable keep the key.
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    var t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    var selected = document.querySelector('.gws-editor-selected[data-gws-widget-id]');
+    if (!selected) return;
+    e.preventDefault();
+    var sectionEl = selected.closest('[data-gws-section-id]');
+    send({ type: 'cms:widget-command', sectionId: sectionEl ? sectionEl.getAttribute('data-gws-section-id') : '', widgetId: selected.getAttribute('data-gws-widget-id'), command: 'delete' });
+  });
+
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') {
       var active = e.target.closest && e.target.closest('[data-gws-inline-prop]');

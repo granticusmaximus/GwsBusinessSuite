@@ -4473,6 +4473,14 @@ else
         _deletedNotice = $"Deleted the {GetWidgetTypeLabel(widget.WidgetType)} block.";
     }
 
+    [JSInvokable]
+    public Task DeleteSelectedWidgetFromKeyboard()
+    {
+        DeleteSelectedWidget();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
     private void DeleteSelectedWidget()
     {
         if (string.IsNullOrEmpty(_selectedWidgetId)) return;

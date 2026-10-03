@@ -234,6 +234,12 @@ also has up/down move buttons, a **Dup** (duplicate) button, and delete, for whi
 widget/section is currently selected. Sections themselves reorder the same way (drag their header
 in the Layers tree, or use the up/down arrows in the Section Settings panel).
 
+On the canvas itself, hovering a block shows a blue **⋮** handle at its top-left - press and drag
+it to move the block (a plain click just selects it). Selecting a block shows a small dark menu at
+its top-right with **Duplicate**, **↑**/**↓** and **Delete**. A selected block can also be removed
+with the **Delete** or **Backspace** key (ignored while you're typing in text or a field), and the
+block's settings have a **Delete** button at the top. Ctrl/Cmd+Z undoes a delete.
+
 Every structural change (add/move/delete/reorder, a new section, a column layout change)
 autosaves and refreshes the live preview automatically — there's no separate "apply" step.
 

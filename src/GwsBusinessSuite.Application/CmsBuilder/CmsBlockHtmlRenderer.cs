@@ -285,13 +285,11 @@ public static class CmsBlockHtmlRenderer
           .gws-section-toolbar button.is-primary { background: #2563eb; color: #fff; font-weight: 600; }
           .gws-section-toolbar button.is-primary:hover { background: #1d4ed8; }
           .gws-section-toolbar button.is-danger:hover { background: #b91c1c; color: #fff; }
-          /* Same anchoring trick as .gws-section-toolbar, retargeted to the widget itself
-             (.gws-editable is already position:relative). Floats above the widget's own top
-             edge via translateY(-100%), so it never collides with .gws-drag-handle (top-left,
-             inside the widget) or .gws-visibility-hint (top-right, inside the widget). */
+          /* Appended to <body> and positioned by cms-edit-mode.js (positionWidgetToolbar) at the
+             selected block's top-right, so no block's stacking context or overflow clipping
+             can cover it. */
           .gws-widget-toolbar {
             position: absolute; z-index: 2147483000; display: flex; gap: 2px;
-            transform: translateY(-100%);
             background: #1e293b; border-radius: 8px 8px 0 0; padding: 4px;
             box-shadow: 0 6px 18px rgba(15, 23, 42, 0.28);
             font-family: system-ui, -apple-system, "Segoe UI", sans-serif;

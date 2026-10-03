@@ -113,6 +113,15 @@ window.gwsCmsBuilderBridge = (function () {
     function handleKeydown(e) {
         if (!_dotNetRef || isEditableFocus()) return;
         var mod = e.ctrlKey || e.metaKey;
+        // Delete/Backspace removes the selected block when focus is on the editor page rather
+        // than inside the canvas (e.g. after clicking a block's drag handle, which never focuses
+        // the canvas). Inside the canvas, cms-edit-mode.js handles the same keys. Not while a
+        // dialog is open.
+        if (!mod && (e.key === 'Delete' || e.key === 'Backspace') && !document.querySelector('.modal.d-block')) {
+            e.preventDefault();
+            _dotNetRef.invokeMethodAsync('DeleteSelectedWidgetFromKeyboard');
+            return;
+        }
         if (!mod) return;
         if (e.key === 'z' && !e.shiftKey) {
             e.preventDefault();
