@@ -10,10 +10,10 @@ namespace GwsBusinessSuite.Tests;
 public sealed class AdminFeaturesTests
 {
     [Fact]
-    public void Parse_ShouldApplyDefaults_WhenNeverConfigured()
+    public void Parse_ShouldShowEverything_WhenNeverConfigured()
     {
-        AdminFeatures.Parse(null).Should().BeEquivalentTo(AdminFeatures.DefaultHiddenKeys);
-        AdminFeatures.Parse(null).Should().NotBeEmpty();
+        // Every admin area is in the menu unless someone deliberately hides it.
+        AdminFeatures.Parse(null).Should().BeEmpty();
     }
 
     [Fact]

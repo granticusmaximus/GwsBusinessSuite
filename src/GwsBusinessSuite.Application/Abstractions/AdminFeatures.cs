@@ -4,10 +4,8 @@ public sealed record AdminFeature(string Key, string DisplayName, string Group, 
 
 // The admin areas that can be hidden from navigation, and why each is a candidate.
 //
-// "Hidden by default" here means: production has never held a single row for that feature. That
-// is an observation about adoption, not a judgement about worth - each one is complete, tested
-// code that works the moment it is switched back on. The cost being addressed is not disk or
-// compute, it is that 57 admin destinations make the twelve in daily use harder to find.
+// Each was a candidate because production had no data in it when this was added - an observation
+// about adoption, not worth. Nothing is hidden unless chosen in Settings (see DefaultHiddenKeys).
 //
 // Deliberately excluded from this list: anything whose emptiness is healthy (security incidents,
 // privacy requests), and every sub-feature of an area that IS used - Wiki revisions, CMS
@@ -28,11 +26,9 @@ public static class AdminFeatures
         new("email-campaigns", "Email Campaigns", "Relationships", "No campaign has ever been created."),
     ];
 
-    // Everything above starts hidden: each is empty in production today, and the whole point is
-    // that the navigation reflects what is actually used. Anything hidden in error is one
-    // checkbox away in Settings, which is why this is safe to default on.
-    public static IReadOnlyList<string> DefaultHiddenKeys =>
-        [.. All.Select(feature => feature.Key)];
+    // Nothing is hidden by default (changed 2026-10-03 at Grant's request - every area should be
+    // in the menu). Hiding is purely opt-in from Settings > General > Navigation.
+    public static IReadOnlyList<string> DefaultHiddenKeys => [];
 
     public static bool IsHidden(string? hiddenNavKeys, string key) =>
         Parse(hiddenNavKeys).Contains(key, StringComparer.OrdinalIgnoreCase);
