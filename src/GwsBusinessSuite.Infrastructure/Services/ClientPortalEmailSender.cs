@@ -1,7 +1,5 @@
 using System.Net;
 using GwsBusinessSuite.Application.ClientPortal;
-using MailKit.Net.Smtp;
-using MailKit.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MimeKit;
@@ -27,9 +25,11 @@ public sealed class ClientPortalEmailOptions : ISmtpTransportOptions
 
 public sealed class ClientPortalEmailSender(
     IOptions<ClientPortalEmailOptions> configuredOptions,
-    ILogger<ClientPortalEmailSender> logger) : IClientPortalEmailSender
+    ILogger<ClientPortalEmailSender> logger,
+    IMailTransport? mailTransport = null) : IClientPortalEmailSender
 {
     private readonly ClientPortalEmailOptions options = configuredOptions.Value;
+    private readonly IMailTransport mail = mailTransport ?? MailTransport.SmtpOnly;
 
     public async Task SendLoginLinkAsync(string toEmail, string contactName, string loginUrl, CancellationToken cancellationToken = default)
     {
@@ -58,27 +58,14 @@ public sealed class ClientPortalEmailSender(
             HtmlBody = $"<p>Hi {WebUtility.HtmlEncode(contactName)},</p><p>Use the link below to sign in to your client portal. It expires in 15 minutes and can only be used once.</p><p><a href=\"{WebUtility.HtmlEncode(loginUrl)}\">Sign in to the client portal</a></p><p>If you didn't request this, you can ignore this email.</p>"
         }.ToMessageBody();
 
-        if (!string.IsNullOrWhiteSpace(options.PickupDirectory))
+        var route = mail.Describe(options);
+        if (!route.CanSend)
         {
-            Directory.CreateDirectory(options.PickupDirectory);
-            var path = Path.Combine(options.PickupDirectory, $"client-portal-login-{Guid.NewGuid():N}.eml");
-            await message.WriteToAsync(path, cancellationToken);
+            logger.LogError("Client portal email not sent to {Email}: no email delivery is configured ({Route}).", toEmail, route.Description);
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(options.Host))
-        {
-            logger.LogError("Client portal login email not sent to {Email}: ClientPortalEmail:Host is not configured.", toEmail);
-            return;
-        }
-
-        TryGetSecurity(options.Security, out var security);
-        using var client = new SmtpClient();
-        await client.ConnectAsync(options.Host.Trim(), options.Port, security, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(options.Username))
-            await client.AuthenticateAsync(options.Username, options.Password, cancellationToken);
-        await client.SendAsync(message, cancellationToken);
-        await client.DisconnectAsync(true, cancellationToken);
+        await mail.SendAsync(message, options, "client-portal-login", cancellationToken);
     }
 
     public async Task SendTicketReplyNotificationAsync(
@@ -105,39 +92,13 @@ public sealed class ClientPortalEmailSender(
             HtmlBody = $"<p>Hi {WebUtility.HtmlEncode(contactName)},</p><p>There's a new reply on your support ticket <strong>{WebUtility.HtmlEncode(ticketSubject)}</strong>.</p><p><a href=\"{WebUtility.HtmlEncode(portalUrl)}\">View it in the client portal</a></p>"
         }.ToMessageBody();
 
-        if (!string.IsNullOrWhiteSpace(options.PickupDirectory))
+        var route = mail.Describe(options);
+        if (!route.CanSend)
         {
-            Directory.CreateDirectory(options.PickupDirectory);
-            var path = Path.Combine(options.PickupDirectory, $"ticket-reply-{Guid.NewGuid():N}.eml");
-            await message.WriteToAsync(path, cancellationToken);
+            logger.LogError("Client portal email not sent to {Email}: no email delivery is configured ({Route}).", toEmail, route.Description);
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(options.Host))
-        {
-            logger.LogError("Ticket reply notification not sent to {Email}: ClientPortalEmail:Host is not configured.", toEmail);
-            return;
-        }
-
-        TryGetSecurity(options.Security, out var security);
-        using var client = new SmtpClient();
-        await client.ConnectAsync(options.Host.Trim(), options.Port, security, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(options.Username))
-            await client.AuthenticateAsync(options.Username, options.Password, cancellationToken);
-        await client.SendAsync(message, cancellationToken);
-        await client.DisconnectAsync(true, cancellationToken);
-    }
-
-    private static bool TryGetSecurity(string value, out SecureSocketOptions security)
-    {
-        security = value.Trim().ToLowerInvariant() switch
-        {
-            "auto" => SecureSocketOptions.Auto,
-            "starttls" => SecureSocketOptions.StartTls,
-            "sslonconnect" => SecureSocketOptions.SslOnConnect,
-            "none" => SecureSocketOptions.None,
-            _ => (SecureSocketOptions)(-1)
-        };
-        return (int)security >= 0;
+        await mail.SendAsync(message, options, "ticket-reply", cancellationToken);
     }
 }

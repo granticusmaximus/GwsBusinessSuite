@@ -65,6 +65,7 @@ public sealed class PageRevisionService(IAppDbContext dbContext) : IPageRevision
     public async Task<CmsPage> RestoreAsync(Guid pageId, Guid revisionId, CancellationToken cancellationToken = default)
     {
         var page = await dbContext.CmsPages
+            .IgnoreQueryFilters()
             .FirstOrDefaultAsync(p => p.Id == pageId, cancellationToken)
             ?? throw new InvalidOperationException("The page no longer exists.");
 

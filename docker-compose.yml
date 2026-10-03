@@ -22,7 +22,9 @@ services:
       # portal) all fall back to ONE shared SMTP section - set it once in the gitignored .env:
       #   Smtp__Host=smtp.yourprovider.com   Smtp__Port=587   Smtp__Security=StartTls
       #   Smtp__Username=...   Smtp__Password=...   Smtp__FromAddress=noreply@grantwatson.dev
-      # A feature's own section (e.g. GrowthReportEmail__Host) still overrides it when set.
+      # A feature's own section (e.g. GrowthReportEmail__Host) still overrides it when set; with
+      # no SMTP at all, mail goes via the Google account connected under Automation > Credentials.
+      # Admin > Settings > Email shows the live route and sends a test.
       # The grantwatson.dev /contact form refuses ALL submissions until Cloudflare Turnstile keys
       # are set (docs/CONTACT_FORM_PROTECTION.md). Put them in .env as Turnstile__SiteKey and
       # Turnstile__SecretKey - not here: an empty-default entry here would override .env.

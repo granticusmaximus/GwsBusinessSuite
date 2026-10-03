@@ -1,5 +1,10 @@
 # Sentinel: Notion-class connected workspace
 
+> **2026-10-03:** the live Notion connection (OAuth/token setup, sync job, webhooks, page/row/schema
+> write-back, conflict review) was removed at Grant's request. Notion content now comes in only
+> through the export-ZIP import in the Templates panel. Sections below describing the connector
+> are historical.
+
 This document tracks broader capability parity and intentional limitations. The bounded
 Sentinel v1 feature score lives in `SENTINEL_REBUILD.md`; current whole-suite production
 readiness and required evidence live in `RELEASE_READINESS.md`.

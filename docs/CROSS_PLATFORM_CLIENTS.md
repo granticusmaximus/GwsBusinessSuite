@@ -206,10 +206,8 @@ plain local chat rather than to a model describing lookups it cannot perform.
 `GwsBusinessSuite.App` MAUI shell) - a persistent `NSStatusItem` with no Dock icon or window
 (`LSUIElement` in `Info.plist`). It holds no credentials and owns no data: every menu action
 opens the system browser at the already-authenticated hosted app, the same source of truth every
-other client uses. "Open Sentinel" and "Open Dashboard" are plain deep links; "Refresh Workspace
-Data" opens Sentinel with `?syncNow=1`, which `Wiki.razor` recognizes to trigger the same manual
-Notion sync the in-app "Sync now" button calls - no separate authenticated API was added for the
-native client. The status-bar glyph is a placeholder SF Symbol pending a dedicated Sentinel logo.
+other client uses. "Open Sentinel" and "Open Dashboard" are plain deep links (the former
+"Refresh Workspace Data" item went away with the Notion connection on 2026-10-03). The status-bar glyph is a placeholder SF Symbol pending a dedicated Sentinel logo.
 
 Build from macOS (requires the `macos` workload: `dotnet workload install macos`):
 

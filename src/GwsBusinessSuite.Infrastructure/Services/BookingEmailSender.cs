@@ -1,7 +1,5 @@
 using System.Net;
 using GwsBusinessSuite.Application.Scheduling;
-using MailKit.Net.Smtp;
-using MailKit.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using MimeKit;
@@ -29,9 +27,11 @@ public sealed class BookingEmailOptions : ISmtpTransportOptions
 
 public sealed class BookingEmailSender(
     IOptions<BookingEmailOptions> configuredOptions,
-    ILogger<BookingEmailSender> logger) : IBookingEmailSender
+    ILogger<BookingEmailSender> logger,
+    IMailTransport? mailTransport = null) : IBookingEmailSender
 {
     private readonly BookingEmailOptions options = configuredOptions.Value;
+    private readonly IMailTransport mail = mailTransport ?? MailTransport.SmtpOnly;
 
     public async Task SendConfirmationAsync(
         string attendeeEmail, string attendeeName, string bookingTypeTitle, DateTimeOffset startsAtUtc, string manageUrl,
@@ -81,39 +81,13 @@ public sealed class BookingEmailSender(
         message.Subject = subject;
         message.Body = new BodyBuilder { TextBody = textBody, HtmlBody = htmlBody }.ToMessageBody();
 
-        if (!string.IsNullOrWhiteSpace(options.PickupDirectory))
+        var route = mail.Describe(options);
+        if (!route.CanSend)
         {
-            Directory.CreateDirectory(options.PickupDirectory);
-            var path = Path.Combine(options.PickupDirectory, $"{filePrefix}-{Guid.NewGuid():N}.eml");
-            await message.WriteToAsync(path, cancellationToken);
+            logger.LogError("Booking email not sent to {Email}: no email delivery is configured ({Route}).", toEmail, route.Description);
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(options.Host))
-        {
-            logger.LogError("Booking email not sent to {Email}: BookingEmail:Host is not configured.", toEmail);
-            return;
-        }
-
-        TryGetSecurity(options.Security, out var security);
-        using var client = new SmtpClient();
-        await client.ConnectAsync(options.Host.Trim(), options.Port, security, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(options.Username))
-            await client.AuthenticateAsync(options.Username, options.Password, cancellationToken);
-        await client.SendAsync(message, cancellationToken);
-        await client.DisconnectAsync(true, cancellationToken);
-    }
-
-    private static bool TryGetSecurity(string value, out SecureSocketOptions security)
-    {
-        security = value.Trim().ToLowerInvariant() switch
-        {
-            "auto" => SecureSocketOptions.Auto,
-            "starttls" => SecureSocketOptions.StartTls,
-            "sslonconnect" => SecureSocketOptions.SslOnConnect,
-            "none" => SecureSocketOptions.None,
-            _ => (SecureSocketOptions)(-1)
-        };
-        return (int)security >= 0;
+        await mail.SendAsync(message, options, filePrefix, cancellationToken);
     }
 }

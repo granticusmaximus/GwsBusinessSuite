@@ -331,7 +331,7 @@ downloaded — is written into the Security Audit ledger under the `SecurityOper
 
 ## Settings
 
-`/admin/settings` is site-wide configuration, organized into six tabs down the left side.
+`/admin/settings` is site-wide configuration, organized into seven tabs down the left side.
 
 - **General** — site name and site slug for the CMS site matching this deployment's configured
   slug. A note warns that changing the slug affects any URLs or references built from it.
@@ -340,6 +340,15 @@ downloaded — is written into the Security Audit ledger under the `SecurityOper
   posts are untouched.
 - **Media** — max upload size in MB (1–100), applied to hero images and the media library, for
   future uploads only.
+- **Email** — which route each email feature (form/support notifications and Growth reports,
+  campaigns and new-article alerts, bookings, client portal sign-in links) will actually send
+  through, its From address, and a **Send test** box. The route is the first one that's set up:
+  the shared `Smtp__*` settings in `.env`; failing that, any feature's own section that names a
+  server (e.g. `GrowthReportEmail__Host`), lent to every feature; failing that, the Google account
+  connected under Automation > Credentials (sent via the Gmail API). **Not set up** means mail is
+  being skipped. The same summary is written to the log at startup (search for
+  `Email delivery for`). Sending through Gmail keeps a From like `grant@gwsapp.net` only if that
+  address is verified in Gmail's *Settings > Accounts > Send mail as*.
 - **SentinelGPT** — an Ollama model override and a generation timeout override (both blank =
   server default), a hero image generation model (feeds Content Studio's "Generate with
   SentinelGPT" button; local image generation is experimental and macOS-only today, and leaving

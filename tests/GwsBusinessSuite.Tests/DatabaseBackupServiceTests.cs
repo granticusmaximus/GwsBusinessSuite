@@ -127,7 +127,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
             await db.Database.MigrateAsync();
             db.AppUsers.Add(new AppUser { Username = "admin", Role = AppRoles.Admin, IsActive = true, MfaEnabled = true, PasswordHash = "hash" });
             db.WikiPages.Add(new WikiPage { Title = "Recovered page", Slug = "recovered-page" });
-            db.NotionConnectorSettings.Add(new NotionConnectorSettings { Id = NotionConnectorSettings.WellKnownId, IntegrationToken = protector.Protect("test-token") });
+            db.AutomationCredentials.Add(new AutomationCredential { Name = "Test", TypeKey = "apiKey", ProtectedData = protector.Protect("test-token") });
             await db.SaveChangesAsync();
         }
 

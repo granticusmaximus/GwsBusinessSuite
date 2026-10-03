@@ -14,7 +14,7 @@ The release includes:
 
 - the admin portal, authentication, public CMS sites, Content Studio, CRM, CJ operations,
   intelligence, Live Show, and deployment/health surfaces;
-- Sentinel's versioned Notion-class v1 contract and its guarded Notion connector;
+- Sentinel's versioned Notion-class v1 contract (the live Notion connector was removed 2026-10-03);
 - SentinelGPT as a private, grounded GWS assistant with governed server-side actions;
 - Growth Studio's first-party analytics and governed social-publishing release scope;
 - durable Workflow Automation for approved GWS and HTTP integrations;
@@ -85,7 +85,6 @@ manual entries with generated evidence where practical.
 | Production liveness/readiness | P0 | `https://admin.gwsapp.net/health/live` and `/health/ready` returned 200 on 2026-08-11 | Pass |
 | Backup plus Data Protection key restore | P0 | Encrypted authenticated archive, manifest, database/key/recording restore, migration, integrity, MFA, Sentinel, audit-chain, restored-secret, and tamper tests; deployment run [32528155116](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32528155116) created and verified a fresh production archive on the droplet on 2026-08-21 | Automated production create/verify pass; manual isolated-container browser verification, off-host backup confirmation, and external key escrow evidence still required |
 | Deployment rollback | P0 | Rehearsal run [32538261980](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32538261980) verified a fresh encrypted backup, healthy `4092afc`, rollback to distinct runtime commit `50da93e`, preserved data volume, and real rollback readiness; run [32539176876](https://github.com/granticusmaximus/GwsBusinessSuite/actions/runs/32539176876) restored `4092afc` and passed internal plus external checks on 2026-08-22 | Production-topology pass |
-| Real Notion sync and guarded write-back | P1 | Requires controlled workspace acceptance run | Not run |
 | Real social publish success/failure | P1 | Requires controlled platform destinations | Not run |
 | Live TURN relay from restricted network | P1 | Requires deployed network acceptance run | Not run |
 | Signed/notarized macOS install | P1 | Requires release identity and clean-machine install | Not run |
@@ -162,28 +161,9 @@ and name what isn't - "partially covered" everywhere, nothing here clears the ba
   page), and row history have real Automated/unit coverage (WikiDatabaseServiceTests.cs) but zero
   Browser evidence - this bullet explicitly asks for "in browser tests," which unit coverage
   doesn't satisfy. Relation-cell editing has no interactive UI yet (renders read-only). -->
-- [ ] OAuth and manual-token connection paths work without accepting Notion credentials.
-  <!-- FULLY COVERED at the Automated tier: NotionOAuthServiceTests.cs (authorize/exchange/refresh/
-  disconnect) and NotionSyncServiceTests.cs (manual-token save/validate/replace). No UI path
-  anywhere solicits a Notion username/password. No Browser evidence for the connect-button flow,
-  but the bullet doesn't explicitly require it - closest to checkable of any bullet in this
-  section, held back only by the section's shared lack of Browser coverage elsewhere. -->
-- [ ] Discovery, selective sync, stable unchanged counts, imported blocks/files, covers/icons,
-  typed properties, conflicts, archival, webhook refresh, and ZIP fallback pass against a
-  controlled Notion workspace.
-  <!-- STRUCTURALLY EXTERNAL - needs a real Notion workspace, tracked in
-  docs/RELEASE_RUNBOOK_REMAINING.md. Every named sub-behavior already has extensive Automated
-  (mocked-API) coverage in NotionSyncServiceTests.cs/NotionWebhookServiceTests.cs/
-  SentinelWorkspaceImportServiceTests.cs, so this is ready to run the moment real credentials are
-  available - not a code gap, a credentials gap. -->
-- [ ] Explicit page/row write-back is authorized, confirmed, idempotent, and audited.
-  <!-- Only "authorized" (SyncDirection/AllowTwoWayWrites gating) has test evidence
-  (NotionSyncServiceTests.cs PushDatabaseRowAsync/PushDatabaseSchemaAsync tests). "Confirmed,"
-  "idempotent," and "audited" are all NOT COVERED - no confirmation dialog wraps the one UI
-  caller (Wiki.razor's PushPageAsync), no test exercises a repeat push for idempotency, and
-  neither push method writes to SecurityAuditService. Distinct gap from the SentinelGPT
-  propose_set_database_row_property tool below, which does have all four properties. -->
-
+- Notion connection, sync, webhook and write-back checks: no longer applicable - the live Notion
+  connection was removed on 2026-10-03 (export-ZIP import remains, covered by
+  SentinelWorkspaceImportServiceTests.cs).
 ### SentinelGPT
 
 <!-- 2026-08-12 evidence audit: no test anywhere loads SentinelGpt.razor - every UI-facing claim

@@ -48,7 +48,7 @@ Open governance questions to resolve before handling ePHI in production:
 | Custom account service | Password hashing, account lockout, roles, activation, password reset | `src/GwsBusinessSuite.Infrastructure/Services/UserManagementService.cs`; `src/GwsBusinessSuite.Domain/Entities/CoreEntities.cs` (`AppUser`) |
 | SQLite/EF Core | Primary private and public content, user, integration, analytics, workflow, and audit-adjacent records | `src/GwsBusinessSuite.Infrastructure/Data/ApplicationDbContext.cs` |
 | Data Protection/secret protector | Encrypts connector and infrastructure credentials at rest and protects OAuth state | `src/GwsBusinessSuite.Infrastructure/Services/DataProtectionSecretProtector.cs`; `src/GwsBusinessSuite.Web/Program.cs` |
-| Sentinel/Notion | Imports workspace pages, databases, blocks, attachments, OAuth/webhook data | `src/GwsBusinessSuite.Infrastructure/Services/NotionSyncService.cs`; `/api/integrations/notion/webhook` in `Program.cs` |
+| Sentinel/Notion export import | Imports uploaded Notion export ZIPs (pages, databases, blocks, attachments); the live Notion connection was removed 2026-10-03 | `src/GwsBusinessSuite.Infrastructure/Services/SentinelWorkspaceImportService.cs` |
 | SentinelGPT/Ollama | Sends workspace-derived context to local models and optionally sends research requests to the configured web provider | `src/GwsBusinessSuite.Infrastructure/Services/SentinelGptService.cs`; `OllamaWebSearchService.cs` |
 | Automation/infrastructure tools | Makes outbound HTTP requests and can access Docker/SSH/DigitalOcean operations | `AutomationHttpClient.cs`; `DockerHealthService.cs`; `SshTerminalService.cs`; `DigitalOceanService.cs` |
 | Public site/analytics | Serves CMS/blog/media and ingests public events, comments, and forms | Public endpoint mappings in `src/GwsBusinessSuite.Web/Program.cs` |
@@ -122,7 +122,7 @@ Not assumed:
 | Blazor Server circuit/admin APIs | Authenticated | Fallback admin policy, named role policies, antiforgery, mutation limits | Broken authorization, CSRF, long-lived/stolen sessions |
 | Public CMS/blog/media APIs | Anonymous | Host constraints on many routes, read limits, output encoding/rendering | Accidental private publication, stored XSS, scraping/DoS |
 | Forms/comments/analytics/hooks | Anonymous | Write limits, validation, tokenized hook | Spam, forged events, personal-data overcollection |
-| Notion OAuth/webhook/sync/import | External provider/untrusted content | Protected OAuth state, encrypted token, webhook verification, mapping/limits | Token theft, malicious content/archive, excessive import |
+| Notion export ZIP import | Authenticated upload of untrusted content | Archive size/entry limits, mapping limits | Malicious content/archive, excessive import |
 | SentinelGPT and web research | Authenticated plus external content | Local model, explicit web setting, result bounds, HTTPS URL checks | Confidential prompt/query egress, prompt injection, false action claims |
 | Automation HTTP | Authenticated/admin-configured | Scheme validation, DNS resolution, private/reserved address denial, 5 MB response cap | DNS rebinding/redirect SSRF, credential exfiltration |
 | Uploads/ZIP/media/recording | Authenticated or selected public reads | Size/type checks in services/components, IDs rather than raw paths | Parser abuse, decompression/space exhaustion, active content |

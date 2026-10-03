@@ -227,6 +227,7 @@ public sealed class CmsBuilderService(
         }
 
         var pages = await dbContext.CmsPages
+            .IgnoreQueryFilters()
             .Where(page => page.SiteId == siteId)
             .ToListAsync(cancellationToken);
 
@@ -323,7 +324,9 @@ public sealed class CmsBuilderService(
 
     public async Task<CmsPage?> GetPageAsync(Guid pageId, CancellationToken cancellationToken = default)
     {
+        // Includes header/footer regions - the editor opens them by id like any page.
         return await dbContext.CmsPages
+            .IgnoreQueryFilters()
             .AsNoTracking()
             .FirstOrDefaultAsync(page => page.Id == pageId, cancellationToken);
     }
@@ -421,8 +424,13 @@ public sealed class CmsBuilderService(
         var now = _timeProvider.GetUtcNow();
         var effectiveActor = string.IsNullOrWhiteSpace(actor) ? "cms-ui" : actor;
         var page = editor.PageId is { } pageId
-            ? await dbContext.CmsPages.FirstOrDefaultAsync(item => item.Id == pageId, cancellationToken)
+            ? await dbContext.CmsPages.IgnoreQueryFilters().FirstOrDefaultAsync(item => item.Id == pageId, cancellationToken)
             : null;
+        // A header/footer region keeps its reserved slug and never gets a parent.
+        if (page?.Region is not null)
+        {
+            editor.ParentPageId = null;
+        }
 
         var isNew = page is null;
         var previousStatus = page?.Status;
@@ -459,7 +467,9 @@ public sealed class CmsBuilderService(
         var requestedSlug = string.IsNullOrWhiteSpace(editor.Slug)
             ? CreateSlug(editor.Title)
             : CreateSlug(editor.Slug);
-        var uniqueSlug = await GetUniquePageSlugAsync(siteId, editor.ParentPageId, requestedSlug, page.Id, cancellationToken);
+        var uniqueSlug = page.Region is not null
+            ? CmsPageRegions.SlugFor(page.Region)
+            : await GetUniquePageSlugAsync(siteId, editor.ParentPageId, requestedSlug, page.Id, cancellationToken);
 
         var requestedStatus = editor.Status == CmsPageStatuses.Published ? CmsPageStatuses.Published : CmsPageStatuses.Draft;
 
@@ -1074,6 +1084,7 @@ public sealed class CmsBuilderService(
     {
         var baseSlug = string.IsNullOrWhiteSpace(requestedSlug) ? "cms-page" : requestedSlug;
         var slugs = await dbContext.CmsPages
+            .IgnoreQueryFilters()
             .Where(page => page.SiteId == siteId && page.ParentPageId == parentPageId && page.Id != currentPageId)
             .Select(page => page.Slug)
             .ToListAsync(cancellationToken);

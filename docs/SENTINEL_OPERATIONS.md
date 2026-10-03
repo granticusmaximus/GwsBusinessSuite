@@ -62,7 +62,7 @@ The rehearsal creates a fresh online backup, authenticates and decrypts it only 
 container's temporary directory, verifies every manifest hash, applies pending migrations to
 the isolated copy, runs `PRAGMA integrity_check`, validates the security-audit hash chain,
 requires MFA on every active administrator, confirms Sentinel pages remain readable, and
-unprotects configured Notion/social/workflow credentials using the restored key ring. It then
+unprotects configured social/workflow credentials using the restored key ring. It then
 removes the plaintext archive and restored directory. Output contains counts and status only,
 not credentials or private content.
 
@@ -71,7 +71,7 @@ container: confirm `/health/ready`, sign in with MFA, open Sentinel, and test on
 without saving a mutation. Only then may a backup replace production data.
 
 Never restore the database without its matching Data Protection key ring. Doing so preserves
-content but makes encrypted Notion credentials unreadable.
+content but makes encrypted credentials unreadable.
 
 ## Production database-copy migration rehearsal
 
@@ -120,18 +120,6 @@ any request already executing or queued inside Ollama. They do not measure retri
 assembly. Use the SentinelGPT panel's per-request performance display when diagnosing those
 additional layers.
 
-## Notion connection webhook
-
-Open Sentinel's Notion connection panel, copy the HTTPS webhook URL into the connection's
-Webhooks tab in Notion, and subscribe to page, data-source, view, and comment events. Notion
-sends a one-time verification token; refresh the panel and paste that token into Notion.
-Subsequent requests are authenticated with HMAC-SHA256 over the exact request body, deduplicated
-by event ID, and dispatch a server-owned incremental sync.
-
-Verification is intentionally one-time so an anonymous request cannot replace an established
-signing secret. Use **Replace webhook subscription** in Sentinel before deleting and recreating
-the subscription in Notion.
-
 ## Incident checks
 
 - Process unavailable: check `/health/live`, then container logs.
@@ -139,7 +127,3 @@ the subscription in Notion.
 - Ready endpoint fails on `ollama`: check the Ollama container and `ollama list`.
 - Ready endpoint fails on `backups`: inspect `/app/backups`, permissions, free disk, and the
   latest scheduled-backup error.
-- Notion changes are delayed: inspect the webhook status and sync job in the connector panel.
-  Repeated event delivery is safe because event IDs are durable and idempotent.
-- Concurrent Notion and Sentinel edits: resolve each field in **Changes requiring review**;
-  Sentinel does not silently select a winner.

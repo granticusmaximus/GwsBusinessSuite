@@ -105,9 +105,6 @@ Each of these is marked "Not run" in `RELEASE_READINESS.md` because it needs a r
 controlled third-party account — plug in credentials and I can pick these up in a follow-up
 session:
 
-- **Real Notion sync + guarded write-back**: a real (non-production) Notion workspace connected
-  via OAuth or a manual token, exercising discovery, selective sync, a write-back action, and
-  webhook refresh.
 - **Real social publish**: Facebook, X, and LinkedIn developer-app credentials plus real
   destination accounts, to exercise OAuth/refresh, publish success and a deliberate failure,
   and engagement import.

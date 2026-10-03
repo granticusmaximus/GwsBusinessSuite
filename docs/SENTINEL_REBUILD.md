@@ -1,5 +1,10 @@
 # Sentinel rebuild
 
+> **2026-10-03:** the live Notion connection (OAuth/token setup, sync job, webhooks, page/row/schema
+> write-back, conflict review) was removed at Grant's request. Notion content now comes in only
+> through the export-ZIP import in the Templates panel. Sections below describing the connector
+> are historical.
+
 This document defines Sentinel's bounded Notion-class v1 feature contract. It does not define
 the readiness of the complete GWS Business Suite or replace the current evidence gates in
 `RELEASE_READINESS.md`.

@@ -27,11 +27,13 @@ for why, and how that may change later.
 13. [Workflow blueprints](#workflow-blueprints)
 14. [Forms and form submissions](#forms-and-form-submissions)
 14a. [Email signup for new-article alerts](#email-signup-for-new-article-alerts)
+14b. [Location map](#location-map)
 15. [Revision history](#revision-history)
 16. [Trash and page hierarchy](#trash-and-page-hierarchy)
 17. [Site recipes (export and import)](#site-recipes-export-and-import)
 18. [Appearance: Customize](#appearance-customize)
 19. [Appearance: Menus](#appearance-menus)
+19a. [Appearance: Header & Footer](#appearance-header--footer)
 20. [Media Library](#media-library)
 21. [End-to-end tutorial: build a simple landing page](#end-to-end-tutorial-build-a-simple-landing-page)
 22. [Known limitations](#known-limitations)
@@ -436,6 +438,20 @@ the pre-built page templates with a signup section use it too) is a reusable sub
   and a themed result page). If Cloudflare Turnstile is configured, the challenge appears inside
   the form automatically.
 
+## Location map
+
+The **Map** widget (Modules → Dynamic) shows an OpenStreetMap map with a pin and an optional
+**Get directions** link. It's free and needs no API key.
+
+- Type an address or place name in the inspector and click **Find on map**. The app looks the
+  address up once (OpenStreetMap-based geocoding, with the US Census geocoder as a fallback) and
+  saves the latitude/longitude on the widget, so visitors' browsers never geocode anything. You
+  can also type the latitude/longitude yourself.
+- Options: heading, zoom (3-18), height (200-800 px) and the directions link.
+- A map with no location shows a prompt in the editor and is hidden on the live site.
+- In the editor the map doesn't respond to the mouse, so clicking it selects the widget; on the
+  live site visitors can pan and zoom normally.
+
 ## Revision history
 
 Every **Save Page Details** on the settings screen snapshots the page's full state (title, slug,
@@ -541,6 +557,26 @@ edit in place:
 
 **Save changes** persists both lists together. Menu items are flat — there is no nesting/dropdown
 support, so every link sits at the same level in both the header and footer.
+
+## Appearance: Header & Footer
+
+`/admin/appearance/header-footer` lets you design the header and footer that every public page
+shares, in the same page editor you use for pages. Until you make a custom one live, the site
+keeps its built-in header (logo + menu) and footer.
+
+- **Start from a layout**: pick a header (*Logo and menu*, *Logo, menu and button*, *Centred*) or
+  footer (*Simple*, *Three columns*, *With newsletter signup*). It opens in the page editor.
+- **Building blocks** (editor palette, "Header & footer" group): **Site Logo** (the logo from
+  Appearance > Customize, linking home), **Nav Menu** (the header or footer menu from
+  Appearance > Menus - social links show as icons, stacked or across), and **Copyright** (©
+  current year and a name, with an optional small admin link). Any other widget works too, e.g. a
+  button or an Email Signup.
+- **Going live**: **Publish** in the editor, or **Make live** on the Header & Footer page, puts it
+  on every public page (home, pages, blog, contact thank-you, 404). Later edits autosave as a
+  draft until you publish again. **Use built-in instead** switches back without deleting your
+  design.
+- Header and footer are kept out of the Pages list, search, the sitemap and SEO audits, and
+  visitors can't open them as pages.
 
 ## Media Library
 

@@ -116,8 +116,7 @@ behavior or turn an unsupported claim into a remembered fact.
 
 - Every normal SentinelGPT question receives a sanitized live GWS Business Suite overview
   plus relevant records from Sentinel, publishing, CRM, automation, container health,
-  intelligence, podcasts, affiliate operations, page generation, Notion sync status, and
-  live-show modules.
+  intelligence, podcasts, affiliate operations, page generation, and live-show modules.
 - The sanitized suite overview and term-matched module context use a 20-second in-memory
   cache. Cache keys contain only normalized search terms, cached records exclude protected
   and unnecessary fields, and distinct term sets remain isolated.

@@ -30,9 +30,11 @@ public sealed class GrantWatsonHomepageTemplateTests
         widgets.Any(widget =>
                 widget.WidgetType == "html"
                 && widget.Props.TryGetValue("content", out var htmlContent)
-                && htmlContent.Contains("/api/blog", StringComparison.Ordinal)
+                && htmlContent.Contains("data-home-blog-grid", StringComparison.Ordinal)
                 && htmlContent.Contains("See all blog articles", StringComparison.Ordinal))
             .Should().BeTrue();
+        // The grid is filled by the served home-blog-grid runtime (inline scripts can't run under the CSP).
+        GrantWatsonHomepageTemplate.BlogGridRuntimeScript.Should().Contain("/api/blog");
     }
 
     [Fact]

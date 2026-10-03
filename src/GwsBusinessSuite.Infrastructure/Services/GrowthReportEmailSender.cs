@@ -1,5 +1,4 @@
 using GwsBusinessSuite.Application.Growth;
-using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Options;
 using MimeKit;
@@ -21,10 +20,12 @@ public sealed class GrowthReportEmailOptions : ISmtpTransportOptions
     public string DashboardUrl { get; set; } = "https://admin.gwsapp.net/admin/growth";
 }
 
-public sealed class GrowthReportEmailSender(IOptions<GrowthReportEmailOptions> configuredOptions)
-    : IGrowthReportEmailSender
+public sealed class GrowthReportEmailSender(
+    IOptions<GrowthReportEmailOptions> configuredOptions,
+    IMailTransport? mailTransport = null) : IGrowthReportEmailSender
 {
     private readonly GrowthReportEmailOptions options = configuredOptions.Value;
+    private readonly IMailTransport mail = mailTransport ?? MailTransport.SmtpOnly;
 
     public GrowthReportDeliveryConfiguration Configuration
     {
@@ -32,10 +33,13 @@ public sealed class GrowthReportEmailSender(IOptions<GrowthReportEmailOptions> c
         {
             if (!MailboxAddress.TryParse(options.FromAddress, out _))
                 return new(false, "Set GrowthReportEmail:FromAddress before enabling report delivery.");
-            if (!string.IsNullOrWhiteSpace(options.PickupDirectory))
+            var route = mail.Describe(options);
+            if (route.Kind == MailRouteKind.PickupDirectory)
                 return new(true, "Report delivery is configured for the local pickup directory.");
-            if (string.IsNullOrWhiteSpace(options.Host))
-                return new(false, "Set GrowthReportEmail SMTP host and sender settings to enable delivery.");
+            if (route.Kind == MailRouteKind.GmailApi)
+                return new(true, $"Email is delivered through {route.Description}.");
+            if (!route.CanSend)
+                return new(false, "Set Smtp__Host (and its sender settings) in .env, or connect a Google account under Automation > Credentials, to enable delivery.");
             if (options.Port is < 1 or > 65535)
                 return new(false, "GrowthReportEmail SMTP port must be between 1 and 65535.");
             if (!TryGetSecurity(options.Security, out _))
@@ -60,21 +64,7 @@ public sealed class GrowthReportEmailSender(IOptions<GrowthReportEmailOptions> c
             HtmlBody = email.HtmlBody
         }.ToMessageBody();
 
-        if (!string.IsNullOrWhiteSpace(options.PickupDirectory))
-        {
-            Directory.CreateDirectory(options.PickupDirectory);
-            var path = Path.Combine(options.PickupDirectory, $"growth-report-{Guid.NewGuid():N}.eml");
-            await message.WriteToAsync(path, cancellationToken);
-            return;
-        }
-
-        TryGetSecurity(options.Security, out var security);
-        using var client = new SmtpClient();
-        await client.ConnectAsync(options.Host.Trim(), options.Port, security, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(options.Username))
-            await client.AuthenticateAsync(options.Username, options.Password, cancellationToken);
-        await client.SendAsync(message, cancellationToken);
-        await client.DisconnectAsync(true, cancellationToken);
+        await mail.SendAsync(message, options, "growth-report", cancellationToken);
     }
 
     private static bool TryGetSecurity(string value, out SecureSocketOptions security)

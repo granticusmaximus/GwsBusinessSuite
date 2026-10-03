@@ -7,15 +7,12 @@ namespace GwsBusinessSuite.SentinelMenuBar;
 // hosted Sentinel workspace. It owns no data of its own and does not authenticate on its own
 // behalf: every action just opens the already-authenticated system browser session at the
 // hosted app, the same source of truth every other client (browser, MAUI) uses - see
-// docs/CROSS_PLATFORM_CLIENTS.md. "Refresh Workspace Data" reuses the existing manual-sync
-// button's own logic (Wiki.razor's SyncNotionNowAsync) via a `?syncNow=1` query flag rather
-// than inventing a second, unauthenticated remote-trigger API surface.
+// docs/CROSS_PLATFORM_CLIENTS.md.
 [Register("AppDelegate")]
 public class AppDelegate : NSApplicationDelegate
 {
     private const string BaseUrl = "https://admin.gwsapp.net/admin";
     private const string SentinelUrl = BaseUrl + "/sentinel";
-    private const string RefreshUrl = SentinelUrl + "?syncNow=1";
 
     private NSStatusItem? _statusItem;
 
@@ -61,8 +58,6 @@ public class AppDelegate : NSApplicationDelegate
         menu.AddItem(CreateItem("Open Sentinel", OpenSentinel));
         menu.AddItem(CreateItem("Open Dashboard", OpenDashboard));
         menu.AddItem(NSMenuItem.SeparatorItem);
-        menu.AddItem(CreateItem("Refresh Workspace Data", RefreshWorkspace));
-        menu.AddItem(NSMenuItem.SeparatorItem);
         menu.AddItem(CreateItem("Quit Sentinel", Quit, "q"));
         return menu;
     }
@@ -76,7 +71,6 @@ public class AppDelegate : NSApplicationDelegate
 
     private static void OpenSentinel() => OpenUrl(SentinelUrl);
     private static void OpenDashboard() => OpenUrl(BaseUrl);
-    private static void RefreshWorkspace() => OpenUrl(RefreshUrl);
     private static void Quit() => NSApplication.SharedApplication.Terminate(null);
 
     private static void OpenUrl(string url)

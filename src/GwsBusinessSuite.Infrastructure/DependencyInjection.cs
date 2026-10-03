@@ -176,6 +176,7 @@ public static class DependencyInjection
         services.AddScoped<ISiteSettingsService, SiteSettingsService>();
         services.AddScoped<IAffiliateOfferScoringService, AffiliateOfferScoringService>();
         services.AddScoped<ICmsBuilderService, CmsBuilderService>();
+        services.AddScoped<ICmsSiteRegionService, CmsSiteRegionService>();
         services.AddScoped<IGlobalBlockService, GlobalBlockService>();
         services.AddScoped<GlobalBlockResolver>();
         services.AddScoped<IMediaLibraryService, MediaLibraryService>();
@@ -205,6 +206,12 @@ public static class DependencyInjection
         services.AddScoped<GwsBusinessSuite.Application.Support.ISupportTicketService, SupportTicketService>();
         services.AddHostedService<SupportTicketSlaBackgroundService>();
         services.AddScoped<GwsBusinessSuite.Application.Support.ISupportTicketCannedResponseService, SupportTicketCannedResponseService>();
+        // Every email feature hands its message to this one transport: SMTP/pickup from its
+        // (shared-fallback) settings, else the Google account connected under Automation.
+        services.AddHttpClient(nameof(MailTransport), client => client.Timeout = TimeSpan.FromSeconds(30));
+        services.AddSingleton<IMailTransport, MailTransport>();
+        services.AddSingleton<GwsBusinessSuite.Application.Operations.IEmailDeliveryStatusService, EmailDeliveryStatusService>();
+        services.AddHostedService<MailTransportStatusService>();
         services.AddOptions<BookingEmailOptions>()
             .Bind(configuration.GetSection(BookingEmailOptions.SectionName))
             .WithSharedSmtpFallback(configuration);
@@ -766,25 +773,6 @@ public static class DependencyInjection
         services.AddSingleton<SentinelPresenceTracker>();
         services.AddSingleton<SentinelCursorTracker>();
         services.AddScoped<ISentinelPresenceService, SentinelPresenceService>();
-        services.AddHttpClient<INotionService, NotionService>(client =>
-        {
-            client.BaseAddress = new Uri("https://api.notion.com/v1/");
-            client.Timeout = TimeSpan.FromSeconds(30);
-        });
-        services.Configure<NotionOAuthOptions>(
-            configuration.GetSection(NotionOAuthOptions.SectionName));
-        services.AddHttpClient<INotionOAuthService, NotionOAuthService>(client =>
-        {
-            client.BaseAddress = new Uri("https://api.notion.com/v1/");
-            client.Timeout = TimeSpan.FromSeconds(30);
-        });
-        services.AddScoped<INotionSyncService, NotionSyncService>();
-        services.AddScoped<INotionWebhookService, NotionWebhookService>();
-        services.AddSingleton<NotionSyncBackgroundService>();
-        services.AddSingleton<INotionSyncCoordinator>(provider =>
-            provider.GetRequiredService<NotionSyncBackgroundService>());
-        services.AddHostedService(provider =>
-            provider.GetRequiredService<NotionSyncBackgroundService>());
         var liveShowRecordingsPath = configuration["LiveShow:RecordingsPath"] ?? "/app/data/live-show-recordings";
         services.AddScoped<ILiveShowService>(sp => new LiveShowService(
             sp.GetRequiredService<IAppDbContext>(),

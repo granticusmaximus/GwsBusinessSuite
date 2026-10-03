@@ -3,6 +3,7 @@ using System;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GwsBusinessSuite.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261003161710_RemoveNotionConnection")]
+    partial class RemoveNotionConnection
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
@@ -2477,10 +2480,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("PublishedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Region")
-                        .HasMaxLength(16)
-                        .HasColumnType("TEXT");
-
                     b.Property<bool>("ScheduledPublishTriggerPending")
                         .HasColumnType("INTEGER");
 
@@ -2515,8 +2514,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("CategoryId");
-
-                    b.HasIndex("SiteId", "Region");
 
                     b.HasIndex("SiteId", "ParentPageId", "Slug")
                         .IsUnique();

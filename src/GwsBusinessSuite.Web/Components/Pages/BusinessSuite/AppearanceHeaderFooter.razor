@@ -1,0 +1,186 @@
+@page "/admin/appearance/header-footer"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContributorAccess")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.CmsBuilder
+@using GwsBusinessSuite.Domain.Entities
+@inject ICmsSiteRegionService RegionService
+@inject GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor CurrentCmsSiteAccessor
+@inject NavigationManager Navigation
+@inject ILogger<AppearanceHeaderFooter> Logger
+
+<PageTitle>Header &amp; Footer</PageTitle>
+
+<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
+    <div>
+        <h1><i class="bi bi-layout-text-window me-2 text-primary"></i>Header &amp; Footer</h1>
+        <p>Design the header and footer every public page on @(_site?.Name ?? "the live site") shares - in the page editor, with your logo and <a href="/admin/appearance/menus">menus</a> built in.</p>
+    </div>
+    <CmsSiteSwitcher SiteChanged="OnSiteChangedAsync" />
+</div>
+
+@if (!string.IsNullOrWhiteSpace(_error))
+{
+    <div class="alert alert-danger" role="alert">@_error</div>
+}
+@if (!string.IsNullOrWhiteSpace(_status))
+{
+    <div class="alert alert-success" role="status">@_status</div>
+}
+
+@if (_regions is null)
+{
+    <LoadingIndicator Message="Loading…" />
+}
+else
+{
+    <div class="row g-4">
+        @foreach (var region in _regions)
+        {
+            var label = region.Region == CmsPageRegions.Header ? "Header" : "Footer";
+            <div class="col-xl-6">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body d-flex flex-column gap-3">
+                        <div class="d-flex align-items-center justify-content-between gap-2">
+                            <h2 class="h5 mb-0"><i class="bi @(region.Region == CmsPageRegions.Header ? "bi-window-dock" : "bi-window-desktop") me-2"></i>@label</h2>
+                            @if (region.IsLive)
+                            {
+                                <span class="badge text-bg-success">Custom - live</span>
+                            }
+                            else if (region.PageId is not null)
+                            {
+                                <span class="badge text-bg-secondary">Custom - not live</span>
+                            }
+                            else
+                            {
+                                <span class="badge text-bg-light border">Built-in</span>
+                            }
+                        </div>
+
+                        @if (region.PageId is { } pageId)
+                        {
+                            <p class="small text-secondary mb-0">
+                                @(region.IsLive
+                                    ? $"Every public page uses your custom {label.ToLowerInvariant()}."
+                                    : $"Your custom {label.ToLowerInvariant()} is saved but visitors still see the built-in one.")
+                                @if (region.HasUnpublishedChanges) { <span> It has edits that aren't live yet.</span> }
+                            </p>
+                            <div class="d-flex flex-wrap gap-2">
+                                <a class="btn btn-primary" href="/admin/pages/@pageId/edit"><i class="bi bi-pencil-square me-1"></i>Edit @label.ToLowerInvariant()</a>
+                                @if (region.IsLive)
+                                {
+                                    @if (region.HasUnpublishedChanges)
+                                    {
+                                        <button class="btn btn-outline-primary" disabled="@_busy" @onclick="() => SetLiveAsync(region.Region, true)"><i class="bi bi-cloud-arrow-up me-1"></i>Publish edits</button>
+                                    }
+                                    <button class="btn btn-outline-secondary" disabled="@_busy" @onclick="() => SetLiveAsync(region.Region, false)">Use built-in instead</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-success" disabled="@_busy" @onclick="() => SetLiveAsync(region.Region, true)"><i class="bi bi-play-fill me-1"></i>Make live</button>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <p class="small text-secondary mb-0">The site uses the built-in @label.ToLowerInvariant(). Pick a starting layout to design your own - nothing changes for visitors until you make it live.</p>
+                            <div class="d-grid gap-2">
+                                @foreach (var template in CmsRegionTemplates.For(region.Region))
+                                {
+                                    <button type="button" class="btn btn-outline-secondary text-start" disabled="@_busy" @onclick="() => CreateAsync(region.Region, template.Key)">
+                                        <strong class="d-block">@template.Name</strong>
+                                        <small class="text-secondary">@template.Description</small>
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+    <p class="small text-secondary mt-3 mb-0">
+        Building blocks: <strong>Site Logo</strong>, <strong>Nav Menu</strong> and <strong>Copyright</strong> (in the editor's
+        "Header &amp; footer" group) plus any other widget - buttons, an email signup, social links in your menus.
+    </p>
+}
+
+@code {
+    private CmsSite? _site;
+    private IReadOnlyList<CmsSiteRegionView>? _regions;
+    private bool _busy;
+    private string _status = string.Empty;
+    private string _error = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _site = await CurrentCmsSiteAccessor.GetCurrentSiteAsync();
+        await LoadAsync();
+    }
+
+    private async Task OnSiteChangedAsync(CmsSite site)
+    {
+        _site = site;
+        _status = string.Empty;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = string.Empty;
+        try
+        {
+            _regions = _site is null ? [] : await RegionService.ListAsync(_site.Id);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to load header/footer regions.");
+            _error = $"Unable to load the header and footer. {ex.Message}";
+            _regions = [];
+        }
+    }
+
+    private async Task CreateAsync(string region, string templateKey)
+    {
+        if (_site is null) return;
+        _busy = true;
+        try
+        {
+            var page = await RegionService.CreateAsync(_site.Id, region, templateKey, "appearance");
+            Navigation.NavigateTo($"/admin/pages/{page.Id}/edit");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to create the {Region} region.", region);
+            _error = $"Unable to create it. {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SetLiveAsync(string region, bool live)
+    {
+        if (_site is null) return;
+        _busy = true;
+        _error = string.Empty;
+        try
+        {
+            await RegionService.SetLiveAsync(_site.Id, region, live, "appearance");
+            _status = live
+                ? $"Your custom {region} is live on every public page."
+                : $"Visitors see the built-in {region} again. Your design is kept.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to change the {Region} region.", region);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

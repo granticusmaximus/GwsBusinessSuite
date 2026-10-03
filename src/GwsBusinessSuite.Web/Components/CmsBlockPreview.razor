@@ -212,6 +212,21 @@ else
                     }
                 </div>
                 break;
+            case "site-logo":
+                <span class="cms-block-chip">Site Logo</span>
+                break;
+            case "nav-menu":
+                <span class="cms-block-chip">Nav Menu</span>
+                <div class="small">@(Get(p, "menu", "header") == "footer" ? "Footer menu" : "Header menu")</div>
+                break;
+            case "copyright":
+                <span class="cms-block-chip">Copyright</span>
+                <div class="small">© @DateTime.UtcNow.Year @Get(p, "holder")</div>
+                break;
+            case "map":
+                <span class="cms-block-chip">Map</span>
+                <div class="small"><i class="bi bi-geo-alt me-1"></i>@Get(p, "address", "No address yet")</div>
+                break;
             case "email-signup":
                 <span class="cms-block-chip">Email Signup</span>
                 <h3>@Get(p, "heading", "Get new articles by email")</h3>

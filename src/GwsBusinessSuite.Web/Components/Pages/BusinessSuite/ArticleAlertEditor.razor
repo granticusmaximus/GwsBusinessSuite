@@ -165,7 +165,7 @@ else
                             <strong>@_previewSubject</strong>
                         </div>
                         <div class="d-flex gap-2">
-                            <input type="email" class="form-control form-control-sm" style="width:14rem" placeholder="you@example.com" @bind="_testAddress" aria-label="Send a test to" />
+                            <input type="email" class="form-control form-control-sm" style="width:14rem" placeholder="you@example.com" @bind="_testAddress" @bind:event="oninput" aria-label="Send a test to" />
                             <button class="btn btn-sm btn-outline-primary text-nowrap" disabled="@(_busy || string.IsNullOrWhiteSpace(_testAddress))" @onclick="SendTestAsync"><i class="bi bi-send me-1"></i>Send test</button>
                         </div>
                     </div>

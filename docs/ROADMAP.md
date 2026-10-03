@@ -105,7 +105,7 @@ also passes.
   symmetric NAT: the server mints short-lived coturn REST credentials, both broadcaster
   and viewer receive the same configured ICE pool, and Docker provides an opt-in coturn
   override with automatic production activation when the required `.env` values exist.
-- Sentinel (Notion-class connected workspace) ✅ v1 / 🚧 broader parity — renamed from Knowledge Base/Wiki with
+- Sentinel (Notion-class workspace) ✅ v1 / 🚧 broader parity — **2026-10-03: live Notion connection removed; export-ZIP import only** — — renamed from Knowledge Base/Wiki with
   `/admin/sentinel` as the canonical route. Delivered foundations include nested block pages,
   DB-snapshot history/diff/restore, `[[Page]]` links, ranked and highlighted workspace search,
   backlinks, per-user favorites/recents, structured person/date mentions with a personal

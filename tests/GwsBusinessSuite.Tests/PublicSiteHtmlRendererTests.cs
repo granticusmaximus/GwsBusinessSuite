@@ -287,6 +287,19 @@ public sealed class PublicSiteHtmlRendererTests
         Assert.Contains("id=\"gws-submitted-modal-close\"", html);
     }
 
+    // script-src has no 'unsafe-inline': an inline <script> silently never runs on the live site
+    // (this is how the submitted-modal Close button and the scroll reveal were dead in production).
+    [Fact]
+    public void PublicShellAndModal_ShouldOnlyUseExternalScripts()
+    {
+        var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, PublicSiteHtmlRenderer.SubmittedModal());
+
+        var inline = System.Text.RegularExpressions.Regex.Matches(html, @"<script(?![^>]*\bsrc=)(?![^>]*application/ld\+json)[^>]*>");
+        Assert.Empty(inline);
+        Assert.Contains("<script src=\"/js/submitted-modal.js\"", html);
+        Assert.Contains("<script src=\"/js/reveal-init.js\"", html);
+    }
+
     [Fact]
     public void BlogListBody_ShouldRenderCategoryAndTagPills_OnArticleCards_WhenPresent()
     {

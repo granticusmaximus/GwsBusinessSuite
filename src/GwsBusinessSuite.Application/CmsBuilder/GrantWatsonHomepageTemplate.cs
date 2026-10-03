@@ -29,6 +29,11 @@ public static class GrantWatsonHomepageTemplate
             <a href="/blog" class="btn btn-ghost">See all blog articles</a>
           </div>
         </section>
+        """;
+
+    // Fills [data-home-blog-grid] from /api/blog. Served as /js/cms-runtime/home-blog-grid.js
+    // (inline scripts can't run under the site's CSP), inlined only into the static ZIP export.
+    public const string BlogGridRuntimeScript = """
         <script>
         (function () {
           var grid = document.querySelector('[data-home-blog-grid]');
@@ -98,6 +103,37 @@ public static class GrantWatsonHomepageTemplate
         }());
         </script>
         """;
+
+    private const string LegacyInlineScriptMarker = "document.querySelector('[data-home-blog-grid]')";
+
+    // Home pages seeded before 2026-10-03 carry the blog-grid script inline inside their HTML
+    // block, where the CSP has always blocked it. Strips that dead copy (the served runtime now
+    // does the work) without touching anything else on the page. Returns false when unchanged.
+    public static bool TryRemoveLegacyInlineScript(string? blocksJson, out string updatedJson)
+    {
+        updatedJson = blocksJson ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(blocksJson) || !blocksJson.Contains("data-home-blog-grid", StringComparison.Ordinal))
+            return false;
+        var layout = CmsBuilderJson.ParseLayout(blocksJson);
+        if (layout is null) return false;
+
+        var changed = false;
+        foreach (var widget in layout.Sections.SelectMany(s => s.Columns).SelectMany(c => c.Widgets))
+        {
+            if (widget.WidgetType != "html" || !widget.Props.TryGetValue("content", out var content)) continue;
+            var cleaned = System.Text.RegularExpressions.Regex.Replace(
+                content,
+                @"\s*<script>(?:(?!</script>).)*?" + System.Text.RegularExpressions.Regex.Escape(LegacyInlineScriptMarker) + @".*?</script>\s*",
+                "\n",
+                System.Text.RegularExpressions.RegexOptions.Singleline);
+            if (cleaned == content) continue;
+            widget.Props["content"] = cleaned.TrimEnd() + "\n";
+            changed = true;
+        }
+
+        if (changed) updatedJson = CmsBuilderJson.Serialize(layout);
+        return changed;
+    }
 
     public static string CreateBlocksJson() => CmsBuilderJson.Serialize(CreateLayout());
 

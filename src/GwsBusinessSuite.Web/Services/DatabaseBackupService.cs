@@ -312,7 +312,6 @@ public sealed class DatabaseBackupService(
     private static async Task<int> VerifyProtectedSecretsAsync(ApplicationDbContext db, ISecretProtector protector, CancellationToken cancellationToken)
     {
         var values = new List<string>();
-        values.AddRange(await db.NotionConnectorSettings.AsNoTracking().Select(x => x.IntegrationToken).Where(x => x != "").ToListAsync(cancellationToken));
         values.AddRange(await db.SocialAccounts.AsNoTracking().Select(x => x.ProtectedAccessToken).Where(x => x != "").ToListAsync(cancellationToken));
         values.AddRange(await db.AutomationCredentials.AsNoTracking().Select(x => x.ProtectedData).Where(x => x != "").ToListAsync(cancellationToken));
         foreach (var value in values) _ = protector.Unprotect(value);

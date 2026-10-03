@@ -10,6 +10,31 @@ public sealed class CmsBlockHtmlRendererTests
         $$"""{"sections":[{"id":"s1","columns":[{"id":"c1","widgets":[{{widgetJson}}]}]}]}""";
 
     [Fact]
+    public void Render_ShouldEmbedAnOpenStreetMapCenteredOnTheStoredCoordinates()
+    {
+        var html = CmsBlockHtmlRenderer.Render(Layout(
+            """{"id":"w1","widgetType":"map","props":{"address":"1 Main St, Springfield","lat":"39.7817","lng":"-89.6501","zoom":"15","height":"400","showDirections":"true"}}"""));
+
+        Assert.Contains("https://www.openstreetmap.org/export/embed.html?bbox=", html);
+        Assert.Contains("marker=39.7817%2C-89.6501", html);
+        Assert.Contains("height:400px", html);
+        Assert.Contains("title=\"Map of 1 Main St, Springfield\"", html);
+        Assert.Contains("https://www.openstreetmap.org/directions?to=39.7817%2C-89.6501", html);
+        Assert.DoesNotContain("pointer-events:none", html);
+    }
+
+    [Fact]
+    public void Render_ShouldHideAMapWithNoLocation_OnTheLiveSite_ButPromptInTheEditor()
+    {
+        var widget = """{"id":"w1","widgetType":"map","props":{"address":"Somewhere","lat":"","lng":""}}""";
+
+        Assert.DoesNotContain("gws-map", CmsBlockHtmlRenderer.Render(Layout(widget)));
+        var editor = CmsBlockHtmlRenderer.Render(Layout(widget), editMode: true);
+        Assert.Contains("Find on map", editor);
+        Assert.DoesNotContain("<iframe", editor);
+    }
+
+    [Fact]
     public void Render_ShouldRenderHeroWidget_WithHeadlineSublineAndCtas()
     {
         var html = CmsBlockHtmlRenderer.Render(Layout(

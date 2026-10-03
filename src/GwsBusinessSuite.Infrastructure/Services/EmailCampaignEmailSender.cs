@@ -1,7 +1,5 @@
 using System.Net;
 using GwsBusinessSuite.Application.Campaigns;
-using MailKit.Net.Smtp;
-using MailKit.Security;
 using Markdig;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -30,13 +28,15 @@ public sealed class EmailCampaignEmailOptions : ISmtpTransportOptions
 
 public sealed class EmailCampaignEmailSender(
     IOptions<EmailCampaignEmailOptions> configuredOptions,
-    ILogger<EmailCampaignEmailSender> logger) : IEmailCampaignEmailSender, IArticleAlertEmailSender
+    ILogger<EmailCampaignEmailSender> logger,
+    IMailTransport? mailTransport = null) : IEmailCampaignEmailSender, IArticleAlertEmailSender
 {
     private static readonly MarkdownPipeline EmailMarkdownPipeline = new MarkdownPipelineBuilder()
         .UseAdvancedExtensions()
         .DisableHtml()
         .Build();
     private readonly EmailCampaignEmailOptions options = configuredOptions.Value;
+    private readonly IMailTransport mail = mailTransport ?? MailTransport.SmtpOnly;
 
     public async Task SendStepAsync(string toEmail, string subject, string body, string unsubscribeUrl, CancellationToken cancellationToken = default)
     {
@@ -63,31 +63,17 @@ public sealed class EmailCampaignEmailSender(
             HtmlBody = $"<div>{htmlBody}</div><p style=\"margin-top:2rem;font-size:.8rem;color:#888;\"><a href=\"{WebUtility.HtmlEncode(unsubscribeUrl)}\">Unsubscribe</a></p>"
         }.ToMessageBody();
 
-        if (!string.IsNullOrWhiteSpace(options.PickupDirectory))
+        var route = mail.Describe(options);
+        if (!route.CanSend)
         {
-            Directory.CreateDirectory(options.PickupDirectory);
-            var path = Path.Combine(options.PickupDirectory, $"campaign-{Guid.NewGuid():N}.eml");
-            await message.WriteToAsync(path, cancellationToken);
+            logger.LogError("Campaign email not sent to {Email}: no email delivery is configured ({Route}).", toEmail, route.Description);
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(options.Host))
-        {
-            logger.LogError("Campaign email not sent to {Email}: EmailCampaignEmail:Host is not configured.", toEmail);
-            return;
-        }
-
-        TryGetSecurity(options.Security, out var security);
-        using var client = new SmtpClient();
-        await client.ConnectAsync(options.Host.Trim(), options.Port, security, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(options.Username))
-            await client.AuthenticateAsync(options.Username, options.Password, cancellationToken);
-        await client.SendAsync(message, cancellationToken);
-        await client.DisconnectAsync(true, cancellationToken);
+        await mail.SendAsync(message, options, "campaign", cancellationToken);
     }
 
-    public bool IsConfigured =>
-        !string.IsNullOrWhiteSpace(options.PickupDirectory) || !string.IsNullOrWhiteSpace(options.Host);
+    public bool IsConfigured => mail.Describe(options).CanSend;
 
     // Article alerts / confirmations: each campaign sends as its own From name/address (e.g.
     // "Grant Watson Software" <grant@gwsapp.net>) over the same transport. The SMTP provider must be
@@ -96,7 +82,7 @@ public sealed class EmailCampaignEmailSender(
     {
         if (!IsConfigured)
         {
-            logger.LogWarning("Campaign email to {Email} not sent: no SMTP server is configured (set Smtp__Host).", email.ToAddress);
+            logger.LogWarning("Campaign email to {Email} not sent: no email delivery is configured (set Smtp__Host, or connect a Google account).", email.ToAddress);
             return false;
         }
 
@@ -120,33 +106,7 @@ public sealed class EmailCampaignEmailSender(
         }
         message.Body = new BodyBuilder { TextBody = email.TextBody, HtmlBody = email.HtmlBody }.ToMessageBody();
 
-        if (!string.IsNullOrWhiteSpace(options.PickupDirectory))
-        {
-            Directory.CreateDirectory(options.PickupDirectory);
-            await message.WriteToAsync(Path.Combine(options.PickupDirectory, $"campaign-{Guid.NewGuid():N}.eml"), cancellationToken);
-            return true;
-        }
-
-        TryGetSecurity(options.Security, out var security);
-        using var client = new SmtpClient();
-        await client.ConnectAsync(options.Host.Trim(), options.Port, security, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(options.Username))
-            await client.AuthenticateAsync(options.Username, options.Password, cancellationToken);
-        await client.SendAsync(message, cancellationToken);
-        await client.DisconnectAsync(true, cancellationToken);
+        await mail.SendAsync(message, options, "campaign", cancellationToken);
         return true;
-    }
-
-    private static bool TryGetSecurity(string value, out SecureSocketOptions security)
-    {
-        security = value.Trim().ToLowerInvariant() switch
-        {
-            "auto" => SecureSocketOptions.Auto,
-            "starttls" => SecureSocketOptions.StartTls,
-            "sslonconnect" => SecureSocketOptions.SslOnConnect,
-            "none" => SecureSocketOptions.None,
-            _ => (SecureSocketOptions)(-1)
-        };
-        return (int)security >= 0;
     }
 }

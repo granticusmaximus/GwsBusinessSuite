@@ -72,9 +72,6 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SeoArticleWorkflowEvent> SeoArticleWorkflowEvents { get; }
     DbSet<SeoArticleDraftRevision> SeoArticleDraftRevisions { get; }
     DbSet<CjConnectorSettings> CjConnectorSettings { get; }
-    DbSet<NotionConnectorSettings> NotionConnectorSettings { get; }
-    DbSet<NotionWebhookEvent> NotionWebhookEvents { get; }
-    DbSet<NotionSyncConflict> NotionSyncConflicts { get; }
     DbSet<SiteSettings> SiteSettings { get; }
     DbSet<Article> Articles { get; }
     DbSet<ArticleAffiliatePlacement> ArticleAffiliatePlacements { get; }

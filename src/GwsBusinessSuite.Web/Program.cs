@@ -645,7 +645,8 @@ app.Use(async (context, next) =>
             // terrain/surface pipeline just never ran, leaving pins/HUD/camera movement (all
             // main-thread work) fully functional while the globe itself stayed invisible.
             "worker-src 'self' blob: https://cdn.jsdelivr.net;",
-            allowTurnstile ? "frame-src 'self' https://challenges.cloudflare.com;" : "frame-src 'self';",
+            // www.openstreetmap.org: the CMS map widget's official, key-free embed.
+            allowTurnstile ? "frame-src 'self' https://challenges.cloudflare.com https://www.openstreetmap.org;" : "frame-src 'self' https://www.openstreetmap.org;",
             "frame-ancestors 'self';",
             "object-src 'none';",
             "base-uri 'self';",
@@ -740,50 +741,7 @@ app.MapHealthChecks("/health/ready", new()
 app.MapDeveloperApiEndpoints();
 app.MapDeveloperApiSentinelEndpoints();
 
-// Notion connection webhooks are intentionally anonymous: Notion is the caller. Event
-// requests are authenticated with X-Notion-Signature (HMAC-SHA256 over the exact raw body);
-// the one-time verification payload establishes and encrypts that signing secret.
-app.MapPost("/api/integrations/notion/webhook", async (
-    HttpContext context,
-    INotionWebhookService webhookService,
-    CancellationToken cancellationToken) =>
-{
-    var request = context.Request;
-    // Shared pattern with the other anonymous endpoints app-wide (analytics ingestion,
-    // automation webhooks) - Kestrel's ~28MB default request body size has no business being
-    // reachable here. Must be set before the body is read. 1MB matches the automation
-    // webhook's own cap; a real Notion event payload is normally a small JSON object.
-    var maxBodySizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
-    if (maxBodySizeFeature is { IsReadOnly: false })
-    {
-        maxBodySizeFeature.MaxRequestBodySize = 1024 * 1024;
-    }
-
-    string rawBody;
-    try
-    {
-        using var reader = new StreamReader(request.Body, Encoding.UTF8);
-        rawBody = await reader.ReadToEndAsync(cancellationToken);
-    }
-    catch (Exception) when (!cancellationToken.IsCancellationRequested)
-    {
-        return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
-    }
-
-    var result = await webhookService.HandleAsync(
-        rawBody,
-        request.Headers["X-Notion-Signature"].FirstOrDefault(),
-        cancellationToken);
-    return Results.Json(
-        new { message = result.Message },
-        statusCode: result.StatusCode);
-})
-    .AllowAnonymous()
-    .DisableAntiforgery()
-    .RequireRateLimiting("public-read");
-
-// Stripe billing webhooks - same anonymous-but-signature-verified shape as the Notion webhook
-// above. Stripe.Event/Stripe.EventUtility/Stripe.Invoice are referenced fully-qualified here
+// Stripe billing webhooks - anonymous but signature-verified. Stripe.Event/Stripe.EventUtility/Stripe.Invoice are referenced fully-qualified here
 // rather than via a top-level "using Stripe;" because GwsBusinessSuite.Domain.Entities already
 // defines its own unqualified "Invoice" (our local billing record), and this file is already
 // "using GwsBusinessSuite.Domain.Entities;".
@@ -1577,90 +1535,8 @@ app.MapGet("/client-portal/auth/logout", async (HttpContext httpContext) =>
     return Results.LocalRedirect("/client-portal/login");
 }).AllowAnonymous().RequireRateLimiting("public-read");
 
-app.MapGet("/auth/notion/connect", (
-    HttpContext httpContext,
-    INotionOAuthService notionOAuth,
-    IDataProtectionProvider dataProtectionProvider) =>
-{
-    if (!notionOAuth.IsConfigured)
-    {
-        return Results.LocalRedirect("/admin/sentinel?notionOAuth=not-configured");
-    }
-
-    var username = httpContext.User.Identity?.Name ?? string.Empty;
-    var statePayload = System.Text.Json.JsonSerializer.Serialize(new
-    {
-        username,
-        issuedAtUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
-    });
-    var state = dataProtectionProvider
-        .CreateProtector("GwsBusinessSuite.NotionOAuth.State.v1")
-        .Protect(statePayload);
-    return Results.Redirect(notionOAuth.CreateAuthorizationUrl(state));
-})
-    .RequireAuthorization("AdminOnly")
-    .RequireRateLimiting("admin-mutation");
-
-app.MapGet("/auth/notion/callback", async (
-    HttpContext httpContext,
-    string? code,
-    string? state,
-    string? error,
-    INotionOAuthService notionOAuth,
-    IDataProtectionProvider dataProtectionProvider,
-    CancellationToken cancellationToken) =>
-{
-    if (string.IsNullOrWhiteSpace(state))
-    {
-        return Results.LocalRedirect("/admin/sentinel?notionOAuth=invalid-state");
-    }
-
-    try
-    {
-        var stateJson = dataProtectionProvider
-            .CreateProtector("GwsBusinessSuite.NotionOAuth.State.v1")
-            .Unprotect(state);
-        using var stateDocument = System.Text.Json.JsonDocument.Parse(stateJson);
-        var root = stateDocument.RootElement;
-        var stateUsername = root.TryGetProperty("username", out var usernameElement)
-            ? usernameElement.GetString()
-            : null;
-        var issuedAt = root.TryGetProperty("issuedAtUnixSeconds", out var issuedElement)
-            && issuedElement.TryGetInt64(out var issuedAtUnixSeconds)
-                ? DateTimeOffset.FromUnixTimeSeconds(issuedAtUnixSeconds)
-                : DateTimeOffset.MinValue;
-        var currentUsername = httpContext.User.Identity?.Name;
-        if (!string.Equals(stateUsername, currentUsername, StringComparison.Ordinal)
-            || issuedAt < DateTimeOffset.UtcNow.AddMinutes(-10)
-            || issuedAt > DateTimeOffset.UtcNow.AddMinutes(1))
-        {
-            return Results.LocalRedirect("/admin/sentinel?notionOAuth=invalid-state");
-        }
-    }
-    catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException
-                                   or System.Text.Json.JsonException
-                                   or ArgumentOutOfRangeException)
-    {
-        return Results.LocalRedirect("/admin/sentinel?notionOAuth=invalid-state");
-    }
-
-    if (!string.IsNullOrWhiteSpace(error))
-    {
-        return Results.LocalRedirect("/admin/sentinel?notionOAuth=denied");
-    }
-
-    var result = await notionOAuth.CompleteAuthorizationAsync(code ?? string.Empty, cancellationToken);
-    return Results.LocalRedirect(
-        result.IsSuccess
-            ? "/admin/sentinel?notionOAuth=connected"
-            : "/admin/sentinel?notionOAuth=failed");
-})
-    .RequireAuthorization("AdminOnly")
-    .RequireRateLimiting("admin-mutation");
-
-// Slack/Google automation connector OAuth - same signed-state, same redirect-target shape as
-// the Notion connect/callback pair immediately above, just landing back on the credentials
-// page instead of Sentinel.
+// Slack/Google automation connector OAuth - signed state bound to the signed-in admin, landing
+// back on the credentials page.
 app.MapGet("/auth/slack/connect", (
     HttpContext httpContext,
     ISlackOAuthService slackOAuth,
@@ -1865,6 +1741,17 @@ app.MapGet("/og-image/{slug}", async (
 // not per-site. Authenticated requests (the Studio's same-origin preview iframe carries the
 // admin session cookie) can see Draft pages; anonymous ones can't — this is also what lets
 // this route double as the Studio's live preview without a separate draft-preview mechanism.
+// The CMS widget runtimes (interactions, TOC, tabs, gallery, carousel, ...), served from their one
+// C# source so pages can load them as same-origin scripts - see CmsBlockHtmlRenderer.RuntimeScripts.
+app.MapGet("/js/cms-runtime/{name}.js", (string name, HttpContext context) =>
+{
+    var source = CmsBlockHtmlRenderer.RuntimeScriptSource(name);
+    if (source is null) return Results.NotFound();
+    // The ?v= content hash on every tag makes long caching safe.
+    context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
+    return Results.Text(source, "text/javascript; charset=utf-8");
+}).AllowAnonymous();
+
 app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
     string siteSlug,
     string pageSlug,
@@ -1881,6 +1768,13 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
 
     var includeUnpublished = httpContext.User.Identity?.IsAuthenticated == true;
     var page = await cmsBuilderService.GetPageByFullPathAsync(site.Id, pageSlug, includeUnpublished);
+    // The header/footer regions are hidden pages: only Studio users can open them here (the
+    // editor canvas and its Preview), never visitors.
+    if (page is null
+        && (httpContext.User.IsInRole(AppRoles.Admin) || httpContext.User.IsInRole(AppRoles.Contributor)))
+    {
+        page = await httpContext.RequestServices.GetRequiredService<ICmsSiteRegionService>().GetBySlugAsync(site.Id, pageSlug);
+    }
     if (page is null) return Results.NotFound();
 
     var languageCode = httpContext.Request.Query["lang"].ToString();
@@ -1942,14 +1836,11 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
         ? string.Empty
         : $"<style>{SanitizeInlineCss(customCss)}</style>";
     var editModeTag = editMode ? CmsBlockHtmlRenderer.BuildEditModeScript() : string.Empty;
-    var tocScriptTag = CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout) ? CmsBlockHtmlRenderer.BuildTableOfContentsRuntimeScript() : string.Empty;
-    var readingProgressScriptTag = CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout) ? CmsBlockHtmlRenderer.BuildReadingProgressRuntimeScript() : string.Empty;
-    var statsScriptTag = CmsBlockHtmlRenderer.LayoutContainsStats(layout) ? CmsBlockHtmlRenderer.BuildStatsCounterRuntimeScript() : string.Empty;
-    var tabsScriptTag = CmsBlockHtmlRenderer.LayoutContainsTabs(layout) ? CmsBlockHtmlRenderer.BuildTabsRuntimeScript() : string.Empty;
-    var pricingTableScriptTag = CmsBlockHtmlRenderer.LayoutContainsPricingTable(layout) ? CmsBlockHtmlRenderer.BuildPricingTableRuntimeScript() : string.Empty;
-    var galleryScriptTag = CmsBlockHtmlRenderer.LayoutContainsGallery(layout) ? CmsBlockHtmlRenderer.BuildGalleryRuntimeScript() : string.Empty;
-    var carouselScriptTag = CmsBlockHtmlRenderer.LayoutContainsCarousel(layout) ? CmsBlockHtmlRenderer.BuildCarouselRuntimeScript() : string.Empty;
-    var portfolioScriptTag = CmsBlockHtmlRenderer.LayoutContainsPortfolioGrid(layout) ? CmsBlockHtmlRenderer.BuildPortfolioRuntimeScript() : string.Empty;
+    // Site logo / nav menu widgets (header & footer builder) get the site's real logo and menus.
+    bodyHtml = PublicSiteHtmlRenderer.FillSiteChrome(bodyHtml, PublicSiteHtmlRenderer.ParseNavItems(site.NavMenuJson),
+        PublicSiteHtmlRenderer.ParseFooterNavItems(site.FooterNavMenuJson), site.Name, site.LogoUrl);
+    // External runtimes only - an inline <script> can't run under this app's CSP.
+    var runtimeScriptTags = CmsBlockHtmlRenderer.BuildRuntimeScriptTags(layout, bodyHtml);
 
     var html = $"""
         <!DOCTYPE html>
@@ -1967,15 +1858,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
         <body>
           {bodyHtml}
           {editModeTag}
-          {CmsBlockHtmlRenderer.BuildInteractionRuntimeScript()}
-          {tocScriptTag}
-          {readingProgressScriptTag}
-          {statsScriptTag}
-          {tabsScriptTag}
-          {pricingTableScriptTag}
-          {galleryScriptTag}
-          {carouselScriptTag}
-          {portfolioScriptTag}
+          {runtimeScriptTags}
         </body>
         </html>
         """;
@@ -2231,7 +2114,7 @@ app.MapGet("/blog", async (
             })
             .ToList();
 
-        var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);
+        var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration, request.HttpContext.RequestServices);
         var bodyHtml = PublicSiteHtmlRenderer.BlogListBody(pageItems, keywords, keyword, categories, category, tag, page, effectivePageSize, filtered.Count, totalPages);
         var html = PublicSiteHtmlRenderer.Layout(
             "Blog — Grant Watson",
@@ -2245,7 +2128,7 @@ app.MapGet("/blog", async (
             canonicalUrl: CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), $"{request.Path}{request.QueryString}"),
             siteName: navMenus.SiteName,
             logoUrl: navMenus.LogoUrl,
-            faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens);
+            faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens, headerHtml: navMenus.HeaderHtml, footerHtml: navMenus.FooterHtml);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
@@ -2267,7 +2150,7 @@ app.MapGet("/blog/{slug}", async (
             .Where(x => x.Slug == slug && x.TrashedAt == null)
             .FirstOrDefaultAsync();
 
-        var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);
+        var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration, request.HttpContext.RequestServices);
 
         if (a is null || !IsArticlePubliclyVisible(a, DateTimeOffset.UtcNow))
         {
@@ -2283,7 +2166,7 @@ app.MapGet("/blog/{slug}", async (
                     navMenus.FontPairingKey,
                     siteName: navMenus.SiteName,
                     logoUrl: navMenus.LogoUrl,
-                    faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens),
+                    faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens, headerHtml: navMenus.HeaderHtml, footerHtml: navMenus.FooterHtml),
                 "text/html", statusCode: StatusCodes.Status404NotFound);
         }
 
@@ -2339,7 +2222,7 @@ app.MapGet("/blog/{slug}", async (
             canonicalUrl: CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), $"/blog/{a.Slug}"),
             siteName: navMenus.SiteName,
             logoUrl: navMenus.LogoUrl,
-            faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens);
+            faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens, headerHtml: navMenus.HeaderHtml, footerHtml: navMenus.FooterHtml);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
@@ -2586,7 +2469,7 @@ app.MapGet("/__not-found", async (HttpContext httpContext, ICmsBuilderService cm
     {
         if (IsPublicHost(httpContext))
         {
-            var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration);
+            var navMenus = await GetPublicNavMenusAsync(cmsBuilderService, configuration, httpContext.RequestServices);
             var html = PublicSiteHtmlRenderer.Layout(
                 "404 — Not Found",
                 string.Empty,
@@ -2598,7 +2481,7 @@ app.MapGet("/__not-found", async (HttpContext httpContext, ICmsBuilderService cm
                 navMenus.FontPairingKey,
                 siteName: navMenus.SiteName,
                 logoUrl: navMenus.LogoUrl,
-                faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens);
+                faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens, headerHtml: navMenus.HeaderHtml, footerHtml: navMenus.FooterHtml);
             return Results.Content(html, "text/html");
         }
 
@@ -2701,6 +2584,7 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
         // field matches what the live /cms/{siteSlug}/{**pageSlug} route would have passed.
         var fullPath = cmsBuilderService.BuildFullPath(page, allPages);
         var bodySections = CmsBlockHtmlRenderer.Render(layout, site.Slug, fullPath, articles: articles, tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson), relatedPostsByAnchorSlug: relatedPosts);
+        bodySections = PublicSiteHtmlRenderer.FillSiteChrome(bodySections, PublicSiteHtmlRenderer.ParseNavItems(site.NavMenuJson), PublicSiteHtmlRenderer.ParseFooterNavItems(site.FooterNavMenuJson), site.Name, site.LogoUrl);
         var pageTitle = System.Net.WebUtility.HtmlEncode(
             string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle);
         var metaDescription = System.Net.WebUtility.HtmlEncode(page.MetaDescription);
@@ -2734,6 +2618,7 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
               {(CmsBlockHtmlRenderer.LayoutContainsGallery(layout) ? CmsBlockHtmlRenderer.BuildGalleryRuntimeScript() : "")}
               {(CmsBlockHtmlRenderer.LayoutContainsCarousel(layout) ? CmsBlockHtmlRenderer.BuildCarouselRuntimeScript() : "")}
               {(CmsBlockHtmlRenderer.LayoutContainsPortfolioGrid(layout) ? CmsBlockHtmlRenderer.BuildPortfolioRuntimeScript() : "")}
+              {(bodySections.Contains("data-home-blog-grid", StringComparison.Ordinal) ? GrantWatsonHomepageTemplate.BlogGridRuntimeScript : "")}
             </body>
             </html>
             """;
@@ -3290,9 +3175,12 @@ app.Run();
 // global design tokens (accent color + font pairing) — shared by every public-host handler
 // that renders a full page shell, not just Canvas pages (blog list/post, 404), since all of
 // them funnel through PublicSiteHtmlRenderer.Layout.
-static async Task<PublicNavMenus> GetPublicNavMenusAsync(ICmsBuilderService cmsBuilderService, IConfiguration configuration)
+static async Task<PublicNavMenus> GetPublicNavMenusAsync(ICmsBuilderService cmsBuilderService, IConfiguration configuration, IServiceProvider? services = null)
 {
     var site = await GetConfiguredCanvasSiteAsync(cmsBuilderService, configuration);
+    var (headerHtml, footerHtml) = site is not null && services is not null
+        ? await RenderSiteRegionsAsync(services, site)
+        : (null, null);
     return new PublicNavMenus(
         PublicSiteHtmlRenderer.ParseNavItems(site?.NavMenuJson),
         PublicSiteHtmlRenderer.ParseFooterNavItems(site?.FooterNavMenuJson),
@@ -3301,7 +3189,33 @@ static async Task<PublicNavMenus> GetPublicNavMenusAsync(ICmsBuilderService cmsB
         site?.Name,
         site?.LogoUrl,
         site?.FaviconUrl,
-        DesignTokenJson.ParseOrEmpty(site?.DesignTokensJson));
+        DesignTokenJson.ParseOrEmpty(site?.DesignTokensJson),
+        headerHtml,
+        footerHtml);
+}
+
+// The site's custom header/footer (Appearance > Header & Footer) as HTML, or null for a region
+// that still uses the built-in one. Global blocks are resolved, the logo/menu placeholders are
+// filled from the site, and any widget runtimes a region needs (e.g. an email signup) come along.
+static async Task<(string? Header, string? Footer)> RenderSiteRegionsAsync(IServiceProvider services, CmsSite site)
+{
+    var regions = services.GetRequiredService<ICmsSiteRegionService>();
+    var resolver = services.GetRequiredService<GlobalBlockResolver>();
+    var (header, footer) = await regions.GetLiveLayoutsAsync(site.Id);
+    var tokens = DesignTokenJson.ParseOrEmpty(site.DesignTokensJson);
+    var primary = PublicSiteHtmlRenderer.ParseNavItems(site.NavMenuJson);
+    var footerItems = PublicSiteHtmlRenderer.ParseFooterNavItems(site.FooterNavMenuJson);
+
+    async Task<string?> RenderAsync(PageLayout? layout)
+    {
+        if (layout is null) return null;
+        await resolver.ResolveAsync(site.Id, layout);
+        var html = CmsBlockHtmlRenderer.Render(layout, site.Slug, string.Empty, tokens: tokens);
+        html += CmsBlockHtmlRenderer.BuildRuntimeScriptTags(layout, html);
+        return PublicSiteHtmlRenderer.FillSiteChrome(html, primary, footerItems, site.Name, site.LogoUrl);
+    }
+
+    return (await RenderAsync(header), await RenderAsync(footer));
 }
 
 // Renders a Canvas page (by full path, under the Canvas:SiteSlug-configured site) as a full
@@ -3317,6 +3231,7 @@ static async Task<IResult> RenderContactThankYouAsync(HttpContext context,
     context.Response.Headers.CacheControl = "no-store";
     context.Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
     var homeUrl = siteSlug is null ? "/" : $"/cms/{Uri.EscapeDataString(site.Slug)}/home";
+    var (thanksHeaderHtml, thanksFooterHtml) = await RenderSiteRegionsAsync(context.RequestServices, site);
     return Results.Content(PublicSiteHtmlRenderer.Layout(
         "Thank you for reaching out", "Your message has been received.", null,
         PublicSiteHtmlRenderer.ContactThankYouBody(homeUrl),
@@ -3324,7 +3239,8 @@ static async Task<IResult> RenderContactThankYouAsync(HttpContext context,
         PublicSiteHtmlRenderer.ParseFooterNavItems(site.FooterNavMenuJson),
         site.AccentColorHex, site.FontPairingKey, siteName: site.Name,
         logoUrl: site.LogoUrl, faviconUrl: site.FaviconUrl,
-        tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson)), "text/html");
+        tokens: DesignTokenJson.ParseOrEmpty(site.DesignTokensJson),
+        headerHtml: thanksHeaderHtml, footerHtml: thanksFooterHtml), "text/html");
 }
 
 static async Task<IResult> RenderPublicCanvasPageAsync(
@@ -3406,26 +3322,16 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
         ? await LoadRelatedPostsByAnchorSlugAsync(layout, dbFactory, relatedArticlesService)
         : null;
     var bodyHtml = CmsBlockHtmlRenderer.Render(layout, siteSlug, fullPath, articles: articles, tokens: renderTokens, relatedPostsByAnchorSlug: relatedPosts, turnstileSiteKey: ContactFormProtection.SiteKeyFor(site, page, configuration));
+    bodyHtml = PublicSiteHtmlRenderer.FillSiteChrome(bodyHtml, navItems, footerNavItems, site.Name, site.LogoUrl);
     if (showSubmittedBanner)
     {
         bodyHtml = PublicSiteHtmlRenderer.SubmittedModal() + bodyHtml;
     }
 
     var customCss = string.Join('\n', new[] { site.CustomCss, page.CustomCss }.Where(css => !string.IsNullOrWhiteSpace(css)));
-    // This call site renders through PublicSiteHtmlRenderer.Layout(), which (unlike the other
-    // two CmsBlockHtmlRenderer.Render() call sites' own hand-rolled <html> templates) has no
-    // {CmsBlockHtmlRenderer.BuildInteractionRuntimeScript()} of its own - append it to the body
-    // here so scroll/click animations and the Phase 4 TOC/reading-progress scripts work
-    // identically on every render path instead of silently doing nothing on this one.
-    bodyHtml += CmsBlockHtmlRenderer.BuildInteractionRuntimeScript();
-    if (CmsBlockHtmlRenderer.LayoutContainsTableOfContents(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildTableOfContentsRuntimeScript();
-    if (CmsBlockHtmlRenderer.LayoutContainsReadingProgress(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildReadingProgressRuntimeScript();
-    if (CmsBlockHtmlRenderer.LayoutContainsStats(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildStatsCounterRuntimeScript();
-    if (CmsBlockHtmlRenderer.LayoutContainsTabs(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildTabsRuntimeScript();
-    if (CmsBlockHtmlRenderer.LayoutContainsPricingTable(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildPricingTableRuntimeScript();
-    if (CmsBlockHtmlRenderer.LayoutContainsGallery(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildGalleryRuntimeScript();
-    if (CmsBlockHtmlRenderer.LayoutContainsCarousel(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildCarouselRuntimeScript();
-    if (CmsBlockHtmlRenderer.LayoutContainsPortfolioGrid(layout)) bodyHtml += CmsBlockHtmlRenderer.BuildPortfolioRuntimeScript();
+    // PublicSiteHtmlRenderer.Layout() has no widget runtimes of its own - append the external
+    // ones this page needs (inline scripts can't run under the CSP).
+    bodyHtml += CmsBlockHtmlRenderer.BuildRuntimeScriptTags(layout, bodyHtml);
     if (isReadOnlyPreview)
         bodyHtml += "<script src=\"/js/cms-theme-preview.js\"></script>";
     var wrappedBody = string.IsNullOrWhiteSpace(customCss)
@@ -3437,6 +3343,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
         GetPublicBaseUrl(configuration, request),
         page.CanonicalUrl,
         GetPublicCanvasRoutePath(page, normalizedPath));
+    var (regionHeaderHtml, regionFooterHtml) = await RenderSiteRegionsAsync(request.HttpContext.RequestServices, site);
     var html = PublicSiteHtmlRenderer.Layout(
         pageTitle,
         page.MetaDescription,
@@ -3449,7 +3356,8 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
         canonicalUrl: canonicalUrl,
         siteName: site.Name,
         logoUrl: site.LogoUrl,
-        faviconUrl: site.FaviconUrl, tokens: renderTokens);
+        faviconUrl: site.FaviconUrl, tokens: renderTokens,
+        headerHtml: regionHeaderHtml, footerHtml: regionFooterHtml);
     return Results.Content(html, "text/html");
 }
 
@@ -3635,6 +3543,28 @@ static async Task EnsureGrantWatsonHomepageAsync(ApplicationDbContext dbContext,
 
     var homePage = await dbContext.CmsPages
         .FirstOrDefaultAsync(page => page.SiteId == site.Id && page.ParentPageId == null && page.Slug == "home");
+
+    if (homePage is not null)
+    {
+        // One-time cleanup: the recent-posts block used to carry its script inline, where the
+        // CSP blocked it; the served home-blog-grid runtime replaces it.
+        var cleaned = false;
+        if (GrantWatsonHomepageTemplate.TryRemoveLegacyInlineScript(homePage.BlocksJson, out var liveJson))
+        {
+            homePage.BlocksJson = liveJson;
+            cleaned = true;
+        }
+        if (GrantWatsonHomepageTemplate.TryRemoveLegacyInlineScript(homePage.DraftBlocksJson, out var draftJson))
+        {
+            homePage.DraftBlocksJson = draftJson;
+            cleaned = true;
+        }
+        if (cleaned)
+        {
+            await dbContext.SaveChangesAsync();
+            logger.LogInformation("Removed the CSP-blocked inline recent-posts script from the {SiteSlug} home page.", GrantWatsonHomepageTemplate.SiteSlug);
+        }
+    }
 
     if (!GrantWatsonHomepageTemplate.ShouldApplyTemplate(homePage))
     {
@@ -4473,4 +4403,6 @@ sealed record PublicNavMenus(
     string? SiteName,
     string? LogoUrl,
     string? FaviconUrl,
-    DesignTokenSet Tokens);
+    DesignTokenSet Tokens,
+    string? HeaderHtml = null,
+    string? FooterHtml = null);

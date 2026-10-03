@@ -1633,24 +1633,6 @@ public sealed class SentinelAiService(
             AddResult("LIVE SHOW", item.Title, $"Status: {item.Status}. Started: {item.StartedAt:u}. Ended: {item.EndedAt?.ToString("u") ?? "Not ended"}.", "admin/live-show");
         }
 
-        var notion = await db.NotionConnectorSettings.AsNoTracking()
-            .Select(item => new
-            {
-                item.WorkspaceName,
-                item.AuthenticationMode,
-                item.LastSyncedAt,
-                item.LastSyncDiscoveredCount,
-                item.LastSyncImportedCount,
-                item.LastSyncUpdatedCount,
-                item.LastSyncSkippedCount
-            })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (notion is not null)
-        {
-            builder.AppendLine(
-                $"NOTION CONNECTOR: Workspace {notion.WorkspaceName ?? "not named"}; mode {notion.AuthenticationMode}; last sync {notion.LastSyncedAt?.ToString("u") ?? "never"}; discovered/imported/updated/skipped {notion.LastSyncDiscoveredCount}/{notion.LastSyncImportedCount}/{notion.LastSyncUpdatedCount}/{notion.LastSyncSkippedCount}.");
-            citations.Add(new SentinelAiCitation(null, false, "Notion connector status", "admin/sentinel", "gws"));
-        }
 
         return new CachedSuiteContext(builder.ToString(), citations.ToArray());
     }

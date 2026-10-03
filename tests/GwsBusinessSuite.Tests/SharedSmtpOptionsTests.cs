@@ -58,4 +58,53 @@ public sealed class SharedSmtpOptionsTests
         options.FromAddress.Should().BeEmpty();
         options.Port.Should().Be(587);
     }
+
+    private static IConfiguration Config(Dictionary<string, string?> values) =>
+        new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+
+    [Fact]
+    public void NoSharedSection_BorrowsAnotherFeaturesServer_SoOneConfiguredSectionPowersEveryFeature()
+    {
+        // A deployment whose only mail settings are the original GrowthReportEmail__* section.
+        var configuration = Config(new()
+        {
+            ["GrowthReportEmail:Host"] = "smtp.gmail.com", ["GrowthReportEmail:Port"] = "587",
+            ["GrowthReportEmail:Username"] = "someone@gmail.com", ["GrowthReportEmail:Password"] = "app-password"
+        });
+        var options = new BookingEmailOptions();
+
+        SharedSmtpOptions.ApplyFallback(options, configuration);
+
+        options.Host.Should().Be("smtp.gmail.com");
+        options.Username.Should().Be("someone@gmail.com");
+        options.Password.Should().Be("app-password");
+        options.FromAddress.Should().Be("someone@gmail.com", "a Gmail-style login is the natural From address");
+    }
+
+    [Fact]
+    public void SharedSection_WinsOverOtherFeatureSections()
+    {
+        var configuration = Config(new()
+        {
+            ["Smtp:Host"] = "smtp.shared.test", ["Smtp:FromAddress"] = "noreply@shared.test",
+            ["GrowthReportEmail:Host"] = "smtp.growth.test"
+        });
+        var options = new ClientPortalEmailOptions();
+
+        SharedSmtpOptions.ApplyFallback(options, configuration);
+
+        options.Host.Should().Be("smtp.shared.test");
+        options.FromAddress.Should().Be("noreply@shared.test");
+    }
+
+    [Fact]
+    public void NothingConfigured_LeavesNoServer_ButDefaultsFromToTheBusinessMailbox()
+    {
+        var options = new EmailCampaignEmailOptions();
+
+        SharedSmtpOptions.ApplyFallback(options, Config([]));
+
+        options.Host.Should().BeEmpty();
+        options.FromAddress.Should().Be(SharedSmtpOptions.DefaultFromAddress);
+    }
 }

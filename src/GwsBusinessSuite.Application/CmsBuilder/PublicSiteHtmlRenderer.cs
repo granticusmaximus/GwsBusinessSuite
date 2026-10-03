@@ -113,10 +113,9 @@ public static class PublicSiteHtmlRenderer
 
     private const string DefaultAccentColorHex = "#f59e0b";
 
-    // Plain (non-raw, non-interpolated) string so its JS braces don't need escaping when
-    // dropped into Layout's raw interpolated string below via a single {ReducedMotionRevealScript} hole.
-    private const string ReducedMotionRevealScript =
-        "<script>if(!window.matchMedia('(prefers-reduced-motion: reduce)').matches){document.documentElement.classList.add('js-reveal')}</script>";
+    // External, synchronous (no defer) so .js-reveal lands before first paint - an inline
+    // <script> never runs under the site's CSP. See wwwroot/js/reveal-init.js.
+    private const string ReducedMotionRevealScript = """<script src="/js/reveal-init.js"></script>""";
 
     // CJ's site-wide deep-link automation. This publisher-specific URL is intentionally
     // limited to the public renderer so affiliate link rewriting never runs in the admin,
@@ -130,7 +129,8 @@ public static class PublicSiteHtmlRenderer
         string pageTitle, string metaDescription, string? ogImageUrl, string bodyHtml,
         IReadOnlyList<NavMenuItem>? navItems = null, IReadOnlyList<NavMenuItem>? footerNavItems = null,
         string? accentColorHex = null, string? fontPairingKey = null,
-        string? canonicalUrl = null, string? siteName = null, string? logoUrl = null, string? faviconUrl = null, DesignTokenSet? tokens = null)
+        string? canonicalUrl = null, string? siteName = null, string? logoUrl = null, string? faviconUrl = null, DesignTokenSet? tokens = null,
+        string? headerHtml = null, string? footerHtml = null)
     {
         var ogImageTag = string.IsNullOrWhiteSpace(ogImageUrl)
             ? string.Empty
@@ -181,9 +181,9 @@ public static class PublicSiteHtmlRenderer
               {ReducedMotionRevealScript}
             </head>
             <body>
-              {Nav(navItems ?? DefaultNavItems, siteName, logoUrl)}
+              {SiteHeader(headerHtml, navItems, siteName, logoUrl)}
               {bodyHtml}
-              {Footer(footerNavItems ?? [])}
+              {SiteFooter(footerHtml, footerNavItems)}
               <script src="/public-site.js" defer></script>
               <script src="/public-analytics.js" defer></script>
               {CjDeepLinkScript}
@@ -255,17 +255,52 @@ public static class PublicSiteHtmlRenderer
         return $"""<a href="{Html(item.Href)}"{targetAttrs}>{Html(item.Label)}</a>""";
     }
 
+    // A custom header/footer built in Appearance > Header & Footer replaces the built-in one.
+    private static string SiteHeader(string? headerHtml, IReadOnlyList<NavMenuItem>? navItems, string? siteName, string? logoUrl) =>
+        string.IsNullOrWhiteSpace(headerHtml)
+            ? Nav(navItems ?? DefaultNavItems, siteName, logoUrl)
+            : "<header class=\"gws-site-region gws-site-header\">" + headerHtml + "</header>";
+
+    private static string SiteFooter(string? footerHtml, IReadOnlyList<NavMenuItem>? footerNavItems) =>
+        string.IsNullOrWhiteSpace(footerHtml)
+            ? Footer(footerNavItems ?? [])
+            : "<footer class=\"gws-site-region gws-site-footer\">" + footerHtml + "</footer>";
+
+    private static string BrandHtml(string? siteName, string? logoUrl, bool showName = true) =>
+        string.IsNullOrWhiteSpace(logoUrl)
+            ? showName
+                ? """
+                    <img src="/logo-mark.svg" alt="" />
+                    <span class="site-logo-wordmark">
+                      <span>grantwatson</span>
+                      <span class="site-logo-domain">.dev</span>
+                    </span>
+                    """
+                : $"""<img src="/logo-mark.svg" alt="{Html(string.IsNullOrWhiteSpace(siteName) ? "Home" : siteName)}" />"""
+            : $"""<img src="{Html(logoUrl)}" alt="{Html(string.IsNullOrWhiteSpace(siteName) ? "Site logo" : siteName)}" class="site-logo-custom" />""";
+
+    private static readonly System.Text.RegularExpressions.Regex SiteLogoPlaceholder =
+        new(@"(<a href=""/"" class=""gws-site-logo"" data-gws-site-logo=""([01])""[^>]*>)</a>", System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly System.Text.RegularExpressions.Regex NavMenuPlaceholder =
+        new(@"(<nav class=""gws-nav-menu[^""]*""[^>]*data-gws-nav-menu=""(header|footer)""[^>]*>)</nav>", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    // Fills the header/footer builder's site-logo and nav-menu placeholders (emitted empty by
+    // CmsBlockHtmlRenderer) with the site's real logo and Appearance > Menus links, using the same
+    // link rendering (social-icon detection included) as the built-in header and footer.
+    public static string FillSiteChrome(string html, IReadOnlyList<NavMenuItem>? primary, IReadOnlyList<NavMenuItem>? footer, string? siteName, string? logoUrl)
+    {
+        if (string.IsNullOrEmpty(html) || !html.Contains("data-gws-", StringComparison.Ordinal)) return html;
+        html = SiteLogoPlaceholder.Replace(html, m => m.Groups[1].Value + BrandHtml(siteName, logoUrl, m.Groups[2].Value == "1") + "</a>");
+        return NavMenuPlaceholder.Replace(html, m =>
+        {
+            var items = m.Groups[2].Value == "footer" ? footer ?? [] : primary ?? DefaultNavItems;
+            return m.Groups[1].Value + string.Concat(items.Select(NavLink)) + "</nav>";
+        });
+    }
+
     private static string Nav(IReadOnlyList<NavMenuItem> navItems, string? siteName, string? logoUrl)
     {
-        var brandHtml = string.IsNullOrWhiteSpace(logoUrl)
-            ? """
-                <img src="/logo-mark.svg" alt="" />
-                <span class="site-logo-wordmark">
-                  <span>grantwatson</span>
-                  <span class="site-logo-domain">.dev</span>
-                </span>
-                """
-            : $"""<img src="{Html(logoUrl)}" alt="{Html(string.IsNullOrWhiteSpace(siteName) ? "Site logo" : siteName)}" class="site-logo-custom" />""";
+        var brandHtml = BrandHtml(siteName, logoUrl);
 
         var sb = new StringBuilder();
         sb.Append("""
@@ -337,26 +372,7 @@ public static class PublicSiteHtmlRenderer
             <button type="button" class="gws-submitted-modal-close" id="gws-submitted-modal-close">Close</button>
           </div>
         </div>
-        <script>
-        (function () {
-          var modal = document.getElementById('gws-submitted-modal');
-          var closeBtn = document.getElementById('gws-submitted-modal-close');
-          if (!modal || !closeBtn) return;
-
-          function close() {
-            modal.style.display = 'none';
-            if (window.history && window.history.replaceState) {
-              var url = new URL(window.location.href);
-              url.searchParams.delete('submitted');
-              window.history.replaceState({}, document.title, url.pathname + url.search + url.hash);
-            }
-          }
-
-          closeBtn.addEventListener('click', close);
-          modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
-          document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
-        })();
-        </script>
+        <script src="/js/submitted-modal.js" defer></script>
         """;
 
     public static string CommentPendingBanner() => """

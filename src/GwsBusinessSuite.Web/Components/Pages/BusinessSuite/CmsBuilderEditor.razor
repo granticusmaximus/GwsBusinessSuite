@@ -24,6 +24,7 @@
 @inject IJSRuntime JS
 @inject ILogger<CmsBuilderEditor> Logger
 @inject GwsBusinessSuite.Application.Campaigns.IArticleAlertService ArticleAlertService
+@inject GwsBusinessSuite.Application.Geocoding.IGeocodingService Geocoding
 
 <PageTitle>Edit page — @(_page?.Title ?? "Loading…")</PageTitle>
 
@@ -88,7 +89,14 @@
         <p class="mb-0">Manage pages, arrange modules, and edit directly on your website.</p>
         @if (_site is not null && _page is not null)
         {
-            <p class="small text-secondary mb-0 mt-1">Website: @_site.Name · Live at: <span class="font-monospace">/@CurrentFullPath</span></p>
+            @if (_page?.Region is { } region)
+            {
+                <p class="small text-secondary mb-0 mt-1">Website: @_site.Name · Shown at the @(region == CmsPageRegions.Header ? "top" : "bottom") of every public page once published · <a href="/admin/appearance/header-footer">Header &amp; Footer settings</a></p>
+            }
+            else
+            {
+                <p class="small text-secondary mb-0 mt-1">Website: @_site.Name · Live at: <span class="font-monospace">/@CurrentFullPath</span></p>
+            }
         }
     </div>
     <div class="studio-header-actions">
@@ -1331,6 +1339,113 @@ else
                                     }
                                 }
                             </div>
+                        }
+                        else if (selWidget.WidgetType == "site-logo")
+                        {
+                            <div class="form-text mb-2">Shows the logo set in Appearance &gt; Customize and links to your home page.</div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="logo-name" checked='@(GetProp(selWidget, "showName", "true") != "false")'
+                                       @onchange='(e) => SetProp(selWidget, "showName", e.Value is true ? "true" : "false", forceNewUndoStep: true)' />
+                                <label class="form-check-label small" for="logo-name">Show the site name next to the default logo mark</label>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Height (px)</label>
+                                <input type="number" min="16" max="120" class="form-control" value='@GetProp(selWidget, "height", "36")'
+                                       @onchange='(e) => SetProp(selWidget, "height", e.Value?.ToString() ?? "36", forceNewUndoStep: true)' />
+                            </div>
+                            @AlignPicker(selWidget, "left")
+                        }
+                        else if (selWidget.WidgetType == "nav-menu")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Menu</label>
+                                <select class="form-select" value='@GetProp(selWidget, "menu", "header")'
+                                        @onchange='(e) => SetProp(selWidget, "menu", e.Value?.ToString() ?? "header", forceNewUndoStep: true)'>
+                                    <option value="header">Header menu</option>
+                                    <option value="footer">Footer menu</option>
+                                </select>
+                                <div class="form-text">Edit the links in <a href="/admin/appearance/menus">Appearance &gt; Menus</a>. Social links (GitHub, LinkedIn…) show as icons.</div>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Direction</label>
+                                <select class="form-select" value='@GetProp(selWidget, "direction", "horizontal")'
+                                        @onchange='(e) => SetProp(selWidget, "direction", e.Value?.ToString() ?? "horizontal", forceNewUndoStep: true)'>
+                                    <option value="horizontal">Across</option>
+                                    <option value="vertical">Stacked</option>
+                                </select>
+                            </div>
+                            @AlignPicker(selWidget, "right")
+                        }
+                        else if (selWidget.WidgetType == "copyright")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Name</label>
+                                <input class="form-control" value='@GetProp(selWidget, "holder")'
+                                       @oninput='(e) => SetProp(selWidget, "holder", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Extra text (optional)</label>
+                                <input class="form-control" value='@GetProp(selWidget, "text")' placeholder="All rights reserved"
+                                       @oninput='(e) => SetProp(selWidget, "text", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="copy-admin" checked='@(GetProp(selWidget, "showAdminLink", "false") == "true")'
+                                       @onchange='(e) => SetProp(selWidget, "showAdminLink", e.Value is true ? "true" : "false", forceNewUndoStep: true)' />
+                                <label class="form-check-label small" for="copy-admin">Show a small "admin" link</label>
+                            </div>
+                            @AlignPicker(selWidget, "center")
+                        }
+                        else if (selWidget.WidgetType == "map")
+                        {
+                            <div>
+                                <label class="form-label small fw-semibold">Address or place</label>
+                                <div class="d-flex gap-2">
+                                    <input class="form-control" value='@GetProp(selWidget, "address")' placeholder="123 Main St, Springfield"
+                                           @oninput='(e) => SetProp(selWidget, "address", e.Value?.ToString() ?? string.Empty)' />
+                                    <button type="button" class="btn btn-outline-primary text-nowrap" disabled="@_mapGeocoding" @onclick="() => GeocodeMapWidgetAsync(selWidget)">
+                                        <i class="bi bi-search me-1"></i>@(_mapGeocoding ? "Finding…" : "Find on map")
+                                    </button>
+                                </div>
+                                @if (!string.IsNullOrEmpty(_mapGeocodeMessage))
+                                {
+                                    <div class="form-text">@_mapGeocodeMessage</div>
+                                }
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold">Latitude</label>
+                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "lat")'
+                                           @onchange='(e) => SetProp(selWidget, "lat", e.Value?.ToString() ?? string.Empty, forceNewUndoStep: true)' />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold">Longitude</label>
+                                    <input class="form-control font-monospace" value='@GetProp(selWidget, "lng")'
+                                           @onchange='(e) => SetProp(selWidget, "lng", e.Value?.ToString() ?? string.Empty, forceNewUndoStep: true)' />
+                                </div>
+                            </div>
+                            <div>
+                                <label class="form-label small fw-semibold">Heading (optional)</label>
+                                <input class="form-control" value='@GetProp(selWidget, "heading")'
+                                       @oninput='(e) => SetProp(selWidget, "heading", e.Value?.ToString() ?? string.Empty)' />
+                            </div>
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold">Zoom (3-18)</label>
+                                    <input type="number" min="3" max="18" class="form-control" value='@GetProp(selWidget, "zoom", "15")'
+                                           @onchange='(e) => SetProp(selWidget, "zoom", e.Value?.ToString() ?? "15", forceNewUndoStep: true)' />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold">Height (px)</label>
+                                    <input type="number" min="200" max="800" step="20" class="form-control" value='@GetProp(selWidget, "height", "360")'
+                                           @onchange='(e) => SetProp(selWidget, "height", e.Value?.ToString() ?? "360", forceNewUndoStep: true)' />
+                                </div>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="map-directions" checked='@(GetProp(selWidget, "showDirections", "true") != "false")'
+                                       @onchange='(e) => SetProp(selWidget, "showDirections", e.Value is true ? "true" : "false", forceNewUndoStep: true)' />
+                                <label class="form-check-label small" for="map-directions">Show a "Get directions" link</label>
+                            </div>
+                            <div class="form-text">Free OpenStreetMap map - no API key. Addresses are looked up once when you click Find on map.</div>
                         }
                         else if (selWidget.WidgetType == "email-signup")
                         {
@@ -2622,9 +2737,10 @@ else
     private const string GroupLayout = "Layout";
     private const string GroupDynamic = "Dynamic";
     private const string GroupAdvanced = "Advanced";
+    private const string GroupSite = "Header & footer";
 
     private static readonly string[] WidgetGroupOrder =
-        [GroupText, GroupMedia, GroupLayout, GroupDynamic, GroupAdvanced];
+        [GroupText, GroupMedia, GroupLayout, GroupDynamic, GroupSite, GroupAdvanced];
 
     private static readonly WidgetDef[] WidgetCatalog =
     [
@@ -2648,6 +2764,7 @@ else
         new("reading-progress", "bi bi-hourglass-split",   "Reading Progress", "A scroll-position progress bar",      GroupDynamic),
         new("booking",     "bi bi-calendar-check",         "Booking",     "Embed one of your booking types",     GroupDynamic),
         new("email-signup", "bi bi-envelope-paper-heart",  "Email Signup", "Visitors subscribe to new-article emails", GroupDynamic),
+        new("map",          "bi bi-geo-alt",                "Map",          "Location map with directions (OpenStreetMap)", GroupDynamic),
         new("stats",       "bi bi-graph-up-arrow",         "Stats",       "Animated number counters for key metrics", GroupMedia),
         new("team-grid",   "bi bi-people",                 "Team Grid",   "Photo cards for introducing your team", GroupMedia),
         new("cta-banner",  "bi bi-bullseye",                "CTA Banner",  "Centered headline, copy, and one button", GroupLayout),
@@ -2661,6 +2778,9 @@ else
         new("portfolio-grid", "bi bi-kanban",               "Portfolio Grid", "A filterable project grid with a detail overlay", GroupMedia),
         new("case-study",  "bi bi-journal-richtext",        "Case Study",  "A single project told as a structured story", GroupMedia),
         new("html",        "bi bi-code-slash",             "HTML",        "Raw HTML block",                      GroupAdvanced),
+        new("site-logo",   "bi bi-badge-tm",               "Site Logo",   "Your logo, linking home",             GroupSite),
+        new("nav-menu",    "bi bi-menu-button-wide",       "Nav Menu",    "Header or footer menu from Appearance > Menus", GroupSite),
+        new("copyright",   "bi bi-c-circle",               "Copyright",   "© year and name, updates itself",     GroupSite),
     ];
 
     private string _blockSearch = string.Empty;
@@ -3817,6 +3937,60 @@ else
     }
 
     // ── Widget CRUD ───────────────────────────────────────────────────────
+    private RenderFragment AlignPicker(LayoutWidget widget, string fallback) => __builder =>
+    {
+        <div>
+            <label class="form-label small fw-semibold">Alignment</label>
+            <select class="form-select" value='@GetProp(widget, "align", fallback)'
+                    @onchange='(e) => SetProp(widget, "align", e.Value?.ToString() ?? fallback, forceNewUndoStep: true)'>
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+            </select>
+        </div>
+    };
+
+    private bool _mapGeocoding;
+    private string _mapGeocodeMessage = string.Empty;
+
+    // Map widget: look the address up once (free Photon/OSM geocoder, Census fallback) and store
+    // the coordinates on the widget, so the public page never geocodes anything itself.
+    private async Task GeocodeMapWidgetAsync(LayoutWidget widget)
+    {
+        var address = GetProp(widget, "address").Trim();
+        if (address.Length == 0)
+        {
+            _mapGeocodeMessage = "Type an address or place name first.";
+            return;
+        }
+
+        _mapGeocoding = true;
+        _mapGeocodeMessage = string.Empty;
+        try
+        {
+            var result = await Geocoding.GeocodeAsync(address);
+            if (result is null)
+            {
+                _mapGeocodeMessage = "Couldn't find that place - try adding the city and state, or enter the latitude/longitude yourself.";
+                return;
+            }
+
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            SetProp(widget, "lat", result.Latitude.ToString("0.######", culture), forceNewUndoStep: true);
+            SetProp(widget, "lng", result.Longitude.ToString("0.######", culture));
+            _mapGeocodeMessage = "Found it - the map now centres on that location.";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Map widget geocoding failed for {Address}.", address);
+            _mapGeocodeMessage = "The address lookup service didn't respond - try again, or enter the latitude/longitude yourself.";
+        }
+        finally
+        {
+            _mapGeocoding = false;
+        }
+    }
+
     private async Task QuickAddWidget(string widgetType)
     {
         PushUndo();
@@ -5491,6 +5665,10 @@ else
         "booking"    => new() { WidgetType = "booking", Props = new() { ["bookingTypeSlug"] = "", ["title"] = "Book a time", ["height"] = "720" } },
         "stats"      => new() { WidgetType = "stats", Props = new() { ["itemsJson"] = """[{"value":"500","suffix":"+","label":"Projects Delivered"},{"value":"98","suffix":"%","label":"Client Satisfaction"},{"value":"12","suffix":"","label":"Years in Business"}]""" } },
         "team-grid"  => new() { WidgetType = "team-grid", Props = new() { ["itemsJson"] = """[{"name":"Jane Doe","role":"Role or title","photoUrl":"","linkedinUrl":"","twitterUrl":"","emailAddress":""}]""" } },
+        "site-logo" => new() { WidgetType = "site-logo", Props = new() { ["showName"] = "true", ["height"] = "36", ["align"] = "left" } },
+        "nav-menu" => new() { WidgetType = "nav-menu", Props = new() { ["menu"] = "header", ["direction"] = "horizontal", ["align"] = "right" } },
+        "copyright" => new() { WidgetType = "copyright", Props = new() { ["holder"] = "Grant Watson", ["text"] = "", ["showAdminLink"] = "false", ["align"] = "center" } },
+        "map" => new() { WidgetType = "map", Props = new() { ["heading"] = "", ["address"] = "", ["lat"] = "", ["lng"] = "", ["zoom"] = "15", ["height"] = "360", ["showDirections"] = "true" } },
         "email-signup" => new() { WidgetType = "email-signup", Props = new() { ["campaignId"] = "", ["heading"] = "Get new articles by email", ["description"] = "Be the first to know when I publish something new.", ["showFirstName"] = "true", ["buttonLabel"] = "Subscribe", ["consentText"] = "No spam. Unsubscribe any time.", ["successMessage"] = "Almost done - check your inbox and click the link to confirm.", ["align"] = "center" } },
         "cta-banner" => new() { WidgetType = "cta-banner", Props = new() { ["headline"] = "Ready to get started?", ["body"] = "Tell visitors what happens next and give them a clear next step.", ["buttonLabel"] = "Get started", ["buttonHref"] = "#", ["buttonVariant"] = "primary", ["align"] = "center" } },
         "logo-cloud" => new() { WidgetType = "logo-cloud", Props = new() { ["itemsJson"] = "[]", ["grayscale"] = "true" } },

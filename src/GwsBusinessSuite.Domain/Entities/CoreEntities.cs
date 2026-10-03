@@ -1194,9 +1194,24 @@ public static class CmsPageStatuses
     public const string Published = "Published";
 }
 
+// Site-wide header/footer regions, built in the page editor like any page but never listed,
+// routed or indexed as one (ApplicationDbContext gives CmsPage a Region == null query filter).
+public static class CmsPageRegions
+{
+    public const string Header = "header";
+    public const string Footer = "footer";
+
+    public static readonly string[] All = [Header, Footer];
+
+    // Reserved slugs - CreateSlug never produces a leading underscore, so no real page can collide.
+    public static string SlugFor(string region) => $"_site-{region}";
+}
+
 public sealed class CmsPage : AuditableEntity
 {
     public Guid SiteId { get; set; }
+    // null for a normal page; CmsPageRegions.Header/Footer for the site-wide header/footer.
+    public string? Region { get; set; }
     public Guid? ParentPageId { get; set; }
     public Guid? CategoryId { get; set; }
     public required string Title { get; set; }
@@ -1455,73 +1470,6 @@ public sealed class CjConnectorSettings : AuditableEntity
     public string EndpointUrl { get; set; } = "https://commissions.api.cj.com/query";
     public int MaxResults { get; set; } = 100;
     public bool AutomaticArticleRotationEnabled { get; set; } = true;
-}
-
-public sealed class NotionConnectorSettings : AuditableEntity
-{
-    // Singleton row — always upserted using WellKnownId.
-    public static readonly Guid WellKnownId = new("00701104-0000-0000-0000-000000000001");
-
-    // Internal-connection, PAT, or OAuth access token. Always encrypted at rest via
-    // ISecretProtector and never returned to the browser.
-    public string IntegrationToken { get; set; } = string.Empty;
-    // OAuth rotates both access and refresh tokens together. Keeping this separate lets the
-    // existing internal-token connector remain a supported fallback.
-    public string OAuthRefreshToken { get; set; } = string.Empty;
-    public string AuthenticationMode { get; set; } = "internal";
-    public string? OAuthBotId { get; set; }
-    public string? WorkspaceId { get; set; }
-    public string? WorkspaceIconUrl { get; set; }
-    public DateTimeOffset? OAuthConnectedAt { get; set; }
-    // Cosmetic - fetched once via GET /v1/users/me when the token is saved.
-    public string? WorkspaceName { get; set; }
-    public bool AutoSyncEnabled { get; set; } = true;
-    public string SyncDirection { get; set; } = "import";
-    public string SelectedNotionIdsJson { get; set; } = "[]";
-    public bool AllowTwoWayWrites { get; set; }
-    public DateTimeOffset? LastSyncedAt { get; set; }
-    public int LastSyncImportedCount { get; set; }
-    public int LastSyncUpdatedCount { get; set; }
-    public int LastSyncArchivedCount { get; set; }
-    public int LastSyncDiscoveredCount { get; set; }
-    public int LastSyncSkippedCount { get; set; }
-    public int LastSyncEmptyContentCount { get; set; }
-    public int LastSyncContentBlockCount { get; set; }
-    // Connection-webhook verification token, encrypted through ISecretProtector. Notion
-    // uses it as the HMAC-SHA256 key for X-Notion-Signature.
-    public string WebhookVerificationToken { get; set; } = string.Empty;
-    public DateTimeOffset? WebhookVerificationReceivedAt { get; set; }
-    public DateTimeOffset? LastWebhookReceivedAt { get; set; }
-    public string? LastWebhookEventType { get; set; }
-}
-
-// Durable webhook receipt ledger. Notion retries a delivery when it does not receive a
-// successful response; the unique event id prevents the same signal from creating duplicate
-// work while still acknowledging the retry.
-public sealed class NotionWebhookEvent : AuditableEntity
-{
-    public required string NotionEventId { get; set; }
-    public required string EventType { get; set; }
-    public string? WorkspaceId { get; set; }
-    public string? EntityType { get; set; }
-    public string? EntityId { get; set; }
-    public DateTimeOffset EventTimestamp { get; set; }
-    public bool SyncQueued { get; set; }
-}
-
-public sealed class NotionSyncConflict : AuditableEntity
-{
-    public Guid WikiPageId { get; set; }
-    public required string NotionId { get; set; }
-    public required string FieldName { get; set; }
-    public string LocalValueJson { get; set; } = "null";
-    public string RemoteValueJson { get; set; } = "null";
-    public DateTimeOffset RemoteEditedAt { get; set; }
-    public string Status { get; set; } = "pending";
-    public string? Resolution { get; set; }
-    public DateTimeOffset? ResolvedAt { get; set; }
-    public string? ResolvedBy { get; set; }
-    public WikiPage? WikiPage { get; set; }
 }
 
 // WordPress-style "Settings" (General/Reading/Writing/Media/AI) — a singleton row for

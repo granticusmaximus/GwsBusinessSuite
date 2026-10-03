@@ -25,6 +25,7 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject GwsBusinessSuite.Application.Operations.IEmailDeliveryStatusService EmailDelivery
 
 <PageTitle>Settings</PageTitle>
 
@@ -166,6 +167,62 @@ else
                     <div class="form-text">Applies to hero images and the media library.</div>
                 </div>
                 <div class="gws-settings-actions"><span>Applies to future uploads.</span><button class="btn btn-primary" @onclick="SaveMediaAsync" disabled="@IsBusy">@(IsBusy ? "Saving…" : "Save changes")</button></div>
+            </div>
+        </div>
+    }
+    else if (ActiveTab == "Email")
+    {
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <p class="small text-secondary">
+                    Every email the app sends uses the first thing that's set up: an SMTP server from <code>.env</code>
+                    (<code>Smtp__Host</code>, or any feature's own section such as <code>GrowthReportEmail__Host</code>),
+                    otherwise the Google account connected under <strong>Automation &gt; Credentials</strong> (sent through the Gmail API).
+                </p>
+                @if (_emailStatus is null)
+                {
+                    <LoadingIndicator Message="Checking email delivery…" />
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-3">
+                            <thead><tr><th>Feature</th><th>Sends via</th><th>From</th></tr></thead>
+                            <tbody>
+                                @foreach (var row in _emailStatus)
+                                {
+                                    <tr>
+                                        <td>@row.Feature</td>
+                                        <td>
+                                            @if (row.CanSend)
+                                            {
+                                                <span class="badge text-bg-success me-1">Ready</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge text-bg-danger me-1">Not set up</span>
+                                            }
+                                            <span class="small">@row.Route</span>
+                                        </td>
+                                        <td class="small"><code>@row.FromAddress</code></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                <label class="form-label small text-secondary" for="email-test-address">Send a test email</label>
+                <div class="d-flex flex-wrap gap-2 mb-2">
+                    <input id="email-test-address" type="email" class="form-control" style="max-width:20rem" placeholder="you@example.com" @bind="_emailTestAddress" @bind:event="oninput" />
+                    <button class="btn btn-outline-primary" disabled="@(IsBusy || string.IsNullOrWhiteSpace(_emailTestAddress))" @onclick="SendEmailTestAsync">
+                        <i class="bi bi-send me-1"></i>@(IsBusy ? "Sending…" : "Send test")
+                    </button>
+                    <button class="btn btn-outline-secondary" disabled="@IsBusy" @onclick="LoadEmailStatusAsync"><i class="bi bi-arrow-clockwise me-1"></i>Recheck</button>
+                </div>
+                <div class="form-text">
+                    Sending through a Gmail account? Gmail only keeps a From address like <code>grant@gwsapp.net</code> if it's added and verified
+                    under Gmail's <em>Settings &gt; Accounts &gt; Send mail as</em>; otherwise it rewrites From to the Gmail address.
+                </div>
             </div>
         </div>
     }
@@ -375,6 +432,7 @@ else
         new("Reading", "bi-book", "Public blog display"),
         new("Writing", "bi-pencil", "Post defaults"),
         new("Media", "bi-image", "Upload limits"),
+        new("Email", "bi-envelope-check", "Delivery status and test"),
         new("SentinelGPT", "bi-stars", "Models and generation"),
         new("Developer API", "bi-braces-asterisk", "Keys, scopes, and docs")
     ];
@@ -409,11 +467,47 @@ else
 
     private List<ArticleCategory> Categories { get; set; } = new();
 
-    private void SelectTab(string tab)
+    private IReadOnlyList<GwsBusinessSuite.Application.Operations.EmailDeliveryFeatureStatus>? _emailStatus;
+    private string _emailTestAddress = string.Empty;
+
+    private async Task SelectTab(string tab)
     {
         ActiveTab = tab;
         StatusMessage = string.Empty;
         ErrorMessage = string.Empty;
+        if (tab == "Email") await LoadEmailStatusAsync();
+    }
+
+    private async Task LoadEmailStatusAsync()
+    {
+        _emailStatus = null;
+        try
+        {
+            _emailStatus = await EmailDelivery.GetStatusAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unable to check email delivery status.");
+            ErrorMessage = $"Unable to check email delivery. {ex.Message}";
+            _emailStatus = [];
+        }
+    }
+
+    private async Task SendEmailTestAsync()
+    {
+        IsBusy = true;
+        StatusMessage = string.Empty;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var result = await EmailDelivery.SendTestAsync(_emailTestAddress.Trim());
+            if (result.Succeeded) StatusMessage = result.Message;
+            else ErrorMessage = result.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     protected override async Task OnInitializedAsync()

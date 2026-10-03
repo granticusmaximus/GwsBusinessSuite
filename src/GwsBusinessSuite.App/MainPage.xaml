@@ -34,7 +34,7 @@
                 ToolTipProperties.Text="Reload">
             <!-- MacCatalyst gets this same action from the native titlebar toolbar instead (see
                  Platforms/MacCatalyst/MacWindowToolbar.cs), which does not sit over the hosted
-                 site's own top-right chrome (Quick find, Notion sync, account menu) the way this
+                 site's own top-right chrome (Quick find, account menu) the way this
                  floating corner button did. -->
             <Button.IsVisible>
                 <OnPlatform x:TypeArguments="x:Boolean" Default="True">

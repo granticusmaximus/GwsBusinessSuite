@@ -532,3 +532,38 @@ body {
 .gws-email-signup-form.is-done .gws-email-signup-consent { display: none; }
 .gws-email-signup-warning { margin-bottom: .75rem; padding: .6rem .8rem; border: 1px dashed #f59e0b; border-radius: 8px; font-size: .85rem; background: rgba(245, 158, 11, .1); }
 @media (max-width: 480px) { .gws-email-signup-submit { flex-basis: 100%; } }
+
+/* Location map widget (OpenStreetMap embed) */
+.gws-map { display: flex; flex-direction: column; gap: .5rem; }
+.gws-map-heading { margin: 0 0 .25rem; }
+.gws-map-frame { display: block; width: 100%; border: 0; border-radius: 12px; background: #e5e7eb; }
+.gws-map-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; font-size: .9rem; }
+.gws-map-address { opacity: .8; }
+.gws-map-directions { font-weight: 600; }
+.gws-map-empty { display: flex; align-items: center; justify-content: center; padding: 1rem; border: 1px dashed currentColor; border-radius: 12px; opacity: .8; }
+
+/* Header & footer builder (Appearance > Header & Footer) */
+.gws-site-region { position: relative; z-index: 10; }
+.gws-site-region > .gws-section, .gws-site-region section { margin: 0; }
+.gws-site-logo-wrap { display: flex; }
+.gws-site-logo-wrap.gws-align-center { justify-content: center; }
+.gws-site-logo-wrap.gws-align-right { justify-content: flex-end; }
+.gws-site-logo { display: inline-flex; align-items: center; gap: .5rem; color: inherit; text-decoration: none; font-weight: 700; }
+.gws-site-logo img { height: var(--gws-logo-height, 36px); width: auto; }
+.gws-nav-menu { display: flex; flex-wrap: wrap; gap: .25rem 1.25rem; align-items: center; }
+.gws-nav-menu.gws-nav-menu-vertical { flex-direction: column; align-items: flex-start; gap: .5rem; }
+.gws-nav-menu.gws-align-center { justify-content: center; }
+.gws-nav-menu.gws-align-right { justify-content: flex-end; }
+.gws-nav-menu.gws-nav-menu-vertical.gws-align-center { align-items: center; }
+.gws-nav-menu.gws-nav-menu-vertical.gws-align-right { align-items: flex-end; }
+.gws-nav-menu a { color: inherit; text-decoration: none; opacity: .85; font-weight: 500; }
+.gws-nav-menu a:hover, .gws-nav-menu a:focus-visible { opacity: 1; text-decoration: underline; }
+.gws-nav-menu .nav-link-social { font-size: 1.15rem; }
+.gws-nav-menu .nav-link-social svg { width: 1.15rem; height: 1.15rem; fill: currentColor; }
+.gws-copyright { margin: .75rem 0 0; font-size: .875rem; opacity: .75; }
+.gws-copyright.gws-align-center { text-align: center; }
+.gws-copyright.gws-align-right { text-align: right; }
+@media (max-width: 640px) {
+  .gws-site-header .gws-columns { gap: .75rem; }
+  .gws-site-header .gws-nav-menu, .gws-site-header .gws-site-logo-wrap { justify-content: center; }
+}

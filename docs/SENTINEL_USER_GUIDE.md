@@ -27,7 +27,7 @@ full-clone parity contract) — this guide is the operator-facing companion to b
 9. [Version history, trash, and duplication](#version-history-trash-and-duplication)
 10. [Search and the command palette](#search-and-the-command-palette)
 11. [Sharing and permissions](#sharing-and-permissions)
-12. [Notion import and sync](#notion-import-and-sync)
+12. [Importing from Notion](#importing-from-notion)
 13. [Using SentinelGPT](#using-sentinelgpt)
 14. [The in-page "Ask SentinelGPT" panel](#the-in-page-ask-sentinelgpt-panel)
 15. [Known limitations](#known-limitations)
@@ -52,8 +52,7 @@ opening any other page.
   its own filters, sorts, and (for Board) grouping. Multiple views can exist side by side on the
   same database without duplicating any data.
 - **Workspace** — your private page/database tree, shown in the left sidebar under "Private."
-  Sentinel also has a lightweight "Teamspaces" entry, which today only ever represents a connected
-  Notion workspace rather than a full multi-team structure.
+  There are no teamspaces.
 - **Sharing** — two independent layers: per-user permission grants (View / Comment / Edit / Full
   access) on a specific page or database, and separate public share links for read-only,
   no-login access.
@@ -299,7 +298,7 @@ re-enabling a paused schedule always computes its next run from the moment you r
 rather than immediately firing for every occurrence it missed while paused.
 
 The same panel also hosts Notion workspace/template import — see
-[Notion import and sync](#notion-import-and-sync).
+[Importing from Notion](#importing-from-notion).
 
 ## Comments and discussions
 
@@ -361,21 +360,19 @@ This same public-share plumbing also backs Workflow Automation's public status p
 [`AUTOMATION_USER_GUIDE.md`](AUTOMATION_USER_GUIDE.md)) — one mechanism, three kinds of target
 (page, database, or workflow status) behind it.
 
-## Notion import and sync
+## Importing from Notion
 
-Sentinel can connect to a real Notion workspace via OAuth from the "Teamspaces" entry in the
-sidebar. Once connected you can sync everything or pick specific pages/databases, run a manual
-**Sync now**, or rely on a webhook for near-real-time updates when the Notion side changes. A page
-can be pushed from Sentinel back up to Notion, and new local database properties can be pushed to
-a Notion-synced database's schema. If both sides changed the same content, the conflict is queued
-for you to resolve manually rather than silently merged.
+There is no live Notion connection (it was removed on 2026-10-03). To bring Notion content in,
+export it from Notion and upload the ZIP from the Templates panel:
 
-Separately, the Templates panel offers two one-time import paths: **Restore a Notion workspace**
-uploads a Notion "Markdown & CSV" or HTML export ZIP (up to 250 MB) and creates or updates real,
-independently-editable pages, databases, rows, and files from it — re-uploading the same export
-later updates matching documents instead of duplicating them. **Import a free Notion template**
-duplicates a small ZIP (up to 25 MB) into your connected Notion workspace so you can pull it in
-through ordinary sync and save it as a Sentinel template.
+- **Restore a Notion workspace** takes a Notion "Markdown & CSV" or HTML export ZIP (up to 250 MB)
+  and creates or updates real, independently editable pages, databases, rows and files from it.
+  Re-uploading the same export later updates the matching documents instead of duplicating them.
+- **Import a free Notion template** takes a smaller export ZIP (up to 25 MB) of a single
+  template, which you can then save as a Sentinel template.
+
+Pages imported earlier keep their small "N" badge in the sidebar; they are ordinary Sentinel pages
+and nothing syncs back to Notion.
 
 ## Using SentinelGPT
 
@@ -458,5 +455,3 @@ These are real gaps observed in the current implementation, not invented ones:
   columns).
 - **Public share links cover pages, databases, and workflow status pages only** — there's no way
   to publicly share a saved search or the workspace as a whole.
-- **"Teamspaces" is effectively single-purpose today.** It surfaces one entry for a connected
-  Notion workspace rather than a real multi-team/multi-space structure inside Sentinel.

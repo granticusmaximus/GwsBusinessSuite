@@ -1,6 +1,6 @@
 // grantwatson.dev public-site interactivity: scroll-triggered section reveals and a
 // soft cursor glow. Both are pure progressive enhancement - the reveal targets are only
-// hidden by CSS when <html> already has .js-reveal, which the inline head script in
+// hidden by CSS when <html> already has .js-reveal, which the head script (js/reveal-init.js) in
 // PublicSiteHtmlRenderer.Layout only adds when prefers-reduced-motion is off, so
 // no-JS and reduced-motion visitors always see full content with no animation.
 (function () {

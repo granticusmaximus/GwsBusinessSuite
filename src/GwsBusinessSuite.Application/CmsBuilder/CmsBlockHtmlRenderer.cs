@@ -134,6 +134,10 @@ public static class CmsBlockHtmlRenderer
             "stats" => "[stats]",
             "cta-banner" => Get(p, "headline", "[CTA banner]"),
             "email-signup" => Get(p, "heading", "[email signup]"),
+            "map" => Get(p, "address", "[map]"),
+            "site-logo" => "[site logo]",
+            "nav-menu" => $"[{Get(p, "menu", "header")} menu]",
+            "copyright" => $"© {Get(p, "holder")}",
             "team-grid" => "[team grid]",
             "logo-cloud" => "[logo cloud]",
             "process-steps" => "[process steps]",
@@ -552,10 +556,61 @@ public static class CmsBlockHtmlRenderer
         return $"""<div class="gws-interaction" data-gws-interaction="{Html(payload)}">{innerHtml}</div>""";
     }
 
-    // Inline <script>, matching BuildEditModeScript's pattern - injected once per public page
-    // response (see Program.cs's public page route and the static-export route) rather than
-    // served as a wwwroot/js file, so the static-export zip stays fully self-contained with no
-    // extra file to bundle. A no-op when the page has no data-gws-interaction elements at all.
+    // The site's CSP has no 'unsafe-inline' in script-src, so an inline <script> never runs on a
+    // served page. Every widget runtime below therefore has ONE source (its Build*RuntimeScript
+    // string): served pages load it from /js/cms-runtime/{name}.js (Program.cs strips the
+    // <script> wrapper), while the static ZIP export - which has no CSP - still inlines it.
+    public static readonly IReadOnlyDictionary<string, Func<string>> RuntimeScripts = new Dictionary<string, Func<string>>(StringComparer.Ordinal)
+    {
+        ["interactions"] = BuildInteractionRuntimeScript,
+        ["table-of-contents"] = BuildTableOfContentsRuntimeScript,
+        ["reading-progress"] = BuildReadingProgressRuntimeScript,
+        ["stats"] = BuildStatsCounterRuntimeScript,
+        ["tabs"] = BuildTabsRuntimeScript,
+        ["pricing-table"] = BuildPricingTableRuntimeScript,
+        ["gallery"] = BuildGalleryRuntimeScript,
+        ["carousel"] = BuildCarouselRuntimeScript,
+        ["portfolio"] = BuildPortfolioRuntimeScript,
+        ["home-blog-grid"] = () => GrantWatsonHomepageTemplate.BlogGridRuntimeScript
+    };
+
+    private static readonly Lazy<string> RuntimeScriptsVersion = new(() =>
+    {
+        var all = string.Concat(RuntimeScripts.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => kv.Value()));
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(all)))[..12].ToLowerInvariant();
+    });
+
+    // The JavaScript body of a runtime (no <script> wrapper), or null for an unknown name.
+    public static string? RuntimeScriptSource(string name)
+    {
+        if (!RuntimeScripts.TryGetValue(name, out var build)) return null;
+        var script = build().Trim();
+        if (script.StartsWith("<script>", StringComparison.Ordinal)) script = script["<script>".Length..];
+        if (script.EndsWith("</script>", StringComparison.Ordinal)) script = script[..^"</script>".Length];
+        return script.Trim() + "\n";
+    }
+
+    // External <script src> tags for every runtime this page actually needs, for served pages.
+    public static string BuildRuntimeScriptTags(PageLayout? layout, string renderedBodyHtml)
+    {
+        var needed = new List<string>();
+        if (renderedBodyHtml.Contains("data-gws-interaction", StringComparison.Ordinal)) needed.Add("interactions");
+        if (LayoutContainsTableOfContents(layout)) needed.Add("table-of-contents");
+        if (LayoutContainsReadingProgress(layout)) needed.Add("reading-progress");
+        if (LayoutContainsStats(layout)) needed.Add("stats");
+        if (LayoutContainsTabs(layout)) needed.Add("tabs");
+        if (LayoutContainsPricingTable(layout)) needed.Add("pricing-table");
+        if (LayoutContainsGallery(layout)) needed.Add("gallery");
+        if (LayoutContainsCarousel(layout)) needed.Add("carousel");
+        if (LayoutContainsPortfolioGrid(layout)) needed.Add("portfolio");
+        if (renderedBodyHtml.Contains("data-home-blog-grid", StringComparison.Ordinal)) needed.Add("home-blog-grid");
+        var version = RuntimeScriptsVersion.Value;
+        return string.Concat(needed.Select(name => $"""<script src="/js/cms-runtime/{name}.js?v={version}" defer></script>"""));
+    }
+
+    // Served as /js/cms-runtime/interactions.js (see RuntimeScripts) and inlined only into the
+    // static-export zip, which stays fully self-contained. A no-op when the page has no
+    // data-gws-interaction elements at all.
     public static string BuildInteractionRuntimeScript() => """
         <script>
         (function () {
@@ -1031,6 +1086,10 @@ public static class CmsBlockHtmlRenderer
             "stats" => RenderStats(p, editMode),
             "cta-banner" => RenderCtaBanner(p, editMode),
             "email-signup" => RenderEmailSignup(p, pageSlug, editMode),
+            "map" => RenderMap(p, editMode),
+            "site-logo" => RenderSiteLogo(p),
+            "nav-menu" => RenderNavMenu(p),
+            "copyright" => RenderCopyright(p),
             "team-grid" => RenderTeamGrid(p, editMode),
             "logo-cloud" => RenderLogoCloud(p),
             "process-steps" => RenderProcessSteps(p, editMode),
@@ -1081,6 +1140,81 @@ public static class CmsBlockHtmlRenderer
     {
         if (string.IsNullOrWhiteSpace(url)) return;
         sb.Append($"""<a href="{Html(HrefOrHash(url))}" class="{cssClass}" target="_blank" rel="noopener noreferrer" aria-label="{Html(label)}"><i class="bi {iconClass}" aria-hidden="true"></i></a>""");
+    }
+
+    // Header/footer builder widgets. The logo and menus are site data the renderer doesn't have,
+    // so these emit empty placeholders that PublicSiteHtmlRenderer.FillSiteChrome fills in on
+    // every render path (live site, editor canvas, export) from Appearance > Menus and the site's
+    // logo. Copyright needs nothing but the current year.
+    private static string RenderSiteLogo(IReadOnlyDictionary<string, string> p)
+    {
+        var height = Math.Clamp(int.TryParse(Get(p, "height", "36"), out var h) ? h : 36, 16, 120);
+        var showName = Get(p, "showName", "true") != "false" ? "1" : "0";
+        return $"""<div class="gws-site-logo-wrap gws-align-{Html(Align(p))}"><a href="/" class="gws-site-logo" data-gws-site-logo="{showName}" style="--gws-logo-height:{height}px"></a></div>""";
+    }
+
+    private static string RenderNavMenu(IReadOnlyDictionary<string, string> p)
+    {
+        var menu = Get(p, "menu", "header") == "footer" ? "footer" : "header";
+        var direction = Get(p, "direction", "horizontal") == "vertical" ? "vertical" : "horizontal";
+        return $"""<nav class="gws-nav-menu gws-nav-menu-{direction} gws-align-{Html(Align(p))}" aria-label="{(menu == "footer" ? "Footer" : "Main")}" data-gws-nav-menu="{menu}"></nav>""";
+    }
+
+    private static string RenderCopyright(IReadOnlyDictionary<string, string> p)
+    {
+        var holder = Get(p, "holder");
+        var text = Get(p, "text");
+        var admin = Get(p, "showAdminLink", "false") == "true" ? """ <a href="/admin" class="footer-admin-link">admin</a>""" : "";
+        var line = $"&copy; {DateTimeOffset.UtcNow.Year}{(string.IsNullOrWhiteSpace(holder) ? "" : " " + Html(holder))}{(string.IsNullOrWhiteSpace(text) ? "" : ". " + Html(text))}";
+        return $"""<p class="gws-copyright gws-align-{Html(Align(p))}">{line}{admin}</p>""";
+    }
+
+    // Location map - OpenStreetMap's own embeddable map (free, no API key, no tile requests of
+    // ours), centred on coordinates the editor geocodes once from the address (see
+    // CmsBuilderEditor's "Find on map"). frame-src allows www.openstreetmap.org for exactly this.
+    private static string RenderMap(IReadOnlyDictionary<string, string> p, bool editMode)
+    {
+        var address = Get(p, "address");
+        var heading = Get(p, "heading");
+        var height = Math.Clamp(int.TryParse(Get(p, "height", "360"), out var h) ? h : 360, 200, 800);
+        if (!TryGetCoordinates(p, out var lat, out var lng))
+        {
+            return editMode
+                ? $"""<div class="gws-map gws-map-empty" style="min-height:{height}px"><div class="gws-email-signup-warning">Enter an address in the inspector and click <strong>Find on map</strong>. The map stays hidden on the live site until it has a location.</div></div>"""
+                : string.Empty;
+        }
+
+        var zoom = Math.Clamp(int.TryParse(Get(p, "zoom", "15"), out var z) ? z : 15, 3, 18);
+        // OSM's embed takes a bounding box rather than a zoom level: half-spans that roughly match
+        // the requested zoom at a ~2:1 map shape.
+        var lngSpan = 360.0 / Math.Pow(2, zoom) * 1.6;
+        var latSpan = lngSpan * 0.45 * Math.Cos(lat * Math.PI / 180);
+        string F(double value) => value.ToString("0.######", System.Globalization.CultureInfo.InvariantCulture);
+        var bbox = $"{F(lng - lngSpan)},{F(lat - latSpan)},{F(lng + lngSpan)},{F(lat + latSpan)}";
+        var src = $"https://www.openstreetmap.org/export/embed.html?bbox={Uri.EscapeDataString(bbox)}&layer=mapnik&marker={F(lat)}%2C{F(lng)}";
+        var directions = $"https://www.openstreetmap.org/directions?to={F(lat)}%2C{F(lng)}";
+        var label = string.IsNullOrWhiteSpace(address) ? "Location map" : $"Map of {address}";
+        var showDirections = Get(p, "showDirections", "true") != "false";
+        // In the editor the frame mustn't swallow the click that selects the widget.
+        var frameStyle = editMode ? "pointer-events:none;" : string.Empty;
+        return $"""
+            <div class="gws-map">
+              {(string.IsNullOrWhiteSpace(heading) ? "" : $"""<h2 class="gws-map-heading"{InlineEditAttrs(editMode, "heading")}>{Html(heading)}</h2>""")}
+              <iframe class="gws-map-frame" src="{Html(src)}" title="{Html(label)}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" style="height:{height}px;{frameStyle}"></iframe>
+              <div class="gws-map-footer">
+                <span class="gws-map-address">{Html(address)}</span>
+                {(showDirections ? $"""<a class="gws-map-directions" href="{Html(directions)}" target="_blank" rel="noopener">Get directions</a>""" : "")}
+              </div>
+            </div>
+            """;
+    }
+
+    private static bool TryGetCoordinates(IReadOnlyDictionary<string, string> p, out double lat, out double lng)
+    {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        var ok = double.TryParse(Get(p, "lat"), System.Globalization.NumberStyles.Float, culture, out lat)
+            & double.TryParse(Get(p, "lng"), System.Globalization.NumberStyles.Float, culture, out lng);
+        return ok && lat is >= -90 and <= 90 && lng is >= -180 and <= 180;
     }
 
     // Workstream C, Tier 2 (CTA banner, promoted from a CmsSectionTemplates composition of 3
