@@ -226,15 +226,7 @@ public sealed class EmailCampaignService(
 
     public async Task<bool> UnsubscribeByTokenAsync(string token, CancellationToken cancellationToken = default)
     {
-        Guid contactId;
-        try
-        {
-            contactId = Guid.Parse(dataProtectionProvider.CreateProtector(UnsubscribeProtectorPurpose).Unprotect(token));
-        }
-        catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or FormatException)
-        {
-            return false;
-        }
+        if (!TryReadUnsubscribeToken(token, out var contactId, out _)) return false;
 
         var contact = await db.Contacts.FirstOrDefaultAsync(item => item.Id == contactId, cancellationToken);
         if (contact is null) return false;
@@ -254,6 +246,66 @@ public sealed class EmailCampaignService(
 
         await db.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    public async Task<CampaignUnsubscribeInfo?> DescribeUnsubscribeTokenAsync(string token, CancellationToken cancellationToken = default)
+    {
+        if (!TryReadUnsubscribeToken(token, out var contactId, out var campaignId)) return null;
+        var contact = await db.Contacts.AsNoTracking().FirstOrDefaultAsync(item => item.Id == contactId, cancellationToken);
+        if (contact is null) return null;
+        string? campaignName = null;
+        var left = false;
+        if (campaignId is { } id)
+        {
+            campaignName = await db.EmailCampaigns.AsNoTracking().Where(c => c.Id == id).Select(c => c.Name).FirstOrDefaultAsync(cancellationToken);
+            left = await db.EmailCampaignEnrollments.AsNoTracking()
+                .AnyAsync(e => e.CampaignId == id && e.ContactId == contactId && e.Status == EmailCampaignEnrollmentStatuses.Unsubscribed, cancellationToken);
+        }
+
+        return new CampaignUnsubscribeInfo(campaignName, contact.UnsubscribedFromCampaignsAt is not null, left);
+    }
+
+    public async Task<bool> UnsubscribeFromCampaignByTokenAsync(string token, CancellationToken cancellationToken = default)
+    {
+        if (!TryReadUnsubscribeToken(token, out var contactId, out var campaignId)) return false;
+        if (campaignId is not { } id) return await UnsubscribeByTokenAsync(token, cancellationToken);
+
+        var now = timeProvider.GetUtcNow();
+        var enrollment = await db.EmailCampaignEnrollments
+            .FirstOrDefaultAsync(e => e.CampaignId == id && e.ContactId == contactId, cancellationToken);
+        if (enrollment is null)
+        {
+            // Keep a row so a later "enroll" can't silently re-add them to this campaign.
+            enrollment = new EmailCampaignEnrollment { CampaignId = id, ContactId = contactId, CreatedAt = now, CreatedBy = "unsubscribe" };
+            db.EmailCampaignEnrollments.Add(enrollment);
+        }
+
+        enrollment.Status = EmailCampaignEnrollmentStatuses.Unsubscribed;
+        enrollment.NextSendAt = null;
+        enrollment.UpdatedAt = now;
+        enrollment.UpdatedBy = "unsubscribe";
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    // Tokens are "{contactId:N}|{campaignId:N}"; links sent before per-campaign unsubscribe
+    // carry just the contact id (campaignId comes back null).
+    private bool TryReadUnsubscribeToken(string token, out Guid contactId, out Guid? campaignId)
+    {
+        contactId = Guid.Empty;
+        campaignId = null;
+        try
+        {
+            var payload = dataProtectionProvider.CreateProtector(UnsubscribeProtectorPurpose).Unprotect(token);
+            var parts = payload.Split('|');
+            if (!Guid.TryParse(parts[0], out contactId)) return false;
+            if (parts.Length > 1 && Guid.TryParse(parts[1], out var parsedCampaign)) campaignId = parsedCampaign;
+            return true;
+        }
+        catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or FormatException)
+        {
+            return false;
+        }
     }
 
     public async Task<bool> ResubscribeContactAsync(Guid contactId, string performedBy, CancellationToken cancellationToken = default)
@@ -324,7 +376,7 @@ public sealed class EmailCampaignService(
             var errorMessage = string.Empty;
             try
             {
-                var unsubscribeToken = dataProtectionProvider.CreateProtector(UnsubscribeProtectorPurpose).Protect(contact.Id.ToString());
+                var unsubscribeToken = dataProtectionProvider.CreateProtector(UnsubscribeProtectorPurpose).Protect($"{contact.Id:N}|{campaign.Id:N}");
                 var unsubscribeUrl = $"{emailOptions.Value.PublicBaseUrl.TrimEnd('/')}/campaigns/unsubscribe/{Uri.EscapeDataString(unsubscribeToken)}";
                 var subject = ResolveTokens(step.Subject, contact);
                 var body = ResolveTokens(step.Body, contact);

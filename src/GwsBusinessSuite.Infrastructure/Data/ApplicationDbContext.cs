@@ -145,10 +145,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<MobileDeviceRegistration> MobileDeviceRegistrations => Set<MobileDeviceRegistration>();
     public DbSet<MemberProfile> MemberProfiles => Set<MemberProfile>();
     public DbSet<Department> Departments => Set<Department>();
+    public DbSet<DepartmentMembership> DepartmentMemberships => Set<DepartmentMembership>();
     public DbSet<ActivityEvent> ActivityEvents => Set<ActivityEvent>();
     public DbSet<ChatThread> ChatThreads => Set<ChatThread>();
     public DbSet<ChatThreadParticipant> ChatThreadParticipants => Set<ChatThreadParticipant>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ChatMessageAttachment> ChatMessageAttachments => Set<ChatMessageAttachment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -728,11 +730,14 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         // HasOne/HasForeignKey/OnDelete configuration here, only indexes.
         modelBuilder.Entity<MemberProfile>().HasIndex(x => x.AppUserId).IsUnique();
         modelBuilder.Entity<MemberProfile>().HasIndex(x => x.DepartmentId);
+        modelBuilder.Entity<DepartmentMembership>().HasIndex(x => new { x.DepartmentId, x.AppUserId }).IsUnique();
+        modelBuilder.Entity<DepartmentMembership>().HasIndex(x => x.AppUserId);
         modelBuilder.Entity<Department>().HasIndex(x => x.Name).IsUnique();
         modelBuilder.Entity<ActivityEvent>().HasIndex(x => x.CreatedAt);
         modelBuilder.Entity<ChatThreadParticipant>().HasIndex(x => new { x.ThreadId, x.Username }).IsUnique();
         modelBuilder.Entity<ChatThreadParticipant>().HasIndex(x => x.Username);
         modelBuilder.Entity<ChatMessage>().HasIndex(x => new { x.ThreadId, x.CreatedAt });
+        modelBuilder.Entity<ChatMessageAttachment>().HasIndex(x => x.MessageId);
 
         modelBuilder.Entity<AppGenerationRequest>().HasIndex(x => x.Status);
         modelBuilder.Entity<AppGenerationRequest>().HasIndex(x => x.TargetSiteId);

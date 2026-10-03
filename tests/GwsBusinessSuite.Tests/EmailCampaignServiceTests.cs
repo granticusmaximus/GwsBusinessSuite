@@ -120,6 +120,34 @@ public sealed class EmailCampaignServiceTests
     }
 
     [Fact]
+    public async Task UnsubscribeFromCampaign_LeavesOnlyThatCampaign_AndBlocksReEnrollment()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var welcome = await fixture.CreateCampaignAsync("Welcome series", activate: true, steps: [("Step 1", "Body", 0), ("Step 2", "Body", 1)]);
+        var news = await fixture.CreateCampaignAsync("Product news", activate: true, steps: [("News 1", "Body", 0), ("News 2", "Body", 1)]);
+        var contact = await fixture.AddContactAsync("Jamie Rivera", "jamie@example.test");
+        await fixture.Service.EnrollContactAsync(welcome.Id, contact.Id);
+        await fixture.Service.EnrollContactAsync(news.Id, contact.Id);
+        await fixture.Service.ProcessDueSendsAsync();
+        var welcomeToken = fixture.EmailSender.Sent.First(e => e.Subject == "Step 1").UnsubscribeUrl.Split('/').Last();
+
+        var info = await fixture.Service.DescribeUnsubscribeTokenAsync(welcomeToken);
+        info!.CampaignName.Should().Be("Welcome series");
+
+        (await fixture.Service.UnsubscribeFromCampaignByTokenAsync(welcomeToken)).Should().BeTrue();
+
+        (await fixture.Db.Contacts.SingleAsync()).UnsubscribedFromCampaignsAt.Should().BeNull("only one campaign was left");
+        var enrollments = await fixture.Db.EmailCampaignEnrollments.AsNoTracking().ToListAsync();
+        enrollments.Single(e => e.CampaignId == welcome.Id).Status.Should().Be(EmailCampaignEnrollmentStatuses.Unsubscribed);
+        enrollments.Single(e => e.CampaignId == news.Id).Status.Should().Be(EmailCampaignEnrollmentStatuses.Active);
+        (await fixture.Service.EnrollContactAsync(welcome.Id, contact.Id)).Should().BeFalse();
+
+        fixture.TimeProvider.Advance(TimeSpan.FromDays(1));
+        await fixture.Service.ProcessDueSendsAsync();
+        fixture.EmailSender.Sent.Select(e => e.Subject).Should().Contain("News 2").And.NotContain("Step 2");
+    }
+
+    [Fact]
     public async Task UnsubscribeByTokenAsync_ShouldReturnFalse_ForAGarbageToken()
     {
         await using var fixture = await Fixture.CreateAsync();

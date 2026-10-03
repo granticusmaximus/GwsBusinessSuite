@@ -345,7 +345,7 @@ else
                         <h3 class="h6 fw-bold">Share this workflow</h3>
                         <p class="text-secondary small">Grant an Author/Contributor teammate full access to just this workflow, without making them an Admin. They still need their own account - this doesn't create one.</p>
                         <div class="input-group input-group-sm mb-2">
-                            <input class="form-control" @bind="_shareUsername" placeholder="username" />
+                            <input class="form-control" @bind="_shareUsername" @bind:event="oninput" placeholder="username" />
                             <button type="button" class="btn btn-outline-warning" disabled="@(_busy || string.IsNullOrWhiteSpace(_shareUsername))" @onclick="GrantWorkflowAccess">Grant access</button>
                         </div>
                         @foreach (var permission in _workflowPermissions)

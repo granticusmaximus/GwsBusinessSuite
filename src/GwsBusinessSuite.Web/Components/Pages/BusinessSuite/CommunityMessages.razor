@@ -10,6 +10,7 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject ILogger<CommunityMessages> Logger
+@inject ChatNotifier Notifier
 
 <PageTitle>Messages · Community</PageTitle>
 
@@ -38,13 +39,37 @@
             @if (ShowNewMessage)
             {
                 <div class="card-body border-bottom py-3">
-                    <select class="form-select form-select-sm" @onchange="e => StartThreadAsync(e.Value?.ToString())">
-                        <option value="">Choose a teammate…</option>
-                        @foreach (var profile in OtherProfiles)
-                        {
-                            <option value="@profile.Username">@profile.DisplayName</option>
-                        }
-                    </select>
+                    <div class="btn-group btn-group-sm w-100 mb-2" role="group" aria-label="Conversation type">
+                        <button type="button" class="btn @(NewIsGroup ? "btn-outline-primary" : "btn-primary")" @onclick="() => NewIsGroup = false">Direct</button>
+                        <button type="button" class="btn @(NewIsGroup ? "btn-primary" : "btn-outline-primary")" @onclick="() => NewIsGroup = true">Group</button>
+                    </div>
+                    @if (!NewIsGroup)
+                    {
+                        <select class="form-select form-select-sm" @onchange="e => StartThreadAsync(e.Value?.ToString())" aria-label="Teammate">
+                            <option value="">Choose a teammate…</option>
+                            @foreach (var profile in OtherProfiles)
+                            {
+                                <option value="@profile.Username">@profile.DisplayName</option>
+                            }
+                        </select>
+                    }
+                    else
+                    {
+                        <input class="form-control form-control-sm mb-2" placeholder="Group name" @bind="NewGroupTitle" @bind:event="oninput" aria-label="Group name" />
+                        <div class="chat-member-picker mb-2">
+                            @foreach (var profile in OtherProfiles)
+                            {
+                                <label class="form-check small mb-1">
+                                    <input class="form-check-input" type="checkbox" checked="@NewGroupMembers.Contains(profile.Username)"
+                                           @onchange="e => ToggleMember(NewGroupMembers, profile.Username, e.Value is true)" />
+                                    <span class="form-check-label">@profile.DisplayName</span>
+                                </label>
+                            }
+                        </div>
+                        <button class="btn btn-sm btn-primary w-100" disabled="@(NewGroupMembers.Count == 0)" @onclick="CreateGroupAsync">
+                            <i class="bi bi-people-fill me-1"></i>Create group (@(NewGroupMembers.Count + 1) people)
+                        </button>
+                    }
                 </div>
             }
             <div class="card-body p-0" style="max-height:520px;overflow-y:auto;">
@@ -64,7 +89,7 @@
                             <button type="button" class="list-group-item list-group-item-action @(thread.ThreadId == ThreadId ? "active" : string.Empty)"
                                     @onclick="() => OpenThreadAsync(thread.ThreadId)">
                                 <div class="d-flex justify-content-between align-items-center gap-2">
-                                    <span class="fw-semibold">@thread.Title</span>
+                                    <span class="fw-semibold">@if (thread.IsGroup) { <i class="bi bi-people-fill me-1"></i> }@thread.Title</span>
                                     @if (thread.UnreadCount > 0)
                                     {
                                         <span class="badge text-bg-primary rounded-pill">@thread.UnreadCount</span>
@@ -90,6 +115,34 @@
                 }
                 else
                 {
+                    @if (CurrentThread is { } current)
+                    {
+                        <div class="border-bottom px-3 py-2 d-flex flex-wrap align-items-center gap-2">
+                            <strong class="me-auto">@current.Title</strong>
+                            @if (current.IsGroup)
+                            {
+                                <span class="small text-secondary" title="@string.Join(", ", Participants.Select(p => p.DisplayName))">@Participants.Count people</span>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => ShowAddPeople = !ShowAddPeople"><i class="bi bi-person-plus"></i> Add people</button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="LeaveAsync">Leave</button>
+                            }
+                        </div>
+                        @if (ShowAddPeople && current.IsGroup)
+                        {
+                            <div class="border-bottom px-3 py-2">
+                                <div class="chat-member-picker mb-2">
+                                    @foreach (var profile in OtherProfiles.Where(p => Participants.All(x => !string.Equals(x.Username, p.Username, StringComparison.OrdinalIgnoreCase))))
+                                    {
+                                        <label class="form-check form-check-inline small mb-1">
+                                            <input class="form-check-input" type="checkbox" checked="@AddMembers.Contains(profile.Username)"
+                                                   @onchange="e => ToggleMember(AddMembers, profile.Username, e.Value is true)" />
+                                            <span class="form-check-label">@profile.DisplayName</span>
+                                        </label>
+                                    }
+                                </div>
+                                <button class="btn btn-sm btn-primary" disabled="@(AddMembers.Count == 0)" @onclick="AddPeopleAsync">Add @AddMembers.Count</button>
+                            </div>
+                        }
+                    }
                     <div class="flex-grow-1 overflow-auto p-3" @ref="MessageListRef">
                         @if (IsLoadingMessages)
                         {
@@ -106,16 +159,44 @@
                                 var isMine = string.Equals(message.SenderUsername, CurrentUsername, StringComparison.OrdinalIgnoreCase);
                                 <div class="d-flex flex-column mb-2 @(isMine ? "align-items-end" : "align-items-start")">
                                     <div class="small text-secondary">@message.SenderDisplayName · @message.SentAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
-                                    <div class="p-2 rounded-3 @(isMine ? "bg-primary text-white" : "bg-body-tertiary")" style="max-width:75%;white-space:pre-wrap;">@message.Body</div>
+                                    @if (!string.IsNullOrWhiteSpace(message.Body))
+                                    {
+                                        <div class="p-2 rounded-3 @(isMine ? "bg-primary text-white" : "bg-body-tertiary")" style="max-width:75%;white-space:pre-wrap;">@message.Body</div>
+                                    }
+                                    @foreach (var attachment in message.AllAttachments)
+                                    {
+                                        var url = $"/admin/api/community/attachments/{attachment.Id}";
+                                        @if (attachment.IsImage && !attachment.ContentType.Contains("svg", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <a href="@url" target="_blank" rel="noopener" class="chat-attachment-image mt-1"><img src="@url" alt="@attachment.FileName" loading="lazy" /></a>
+                                        }
+                                        else
+                                        {
+                                            <a href="@url" class="chat-attachment-file mt-1" download="@attachment.FileName"><i class="bi bi-paperclip me-1"></i>@attachment.FileName <span class="text-secondary">(@FormatSize(attachment.SizeBytes))</span></a>
+                                        }
+                                    }
                                 </div>
                             }
                         }
                     </div>
+                    @if (PendingFiles.Count > 0)
+                    {
+                        <div class="border-top px-2 pt-2 d-flex flex-wrap gap-1">
+                            @foreach (var file in PendingFiles)
+                            {
+                                <span class="badge text-bg-light border"><i class="bi bi-paperclip"></i> @file.FileName <button type="button" class="btn-close btn-close-sm ms-1" style="font-size:.5rem" aria-label="Remove @file.FileName" @onclick="() => PendingFiles.Remove(file)"></button></span>
+                            }
+                        </div>
+                    }
                     <div class="border-top p-2 d-flex gap-2">
+                        <label class="btn btn-outline-secondary mb-0" title="Attach files (up to @ChatLimits.MaxAttachmentsPerMessage, @(ChatLimits.MaxAttachmentBytes / 1024 / 1024) MB each)">
+                            <i class="bi bi-paperclip"></i>
+                            <InputFile class="visually-hidden" multiple OnChange="OnFilesChosenAsync" />
+                        </label>
                         <input class="form-control" placeholder="Write a message…" value="@ComposeBody"
                                @oninput="e => ComposeBody = e.Value?.ToString() ?? string.Empty"
                                @onkeydown="OnComposeKeyDownAsync" />
-                        <button class="btn btn-primary" @onclick="SendAsync" disabled="@(IsSending || string.IsNullOrWhiteSpace(ComposeBody))">
+                        <button class="btn btn-primary" @onclick="SendAsync" disabled="@(IsSending || (string.IsNullOrWhiteSpace(ComposeBody) && PendingFiles.Count == 0))" aria-label="Send">
                             <i class="bi bi-send-fill"></i>
                         </button>
                     </div>
@@ -140,6 +221,15 @@
     private string ErrorMessage { get; set; } = string.Empty;
     private ElementReference MessageListRef;
 
+    private ChatThreadSummary? CurrentThread => ThreadId is { } id ? Threads.FirstOrDefault(t => t.ThreadId == id) : null;
+    private List<ChatParticipantView> Participants { get; set; } = [];
+    private bool NewIsGroup { get; set; }
+    private string NewGroupTitle { get; set; } = string.Empty;
+    private HashSet<string> NewGroupMembers { get; } = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> AddMembers { get; } = new(StringComparer.OrdinalIgnoreCase);
+    private bool ShowAddPeople { get; set; }
+    private List<ChatAttachmentUpload> PendingFiles { get; } = [];
+
     private readonly CancellationTokenSource _pollLifetime = new();
     private Task? _pollTask;
     private Guid? _loadedThreadId;
@@ -150,7 +240,110 @@
         await LoadThreadsAsync();
         var allProfiles = await DirectoryService.ListProfilesAsync();
         OtherProfiles = allProfiles.Where(p => !string.Equals(p.Username, CurrentUsername, StringComparison.OrdinalIgnoreCase)).ToList();
+        Notifier.OnMessage += OnChatMessage;
         _pollTask = PollAsync(_pollLifetime.Token);
+    }
+
+    // Live delivery: a message sent from any session lands here at once (the poll is a fallback).
+    private void OnChatMessage(ChatMessageNotice notice)
+    {
+        var mine = notice.RecipientUsernames.Contains(CurrentUsername, StringComparer.OrdinalIgnoreCase)
+            || string.Equals(notice.SenderUsername, CurrentUsername, StringComparison.OrdinalIgnoreCase);
+        if (!mine) return;
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                if (ThreadId == notice.ThreadId)
+                {
+                    Messages = (await ChatService.GetMessagesAsync(notice.ThreadId, CurrentUsername)).ToList();
+                    await ChatService.MarkThreadReadAsync(notice.ThreadId, CurrentUsername);
+                }
+                await LoadThreadsAsync();
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                Logger.LogDebug(ex, "Live chat refresh was skipped.");
+            }
+        });
+    }
+
+    private static void ToggleMember(HashSet<string> set, string username, bool selected)
+    {
+        if (selected) set.Add(username); else set.Remove(username);
+    }
+
+    private static string FormatSize(long bytes) =>
+        bytes >= 1024 * 1024 ? $"{bytes / 1024d / 1024d:0.#} MB" : $"{Math.Max(1, bytes / 1024)} KB";
+
+    private async Task CreateGroupAsync()
+    {
+        try
+        {
+            var threadId = await ChatService.CreateGroupThreadAsync(CurrentUsername, NewGroupTitle, NewGroupMembers);
+            ShowNewMessage = false;
+            NewGroupMembers.Clear();
+            NewGroupTitle = string.Empty;
+            Navigation.NavigateTo($"/admin/community/messages/{threadId}");
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex is ArgumentException ? ex.Message : "Couldn't create that group.";
+            Logger.LogError(ex, "Failed to create a group chat.");
+        }
+    }
+
+    private async Task AddPeopleAsync()
+    {
+        if (ThreadId is not { } id) return;
+        try
+        {
+            await ChatService.AddParticipantsAsync(id, CurrentUsername, AddMembers);
+            AddMembers.Clear();
+            ShowAddPeople = false;
+            Participants = (await ChatService.GetParticipantsAsync(id, CurrentUsername)).ToList();
+            await LoadThreadsAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = ex is ArgumentException or InvalidOperationException ? ex.Message : "Couldn't add those people.";
+            Logger.LogError(ex, "Failed to add people to chat thread {ThreadId}.", id);
+        }
+    }
+
+    private async Task LeaveAsync()
+    {
+        if (ThreadId is not { } id) return;
+        try
+        {
+            await ChatService.LeaveThreadAsync(id, CurrentUsername);
+            Navigation.NavigateTo("/admin/community/messages");
+            await LoadThreadsAsync();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Couldn't leave that conversation.";
+            Logger.LogError(ex, "Failed to leave chat thread {ThreadId}.", id);
+        }
+    }
+
+    private async Task OnFilesChosenAsync(InputFileChangeEventArgs args)
+    {
+        ErrorMessage = string.Empty;
+        foreach (var file in args.GetMultipleFiles(ChatLimits.MaxAttachmentsPerMessage))
+        {
+            if (PendingFiles.Count >= ChatLimits.MaxAttachmentsPerMessage) break;
+            if (file.Size > ChatLimits.MaxAttachmentBytes)
+            {
+                ErrorMessage = $"'{file.Name}' is larger than {ChatLimits.MaxAttachmentBytes / 1024 / 1024} MB.";
+                continue;
+            }
+            using var stream = file.OpenReadStream(ChatLimits.MaxAttachmentBytes);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            PendingFiles.Add(new ChatAttachmentUpload(file.Name, file.ContentType, buffer.ToArray()));
+        }
     }
 
     protected override async Task OnParametersSetAsync()
@@ -187,6 +380,8 @@
         {
             Messages = (await ChatService.GetMessagesAsync(threadId, CurrentUsername)).ToList();
             await ChatService.MarkThreadReadAsync(threadId, CurrentUsername);
+            Participants = (await ChatService.GetParticipantsAsync(threadId, CurrentUsername)).ToList();
+            ShowAddPeople = false;
             await LoadThreadsAsync();
         }
         catch (UnauthorizedAccessException)
@@ -228,17 +423,18 @@
 
     private async Task SendAsync()
     {
-        if (ThreadId is not { } id || string.IsNullOrWhiteSpace(ComposeBody)) return;
+        if (ThreadId is not { } id || (string.IsNullOrWhiteSpace(ComposeBody) && PendingFiles.Count == 0)) return;
         IsSending = true;
         try
         {
-            await ChatService.SendMessageAsync(id, CurrentUsername, ComposeBody);
+            await ChatService.SendMessageAsync(id, CurrentUsername, ComposeBody, PendingFiles.ToList());
             ComposeBody = string.Empty;
+            PendingFiles.Clear();
             await LoadMessagesAsync(id);
         }
         catch (Exception ex)
         {
-            ErrorMessage = "Couldn't send that message.";
+            ErrorMessage = ex is ArgumentException ? ex.Message : "Couldn't send that message.";
             Logger.LogError(ex, "Failed to send a chat message in thread {ThreadId}.", id);
         }
         finally
@@ -257,7 +453,8 @@
 
     private async Task PollAsync(CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        // Fallback only - new messages arrive live through ChatNotifier.
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
         try
         {
             while (await timer.WaitForNextTickAsync(cancellationToken))
@@ -287,6 +484,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        Notifier.OnMessage -= OnChatMessage;
         _pollLifetime.Cancel();
         if (_pollTask is not null)
         {

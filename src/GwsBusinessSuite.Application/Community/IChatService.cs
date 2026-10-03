@@ -21,4 +21,19 @@ public interface IChatService
     Task<ChatMessageView> SendMessageAsync(Guid threadId, string senderUsername, string body, CancellationToken cancellationToken = default);
 
     Task MarkThreadReadAsync(Guid threadId, string username, CancellationToken cancellationToken = default);
+
+    // Group conversations: the creator plus the chosen members (duplicates/unknown accounts ignored).
+    Task<Guid> CreateGroupThreadAsync(string creatorUsername, string title, IEnumerable<string> memberUsernames, CancellationToken cancellationToken = default);
+    Task AddParticipantsAsync(Guid threadId, string performedBy, IEnumerable<string> usernames, CancellationToken cancellationToken = default);
+    Task LeaveThreadAsync(Guid threadId, string username, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ChatParticipantView>> GetParticipantsAsync(Guid threadId, string requestingUsername, CancellationToken cancellationToken = default);
+
+    // A message with files (body may be empty when there's at least one file).
+    Task<ChatMessageView> SendMessageAsync(Guid threadId, string senderUsername, string body,
+        IReadOnlyList<ChatAttachmentUpload> attachments, CancellationToken cancellationToken = default);
+
+    // Throws UnauthorizedAccessException unless the requester is in the attachment's thread.
+    Task<ChatAttachmentFile?> GetAttachmentAsync(Guid attachmentId, string requestingUsername, CancellationToken cancellationToken = default);
+
+    Task<int> CountUnreadAsync(string username, CancellationToken cancellationToken = default);
 }

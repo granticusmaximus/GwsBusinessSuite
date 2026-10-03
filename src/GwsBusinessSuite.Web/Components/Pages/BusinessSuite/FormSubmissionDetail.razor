@@ -76,7 +76,7 @@ else
                                     <input class="form-control form-control-sm" placeholder="Full name" @bind="_newContactName" />
                                 </div>
                                 <div class="col-md-4">
-                                    <input class="form-control form-control-sm" placeholder="Email" @bind="_newContactEmail" />
+                                    <input class="form-control form-control-sm" placeholder="Email" @bind="_newContactEmail" @bind:event="oninput" />
                                 </div>
                                 <div class="col-md-4">
                                     <input class="form-control form-control-sm" placeholder="Company (optional)" @bind="_newContactCompany" />

@@ -55,6 +55,9 @@ public sealed class EmailCampaignEmailSender(
         message.From.Add(new MailboxAddress(options.FromName.Trim(), from.Address));
         message.To.Add(to);
         message.Subject = subject;
+        // RFC 8058 one-click unsubscribe (POST to the same link leaves just this campaign).
+        message.Headers.Add("List-Unsubscribe", $"<{unsubscribeUrl}>");
+        message.Headers.Add("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
         var textBody = Markdown.ToPlainText(body, EmailMarkdownPipeline).Trim();
         var htmlBody = Markdown.ToHtml(body, EmailMarkdownPipeline);
         message.Body = new BodyBuilder

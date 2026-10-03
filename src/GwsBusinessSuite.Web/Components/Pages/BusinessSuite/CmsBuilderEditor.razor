@@ -126,6 +126,9 @@
            "Save page" to "Publish changes" in 2016 after research found new editors thought
            saving was private). *@
         <span class="studio-save-state">@SaveStateText</span>
+        <button type="button" class="btn btn-outline-secondary" data-gws-focus-toggle title="Fullscreen" aria-label="Fullscreen" aria-pressed="false">
+            <i class="bi bi-arrows-fullscreen"></i>
+        </button>
         <button class="btn btn-outline-secondary" @onclick="BackToList">Back</button>
         @if (_page is not null && !string.IsNullOrWhiteSpace(PreviewUrl))
         {
@@ -189,11 +192,21 @@ else
     <button type="button" class="desk-nav-button @(_leftTab == "widgets" || _leftTab == "global" ? "is-active" : "")" @onclick='() => _leftTab = "widgets"' aria-pressed='@(_leftTab == "widgets" || _leftTab == "global")'>Modules</button>
     <button type="button" class="desk-nav-button @(_inspectorOpen && _rightTab == "page" ? "is-active" : "")" @onclick="OpenPageSettings" aria-expanded="@_inspectorOpen" aria-controls="desk-inspector">Page settings</button>
 </nav>
-<div class="studio-workspace @(_inspectorOpen ? "has-inspector" : "")">
-    <aside class="studio-panel studio-panel-left" aria-label="Site navigation and modules">
+<div class="studio-workspace @(_inspectorOpen ? "has-inspector" : "") @(_leftCollapsed ? "left-collapsed" : "")">
+    @if (_leftCollapsed)
+    {
+        <aside class="studio-panel studio-panel-left studio-panel-rail" aria-label="Site navigation and modules (collapsed)">
+            <button type="button" class="studio-rail-button" title="Show the side panel" aria-label="Show the side panel" @onclick="() => _leftCollapsed = false">
+                <i class="bi bi-layout-sidebar-inset"></i>
+            </button>
+        </aside>
+    }
+    <aside class="studio-panel studio-panel-left" aria-label="Site navigation and modules" hidden="@_leftCollapsed">
         <div class="desk-panel-heading">
             <strong>@(_leftTab == "layers" ? "Site navigator" : _leftTab == "global" ? "Reusable modules" : "Module library")</strong>
-            <i class="bi bi-layout-sidebar"></i>
+            <button type="button" class="studio-rail-button" title="Hide this panel to give the canvas more room" aria-label="Hide the side panel" @onclick="() => _leftCollapsed = true">
+                <i class="bi bi-layout-sidebar"></i>
+            </button>
         </div>
         @if (_leftTab == "widgets")
         {
@@ -436,7 +449,7 @@ else
                         title="Live preview — @_page.Title"></iframe>
             </div>
         </div>
-        <p class="small text-secondary px-2 mb-0">
+        <p class="small text-secondary px-2 mb-0 studio-stage-hint">
             <i class="bi bi-info-circle me-1"></i>Edits autosave as a draft — nothing reaches the live site until you publish. Drag blocks or global blocks onto the canvas; structural changes refresh the preview automatically.
         </p>
     </section>
@@ -546,10 +559,13 @@ else
                             <span class="studio-widget-icon studio-widget-icon-sm">
                                 <i class="@GetWidgetIconClass(selWidget.WidgetType)"></i>
                             </span>
-                            <div>
+                            <div class="me-auto">
                                 <div class="fw-semibold">@GetWidgetTypeLabel(selWidget.WidgetType)</div>
                                 <div class="small text-secondary">Widget properties</div>
                             </div>
+                            <button type="button" class="btn btn-sm btn-outline-danger" title="Delete this block (Ctrl+Z to undo)" @onclick="DeleteSelectedWidget">
+                                <i class="bi bi-trash me-1"></i>Delete
+                            </button>
                         </div>
                         @if (!_isAdmin && EffectiveWidgetEditPermission(_selectedWidgetId) != CmsEditPermissions.Open)
                         {
@@ -2853,6 +2869,13 @@ else
             try
             {
                 await JS.InvokeVoidAsync("gwsCmsBuilderBridge.init", _bridgeRef);
+                try
+                {
+                    _browserUtcOffset = TimeSpan.FromMinutes(-await JS.InvokeAsync<int>("gwsClientTime.utcOffsetMinutesWest"));
+                }
+                catch (JSException)
+                {
+                }
                 _bridgeInitialized = true;
             }
             catch (JSDisconnectedException)
@@ -2944,6 +2967,15 @@ else
     [JSInvokable]
     public Task OnWidgetCommandFromIframe(string sectionId, string widgetId, string command)
     {
+        // Act on the widget whose toolbar was clicked, not whatever the inspector last had
+        // selected - the two can disagree (e.g. right after an add or a canvas reload), which
+        // made Delete remove nothing or the wrong block.
+        if (!string.IsNullOrEmpty(widgetId) && FindWidget(widgetId) is not null)
+        {
+            var (owningSection, _) = FindWidgetLocation(widgetId);
+            SelectWidget(owningSection?.Id ?? sectionId, widgetId);
+        }
+
         switch (command)
         {
             case "duplicate":
@@ -3400,6 +3432,7 @@ else
         }
 
         _pendingAutosaveReloadPreview |= reloadPreview;
+        _deletedNotice = string.Empty;
         _errorMessage = string.Empty;
         _statusMessage = "Saving changes…";
 
@@ -3699,7 +3732,9 @@ else
         {
             if (_isBusy) return "Saving…";
             if (_layoutParseFailed) return string.Empty;
-            if (_lastSavedAt is { } savedAt) return $"Draft saved {savedAt.ToLocalTime():h:mm tt}";
+            var prefix = string.IsNullOrEmpty(_deletedNotice) ? string.Empty : _deletedNotice + " ";
+            // The server runs on UTC, so convert with the browser's own offset (read once).
+            if (_lastSavedAt is { } savedAt) return $"{prefix}Draft saved {savedAt.ToOffset(_browserUtcOffset ?? TimeZoneInfo.Local.GetUtcOffset(savedAt)):h:mm tt}";
             return _hasUnpublishedChanges ? "Unpublished draft" : string.Empty;
         }
     }
@@ -3950,6 +3985,10 @@ else
         </div>
     };
 
+    private bool _leftCollapsed;
+    // Shown in the save-state slot right after a delete, until the next edit.
+    private string _deletedNotice = string.Empty;
+    private TimeSpan? _browserUtcOffset;
     private bool _mapGeocoding;
     private string _mapGeocodeMessage = string.Empty;
 
@@ -4419,11 +4458,19 @@ else
 
     private void DeleteWidget(string sectionId, string columnId, string widgetId)
     {
-        PushUndo();
         var col = FindSection(sectionId)?.Columns.FirstOrDefault(c => c.Id == columnId);
-        col?.Widgets.RemoveAll(w => w.Id == widgetId);
-        if (_selectedWidgetId == widgetId) ClearSelection();
+        var widget = col?.Widgets.FirstOrDefault(w => w.Id == widgetId);
+        if (col is null || widget is null) return;
+        PushUndo();
+        col.Widgets.Remove(widget);
+        if (_selectedWidgetId == widgetId)
+        {
+            ClearSelection();
+            // Nothing left to inspect - hand the room back to the canvas.
+            _inspectorOpen = false;
+        }
         QueueAutosave(reloadPreview: true, immediate: true);
+        _deletedNotice = $"Deleted the {GetWidgetTypeLabel(widget.WidgetType)} block.";
     }
 
     private void DeleteSelectedWidget()

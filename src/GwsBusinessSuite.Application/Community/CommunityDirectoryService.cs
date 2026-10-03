@@ -19,9 +19,14 @@ public sealed class CommunityDirectoryService(IAppDbContext dbContext) : ICommun
         // nothing here while risking the usual SQLite/EF Core client-eval surprises this
         // codebase has hit before with more complex query shapes.
         var profiles = await dbContext.MemberProfiles.AsNoTracking().ToListAsync(cancellationToken);
+        var memberships = await dbContext.DepartmentMemberships.AsNoTracking().ToListAsync(cancellationToken);
+        // Distinct people per department, whether it's their primary department or an extra one.
         var memberCounts = profiles
             .Where(p => p.DepartmentId.HasValue)
-            .GroupBy(p => p.DepartmentId!.Value)
+            .Select(p => (DepartmentId: p.DepartmentId!.Value, p.AppUserId))
+            .Concat(memberships.Select(m => (m.DepartmentId, m.AppUserId)))
+            .Distinct()
+            .GroupBy(x => x.DepartmentId)
             .ToDictionary(g => g.Key, g => g.Count());
 
         var leadUsernames = departments.Where(d => !string.IsNullOrWhiteSpace(d.LeadUsername))
@@ -80,6 +85,8 @@ public sealed class CommunityDirectoryService(IAppDbContext dbContext) : ICommun
         {
             profile.DepartmentId = null;
         }
+        dbContext.DepartmentMemberships.RemoveRange(
+            await dbContext.DepartmentMemberships.Where(m => m.DepartmentId == departmentId).ToListAsync(cancellationToken));
 
         dbContext.Departments.Remove(department);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -91,19 +98,17 @@ public sealed class CommunityDirectoryService(IAppDbContext dbContext) : ICommun
         var users = await dbContext.AppUsers.AsNoTracking().Where(u => u.IsActive).ToListAsync(cancellationToken);
         var profilesByUserId = await dbContext.MemberProfiles.AsNoTracking().ToListAsync(cancellationToken);
         var profileLookup = profilesByUserId.ToDictionary(p => p.AppUserId);
-        var departments = await dbContext.Departments.AsNoTracking().ToListAsync(cancellationToken);
-        var departmentLookup = departments.ToDictionary(d => d.Id);
+        var departmentsByUser = await LoadDepartmentsAsync(profilesByUserId, null, cancellationToken);
 
         var views = users.Select(u =>
         {
             profileLookup.TryGetValue(u.Id, out var profile);
-            var departmentName = profile?.DepartmentId is { } depId && departmentLookup.TryGetValue(depId, out var dep) ? dep.Name : null;
-            return ToView(u, profile, departmentName);
+            return ToView(u, profile, departmentsByUser.GetValueOrDefault(u.Id) ?? []);
         });
 
         if (departmentId is { } filterDepartmentId)
         {
-            views = views.Where(v => v.DepartmentId == filterDepartmentId);
+            views = views.Where(v => v.IsInDepartment(filterDepartmentId));
         }
 
         if (!string.IsNullOrWhiteSpace(searchText))
@@ -125,13 +130,8 @@ public sealed class CommunityDirectoryService(IAppDbContext dbContext) : ICommun
         if (user is null) return null;
 
         var profile = await dbContext.MemberProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.AppUserId == user.Id, cancellationToken);
-        string? departmentName = null;
-        if (profile?.DepartmentId is { } departmentId)
-        {
-            departmentName = (await dbContext.Departments.AsNoTracking().FirstOrDefaultAsync(d => d.Id == departmentId, cancellationToken))?.Name;
-        }
-
-        return ToView(user, profile, departmentName);
+        var departments = await LoadDepartmentsAsync(profile is null ? [] : [profile], user.Id, cancellationToken);
+        return ToView(user, profile, departments.GetValueOrDefault(user.Id) ?? []);
     }
 
     public async Task<MemberProfileView> SaveProfileAsync(MemberProfileEditorModel editor, string performedBy, CancellationToken cancellationToken = default)
@@ -150,6 +150,8 @@ public sealed class CommunityDirectoryService(IAppDbContext dbContext) : ICommun
         profile.JobTitle = editor.JobTitle?.Trim() ?? string.Empty;
         profile.DepartmentId = editor.DepartmentId;
         profile.Phone = editor.Phone?.Trim() ?? string.Empty;
+        profile.Email = editor.Email?.Trim() ?? string.Empty;
+        profile.NotifyUnreadMessagesByEmail = editor.NotifyUnreadMessagesByEmail;
         profile.LinkedInUrl = editor.LinkedInUrl?.Trim() ?? string.Empty;
         profile.TwitterUrl = editor.TwitterUrl?.Trim() ?? string.Empty;
         profile.WebsiteUrl = editor.WebsiteUrl?.Trim() ?? string.Empty;
@@ -157,15 +159,21 @@ public sealed class CommunityDirectoryService(IAppDbContext dbContext) : ICommun
         profile.UpdatedBy = performedBy;
 
         if (isNew) dbContext.MemberProfiles.Add(profile);
-        await dbContext.SaveChangesAsync(cancellationToken);
 
-        string? departmentName = null;
-        if (profile.DepartmentId is { } departmentId)
+        // Sync the extra departments: whatever was picked, minus the primary one.
+        var wanted = (editor.AdditionalDepartmentIds ?? []).Where(id => id != profile.DepartmentId).ToHashSet();
+        var existing = await dbContext.DepartmentMemberships.Where(m => m.AppUserId == user.Id).ToListAsync(cancellationToken);
+        dbContext.DepartmentMemberships.RemoveRange(existing.Where(m => !wanted.Contains(m.DepartmentId)));
+        var validIds = await dbContext.Departments.AsNoTracking().Where(d => wanted.Contains(d.Id)).Select(d => d.Id).ToListAsync(cancellationToken);
+        foreach (var id in validIds.Where(id => existing.All(m => m.DepartmentId != id)))
         {
-            departmentName = (await dbContext.Departments.AsNoTracking().FirstOrDefaultAsync(d => d.Id == departmentId, cancellationToken))?.Name;
+            dbContext.DepartmentMemberships.Add(new DepartmentMembership { DepartmentId = id, AppUserId = user.Id, CreatedBy = performedBy });
         }
 
-        return ToView(user, profile, departmentName);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var departments = await LoadDepartmentsAsync([profile], user.Id, cancellationToken);
+        return ToView(user, profile, departments.GetValueOrDefault(user.Id) ?? []);
     }
 
     public async Task<bool> CanEditProfileAsync(string performedByUsername, string targetUsername, CancellationToken cancellationToken = default)
@@ -181,11 +189,17 @@ public sealed class CommunityDirectoryService(IAppDbContext dbContext) : ICommun
             .FirstOrDefaultAsync(u => u.Username.ToLower() == targetUsername.ToLower(), cancellationToken);
         if (target is null) return false;
 
+        // A lead of ANY of the target's departments may edit their profile.
         var targetProfile = await dbContext.MemberProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.AppUserId == target.Id, cancellationToken);
-        if (targetProfile?.DepartmentId is not { } departmentId) return false;
+        var departments = await LoadDepartmentsAsync(targetProfile is null ? [] : [targetProfile], target.Id, cancellationToken);
+        var departmentIds = (departments.GetValueOrDefault(target.Id) ?? []).Select(d => d.Id).ToList();
+        if (departmentIds.Count == 0) return false;
 
-        var department = await dbContext.Departments.AsNoTracking().FirstOrDefaultAsync(d => d.Id == departmentId, cancellationToken);
-        return department is not null && string.Equals(department.LeadUsername, performedByUsername, StringComparison.OrdinalIgnoreCase);
+        var leads = await dbContext.Departments.AsNoTracking()
+            .Where(d => departmentIds.Contains(d.Id) && d.LeadUsername != null)
+            .Select(d => d.LeadUsername!)
+            .ToListAsync(cancellationToken);
+        return leads.Any(lead => string.Equals(lead, performedByUsername, StringComparison.OrdinalIgnoreCase));
     }
 
     private async Task<Dictionary<string, string>> ResolveDisplayNamesAsync(IReadOnlyList<string> usernames, CancellationToken cancellationToken)
@@ -207,7 +221,33 @@ public sealed class CommunityDirectoryService(IAppDbContext dbContext) : ICommun
             StringComparer.OrdinalIgnoreCase);
     }
 
-    private static MemberProfileView ToView(AppUser user, MemberProfile? profile, string? departmentName) => new(
+    // Every department each user belongs to (primary first). userId narrows the membership load
+    // to one person; null loads everyone (directory listing).
+    private async Task<Dictionary<Guid, List<DepartmentMembershipView>>> LoadDepartmentsAsync(
+        IReadOnlyCollection<MemberProfile> profiles, Guid? userId, CancellationToken cancellationToken)
+    {
+        var membershipQuery = dbContext.DepartmentMemberships.AsNoTracking();
+        if (userId is { } onlyUser) membershipQuery = membershipQuery.Where(m => m.AppUserId == onlyUser);
+        var memberships = await membershipQuery.ToListAsync(cancellationToken);
+        var names = (await dbContext.Departments.AsNoTracking().Select(d => new { d.Id, d.Name }).ToListAsync(cancellationToken))
+            .ToDictionary(d => d.Id, d => d.Name);
+
+        var result = new Dictionary<Guid, List<DepartmentMembershipView>>();
+        foreach (var profile in profiles.Where(p => p.DepartmentId is { } id && names.ContainsKey(id)))
+        {
+            result[profile.AppUserId] = [new DepartmentMembershipView(profile.DepartmentId!.Value, names[profile.DepartmentId.Value], true)];
+        }
+        foreach (var membership in memberships.Where(m => names.ContainsKey(m.DepartmentId)))
+        {
+            var list = result.TryGetValue(membership.AppUserId, out var existing) ? existing : result[membership.AppUserId] = [];
+            if (list.All(d => d.Id != membership.DepartmentId))
+                list.Add(new DepartmentMembershipView(membership.DepartmentId, names[membership.DepartmentId], false));
+        }
+
+        return result;
+    }
+
+    private static MemberProfileView ToView(AppUser user, MemberProfile? profile, IReadOnlyList<DepartmentMembershipView> departments) => new(
         profile?.Id,
         user.Username,
         user.Role,
@@ -217,9 +257,12 @@ public sealed class CommunityDirectoryService(IAppDbContext dbContext) : ICommun
         profile?.Bio ?? string.Empty,
         profile?.JobTitle ?? string.Empty,
         profile?.DepartmentId,
-        departmentName,
+        departments.FirstOrDefault(d => d.IsPrimary)?.Name,
         profile?.Phone ?? string.Empty,
         profile?.LinkedInUrl ?? string.Empty,
         profile?.TwitterUrl ?? string.Empty,
-        profile?.WebsiteUrl ?? string.Empty);
+        profile?.WebsiteUrl ?? string.Empty,
+        departments,
+        profile?.Email ?? string.Empty,
+        profile?.NotifyUnreadMessagesByEmail ?? true);
 }

@@ -126,6 +126,8 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<MobileDeviceRegistration> MobileDeviceRegistrations { get; }
     DbSet<MemberProfile> MemberProfiles { get; }
     DbSet<Department> Departments { get; }
+    DbSet<DepartmentMembership> DepartmentMemberships { get; }
+    DbSet<ChatMessageAttachment> ChatMessageAttachments { get; }
     DbSet<ActivityEvent> ActivityEvents { get; }
     DbSet<ChatThread> ChatThreads { get; }
     DbSet<ChatThreadParticipant> ChatThreadParticipants { get; }

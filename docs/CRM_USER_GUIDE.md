@@ -237,14 +237,16 @@ on the right.
   (`Active`/`Completed`/`Cancelled`), which step they're on out of the total, and their next send
   time. A background sweep (running every 5 minutes) is what actually sends due steps — there's no
   manual "send now" button, so a step you'd expect to fire immediately can take up to 5 minutes.
-- **Unsubscribing**: every sent step includes an unsubscribe link unique to that contact (a
-  non-expiring, encrypted token — not a stored, expirable code — so it keeps working no matter how
-  old the email is). Clicking it sets a global "unsubscribed from campaigns" flag on the contact
-  (suppressing them from *every* campaign, not just the one the email came from) and cancels every
-  campaign they're currently actively enrolled in. There's no in-app UI for a contact to manage
-  this themselves beyond that one link. If they explicitly ask to opt back in, select their
-  "unsubscribed" entry in the enrollment picker, click **Resubscribe**, and confirm consent. This
-  restores global eligibility while preserving cancelled enrollments as history.
+- **Unsubscribing**: every sent step includes an unsubscribe link (an encrypted, non-expiring token
+  naming the contact and this campaign) plus standard one-click `List-Unsubscribe` headers, so
+  Gmail/Apple Mail show their own Unsubscribe button. The link opens a page that asks before doing
+  anything (link scanners and previews can't unsubscribe anyone) and offers **Stop emails from
+  "{campaign}"** - leaves just that campaign; its enrollment becomes `Unsubscribed` and can't be
+  re-enrolled - or **Unsubscribe from all of our emails**, which sets the contact's global
+  "unsubscribed from campaigns" flag and cancels every active enrollment. A mail client's one-click
+  button leaves just that campaign. Links in emails sent before this change mean "all". If someone
+  asks to opt back in after a global unsubscribe, select their "unsubscribed" entry in the
+  enrollment picker, click **Resubscribe**, and confirm consent.
 - **Delete a campaign**: the **Delete** button (confirmation required) permanently removes the
   campaign, its steps, every enrollment, and every send-log entry for it.
 
@@ -273,6 +275,9 @@ sequences are listed under **Drip sequences** below it and are unaffected.
 - **Settings tab**:
   - Sender: From name, From address (default `grant@gwsapp.net`) and Reply-To.
   - Content: excerpt length, Read More label, and whether to show the hero image.
+  - **How to send**: one email per article as it goes live, or a **weekly digest** of everything
+    published that week, sent on the day and hour you choose (in the list's time zone) with its own
+    subject (`{{digest.count}}` = number of articles). A week with no new articles sends nothing.
   - **Grace period**: default 15 minutes after an article goes live, so a quick typo fix or an
     accidental publish doesn't email anyone. An article that is unpublished or trashed during the
     grace period is marked Skipped and never sent.
@@ -391,10 +396,8 @@ These are real gaps observed directly in the current code, not a general disclai
 - **No campaign send-time control beyond the day-delay chain.** There's no "send only during
   business hours" or "skip weekends" option, and the background sweep only runs every 5 minutes,
   so there's no true "send immediately" button.
-- **Alert lists send one email per article, never a digest.** Publishing several articles in a row
-  sends several emails; there's no "weekly roundup" mode.
-- **Campaign unsubscribe and resubscribe are global, not per-campaign** (for drip sequences; alert
-  lists unsubscribe per list). An unsubscribe suppresses
+- **Resubscribe is global only.** An admin can restore a contact after a global unsubscribe, but
+  there's no button to undo a single-campaign unsubscribe. An unsubscribe suppresses
   the contact from every campaign; the admin Resubscribe action restores eligibility for every
   campaign after consent, rather than for one campaign at a time.
 - **Form-to-Contact matching is exact-email-only**, with no fuzzy dedup — a submitter who uses a

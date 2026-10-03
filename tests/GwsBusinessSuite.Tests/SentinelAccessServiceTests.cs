@@ -190,6 +190,40 @@ public sealed class SentinelAccessServiceTests
     }
 
     [Fact]
+    public async Task DepartmentGrant_ReachesPrimaryAndAdditionalMembers_AndTheHighestLevelWins()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var engineering = new Department { Name = "Engineering" };
+        var sales = new Department { Name = "Sales" };
+        fixture.Db.Departments.AddRange(engineering, sales);
+        var primaryMember = new AppUser { Username = "ana", Role = AppRoles.Contributor, IsActive = true };
+        var extraMember = new AppUser { Username = "ben", Role = AppRoles.Contributor, IsActive = true };
+        var outsider = new AppUser { Username = "cal", Role = AppRoles.Contributor, IsActive = true };
+        fixture.Db.AppUsers.AddRange(primaryMember, extraMember, outsider);
+        fixture.Db.MemberProfiles.Add(new MemberProfile { AppUserId = primaryMember.Id, DepartmentId = engineering.Id });
+        fixture.Db.MemberProfiles.Add(new MemberProfile { AppUserId = extraMember.Id, DepartmentId = sales.Id });
+        fixture.Db.DepartmentMemberships.Add(new DepartmentMembership { DepartmentId = engineering.Id, AppUserId = extraMember.Id });
+        var root = AddPage(fixture, "Runbooks");
+        var child = AddPage(fixture, "On-call", root.Id);
+        await fixture.Db.SaveChangesAsync();
+
+        await fixture.Service.SetPermissionAsync(root.Id, false, SentinelPrincipals.Department(engineering.Id), SentinelAccessLevels.Edit, "owner");
+        // A personal grant on the same page is lower than the department's - the higher one wins.
+        await fixture.Service.SetPermissionAsync(root.Id, false, "ana", SentinelAccessLevels.View, "owner");
+
+        (await fixture.Service.CanAccessAsync(child.Id, false, "ana", SentinelAccessLevels.Edit)).Should().BeTrue("inherited from the department grant on the parent");
+        (await fixture.Service.CanAccessAsync(child.Id, false, "ben", SentinelAccessLevels.Edit)).Should().BeTrue("an additional department counts too");
+        (await fixture.Service.CanAccessAsync(child.Id, false, "cal", SentinelAccessLevels.View)).Should().BeFalse();
+        (await fixture.Service.HasDirectPermissionAsync(root.Id, false, "ben", SentinelAccessLevels.Edit)).Should().BeTrue();
+
+        var snapshot = await fixture.Service.GetAccessAsync(root.Id, false);
+        snapshot.Permissions.Should().Contain(p => p.IsDepartment && p.DisplayLabel == "Engineering (department)");
+
+        var act = () => fixture.Service.SetPermissionAsync(root.Id, false, SentinelPrincipals.Department(Guid.NewGuid()), SentinelAccessLevels.View, "owner");
+        await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
     public async Task CanAccess_ShouldInheritNearestPagePermissionForNestedPagesAndDatabases()
     {
         await using var fixture = await Fixture.CreateAsync();

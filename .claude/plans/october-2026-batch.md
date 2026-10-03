@@ -8,18 +8,22 @@ verified with `./scripts/verify-release.sh` before it is marked done. Grant comm
 | 1 | Email delivery: every feature uses whatever is configured (any SMTP section in .env, else the connected Google account via Gmail API); status card + test send; startup log line | done 2026-10-03 (verify-release PASS) |
 | 2 | Remove the Notion connection (connector settings, OAuth, sync job, picker). Keep already-imported Sentinel pages | done 2026-10-03 (verify-release PASS) |
 | 3 | Map/location widget - free, no API key (OpenStreetMap embed) | done 2026-10-03 (verify-release PASS) |
-| 4 | Header/footer builder | built + browser-verified; final verify running |
-| 5 | Department-based permissions (Community Phase 3) | pending |
-| 6 | Small leftovers: Osiris durable Wikidata cache; Developer Mode folder memory | pending |
-| 7 | Community gaps: group conversations, message attachments, unread notifications, multiple departments, more activity-feed sources | pending |
-| 8 | Email gaps: per-list digest mode; per-campaign (not global) unsubscribe for drip sequences | pending |
-| 9 | Overwatch coverage: research + add free, key-less sources for unresearched states/countries | pending |
-| 10 | Housekeeping: refresh stale master-plan status; triage failing Dependabot PRs | pending |
-| 11 | Hand Grant: Turnstile key steps | pending |
+| 4 | Header/footer builder | done 2026-10-03 (verify-release PASS) |
+| 5 | Department-based permissions (Community Phase 3): Sentinel sharing with departments + multiple departments per person (gap 7 part) | done 2026-10-03 (verify-release PASS) |
+| 6 | Small leftovers: Osiris durable Wikidata cache; Developer Mode folder memory | n/a - Osiris was removed (6b009a4); folder memory already shipped (b81df78, d741485) |
+| 7 | Community gaps: group conversations, message attachments, unread notifications (live bell + 15-min email), more activity-feed sources (multiple departments done in 5) | done 2026-10-03 (verify-release PASS) |
+| 8 | Email gaps: weekly digest mode for alert lists; per-campaign unsubscribe for drip sequences (+ FOUND BUG: drip unsubscribe page unsubscribed on page load - link scanners could unsubscribe people; now a confirm step) | done 2026-10-03 (verify-release PASS) |
+| 9 | Overwatch coverage: research + add free, key-less sources for unresearched states/countries | NOT STARTED - deferred at session end (2026-10-03) |
+| 10 | Housekeeping: refresh stale master-plan status; triage failing Dependabot PRs | done - master plan refreshed; no open Dependabot PRs remain (checked 2026-10-03) |
+| 11 | Hand Grant: Turnstile key steps | done (in chat) |
 
 Out of scope by Grant's instruction: macOS installer (disregarded 2026-10-03).
 
 | 3a | FOUND BUG: 9 CMS widget runtimes + home blog grid + reveal + submitted-modal were inline scripts the CSP blocks in production; now served externally | done 2026-10-03 (verify-release PASS) |
+
+| 5a | FOUND BUG: 12 text boxes gated their button on blur (Settings test email, alert test, Sentinel Invite, workflow Grant access, template/API-key/property names, model pull...) - clicking the button did nothing | fixed (oninput) |
+
+| 7a | USER-REPORTED (2026-10-03): page-editor widget delete "saves but doesn't"; editing area too small on a laptop | canvas toolbar now acts on its own widget; labelled Delete at top of inspector; add scrolls canvas to the new block; delete notice; working left-panel collapse (was a dead icon); compact header < 1600px; Fullscreen button; local-time "Draft saved" (was UTC) |
 
 ## Notes
 

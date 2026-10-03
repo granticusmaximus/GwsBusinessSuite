@@ -3,6 +3,7 @@ using System;
 using GwsBusinessSuite.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace GwsBusinessSuite.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261003173732_AddDepartmentMemberships")]
+    partial class AddDepartmentMemberships
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.12");
@@ -1954,50 +1957,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("ChatMessages");
                 });
 
-            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.ChatMessageAttachment", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("TEXT");
-
-                    b.Property<byte[]>("Content")
-                        .IsRequired()
-                        .HasColumnType("BLOB");
-
-                    b.Property<string>("ContentType")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CreatedBy")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("FileName")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<Guid>("MessageId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<long>("SizeBytes")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<DateTimeOffset?>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("UpdatedBy")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("MessageId");
-
-                    b.ToTable("ChatMessageAttachments");
-                });
-
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.ChatThread", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2045,9 +2004,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("ThreadId")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("UnreadEmailSentAt")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset?>("UpdatedAt")
@@ -4014,10 +3970,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("JobTitle")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -4025,9 +3977,6 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<string>("LinkedInUrl")
                         .IsRequired()
                         .HasColumnType("TEXT");
-
-                    b.Property<bool>("NotifyUnreadMessagesByEmail")
-                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Phone")
                         .IsRequired()

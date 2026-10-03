@@ -20,7 +20,9 @@
     <div>
         <a class="small" href="/admin/email-campaigns"><i class="bi bi-arrow-left me-1"></i>Email Campaigns</a>
         <h1 class="mt-1"><i class="bi bi-bell-fill me-2 text-primary"></i>@(Campaign?.Name ?? "Article alerts")</h1>
-        <p class="mb-0">Emails confirmed subscribers @(Settings.GraceMinutes == 0 ? "as soon as" : $"{Settings.GraceMinutes} minutes after") a new article goes live.</p>
+        <p class="mb-0">@(Settings.IsWeeklyDigest
+            ? $"Emails confirmed subscribers a weekly digest every {Settings.DigestDay} at {new DateTime(2000, 1, 1, Math.Clamp(Settings.DigestHour, 0, 23), 0, 0):h tt}."
+            : $"Emails confirmed subscribers {(Settings.GraceMinutes == 0 ? "as soon as" : $"{Settings.GraceMinutes} minutes after")} a new article goes live.")</p>
     </div>
     @if (Campaign is not null)
     {
@@ -190,6 +192,41 @@ else
                 </div></div>
                 <div class="card border-0 shadow-sm mb-3"><div class="card-body">
                     <div class="fw-semibold small mb-2">Timing</div>
+                    <label class="form-label small">How to send</label>
+                    <div class="mb-2">
+                        <label class="form-check small mb-1">
+                            <input class="form-check-input" type="radio" name="delivery-mode" checked="@(!Settings.IsWeeklyDigest)"
+                                   @onchange="() => SetDeliveryModeAsync(ArticleAlertSettings.DeliveryEach)" />
+                            <span class="form-check-label">One email per article, as it goes live</span>
+                        </label>
+                        <label class="form-check small mb-0">
+                            <input class="form-check-input" type="radio" name="delivery-mode" checked="@Settings.IsWeeklyDigest"
+                                   @onchange="() => SetDeliveryModeAsync(ArticleAlertSettings.DeliveryWeekly)" />
+                            <span class="form-check-label">A weekly digest of everything published that week</span>
+                        </label>
+                    </div>
+                    @if (Settings.IsWeeklyDigest)
+                    {
+                        <div class="row g-2 mb-2">
+                            <div class="col-7">
+                                <label class="form-label small">Send on</label>
+                                <select class="form-select form-select-sm" value="@((int)Settings.DigestDay)"
+                                        @onchange="SetDigestDay">
+                                    @foreach (var day in Enum.GetValues<DayOfWeek>()) { <option value="@((int)day)">@day</option> }
+                                </select>
+                            </div>
+                            <div class="col-5">
+                                <label class="form-label small">At</label>
+                                <select class="form-select form-select-sm" value="@Settings.DigestHour"
+                                        @onchange="SetDigestHour">
+                                    @for (var hour = 0; hour < 24; hour++) { var h = hour; <option value="@h">@(new DateTime(2000, 1, 1, h, 0, 0).ToString("h tt"))</option> }
+                                </select>
+                            </div>
+                        </div>
+                        <label class="form-label small">Digest subject</label>
+                        <input class="form-control form-control-sm mb-1" @bind="Settings.DigestSubject" @bind:after="RefreshPreviewAsync" />
+                        <div class="form-text mb-2"><code>{{digest.count}}</code> is the number of articles in it. Weeks with no new articles send nothing.</div>
+                    }
                     <label class="form-label small">Wait after an article goes live (minutes)</label>
                     <input type="number" min="0" max="1440" class="form-control form-control-sm mb-1" @bind="Settings.GraceMinutes" />
                     <div class="form-text mb-2">Gives you time to fix a typo or unpublish. An article that's no longer live when the wait ends isn't sent.</div>
@@ -311,6 +348,22 @@ else
                   OnPicked="PickImageAsync" OnClose="() => _picking = null" />
 
 @code {
+    private void SetDigestDay(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var day) && day is >= 0 and <= 6) Settings.DigestDay = (DayOfWeek)day;
+    }
+
+    private void SetDigestHour(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var hour) && hour is >= 0 and <= 23) Settings.DigestHour = hour;
+    }
+
+    private async Task SetDeliveryModeAsync(string mode)
+    {
+        Settings.DeliveryMode = mode;
+        await RefreshPreviewAsync();
+    }
+
     [Parameter] public Guid CampaignId { get; set; }
 
     private static readonly (string Key, string Label, string Icon)[] Tabs =

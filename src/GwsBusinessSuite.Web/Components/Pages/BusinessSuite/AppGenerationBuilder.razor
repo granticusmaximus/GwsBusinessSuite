@@ -126,7 +126,7 @@ else
                     @if (Selected.Status == AppGenerationRequestStatuses.Drafting)
                     {
                         <div class="input-group mb-2">
-                            <textarea class="form-control" rows="2" @bind="ChatMessage" placeholder="Reply to keep refining the plan..."></textarea>
+                            <textarea class="form-control" rows="2" @bind="ChatMessage" @bind:event="oninput" placeholder="Reply to keep refining the plan..."></textarea>
                             <button class="btn btn-outline-primary" @onclick="SendAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(ChatMessage))">
                                 <i class="bi bi-send"></i>
                             </button>

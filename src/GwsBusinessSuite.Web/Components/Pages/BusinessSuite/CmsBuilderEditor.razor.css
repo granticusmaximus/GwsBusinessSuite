@@ -924,3 +924,28 @@
 }
 
 .signup-campaign-picker .modal-title { color: var(--gws-text-strong); }
+
+/* ── Room for the canvas ─────────────────────────────────────────────────────
+   Collapsible left panel, laptop-width compaction and Fullscreen (app.js's shared
+   data-gws-focus-toggle, which hides the admin sidebar and top bar). */
+.studio-rail-button { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #526279; }
+.studio-rail-button:hover, .studio-rail-button:focus-visible { background: #edf3fa; color: #253349; border-color: #cdd6e2; }
+.studio-panel-rail { display: flex; flex-direction: column; align-items: center; padding-top: 0.75rem; }
+.studio-panel-left[hidden] { display: none; }
+@media (min-width: 1200px) {
+    .studio-workspace.left-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
+    .studio-workspace.left-collapsed.has-inspector { grid-template-columns: 44px minmax(0, 1fr) 300px; }
+}
+
+@media (min-width: 1200px) and (max-width: 1599.98px) {
+    .studio-header { padding: 0.5rem 0.9rem; gap: 0.6rem; }
+    .studio-header p, .studio-kicker { display: none; }
+    .studio-header h1 { font-size: 1.05rem; margin: 0; }
+    .studio-pills .studio-pill:not(.studio-pill-draft):not(:first-child) { display: none; }
+    .desk-navigation { padding: 0.3rem 0.9rem; }
+    .desk-panel-heading { padding: 0.6rem 0.75rem; }
+    .studio-workspace.has-inspector { grid-template-columns: 220px minmax(0, 1fr) 270px; }
+    .studio-workspace.left-collapsed.has-inspector { grid-template-columns: 44px minmax(0, 1fr) 270px; }
+    .studio-stage-hint { display: none; }
+    .studio-shell { height: calc(100dvh - 5.5rem); min-height: 600px; }
+}

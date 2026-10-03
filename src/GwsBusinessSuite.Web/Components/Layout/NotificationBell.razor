@@ -5,6 +5,9 @@
 @inject DockerHealthNotifier DockerNotifier
 @inject ISocialPublishingService SocialPublishingService
 @inject SocialPublishingNotifier SocialNotifier
+@inject GwsBusinessSuite.Application.Community.IChatService ChatService
+@inject GwsBusinessSuite.Application.Community.ChatNotifier ChatNotifier
+@inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject ILogger<NotificationBell> Logger
 
@@ -83,14 +86,16 @@
     {
         var dockerUnread = await DockerHealthService.CountUnreadAlertsAsync();
         var socialUnread = await SocialPublishingService.CountUnreadAlertsAsync();
-        UnreadCount = dockerUnread + socialUnread;
 
         var dockerAlerts = (await DockerHealthService.ListAlertsAsync(unreadOnly: false)).Select(ToBellAlert);
         var socialAlerts = (await SocialPublishingService.ListAlertsAsync(unreadOnly: false)).Select(ToBellAlert);
-        RecentAlerts = dockerAlerts.Concat(socialAlerts).OrderByDescending(a => a.CreatedAt).Take(10).ToList();
+        var chatAlerts = await LoadChatAlertsAsync();
+        UnreadCount = dockerUnread + socialUnread + chatAlerts.Count;
+        RecentAlerts = dockerAlerts.Concat(socialAlerts).Concat(chatAlerts).OrderByDescending(a => a.CreatedAt).Take(10).ToList();
 
         DockerNotifier.OnAlert += HandleDockerAlert;
         SocialNotifier.OnAlert += HandleSocialAlert;
+        ChatNotifier.OnMessage += HandleChatMessage;
     }
 
     private static BellAlert ToBellAlert(DockerHealthAlertView alert) => new(
@@ -100,6 +105,49 @@
     private static BellAlert ToBellAlert(SocialPostAlertView alert) => new(
         "social", alert.Id, alert.PostTitle, alert.Message, alert.IsRead, alert.CreatedAt,
         "/admin/growth");
+
+    private string _currentUsername = string.Empty;
+
+    // Community messages: one bell entry per conversation with unread messages (opening the
+    // conversation is what marks it read).
+    private async Task<List<BellAlert>> LoadChatAlertsAsync()
+    {
+        try
+        {
+            _currentUsername = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            if (string.IsNullOrWhiteSpace(_currentUsername)) return [];
+            return (await ChatService.ListThreadsForUserAsync(_currentUsername))
+                .Where(t => t.UnreadCount > 0)
+                .Select(t => new BellAlert("chat", t.ThreadId, t.Title,
+                    $"{t.UnreadCount} unread · {t.LastMessagePreview}", false, t.LastMessageAt ?? DateTimeOffset.UtcNow,
+                    $"/admin/community/messages/{t.ThreadId}"))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Couldn't load unread chat messages for the bell.");
+            return [];
+        }
+    }
+
+    private void HandleChatMessage(GwsBusinessSuite.Application.Community.ChatMessageNotice notice)
+    {
+        if (!notice.RecipientUsernames.Contains(_currentUsername, StringComparer.OrdinalIgnoreCase)) return;
+        // Don't ping about the conversation the user is looking at right now.
+        if (Navigation.Uri.Contains($"/admin/community/messages/{notice.ThreadId}", StringComparison.OrdinalIgnoreCase)) return;
+        _ = InvokeAsync(() =>
+        {
+            var existing = RecentAlerts.FindIndex(a => a.Kind == "chat" && a.Id == notice.ThreadId);
+            var wasUnread = existing >= 0 && !RecentAlerts[existing].IsRead;
+            if (existing >= 0) RecentAlerts.RemoveAt(existing);
+            var label = notice.IsGroup ? $"{notice.SenderDisplayName}: {notice.Preview}" : notice.Preview;
+            RecentAlerts.Insert(0, new BellAlert("chat", notice.ThreadId, notice.ThreadTitle, label, false, notice.SentAt,
+                $"/admin/community/messages/{notice.ThreadId}"));
+            if (RecentAlerts.Count > 10) RecentAlerts.RemoveAt(RecentAlerts.Count - 1);
+            if (!wasUnread) UnreadCount++;
+            StateHasChanged();
+        });
+    }
 
     private void HandleDockerAlert(DockerHealthAlertView alert) => AddAlert(ToBellAlert(alert));
 
@@ -139,6 +187,7 @@
         }
 
         if (alert.Kind == "docker") await DockerHealthService.MarkAlertReadAsync(alert.Id);
+        else if (alert.Kind == "chat") { /* opening the conversation marks it read */ }
         else await SocialPublishingService.MarkAlertReadAsync(alert.Id);
 
         var index = RecentAlerts.FindIndex(a => a.Kind == alert.Kind && a.Id == alert.Id);
@@ -154,6 +203,13 @@
     {
         await DockerHealthService.MarkAllAlertsReadAsync();
         await SocialPublishingService.MarkAllAlertsReadAsync();
+        if (!string.IsNullOrWhiteSpace(_currentUsername))
+        {
+            foreach (var chat in RecentAlerts.Where(a => a.Kind == "chat" && !a.IsRead))
+            {
+                await ChatService.MarkThreadReadAsync(chat.Id, _currentUsername);
+            }
+        }
         RecentAlerts = RecentAlerts.Select(a => a.IsRead ? a : a with { IsRead = true }).ToList();
         UnreadCount = 0;
     }
@@ -183,5 +239,6 @@
     {
         DockerNotifier.OnAlert -= HandleDockerAlert;
         SocialNotifier.OnAlert -= HandleSocialAlert;
+        ChatNotifier.OnMessage -= HandleChatMessage;
     }
 }

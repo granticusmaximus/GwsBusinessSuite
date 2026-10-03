@@ -135,6 +135,40 @@ public sealed class ChatServiceTests
         threads.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task GroupChat_WithAttachments_NotifiesEveryoneElse_AndOnlyMembersCanDownload()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        foreach (var name in new[] { "ana", "ben", "cal", "dee" }) fixture.AddUser(name);
+        await fixture.Db.SaveChangesAsync();
+        var notices = new List<ChatMessageNotice>();
+        var notifier = new ChatNotifier();
+        notifier.OnMessage += notices.Add;
+        var service = new ChatService(fixture.Db, notifier);
+
+        var threadId = await service.CreateGroupThreadAsync("ana", "Launch crew", ["ben", "cal", "nobody"]);
+        var sent = await service.SendMessageAsync(threadId, "ana", "", [new ChatAttachmentUpload("plan.pdf", "application/pdf", [1, 2, 3])]);
+
+        sent.AllAttachments.Should().ContainSingle(a => a.FileName == "plan.pdf" && a.SizeBytes == 3);
+        notices.Should().ContainSingle();
+        notices[0].RecipientUsernames.Should().BeEquivalentTo(["ben", "cal"]);
+        notices[0].ThreadTitle.Should().Be("Launch crew");
+
+        var bensThreads = await service.ListThreadsForUserAsync("ben");
+        bensThreads.Single().Should().Match<ChatThreadSummary>(t => t.IsGroup && t.ParticipantCount == 3 && t.UnreadCount == 1);
+        (await service.CountUnreadAsync("ben")).Should().Be(1);
+
+        var attachmentId = sent.AllAttachments[0].Id;
+        (await service.GetAttachmentAsync(attachmentId, "cal"))!.Content.Should().Equal(1, 2, 3);
+        var outsider = () => service.GetAttachmentAsync(attachmentId, "dee");
+        await outsider.Should().ThrowAsync<UnauthorizedAccessException>();
+
+        await service.AddParticipantsAsync(threadId, "ben", ["dee"]);
+        (await service.CountUnreadAsync("dee")).Should().Be(0, "joiners don't inherit unread history");
+        await service.LeaveThreadAsync(threadId, "cal");
+        (await service.GetParticipantsAsync(threadId, "ana")).Select(p => p.Username).Should().BeEquivalentTo(["ana", "ben", "dee"]);
+    }
+
     private sealed class Fixture(SqliteConnection connection, ApplicationDbContext db) : IAsyncDisposable
     {
         public ApplicationDbContext Db { get; } = db;

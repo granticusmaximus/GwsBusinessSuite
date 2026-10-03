@@ -1,6 +1,26 @@
 namespace GwsBusinessSuite.Application.Wiki;
 
-public sealed record SentinelPermissionView(Guid Id, string Username, string AccessLevel);
+// Username is the grant's principal: a username, or SentinelPrincipals.Department(id) for a
+// whole-department grant. DisplayLabel is a human-readable name for it.
+public sealed record SentinelPermissionView(Guid Id, string Username, string AccessLevel, string? DisplayLabel = null)
+{
+    public bool IsDepartment => SentinelPrincipals.IsDepartment(Username);
+}
+
+// A permission row's principal is a username or "dept:{id}" - every member of that department
+// (primary or additional membership) gets the grant. When a person matches several grants on
+// the same item, the highest access level wins.
+public static class SentinelPrincipals
+{
+    public const string DepartmentPrefix = "dept:";
+
+    public static string Department(Guid departmentId) => DepartmentPrefix + departmentId.ToString("N");
+
+    public static bool IsDepartment(string principal) => principal.StartsWith(DepartmentPrefix, StringComparison.Ordinal);
+
+    public static Guid? DepartmentId(string principal) =>
+        IsDepartment(principal) && Guid.TryParse(principal[DepartmentPrefix.Length..], out var id) ? id : null;
+}
 
 public sealed record SentinelShareView(
     Guid Id,

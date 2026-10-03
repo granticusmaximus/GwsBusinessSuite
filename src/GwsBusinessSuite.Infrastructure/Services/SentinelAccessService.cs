@@ -19,11 +19,19 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
 
     public async Task<SentinelAccessSnapshot> GetAccessAsync(Guid targetId, bool isDatabase, CancellationToken cancellationToken = default)
     {
-        var permissions = await dbContext.SentinelResourcePermissions.AsNoTracking()
+        var rows = await dbContext.SentinelResourcePermissions.AsNoTracking()
             .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase)
             .OrderBy(item => item.Username)
-            .Select(item => new SentinelPermissionView(item.Id, item.Username, item.AccessLevel))
+            .Select(item => new { item.Id, item.Username, item.AccessLevel })
             .ToListAsync(cancellationToken);
+        var departmentNames = await dbContext.Departments.AsNoTracking().Select(d => new { d.Id, d.Name }).ToListAsync(cancellationToken);
+        var permissions = rows.Select(row => new SentinelPermissionView(
+                row.Id, row.Username, row.AccessLevel,
+                SentinelPrincipals.DepartmentId(row.Username) is { } departmentId
+                    ? $"{departmentNames.FirstOrDefault(d => d.Id == departmentId)?.Name ?? "Deleted department"} (department)"
+                    : row.Username))
+            .OrderBy(view => view.IsDepartment ? 0 : 1).ThenBy(view => view.DisplayLabel)
+            .ToList();
         var shares = await dbContext.SentinelPublicShares.AsNoTracking()
             .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase)
             .Select(item => new SentinelShareView(
@@ -48,6 +56,12 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         username = username.Trim();
         if (username.Length == 0) throw new ArgumentException("Username is required.", nameof(username));
         if (!AccessRanks.ContainsKey(accessLevel)) throw new ArgumentException("Unknown access level.", nameof(accessLevel));
+        if (SentinelPrincipals.IsDepartment(username)
+            && (SentinelPrincipals.DepartmentId(username) is not { } departmentId
+                || !await dbContext.Departments.AnyAsync(d => d.Id == departmentId, cancellationToken)))
+        {
+            throw new ArgumentException("That department no longer exists.", nameof(username));
+        }
         var permission = await dbContext.SentinelResourcePermissions
             .FirstOrDefaultAsync(item => item.TargetId == targetId && item.IsDatabase == isDatabase && item.Username == username, cancellationToken);
         if (permission is null)
@@ -180,11 +194,12 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         if (!AccessRanks.TryGetValue(requiredAccessLevel, out var requiredRank)) return false;
         if (await IsOwnerOrAdminAsync(username, cancellationToken)) return true;
 
-        var accessLevel = await dbContext.SentinelResourcePermissions.AsNoTracking()
-            .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase && item.Username == username)
+        var principals = await GetPrincipalsAsync(username, cancellationToken);
+        var accessLevels = await dbContext.SentinelResourcePermissions.AsNoTracking()
+            .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase && principals.Contains(item.Username))
             .Select(item => item.AccessLevel)
-            .FirstOrDefaultAsync(cancellationToken);
-        return accessLevel is not null && AccessRanks.GetValueOrDefault(accessLevel, -1) >= requiredRank;
+            .ToListAsync(cancellationToken);
+        return accessLevels.Count > 0 && accessLevels.Max(level => AccessRanks.GetValueOrDefault(level, -1)) >= requiredRank;
     }
 
     // Two independent "has full access to everything" overrides: a SentinelWorkspaceMembers
@@ -194,6 +209,28 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
     // who was never separately added as a SentinelWorkspaceMembers Owner gets denied by every
     // access-gated action that doesn't have its own redundant admin bypass (this was the root
     // cause of "Unable to update favorite: you don't have access" for an Admin user).
+    // The user plus every department they belong to (primary or additional), as grant principals.
+    private async Task<List<string>> GetPrincipalsAsync(string username, CancellationToken cancellationToken)
+    {
+        var principals = new List<string> { username };
+        var userId = await dbContext.AppUsers.AsNoTracking()
+            .Where(item => item.Username == username)
+            .Select(item => (Guid?)item.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (userId is null) return principals;
+
+        var primary = await dbContext.MemberProfiles.AsNoTracking()
+            .Where(item => item.AppUserId == userId && item.DepartmentId != null)
+            .Select(item => item.DepartmentId!.Value)
+            .ToListAsync(cancellationToken);
+        var additional = await dbContext.DepartmentMemberships.AsNoTracking()
+            .Where(item => item.AppUserId == userId)
+            .Select(item => item.DepartmentId)
+            .ToListAsync(cancellationToken);
+        principals.AddRange(primary.Concat(additional).Distinct().Select(SentinelPrincipals.Department));
+        return principals;
+    }
+
     private async Task<bool> IsOwnerOrAdminAsync(string username, CancellationToken cancellationToken) =>
         await dbContext.SentinelWorkspaceMembers.AsNoTracking()
             .AnyAsync(item => item.Username == username && item.Role == SentinelWorkspaceRoles.Owner, cancellationToken)
@@ -228,16 +265,20 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         var databaseNodes = await dbContext.WikiDatabases.AsNoTracking()
             .Select(item => new { item.Id, item.ParentWikiPageId })
             .ToListAsync(cancellationToken);
+        var principals = await GetPrincipalsAsync(username, cancellationToken);
         var permissionRows = await dbContext.SentinelResourcePermissions.AsNoTracking()
-            .Where(item => item.Username == username)
+            .Where(item => principals.Contains(item.Username))
             .Select(item => new { item.TargetId, item.IsDatabase, item.AccessLevel })
             .ToListAsync(cancellationToken);
 
         var pageParents = pageNodes.ToDictionary(item => item.Id, item => item.ParentWikiPageId);
         var databaseParents = databaseNodes.ToDictionary(item => item.Id, item => item.ParentWikiPageId);
-        var accessByTarget = permissionRows.ToDictionary(
-            item => new SentinelAccessTarget(item.TargetId, item.IsDatabase),
-            item => item.AccessLevel);
+        // A personal grant and department grants can both sit on the same item - the highest wins.
+        var accessByTarget = permissionRows
+            .GroupBy(item => new SentinelAccessTarget(item.TargetId, item.IsDatabase))
+            .ToDictionary(
+                group => group.Key,
+                group => group.MaxBy(item => AccessRanks.GetValueOrDefault(item.AccessLevel, -1))!.AccessLevel);
 
         var accessibleTargets = new HashSet<SentinelAccessTarget>();
         foreach (var target in distinctTargets)

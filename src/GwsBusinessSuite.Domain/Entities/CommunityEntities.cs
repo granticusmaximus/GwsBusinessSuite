@@ -24,14 +24,14 @@ public sealed class MemberProfile : AuditableEntity
     public string Bio { get; set; } = string.Empty;
     public string JobTitle { get; set; } = string.Empty;
 
-    // One department per member, not a many-to-many membership list - a deliberate
-    // simplification of the master plan's "list of member AppUser ids" framing: a real staff
-    // directory overwhelmingly has one primary department per employee, and a join table buys
-    // little at this app's scale. Revisit only if a real need for multi-department membership
-    // emerges.
+    // The member's primary department (shown first in the directory). Further departments live
+    // in DepartmentMembership rows.
     public Guid? DepartmentId { get; set; }
 
     public string Phone { get; set; } = string.Empty;
+    // Work email - also where unread-message reminders go (when NotifyUnreadMessagesByEmail).
+    public string Email { get; set; } = string.Empty;
+    public bool NotifyUnreadMessagesByEmail { get; set; } = true;
     public string LinkedInUrl { get; set; } = string.Empty;
     public string TwitterUrl { get; set; } = string.Empty;
     public string WebsiteUrl { get; set; } = string.Empty;
@@ -40,6 +40,15 @@ public sealed class MemberProfile : AuditableEntity
 // LeadUsername (an AppUser.Username, loose reference) powers the department-scoped permission
 // added in Phase 3 - a lead can edit their own department's member profiles - without a
 // separate role/permission table.
+// Additional departments beyond a member's primary MemberProfile.DepartmentId - a person can
+// belong to several teams. Membership in any of them counts for department-scoped permissions
+// (Sentinel sharing, department-lead profile editing).
+public sealed class DepartmentMembership : AuditableEntity
+{
+    public Guid DepartmentId { get; set; }
+    public Guid AppUserId { get; set; }
+}
+
 public sealed class Department : AuditableEntity
 {
     public required string Name { get; set; }
@@ -77,6 +86,9 @@ public sealed class ChatThreadParticipant : AuditableEntity
     public Guid ThreadId { get; set; }
     public required string Username { get; set; }
     public DateTimeOffset? LastReadAt { get; set; }
+    // When this participant was last emailed about unread messages in the thread - the reminder
+    // sweep only emails again once newer unread messages arrive after it.
+    public DateTimeOffset? UnreadEmailSentAt { get; set; }
 }
 
 // CreatedBy/CreatedAt double as sender/sent-at, same ContactActivity convention as ActivityEvent
@@ -84,5 +96,17 @@ public sealed class ChatThreadParticipant : AuditableEntity
 public sealed class ChatMessage : AuditableEntity
 {
     public Guid ThreadId { get; set; }
+    // May be empty when the message is only attachments.
     public required string Body { get; set; }
+}
+
+// A file sent with a chat message. Stored in the database (like SupportTicketAttachment) and only
+// downloadable by participants of the message's thread.
+public sealed class ChatMessageAttachment : AuditableEntity
+{
+    public Guid MessageId { get; set; }
+    public required string FileName { get; set; }
+    public required string ContentType { get; set; }
+    public long SizeBytes { get; set; }
+    public byte[] Content { get; set; } = [];
 }

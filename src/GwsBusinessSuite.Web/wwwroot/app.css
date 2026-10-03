@@ -5217,3 +5217,7 @@ audio.wiki-embed-media { max-width: 100%; }
     color: inherit;
     cursor: pointer;
 }
+
+/* Page editor in Fullscreen (data-gws-focus-toggle): admin chrome is hidden, so the editor
+   can use nearly the whole viewport height. */
+.gws-focus-mode .studio-shell { height: calc(100dvh - 1.5rem) !important; }

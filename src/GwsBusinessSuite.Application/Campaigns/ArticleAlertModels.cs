@@ -38,6 +38,33 @@ public sealed class ArticleAlertSettings
     // Alerts send this long after the article goes live, so a typo can be fixed or the post
     // unpublished first; an article that's no longer live by then is skipped.
     public int GraceMinutes { get; set; } = 15;
+
+    // "each" emails every article as it goes live; "weekly" bundles the week's articles into one
+    // digest sent at DigestDay/DigestHour in TimeZoneId.
+    public const string DeliveryEach = "each";
+    public const string DeliveryWeekly = "weekly";
+    public string DeliveryMode { get; set; } = DeliveryEach;
+    public DayOfWeek DigestDay { get; set; } = DayOfWeek.Friday;
+    public int DigestHour { get; set; } = 9;
+    public string DigestSubject { get; set; } = "New this week: {{digest.count}} new article(s)";
+
+    public bool IsWeeklyDigest => string.Equals(DeliveryMode, DeliveryWeekly, StringComparison.OrdinalIgnoreCase);
+
+    // The first digest slot strictly after `after`, in the list's time zone (falls back to UTC).
+    public DateTimeOffset NextDigestAt(DateTimeOffset after)
+    {
+        TimeZoneInfo zone;
+        try { zone = TimeZoneInfo.FindSystemTimeZoneById(TimeZoneId); }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException) { zone = TimeZoneInfo.Utc; }
+
+        var local = TimeZoneInfo.ConvertTime(after, zone);
+        var hour = Math.Clamp(DigestHour, 0, 23);
+        var daysAhead = ((int)DigestDay - (int)local.DayOfWeek + 7) % 7;
+        var candidate = local.Date.AddDays(daysAhead).AddHours(hour);
+        if (candidate <= local.DateTime) candidate = candidate.AddDays(7);
+        var unspecified = DateTime.SpecifyKind(candidate, DateTimeKind.Unspecified);
+        return new DateTimeOffset(unspecified, zone.GetUtcOffset(unspecified));
+    }
     public string TimeZoneId { get; set; } = "America/New_York";
 
     public string ConfirmationSubject { get; set; } = "Please confirm your subscription";

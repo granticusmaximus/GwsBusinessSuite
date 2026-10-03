@@ -7,6 +7,14 @@ plan (this same file, previous revision), `reports/Marketing-theme module inspir
 separate active plans. Do not re-derive scope from them independently; they're cited inline
 below wherever their findings feed a decision.
 
+## Resume status (2026-10-03) - supersedes the 2026-09-27 block below
+
+- Workstreams B, C, D and E are BUILT (commits 1cc1bf6..0efa9ee, 2026-09-27..29). Remaining
+  C Tier 4 (map embed, header/footer builder) and E Phase 3 (department permissions) were
+  finished 2026-10-03 - see `.claude/plans/october-2026-batch.md`, the live tracker now.
+- Workstream A: still open beyond the batches already shipped (Colorado disabled, Maryland
+  excluded); see october-2026-batch item 9.
+
 ## Resume status (2026-09-27)
 
 - Workstream B Phase 1 is committed as `1cc1bf6`; live inspector click-through remains outstanding.

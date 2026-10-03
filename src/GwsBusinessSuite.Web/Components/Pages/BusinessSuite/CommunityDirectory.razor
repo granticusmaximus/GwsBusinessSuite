@@ -87,9 +87,14 @@ else
                                 }
                             </div>
                         </div>
-                        @if (!string.IsNullOrWhiteSpace(profile.DepartmentName))
+                        @if (profile.AllDepartments.Count > 0)
                         {
-                            <span class="badge text-bg-light mb-2">@profile.DepartmentName</span>
+                            <div class="d-flex flex-wrap gap-1 mb-2">
+                                @foreach (var membership in profile.AllDepartments)
+                                {
+                                    <span class="badge @(membership.IsPrimary ? "text-bg-light" : "text-bg-light opacity-75") border">@membership.Name</span>
+                                }
+                            </div>
                         }
                         <div class="d-flex gap-2 mt-2">
                             <a href="/admin/community/profile/@profile.Username" class="btn btn-sm btn-outline-secondary">View profile</a>

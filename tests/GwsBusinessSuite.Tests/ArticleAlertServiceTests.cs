@@ -121,6 +121,48 @@ public sealed class ArticleAlertServiceTests
     }
 
     [Fact]
+    public async Task WeeklyDigest_BundlesTheWeeksArticlesIntoOneEmail_AtTheChosenSlot()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var campaign = await harness.Service.CreateCampaignAsync("Weekly", "grant");
+        var settings = new ArticleAlertSettings
+        {
+            DeliveryMode = ArticleAlertSettings.DeliveryWeekly, DigestDay = DayOfWeek.Friday, DigestHour = 9, TimeZoneId = "America/New_York"
+        };
+        await harness.Service.SaveCampaignAsync(campaign.Id, "Weekly", "", settings, "grant");
+        await harness.SubscribeAndConfirmAsync(campaign.Id, "reader@example.com", "Casey");
+        await harness.Service.SetActiveAsync(campaign.Id, active: true, "grant");
+        harness.Sender.Sent.Clear();
+
+        // Start is Fri 2026-10-02 14:00 UTC (10:00 New York) - just past this week's 9:00 slot.
+        harness.Clock.Advance(TimeSpan.FromMinutes(1));
+        await harness.AddArticleAsync("Monday-ish post", publishedAt: harness.Clock.GetUtcNow());
+        harness.Clock.Advance(TimeSpan.FromDays(3));
+        await harness.AddArticleAsync("Later post", publishedAt: harness.Clock.GetUtcNow());
+        await harness.Service.ProcessAsync();
+        harness.Sender.Sent.Should().BeEmpty("nothing goes out before the digest slot");
+
+        // Next Friday 9:00 New York (EDT) = 13:00 UTC on 2026-10-09.
+        harness.Clock.Advance(new DateTimeOffset(2026, 10, 9, 13, 1, 0, TimeSpan.Zero) - harness.Clock.GetUtcNow());
+        await harness.Service.ProcessAsync();
+        await harness.Service.ProcessAsync();
+
+        var digest = harness.Sender.Sent.Should().ContainSingle("one email per subscriber, not one per article").Subject;
+        digest.Subject.Should().Be("New this week: 2 new article(s)");
+        digest.HtmlBody.Should().Contain("Monday-ish post").And.Contain("Later post");
+        (await harness.Service.ListAnnouncementsAsync(campaign.Id)).Should().HaveCount(2)
+            .And.OnlyContain(a => a.Status == ArticleAnnouncementStatuses.Sent);
+    }
+
+    [Fact]
+    public void NextDigestAt_RollsToNextWeek_OncePastTheSlot()
+    {
+        var settings = new ArticleAlertSettings { DigestDay = DayOfWeek.Monday, DigestHour = 8, TimeZoneId = "UTC" };
+        settings.NextDigestAt(new DateTimeOffset(2026, 10, 5, 7, 0, 0, TimeSpan.Zero)).Should().Be(new DateTimeOffset(2026, 10, 5, 8, 0, 0, TimeSpan.Zero));
+        settings.NextDigestAt(new DateTimeOffset(2026, 10, 5, 8, 0, 0, TimeSpan.Zero)).Should().Be(new DateTimeOffset(2026, 10, 12, 8, 0, 0, TimeSpan.Zero));
+    }
+
+    [Fact]
     public async Task Sweep_SkipsAnArticleUnpublishedDuringTheGracePeriod()
     {
         await using var harness = await Harness.CreateAsync();

@@ -25,6 +25,32 @@ public sealed class CommunityDirectoryServiceTests
     }
 
     [Fact]
+    public async Task AMember_CanBelongToSeveralDepartments_ForFilteringCountsAndLeadEditing()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.AddUser("jdoe");
+        fixture.AddUser("lead");
+        var design = new Department { Name = "Design", LeadUsername = "lead" };
+        var product = new Department { Name = "Product" };
+        fixture.Db.Departments.AddRange(design, product);
+        await fixture.Db.SaveChangesAsync();
+
+        var saved = await fixture.Service.SaveProfileAsync(new MemberProfileEditorModel
+        {
+            Username = "jdoe", DepartmentId = product.Id, AdditionalDepartmentIds = [design.Id, product.Id]
+        }, "jdoe");
+
+        saved.DepartmentName.Should().Be("Product");
+        saved.AllDepartments.Select(d => (d.Name, d.IsPrimary)).Should().Equal(("Product", true), ("Design", false));
+        (await fixture.Service.ListProfilesAsync(design.Id)).Select(p => p.Username).Should().Equal("jdoe");
+        (await fixture.Service.ListDepartmentsAsync()).Single(d => d.Id == design.Id).MemberCount.Should().Be(1);
+        (await fixture.Service.CanEditProfileAsync("lead", "jdoe")).Should().BeTrue("the lead of an additional department may edit");
+
+        await fixture.Service.SaveProfileAsync(new MemberProfileEditorModel { Username = "jdoe", DepartmentId = product.Id }, "jdoe");
+        (await fixture.Service.CanEditProfileAsync("lead", "jdoe")).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task GetProfileByUsernameAsync_ShouldReturnNull_ForAnUnknownUsername()
     {
         await using var fixture = await Fixture.CreateAsync();

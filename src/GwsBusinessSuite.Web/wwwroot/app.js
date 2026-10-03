@@ -516,3 +516,9 @@
 		}
 	};
 })();
+
+// The server renders on UTC; Blazor pages that show a "saved at" time ask the browser for its
+// own offset once (minutes WEST of UTC, i.e. Date.getTimezoneOffset()).
+window.gwsClientTime = {
+	utcOffsetMinutesWest: function () { return new Date().getTimezoneOffset(); }
+};

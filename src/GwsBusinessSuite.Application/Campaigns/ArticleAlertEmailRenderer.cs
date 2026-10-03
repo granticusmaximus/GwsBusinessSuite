@@ -89,6 +89,60 @@ public static class ArticleAlertEmailRenderer
         return new RenderedEmail(subject, html, text);
     }
 
+    // Weekly digest: the list's message, then one card per article (newest first).
+    public static RenderedEmail RenderDigest(
+        ArticleAlertSettings settings,
+        IReadOnlyList<ArticleAlertArticle> articles,
+        string subscriberFirstName,
+        string unsubscribeUrl,
+        ArticleAlertBranding branding)
+    {
+        if (articles.Count == 0) throw new ArgumentException("A digest needs at least one article.", nameof(articles));
+        var ordered = articles.OrderByDescending(a => a.PublishedAt).ToList();
+        var lead = ordered[0];
+        var tokens = Tokens(subscriberFirstName, lead.Title, FormatPublished(lead.PublishedAt, settings.TimeZoneId), lead.Url);
+        tokens["{{digest.count}}"] = ordered.Count.ToString(CultureInfo.InvariantCulture);
+        var subjectTemplate = string.IsNullOrWhiteSpace(settings.DigestSubject) ? "New this week: {{digest.count}} new article(s)" : settings.DigestSubject;
+        var subject = Replace(subjectTemplate, tokens, html: false).Trim();
+        var accent = SafeAccent(branding.AccentHex);
+        var readMore = string.IsNullOrWhiteSpace(settings.ReadMoreLabel) ? "Read More" : settings.ReadMoreLabel.Trim();
+        var messageHtml = Markdown.ToHtml(Replace(settings.Message, tokens, html: false), SafeMarkdown);
+
+        var cards = new StringBuilder();
+        var text = new StringBuilder()
+            .AppendLine(Markdown.ToPlainText(Replace(settings.Message, tokens, html: false), SafeMarkdown).Trim())
+            .AppendLine();
+        foreach (var article in ordered)
+        {
+            var publishedText = FormatPublished(article.PublishedAt, settings.TimeZoneId);
+            var excerpt = Excerpt(article.BodyMarkdown, settings.ExcerptLength);
+            var image = settings.ShowHeroImage && IsAbsoluteHttp(article.HeroImageUrl)
+                ? $"""<tr><td style="padding:0"><a href="{H(article.Url)}"><img src="{H(article.HeroImageUrl!)}" alt="{H(article.Title)}" width="600" style="display:block;width:100%;max-width:600px;height:auto;border:0" /></a></td></tr>"""
+                : string.Empty;
+            cards.Append($"""
+                <tr><td style="padding:16px 20px 0"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;background:#ffffff">
+                  {image}
+                  <tr><td style="padding:20px 24px 6px">
+                    <a href="{H(article.Url)}" style="color:#111827;text-decoration:none"><h2 style="margin:0 0 6px;font-size:20px;line-height:1.3;font-weight:700;color:#111827">{H(article.Title)}</h2></a>
+                    <p style="margin:0;font-size:13px;color:#6b7280">Published {H(publishedText)}</p>
+                  </td></tr>
+                  <tr><td style="padding:6px 24px 22px">
+                    <p style="margin:0;font-size:15px;line-height:1.6;color:#374151">{H(excerpt)} <a href="{H(article.Url)}" style="color:{accent};font-weight:700;text-decoration:none">({H(readMore)})</a></p>
+                  </td></tr>
+                </table></td></tr>
+                """);
+            text.AppendLine(article.Title).AppendLine($"Published {publishedText}").AppendLine($"{excerpt} ({readMore}: {article.Url})").AppendLine();
+        }
+
+        var html = Layout(
+            $"{ordered.Count} new article{(ordered.Count == 1 ? "" : "s")}: {lead.Title}",
+            $"""<tr><td style="padding:28px 28px 8px;font-size:15px;line-height:1.6;color:#374151">{messageHtml}</td></tr>""",
+            cards.ToString(),
+            Footer(settings, branding, unsubscribeUrl, "You're receiving this weekly roundup because you asked to hear about new articles from " + branding.SiteName + "."));
+        text.Append(FooterText(settings, unsubscribeUrl));
+        return new RenderedEmail(subject.Length == 0 ? $"{ordered.Count} new articles" : subject, html, text.ToString());
+    }
+
     public static RenderedEmail RenderConfirmation(
         ArticleAlertSettings settings,
         string subscriberFirstName,

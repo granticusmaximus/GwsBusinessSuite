@@ -325,7 +325,9 @@ public sealed class ArticleAlertService(
     public async Task<(string Subject, string Html)> RenderPreviewAsync(Guid campaignId, ArticleAlertSettings? unsavedSettings = null, CancellationToken cancellationToken = default)
     {
         var (settings, article, branding) = await PreviewInputsAsync(campaignId, unsavedSettings, cancellationToken);
-        var rendered = ArticleAlertEmailRenderer.RenderAlert(settings, article, "Sam", $"{PublicBaseUrl}/campaigns/alerts/unsubscribe/preview", branding);
+        var rendered = settings.IsWeeklyDigest
+            ? ArticleAlertEmailRenderer.RenderDigest(settings, [article], "Sam", $"{PublicBaseUrl}/campaigns/alerts/unsubscribe/preview", branding)
+            : ArticleAlertEmailRenderer.RenderAlert(settings, article, "Sam", $"{PublicBaseUrl}/campaigns/alerts/unsubscribe/preview", branding);
         return (rendered.Subject, rendered.Html);
     }
 
@@ -334,7 +336,9 @@ public sealed class ArticleAlertService(
         if (!IsValidEmail(toAddress)) throw new ArgumentException("Enter a valid email address for the test.", nameof(toAddress));
         if (!emailSender.IsConfigured) throw new InvalidOperationException("Email isn't set up on this server yet (Smtp__Host), so nothing can be sent.");
         var (settings, article, branding) = await PreviewInputsAsync(campaignId, unsavedSettings, cancellationToken);
-        var rendered = ArticleAlertEmailRenderer.RenderAlert(settings, article, "there", $"{PublicBaseUrl}/campaigns/alerts/unsubscribe/test", branding);
+        var rendered = settings.IsWeeklyDigest
+            ? ArticleAlertEmailRenderer.RenderDigest(settings, [article], "there", $"{PublicBaseUrl}/campaigns/alerts/unsubscribe/test", branding)
+            : ArticleAlertEmailRenderer.RenderAlert(settings, article, "there", $"{PublicBaseUrl}/campaigns/alerts/unsubscribe/test", branding);
         await emailSender.SendAsync(new OutgoingCampaignEmail(
             settings.FromName, settings.FromAddress, settings.ReplyTo, toAddress.Trim(),
             "[Test] " + rendered.Subject, rendered.Html, rendered.Text, OneClickUnsubscribeUrl: null), cancellationToken);
@@ -363,14 +367,24 @@ public sealed class ArticleAlertService(
             .ToListAsync(cancellationToken);
         var budget = SendBudgetPerRun;
         var sent = 0;
-        foreach (var announcement in due.OrderBy(a => a.DueAtUnixSeconds))
+        foreach (var slot in due.GroupBy(a => (a.CampaignId, a.DueAtUnixSeconds)).OrderBy(g => g.Key.DueAtUnixSeconds))
         {
-            var campaign = campaigns.FirstOrDefault(c => c.Id == announcement.CampaignId);
+            var campaign = campaigns.FirstOrDefault(c => c.Id == slot.Key.CampaignId);
             if (campaign is null) continue; // paused since it was scheduled - resumes when reactivated
-            var result = await ProcessAnnouncementAsync(campaign, announcement, liveArticles, budget, cancellationToken);
-            sent += result.Delivered;
-            budget -= result.Attempted;
-            if (result.StopAll || budget <= 0) break;
+            var isDigest = ParseSettings(campaign.ArticleAlertSettingsJson).IsWeeklyDigest;
+            var stop = false;
+            foreach (var batch in isDigest ? [slot.ToList()] : slot.Select(a => new List<ArticleAnnouncement> { a }))
+            {
+                var result = isDigest
+                    ? await ProcessDigestAsync(campaign, batch, liveArticles, budget, cancellationToken)
+                    : await ProcessAnnouncementAsync(campaign, batch[0], liveArticles, budget, cancellationToken);
+                sent += result.Delivered;
+                budget -= result.Attempted;
+                stop = result.StopAll || budget <= 0;
+                if (stop) break;
+            }
+
+            if (stop) break;
         }
 
         return sent;
@@ -405,7 +419,9 @@ public sealed class ArticleAlertService(
             .ToListAsync(cancellationToken);
         foreach (var article in candidates.Where(a => !alreadyScheduled.Contains(a.Id)))
         {
-            var dueAt = article.PublishedAt.AddMinutes(settings.GraceMinutes);
+            var afterGrace = article.PublishedAt.AddMinutes(settings.GraceMinutes);
+            // Weekly digests: everything published in a week shares the next digest slot.
+            var dueAt = settings.IsWeeklyDigest ? settings.NextDigestAt(afterGrace) : afterGrace;
             db.ArticleAnnouncements.Add(new ArticleAnnouncement
             {
                 CampaignId = campaign.Id,
@@ -473,6 +489,125 @@ public sealed class ArticleAlertService(
             return new ProcessResult(0, 0, StopAll: false);
         }
 
+        var alertArticle = ToAlertArticle(article, campaign);
+        var result = await SendPendingAsync(campaign, announcement, pending,
+            (settings, subscription, unsubscribeUrl, branding) => ArticleAlertEmailRenderer.RenderAlert(settings, alertArticle, subscription.FirstName, unsubscribeUrl, branding),
+            cancellationToken);
+        await RefreshCountsAsync(announcement, cancellationToken);
+        return result;
+    }
+
+    // Weekly digest: every article due in this slot goes out as ONE email per subscriber. The
+    // deliveries hang off a single "lead" announcement; the others ride along and complete with it.
+    private async Task<ProcessResult> ProcessDigestAsync(
+        EmailCampaign campaign, List<ArticleAnnouncement> slot, List<LiveArticle> liveArticles, int budget, CancellationToken cancellationToken)
+    {
+        var now = timeProvider.GetUtcNow();
+        foreach (var announcement in slot.Where(a => a.Status == ArticleAnnouncementStatuses.Scheduled && liveArticles.All(l => l.Id != a.ArticleId)))
+        {
+            announcement.Status = ArticleAnnouncementStatuses.Skipped;
+            announcement.CompletedAt = now;
+        }
+        var members = slot.Where(a => a.Status != ArticleAnnouncementStatuses.Skipped).ToList();
+        if (members.Count == 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            return new ProcessResult(0, 0, StopAll: false);
+        }
+
+        // The slot's lead is whichever announcement carries the deliveries - possibly one that has
+        // already finished (Sent) and so isn't in this sweep's due list.
+        var slotDue = members[0].DueAtUnixSeconds;
+        var slotIds = await db.ArticleAnnouncements.AsNoTracking()
+            .Where(a => a.CampaignId == campaign.Id && a.DueAtUnixSeconds == slotDue)
+            .Select(a => a.Id)
+            .ToListAsync(cancellationToken);
+        var leadId = await db.ArticleAnnouncementDeliveries.AsNoTracking()
+            .Where(d => slotIds.Contains(d.AnnouncementId))
+            .Select(d => (Guid?)d.AnnouncementId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (leadId is { } existingLead && members.All(m => m.Id != existingLead))
+        {
+            // The digest already went out; these just ride along with it.
+            var finished = await db.ArticleAnnouncements.AsNoTracking().FirstAsync(a => a.Id == existingLead, cancellationToken);
+            foreach (var member in members)
+            {
+                member.Status = ArticleAnnouncementStatuses.Sent;
+                member.CompletedAt = now;
+                member.RecipientCount = finished.RecipientCount;
+                member.DeliveredCount = finished.DeliveredCount;
+                member.FailedCount = finished.FailedCount;
+            }
+            await db.SaveChangesAsync(cancellationToken);
+            return new ProcessResult(0, 0, StopAll: false);
+        }
+        var lead = members.FirstOrDefault(a => a.Id == leadId) ?? members.OrderBy(a => a.ArticleTitle, StringComparer.Ordinal).First();
+        if (leadId is null)
+        {
+            var recipients = await db.EmailCampaignSubscriptions.AsNoTracking()
+                .Where(s => s.CampaignId == campaign.Id && s.Status == EmailCampaignSubscriptionStatuses.Confirmed)
+                .Select(s => s.Id)
+                .ToListAsync(cancellationToken);
+            foreach (var subscriptionId in recipients)
+            {
+                db.ArticleAnnouncementDeliveries.Add(new ArticleAnnouncementDelivery { AnnouncementId = lead.Id, SubscriptionId = subscriptionId, CreatedBy = "article-alerts" });
+            }
+            foreach (var member in members)
+            {
+                member.Status = ArticleAnnouncementStatuses.Sending;
+                member.RecipientCount = recipients.Count;
+            }
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        var pending = await db.ArticleAnnouncementDeliveries
+            .Where(d => d.AnnouncementId == lead.Id && !d.Succeeded && d.Attempts < MaxAttempts)
+            .Take(budget)
+            .ToListAsync(cancellationToken);
+        var articles = members
+            .Select(m => liveArticles.FirstOrDefault(l => l.Id == m.ArticleId))
+            .Where(a => a is not null)
+            .Select(a => ToAlertArticle(a!, campaign))
+            .ToList();
+        if (pending.Count == 0 || articles.Count == 0)
+        {
+            await CompleteAsync(lead, now, cancellationToken);
+            foreach (var member in members.Where(m => m.Id != lead.Id))
+            {
+                member.Status = ArticleAnnouncementStatuses.Sent;
+                member.CompletedAt = now;
+                member.DeliveredCount = lead.DeliveredCount;
+                member.FailedCount = lead.FailedCount;
+            }
+            await db.SaveChangesAsync(cancellationToken);
+            return new ProcessResult(0, 0, StopAll: false);
+        }
+
+        var result = await SendPendingAsync(campaign, lead, pending,
+            (settings, subscription, unsubscribeUrl, branding) => ArticleAlertEmailRenderer.RenderDigest(settings, articles, subscription.FirstName, unsubscribeUrl, branding),
+            cancellationToken);
+        await RefreshCountsAsync(lead, cancellationToken);
+        if (lead.Status == ArticleAnnouncementStatuses.Sent)
+        {
+            foreach (var member in members.Where(m => m.Id != lead.Id))
+            {
+                member.Status = ArticleAnnouncementStatuses.Sent;
+                member.CompletedAt = timeProvider.GetUtcNow();
+                member.DeliveredCount = lead.DeliveredCount;
+                member.FailedCount = lead.FailedCount;
+            }
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        return result;
+    }
+
+    // Sends one batch of pending deliveries for an announcement - shared by single alerts and
+    // digests so opt-out checks, retries and "no mail server" handling stay identical.
+    private async Task<ProcessResult> SendPendingAsync(
+        EmailCampaign campaign, ArticleAnnouncement announcement, List<ArticleAnnouncementDelivery> pending,
+        Func<ArticleAlertSettings, EmailCampaignSubscription, string, ArticleAlertBranding, RenderedEmail> render,
+        CancellationToken cancellationToken)
+    {
         var subscriptionIds = pending.Select(d => d.SubscriptionId).ToList();
         var subscriptions = await db.EmailCampaignSubscriptions.AsNoTracking()
             .Where(s => subscriptionIds.Contains(s.Id))
@@ -485,7 +620,6 @@ public sealed class ArticleAlertService(
 
         var settings = ParseSettings(campaign.ArticleAlertSettingsJson);
         var branding = await GetBrandingAsync(cancellationToken);
-        var alertArticle = ToAlertArticle(article, campaign);
         AbsolutizeFooter(settings);
 
         var attempted = 0;
@@ -504,7 +638,7 @@ public sealed class ArticleAlertService(
             }
 
             var unsubscribeUrl = $"{PublicBaseUrl}/campaigns/alerts/unsubscribe/{UnsubscribeToken(subscription.Id)}";
-            var rendered = ArticleAlertEmailRenderer.RenderAlert(settings, alertArticle, subscription.FirstName, unsubscribeUrl, branding);
+            var rendered = render(settings, subscription, unsubscribeUrl, branding);
             try
             {
                 var accepted = await emailSender.SendAsync(new OutgoingCampaignEmail(
@@ -533,7 +667,6 @@ public sealed class ArticleAlertService(
         }
 
         await db.SaveChangesAsync(cancellationToken);
-        await RefreshCountsAsync(announcement, cancellationToken);
         return new ProcessResult(attempted, delivered, StopAll: false);
     }
 

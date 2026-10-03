@@ -377,6 +377,12 @@
         el.classList.add('gws-editor-selected');
         var sectionEl = el.closest('[data-gws-section-id]');
         if (sectionEl) buildWidgetToolbar(el, sectionEl.getAttribute('data-gws-section-id'), widgetId);
+        // A widget selected from outside the canvas (e.g. just added from the palette) may be
+        // off-screen - bring it into view so the user sees where it went.
+        var rect = el.getBoundingClientRect();
+        if (rect.top < 0 || rect.bottom > window.innerHeight) {
+          el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
       }
     }
   }

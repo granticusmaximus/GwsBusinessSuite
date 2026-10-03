@@ -95,9 +95,11 @@ public static class DependencyInjection
         services.AddSingleton<PublicContentCacheInvalidationInterceptor>();
         services.AddSingleton<SemanticIndexQueue>();
         services.AddSingleton<SemanticIndexSaveChangesInterceptor>();
+        services.AddSingleton<ActivityFeedSaveChangesInterceptor>();
         services.AddDbContextFactory<ApplicationDbContext>((serviceProvider, options) => options
             .UseSqlite(connectionString)
             .AddInterceptors(
+                serviceProvider.GetRequiredService<ActivityFeedSaveChangesInterceptor>(),
                 serviceProvider.GetRequiredService<PublicContentCacheInvalidationInterceptor>(),
                 serviceProvider.GetRequiredService<SemanticIndexSaveChangesInterceptor>()));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
@@ -185,7 +187,10 @@ public static class DependencyInjection
         services.AddScoped<IRelatedArticlesService, RelatedArticlesService>();
         services.AddScoped<ICommunityDirectoryService, CommunityDirectoryService>();
         services.AddScoped<IActivityFeedService, ActivityFeedService>();
+        services.AddSingleton<ChatNotifier>();
+        services.AddSingleton<IChatNotifier>(sp => sp.GetRequiredService<ChatNotifier>());
         services.AddScoped<IChatService, ChatService>();
+        services.AddHostedService<ChatUnreadEmailBackgroundService>();
         services.AddScoped<IDockerHealthService, DockerHealthService>();
         services.AddSingleton<DockerHealthNotifier>();
         services.AddHostedService<DockerHealthMonitorBackgroundService>();

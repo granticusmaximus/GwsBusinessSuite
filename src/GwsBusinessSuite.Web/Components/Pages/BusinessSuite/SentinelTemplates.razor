@@ -22,7 +22,7 @@
     @if (IsPageEditorActive)
     {
         <div class="sentinel-template-save-row">
-            <input class="form-control form-control-sm" @bind="NewBlockTemplateName" placeholder="Block template name" maxlength="120" />
+            <input class="form-control form-control-sm" @bind="NewBlockTemplateName" @bind:event="oninput" placeholder="Block template name" maxlength="120" />
             <button type="button" class="btn btn-sm btn-warning" @onclick="SaveBlockTemplateAsync"
                     disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewBlockTemplateName))" title="Save the current page's blocks as a reusable template">
                 <i class="bi bi-bookmark-plus me-1"></i>Save blocks
@@ -32,7 +32,7 @@
     @if (CurrentPageId.HasValue)
     {
         <div class="sentinel-template-save-row">
-            <input class="form-control form-control-sm" @bind="NewTemplateName" placeholder="Page template name" maxlength="120" />
+            <input class="form-control form-control-sm" @bind="NewTemplateName" @bind:event="oninput" placeholder="Page template name" maxlength="120" />
             <button type="button" class="btn btn-sm btn-warning" @onclick="SaveTemplateAsync"
                     disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewTemplateName))" title="Save this page as a template">
                 <i class="bi bi-bookmark-plus me-1"></i>Save page
@@ -42,7 +42,7 @@
     @if (CurrentDatabaseId.HasValue)
     {
         <div class="sentinel-template-save-row">
-            <input class="form-control form-control-sm" @bind="NewDatabaseTemplateName" placeholder="Database template name" maxlength="120" />
+            <input class="form-control form-control-sm" @bind="NewDatabaseTemplateName" @bind:event="oninput" placeholder="Database template name" maxlength="120" />
             <button type="button" class="btn btn-sm btn-warning" @onclick="SaveDatabaseTemplateAsync"
                     disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewDatabaseTemplateName))" title="Save this database as a template">
                 <i class="bi bi-bookmark-plus me-1"></i>Save database

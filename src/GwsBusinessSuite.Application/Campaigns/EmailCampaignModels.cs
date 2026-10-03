@@ -71,6 +71,13 @@ public interface IEmailCampaignService
     // cancels every active enrollment for that contact across every campaign.
     Task<bool> UnsubscribeByTokenAsync(string token, CancellationToken cancellationToken = default);
 
+    // What an unsubscribe link refers to, for the confirmation page - null for a bad token.
+    Task<CampaignUnsubscribeInfo?> DescribeUnsubscribeTokenAsync(string token, CancellationToken cancellationToken = default);
+
+    // Leaves only the campaign the email came from (its enrollment becomes Unsubscribed and can't
+    // be re-enrolled). Links from before per-campaign tokens fall back to the global unsubscribe.
+    Task<bool> UnsubscribeFromCampaignByTokenAsync(string token, CancellationToken cancellationToken = default);
+
     // Clears global suppression after an admin confirms renewed consent. Existing cancelled
     // enrollments remain historical and can be followed by a deliberate new enrollment.
     Task<bool> ResubscribeContactAsync(Guid contactId, string performedBy, CancellationToken cancellationToken = default);
@@ -84,3 +91,5 @@ public interface IEmailCampaignEmailSender
 {
     Task SendStepAsync(string toEmail, string subject, string body, string unsubscribeUrl, CancellationToken cancellationToken = default);
 }
+
+public sealed record CampaignUnsubscribeInfo(string? CampaignName, bool IsUnsubscribedEverywhere, bool HasLeftCampaign);

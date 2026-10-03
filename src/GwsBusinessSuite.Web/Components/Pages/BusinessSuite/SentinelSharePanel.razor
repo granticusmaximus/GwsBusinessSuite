@@ -5,6 +5,7 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
+@inject GwsBusinessSuite.Application.Community.ICommunityDirectoryService CommunityDirectory
 
 <div class="sentinel-share-panel">
     <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-tool-btn-label" @onclick="ToggleAsync" title="Share this page">
@@ -19,7 +20,7 @@
             </div>
             <label class="form-label small">Invite a user</label>
             <div class="input-group input-group-sm mb-3">
-                <input class="form-control" @bind="_username" placeholder="username" />
+                <input class="form-control" @bind="_username" @bind:event="oninput" placeholder="username" />
                 <select class="form-select" @bind="_accessLevel">
                     <option value="@SentinelAccessLevels.View">Can view</option>
                     <option value="@SentinelAccessLevels.Comment">Can comment</option>
@@ -28,10 +29,34 @@
                 </select>
                 <button type="button" class="btn btn-warning" @onclick="SavePermissionAsync" disabled="@string.IsNullOrWhiteSpace(_username)">Invite</button>
             </div>
+            @if (_departments.Count > 0)
+            {
+                <label class="form-label small">Share with a department</label>
+                <div class="input-group input-group-sm mb-3">
+                    <select class="form-select" @bind="_departmentId" aria-label="Department">
+                        <option value="">Choose a department…</option>
+                        @foreach (var department in _departments)
+                        {
+                            <option value="@department.Id">@department.Name (@department.MemberCount)</option>
+                        }
+                    </select>
+                    <select class="form-select" @bind="_departmentAccessLevel" aria-label="Department access level">
+                        <option value="@SentinelAccessLevels.View">Can view</option>
+                        <option value="@SentinelAccessLevels.Comment">Can comment</option>
+                        <option value="@SentinelAccessLevels.Edit">Can edit</option>
+                        <option value="@SentinelAccessLevels.FullAccess">Full access</option>
+                    </select>
+                    <button type="button" class="btn btn-warning" @onclick="SaveDepartmentPermissionAsync" disabled="@(!Guid.TryParse(_departmentId, out _))">Share</button>
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="small text-danger mb-2">@_error</div>
+            }
             @foreach (var permission in _snapshot.Permissions)
             {
                 <div class="sentinel-share-entry">
-                    <span><i class="bi bi-person-circle me-2"></i>@permission.Username</span>
+                    <span><i class="bi @(permission.IsDepartment ? "bi-people-fill" : "bi-person-circle") me-2"></i>@(permission.DisplayLabel ?? permission.Username)</span>
                     <small>@permission.AccessLevel</small>
                     <button type="button" @onclick="() => RemovePermissionAsync(permission.Id)"><i class="bi bi-x"></i></button>
                 </div>
@@ -97,10 +122,37 @@
     private string _sharePassword = string.Empty;
     private bool _allowSearchIndexing;
 
+    private IReadOnlyList<GwsBusinessSuite.Application.Community.DepartmentView> _departments = [];
+    private string _departmentId = string.Empty;
+    private string _departmentAccessLevel = SentinelAccessLevels.View;
+    private string _error = string.Empty;
+
     private async Task ToggleAsync()
     {
         _open = !_open;
-        if (_open) await LoadAsync();
+        if (_open)
+        {
+            await LoadAsync();
+            _departments = await CommunityDirectory.ListDepartmentsAsync();
+        }
+    }
+
+    // Every member of the department (primary or additional membership) gets this access.
+    private async Task SaveDepartmentPermissionAsync()
+    {
+        if (!Guid.TryParse(_departmentId, out var departmentId)) return;
+        _error = string.Empty;
+        try
+        {
+            await AccessService.SetPermissionAsync(TargetId, IsDatabase, SentinelPrincipals.Department(departmentId), _departmentAccessLevel,
+                await CurrentUserAccessor.GetCurrentUsernameAsync());
+            _departmentId = string.Empty;
+            await LoadAsync();
+        }
+        catch (ArgumentException ex)
+        {
+            _error = ex.Message;
+        }
     }
 
     private Task LoadAsync() => LoadCoreAsync();

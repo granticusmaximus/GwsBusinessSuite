@@ -1918,6 +1918,12 @@ app.MapGet("/admin/api/cms/{siteSlug}/page-template-preview/{templateKey}", asyn
         previewSite: site, previewPageTemplate: template);
 }).RequireAuthorization("ContributorAccess").RequireRateLimiting("public-read");
 
+// Drip-campaign one-click unsubscribe (RFC 8058 List-Unsubscribe-Post from mail clients). The GET
+// of the same URL is the CampaignUnsubscribe page, which asks before doing anything.
+app.MapPost("/campaigns/unsubscribe/{token}", async (string token, GwsBusinessSuite.Application.Campaigns.IEmailCampaignService campaigns, CancellationToken cancellationToken) =>
+    await campaigns.UnsubscribeFromCampaignByTokenAsync(token, cancellationToken) ? Results.Ok() : Results.NotFound())
+    .AllowAnonymous().DisableAntiforgery().RequireRateLimiting("public-write");
+
 // "Email signup" widget + article-alert emails: subscribe / confirm / unsubscribe.
 ArticleAlertEndpoints.Map(app);
 
@@ -2746,6 +2752,28 @@ app.MapGet("/media/{id:guid}/thumb", async (Guid id, IMediaLibraryService mediaL
 // under either the admin cookie scheme or the separate ClientPortalAccess scheme - the
 // FallbackPolicy (AdminOnly) would reject a contact outright before this handler ever got to
 // check ownership, so both cases are resolved manually below instead.
+// Chat attachments: only participants of the message's conversation can download. Anything that
+// isn't a plain raster image is served as a download (never rendered inline) so an uploaded
+// HTML/SVG file can't run script on this origin.
+app.MapGet("/admin/api/community/attachments/{id:guid}", async (Guid id, HttpContext context, GwsBusinessSuite.Application.Community.IChatService chat, CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var file = await chat.GetAttachmentAsync(id, context.User.Identity?.Name ?? string.Empty, cancellationToken);
+        if (file is null) return Results.NotFound();
+        context.Response.Headers.CacheControl = "private, max-age=3600";
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        var inlineImage = file.ContentType is "image/png" or "image/jpeg" or "image/gif" or "image/webp";
+        return inlineImage
+            ? Results.File(file.Content, file.ContentType)
+            : Results.File(file.Content, "application/octet-stream", file.FileName);
+    }
+    catch (UnauthorizedAccessException)
+    {
+        return Results.NotFound();
+    }
+}).RequireAuthorization("PortalAccess").RequireRateLimiting("public-read");
+
 app.MapGet("/support/attachments/{id:guid}", async (
     Guid id, HttpContext httpContext, ISupportTicketService ticketService) =>
 {

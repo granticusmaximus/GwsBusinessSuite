@@ -351,6 +351,11 @@ Each page or database has its own **Share** control with two independent layers:
 
 - **Invite a user** — grant a specific username one of four access levels: **View**, **Comment**,
   **Edit**, or **Full access**. Remove a grant anytime.
+- **Share with a department** — grant the same levels to a whole Community department. Everyone
+  in it (as their primary department or an additional one) gets that access, and people who join
+  the department later get it automatically. Like personal grants, it flows down to sub-pages and
+  databases. If someone has both a personal grant and a department grant on the same item, the
+  higher level wins.
 - **Public link** — a read-only link anyone can open without logging in. Optionally set an expiry
   date/time and a password (locked out after repeated wrong guesses); optionally allow search
   engines to index it. View count and last-viewed time are tracked, and the link can be revoked at

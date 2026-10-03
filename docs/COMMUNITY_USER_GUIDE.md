@@ -60,42 +60,53 @@ members stay exactly as they were, just no longer assigned to any department.
 A department's lead doesn't need any special role (Admin/Author/Contributor) — being named as a
 lead is what grants them permission to edit their department members' profiles, nothing more.
 
+People can belong to **several departments**: a primary one (shown first) plus any others ticked
+under **Also a member of** on their profile. Every membership counts: the directory filter, the
+member counts, a lead's right to edit profiles, and **department sharing in Sentinel** (a page or
+database shared with a department is open to all its members - see the Sentinel guide's *Sharing
+and permissions*).
+
 ## Member profiles
 
 Every staff member has a profile page at `/admin/community/profile/{username}`. If you have edit
 permission for that profile (see [Core concepts](#core-concepts)), you'll see an editable form for
-display name, job title, department, phone, avatar URL, bio, and LinkedIn/Twitter/website links.
+display name, job title, departments, phone, work email, avatar URL, bio, and
+LinkedIn/Twitter/website links. The work email is also where unread-message reminders go (see
+[Messages](#messages)); untick "Email me about messages I haven't read" to stop them.
 Otherwise you'll see the same information as a read-only summary. A **Message** button on anyone
 else's profile starts a direct conversation with them.
 
 ## Activity Feed
 
-`/admin/community/activity` shows the most recent activity across the app — currently: wiki pages
-being created or edited, and new CRM contacts being created. Each entry shows who did it, what
+`/admin/community/activity` shows the most recent activity across the app: wiki pages created or
+edited, new CRM contacts, articles and website pages going live (from any editor), support tickets
+opened and resolved, and new bookings. Each entry shows who did it, what
 they did, and a link to the thing itself, newest first. There's no filtering yet — it's a single
 recent-activity stream.
 
 ## Messages
 
 `/admin/community/messages` is a two-pane inbox: your conversations on the left, the open
-conversation on the right. Click **+** above the conversation list to start a new one with any
-teammate. Messages you haven't read yet show an unread-count badge on their conversation; opening
-a conversation marks it as read. Type in the box at the bottom and press Enter (or click the send
-button) to send — Shift+Enter adds a line break instead of sending.
+conversation on the right. Click **+** above the conversation list to start one:
 
-New messages and updated unread counts appear automatically every few seconds — there's no need
-to refresh the page, though there may be a brief (a few seconds) delay before a teammate's new
-message shows up.
+- **Direct** — a one-on-one conversation with a teammate (reopens the existing one if you already
+  have it).
+- **Group** — name it, tick the people to include, and **Create group**. In a group, the header
+  shows how many people are in it, **Add people** brings more in (they see the history, but none of
+  it counts as unread for them), and **Leave** takes you out.
+
+Type in the box at the bottom and press Enter (or click send); Shift+Enter adds a line break. The
+paperclip attaches files - up to 5 per message, 10 MB each. Images show as previews; other files
+download. Only people in the conversation can open its attachments.
+
+**Getting notified.** New messages arrive instantly in any open Messages page and in the bell at
+the top right (one entry per conversation with unread messages; opening it marks it read). If a
+message is still unread 15 minutes later, you get one email about it at the work email on your
+profile (one per conversation until new messages arrive) - provided email delivery is set up
+(Settings > Email) and you haven't turned these reminders off.
 
 ## Known limitations
 
-- **No push notifications.** New messages and activity are delivered by the page quietly
-  re-checking every 5 seconds while you have it open — nothing pings you if the tab isn't open, and
-  there's no email/desktop notification for a new direct message.
-- **No group conversations.** Direct messages are one-on-one only.
-- **One department per person.** A staff member can belong to at most one department; there's no
-  way to be on two teams at once.
-- **No file attachments in messages.** Direct messages are plain text only.
-- **Activity Feed has two sources today.** Wiki page saves and new CRM contacts are the only
-  actions that currently post to the feed — other actions elsewhere in the app (comments, support
-  tickets, billing, etc.) don't yet.
+- **No browser/desktop push notifications** - the bell and email reminders cover it instead.
+- **Groups have no admins** - anyone in a group can add people, and there's no way to remove
+  someone else (they can leave themselves).

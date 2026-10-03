@@ -14,17 +14,38 @@
             {
                 <p class="text-secondary">Loading...</p>
             }
-            else if (_success)
-            {
-                <i class="bi bi-check-circle-fill text-success" style="font-size: 2.5rem;"></i>
-                <h1 class="h5 mt-3">You're unsubscribed</h1>
-                <p class="text-secondary">You won't receive any more emails from our campaigns.</p>
-            }
-            else
+            else if (_info is null)
             {
                 <i class="bi bi-exclamation-triangle-fill text-warning" style="font-size: 2.5rem;"></i>
                 <h1 class="h5 mt-3">Link not recognized</h1>
-                <p class="text-secondary">This unsubscribe link is invalid or has already been used.</p>
+                <p class="text-secondary">This unsubscribe link is invalid or has expired.</p>
+            }
+            else if (_done is not null)
+            {
+                <i class="bi bi-check-circle-fill text-success" style="font-size: 2.5rem;"></i>
+                <h1 class="h5 mt-3">You're unsubscribed</h1>
+                <p class="text-secondary">@_done</p>
+            }
+            else
+            {
+                @* A confirm step on purpose: email scanners and link previewers open links
+                   automatically, and must not unsubscribe anyone by doing so. *@
+                <i class="bi bi-envelope-dash text-secondary" style="font-size: 2.5rem;"></i>
+                <h1 class="h5 mt-3">Unsubscribe?</h1>
+                @if (_info.IsUnsubscribedEverywhere)
+                {
+                    <p class="text-secondary">You're already unsubscribed from all of our emails.</p>
+                }
+                else
+                {
+                    <div class="d-grid gap-2 mt-3">
+                        @if (!string.IsNullOrWhiteSpace(_info.CampaignName) && !_info.HasLeftCampaign)
+                        {
+                            <button class="btn btn-primary" disabled="@_busy" @onclick="LeaveCampaignAsync">Stop emails from “@_info.CampaignName”</button>
+                        }
+                        <button class="btn btn-outline-secondary" disabled="@_busy" @onclick="LeaveEverythingAsync">Unsubscribe from all of our emails</button>
+                    </div>
+                }
             }
         </div>
     </div>
@@ -42,11 +63,29 @@
     [Parameter] public string Token { get; set; } = string.Empty;
 
     private bool _loading = true;
-    private bool _success;
+    private bool _busy;
+    private CampaignUnsubscribeInfo? _info;
+    private string? _done;
 
     protected override async Task OnInitializedAsync()
     {
-        _success = await CampaignService.UnsubscribeByTokenAsync(Token);
+        _info = await CampaignService.DescribeUnsubscribeTokenAsync(Token);
         _loading = false;
+    }
+
+    private async Task LeaveCampaignAsync()
+    {
+        _busy = true;
+        if (await CampaignService.UnsubscribeFromCampaignByTokenAsync(Token))
+            _done = $"You won't get any more emails from “{_info?.CampaignName}”.";
+        _busy = false;
+    }
+
+    private async Task LeaveEverythingAsync()
+    {
+        _busy = true;
+        if (await CampaignService.UnsubscribeByTokenAsync(Token))
+            _done = "You won't receive any more emails from our campaigns.";
+        _busy = false;
     }
 }

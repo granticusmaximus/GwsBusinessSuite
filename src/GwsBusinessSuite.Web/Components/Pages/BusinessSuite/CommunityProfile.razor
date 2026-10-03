@@ -69,7 +69,7 @@ else
                                     <InputText class="form-control" @bind-Value="Editor.JobTitle" />
                                 </div>
                                 <div class="col-md-6">
-                                    <label class="form-label fw-semibold small">Department</label>
+                                    <label class="form-label fw-semibold small">Primary department</label>
                                     <InputSelect class="form-select" @bind-Value="EditorDepartmentIdValue">
                                         <option value="">No department</option>
                                         @foreach (var department in Departments)
@@ -77,10 +77,32 @@ else
                                             <option value="@department.Id">@department.Name</option>
                                         }
                                     </InputSelect>
+                                    @if (Departments.Count > 1)
+                                    {
+                                        <label class="form-label fw-semibold small mt-2 d-block">Also a member of</label>
+                                        <div class="d-flex flex-wrap gap-2">
+                                            @foreach (var department in Departments.Where(d => d.Id != Editor.DepartmentId))
+                                            {
+                                                <label class="form-check form-check-inline small mb-0">
+                                                    <input class="form-check-input" type="checkbox" checked="@Editor.AdditionalDepartmentIds.Contains(department.Id)"
+                                                           @onchange="e => ToggleAdditionalDepartment(department.Id, e.Value is true)" />
+                                                    <span class="form-check-label">@department.Name</span>
+                                                </label>
+                                            }
+                                        </div>
+                                    }
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label fw-semibold small">Phone</label>
                                     <InputText class="form-control" @bind-Value="Editor.Phone" />
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label fw-semibold small">Work email</label>
+                                    <InputText type="email" class="form-control" @bind-Value="Editor.Email" placeholder="name@company.com" />
+                                    <div class="form-check mt-1">
+                                        <InputCheckbox class="form-check-input" id="notify-unread" @bind-Value="Editor.NotifyUnreadMessagesByEmail" />
+                                        <label class="form-check-label small" for="notify-unread">Email me about messages I haven't read after 15 minutes</label>
+                                    </div>
                                 </div>
                                 <div class="col-md-12">
                                     <label class="form-label fw-semibold small">Avatar URL</label>
@@ -115,12 +137,14 @@ else
                         <dl class="row mb-0">
                             <dt class="col-sm-4">Job Title</dt>
                             <dd class="col-sm-8">@(string.IsNullOrWhiteSpace(Profile.JobTitle) ? "—" : Profile.JobTitle)</dd>
-                            <dt class="col-sm-4">Department</dt>
-                            <dd class="col-sm-8">@(Profile.DepartmentName ?? "—")</dd>
+                            <dt class="col-sm-4">Departments</dt>
+                            <dd class="col-sm-8">@(Profile.AllDepartments.Count == 0 ? "—" : string.Join(", ", Profile.AllDepartments.Select(d => d.Name)))</dd>
                             <dt class="col-sm-4">Bio</dt>
                             <dd class="col-sm-8">@(string.IsNullOrWhiteSpace(Profile.Bio) ? "—" : Profile.Bio)</dd>
                             <dt class="col-sm-4">Phone</dt>
                             <dd class="col-sm-8">@(string.IsNullOrWhiteSpace(Profile.Phone) ? "—" : Profile.Phone)</dd>
+                            <dt class="col-sm-4">Email</dt>
+                            <dd class="col-sm-8">@if (string.IsNullOrWhiteSpace(Profile.Email)) { <span>—</span> } else { <a href="mailto:@Profile.Email">@Profile.Email</a> }</dd>
                             <dt class="col-sm-4">Links</dt>
                             <dd class="col-sm-8">
                                 @if (string.IsNullOrWhiteSpace(Profile.LinkedInUrl) && string.IsNullOrWhiteSpace(Profile.TwitterUrl) && string.IsNullOrWhiteSpace(Profile.WebsiteUrl))
@@ -167,6 +191,12 @@ else
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
 
+    private void ToggleAdditionalDepartment(Guid departmentId, bool member)
+    {
+        Editor.AdditionalDepartmentIds.Remove(departmentId);
+        if (member) Editor.AdditionalDepartmentIds.Add(departmentId);
+    }
+
     private string EditorDepartmentIdValue
     {
         get => Editor.DepartmentId?.ToString() ?? string.Empty;
@@ -196,7 +226,10 @@ else
                 Bio = Profile.Bio,
                 JobTitle = Profile.JobTitle,
                 DepartmentId = Profile.DepartmentId,
+                AdditionalDepartmentIds = Profile.AllDepartments.Where(d => !d.IsPrimary).Select(d => d.Id).ToList(),
                 Phone = Profile.Phone,
+                Email = Profile.Email,
+                NotifyUnreadMessagesByEmail = Profile.NotifyUnreadMessagesByEmail,
                 LinkedInUrl = Profile.LinkedInUrl,
                 TwitterUrl = Profile.TwitterUrl,
                 WebsiteUrl = Profile.WebsiteUrl

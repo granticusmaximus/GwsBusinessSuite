@@ -520,6 +520,8 @@ public static class EmailCampaignEnrollmentStatuses
     public const string Active = "Active";
     public const string Completed = "Completed";
     public const string Cancelled = "Cancelled";
+    // The contact left this one campaign via its unsubscribe link; blocks re-enrollment in it.
+    public const string Unsubscribed = "Unsubscribed";
 }
 
 public sealed class EmailCampaignEnrollment : AuditableEntity
