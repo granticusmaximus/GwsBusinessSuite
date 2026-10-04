@@ -125,6 +125,31 @@ public sealed class WikiServiceTests
     }
 
     [Fact]
+    public async Task SavePageAsync_ShouldNotReuseTheSlugOfATrashedPage()
+    {
+        // Regression guard: WikiPages.Slug is UNIQUE across every row, trashed or not, so a
+        // trashed "Untitled" page used to make the next "Untitled" page (e.g. a /page child)
+        // fail with "UNIQUE constraint failed: WikiPages.Slug".
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+
+        var trashed = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Untitled",
+            BlocksJson = ParagraphBlocks("Old page")
+        }, "grantwatson");
+        await service.TrashPageAsync(trashed.Id, "grantwatson");
+
+        var created = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Untitled",
+            BlocksJson = ParagraphBlocks("New page")
+        }, "grantwatson");
+
+        created.Slug.Should().Be("untitled-2");
+    }
+
+    [Fact]
     public async Task DuplicatePageAsync_ShouldCopyNestedPagesWithFreshBlockIdsAndAdjacentRootOrder()
     {
         await using var db = await CreateDbAsync();

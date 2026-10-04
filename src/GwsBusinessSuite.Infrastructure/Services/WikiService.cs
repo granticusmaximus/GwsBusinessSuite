@@ -898,11 +898,12 @@ public sealed class WikiService(
     private async Task<string> GetUniqueSlugAsync(string requestedSlug, Guid currentPageId, CancellationToken cancellationToken)
     {
         var baseSlug = string.IsNullOrWhiteSpace(requestedSlug) ? "wiki-page" : requestedSlug;
-        // A trashed page's slug is available for reuse - it's effectively gone from the live
-        // workspace. If the original is later restored while a new page now holds its old slug,
-        // the restored page keeps whatever slug it already has rather than re-colliding.
+        // Trashed pages still hold their slug: WikiPages.Slug has a UNIQUE index across every row,
+        // trashed or not, so treating a trashed slug as free made creating a page (or a /page
+        // child) fail with "UNIQUE constraint failed: WikiPages.Slug" whenever a trashed page
+        // already owned the generated slug. Restoring from Trash keeps the original slug intact.
         var slugs = await dbContext.WikiPages
-            .Where(page => page.Id != currentPageId && page.TrashedAt == null)
+            .Where(page => page.Id != currentPageId)
             .Select(page => page.Slug)
             .ToListAsync(cancellationToken);
 
