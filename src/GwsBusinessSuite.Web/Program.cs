@@ -1855,11 +1855,12 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
         <html lang="en">
         <head>
           <meta charset="utf-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
           <title>{pageTitle}</title>
           <meta name="description" content="{metaDescription}" />
           {ogImageTag}
           <link rel="stylesheet" href="/cms-public.css" />
+          <link rel="stylesheet" href="/css/gws-responsive.css" />
           <style>{CmsThemeCss.Build(DesignTokenJson.ParseOrEmpty(site.DesignTokensJson))}</style>
           {customStyleTag}
         </head>
@@ -2504,7 +2505,7 @@ app.MapGet("/__not-found", async (HttpContext httpContext, ICmsBuilderService cm
             <html lang="en">
             <head>
               <meta charset="utf-8" />
-              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
               <title>Not Found</title>
               <link rel="stylesheet" href="/lib/bootstrap/dist/css/bootstrap.min.css" />
             </head>
@@ -2615,7 +2616,7 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
             <html lang="en">
             <head>
               <meta charset="utf-8" />
-              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
               <title>{pageTitle}</title>
               <meta name="description" content="{metaDescription}" />
               {ogImageTag}

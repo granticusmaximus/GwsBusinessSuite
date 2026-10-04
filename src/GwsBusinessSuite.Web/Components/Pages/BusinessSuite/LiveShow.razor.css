@@ -46,7 +46,7 @@
 	border-radius: 999px;
 	background: rgba(239, 68, 68, 0.9);
 	color: white;
-	font-size: 0.72rem;
+	font-size: .75rem;
 	font-weight: 800;
 	letter-spacing: 0.12em;
 	backdrop-filter: blur(8px);
@@ -175,7 +175,7 @@
 	border-radius: 22px;
 	background: rgba(255, 255, 255, 0.08);
 	color: white;
-	font-size: 0.72rem;
+	font-size: .75rem;
 	font-weight: 600;
 	letter-spacing: 0.04em;
 	cursor: pointer;

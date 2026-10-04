@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <base href="/" />
     <script src="js/theme-init.js"></script>
     <ResourcePreloader />
@@ -19,6 +19,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["css/gws-responsive.css"]" />
     <link rel="stylesheet" href="@Assets["GwsBusinessSuite.Web.styles.css"]" />
     @* No <ImportMap />: it renders an inline <script type="importmap">, which this app's CSP
        (script-src without 'unsafe-inline') blocks on every deployed page - it never took effect
@@ -32,6 +33,7 @@
     <ReconnectModal />
     <script src="@Assets["lib/bootstrap/dist/js/bootstrap.bundle.min.js"]"></script>
     <script src="@Assets["app.js"]"></script>
+    <script src="@Assets["js/responsive-tables.js"]" defer></script>
     <script src="@Assets["lib/signalr/signalr.min.js"]"></script>
     <script src="js/liveShow.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>

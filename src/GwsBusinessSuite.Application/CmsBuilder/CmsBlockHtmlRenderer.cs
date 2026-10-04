@@ -1155,7 +1155,11 @@ public static class CmsBlockHtmlRenderer
     {
         var menu = Get(p, "menu", "header") == "footer" ? "footer" : "header";
         var direction = Get(p, "direction", "horizontal") == "vertical" ? "vertical" : "horizontal";
-        return $"""<nav class="gws-nav-menu gws-nav-menu-{direction} gws-align-{Html(Align(p))}" aria-label="{(menu == "footer" ? "Footer" : "Main")}" data-gws-nav-menu="{menu}"></nav>""";
+        if (menu == "footer" || direction != "horizontal")
+            return $"""<nav class="gws-nav-menu gws-nav-menu-{direction} gws-align-{Html(Align(p))}" aria-label="{(menu == "footer" ? "Footer" : "Main")}" data-gws-nav-menu="{menu}"></nav>""";
+        // A header menu collapses behind a button on phones (public-site.css / public-site.js).
+        var navId = "gws-nav-" + Guid.NewGuid().ToString("N")[..8];
+        return $"""<button type="button" class="gws-nav-menu-toggle" data-gws-menu-toggle aria-controls="{navId}" aria-expanded="false" aria-label="Menu"><i class="bi bi-list" aria-hidden="true"></i></button><nav id="{navId}" class="gws-nav-menu gws-nav-menu-{direction} gws-align-{Html(Align(p))}" aria-label="Main" data-gws-nav-menu="{menu}"></nav>""";
     }
 
     private static string RenderCopyright(IReadOnlyDictionary<string, string> p)

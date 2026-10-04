@@ -567,3 +567,6 @@ body {
   .gws-site-header .gws-columns { gap: .75rem; }
   .gws-site-header .gws-nav-menu, .gws-site-header .gws-site-logo-wrap { justify-content: center; }
 }
+
+/* Phone menu button for custom-header Nav Menus - styled and shown by public-site.css only. */
+.gws-nav-menu-toggle { display: none; }

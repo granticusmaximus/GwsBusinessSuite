@@ -166,7 +166,7 @@ public static class PublicSiteHtmlRenderer
             <head>
               <meta charset="UTF-8" />
               <link rel="icon" href="{Html(iconHref)}" />
-              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+              <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
               <title>{Html(pageTitle)}</title>
               <meta name="description" content="{Html(metaDescription)}" />
               {ogImageTag}
@@ -176,6 +176,7 @@ public static class PublicSiteHtmlRenderer
               <link href="{pairing.GoogleFontsHref}" rel="stylesheet" />
               <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
               <link rel="stylesheet" href="/public-site.css" />
+              <link rel="stylesheet" href="/css/gws-responsive.css" />
               {designTokensStyle}
               <style>{CmsThemeCss.Build(tokens)}</style>
               {ReducedMotionRevealScript}
@@ -185,6 +186,7 @@ public static class PublicSiteHtmlRenderer
               {bodyHtml}
               {SiteFooter(footerHtml, footerNavItems)}
               <script src="/public-site.js" defer></script>
+              <script src="/js/responsive-tables.js" defer></script>
               <script src="/public-analytics.js" defer></script>
               {CjDeepLinkScript}
             </body>
@@ -282,7 +284,7 @@ public static class PublicSiteHtmlRenderer
     private static readonly System.Text.RegularExpressions.Regex SiteLogoPlaceholder =
         new(@"(<a href=""/"" class=""gws-site-logo"" data-gws-site-logo=""([01])""[^>]*>)</a>", System.Text.RegularExpressions.RegexOptions.Compiled);
     private static readonly System.Text.RegularExpressions.Regex NavMenuPlaceholder =
-        new(@"(<nav class=""gws-nav-menu[^""]*""[^>]*data-gws-nav-menu=""(header|footer)""[^>]*>)</nav>", System.Text.RegularExpressions.RegexOptions.Compiled);
+        new(@"(<nav\b[^>]*\bclass=""gws-nav-menu[^""]*""[^>]*data-gws-nav-menu=""(header|footer)""[^>]*>)</nav>", System.Text.RegularExpressions.RegexOptions.Compiled);
 
     // Fills the header/footer builder's site-logo and nav-menu placeholders (emitted empty by
     // CmsBlockHtmlRenderer) with the site's real logo and Appearance > Menus links, using the same
@@ -308,9 +310,13 @@ public static class PublicSiteHtmlRenderer
               <a href="/" class="site-logo">
             """);
         sb.Append(brandHtml);
+        // The menu button only shows on phones (public-site.css); public-site.js toggles it.
         sb.Append("""
               </a>
-              <div class="nav-links">
+              <button type="button" class="site-nav-toggle" data-gws-menu-toggle aria-controls="site-nav-links" aria-expanded="false" aria-label="Menu">
+                <i class="bi bi-list" aria-hidden="true"></i>
+              </button>
+              <div class="nav-links" id="site-nav-links">
             """);
         foreach (var item in navItems)
         {

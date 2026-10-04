@@ -11,6 +11,43 @@ namespace GwsBusinessSuite.Tests;
 public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture)
 {
     [Fact]
+    public async Task EmptyParagraphs_Enter_ShouldKeepHintOnlyAtCaretAndPersistNoText()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = "<main class=\"sentinel-workspace\"><div id=\"editor\" class=\"wiki-block-editor\"></div></main>"
+        }));
+        await page.GotoAsync("http://localhost/editor");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot"));
+        await page.AddStyleTagAsync(new() { Content = await File.ReadAllTextAsync(Path.Combine(root, "app.css")) });
+        var source = await File.ReadAllTextAsync(Path.Combine(root, "js/wiki-block-editor.js"));
+        await page.AddScriptTagAsync(new() { Type = "module", Content = source.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.editor = { initialize, getBlocksJson };" });
+        await page.WaitForFunctionAsync("() => Boolean(window.editor)");
+        await page.EvaluateAsync("""
+            () => window.editor.initialize(document.querySelector('#editor'),
+                { invokeMethodAsync: () => Promise.resolve([]) }, '[]')
+            """);
+        await page.Locator(".wiki-block-content").First.ClickAsync();
+        await page.Keyboard.PressAsync("Enter");
+        await page.Keyboard.PressAsync("Enter");
+        await Expect(page.Locator(".wiki-block-content")).ToHaveCountAsync(3);
+        var hints = await page.EvaluateAsync<string[]>("""
+            () => [...document.querySelectorAll('.wiki-block-content')]
+                .map(el => getComputedStyle(el, '::before').content)
+            """);
+        hints[0].Should().Be("none");
+        hints[1].Should().Be("none");
+        hints[2].Should().Contain("for commands");
+        var json = await page.EvaluateAsync<string>("() => window.editor.getBlocksJson(document.querySelector('#editor'))");
+        WikiBlockJson.ParseBlocks(json).Should().OnlyContain(block => block.RichText.Count == 0);
+    }
+
+    [Fact]
     public async Task ImportedRichText_ShouldRejectExecutableLinkSchemes()
     {
         await using var page = await fixture.Browser.NewPageAsync();

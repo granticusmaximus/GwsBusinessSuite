@@ -35,10 +35,10 @@
 .gws-settings-nav-item:hover { background: var(--gws-panel-bg-2); color: var(--gws-text-strong); }
 .gws-settings-nav-item.active { background: var(--gws-panel-bg-2); color: var(--gws-text-strong); box-shadow: inset 3px 0 0 var(--gws-sidebar-accent); }
 .gws-settings-nav-item > i:first-child { color: var(--gws-sidebar-accent); text-align: center; }
-.gws-settings-nav-item > i:last-child { font-size: .65rem; }
+.gws-settings-nav-item > i:last-child { font-size: .75rem; }
 .gws-settings-nav-item span { display: flex; min-width: 0; flex-direction: column; }
 .gws-settings-nav-item strong { font-size: .84rem; }
-.gws-settings-nav-item small { margin-top: .1rem; color: var(--gws-text-soft); font-size: .68rem; }
+.gws-settings-nav-item small { margin-top: .1rem; color: var(--gws-text-soft); font-size: .75rem; }
 
 .gws-settings-content .card-body { padding: 1.4rem; }
 .gws-settings-actions {

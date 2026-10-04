@@ -1,0 +1,331 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   GWS responsive foundation - loaded by every shell (admin, public site, CMS
+   pages) so all of them scale the same way. See .claude/plans/responsive-every-device.md.
+
+   Scale to the device's CAPABILITIES (width, container width, touch vs mouse,
+   hover, safe areas, motion, text size), never to a device name.
+
+   Breakpoint tiers - CSS can't use custom properties in media queries, so these
+   are the only widths new rules should use (Phase 2 migrates the older ad-hoc ones):
+     xs  < 576px      phones
+     sm  576–767px    large phones, phones in landscape
+     md  768–1023px   tablets portrait
+     lg  1024–1439px  tablets landscape, laptops
+     xl  1440–1919px  desktops
+     xxl ≥ 1920px     large / ultrawide
+   (max-width forms use .98, e.g. max-width: 767.98px.)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+    /* Fluid spacing: grows smoothly from a 360px phone to a 1920px desktop. */
+    --gws-space-1: clamp(0.25rem, 0.22rem + 0.13vw, 0.375rem);
+    --gws-space-2: clamp(0.5rem, 0.45rem + 0.25vw, 0.75rem);
+    --gws-space-3: clamp(0.75rem, 0.66rem + 0.4vw, 1.125rem);
+    --gws-space-4: clamp(1rem, 0.86rem + 0.6vw, 1.5rem);
+    --gws-space-5: clamp(1.5rem, 1.25rem + 1.1vw, 2.5rem);
+    --gws-space-6: clamp(2rem, 1.55rem + 2vw, 4rem);
+    --gws-gutter: clamp(0.875rem, 0.6rem + 1.2vw, 2rem);
+
+    /* Fluid type: body never below 15px, headings scale with the screen. */
+    --gws-text-xs: clamp(0.75rem, 0.73rem + 0.08vw, 0.8125rem);
+    --gws-text-sm: clamp(0.8125rem, 0.79rem + 0.1vw, 0.875rem);
+    --gws-text-base: clamp(0.9375rem, 0.91rem + 0.13vw, 1rem);
+    --gws-text-lg: clamp(1.0625rem, 1rem + 0.3vw, 1.25rem);
+    --gws-text-xl: clamp(1.25rem, 1.12rem + 0.6vw, 1.625rem);
+    --gws-text-2xl: clamp(1.5rem, 1.27rem + 1vw, 2.125rem);
+    --gws-text-3xl: clamp(1.875rem, 1.5rem + 1.7vw, 3rem);
+
+    /* Smallest comfortable hit area for the current pointer (raised for touch below). */
+    --gws-tap: 32px;
+    /* Comfortable reading line length on wide screens. */
+    --gws-measure: 72ch;
+
+    /* Notch / rounded corners / home indicator (needs viewport-fit=cover). */
+    --gws-safe-top: env(safe-area-inset-top, 0px);
+    --gws-safe-right: env(safe-area-inset-right, 0px);
+    --gws-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --gws-safe-left: env(safe-area-inset-left, 0px);
+
+    /* Full viewport height that excludes mobile browser toolbars. */
+    --gws-vh-full: 100vh;
+}
+
+@supports (height: 100dvh) {
+    :root { --gws-vh-full: 100dvh; }
+}
+
+@media (pointer: coarse) {
+    :root { --gws-tap: 44px; }
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+/* Text floor: relative sizes (badges, keyboard hints, <small>) never drop below 12px. */
+:where(.badge, kbd) { font-size: max(12px, 0.75em); }
+:where(small, .small) { font-size: max(12px, 0.875em); }
+
+/* Media never forces sideways scrolling. :where() keeps specificity at zero so any
+   component that sizes its own images still wins. */
+:where(img, video) {
+    max-width: 100%;
+    height: auto;
+}
+
+/* ── Touch devices ──────────────────────────────────────────────────────────
+   Every control is big enough to hit with a finger, and form fields are at
+   least 16px so iOS Safari doesn't zoom the page when one is focused. */
+@media (pointer: coarse) {
+    :where(.btn, .form-control, .form-select, .page-link, .nav-link, .dropdown-item,
+           .list-group-item-action, .gws-nav-link, .gws-icon-button, [role="button"]) {
+        min-height: var(--gws-tap);
+    }
+
+    :where(.btn-sm, .form-control-sm, .form-select-sm) {
+        min-height: 40px;
+    }
+
+    :where(.btn-close) {
+        width: var(--gws-tap);
+        height: var(--gws-tap);
+        padding: 0;
+    }
+
+    .form-check-input {
+        width: 1.25em;
+        height: 1.25em;
+    }
+
+    :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) {
+        font-size: max(16px, 1em);
+    }
+
+    /* Hover-only affordances must stay usable without hover. Components opt in with
+       .gws-hover-reveal on anything that is normally shown only on :hover. */
+    .gws-hover-reveal {
+        opacity: 1 !important;
+        visibility: visible !important;
+    }
+}
+
+/* ── Container queries ─────────────────────────────────────────────────────
+   Put .gws-cq on a panel; children then adapt to the PANEL's width (e.g. an
+   inspector in a narrow sidebar) instead of the window's. */
+.gws-cq {
+    container-type: inline-size;
+}
+
+@container (max-width: 520px) {
+    .gws-cq-stack {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+    }
+
+    .gws-cq-stack > * {
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+}
+
+/* ── Tables → stacked cards on phones ──────────────────────────────────────
+   responsive-tables.js labels each cell with its column heading (data-label)
+   and adds .gws-table-stack, so every .table reads as a card list on a phone
+   instead of a sideways-scrolling grid. Opt out with .gws-table-keep. */
+@media (max-width: 767.98px) {
+    table.gws-table-stack,
+    table.gws-table-stack > tbody,
+    table.gws-table-stack > tbody > tr,
+    table.gws-table-stack > tbody > tr > td {
+        display: block;
+        width: 100%;
+    }
+
+    table.gws-table-stack > thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+    }
+
+    table.gws-table-stack > tbody > tr {
+        margin: 0 0 var(--gws-space-2);
+        padding: var(--gws-space-2) var(--gws-space-3);
+        border: 1px solid var(--gws-panel-border, rgba(127, 127, 127, 0.25));
+        border-radius: var(--gws-radius-md, 12px);
+        background: var(--gws-panel-bg, transparent);
+    }
+
+    /* Label on the left, the cell's content on the right; a cell holding several things
+       (a title link, its slug, Edit/Trash/View) stacks them instead of squeezing them. */
+    table.gws-table-stack > tbody > tr > td {
+        display: grid;
+        grid-template-columns: minmax(5.5rem, 38%) minmax(0, 1fr);
+        align-items: start;
+        column-gap: var(--gws-space-3);
+        row-gap: 0.25rem;
+        padding: 0.35rem 0;
+        border: 0;
+        text-align: right;
+        overflow-wrap: anywhere;
+    }
+
+    table.gws-table-stack > tbody > tr > td > * {
+        grid-column: 2;
+        justify-self: end;
+        max-width: 100%;
+    }
+
+    table.gws-table-stack > tbody > tr > td[data-label]::before {
+        content: attr(data-label);
+        grid-column: 1;
+        grid-row: 1;
+        font-weight: 600;
+        text-align: left;
+        color: var(--gws-text-soft, inherit);
+    }
+
+    table.gws-table-stack > tbody > tr > td:not([data-label]),
+    table.gws-table-stack > tbody > tr > td[data-label=""] {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    table.gws-table-stack > tbody > tr > td:not([data-label]) > *,
+    table.gws-table-stack > tbody > tr > td[data-label=""] > * {
+        grid-column: 1;
+    }
+
+    /* A header row with controls (e.g. "select all") stays visible as a small toolbar
+       instead of being hidden with the rest of the column headings. */
+    table.gws-table-stack.gws-head-controls > thead {
+        position: static;
+        width: auto;
+        height: auto;
+        overflow: visible;
+        clip: auto;
+        white-space: normal;
+        display: block;
+    }
+
+    table.gws-table-stack.gws-head-controls > thead > tr {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--gws-space-2);
+        padding: 0 0 var(--gws-space-2);
+    }
+
+    table.gws-table-stack.gws-head-controls > thead > tr > th {
+        display: none;
+        border: 0;
+        padding: 0;
+    }
+
+    table.gws-table-stack.gws-head-controls > thead > tr > th:has(input, button, select) {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+    }
+
+    /* The wrapper's sideways scroll is no longer needed once the table stacks. */
+    .table-responsive:has(> table.gws-table-stack) {
+        overflow-x: visible;
+    }
+}
+
+/* ── Dialogs → bottom sheets on phones ─────────────────────────────────────
+   Bootstrap modals become full-width sheets anchored to the bottom, clear of
+   the home indicator, with a scrolling body. */
+@media (max-width: 575.98px) {
+    .modal-dialog:not(.gws-modal-keep) {
+        margin: 0;
+        max-width: none;
+        min-height: 100%;
+        display: flex;
+        align-items: flex-end;
+    }
+
+    .modal-dialog:not(.gws-modal-keep) > .modal-content {
+        width: 100%;
+        max-height: calc(var(--gws-vh-full) - var(--gws-safe-top) - 1rem);
+        border-radius: 16px 16px 0 0;
+        padding-bottom: var(--gws-safe-bottom);
+    }
+
+    .modal-dialog:not(.gws-modal-keep) .modal-body {
+        overflow-y: auto;
+    }
+
+    .modal-dialog:not(.gws-modal-keep) .modal-footer {
+        flex-wrap: wrap;
+    }
+
+    .modal-dialog:not(.gws-modal-keep) .modal-footer > .btn {
+        flex: 1 1 auto;
+    }
+}
+
+/* ── Forms on small screens ────────────────────────────────────────────────
+   Side-by-side Bootstrap columns inside forms collapse to one column, and long
+   action rows wrap instead of overflowing. */
+@media (max-width: 575.98px) {
+    form .row > [class*="col-"]:not([class*="col-xs-"]),
+    .gws-form-grid > * {
+        flex: 0 0 100%;
+        max-width: 100%;
+    }
+
+    .gws-action-bar,
+    .page-header .d-flex.gap-2 {
+        flex-wrap: wrap;
+    }
+}
+
+/* ── Large screens ─────────────────────────────────────────────────────────
+   Long-form text keeps a readable line length however wide the window gets. */
+@media (min-width: 1920px) {
+    :where(.gws-prose, .gws-richtext, .article-body, .blog-post-body) {
+        max-width: var(--gws-measure);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ── Admin shell safe areas ────────────────────────────────────────────────
+   On notched phones in landscape (and the iOS home indicator) the insets are
+   non-zero; everywhere else max() keeps today's padding. */
+.gws-admin-bar {
+    padding-left: max(1rem, var(--gws-safe-left));
+    padding-right: max(1rem, var(--gws-safe-right));
+}
+
+.gws-content {
+    padding-left: max(1.75rem, var(--gws-safe-left));
+    padding-right: max(1.75rem, var(--gws-safe-right));
+    padding-bottom: max(2rem, var(--gws-safe-bottom));
+}
+
+@media (max-width: 767.98px) {
+    .gws-content {
+        padding-left: max(1rem, var(--gws-safe-left));
+        padding-right: max(1rem, var(--gws-safe-right));
+    }
+}
+
+@media (max-width: 575.98px) {
+    .gws-content {
+        padding-left: max(.75rem, var(--gws-safe-left));
+        padding-right: max(.75rem, var(--gws-safe-right));
+    }
+}
+
+.gws-sidebar {
+    padding-bottom: max(.75rem, var(--gws-safe-bottom));
+}

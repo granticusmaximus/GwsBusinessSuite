@@ -27,7 +27,7 @@
 .retention-panel header > div:first-child small,
 .retention-summary small {
     color: #9b958e;
-    font-size: .65rem;
+    font-size: .75rem;
 }
 
 .retention-summary {
@@ -44,7 +44,7 @@
     width: 100%;
     min-width: 620px;
     border-collapse: collapse;
-    font-size: .7rem;
+    font-size: .75rem;
 }
 
 .cohort-scroll th, .cohort-scroll td {
@@ -58,7 +58,7 @@
 .cohort-scroll th:first-child { min-width: 105px; text-align: left; }
 .cohort-scroll thead th {
     color: #9b958e;
-    font-size: .6rem;
+    font-size: .75rem;
     letter-spacing: .03em;
     text-transform: uppercase;
 }
@@ -74,14 +74,14 @@
 }
 .retention-empty > i { color: #f59e0b; font-size: 1.1rem; }
 .retention-empty strong, .retention-empty small { display: block; }
-.retention-empty small { margin-top: .15rem; color: #9b958e; font-size: .68rem; }
+.retention-empty small { margin-top: .15rem; color: #9b958e; font-size: .75rem; }
 
 .retention-privacy {
     margin: 0;
     padding: .7rem 1rem;
     border-top: 1px solid rgba(255,255,255,.06);
     color: #837d76;
-    font-size: .61rem;
+    font-size: .75rem;
     line-height: 1.45;
 }
 

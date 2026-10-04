@@ -19,7 +19,7 @@
 
 .segment-picker > span {
     color: #f7f3ed;
-    font-size: .72rem;
+    font-size: .75rem;
     font-weight: 800;
     white-space: nowrap;
 }
@@ -33,7 +33,7 @@
     background: #211e1a;
     color: #f7f3ed;
     padding: .42rem 2rem .42rem .55rem;
-    font-size: .72rem;
+    font-size: .75rem;
 }
 
 .segment-picker small {
@@ -42,7 +42,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: #9b958e;
-    font-size: .65rem;
+    font-size: .75rem;
 }
 
 .segment-manage, .rule-add, .segment-save {
@@ -51,7 +51,7 @@
     background: transparent;
     color: #f7f3ed;
     padding: .46rem .7rem;
-    font-size: .7rem;
+    font-size: .75rem;
     font-weight: 750;
     white-space: nowrap;
 }
@@ -65,7 +65,7 @@
     background: rgba(245,158,11,.08);
     padding: .65rem .8rem;
     color: #f7f3ed;
-    font-size: .72rem;
+    font-size: .75rem;
 }
 
 .segment-message.error {
@@ -98,7 +98,7 @@
 
 .segment-drawer header { margin-bottom: 1rem; }
 .segment-drawer header strong, .segment-drawer header small { display: block; }
-.segment-drawer header small { color: #9b958e; font-size: .67rem; margin-top: .15rem; }
+.segment-drawer header small { color: #9b958e; font-size: .75rem; margin-top: .15rem; }
 .segment-drawer header button, .segment-form-heading button {
     border: 0;
     background: transparent;
@@ -106,7 +106,7 @@
 }
 .segment-drawer header button { font-size: 1.4rem; line-height: 1; }
 .segment-form-heading { align-items: center; margin: 1rem 0 .8rem; }
-.segment-form-heading button { color: #f59e0b; font-size: .68rem; }
+.segment-form-heading button { color: #f59e0b; font-size: .75rem; }
 
 .segment-definition {
     display: flex;
@@ -126,14 +126,14 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: #9b958e;
-    font-size: .63rem;
+    font-size: .75rem;
 }
 .segment-definition button { border: 0; background: transparent; color: #9b958e; padding: .2rem; }
 
 .segment-drawer label {
     display: block;
     color: #9b958e;
-    font-size: .68rem;
+    font-size: .75rem;
     font-weight: 700;
 }
 
@@ -170,7 +170,7 @@
     border-radius: 50%;
     background: rgba(245,158,11,.12);
     color: #f59e0b;
-    font-size: .65rem;
+    font-size: .75rem;
     font-weight: 800;
 }
 
@@ -182,7 +182,7 @@
 }
 .rule-remove:disabled, .rule-add:disabled { opacity: .35; }
 .rule-add { margin-top: .65rem; }
-.segment-help { color: #9b958e; font-size: .67rem; line-height: 1.45; }
+.segment-help { color: #9b958e; font-size: .75rem; line-height: 1.45; }
 .segment-save { width: 100%; background: #f59e0b; color: #17130c; border-color: #f59e0b; }
 .segment-save:disabled { opacity: .55; }
 

@@ -16,6 +16,7 @@
     --civic-radius: 1rem;
     display: block;
     min-height: calc(100vh - 3.5rem);
+    min-height: calc(100dvh - 3.5rem);
     margin: -1.5rem;
     padding: clamp(1rem, 2.5vw, 2.5rem);
     color: var(--civic-ink);

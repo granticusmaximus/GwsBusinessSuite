@@ -32,6 +32,7 @@ body {
   background: var(--bg);
   color: var(--text-1);
   min-height: 100vh;
+  min-height: 100dvh;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -254,7 +255,7 @@ a { color: inherit; }
   align-items: center;
   justify-content: center;
   color: var(--text-3);
-  font-size: 0.7rem;
+  font-size: .75rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -299,7 +300,7 @@ a { color: inherit; }
   color: var(--accent);
   padding: 0.15rem 0.55rem;
   border-radius: 4px;
-  font-size: 0.7rem;
+  font-size: .75rem;
   font-weight: 600;
   letter-spacing: 0.02em;
 }
@@ -861,6 +862,7 @@ a { color: inherit; }
   align-items: center;
   justify-content: center;
   min-height: calc(100vh - var(--nav-h));
+  min-height: calc(100dvh - var(--nav-h));
   text-align: center;
   gap: 1rem;
   padding: 2rem;
@@ -876,19 +878,51 @@ a { color: inherit; }
 .page-not-found a { color: var(--accent); text-decoration: none; }
 .page-not-found a:hover { opacity: 0.75; }
 
-@media (max-width: 760px) {
+.site-nav-toggle { display: none; }
+
+/* Phones: the menu collapses behind a button so the sticky header stays one short row,
+   and each link becomes a full-width 44px row that's easy to tap. */
+@media (max-width: 767.98px) {
   .site-nav {
-    height: auto;
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 1rem;
-    padding: 1rem 1.25rem;
+    flex-wrap: wrap;
+    padding: 0.5rem max(1rem, env(safe-area-inset-right)) 0.5rem max(1rem, env(safe-area-inset-left));
+  }
+
+  .site-nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin-left: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--text-1);
+    font-size: 1.5rem;
   }
 
   .nav-links {
-    flex-wrap: wrap;
-    gap: 0.9rem 1.25rem;
+    display: none;
+    flex-basis: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 0.5rem 0 0.25rem;
   }
+
+  .nav-links.is-open { display: flex; }
+
+  .nav-links a {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 0.25rem;
+    font-size: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .nav-links .nav-link-social { justify-content: flex-start; }
 }
 
 /* ─── Canvas widget rendering (Section > Column > Widget) ─────────────────
@@ -1673,4 +1707,37 @@ a { color: inherit; }
 @media (max-width: 640px) {
   .gws-site-header .gws-columns { gap: .75rem; }
   .gws-site-header .gws-nav-menu, .gws-site-header .gws-site-logo-wrap { justify-content: center; }
+}
+
+
+/* Custom header (Appearance > Header & Footer): its Nav Menu gets the same phone menu button. */
+.gws-nav-menu-toggle { display: none; }
+@media (max-width: 767.98px) {
+  .gws-site-header .gws-nav-menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border: 1px solid var(--border, rgba(127,127,127,.3));
+    border-radius: 10px;
+    background: transparent;
+    color: inherit;
+    font-size: 1.5rem;
+  }
+  .gws-site-header .gws-nav-menu-horizontal { display: none; flex-direction: column; align-items: stretch; width: 100%; gap: 0; }
+  .gws-site-header .gws-nav-menu-horizontal.is-open { display: flex; }
+  .gws-site-header .gws-nav-menu-horizontal a { display: flex; align-items: center; min-height: 44px; border-top: 1px solid var(--border, rgba(127,127,127,.2)); }
+}
+
+/* Touch screens wider than a phone (tablets) keep the inline menu, but every link gets a
+   44px-tall hit area. */
+@media (pointer: coarse) and (min-width: 768px) {
+  .nav-links a,
+  .footer-links a,
+  .gws-nav-menu a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
 }

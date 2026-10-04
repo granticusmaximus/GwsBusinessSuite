@@ -192,8 +192,10 @@ public sealed class PlaywrightBrowserFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        await Browser.CloseAsync();
-        Playwright.Dispose();
+        // Null-safe: if InitializeAsync failed (e.g. a browser launch error), xUnit still calls
+        // this, and a NullReferenceException here would bury the real failure.
+        if (Browser is not null) await Browser.CloseAsync();
+        Playwright?.Dispose();
     }
 }
 

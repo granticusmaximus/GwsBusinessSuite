@@ -1,8 +1,8 @@
-.devtools-shell { display:grid; grid-template-columns:250px minmax(420px,1fr); min-height:calc(100vh - 7.5rem); margin:-1rem; background:var(--gws-body-bg); }
+.devtools-shell { display:grid; grid-template-columns:250px minmax(420px,1fr); min-height:calc(100vh - 7.5rem); min-height:calc(100dvh - 7.5rem); margin:-1rem; background:var(--gws-body-bg); }
 .devtools-sidebar { border-right:1px solid var(--gws-panel-border); background:var(--gws-panel-bg); padding:1rem .75rem; overflow:auto; }
 .devtools-content { padding:1.5rem; overflow:auto; }
 
-.devtools-group-heading { margin:1rem .35rem .4rem; font-size:.68rem; font-weight:750; color:var(--gws-text-soft); text-transform:uppercase; letter-spacing:.08em; }
+.devtools-group-heading { margin:1rem .35rem .4rem; font-size: .75rem; font-weight:750; color:var(--gws-text-soft); text-transform:uppercase; letter-spacing:.08em; }
 .devtools-group-heading:first-of-type { margin-top:.25rem; }
 .devtools-tool-button { display:block; width:100%; border:0; background:transparent; border-radius:.6rem; padding:.5rem .6rem; text-align:left; font-size:.82rem; color:var(--gws-text-strong); }
 .devtools-tool-button:hover { background:var(--gws-sidebar-hover-bg); }

@@ -64,6 +64,11 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
             return text ? s + ' "' + text + '"' : s;
           };
           const visible = el => {
+            // checkVisibility() also excludes content inside a closed <details> (Chrome keeps it
+            // laid out but unpainted), which otherwise reads as "visible but covered".
+            if (el.checkVisibility && !el.checkVisibility({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true })) return false;
+            const closed = el.closest('details:not([open])');
+            if (closed && !el.closest('summary')) return false;
             const cs = getComputedStyle(el);
             if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) return false;
             const r = el.getBoundingClientRect();
@@ -152,6 +157,7 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         var rows = new List<Dictionary<string, object?>>();
         foreach (var device in devices)
         {
+            File.Delete(Path.Combine(outDir, $"rows-{device.Name}.jsonl"));
             var context = await fixture.Browser.NewContextAsync(new()
             {
                 ViewportSize = new() { Width = device.Width, Height = device.Height },
@@ -190,13 +196,38 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
                 }
                 row["errors"] = errors;
                 rows.Add(row);
+                // Saved as it goes, one file per device, so a long run that's stopped keeps what it
+                // measured and parallel runs (different GWS_AUDIT_DEVICES) can share one folder.
+                await File.AppendAllTextAsync(Path.Combine(outDir, $"rows-{device.Name}.jsonl"), JsonSerializer.Serialize(row) + "\n");
                 await page.CloseAsync();
             }
             await context.DisposeAsync();
         }
 
-        await File.WriteAllTextAsync(Path.Combine(outDir, "audit.json"), JsonSerializer.Serialize(rows, new JsonSerializerOptions { WriteIndented = true }));
-        await File.WriteAllTextAsync(Path.Combine(outDir, "audit.md"), Summarize(rows));
+        await WriteReportAsync(outDir);
+    }
+
+    // Rebuilds audit.json / audit.md from every rows-*.jsonl in the folder (all devices so far).
+    internal static async Task WriteReportAsync(string outDir)
+    {
+        var all = new List<Dictionary<string, object?>>();
+        foreach (var file in Directory.GetFiles(outDir, "rows-*.jsonl"))
+        {
+            foreach (var line in await File.ReadAllLinesAsync(file))
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                using var doc = JsonDocument.Parse(line);
+                all.Add(doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => (object?)(p.Value.ValueKind switch
+                {
+                    JsonValueKind.Number => p.Value.GetInt32(),
+                    JsonValueKind.Array => p.Value.EnumerateArray().Select(v => v.ToString()).ToList(),
+                    JsonValueKind.Null => null,
+                    _ => p.Value.ToString()
+                })));
+            }
+        }
+        await File.WriteAllTextAsync(Path.Combine(outDir, "audit.json"), JsonSerializer.Serialize(all, new JsonSerializerOptions { WriteIndented = true }));
+        await File.WriteAllTextAsync(Path.Combine(outDir, "audit.md"), Summarize(all));
     }
 
     private static int Num(Dictionary<string, object?> row, string key) => row.TryGetValue(key, out var v) && v is int i ? i : 0;

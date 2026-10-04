@@ -177,6 +177,7 @@ h1:focus { outline: none; }
 /* ── App layout ──────────────────────────────────────────── */
 .gws-layout {
     min-height: 100vh;
+    min-height: 100dvh;
 }
 
 /* Sticky rather than fixed: as the very first element in the document it
@@ -319,7 +320,7 @@ h1:focus { outline: none; }
 }
 .gws-account-menu > summary::-webkit-details-marker { display: none; }
 .gws-account-menu > summary:hover { background: var(--gws-sidebar-hover-bg); color: #fff; }
-.gws-account-menu > summary .bi-chevron-down { font-size: .65rem; }
+.gws-account-menu > summary .bi-chevron-down { font-size: .75rem; }
 .gws-account-menu[open] > summary .bi-chevron-down { transform: rotate(180deg); }
 
 .gws-account-avatar {
@@ -354,6 +355,7 @@ h1:focus { outline: none; }
 .gws-layout-body {
     display: flex;
     min-height: calc(100vh - var(--gws-admin-bar-height));
+    min-height: calc(100dvh - var(--gws-admin-bar-height));
 }
 
 .gws-sidebar {
@@ -367,6 +369,7 @@ h1:focus { outline: none; }
     display: flex;
     flex-direction: column;
     height: calc(100vh - var(--gws-admin-bar-height));
+    height: calc(100dvh - var(--gws-admin-bar-height));
     overflow-y: auto;
     flex-shrink: 0;
     padding: .75rem .55rem;
@@ -408,14 +411,17 @@ h1:focus { outline: none; }
    own header and panels fill the screen edge-to-edge. */
 .gws-builder-mode {
     height: 100vh;
+    height: 100dvh;
 }
 
 .gws-builder-mode .gws-layout-body {
     min-height: 100vh;
+    min-height: 100dvh;
 }
 
 .gws-builder-mode .gws-body {
     height: 100vh;
+    height: 100dvh;
 }
 
 .gws-content-builder {
@@ -424,6 +430,7 @@ h1:focus { outline: none; }
     padding: 0;
     overflow-y: auto;
     height: 100vh;
+    height: 100dvh;
 }
 
 /* Client-side "focus mode" (Overwatch's fullscreen toggle, see app.js's toggleFocusMode) reuses
@@ -464,7 +471,7 @@ h1:focus { outline: none; }
     color: var(--gws-sidebar-text-soft);
     cursor: pointer;
     list-style: none;
-    font-size: .68rem;
+    font-size: .75rem;
     font-weight: 750;
     letter-spacing: .09em;
     text-transform: uppercase;
@@ -472,7 +479,7 @@ h1:focus { outline: none; }
 
 .gws-nav-group > summary::-webkit-details-marker { display: none; }
 .gws-nav-group > summary:hover { background: rgba(255, 255, 255, .025); color: var(--gws-sidebar-text); }
-.gws-nav-group > summary i { font-size: .65rem; transition: transform .15s ease; }
+.gws-nav-group > summary i { font-size: .75rem; transition: transform .15s ease; }
 .gws-nav-group[open] > summary i { transform: rotate(90deg); }
 .gws-nav-group-items { padding-bottom: .2rem; }
 
@@ -515,7 +522,7 @@ h1:focus { outline: none; }
     display: block;
     overflow: hidden;
     color: var(--gws-sidebar-text-soft);
-    font-size: .68rem;
+    font-size: .75rem;
     font-weight: 400;
     line-height: 1.25;
     text-overflow: ellipsis;
@@ -527,7 +534,7 @@ h1:focus { outline: none; }
     border-radius: 999px;
     background: rgba(var(--bs-primary-rgb), .17);
     color: #fbbf24;
-    font-size: .68rem;
+    font-size: .75rem;
     font-weight: 750;
     line-height: 1.2;
     text-align: center;
@@ -646,7 +653,7 @@ h1:focus { outline: none; }
    follow the global data-theme toggle. */
 .page-header-eyebrow {
     display: inline-block;
-    font-size: .7rem;
+    font-size: .75rem;
     font-weight: 800;
     letter-spacing: .14em;
     text-transform: uppercase;
@@ -717,7 +724,6 @@ h1:focus { outline: none; }
 
 .form-control,
 .form-select,
-.form-check-input,
 .form-control:focus,
 .form-select:focus {
     min-height: var(--gws-control-height);
@@ -725,6 +731,14 @@ h1:focus { outline: none; }
     background-color: var(--gws-panel-bg-2);
     border-color: var(--gws-panel-border);
     color: var(--gws-text-strong);
+}
+
+/* Checkboxes, radios and switches take the theme colours but keep Bootstrap's own size and
+   shape - they used to share the 40px text-field min-height above, which stretched every
+   checkbox into a 13x40px pill. */
+.form-check-input {
+    background-color: var(--gws-panel-bg-2);
+    border-color: var(--gws-panel-border);
 }
 
 .form-control::placeholder { color: var(--gws-text-soft); }
@@ -776,9 +790,9 @@ h1:focus { outline: none; }
 .gws-command-result > span { display: flex; min-width: 0; flex-direction: column; }
 .gws-command-result strong { font-size: .88rem; }
 .gws-command-result small { overflow: hidden; color: var(--gws-text-soft); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
-.gws-command-result em { color: var(--gws-text-soft); font-size: .68rem; font-style: normal; text-transform: uppercase; letter-spacing: .05em; }
+.gws-command-result em { color: var(--gws-text-soft); font-size: .75rem; font-style: normal; text-transform: uppercase; letter-spacing: .05em; }
 .gws-command-empty { padding: 2.5rem 1rem; color: var(--gws-text-soft); text-align: center; }
-.gws-command-dialog > footer { padding: .55rem 1rem; border-top: 1px solid var(--gws-panel-border); color: var(--gws-text-soft); font-size: .7rem; }
+.gws-command-dialog > footer { padding: .55rem 1rem; border-top: 1px solid var(--gws-panel-border); color: var(--gws-text-soft); font-size: .75rem; }
 
 /* ── Bootstrap component dark-mode overrides ───────────────
    Bootstrap 5's own component CSS (tables, modals, dropdowns, alerts,
@@ -813,7 +827,7 @@ h1:focus { outline: none; }
 .sentinel-shortcuts-group h6 {
     margin-bottom: .5rem;
     color: var(--gws-text-soft);
-    font-size: .68rem;
+    font-size: .75rem;
     font-weight: 700;
     letter-spacing: .06em;
     text-transform: uppercase;
@@ -1028,7 +1042,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     display: block;
     margin-bottom: .35rem;
     color: var(--gws-sidebar-accent);
-    font-size: .7rem;
+    font-size: .75rem;
     font-weight: 750;
     letter-spacing: .09em;
     text-transform: uppercase;
@@ -1330,6 +1344,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     align-items: center;
     justify-content: center;
     min-height: 100vh;
+    min-height: 100dvh;
     padding: 2rem;
     background:
         radial-gradient(circle at top left, rgba(var(--bs-primary-rgb), 0.12), transparent 28%),
@@ -1381,7 +1396,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     .page-header > :last-child:not(:first-child) { width: 100%; flex-wrap: wrap; }
     .page-header > :last-child:not(:first-child) > .btn { flex: 1 1 auto; }
     .gws-command-layer { padding-top: 4.25rem; }
-    .gws-command-dialog { max-height: calc(100vh - 5.25rem); }
+    .gws-command-dialog { max-height: calc(100vh - 5.25rem); max-height: calc(100dvh - 5.25rem); }
     .gws-command-result { grid-template-columns: 2rem 1fr; }
     .gws-command-result em { display: none; }
 }
@@ -1395,7 +1410,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-db-timeline-label { display: grid; align-content: start; gap: .08rem; min-width: 0; }
 .sentinel-db-timeline-label > button, .sentinel-db-map button, .sentinel-db-feed button { border: 0; background: transparent; color: inherit; text-align: left; font-weight: 600; }
 .sentinel-db-timeline-label > button { overflow: hidden; padding: 0; text-overflow: ellipsis; white-space: nowrap; }
-.sentinel-db-timeline-label details { position: relative; font-size: .72rem; color: #94a3b8; }
+.sentinel-db-timeline-label details { position: relative; font-size: .75rem; color: #94a3b8; }
 .sentinel-db-timeline-label summary { cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sentinel-db-timeline-dependency-picker { position: absolute; z-index: 10; width: min(20rem,80vw); max-height: 14rem; overflow-y: auto; padding: .65rem; border: 1px solid rgba(148,163,184,.25); border-radius: .55rem; background: #111827; color: #e5e7eb; box-shadow: 0 .8rem 2rem rgba(0,0,0,.3); }
 .sentinel-db-timeline-track { position: relative; min-height: 3.2rem; border-radius: .4rem; background-image: repeating-linear-gradient(90deg,rgba(148,163,184,.11) 0,rgba(148,163,184,.11) 1px,transparent 1px,transparent 10%); }
@@ -1403,7 +1418,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-db-timeline-bar span { color: inherit; }
 .sentinel-db-timeline-bar { cursor: grab; touch-action: none; }
 .sentinel-db-timeline-bar.is-dragging { cursor: grabbing; z-index: 2; box-shadow: 0 .5rem 1.2rem rgba(0,0,0,.32); transition: none; }
-.sentinel-db-timeline-links { position: absolute; top: 2.35rem; left: var(--timeline-left,0); display: flex; align-items: center; gap: .25rem; max-width: 75%; color: #94a3b8; font-size: .68rem; white-space: nowrap; }
+.sentinel-db-timeline-links { position: absolute; top: 2.35rem; left: var(--timeline-left,0); display: flex; align-items: center; gap: .25rem; max-width: 75%; color: #94a3b8; font-size: .75rem; white-space: nowrap; }
 .sentinel-db-timeline-undated { display: grid; grid-template-columns: 15rem minmax(30rem,1fr); gap: .75rem; min-width: 46rem; padding: .7rem .55rem; }
 .sentinel-db-timeline-undated > div { display: flex; flex-wrap: wrap; gap: .4rem; }
 .sentinel-db-timeline-undated button { border: 1px dashed rgba(148,163,184,.3); border-radius: .4rem; padding: .3rem .5rem; background: transparent; color: inherit; font-size: .75rem; }
@@ -1444,10 +1459,10 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-share-entry { display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: .65rem; padding: .45rem 0; }
 .sentinel-share-entry small { color: #94a3b8; }
 .sentinel-share-entry button { border: 0; background: transparent; color: #94a3b8; }
-.sentinel-public-share { min-height: 100vh; background: #faf9f7; color: #292524; padding-bottom: 6rem; }
+.sentinel-public-share { min-height: 100vh; min-height: 100dvh; background: #faf9f7; color: #292524; padding-bottom: 6rem; }
 .sentinel-public-share article { width: min(52rem,calc(100% - 2rem)); margin: 0 auto; padding: 4rem 0; }
 .sentinel-public-cover { display: block; width: 100%; height: min(34vh,22rem); object-fit: cover; }
-.sentinel-public-brand { margin-bottom: 1.5rem; color: #a8a29e; font-size: .72rem; font-weight: 800; letter-spacing: .16em; }
+.sentinel-public-brand { margin-bottom: 1.5rem; color: #a8a29e; font-size: .75rem; font-weight: 800; letter-spacing: .16em; }
 /* This whole page is deliberately light-themed regardless of the admin shell's own dark theme
    (an external, often logged-out audience views it), but Bootstrap's own heading/table CSS reads
    app-wide dark-mode custom properties (--bs-heading-color, .table's --bs-table-color, etc. - see
@@ -1466,7 +1481,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     color: #292524; --bs-table-color: #292524; --bs-table-hover-color: #292524; --bs-table-bg: white;
 }
 .sentinel-public-automation-runs th { color: #78716c; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
-.sentinel-public-share-error { display: grid; place-content: center; min-height: 100vh; text-align: center; }
+.sentinel-public-share-error { display: grid; place-content: center; min-height: 100vh; min-height: 100dvh; text-align: center; }
 /* Collapsed (the default, and how a page spends nearly all of its time) is a small, low-chrome
    invocation point - Notion's own AI entry point is a text trigger (Cmd+J / a slash command),
    never a permanently docked, bordered banner - not a card claiming a full-width row on every
@@ -1480,7 +1495,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-ai-toggle small { color: #78716c; }
 .sentinel-ai-body { display: grid; gap: .75rem; padding: .8rem; border-top: 1px solid rgba(var(--bs-primary-rgb), .12); }
 .sentinel-ai-actions { display: flex; flex-wrap: wrap; gap: .35rem; }
-.sentinel-ai-actions button { padding: .25rem .55rem; border: 1px solid rgba(148,163,184,.2); border-radius: 999px; background: transparent; color: #a8a29e; font-size: .72rem; }
+.sentinel-ai-actions button { padding: .25rem .55rem; border: 1px solid rgba(148,163,184,.2); border-radius: 999px; background: transparent; color: #a8a29e; font-size: .75rem; }
 .sentinel-ai-actions button.active { border-color: rgba(var(--bs-primary-rgb), .5); background: rgba(var(--bs-primary-rgb), .12); color: #fbbf24; }
 .sentinel-ai-body textarea { width: 100%; padding: .65rem; border: 1px solid rgba(148,163,184,.22); border-radius: .45rem; background: rgba(2,6,23,.4); color: inherit; resize: vertical; }
 .sentinel-ai-result { display: grid; gap: .6rem; padding: .75rem; border: 1px solid rgba(148,163,184,.18); border-radius: .5rem; background: rgba(15,23,42,.42); }
@@ -1489,7 +1504,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-ai-streaming pre::after { content: "▌"; animation: sentinelAiCaretBlink 1s step-end infinite; color: #fbbf24; }
 @keyframes sentinelAiCaretBlink { 50% { opacity: 0; } }
 .sentinel-ai-citations { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; }
-.sentinel-ai-citations .badge { font-weight: 500; font-size: .68rem; }
+.sentinel-ai-citations .badge { font-weight: 500; font-size: .75rem; }
 .sentinel-ai-history summary { color: #a8a29e; font-size: .75rem; cursor: pointer; }
 .sentinel-ai-history > div { display: flex; justify-content: space-between; padding: .3rem 0; color: #d6d3d1; font-size: .75rem; }
 .sentinel-ai-history small { color: #78716c; }
@@ -1524,7 +1539,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     height: 1.5rem;
     border-radius: 50%;
     color: #fff;
-    font-size: 0.7rem;
+    font-size: .75rem;
     font-weight: 700;
     flex-shrink: 0;
 }
@@ -1593,7 +1608,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .wiki-block-discussion.has-discussions {
     background: #eef2ff;
     color: #4f46e5;
-    font-size: 0.72rem;
+    font-size: .75rem;
     font-weight: 600;
 }
 .wiki-block-handle {
@@ -1627,7 +1642,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     padding: 0.15rem 0.1rem;
     line-height: 1.5;
 }
-.wiki-block-content:empty::before {
+.wiki-block-content:empty:focus::before {
     content: attr(data-placeholder);
     color: #adb5bd;
     pointer-events: none;
@@ -1759,7 +1774,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .wiki-editor-menu-group {
     padding: .35rem .5rem;
     color: var(--gws-text-soft);
-    font-size: .65rem;
+    font-size: .75rem;
 }
 .wiki-editor-menu-hint {
     border-bottom: 1px solid var(--gws-panel-border);
@@ -1815,7 +1830,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .wiki-editor-menu-description {
     overflow: hidden;
     color: var(--gws-text-soft);
-    font-size: .67rem;
+    font-size: .75rem;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -1852,7 +1867,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 4px;
     background: transparent;
     color: var(--gws-sidebar-text);
-    font-size: .72rem;
+    font-size: .75rem;
 }
 
 .wiki-inline-toolbar button:hover,
@@ -1903,7 +1918,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .wiki-ai-menu-status {
     padding: .34rem .45rem;
     color: var(--sentinel-faint, var(--gws-text-soft));
-    font-size: .72rem;
+    font-size: .75rem;
 }
 .wiki-ai-menu-status.is-error { color: #f87171; }
 
@@ -1929,7 +1944,7 @@ audio.wiki-embed-media { max-width: 100%; }
     grid-column: 1 / -1;
     padding: .4rem .45rem .2rem;
     color: var(--sentinel-faint, var(--gws-text-soft));
-    font-size: .65rem;
+    font-size: .75rem;
     font-weight: 700;
     letter-spacing: .04em;
     text-transform: uppercase;
@@ -1956,7 +1971,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 1px solid rgba(214, 211, 209, .16);
     border-radius: 4px;
     color: var(--gws-sidebar-text);
-    font-size: .66rem;
+    font-size: .75rem;
     font-weight: 750;
 }
 
@@ -2088,7 +2103,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 .wiki-notion-badge {
     flex-shrink: 0;
-    font-size: 0.62rem;
+    font-size: .75rem;
     line-height: 1;
     padding: 0.2rem 0.32rem;
 }
@@ -2121,7 +2136,7 @@ audio.wiki-embed-media { max-width: 100%; }
     gap: 0.35rem;
     padding: 0.25rem 0.75rem;
     color: #6c757d;
-    font-size: 0.7rem;
+    font-size: .75rem;
     font-weight: 700;
     letter-spacing: 0.04em;
     text-transform: uppercase;
@@ -2192,7 +2207,7 @@ audio.wiki-embed-media { max-width: 100%; }
     background: rgba(255,255,255,.65);
 }
 .sentinel-sync-metrics strong { font-size: 1rem; }
-.sentinel-sync-metrics small { color: var(--sentinel-muted); font-size: .68rem; }
+.sentinel-sync-metrics small { color: var(--sentinel-muted); font-size: .75rem; }
 .sentinel-discussion-thread {
     padding: 1rem;
 }
@@ -2231,7 +2246,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 50%;
     background: #4f46e5;
     color: #fff;
-    font-size: 0.65rem;
+    font-size: .75rem;
     font-weight: 700;
 }
 .sentinel-row-page-host {
@@ -2312,7 +2327,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 .sentinel-row-page-mode-label {
     color: var(--sentinel-faint);
-    font-size: .68rem;
+    font-size: .75rem;
     text-transform: uppercase;
     letter-spacing: .06em;
 }
@@ -2350,7 +2365,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-row-page-property-name {
     flex: 0 0 8rem;
     color: var(--sentinel-faint);
-    font-size: .74rem;
+    font-size: .75rem;
 }
 .sentinel-row-page-property-value {
     flex: 1;
@@ -2522,7 +2537,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-eyebrow {
     margin-bottom: .06rem;
     color: var(--gws-sidebar-accent);
-    font-size: .64rem;
+    font-size: .75rem;
     font-weight: 800;
     letter-spacing: .11em;
     text-transform: uppercase;
@@ -2535,14 +2550,14 @@ audio.wiki-embed-media { max-width: 100%; }
     letter-spacing: -.025em;
 }
 
-.sentinel-workspace-header h1 i { margin-left: .2rem; color: var(--sentinel-faint); font-size: .55rem; }
+.sentinel-workspace-header h1 i { margin-left: .2rem; color: var(--sentinel-faint); font-size: .75rem; }
 
 .sentinel-workspace-status {
     display: inline-flex;
     align-items: center;
     gap: .4rem;
     color: var(--sentinel-muted);
-    font-size: .72rem;
+    font-size: .75rem;
     font-weight: 600;
 }
 
@@ -2684,7 +2699,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 .sentinel-nav-toolbar .fw-semibold { font-size: .78rem; }
-.sentinel-nav-toolbar small { margin-top: .05rem; color: var(--sentinel-faint); font-size: .65rem; }
+.sentinel-nav-toolbar small { margin-top: .05rem; color: var(--sentinel-faint); font-size: .75rem; }
 .sentinel-nav-toolbar .btn { width: 1.85rem; min-height: 1.85rem; padding: 0; border: 0; }
 
 .sentinel-nav-search {
@@ -2697,7 +2712,7 @@ audio.wiki-embed-media { max-width: 100%; }
     min-height: 2rem;
     border-color: transparent;
     background: var(--sentinel-hover) !important;
-    font-size: .74rem;
+    font-size: .75rem;
 }
 
 .sentinel-nav-search .input-group:focus-within {
@@ -2708,12 +2723,12 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-search-scope {
     margin-top: .35rem;
     color: var(--sentinel-faint);
-    font-size: .6rem;
+    font-size: .75rem;
     line-height: 1.35;
 }
 
 .sentinel-search-filters { display: flex; gap: .4rem; padding: .5rem .75rem; border-bottom: 1px solid var(--sentinel-border, rgba(214,211,209,.14)); }
-.sentinel-search-filters select { flex: 1; font-size: .72rem; }
+.sentinel-search-filters select { flex: 1; font-size: .75rem; }
 
 .sentinel-tree-scroll {
     flex: 1 1 auto;
@@ -2735,7 +2750,7 @@ audio.wiki-embed-media { max-width: 100%; }
     padding: .35rem .65rem .25rem .75rem;
     background: var(--sentinel-sidebar);
     color: var(--sentinel-faint);
-    font-size: .62rem;
+    font-size: .75rem;
     font-weight: 650;
     letter-spacing: .035em;
 }
@@ -2825,7 +2840,7 @@ audio.wiki-embed-media { max-width: 100%; }
     height: 1.5rem;
     border-radius: 4px;
     color: var(--sentinel-faint);
-    font-size: .58rem;
+    font-size: .75rem;
 }
 .sentinel-workspace .wiki-tree-toggle:hover,
 .sentinel-workspace .wiki-tree-toggle:focus-visible {
@@ -2848,7 +2863,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .sentinel-nav-heading {
     padding: .4rem .55rem .25rem;
     color: var(--sentinel-faint);
-    font-size: .61rem;
+    font-size: .75rem;
     letter-spacing: .09em;
 }
 
@@ -2857,7 +2872,7 @@ audio.wiki-embed-media { max-width: 100%; }
     padding: .3rem .55rem;
     border-radius: 6px;
     color: var(--gws-sidebar-text);
-    font-size: .74rem;
+    font-size: .75rem;
 }
 
 .sentinel-workspace .sentinel-nav-item:hover { background: var(--sentinel-hover); }
@@ -2888,7 +2903,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 1px solid var(--sentinel-border);
     border-radius: 4px;
     color: var(--gws-text-strong);
-    font-size: .63rem;
+    font-size: .75rem;
     font-weight: 800;
 }
 
@@ -2916,7 +2931,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 999px;
     background: var(--sentinel-hover, var(--gws-panel-bg-2));
     color: var(--sentinel-muted, var(--gws-text-soft));
-    font-size: .68rem;
+    font-size: .75rem;
     font-weight: 700;
 }
 
@@ -2953,14 +2968,14 @@ audio.wiki-embed-media { max-width: 100%; }
 
 .sentinel-template-card-icon { font-size: 1.4rem; line-height: 1; }
 .sentinel-template-card-name { color: var(--gws-text-strong); font-size: .8rem; font-weight: 650; }
-.sentinel-template-card-meta { color: var(--sentinel-faint, var(--gws-text-soft)); font-size: .68rem; }
+.sentinel-template-card-meta { color: var(--sentinel-faint, var(--gws-text-soft)); font-size: .75rem; }
 .sentinel-template-card-actions { display: flex; align-items: center; gap: .35rem; }
 
 .sentinel-notion-import-details { margin-top: .9rem; padding-top: .75rem; border-top: 1px solid var(--sentinel-border); }
 .sentinel-notion-import-details > summary {
     margin-bottom: .5rem;
     color: var(--sentinel-muted, var(--gws-text-soft));
-    font-size: .72rem;
+    font-size: .75rem;
     font-weight: 700;
     letter-spacing: .03em;
     text-transform: uppercase;
@@ -3011,7 +3026,7 @@ audio.wiki-embed-media { max-width: 100%; }
     font-weight: 650;
 }
 
-.sentinel-document-context i { color: var(--sentinel-faint); font-size: .58rem; }
+.sentinel-document-context i { color: var(--sentinel-faint); font-size: .75rem; }
 .sentinel-document-breadcrumb-root { color: var(--gws-sidebar-accent); }
 .sentinel-document-context button {
     display: inline-flex;
@@ -3105,7 +3120,7 @@ audio.wiki-embed-media { max-width: 100%; }
 
 .sentinel-context-heading > div { display: flex; flex-direction: column; min-width: 0; }
 .sentinel-context-heading strong { color: var(--gws-text-strong); font-size: .75rem; }
-.sentinel-context-heading span { color: var(--sentinel-faint); font-size: .6rem; }
+.sentinel-context-heading span { color: var(--sentinel-faint); font-size: .75rem; }
 .sentinel-context-heading .sentinel-word-count { margin-top: .15rem; }
 .sentinel-context-heading button,
 .sentinel-context-rail-button {
@@ -3142,14 +3157,14 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-context-rail-button {
     margin: .55rem auto;
 }
-.sentinel-context-rail-button span { font-size: .58rem; }
+.sentinel-context-rail-button span { font-size: .75rem; }
 
 .sentinel-editing-state {
     padding: .2rem .55rem;
     border: 1px solid var(--sentinel-border);
     border-radius: 999px;
     color: var(--sentinel-muted);
-    font-size: .64rem;
+    font-size: .75rem;
     font-weight: 700;
     letter-spacing: .03em;
     white-space: nowrap;
@@ -3187,7 +3202,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-tool-btn-label {
     width: auto;
     padding: 0 .6rem;
-    font-size: .74rem;
+    font-size: .75rem;
     font-weight: 600;
 }
 
@@ -3238,7 +3253,7 @@ audio.wiki-embed-media { max-width: 100%; }
     padding: .28rem .55rem;
     border-color: rgba(255, 255, 255, .14);
     background: rgba(28, 25, 23, .86);
-    font-size: .68rem;
+    font-size: .75rem;
     -webkit-backdrop-filter: blur(8px);
     backdrop-filter: blur(8px);
 }
@@ -3275,7 +3290,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-style-menu-heading {
     padding: .4rem .9rem .2rem;
     color: var(--gws-text-soft);
-    font-size: .65rem;
+    font-size: .75rem;
     font-weight: 700;
     letter-spacing: .05em;
     text-transform: uppercase;
@@ -3304,7 +3319,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 5px;
     background: transparent;
     color: var(--sentinel-muted);
-    font-size: .68rem;
+    font-size: .75rem;
 }
 
 .sentinel-page-affordances button:hover { background: var(--sentinel-hover); color: var(--gws-sidebar-text); }
@@ -3381,14 +3396,14 @@ audio.wiki-embed-media { max-width: 100%; }
     padding: .2rem .4rem;
     border-radius: 4px;
     color: var(--sentinel-faint);
-    font-size: .68rem;
+    font-size: .75rem;
     cursor: pointer;
     list-style: none;
 }
 
 .sentinel-page-properties > summary::-webkit-details-marker { display: none; }
 .sentinel-page-properties > summary:hover { background: var(--sentinel-hover); color: var(--sentinel-muted); }
-.sentinel-page-properties > summary i:last-child { font-size: .58rem; transition: transform .12s ease; }
+.sentinel-page-properties > summary i:last-child { font-size: .75rem; transition: transform .12s ease; }
 .sentinel-page-properties[open] > summary i:last-child { transform: rotate(90deg); }
 
 .sentinel-properties {
@@ -3413,7 +3428,7 @@ audio.wiki-embed-media { max-width: 100%; }
     gap: .5rem;
     margin: 0;
     color: var(--sentinel-muted);
-    font-size: .73rem;
+    font-size: .75rem;
 }
 
 .sentinel-property-row > label i { width: .9rem; color: var(--sentinel-faint); text-align: center; }
@@ -3441,7 +3456,7 @@ audio.wiki-embed-media { max-width: 100%; }
     gap: .5rem;
     padding: .3rem .15rem .7rem;
     color: var(--sentinel-faint);
-    font-size: .68rem;
+    font-size: .75rem;
     opacity: .35;
     transition: opacity .12s ease;
 }
@@ -3451,7 +3466,7 @@ audio.wiki-embed-media { max-width: 100%; }
 
 .sentinel-editor-hint code {
     color: var(--gws-sidebar-text);
-    font-size: .68rem;
+    font-size: .75rem;
 }
 
 .sentinel-workspace .wiki-block-editor {
@@ -3479,7 +3494,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-block-body { width: 100%; }
 .sentinel-workspace .wiki-block-content { min-height: 1.55rem; line-height: 1.55; caret-color: var(--gws-sidebar-accent); }
 .sentinel-workspace .wiki-block-content:focus { border-radius: 3px; background: rgba(255, 255, 255, .018); }
-.sentinel-workspace .wiki-block-content:empty::before { color: #57534e; }
+.sentinel-workspace .wiki-block-content:empty:focus::before { color: #57534e; }
 .sentinel-workspace .wiki-block-content a { color: var(--sentinel-link); text-decoration-color: rgba(251, 191, 36, .45); text-underline-offset: 2px; }
 .sentinel-workspace .wiki-block-content a[href^="wikilink:"] { cursor: pointer; }
 .sentinel-workspace .wiki-page-link-card {
@@ -3646,7 +3661,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-native-table-actions { display: flex; gap: .25rem; padding-top: .3rem; opacity: 0; transition: opacity .12s ease; }
 .sentinel-workspace .wiki-native-table-editor:hover .wiki-native-table-actions,
 .sentinel-workspace .wiki-native-table-editor:focus-within .wiki-native-table-actions { opacity: 1; }
-.sentinel-workspace .wiki-native-table-actions button { min-height: 1.65rem; padding: .15rem .4rem; border: 0; border-radius: 4px; background: transparent; color: var(--sentinel-muted); font-size: .65rem; }
+.sentinel-workspace .wiki-native-table-actions button { min-height: 1.65rem; padding: .15rem .4rem; border: 0; border-radius: 4px; background: transparent; color: var(--sentinel-muted); font-size: .75rem; }
 .sentinel-workspace .wiki-native-table-actions button:hover { background: var(--sentinel-hover); color: var(--gws-text-strong); }
 .sentinel-workspace .wiki-block[data-block-type="button"] .wiki-block-content { display: inline-block; min-width: 7rem; width: auto; padding: .5rem .85rem; border-radius: .45rem; background: var(--gws-sidebar-accent); color: var(--gws-accent-contrast); font-weight: 700; text-align: center; }
 .sentinel-workspace .wiki-block[data-block-type="synced_block"] .wiki-block-body { padding: .7rem .85rem; border: 1px solid rgba(var(--bs-primary-rgb), .36); border-left-width: 3px; background: rgba(var(--bs-primary-rgb), .055); }
@@ -3794,7 +3809,7 @@ audio.wiki-embed-media { max-width: 100%; }
     outline: 0;
     background: transparent;
     color: var(--sentinel-text);
-    font-size: .72rem;
+    font-size: .75rem;
     font-weight: 650;
 }
 .sentinel-workspace .wiki-tab-title:hover,
@@ -3971,7 +3986,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 4px;
     background: var(--gws-panel-bg);
     color: var(--sentinel-muted);
-    font-size: .65rem;
+    font-size: .75rem;
     opacity: 0;
 }
 
@@ -4009,13 +4024,13 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 5px;
     background: transparent;
     color: var(--gws-sidebar-text);
-    font-size: .74rem;
+    font-size: .75rem;
     text-align: left;
 }
 
 .sentinel-workspace .wiki-linked-database-option:hover,
 .sentinel-workspace .wiki-linked-database-option:focus-visible { outline: 0; background: var(--sentinel-hover); }
-.sentinel-workspace .wiki-linked-database-empty { display: block; padding: .65rem; color: var(--sentinel-faint); font-size: .7rem; }
+.sentinel-workspace .wiki-linked-database-empty { display: block; padding: .65rem; color: var(--sentinel-faint); font-size: .75rem; }
 
 .sentinel-workspace .wiki-linked-view-chooser {
     overflow: hidden;
@@ -4050,7 +4065,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 5px;
     background: transparent;
     color: var(--gws-sidebar-text);
-    font-size: .74rem;
+    font-size: .75rem;
     text-align: left;
 }
 .sentinel-workspace .wiki-linked-view-option:hover,
@@ -4097,7 +4112,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 1px solid var(--sentinel-border);
     border-radius: 999px;
     color: var(--sentinel-muted);
-    font-size: .62rem;
+    font-size: .75rem;
     font-weight: 600;
     white-space: nowrap;
 }
@@ -4114,7 +4129,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 4px;
     background: transparent;
     color: var(--sentinel-muted);
-    font-size: .66rem;
+    font-size: .75rem;
 }
 .sentinel-workspace .wiki-inline-database-actions button:hover,
 .sentinel-workspace .wiki-inline-database-footer button:hover { background: var(--sentinel-hover); color: var(--gws-text-strong); }
@@ -4132,7 +4147,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 4px;
     background: transparent;
     color: var(--sentinel-muted);
-    font-size: .7rem;
+    font-size: .75rem;
 }
 .sentinel-workspace .wiki-inline-database-view:hover,
 .sentinel-workspace .wiki-inline-database-view.is-active { background: var(--sentinel-hover); color: var(--gws-text-strong); }
@@ -4167,7 +4182,7 @@ audio.wiki-embed-media { max-width: 100%; }
     gap: .5rem;
     padding: .2rem .25rem .55rem;
     color: var(--gws-sidebar-text);
-    font-size: .7rem;
+    font-size: .75rem;
     font-weight: 650;
 }
 .sentinel-workspace .wiki-inline-board-heading span:last-child { color: var(--sentinel-faint); font-weight: 500; }
@@ -4194,7 +4209,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 6px;
     background: var(--sentinel-canvas-raised);
     color: var(--gws-text-strong);
-    font-size: .72rem;
+    font-size: .75rem;
     font-weight: 600;
     line-height: 1.4;
     text-align: left;
@@ -4208,7 +4223,7 @@ audio.wiki-embed-media { max-width: 100%; }
     display: block;
     margin-top: .4rem;
     color: var(--sentinel-muted);
-    font-size: .64rem;
+    font-size: .75rem;
     font-weight: 500;
 }
 .sentinel-workspace .wiki-inline-board-card:hover { border-color: var(--sentinel-border-strong); background: var(--sentinel-hover); }
@@ -4220,7 +4235,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 5px;
     background: transparent;
     color: var(--sentinel-muted);
-    font-size: .7rem;
+    font-size: .75rem;
     font-weight: 600;
     text-align: left;
 }
@@ -4241,7 +4256,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 5px;
     background: var(--sentinel-canvas-raised);
     color: var(--gws-text-strong);
-    font-size: .72rem;
+    font-size: .75rem;
     outline: none;
 }
 .sentinel-workspace .wiki-inline-board-composer input:focus {
@@ -4256,7 +4271,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 4px;
     background: transparent;
     color: var(--sentinel-muted);
-    font-size: .65rem;
+    font-size: .75rem;
 }
 .sentinel-workspace .wiki-inline-board-composer button:first-child {
     border-color: var(--gws-sidebar-accent);
@@ -4278,7 +4293,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-inline-database-table th {
     padding: .4rem .55rem;
     color: var(--sentinel-muted);
-    font-size: .66rem;
+    font-size: .75rem;
     font-weight: 650;
     text-align: left;
 }
@@ -4294,7 +4309,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border: 0;
     background: transparent;
     color: var(--sentinel-faint);
-    font-size: .72rem;
+    font-size: .75rem;
 }
 .sentinel-workspace .wiki-inline-database-open-row:hover { background: var(--sentinel-hover); color: var(--gws-text-strong); }
 
@@ -4306,17 +4321,17 @@ audio.wiki-embed-media { max-width: 100%; }
     outline: 0;
     background: transparent;
     color: var(--gws-sidebar-text);
-    font-size: .72rem;
+    font-size: .75rem;
 }
 .sentinel-workspace .wiki-inline-cell-control:hover,
 .sentinel-workspace .wiki-inline-cell-control:focus { background: var(--sentinel-hover); }
 .sentinel-workspace .wiki-inline-cell-control option { background: var(--sentinel-canvas-raised); }
 .sentinel-workspace select.wiki-inline-cell-control[multiple] { min-height: 3.4rem; padding: .2rem; }
 .sentinel-workspace .wiki-inline-database-table input[type="checkbox"] { margin-left: .55rem; accent-color: var(--gws-sidebar-accent); }
-.sentinel-workspace .wiki-inline-cell-readonly { display: block; padding: .5rem; color: var(--sentinel-faint); font-size: .7rem; }
+.sentinel-workspace .wiki-inline-cell-readonly { display: block; padding: .5rem; color: var(--sentinel-faint); font-size: .75rem; }
 .sentinel-workspace .wiki-inline-database-footer { min-height: 2.25rem; padding: .25rem .45rem; }
 .sentinel-workspace .wiki-inline-database-loading,
-.sentinel-workspace .wiki-inline-database-error { padding: 1rem; color: var(--sentinel-muted); font-size: .72rem; }
+.sentinel-workspace .wiki-inline-database-error { padding: 1rem; color: var(--sentinel-muted); font-size: .75rem; }
 .sentinel-workspace .wiki-inline-database-error { color: #fca5a5; }
 
 /* Read-only renderer counterpart for linked-database blocks. */
@@ -4350,7 +4365,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-top: 1px solid var(--sentinel-border);
 }
 
-.sentinel-editor-actions .btn { min-height: 2.15rem; padding: .35rem .7rem; font-size: .73rem; }
+.sentinel-editor-actions .btn { min-height: 2.15rem; padding: .35rem .7rem; font-size: .75rem; }
 
 .sentinel-support-panel,
 .sentinel-main > .card {
@@ -4405,7 +4420,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-db-calendar-weekdays,
 .sentinel-db-calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(7.25rem, 1fr)); min-width: 52rem; }
 .sentinel-db-calendar-weekdays { border-bottom: 1px solid var(--sentinel-border); background: var(--sentinel-sidebar); }
-.sentinel-db-calendar-weekdays span { padding: .42rem .55rem; color: var(--sentinel-faint); font-size: .62rem; font-weight: 700; text-transform: uppercase; }
+.sentinel-db-calendar-weekdays span { padding: .42rem .55rem; color: var(--sentinel-faint); font-size: .75rem; font-weight: 700; text-transform: uppercase; }
 .sentinel-db-calendar-day {
     min-height: 7.25rem;
     padding: .38rem;
@@ -4417,7 +4432,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-db-calendar-day:nth-last-child(-n + 7) { border-bottom: 0; }
 .sentinel-db-calendar-day.is-outside { background: rgba(0, 0, 0, .08); opacity: .55; }
 .sentinel-db-calendar-day.is-today { box-shadow: inset 0 0 0 1px rgba(var(--bs-primary-rgb), .55); }
-.sentinel-db-calendar-day-header { display: flex; align-items: center; justify-content: space-between; min-height: 1.5rem; color: var(--sentinel-muted); font-size: .67rem; }
+.sentinel-db-calendar-day-header { display: flex; align-items: center; justify-content: space-between; min-height: 1.5rem; color: var(--sentinel-muted); font-size: .75rem; }
 .sentinel-db-calendar-day.is-today .sentinel-db-calendar-day-header > span {
     display: grid;
     place-items: center;
@@ -4451,14 +4466,14 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 3px;
     background: rgba(var(--bs-primary-rgb), .08);
     color: var(--gws-sidebar-text);
-    font-size: .65rem;
+    font-size: .75rem;
     text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 .sentinel-db-calendar-item:hover { background: rgba(var(--bs-primary-rgb), .15); color: var(--gws-text-strong); }
 .sentinel-db-calendar-undated { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem; margin-top: .75rem; }
-.sentinel-db-calendar-undated button { padding: .28rem .48rem; border: 1px solid var(--sentinel-border); border-radius: 5px; background: transparent; color: var(--sentinel-muted); font-size: .67rem; }
+.sentinel-db-calendar-undated button { padding: .28rem .48rem; border: 1px solid var(--sentinel-border); border-radius: 5px; background: transparent; color: var(--sentinel-muted); font-size: .75rem; }
 .sentinel-db-calendar-undated button:hover { background: var(--sentinel-hover); color: var(--gws-text-strong); }
 .sentinel-workspace .sentinel-search-highlight { background: rgba(var(--bs-primary-rgb), .3); color: #fef3c7; }
 .sentinel-workspace .wiki-mention { background: rgba(var(--bs-primary-rgb), .12); color: var(--sentinel-link); }
@@ -4469,14 +4484,14 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-command-palette-input { display: flex; align-items: center; gap: .6rem; padding: .9rem 1.1rem; border-bottom: 1px solid rgba(214,211,209,.12); color: #a8a29e; }
 .sentinel-command-palette-input input { flex: 1; border: 0; background: transparent; color: var(--gws-text-strong); font-size: 1rem; outline: none; }
 .sentinel-command-palette-input input::placeholder { color: #78716c; }
-.sentinel-command-palette-input kbd { padding: .1rem .4rem; border: 1px solid rgba(214,211,209,.25); border-radius: .3rem; color: #a8a29e; font-size: .72rem; }
+.sentinel-command-palette-input kbd { padding: .1rem .4rem; border: 1px solid rgba(214,211,209,.25); border-radius: .3rem; color: #a8a29e; font-size: .75rem; }
 .sentinel-command-palette-results { overflow-y: auto; padding: .4rem; }
 .sentinel-command-palette-empty { padding: 1.5rem 1rem; text-align: center; color: #78716c; font-size: .85rem; }
 .sentinel-command-palette-item { display: flex; align-items: center; gap: .7rem; width: 100%; padding: .55rem .65rem; border: 0; border-radius: .55rem; background: transparent; color: var(--gws-text-strong); text-align: left; }
 .sentinel-command-palette-item i { flex: 0 0 auto; color: #78716c; }
 .sentinel-command-palette-item span:not(.badge) { flex: 1; min-width: 0; display: grid; gap: .05rem; }
 .sentinel-command-palette-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.sentinel-command-palette-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a8a29e; font-size: .74rem; }
+.sentinel-command-palette-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #a8a29e; font-size: .75rem; }
 .sentinel-command-palette-item.is-selected, .sentinel-command-palette-item:hover { background: rgba(var(--bs-primary-rgb), .14); }
 .sentinel-command-palette-item .badge { flex: 0 0 auto; }
 .sentinel-command-palette-filters { display: flex; gap: .5rem; padding: .55rem .9rem; border-bottom: 1px solid rgba(214,211,209,.1); }
@@ -4520,7 +4535,7 @@ audio.wiki-embed-media { max-width: 100%; }
     gap: .75rem;
     margin: .85rem 0;
     color: var(--sentinel-faint, #78716c);
-    font-size: .68rem;
+    font-size: .75rem;
     font-weight: 700;
     text-transform: uppercase;
 }
@@ -4683,7 +4698,7 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 .sentinel-gpt-brand strong { font-size: 1rem; line-height: 1.2; }
-.sentinel-gpt-brand small { color: var(--gws-text-soft); font-size: .65rem; }
+.sentinel-gpt-brand small { color: var(--gws-text-soft); font-size: .75rem; }
 
 .sentinel-gpt-shield,
 .sentinel-gpt-avatar {
@@ -4762,7 +4777,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-section-label {
     padding: .7rem .65rem .35rem;
     color: #756f6a;
-    font-size: .63rem;
+    font-size: .75rem;
     font-weight: 750;
     letter-spacing: .08em;
     text-transform: uppercase;
@@ -4776,7 +4791,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-page-tree details { margin: .05rem 0; }
 .sentinel-gpt-page-tree summary { padding: .4rem .4rem; cursor: pointer; list-style: none; }
 .sentinel-gpt-page-tree summary::-webkit-details-marker { display: none; }
-.sentinel-gpt-page-tree summary > i { color: #6f6964; font-size: .58rem; transition: transform .12s ease; }
+.sentinel-gpt-page-tree summary > i { color: #6f6964; font-size: .75rem; transition: transform .12s ease; }
 .sentinel-gpt-page-tree details[open] > summary > i { transform: rotate(90deg); }
 .sentinel-gpt-page-tree summary a { min-width: 0; overflow: hidden; color: inherit; text-overflow: ellipsis; white-space: nowrap; text-decoration: none; }
 .sentinel-gpt-child-page { margin-left: 1.45rem; padding: .35rem .5rem; }
@@ -4831,9 +4846,9 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-history-item.active { border-color: #3d3834; background: #2a2724; color: #fff; box-shadow: inset 2px 0 var(--gws-sidebar-accent); }
 .sentinel-gpt-history-item > i { color: #8d8782; }
 .sentinel-gpt-history-item > span { display: flex; min-width: 0; flex-direction: column; }
-.sentinel-gpt-history-item strong { overflow: hidden; font-size: .74rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.sentinel-gpt-history-item small { margin-top: .1rem; color: #706a66; font-size: .62rem; }
-.sentinel-gpt-history-empty { padding: 2rem .6rem; color: #7c7671; font-size: .73rem; text-align: center; }
+.sentinel-gpt-history-item strong { overflow: hidden; font-size: .75rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.sentinel-gpt-history-item small { margin-top: .1rem; color: #706a66; font-size: .75rem; }
+.sentinel-gpt-history-empty { padding: 2rem .6rem; color: #7c7671; font-size: .75rem; text-align: center; }
 
 .sentinel-gpt-history-row { position: relative; }
 .sentinel-gpt-history-row .sentinel-gpt-history-item { padding-right: 2.1rem; }
@@ -4883,15 +4898,15 @@ audio.wiki-embed-media { max-width: 100%; }
 
 .sentinel-gpt-chat-header > div:first-child { display: flex; align-items: baseline; gap: .7rem; min-width: 0; }
 .sentinel-gpt-chat-header h1 { margin: 0; color: var(--gws-text-strong); font-size: 1rem; font-weight: 750; }
-.sentinel-gpt-chat-header > div:first-child > span { display: inline-flex; align-items: center; gap: .35rem; color: #85807b; font-size: .68rem; }
+.sentinel-gpt-chat-header > div:first-child > span { display: inline-flex; align-items: center; gap: .35rem; color: #85807b; font-size: .75rem; }
 .sentinel-gpt-chat-header > div:first-child > span i { width: .42rem; height: .42rem; border-radius: 50%; background: #78716c; }
 .sentinel-gpt-chat-header > div:first-child > span.is-connected { color: #65b96d; }
 .sentinel-gpt-chat-header > div:first-child > span.is-connected i { background: #55b45f; box-shadow: 0 0 0 3px rgba(85, 180, 95, .1); }
 
 .sentinel-gpt-header-actions { display: flex; align-items: center; gap: .4rem; }
-.sentinel-gpt-web-status { display: inline-flex; align-items: center; gap: .32rem; padding: .34rem .5rem; border: 1px solid #34302d; border-radius: 8px; color: #77716c; font-size: .64rem; }
+.sentinel-gpt-web-status { display: inline-flex; align-items: center; gap: .32rem; padding: .34rem .5rem; border: 1px solid #34302d; border-radius: 8px; color: #77716c; font-size: .75rem; }
 .sentinel-gpt-web-status.is-ready { border-color: rgba(74, 222, 128, .2); color: #65b96d; }
-.sentinel-gpt-model-pill { display: inline-flex; align-items: center; gap: .4rem; max-width: 15rem; padding: .38rem .6rem; border: 1px solid #34302d; border-radius: 8px; color: #aaa49f; font-size: .68rem; }
+.sentinel-gpt-model-pill { display: inline-flex; align-items: center; gap: .4rem; max-width: 15rem; padding: .38rem .6rem; border: 1px solid #34302d; border-radius: 8px; color: #aaa49f; font-size: .75rem; }
 .sentinel-gpt-header-actions button,
 .sentinel-gpt-composer > button { display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; color: #97918c; }
 .sentinel-gpt-header-actions button { width: 2rem; height: 2rem; border-radius: 7px; }
@@ -4917,10 +4932,10 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-performance-setting { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: .75rem; padding-top: .45rem; border-top: 1px solid #302c29; }
 .sentinel-gpt-performance-setting > div:first-child { display: flex; flex-direction: column; min-width: 12rem; }
 .sentinel-gpt-performance-metrics { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .35rem; }
-.sentinel-gpt-performance-metrics span { padding: .3rem .45rem; border: 1px solid #37312d; border-radius: 7px; background: #211e1c; color: #817a75; font-size: .59rem; white-space: nowrap; }
+.sentinel-gpt-performance-metrics span { padding: .3rem .45rem; border: 1px solid #37312d; border-radius: 7px; background: #211e1c; color: #817a75; font-size: .75rem; white-space: nowrap; }
 .sentinel-gpt-performance-metrics b { color: #e7e2de; font-variant-numeric: tabular-nums; font-weight: 700; }
-.sentinel-gpt-settings strong { font-size: .72rem; }
-.sentinel-gpt-settings small { color: #7f7974; font-size: .61rem; }
+.sentinel-gpt-settings strong { font-size: .75rem; }
+.sentinel-gpt-settings small { color: #7f7974; font-size: .75rem; }
 .sentinel-gpt-settings select,
 .sentinel-gpt-model-install input {
     min-height: 2.2rem;
@@ -4929,13 +4944,13 @@ audio.wiki-embed-media { max-width: 100%; }
     outline: none;
     background: #24201e;
     color: #eeeae7;
-    font-size: .72rem;
+    font-size: .75rem;
 }
 .sentinel-gpt-settings select { padding: 0 .55rem; }
 .sentinel-gpt-model-install { display: flex; min-width: 0; }
 .sentinel-gpt-model-install input { flex: 1; min-width: 0; padding: 0 .6rem; border-radius: 7px 0 0 7px; }
 .sentinel-gpt-model-install button,
-.sentinel-gpt-recheck { min-height: 2.2rem; border: 1px solid #4a3a22; background: rgba(var(--bs-primary-rgb), .1); color: var(--sentinel-link); font-size: .7rem; }
+.sentinel-gpt-recheck { min-height: 2.2rem; border: 1px solid #4a3a22; background: rgba(var(--bs-primary-rgb), .1); color: var(--sentinel-link); font-size: .75rem; }
 .sentinel-gpt-model-install button { border-radius: 0 7px 7px 0; }
 .sentinel-gpt-recheck { border-radius: 7px; }
 
@@ -4971,7 +4986,7 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-gpt-welcome h2 { margin: .1rem 0 .4rem; color: var(--gws-text-strong); font-size: 1.3rem; }
 .sentinel-gpt-welcome p { max-width: 32rem; color: #96908b; font-size: .82rem; line-height: 1.6; }
 .sentinel-gpt-starters { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .9rem; }
-.sentinel-gpt-starters button { padding: .45rem .65rem; border: 1px solid #38332f; border-radius: 999px; background: #1d1a18; color: #aaa49f; font-size: .68rem; }
+.sentinel-gpt-starters button { padding: .45rem .65rem; border: 1px solid #38332f; border-radius: 999px; background: #1d1a18; color: #aaa49f; font-size: .75rem; }
 .sentinel-gpt-starters button:hover { border-color: rgba(var(--bs-primary-rgb), .5); color: var(--sentinel-link); }
 
 .sentinel-gpt-exchange {
@@ -5001,7 +5016,7 @@ audio.wiki-embed-media { max-width: 100%; }
     display: block;
     margin-top: .25rem;
     color: rgba(34, 21, 6, .62);
-    font-size: .58rem;
+    font-size: .75rem;
     text-align: right;
 }
 
@@ -5030,9 +5045,9 @@ audio.wiki-embed-media { max-width: 100%; }
     font-size: .82rem;
     box-shadow: 0 5px 18px rgba(0, 0, 0, .18);
 }
-.sentinel-gpt-assistant-row time { display: block; margin: .22rem .25rem 0; color: #716b66; font-size: .58rem; }
+.sentinel-gpt-assistant-row time { display: block; margin: .22rem .25rem 0; color: #716b66; font-size: .75rem; }
 .sentinel-gpt-response-meta { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; }
-.sentinel-gpt-feedback { display: inline-flex; align-items: center; gap: .2rem; color: #716b66; font-size: .62rem; }
+.sentinel-gpt-feedback { display: inline-flex; align-items: center; gap: .2rem; color: #716b66; font-size: .75rem; }
 .sentinel-gpt-feedback button {
     display: inline-grid;
     place-items: center;
@@ -5070,11 +5085,11 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 6px;
     background: transparent;
     color: #aaa49f;
-    font-size: .62rem;
+    font-size: .75rem;
 }
 .sentinel-gpt-retry:hover { border-color: var(--gws-sidebar-accent); color: #f4a515; }
 .sentinel-gpt-retry:disabled { opacity: .55; cursor: wait; }
-.sentinel-gpt-thinking-copy { display: inline-flex; align-items: center; gap: .55rem; color: #aaa49f; font-size: .72rem; }
+.sentinel-gpt-thinking-copy { display: inline-flex; align-items: center; gap: .55rem; color: #aaa49f; font-size: .75rem; }
 .sentinel-gpt-thinking { display: flex; gap: .25rem; padding: .35rem .1rem; }
 .sentinel-gpt-thinking i { width: .35rem; height: .35rem; border-radius: 50%; background: #918b86; animation: sentinelGptThinking 1.2s infinite ease-in-out; }
 .sentinel-gpt-thinking i:nth-child(2) { animation-delay: .15s; }
@@ -5087,21 +5102,21 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 8px;
     background: #191715;
     color: #9f9994;
-    font-size: .65rem;
+    font-size: .75rem;
 }
 .sentinel-gpt-sources summary { display: flex; align-items: center; gap: .4rem; padding: .45rem .6rem; cursor: pointer; list-style: none; }
 .sentinel-gpt-sources summary::-webkit-details-marker { display: none; }
 .sentinel-gpt-sources > div { display: flex; flex-wrap: wrap; gap: .35rem; padding: 0 .6rem .55rem; }
 .sentinel-gpt-sources a { display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .45rem; border-radius: 6px; background: #24211f; color: #d3cfcb; text-decoration: none; }
 .sentinel-gpt-sources a:hover { color: var(--sentinel-link); }
-.sentinel-gpt-error { display: flex; align-items: flex-start; gap: .45rem; width: min(100%, 58rem); margin: 0 auto 1rem; padding: .65rem .8rem; border: 1px solid rgba(239, 68, 68, .25); border-radius: 8px; background: rgba(127, 29, 29, .12); color: #fca5a5; font-size: .72rem; }
-.sentinel-gpt-notice { display: flex; align-items: center; gap: .45rem; width: min(100%, 58rem); margin: 0 auto 1rem; padding: .65rem .8rem; border: 1px solid #48413c; border-radius: 8px; background: #211e1b; color: #c8c3be; font-size: .72rem; }
-.sentinel-gpt-confirmation { width: min(100%, 58rem); margin: 0 auto 1rem; padding: .8rem; border: 1px solid rgba(var(--bs-primary-rgb), .35); border-radius: 10px; background: rgba(120, 53, 15, .14); color: var(--gws-sidebar-text); font-size: .72rem; }
+.sentinel-gpt-error { display: flex; align-items: flex-start; gap: .45rem; width: min(100%, 58rem); margin: 0 auto 1rem; padding: .65rem .8rem; border: 1px solid rgba(239, 68, 68, .25); border-radius: 8px; background: rgba(127, 29, 29, .12); color: #fca5a5; font-size: .75rem; }
+.sentinel-gpt-notice { display: flex; align-items: center; gap: .45rem; width: min(100%, 58rem); margin: 0 auto 1rem; padding: .65rem .8rem; border: 1px solid #48413c; border-radius: 8px; background: #211e1b; color: #c8c3be; font-size: .75rem; }
+.sentinel-gpt-confirmation { width: min(100%, 58rem); margin: 0 auto 1rem; padding: .8rem; border: 1px solid rgba(var(--bs-primary-rgb), .35); border-radius: 10px; background: rgba(120, 53, 15, .14); color: var(--gws-sidebar-text); font-size: .75rem; }
 .sentinel-gpt-confirmation > div:first-child { display: flex; align-items: flex-start; gap: .55rem; }
 .sentinel-gpt-confirmation > div:first-child > i { color: var(--gws-sidebar-accent); }
 .sentinel-gpt-confirmation span { display: flex; flex-direction: column; gap: .18rem; }
 .sentinel-gpt-confirmation > div:last-child { display: flex; gap: .45rem; margin-top: .65rem; padding-left: 1.4rem; }
-.sentinel-gpt-confirmation button { padding: .38rem .7rem; border: 1px solid #4a433d; border-radius: 7px; background: #24211f; color: var(--gws-sidebar-text); font-size: .68rem; }
+.sentinel-gpt-confirmation button { padding: .38rem .7rem; border: 1px solid #4a433d; border-radius: 7px; background: #24211f; color: var(--gws-sidebar-text); font-size: .75rem; }
 .sentinel-gpt-confirmation button.sentinel-gpt-confirm { border-color: #b56a08; background: #d98208; color: #211305; font-weight: 700; }
 
 .sentinel-gpt-composer-wrap {
@@ -5141,7 +5156,7 @@ audio.wiki-embed-media { max-width: 100%; }
 
 .sentinel-gpt-composer textarea::placeholder { color: #77716c; }
 .sentinel-gpt-composer > button { width: 2.2rem; height: 2.2rem; border-radius: 50%; }
-.sentinel-gpt-composer > button.sentinel-gpt-context-pill { width: auto; height: auto; display: inline-flex; align-items: center; gap: .35rem; padding: .38rem .55rem; border: 1px solid #3b3632; border-radius: 999px; background: transparent; color: #aaa49f; font-size: .62rem; white-space: nowrap; }
+.sentinel-gpt-composer > button.sentinel-gpt-context-pill { width: auto; height: auto; display: inline-flex; align-items: center; gap: .35rem; padding: .38rem .55rem; border: 1px solid #3b3632; border-radius: 999px; background: transparent; color: #aaa49f; font-size: .75rem; white-space: nowrap; }
 .sentinel-gpt-composer > button.sentinel-gpt-context-pill:hover,
 .sentinel-gpt-composer > button.sentinel-gpt-context-pill.is-enabled { border-color: rgba(var(--bs-primary-rgb), .5); background: rgba(var(--bs-primary-rgb), .08); color: var(--sentinel-link); }
 .sentinel-gpt-composer > button.sentinel-gpt-context-pill:disabled { cursor: default; opacity: .65; }
@@ -5157,7 +5172,7 @@ audio.wiki-embed-media { max-width: 100%; }
     0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, .35); }
     50% { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
 }
-.sentinel-gpt-composer-wrap > small { display: block; margin-top: .4rem; color: #625d58; font-size: .57rem; text-align: center; }
+.sentinel-gpt-composer-wrap > small { display: block; margin-top: .4rem; color: #625d58; font-size: .75rem; text-align: center; }
 .sentinel-gpt-character-count { color: #d6a047; font-variant-numeric: tabular-nums; }
 
 /* The portal navigation already consumes 248px. Collapse the workspace column on

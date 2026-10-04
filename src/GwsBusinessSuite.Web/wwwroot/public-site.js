@@ -63,3 +63,26 @@
     });
   }
 }());
+
+// Phone menu buttons (built-in header and custom-header Nav Menus): toggle the menu named by
+// aria-controls, keep aria-expanded in sync, and close on Escape or after following a link.
+(function () {
+  document.addEventListener('click', function (e) {
+    var toggle = e.target.closest && e.target.closest('[data-gws-menu-toggle]');
+    if (toggle) {
+      var menu = document.getElementById(toggle.getAttribute('aria-controls'));
+      if (!menu) return;
+      var open = !menu.classList.contains('is-open');
+      menu.classList.toggle('is-open', open);
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      return;
+    }
+    if (e.target.closest && e.target.closest('.nav-links.is-open a, .gws-nav-menu.is-open a')) {
+      document.querySelectorAll('[data-gws-menu-toggle][aria-expanded="true"]').forEach(function (b) { b.click(); });
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    document.querySelectorAll('[data-gws-menu-toggle][aria-expanded="true"]').forEach(function (b) { b.click(); b.focus(); });
+  });
+}());

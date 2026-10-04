@@ -1756,28 +1756,78 @@
     [JSInvokable]
     public async Task<string?> CreateChildPageFromEditor(string title)
     {
-        var user = await CurrentUserNameAsync();
-        var page = await WikiService.SavePageAsync(new WikiPageEditorModel
-        {
-            Title = string.IsNullOrWhiteSpace(title) ? "Untitled" : title.Trim(),
-            ParentWikiPageId = SelectedPageId
-        }, user);
-        await LoadTreeAsync(selectFirstPage: false);
-        await OpenPageAsync(page.Id);
-        StateHasChanged();
-        return page.Id.ToString();
+        return await CreateChildFromEditorAsync(title, isDatabase: false);
     }
 
     [JSInvokable]
     public async Task<string?> CreateChildDatabaseFromEditor(string title)
     {
-        var user = await CurrentUserNameAsync();
-        var database = await WikiDatabaseService.CreateDatabaseAsync(
-            string.IsNullOrWhiteSpace(title) ? "Untitled Database" : title.Trim(), SelectedPageId, user);
-        await LoadTreeAsync(selectFirstPage: false);
-        await OpenDatabaseAsync(database.Id);
-        StateHasChanged();
-        return database.Id.ToString();
+        return await CreateChildFromEditorAsync(title, isDatabase: true);
+    }
+
+    private async Task<string?> CreateChildFromEditorAsync(string title, bool isDatabase)
+    {
+        try
+        {
+            // Persist a new parent and finish pending edits before creating its child.
+            await FlushAutosaveAsync();
+            if (!Editor.WikiPageId.HasValue)
+            {
+                await PerformAutosaveAsync(CancellationToken.None);
+            }
+            if (!Editor.WikiPageId.HasValue || _hasUnsavedAutosaveChanges)
+            {
+                ErrorMessage = "Save the parent page before creating a child.";
+                return null;
+            }
+
+            var parentId = Editor.WikiPageId.Value;
+            if (!await CanAccessPageOrDatabaseAsync(parentId, isDatabase: false, SentinelAccessLevels.Edit))
+            {
+                ErrorMessage = "You don't have permission to create a child here.";
+                return null;
+            }
+
+            var user = await CurrentUserNameAsync();
+            Guid childId;
+            await _saveLock.WaitAsync();
+            try
+            {
+                if (isDatabase)
+                {
+                    var database = await WikiDatabaseService.CreateDatabaseAsync(
+                        string.IsNullOrWhiteSpace(title) ? "Untitled Database" : title.Trim(), parentId, user);
+                    childId = database.Id;
+                }
+                else
+                {
+                    var page = await WikiService.SavePageAsync(new WikiPageEditorModel
+                    {
+                        Title = string.IsNullOrWhiteSpace(title) ? "Untitled" : title.Trim(),
+                        ParentWikiPageId = parentId
+                    }, user);
+                    childId = page.Id;
+                }
+            }
+            finally
+            {
+                _saveLock.Release();
+            }
+
+            await LoadTreeAsync(selectFirstPage: false);
+            if (isDatabase) await OpenDatabaseAsync(childId);
+            else await OpenPageAsync(childId);
+            return childId.ToString();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Unable to create the child {(isDatabase ? "database" : "page")}. {ex.Message}";
+            return null;
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     // Creates the shared source row a new "Synced block" instance points at (see
@@ -2072,7 +2122,7 @@
         if (SelectedDatabaseId is null && !_blockEditorInitialized)
         {
             _blockEditorRef ??= DotNetObjectReference.Create(this);
-            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=9");
+            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=10");
             await _blockEditorModule.InvokeVoidAsync(
                 "initialize",
                 _blockEditorContainer,
