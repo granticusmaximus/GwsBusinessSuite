@@ -470,6 +470,14 @@ var normalizedPathBase = NormalizePathBase(configuredPathBase);
 // endpoints below) rather than the retired React app on Netlify — distinguished purely by
 // Host header, since admin.gwsapp.net keeps its existing admin-only behavior otherwise.
 string[] publicHosts = ["grantwatson.dev", "www.grantwatson.dev"];
+// Development only: extra hostnames that also serve the public site, so local browsers and the
+// responsive device audit can load it (".dev" is HSTS-preloaded, so a local grantwatson.dev
+// mapping can't work over plain http). Ignored outside Development.
+if (app.Environment.IsDevelopment()
+    && app.Configuration.GetSection("PublicSite:AdditionalHosts").Get<string[]>() is { Length: > 0 } extraPublicHosts)
+{
+    publicHosts = [.. publicHosts, .. extraPublicHosts];
+}
 bool IsPublicHost(HttpContext ctx) => publicHosts.Contains(ctx.Request.Host.Host, StringComparer.OrdinalIgnoreCase);
 
 using (var scope = app.Services.CreateScope())
