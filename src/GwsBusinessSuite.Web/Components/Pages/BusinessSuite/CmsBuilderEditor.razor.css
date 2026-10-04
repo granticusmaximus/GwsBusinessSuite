@@ -951,3 +951,13 @@
     .studio-stage-hint { display: none; }
     .studio-shell { height: calc(100dvh - 5.5rem); min-height: 600px; }
 }
+
+/* Grid items must stop at the panel boundary when the phone layout caps its height. */
+@media (max-width: 767.98px) {
+    .studio-workspace > .studio-panel-left { overflow-y: auto; min-height: 0; }
+}
+
+/* Enlarged header text and a wrapping module dock must leave a usable canvas.
+   Let the workbench scroll when those regions need more than the viewport. */
+.studio-shell { overflow-y: auto; }
+.studio-workspace { min-height: min(24rem, 60dvh); flex-shrink: 0; }

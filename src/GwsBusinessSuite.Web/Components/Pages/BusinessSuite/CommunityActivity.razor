@@ -43,7 +43,7 @@
                             <span>@activityEvent.Verb</span>
                             @if (!string.IsNullOrWhiteSpace(activityEvent.TargetUrl))
                             {
-                                <a href="@activityEvent.TargetUrl">@activityEvent.TargetLabel</a>
+                                <a class="community-activity-target" href="@activityEvent.TargetUrl">@activityEvent.TargetLabel</a>
                             }
                             else
                             {

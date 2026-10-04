@@ -302,7 +302,7 @@ h1:focus { outline: none; }
     border-radius: 5px;
     background: var(--gws-panel-bg-2);
     color: var(--gws-text-soft);
-    font: 600 .7rem var(--gws-font-sans);
+    font: 600 .75rem var(--gws-font-sans);
     box-shadow: none;
 }
 
@@ -2582,7 +2582,7 @@ audio.wiki-embed-media { max-width: 100%; }
     border-radius: 4px;
     background: var(--sentinel-hover);
     color: var(--sentinel-muted);
-    font: 600 .58rem/1.25 var(--gws-font-sans);
+    font: 600 .75rem/1.25 var(--gws-font-sans);
 }
 
 .sentinel-notice {
@@ -3487,7 +3487,9 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-block-gutter {
     position: absolute;
     top: .25rem;
-    left: -3.45rem;
+    left: -.5rem;
+    transform: translateX(-100%);
+    width: max-content;
     z-index: 2;
 }
 
@@ -4633,7 +4635,7 @@ audio.wiki-embed-media { max-width: 100%; }
     /* Notion's compact editor does not reserve a permanent gutter on phones. New blocks
        still come from Enter and slash commands; hiding drag/discussion chrome gives the
        actual document the full viewport width. */
-    .sentinel-workspace .wiki-block-gutter { display: none; }
+    .sentinel-workspace .wiki-block-gutter { position: static; }
     .sentinel-editor-actions { padding-bottom: max(.65rem, env(safe-area-inset-bottom)); }
     .sentinel-support-panel,
     .sentinel-main > .card { width: calc(100% - 1rem); }
@@ -5236,3 +5238,61 @@ audio.wiki-embed-media { max-width: 100%; }
 /* Page editor in Fullscreen (data-gws-focus-toggle): admin chrome is hidden, so the editor
    can use nearly the whole viewport height. */
 .gws-focus-mode .studio-shell { height: calc(100dvh - 1.5rem) !important; }
+
+/* Touch block actions occupy their own row rather than covering the document's
+   checkbox or text when their hit areas grow. */
+@media (pointer: coarse), (max-width: 767.98px) {
+    .sentinel-workspace .wiki-block { flex-direction: column; }
+    .sentinel-workspace .wiki-block-gutter {
+        position: static;
+        transform: none;
+        max-width: 100%;
+        order: 2;
+        opacity: 1;
+        flex-wrap: wrap;
+        gap: .25rem;
+        padding-top: 0;
+    }
+    .sentinel-workspace .wiki-block-discussion { opacity: 1; }
+    .sentinel-workspace .wiki-block-gutter :is(button, .wiki-block-handle) {
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+    }
+    .sentinel-workspace .wiki-block-discussion.has-discussions { width: auto; }
+    .sentinel-workspace .sentinel-tool-btn { min-width: 44px; }
+}
+
+@media (max-width: 575.98px) {
+    .sentinel-document-toolbar { flex-wrap: wrap; gap: .5rem; }
+    .sentinel-document-context { flex: 1 1 100%; }
+    .sentinel-document-toolbar > .d-flex {
+        flex: 1 1 100%;
+        max-width: 100%;
+        flex-wrap: wrap;
+        overflow: visible;
+    }
+}
+
+@media (max-width: 767.98px) {
+    /* A transformed/filtered toolbar would contain a fixed sheet instead of the viewport. */
+    .sentinel-document-toolbar { backdrop-filter: none; -webkit-backdrop-filter: none; }
+    .sentinel-share-popover {
+        position: fixed;
+        top: auto;
+        right: max(8px, env(safe-area-inset-right));
+        bottom: max(8px, env(safe-area-inset-bottom));
+        left: max(8px, env(safe-area-inset-left));
+        width: auto;
+        max-height: calc(100dvh - var(--gws-admin-bar-height) - env(safe-area-inset-top) - 16px);
+        overflow-y: auto;
+        padding: .75rem;
+    }
+    .sentinel-share-popover strong { min-width: 0; overflow-wrap: anywhere; }
+    .sentinel-share-popover .input-group { flex-direction: column; gap: .5rem; }
+    .sentinel-share-popover .input-group > :is(input, select, button) {
+        width: 100%;
+        margin-left: 0;
+        border-radius: .375rem !important;
+    }
+}

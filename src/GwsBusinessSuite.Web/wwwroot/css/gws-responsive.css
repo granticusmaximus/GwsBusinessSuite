@@ -64,8 +64,8 @@ html {
 }
 
 /* Text floor: relative sizes (badges, keyboard hints, <small>) never drop below 12px. */
-:where(.badge, kbd) { font-size: max(12px, 0.75em); }
-:where(small, .small) { font-size: max(12px, 0.875em); }
+.badge, kbd { font-size: max(.75rem, .75em); }
+small, .small { font-size: max(.75rem, .875em); }
 
 /* Media never forces sideways scrolling. :where() keeps specificity at zero so any
    component that sizes its own images still wins. */
@@ -84,7 +84,7 @@ html {
     }
 
     :where(.btn-sm, .form-control-sm, .form-select-sm) {
-        min-height: 40px;
+        min-height: var(--gws-tap);
     }
 
     :where(.btn-close) {
@@ -328,4 +328,90 @@ html {
 
 .gws-sidebar {
     padding-bottom: max(.75rem, var(--gws-safe-bottom));
+}
+
+/* Use normal specificity here: component and Bootstrap compact-control rules otherwise
+   override the zero-specificity defaults above. Inline prose links keep their text flow. */
+@media (pointer: coarse) {
+    .gws-content :is(button, .btn, .form-control, .form-select, .page-link, .nav-link, summary, [role="button"]),
+    .gws-sidebar summary,
+    .gws-admin-bar :is(button, summary),
+    .wp-row-actions :is(a, button) {
+        /* This accessibility minimum must survive compact component styles. */
+        min-width: 44px !important;
+        min-height: 44px !important;
+        flex-shrink: 0;
+    }
+
+    .gws-content .btn-close { width: 44px; height: 44px; padding: 0; }
+    .wp-row-actions { flex-wrap: wrap; }
+    .wp-row-actions :is(a, button) {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .studio-rail-button { width: 44px; height: 44px; }
+    .gws-content a.small:not(.btn) {
+        display: inline-flex;
+        align-items: center;
+        min-height: 44px;
+    }
+}
+
+@media (pointer: coarse) {
+    .gws-content :is(.form-control, .form-select) { min-height: 44px; }
+    .sentinel-workspace .sentinel-title-input { min-height: 44px; }
+}
+
+@media (pointer: coarse) {
+    .gws-content select, .gws-content textarea,
+    .gws-content input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]):not([type="file"]) {
+        min-height: 44px !important;
+        font-size: max(16px, 1em) !important;
+    }
+    .gws-content th[role="button"] { height: 44px; }
+    .community-profile-link, .community-activity-target {
+        display: inline-flex;
+        align-items: center;
+        min-width: 44px;
+        min-height: 44px;
+    }
+}
+
+/* Compact chrome leaves room for enlarged text on tablets and laptops. */
+@media (max-width: 1439.98px) {
+    .gws-admin-bar-brand span,
+    .gws-command-trigger span, .gws-command-trigger kbd,
+    .gws-account-name, .gws-account-menu > summary .bi-chevron-down { display: none; }
+    .gws-command-trigger { min-width: 44px; width: 44px; justify-content: center; padding: 0; }
+}
+
+@media (max-width: 767.98px) {
+    .gws-admin-bar {
+        padding-left: max(8px, var(--gws-safe-left));
+        padding-right: max(8px, var(--gws-safe-right));
+        gap: 8px;
+    }
+    .gws-admin-bar-start { gap: 8px; }
+    .gws-admin-bar-actions { gap: 6px; }
+    .gws-admin-bar-icon { width: 18px; height: 18px; }
+    .gws-admin-bar-start > button,
+    .gws-admin-bar-actions > button,
+    .gws-admin-bar .notif-bell-btn,
+    .gws-admin-bar .gws-account-menu > summary {
+        width: 44px !important;
+        height: 44px !important;
+        min-width: 44px;
+        min-height: 44px;
+        padding: 0;
+        font-size: clamp(16px, 1rem, 24px);
+    }
+    .gws-admin-bar .gws-account-avatar { width: 28px; height: 28px; font-size: 14px; }
+}
+
+@media (pointer: coarse) {
+    .gws-content :is(a.breakdown-export, a.d-block) {
+        min-width: 44px !important;
+        min-height: 44px !important;
+    }
 }

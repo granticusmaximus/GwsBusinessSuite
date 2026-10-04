@@ -230,12 +230,23 @@ fi
 if [[ "$skip_tests" == true ]]; then
   printf '| Full automated suite | NOT RUN | 0s |\n' >>"$rows_file"
 else
+  # Supplying a running audit target opts into real responsive gates, not report-only checks.
+  if [[ -n "${GWS_AUDIT_ADMIN_BASE:-}" ]]; then
+    export GWS_AUDIT_ENFORCE=1
+  fi
   run_check "Full automated suite" \
     dotnet test tests/GwsBusinessSuite.Tests/GwsBusinessSuite.Tests.csproj \
       -c Release --no-build --disable-build-servers -m:1
 fi
 
+if [[ -n "${GWS_AUDIT_ADMIN_BASE:-}" && "$skip_tests" != true ]]; then
+  printf '| Responsive audit gates | ENFORCED in automated suite | - |\n' >>"$rows_file"
+else
+  printf '| Responsive audit gates | NOT RUN (target absent or tests skipped) | - |\n' >>"$rows_file"
+fi
+
 run_check "Docker Compose rendering" docker compose config --quiet
+run_check "Responsive breakpoint lint" python3 scripts/check-responsive-breakpoints.py
 run_check "Patch whitespace" git diff --check
 
 if [[ "$require_clean" == true ]]; then

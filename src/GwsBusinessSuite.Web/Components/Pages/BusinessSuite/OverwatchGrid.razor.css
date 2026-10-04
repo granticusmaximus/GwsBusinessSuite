@@ -361,3 +361,12 @@
     font-size: .75rem;
     line-height: 1.4;
 }
+
+@media (pointer: coarse) {
+    .tg-search input, .tg-search button, .tg-toggle {
+        min-width: 44px;
+        min-height: 44px;
+        font-size: max(1rem, 16px);
+    }
+    .tg-hud-toggles { flex-wrap: wrap; }
+}

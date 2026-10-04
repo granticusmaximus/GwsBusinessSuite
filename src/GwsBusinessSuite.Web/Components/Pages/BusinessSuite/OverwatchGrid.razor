@@ -583,6 +583,8 @@
 
     public async ValueTask DisposeAsync()
     {
+        // The prerendered instance never initializes the browser viewport.
+        if (_dotNetRef is null) return;
         try
         {
             await JS.InvokeVoidAsync("tacticalGlobe.dispose", "tg-viewport");

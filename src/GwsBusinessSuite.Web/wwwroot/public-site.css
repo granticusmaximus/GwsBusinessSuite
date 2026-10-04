@@ -1741,3 +1741,14 @@ a { color: inherit; }
     min-height: 44px;
   }
 }
+
+@media (pointer: coarse) {
+    .keyword-pill, .pagesize-btn, .pagination-btn, .gws-site-logo,
+    .nav-links a, .footer-links a, .gws-nav-menu a, .back-link, .blog-post-back-link, .page-back a, .page-not-found a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 44px;
+        min-height: 44px;
+    }
+}

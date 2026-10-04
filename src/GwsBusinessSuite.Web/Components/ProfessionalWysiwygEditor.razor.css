@@ -63,3 +63,8 @@
     .gws-wysiwyg-hint { display: none; }
     .gws-wysiwyg-toolbar { gap: .2rem; }
 }
+
+@media (pointer: coarse) {
+    .gws-wysiwyg-toolbar button { min-width: 44px; min-height: 44px; height: 44px; }
+    .gws-wysiwyg-group { flex-wrap: wrap; max-width: 100%; }
+}

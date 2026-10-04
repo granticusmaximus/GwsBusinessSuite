@@ -23,13 +23,16 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
     [
         new("phone-360", 360, 780, true),
         new("phone-390", 390, 844, true),
+        new("phone-430", 430, 932, true),
         new("phone-landscape", 844, 390, true),
         new("tablet-768", 768, 1024, true),
+        new("tablet-820", 820, 1180, true),
         new("tablet-landscape-1024", 1024, 768, true),
         new("laptop-1280", 1280, 800, false),
         new("laptop-1440", 1440, 900, false),
         new("desktop-1920", 1920, 1080, false),
         new("desktop-2560", 2560, 1440, false),
+        new("ultrawide-3440", 3440, 1440, false),
     ];
 
     public static readonly string[] PublicRoutes = ["/", "/blog", "/about", "/cv", "/portfolio", "/contact"];
@@ -52,7 +55,7 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
     ];
 
     // Runs inside the page; one call per page/device.
-    private const string ChecksScript = """
+    internal const string ChecksScript = """
         (touch) => {
           const vw = window.innerWidth, vh = window.innerHeight, de = document.documentElement;
           const desc = el => {
@@ -66,6 +69,7 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
           const visible = el => {
             // checkVisibility() also excludes content inside a closed <details> (Chrome keeps it
             // laid out but unpainted), which otherwise reads as "visible but covered".
+            if (el.closest('.visually-hidden, .sr-only')) return false;
             if (el.checkVisibility && !el.checkVisibility({ contentVisibilityAuto: true, opacityProperty: true, visibilityProperty: true })) return false;
             const closed = el.closest('details:not([open])');
             if (closed && !el.closest('summary')) return false;
@@ -96,13 +100,25 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
             .filter(el => visible(el) && !el.closest('[aria-hidden=true]') && !el.closest('iframe'));
           for (const el of interactive) {
             const r = el.getBoundingClientRect();
-            if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) continue;
+            const offscreen = r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw;
+            // Scroll containers clip offscreen rows even though their layout boxes exist.
+            // Do not report a clipped row as covered by a different, visible row.
+            let clipped = false;
+            for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+              const cs = getComputedStyle(parent), pr = parent.getBoundingClientRect();
+              const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+              if ((/(auto|scroll|hidden|clip)/.test(cs.overflowY) && (cy < pr.top || cy > pr.bottom))
+                  || (/(auto|scroll|hidden|clip)/.test(cs.overflowX) && (cx < pr.left || cx > pr.right))) {
+                clipped = true; break;
+              }
+            }
             const min = Math.min(r.width, r.height);
-            const isInlineLink = el.tagName === 'A' && getComputedStyle(el).display === 'inline' && el.closest('p, li, td');
-            if (touch && min < 32 && !isInlineLink && el.type !== 'checkbox' && el.type !== 'radio') {
+            const isInlineLink = el.tagName === 'A' && getComputedStyle(el).display === 'inline' && (el.closest('p, li, td') || [...el.parentElement.childNodes].some(n => n.nodeType === Node.TEXT_NODE && n.textContent.trim()));
+            if (touch && min < 43.5 && !isInlineLink && el.type !== 'checkbox' && el.type !== 'radio') {
               result.smallTargetCount++;
               if (result.smallTargets.length < 6) result.smallTargets.push(desc(el) + ' (' + Math.round(r.width) + 'x' + Math.round(r.height) + ')');
             }
+            if (clipped || offscreen) continue;
             const cx = Math.min(Math.max(r.left + r.width / 2, 0), vw - 1), cy = Math.min(Math.max(r.top + r.height / 2, 0), vh - 1);
             if (r.left >= 0 && r.right <= vw && r.top >= 0 && r.bottom <= vh && getComputedStyle(el).pointerEvents !== 'none') {
               const hit = document.elementFromPoint(cx, cy);
@@ -131,6 +147,118 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         """;
 
     [Fact]
+    public async Task TouchControls_ShouldRemainReachableWithoutCoveringEditorContent()
+    {
+        await using var context = await fixture.Browser.NewContextAsync(new()
+        {
+            ViewportSize = new() { Width = 390, Height = 844 }, HasTouch = true
+        });
+        await using var page = await context.NewPageAsync();
+        await page.SetContentAsync("""
+            <style>*, *::before, *::after { box-sizing: border-box; }</style>
+            <header class="gws-admin-bar">
+                <div class="gws-admin-bar-start"><button>☰</button><div class="gws-admin-bar-brand"><span>GWS Business Suite</span></div></div>
+                <div class="gws-admin-bar-actions">
+                    <button class="gws-command-trigger">⌕<span>Search</span><kbd>⌘K</kbd></button>
+                    <button class="gws-theme-toggle">☾</button><button>♧</button>
+                    <details class="gws-account-menu"><summary><span class="gws-account-avatar">A</span><span class="gws-account-name">Account</span></summary></details>
+                </div>
+            </header>
+            <main class="gws-content sentinel-workspace">
+                <button class="sentinel-global-search">Quick find <kbd>⌘K</kbd></button>
+                <div class="sentinel-document-toolbar">
+                    <nav class="sentinel-document-context">A long parent / A long child page title</nav>
+                    <div class="d-flex"><button class="btn sentinel-tool-btn">Share</button><button class="btn sentinel-tool-btn">More</button></div>
+                </div>
+                <div class="wiki-block">
+                    <div class="wiki-block-gutter"><button class="wiki-block-add">+</button><button class="wiki-block-menu-toggle">⋮</button></div>
+                    <div class="wiki-block-body"><input class="wiki-todo-checkbox" type="checkbox"><div class="wiki-block-content" contenteditable="true">Task</div></div>
+                </div>
+                <div class="wp-row-actions"><a href="#edit">Edit</a><button>Trash</button></div>
+                <div class="gws-wysiwyg-toolbar"><div class="gws-wysiwyg-group"><button>Undo</button><button>Bold</button></div></div>
+                <input type="file" class="visually-hidden" style="position:absolute;width:1px;height:1px">
+                <details><summary>Properties</summary><button>Hidden action</button></details>
+            </main>
+            """);
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../src/GwsBusinessSuite.Web/wwwroot"));
+        await page.AddStyleTagAsync(new() { Content = await File.ReadAllTextAsync(Path.Combine(root, "app.css")) });
+        await page.AddStyleTagAsync(new() { Content = await File.ReadAllTextAsync(Path.Combine(root, "css/gws-responsive.css")) });
+        await page.AddStyleTagAsync(new() { Content = await File.ReadAllTextAsync(Path.Combine(root, "../Components/ProfessionalWysiwygEditor.razor.css")) });
+        foreach (var width in new[] { 390, 768 })
+        {
+            await page.SetViewportSizeAsync(width, 1024);
+            foreach (var scale in new[] { "100%", "200%" })
+            {
+                await page.EvaluateAsync("scale => document.documentElement.style.fontSize = scale", scale);
+                using var result = JsonDocument.Parse(await page.EvaluateAsync<string>(ChecksScript, true));
+                Assert.Equal(0, result.RootElement.GetProperty("coveredCount").GetInt32());
+                Assert.Equal(0, result.RootElement.GetProperty("smallTargetCount").GetInt32());
+                Assert.Equal(0, result.RootElement.GetProperty("tinyTextCount").GetInt32());
+                Assert.True(result.RootElement.GetProperty("overflowX").GetInt32() <= 1, $"{width}px / {scale}: {result.RootElement}");
+                await page.EvaluateAsync("""
+                    () => {
+                        const sheet = document.createElement('div');
+                        sheet.className = 'sentinel-share-popover';
+                        sheet.innerHTML = '<strong>Share a long child page title</strong><div class="input-group"><input><select><option>Can view</option></select><button>Invite</button></div>';
+                        document.querySelector('.sentinel-document-toolbar').append(sheet);
+                    }
+                    """);
+                var bounds = await page.Locator(".sentinel-share-popover").BoundingBoxAsync();
+                Assert.NotNull(bounds);
+                Assert.True(bounds.X >= 0 && bounds.X + bounds.Width <= width + 1);
+                Assert.True(bounds.Y >= 0 && bounds.Y + bounds.Height <= 1025);
+                await page.Locator(".sentinel-share-popover").EvaluateAsync("el => el.remove()");
+            }
+        }
+        // A control below the first screen still needs a usable touch target.
+        await page.EvaluateAsync("""
+            () => {
+                const button = document.createElement('button');
+                button.textContent = 'x';
+                button.style.cssText = 'position:absolute;top:2000px;left:0;width:20px;height:44px;padding:0';
+                document.body.append(button);
+            }
+            """);
+        using var offscreen = JsonDocument.Parse(await page.EvaluateAsync<string>(ChecksScript, true));
+        Assert.Equal(1, offscreen.RootElement.GetProperty("smallTargetCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task CmsWorkbench_EnlargedText_ShouldKeepModuleDockOutsideCanvas()
+    {
+        await using var page = await fixture.Browser.NewPageAsync(new() { ViewportSize = new() { Width = 1440, Height = 900 } });
+        await page.SetContentAsync("""
+            <style>*,*::before,*::after{box-sizing:border-box}html{font-size:200%}</style>
+            <div class="studio-shell" style="width:1080px">
+                <header class="studio-header" style="height:260px">Site Desk</header>
+                <nav class="desk-navigation" style="height:90px;flex-shrink:0">Pages</nav>
+                <div class="studio-workspace">
+                    <aside class="studio-panel studio-panel-left">Pages</aside>
+                    <section class="studio-stage-panel studio-panel">
+                        <header class="studio-stage-header" style="height:100px">Live preview</header>
+                        <div class="studio-stage-shell"><div class="studio-stage-frame is-desktop"><iframe class="studio-live-iframe"></iframe></div></div>
+                    </section>
+                </div>
+                <div class="desk-module-dock">
+                    <button class="desk-module-button" onclick="window.moduleClicked=true">Heading</button>
+                    <button class="desk-module-button">Paragraph</button><button class="desk-module-button">Image</button>
+                    <button class="desk-module-button">Form</button><button class="desk-module-button">Posts Grid</button>
+                    <button class="desk-module-button">Reusable</button><button class="desk-module-button">All modules</button>
+                </div>
+            </div>
+            """);
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../src/GwsBusinessSuite.Web"));
+        await page.AddStyleTagAsync(new() { Content = await File.ReadAllTextAsync(Path.Combine(root, "Components/Pages/BusinessSuite/CmsBuilderEditor.razor.css")) });
+        var canvas = await page.Locator(".studio-stage-shell").BoundingBoxAsync();
+        var dock = await page.Locator(".desk-module-dock").BoundingBoxAsync();
+        Assert.NotNull(canvas);
+        Assert.NotNull(dock);
+        Assert.True(canvas.Y + canvas.Height <= dock.Y + 1);
+        await page.Locator(".desk-module-button").First.ClickAsync();
+        Assert.True(await page.EvaluateAsync<bool>("() => window.moduleClicked === true"));
+    }
+
+    [Fact]
     public async Task AuditEveryPageOnEveryDevice()
     {
         var adminBase = Environment.GetEnvironmentVariable("GWS_AUDIT_ADMIN_BASE");
@@ -139,9 +267,12 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         var outDir = Environment.GetEnvironmentVariable("GWS_AUDIT_OUT") ?? Path.Combine(Path.GetTempPath(), "gws-responsive-audit");
         Directory.CreateDirectory(outDir);
         var devices = Filter(Devices, Environment.GetEnvironmentVariable("GWS_AUDIT_DEVICES"), d => $"{d.Width}x{d.Height}", d => d.Name);
+        Assert.NotEmpty(devices);
         var routeFilter = Environment.GetEnvironmentVariable("GWS_AUDIT_ROUTES");
+        var textScale = Environment.GetEnvironmentVariable("GWS_AUDIT_TEXT_SCALE") == "2" ? 2 : 1;
         var adminRoutes = Filter(AdminRoutes, routeFilter, r => r, r => r);
         var publicRoutes = Filter(PublicRoutes, routeFilter, r => r, r => r);
+        Assert.True(adminRoutes.Length + publicRoutes.Length > 0, "Audit route filter matched no routes.");
 
         // Sign in once and reuse the cookie for every device.
         var loginContext = await fixture.Browser.NewContextAsync();
@@ -150,14 +281,15 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         await login.FillAsync("#gws-login-username", Environment.GetEnvironmentVariable("GWS_AUDIT_USER") ?? "");
         await login.FillAsync("#gws-login-password", Environment.GetEnvironmentVariable("GWS_AUDIT_PASSWORD") ?? "");
         await login.ClickAsync(".gws-login-submit");
-        await login.WaitForTimeoutAsync(4000);
+        await login.WaitForURLAsync(url => !url.Contains("/admin/login", StringComparison.OrdinalIgnoreCase));
+        Assert.False(login.Url.Contains("/admin/login", StringComparison.OrdinalIgnoreCase), "Responsive audit login failed.");
         var storage = await loginContext.StorageStateAsync();
         await loginContext.DisposeAsync();
 
-        var rows = new List<Dictionary<string, object?>>();
-        foreach (var device in devices)
+        await Parallel.ForEachAsync(devices, new ParallelOptions { MaxDegreeOfParallelism = 3 }, async (device, cancellationToken) =>
         {
-            File.Delete(Path.Combine(outDir, $"rows-{device.Name}.jsonl"));
+            var scenarioName = textScale == 2 ? device.Name + "-text-200" : device.Name;
+            File.Delete(Path.Combine(outDir, $"rows-{scenarioName}.jsonl"));
             var context = await fixture.Browser.NewContextAsync(new()
             {
                 ViewportSize = new() { Width = device.Width, Height = device.Height },
@@ -173,19 +305,26 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
                 var errors = new List<string>();
                 page.Console += (_, m) => { if (m.Type == "error" && errors.Count < 5) errors.Add(m.Text.Length > 140 ? m.Text[..140] : m.Text); };
                 page.PageError += (_, e) => { if (errors.Count < 5) errors.Add("pageerror: " + (e.Length > 140 ? e[..140] : e)); };
-                var row = new Dictionary<string, object?> { ["device"] = device.Name, ["area"] = area, ["route"] = route };
+                var row = new Dictionary<string, object?> { ["device"] = scenarioName, ["area"] = area, ["route"] = route };
                 try
                 {
                     var response = await page.GotoAsync(url, new() { Timeout = 30000, WaitUntil = WaitUntilState.Load });
                     row["status"] = response?.Status;
+                    if (response is null || response.Status >= 400 || (area == "admin" && page.Url.Contains("/admin/login")))
+                        throw new InvalidOperationException($"Page failed to load: HTTP {response?.Status}, authentication redirect: {page.Url.Contains("/admin/login")}");
                     await page.WaitForTimeoutAsync(area == "admin" ? 2500 : 1200);
+                    // A boot screen is expected briefly; a persistent boot/error screen is a load failure.
+                    if (route == "/admin/osint")
+                        await page.Locator(".tg-boot:not(.tg-boot-hidden)").WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 20000 });
+                    if (textScale == 2)
+                        await page.EvaluateAsync("() => document.documentElement.style.fontSize = '200%'");
                     var json = await page.EvaluateAsync<string>(ChecksScript, device.Touch);
                     using var doc = JsonDocument.Parse(json);
                     foreach (var property in doc.RootElement.EnumerateObject())
                         row[property.Name] = property.Value.ValueKind == JsonValueKind.Array
                             ? property.Value.EnumerateArray().Select(v => v.GetString()).ToList()
                             : property.Value.GetInt32();
-                    var shot = Path.Combine(outDir, "screens", device.Name, Slug(area, route) + ".png");
+                    var shot = Path.Combine(outDir, "screens", scenarioName, Slug(area, route) + ".png");
                     Directory.CreateDirectory(Path.GetDirectoryName(shot)!);
                     await page.ScreenshotAsync(new() { Path = shot });
                     row["screenshot"] = Path.GetRelativePath(outDir, shot);
@@ -195,16 +334,25 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
                     row["failure"] = ex.Message.Split('\n')[0];
                 }
                 row["errors"] = errors;
-                rows.Add(row);
                 // Saved as it goes, one file per device, so a long run that's stopped keeps what it
                 // measured and parallel runs (different GWS_AUDIT_DEVICES) can share one folder.
-                await File.AppendAllTextAsync(Path.Combine(outDir, $"rows-{device.Name}.jsonl"), JsonSerializer.Serialize(row) + "\n");
+                await File.AppendAllTextAsync(Path.Combine(outDir, $"rows-{scenarioName}.jsonl"), JsonSerializer.Serialize(row) + "\n");
                 await page.CloseAsync();
             }
             await context.DisposeAsync();
-        }
+        });
 
         await WriteReportAsync(outDir);
+        if (Environment.GetEnvironmentVariable("GWS_AUDIT_ENFORCE") == "1")
+        {
+            using var report = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(outDir, "audit.json")));
+            var failures = report.RootElement.EnumerateArray().Where(row =>
+                row.TryGetProperty("failure", out _)
+                || row.GetProperty("overflowX").GetInt32() > 1
+                || row.GetProperty("coveredCount").GetInt32() > 0
+                || row.GetProperty("smallTargetCount").GetInt32() > 0).Select(row => $"{row.GetProperty("device")} {row.GetProperty("route")}").ToArray();
+            Assert.True(failures.Length == 0, "Responsive audit failed: " + string.Join(", ", failures));
+        }
     }
 
     // Rebuilds audit.json / audit.md from every rows-*.jsonl in the folder (all devices so far).
