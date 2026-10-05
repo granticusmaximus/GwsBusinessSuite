@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Reject new ad-hoc viewport breakpoints; retain documented legacy exceptions.
+"""Reject viewport breakpoints outside the standard tiers.
 
-Container queries are deliberately independent of the viewport tiers.
-Remove exceptions as existing components migrate to the standard tiers.
+Container queries are deliberately independent of the viewport tiers: admin components size
+to the content area with @container gws-main (...), which allows any width.
+responsive-breakpoint-exceptions.json can list a per-stylesheet exception; it is empty now
+that every legacy width has migrated (2026-10-04), so keep it that way.
 """
 import json
 import re
@@ -27,4 +29,5 @@ for path in sorted((root / "src/GwsBusinessSuite.Web").rglob("*.css")):
 if failures:
     print("\n".join(failures), file=sys.stderr)
     sys.exit(1)
-print("Responsive breakpoint lint passed (legacy exceptions retained).")
+retained = sum(len(widths) for widths in exceptions.values())
+print("Responsive breakpoint lint passed" + (f" ({retained} listed exceptions)." if retained else "."))

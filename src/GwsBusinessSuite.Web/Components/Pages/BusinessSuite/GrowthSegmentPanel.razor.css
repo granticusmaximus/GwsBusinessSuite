@@ -186,7 +186,7 @@
 .segment-save { width: 100%; background: #f59e0b; color: #17130c; border-color: #f59e0b; }
 .segment-save:disabled { opacity: .55; }
 
-@media (max-width: 680px) {
+@container gws-main (max-width: 648px) {
     .segment-panel { align-items: stretch; flex-direction: column; }
     .segment-picker { display: grid; grid-template-columns: auto 1fr; }
     .segment-picker small { grid-column: 1 / 3; }

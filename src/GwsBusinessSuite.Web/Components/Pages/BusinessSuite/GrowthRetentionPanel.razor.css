@@ -85,7 +85,7 @@
     line-height: 1.45;
 }
 
-@media (max-width: 620px) {
+@container gws-main (max-width: 588px) {
     .retention-panel > header { align-items: flex-start; flex-direction: column; }
     .retention-summary { width: 100%; justify-content: space-between; text-align: left; }
 }

@@ -20,7 +20,7 @@
     font-size: .75rem;
 }
 
-@media (max-width: 991.98px) {
+@container gws-main (max-width: 687.98px) {
     .cms-structured-toolbar {
         grid-template-columns: 1fr;
         align-items: stretch;

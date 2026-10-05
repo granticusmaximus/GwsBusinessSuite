@@ -174,7 +174,7 @@
 .account-drawer .active-toggle input { width: auto; margin: 0; accent-color: var(--growth-accent); }
 .credential-note { color: var(--growth-muted); font-size: .75rem; line-height: 1.45; }
 
-@media (max-width: 900px) {
+@container gws-main (max-width: 596px) {
     .metric-grid { grid-template-columns: repeat(2, 1fr); }
     .insight-grid { grid-template-columns: 1fr; }
     .channel-picker { grid-template-columns: 1fr; }
@@ -182,7 +182,7 @@
     .goal-row > span:nth-of-type(5) { display: none; }
 }
 
-@media (max-width: 620px) {
+@container gws-main (max-width: 588px) {
     .growth-shell { margin: -1rem; padding: 1rem; }
     .section-toolbar { align-items: flex-start; flex-direction: column; }
     .analytics-actions { width: 100%; justify-content: space-between; }

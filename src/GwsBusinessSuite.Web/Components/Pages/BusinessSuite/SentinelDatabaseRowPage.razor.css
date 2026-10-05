@@ -185,7 +185,7 @@
     }
 }
 
-@media (max-width: 419.98px) {
+@container gws-main (max-width: 395.98px) {
     .sentinel-row-page-property {
         grid-template-columns: minmax(0, 1fr);
         gap: .15rem;

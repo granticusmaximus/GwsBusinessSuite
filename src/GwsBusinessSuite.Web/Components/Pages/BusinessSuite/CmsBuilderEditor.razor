@@ -2564,8 +2564,8 @@ else
             <i class="@module.Icon"></i>@module.Title
         </button>
     }
-    <button type="button" class="desk-module-button" @onclick='() => _leftTab = "global"'><i class="bi bi-globe2"></i>Reusable</button>
-    <button type="button" class="desk-module-button" @onclick='() => _leftTab = "widgets"'><i class="bi bi-grid"></i>All modules</button>
+    <button type="button" class="desk-module-button" data-gws-show-panel @onclick='() => _leftTab = "global"'><i class="bi bi-globe2"></i>Reusable</button>
+    <button type="button" class="desk-module-button" data-gws-show-panel @onclick='() => _leftTab = "widgets"'><i class="bi bi-grid"></i>All modules</button>
     <span>Drag onto your page or click to add</span>
 </div>
 }

@@ -1821,7 +1821,11 @@
         }
         catch (Exception ex)
         {
-            ErrorMessage = $"Unable to create the child {(isDatabase ? "database" : "page")}. {ex.Message}";
+            // EF wraps the real cause ("UNIQUE constraint failed: ...") in a generic "see the
+            // inner exception" message, so log the full exception and surface the root cause.
+            Logger.LogError(ex, "Creating a child {Kind} under Sentinel page {WikiPageId} failed.",
+                isDatabase ? "database" : "page", Editor.WikiPageId);
+            ErrorMessage = $"Unable to create the child {(isDatabase ? "database" : "page")}. {ex.GetBaseException().Message}";
             return null;
         }
         finally

@@ -269,6 +269,14 @@ public sealed class WikiService(
             await ReloadAsync(page, cancellationToken);
             throw CreateConcurrencyException(page, editor.ExpectedContentVersion);
         }
+        catch (DbUpdateException) when (isNew)
+        {
+            // A Blazor circuit keeps this DbContext for the whole session. Left tracked as
+            // Added, the rejected page would be re-sent by every later SaveChanges, so one
+            // failed create would make every following save in that tab fail the same way.
+            if (dbContext is DbContext efContext) efContext.Entry(page).State = EntityState.Detached;
+            throw;
+        }
         await PropagateSyncedBlocksAsync(previousBlocksJson, page.BlocksJson, performedBy, cancellationToken);
         if (!isNew && !string.Equals(previousBlocksJson, page.BlocksJson, StringComparison.Ordinal))
         {

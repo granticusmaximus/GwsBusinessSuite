@@ -35,4 +35,4 @@
 .report-toggle small { color: var(--growth-muted); font-size: .75rem; margin-top: .12rem; }
 .report-save { width: 100%; border: 1px solid var(--growth-accent); border-radius: .55rem; background: var(--growth-accent); color: #17130c; padding: .58rem .7rem; font-size: .75rem; font-weight: 800; }
 .report-save:disabled, .report-actions button:disabled { opacity: .55; }
-@media (max-width: 620px) { .report-drawer { top: 4.6rem; } .report-form-grid { grid-template-columns: 1fr; } .report-definition { align-items: flex-start; } }
+@container gws-main (max-width: 588px) { .report-drawer { top: 4.6rem; } .report-form-grid { grid-template-columns: 1fr; } .report-definition { align-items: flex-start; } }

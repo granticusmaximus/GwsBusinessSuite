@@ -103,11 +103,11 @@
 .funnel-save { color: #1c1507; border: 1px solid #fbbf24; background: var(--growth-accent); }
 .funnel-delete { color: #fca5a5; border: 0; background: transparent; margin-top: .35rem; font-size: .75rem; }
 
-@media (max-width: 900px) {
+@container gws-main (max-width: 596px) {
     .funnel-grid { grid-template-columns: 1fr; }
 }
 
-@media (max-width: 620px) {
+@container gws-main (max-width: 588px) {
     .funnel-heading, .funnel-empty { align-items: flex-start; flex-direction: column; }
     .funnel-manage { width: 100%; }
     .funnel-drawer { top: .65rem; right: .65rem; bottom: .65rem; width: calc(100vw - 1.3rem); }

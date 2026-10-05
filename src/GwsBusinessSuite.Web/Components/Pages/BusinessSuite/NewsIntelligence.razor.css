@@ -85,7 +85,7 @@
 .media-watch .card a.h6, .media-watch a.text-body { color: var(--civic-ink); font: 700 .92rem/1.4 Georgia, serif; }
 .media-watch .card a.h6:hover, .media-watch a.text-body:hover { color: var(--civic-accent-strong); }
 
-@media (max-width: 760px) {
+@container gws-main (max-width: 728px) {
     .media-watch { margin: -1rem; padding: 1rem; }
     .masthead-actions { width: 100%; }
     .masthead-actions .btn { flex: 1; }

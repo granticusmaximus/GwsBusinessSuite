@@ -59,7 +59,7 @@
 .gws-wysiwyg[data-disabled="true"] { opacity: .7; }
 .gws-wysiwyg[data-disabled="true"] .gws-wysiwyg-toolbar { pointer-events: none; }
 
-@media (max-width: 720px) {
+@container gws-main (max-width: 688px) {
     .gws-wysiwyg-hint { display: none; }
     .gws-wysiwyg-toolbar { gap: .2rem; }
 }

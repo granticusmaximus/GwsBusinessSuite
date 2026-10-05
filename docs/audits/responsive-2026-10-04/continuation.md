@@ -23,18 +23,22 @@ A second matrix and representative 200% text checks are being completed. Machine
 
 ## Running the audit
 
-Use a running local application with a disposable database and a local audit account. Set `GWS_AUDIT_ADMIN_BASE`, `GWS_AUDIT_PUBLIC_BASE`, `GWS_AUDIT_USER`, `GWS_AUDIT_PASSWORD`, and an absolute `GWS_AUDIT_OUT` path. Optional filters are `GWS_AUDIT_DEVICES` and `GWS_AUDIT_ROUTES`; `GWS_AUDIT_TEXT_SCALE=2` adds 200% root text scenarios. Use a fresh output directory for a new run.
+Use a running local application with a disposable database and a local audit account (the open-state checks type into a Sentinel page). Set `GWS_AUDIT_ADMIN_BASE`, `GWS_AUDIT_PUBLIC_BASE`, `GWS_AUDIT_USER`, `GWS_AUDIT_PASSWORD`, and an absolute `GWS_AUDIT_OUT` path. Optional filters are `GWS_AUDIT_DEVICES` and `GWS_AUDIT_ROUTES`; `GWS_AUDIT_EXTRA_ROUTES` adds record-specific editor routes (`/admin/pages/<id>/edit`, `/admin/automation/<id>`, `/admin/mind-maps/<id>`); `GWS_AUDIT_TEXT_SCALE=2` adds 200% root text scenarios. Use a fresh output directory for a new run. The local login limit is 5 attempts per 15 minutes and each device batch signs in once, so restart the app between long runs.
+
+Each page is scrolled top to bottom before it is measured: the public site's scroll reveal keeps below-the-fold sections at opacity 0, and the first runs silently skipped their controls (carousel dots, tabs). Each route also has open states (`Interactions` in `ResponsiveAuditTests`): navigation drawer, account menu, command palette, notifications, the public site menu, Sentinel's page tree / Share / block menu, and the page editor's module list / page settings. Only controls inside the opened panel are checked for size and covering.
 
 Run `dotnet test tests/GwsBusinessSuite.Tests/GwsBusinessSuite.Tests.csproj -c Release --filter FullyQualifiedName~ResponsiveAuditTests`. `GWS_AUDIT_ENFORCE=1` fails the audit on load failures, overflow, covered controls, or undersized touch targets. `verify-release.sh` sets enforcement automatically when an audit target is supplied and explicitly reports when the audit is not run.
 
-`python3 scripts/check-responsive-breakpoints.py` runs in release verification. Existing nonstandard viewport widths are listed per stylesheet in `scripts/responsive-breakpoint-exceptions.json`; new CSS must use the six standard tiers. Container queries are independent of viewport tiers. Remove legacy exceptions as those components migrate.
+`python3 scripts/check-responsive-breakpoints.py` runs in release verification; every viewport `@media` width must be one of the six standard tiers. All 55 legacy widths migrated on 2026-10-04 and `scripts/responsive-breakpoint-exceptions.json` is now empty:
+
+- Admin components use `@container gws-main (...)` (the `.gws-content` area) instead of the window width. The old widths assumed the 248px sidebar was open, so each became its content-area equivalent (window minus about 304px; minus 32px below 768px where the sidebar is a drawer). Layouts now also adapt correctly when the sidebar is collapsed, in Fullscreen, and in the full-screen page editor.
+- The public stylesheets (`public-site.css`, `cms-public.css`) rounded each width up to the next tier, so a layout collapses slightly earlier rather than overflowing.
+- The page editor's device preview renders at real device widths (1280/820/390px) and scales to fit, so its Desktop and Tablet buttons still show those layouts in a narrow stage.
 
 ## Remaining acceptance work
 
-- Supply representative local content for the three missing public pages and audit their real layouts.
-- Review interactive states beyond entry pages: navigation drawers, resource detail editors, dialogs, database views, canvas interactions, and keyboard navigation.
+- Interactive states not yet scripted: database views, canvas drag interactions, keyboard-only navigation.
 - Verify native Mac WebView behavior. Its source hosts the same responsive web UI and hides the floating reload control on MacCatalyst; native window testing remains outstanding.
 - Physical iPhone Safari, Android Chrome, iPad, and Windows Edge checks, including notch/home-indicator insets, software keyboard, rotation, text settings, and touch gestures.
-- Gradually migrate the documented legacy viewport breakpoints; the lint prevents additional ad-hoc widths but does not claim that migration is complete.
 
 The post-Phase-2 Intelligence-source research remains queued until responsive acceptance is complete.

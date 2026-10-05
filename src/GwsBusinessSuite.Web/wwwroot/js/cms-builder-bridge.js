@@ -11,14 +11,88 @@ window.gwsCmsBuilderBridge = (function () {
     let _pendingDragEvent = null;
     let _wasOverIframe = false;
     let _externalDrag = null;
+    let _fitFrame = null;
+    let _fitResize = null;
+    let _fitClass = null;
+
+    // The Desktop preview fills the stage, which on a laptop (sidebar + both panels open) is
+    // often under 800px - narrow enough that the page's own tablet/phone breakpoints kicked in
+    // and "Desktop" showed the phone layout (Tablet likewise fell into the phone band below
+    // 820px). Render each preset at its real width instead and scale it down to fit.
+    const PREVIEW_WIDTHS = { 'is-desktop': 1280, 'is-tablet': 820, 'is-mobile': 390 };
 
     function iframe() {
         return document.getElementById('cms-builder-iframe');
     }
 
+    function fitPreview() {
+        const frame = iframe()?.parentElement;
+        if (!frame) return;
+        const preset = Object.keys(PREVIEW_WIDTHS).find(name => frame.classList.contains(name));
+        const target = preset ? PREVIEW_WIDTHS[preset] : 0;
+        const width = frame.clientWidth;
+        const scale = target > 0 ? width / target : 1;
+        if (target > 0 && width > 0 && scale < 0.999) {
+            const height = frame.clientHeight;
+            frame.style.setProperty('--gws-preview-width', target + 'px');
+            frame.style.setProperty('--gws-preview-scale', String(scale));
+            frame.style.setProperty('--gws-preview-height', (height / scale) + 'px');
+            // Negative margins keep the iframe's layout footprint exactly the frame's own size,
+            // so its larger unscaled box can never grow the frame and re-trigger this observer.
+            frame.style.setProperty('--gws-preview-margin-right', (width - target) + 'px');
+            frame.style.setProperty('--gws-preview-margin-bottom', (height - height / scale) + 'px');
+            setScaled(frame, true);
+        } else {
+            setScaled(frame, false);
+        }
+    }
+
+    // classList.add/remove rewrite the class attribute even when nothing changes, which would
+    // re-fire the class observer below forever - only touch it on a real change.
+    function setScaled(frame, scaled) {
+        if (frame.classList.contains('is-scaled') !== scaled) frame.classList.toggle('is-scaled', scaled);
+    }
+
+    // Re-attached whenever the iframe reports ready, in case Blazor replaced the frame element.
+    function watchPreviewFrame() {
+        const frame = iframe()?.parentElement;
+        if (!frame || frame === _fitFrame) { fitPreview(); return; }
+        unwatchPreviewFrame();
+        _fitFrame = frame;
+        _fitResize = new ResizeObserver(fitPreview);
+        _fitResize.observe(frame);
+        // Switching device only changes the class when the stage is narrower than every preset.
+        _fitClass = new MutationObserver(fitPreview);
+        _fitClass.observe(frame, { attributes: true, attributeFilter: ['class'] });
+        fitPreview();
+    }
+
+    // The module dock's "Reusable"/"All modules" buttons switch the side panel's tab. On a phone
+    // that panel sits above the canvas, often scrolled out of sight, so the tap looked like it
+    // did nothing. Bring the panel into view once Blazor has re-rendered it (html's
+    // scroll-padding-top keeps it below the sticky admin bar); no-op when it's already visible.
+    function handleShowPanelClick(event) {
+        if (!event.target.closest('[data-gws-show-panel]')) return;
+        setTimeout(function () {
+            const panel = document.querySelector('.studio-panel-left:not([hidden])');
+            if (!panel) return;
+            const top = panel.getBoundingClientRect().top;
+            const barBottom = document.querySelector('.gws-admin-bar')?.getBoundingClientRect().bottom || 0;
+            if (top < barBottom || top > window.innerHeight * 0.6) panel.scrollIntoView({ block: 'start' });
+        }, 60);
+    }
+
+    function unwatchPreviewFrame() {
+        _fitResize?.disconnect();
+        _fitClass?.disconnect();
+        _fitFrame = _fitResize = _fitClass = null;
+    }
+
     function init(dotNetRef) {
         dispose();
         _dotNetRef = dotNetRef;
+        watchPreviewFrame();
+        document.addEventListener('click', handleShowPanelClick);
         _boundHandler = handleMessage;
         window.addEventListener('message', _boundHandler);
         // This is one of only two global keydown listeners in the app - the other is
@@ -61,14 +135,17 @@ window.gwsCmsBuilderBridge = (function () {
         const el = iframe();
         if (!el) return;
         const rect = el.getBoundingClientRect();
+        // The scaled Desktop preview draws smaller than its layout width; map back into the
+        // iframe's own coordinates.
+        const scale = el.offsetWidth > 0 ? rect.width / el.offsetWidth : 1;
         const overIframe = event.clientX >= rect.left && event.clientX <= rect.right
             && event.clientY >= rect.top && event.clientY <= rect.bottom;
         if (overIframe) {
             _wasOverIframe = true;
             sendToIframe({
                 type: 'cms:external-drag-move',
-                x: event.clientX - rect.left,
-                y: event.clientY - rect.top
+                x: (event.clientX - rect.left) / scale,
+                y: (event.clientY - rect.top) / scale
             });
         } else if (_wasOverIframe) {
             _wasOverIframe = false;
@@ -78,6 +155,8 @@ window.gwsCmsBuilderBridge = (function () {
     }
 
     function dispose() {
+        unwatchPreviewFrame();
+        document.removeEventListener('click', handleShowPanelClick);
         if (_boundHandler) {
             window.removeEventListener('message', _boundHandler);
             _boundHandler = null;
@@ -321,6 +400,7 @@ window.gwsCmsBuilderBridge = (function () {
                 }
                 break;
             case 'cms:ready':
+                watchPreviewFrame();
                 _dotNetRef.invokeMethodAsync('OnIframeReady');
                 break;
             case 'cms:freeform-update':

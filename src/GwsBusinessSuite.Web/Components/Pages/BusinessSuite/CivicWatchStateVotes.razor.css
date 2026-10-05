@@ -15,4 +15,4 @@
 .vote-table-wrap table { width: 100%; border-collapse: collapse; font-size: .75rem; }
 .vote-table-wrap th, .vote-table-wrap td { padding: .4rem; border-bottom: 1px solid var(--civic-line); text-align: left; }
 .vote-empty { margin: 0; color: var(--civic-muted); font-size: .75rem; }
-@media (max-width: 600px) { .vote-meta, .vote-actions { align-items: flex-start; flex-direction: column; } }
+@container gws-main (max-width: 568px) { .vote-meta, .vote-actions { align-items: flex-start; flex-direction: column; } }

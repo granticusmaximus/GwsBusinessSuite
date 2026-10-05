@@ -103,6 +103,34 @@ public sealed class HybridSemanticSearchServiceTests
     }
 
     [Fact]
+    public async Task RebuildAsync_ShouldSkipBlankPages_AndStillIndexTheRest()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var factory = new TestDbContextFactory(connection);
+        Guid pageId;
+        await using (var setup = factory.CreateDbContext())
+        {
+            await setup.Database.EnsureCreatedAsync();
+            setup.WikiPages.Add(new WikiPage { Title = "", Slug = $"blank-{Guid.NewGuid():N}", BlocksJson = "[]" });
+            var page = new WikiPage { Title = "Runbook", Slug = $"runbook-{Guid.NewGuid():N}", BlocksJson = "[]" };
+            setup.WikiPages.Add(page);
+            await setup.SaveChangesAsync();
+            pageId = page.Id;
+        }
+
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new HybridSemanticSearchService(
+            factory, new FakeOllamaService([1f, 0f]), Options.Create(new SemanticSearchOptions { Model = "test-embedding" }),
+            cache, NullLogger<HybridSemanticSearchService>.Instance);
+
+        await service.RebuildAsync();
+
+        await using var verify = factory.CreateDbContext();
+        (await verify.SemanticSearchDocuments.ToListAsync()).Should().ContainSingle(item => item.SourceId == pageId);
+    }
+
+    [Fact]
     public async Task RebuildAsync_ShouldRemoveStaleDocuments_EvenWhenNothingElseChanged()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
@@ -260,6 +288,8 @@ public sealed class HybridSemanticSearchServiceTests
         public Task<IReadOnlyList<float[]>> EmbedAsync(string model, IReadOnlyList<string> inputs, CancellationToken ct = default)
         {
             CallCount++;
+            // Same guard as the real OllamaService.EmbedAsync.
+            if (inputs.Any(string.IsNullOrWhiteSpace)) throw new ArgumentException("Embedding inputs cannot be empty.", nameof(inputs));
             return queryVector is null
                 ? throw new HttpRequestException("Embedding model unavailable")
                 : Task.FromResult<IReadOnlyList<float[]>>(inputs.Select(_ => queryVector).ToList());

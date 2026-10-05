@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Playwright;
 using Xunit;
 
@@ -14,6 +15,8 @@ namespace GwsBusinessSuite.Tests;
 //   GWS_AUDIT_ADMIN_BASE=http://localhost:5214  GWS_AUDIT_PUBLIC_BASE=http://127.0.0.1:5214
 //   GWS_AUDIT_USER / GWS_AUDIT_PASSWORD  GWS_AUDIT_OUT=<folder>  [GWS_AUDIT_DEVICES=360x780,...]
 //   [GWS_AUDIT_ROUTES=/admin,/blog,...]
+//   [GWS_AUDIT_EXTRA_ROUTES=/admin/pages/<id>/edit,/admin/automation/<id>,...] record-specific
+//   admin routes (editors) that the fixed list can't name because their ids differ per database
 [Collection("Playwright")]
 public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
 {
@@ -54,9 +57,36 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         "/admin/users"
     ];
 
-    // Runs inside the page; one call per page/device.
+    // Open states the entry-page crawl never sees: drawers, menus, dialogs, editor panels.
+    // Steps run in order ("click:<selector>", "press:<key>", "type:<text>"); the first must be
+    // visible on the device or the state is recorded as not applicable (e.g. a phone-only menu
+    // button on a desktop). Scope limits the target/covered checks to the opened panel -
+    // everything beneath a drawer's backdrop is covered on purpose; "@aria-controls" means the
+    // panel the first clicked control names (generated ids, e.g. the header builder's menu).
+    // Route is a regex so
+    // record-specific editor routes from GWS_AUDIT_EXTRA_ROUTES can match.
+    public sealed record Interaction(string Route, string Name, string[] Steps, string Scope);
+
+    public static readonly Interaction[] Interactions =
+    [
+        new("^/admin$", "navigation", ["click:.gws-sidebar-toggle"], "#gws-sidebar"),
+        new("^/admin$", "account menu", ["click:.gws-account-menu > summary"], ".gws-account-menu"),
+        new("^/admin$", "command palette", ["click:.gws-command-trigger"], ".gws-command-dialog"),
+        new("^/admin$", "notifications", ["click:.notif-bell-btn"], ".notif-bell-panel"),
+        new("^/$", "site menu", ["click:[data-gws-menu-toggle]"], "@aria-controls"),
+        new("^/admin/sentinel$", "page tree", ["click:.sentinel-mobile-nav-toggle"], "#sentinel-workspace-browser"),
+        new("^/admin/sentinel$", "share", ["click:button[title='Share this page']"], ".sentinel-share-popover"),
+        new("^/admin/sentinel$", "block menu", ["click:main [contenteditable]", "press:End", "press:Enter", "type:/"], ".wiki-slash-menu"),
+        new("^/admin/pages/[^/]+/edit$", "all modules", ["click:.desk-module-button:has-text('All modules')"], ".studio-panel-left:not([hidden])"),
+        new("^/admin/pages/[^/]+/edit$", "page settings", ["click:.desk-nav-button:has-text('Page settings')"], "#desk-inspector"),
+    ];
+
+    // Runs inside the page; one call per page/device. Takes the touch flag, or
+    // { touch, scope } to check only the controls inside an opened panel.
     internal const string ChecksScript = """
-        (touch) => {
+        (arg) => {
+          const touch = typeof arg === 'object' && arg !== null ? !!arg.touch : !!arg;
+          const scopeRoot = typeof arg === 'object' && arg !== null && arg.scope ? document.querySelector(arg.scope) : null;
           const vw = window.innerWidth, vh = window.innerHeight, de = document.documentElement;
           const desc = el => {
             let s = el.tagName.toLowerCase();
@@ -96,7 +126,7 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
             }
           }
 
-          const interactive = Array.from(document.querySelectorAll('a[href], button, input:not([type=hidden]), select, textarea, [role=button], summary'))
+          const interactive = Array.from((scopeRoot || document).querySelectorAll('a[href], button, input:not([type=hidden]), select, textarea, [role=button], summary'))
             .filter(el => visible(el) && !el.closest('[aria-hidden=true]') && !el.closest('iframe'));
           for (const el of interactive) {
             const r = el.getBoundingClientRect();
@@ -270,7 +300,9 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         Assert.NotEmpty(devices);
         var routeFilter = Environment.GetEnvironmentVariable("GWS_AUDIT_ROUTES");
         var textScale = Environment.GetEnvironmentVariable("GWS_AUDIT_TEXT_SCALE") == "2" ? 2 : 1;
-        var adminRoutes = Filter(AdminRoutes, routeFilter, r => r, r => r);
+        var extraRoutes = (Environment.GetEnvironmentVariable("GWS_AUDIT_EXTRA_ROUTES") ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var adminRoutes = Filter(AdminRoutes, routeFilter, r => r, r => r).Concat(extraRoutes).ToArray();
         var publicRoutes = Filter(PublicRoutes, routeFilter, r => r, r => r);
         Assert.True(adminRoutes.Length + publicRoutes.Length > 0, "Audit route filter matched no routes.");
 
@@ -299,13 +331,17 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
             });
             var targets = publicRoutes.Select(r => (Url: publicBase + r, Route: r, Area: "public"))
                 .Concat(adminRoutes.Select(r => (Url: adminBase + r, Route: r, Area: "admin")));
-            foreach (var (url, route, area) in targets)
+            var states = targets.SelectMany(target => Interactions
+                    .Where(interaction => Regex.IsMatch(target.Route, interaction.Route))
+                    .Select(interaction => (target.Url, target.Route, target.Area, State: (Interaction?)interaction)))
+                .ToList();
+            foreach (var (url, route, area, state) in targets.Select(t => (t.Url, t.Route, t.Area, State: (Interaction?)null)).Concat(states))
             {
                 var page = await context.NewPageAsync();
                 var errors = new List<string>();
                 page.Console += (_, m) => { if (m.Type == "error" && errors.Count < 5) errors.Add(m.Text.Length > 140 ? m.Text[..140] : m.Text); };
                 page.PageError += (_, e) => { if (errors.Count < 5) errors.Add("pageerror: " + (e.Length > 140 ? e[..140] : e)); };
-                var row = new Dictionary<string, object?> { ["device"] = scenarioName, ["area"] = area, ["route"] = route };
+                var row = new Dictionary<string, object?> { ["device"] = scenarioName, ["area"] = area, ["route"] = state is null ? route : $"{route} [{state.Name}]" };
                 try
                 {
                     var response = await page.GotoAsync(url, new() { Timeout = 30000, WaitUntil = WaitUntilState.Load });
@@ -318,13 +354,26 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
                         await page.Locator(".tg-boot:not(.tg-boot-hidden)").WaitForAsync(new() { State = WaitForSelectorState.Hidden, Timeout = 20000 });
                     if (textScale == 2)
                         await page.EvaluateAsync("() => document.documentElement.style.fontSize = '200%'");
-                    var json = await page.EvaluateAsync<string>(ChecksScript, device.Touch);
+                    // Scroll the whole page first, as a visitor would: the public site's scroll
+                    // reveal (reveal-init.js) keeps below-the-fold sections at opacity 0 until they
+                    // enter the viewport, and invisible controls were silently skipped.
+                    // page.evaluate has no timeout of its own; a stalled page must fail its row,
+                    // not hang every device's batch.
+                    await page.EvaluateAsync(ScrollThroughScript).WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
+                    var scope = state is null ? null : await OpenStateAsync(page, state);
+                    if (state is not null && scope is null)
+                    {
+                        row["notApplicable"] = "trigger not shown on this device";
+                        await page.CloseAsync();
+                        continue;
+                    }
+                    var json = await page.EvaluateAsync<string>(ChecksScript, new { touch = device.Touch, scope }).WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
                     using var doc = JsonDocument.Parse(json);
                     foreach (var property in doc.RootElement.EnumerateObject())
                         row[property.Name] = property.Value.ValueKind == JsonValueKind.Array
                             ? property.Value.EnumerateArray().Select(v => v.GetString()).ToList()
                             : property.Value.GetInt32();
-                    var shot = Path.Combine(outDir, "screens", scenarioName, Slug(area, route) + ".png");
+                    var shot = Path.Combine(outDir, "screens", scenarioName, Slug(area, route) + (state is null ? "" : "--" + Regex.Replace(state.Name, "[^a-z0-9]+", "-")) + ".png");
                     Directory.CreateDirectory(Path.GetDirectoryName(shot)!);
                     await page.ScreenshotAsync(new() { Path = shot });
                     row["screenshot"] = Path.GetRelativePath(outDir, shot);
@@ -353,6 +402,55 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
                 || row.GetProperty("smallTargetCount").GetInt32() > 0).Select(row => $"{row.GetProperty("device")} {row.GetProperty("route")}").ToArray();
             Assert.True(failures.Length == 0, "Responsive audit failed: " + string.Join(", ", failures));
         }
+    }
+
+    internal const string ScrollThroughScript = """
+        async () => {
+          const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+          const step = Math.max(200, Math.floor(window.innerHeight * 0.8));
+          // 'instant': the public site sets scroll-behavior: smooth, and each smooth scroll
+          // would be cut short by the next step before reaching the lower sections.
+          // Capped: an infinite-scroll page (Community activity) keeps growing as it scrolls, and
+          // page.evaluate has no timeout, so an uncapped loop hung the whole audit.
+          const started = Date.now();
+          for (let y = 0, steps = 0; y < document.documentElement.scrollHeight && steps < 40 && Date.now() - started < 8000; y += step, steps++) {
+            window.scrollTo({ top: y, behavior: 'instant' });
+            await pause(80);
+          }
+          window.scrollTo({ top: 0, behavior: 'instant' });
+          await pause(400);
+        }
+        """;
+
+    // Performs an interaction's steps and returns the opened panel's selector; null when its
+    // trigger isn't visible on this device.
+    private static async Task<string?> OpenStateAsync(IPage page, Interaction state)
+    {
+        var scope = state.Scope;
+        foreach (var (step, index) in state.Steps.Select((s, i) => (s, i)))
+        {
+            var (kind, value) = (step[..step.IndexOf(':')], step[(step.IndexOf(':') + 1)..]);
+            switch (kind)
+            {
+                case "click":
+                    var target = page.Locator(value).First;
+                    if (index == 0 && !await target.IsVisibleAsync()) return null;
+                    if (index == 0 && scope == "@aria-controls")
+                        scope = "#" + (await target.GetAttributeAsync("aria-controls") ?? throw new InvalidOperationException($"'{state.Name}' trigger has no aria-controls."));
+                    await target.ClickAsync(new() { Timeout = 10000 });
+                    break;
+                case "press":
+                    await page.Keyboard.PressAsync(value);
+                    break;
+                case "type":
+                    await page.Keyboard.TypeAsync(value, new() { Delay = 50 });
+                    break;
+            }
+        }
+        await page.WaitForTimeoutAsync(900);
+        if (!await page.Locator(scope).First.IsVisibleAsync())
+            throw new InvalidOperationException($"'{state.Name}' did not open {scope}.");
+        return scope;
     }
 
     // Rebuilds audit.json / audit.md from every rows-*.jsonl in the folder (all devices so far).

@@ -150,6 +150,28 @@ public sealed class WikiServiceTests
     }
 
     [Fact]
+    public async Task SavePageAsync_AFailedCreate_ShouldNotBreakLaterSavesOnTheSameContext()
+    {
+        // A Blazor circuit reuses one DbContext; a rejected insert left tracked as Added was
+        // re-sent by every later SaveChanges, so one failed child-page create broke the tab.
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+        await db.Database.ExecuteSqlRawAsync(
+            "CREATE TRIGGER reject_boom BEFORE INSERT ON WikiPages WHEN NEW.Title = 'Boom' BEGIN SELECT RAISE(ABORT, 'rejected'); END;");
+
+        var failed = () => service.SavePageAsync(new WikiPageEditorModel { Title = "Boom" }, "grantwatson");
+        await failed.Should().ThrowAsync<DbUpdateException>();
+
+        var created = await service.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "After the failure",
+            BlocksJson = ParagraphBlocks("Still works")
+        }, "grantwatson");
+
+        created.Slug.Should().Be("after-the-failure");
+    }
+
+    [Fact]
     public async Task DuplicatePageAsync_ShouldCopyNestedPagesWithFreshBlockIdsAndAdjacentRootOrder()
     {
         await using var db = await CreateDbAsync();

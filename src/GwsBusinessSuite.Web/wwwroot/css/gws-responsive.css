@@ -306,7 +306,17 @@ small, .small { font-size: max(.75rem, .875em); }
     padding-right: max(1rem, var(--gws-safe-right));
 }
 
+/* Anything scrolled into view (scrollIntoView, anchors, focus) stops below the sticky admin bar
+   instead of underneath it - e.g. the page editor's "All modules" panel on a phone. */
+html:has(.gws-admin-bar) {
+    scroll-padding-top: calc(var(--gws-admin-bar-height) + .5rem);
+}
+
+/* Admin pages size their layouts to the room they actually have: the window minus the
+   sidebar (248px, 68px collapsed, none in Fullscreen or the full-screen page editor).
+   Components query it with @container gws-main (...) instead of a viewport @media. */
 .gws-content {
+    container: gws-main / inline-size;
     padding-left: max(1.75rem, var(--gws-safe-left));
     padding-right: max(1.75rem, var(--gws-safe-right));
     padding-bottom: max(2rem, var(--gws-safe-bottom));
@@ -351,6 +361,9 @@ small, .small { font-size: max(.75rem, .875em); }
         justify-content: center;
     }
     .studio-rail-button { width: 44px; height: 44px; }
+    /* Open-state controls outside .gws-content: the account menu and command palette. */
+    .gws-account-popover a,
+    .gws-command-dialog input { min-height: 44px; }
     .gws-content a.small:not(.btn) {
         display: inline-flex;
         align-items: center;

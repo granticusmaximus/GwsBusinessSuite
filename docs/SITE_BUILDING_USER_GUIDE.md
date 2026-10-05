@@ -165,8 +165,11 @@ clicking the row itself — is a three-panel workspace:
   - **Layers** — a collapsible tree of every section and widget on the page, with drag handles
     for reordering, and an **Add Section** button.
 - **Center panel** — the **live preview**, an actual same-origin iframe rendering the real public
-  page (with a small edit-mode bridge active). Desktop/Tablet/Mobile viewport toggles resize the
-  frame; a reload button forces a fresh render. Clicking a section or widget directly in the
+  page (with a small edit-mode bridge active). Desktop/Tablet/Mobile viewport toggles render the
+  page at a real device width (1280px, 820px and 390px). When the preview area is narrower than
+  that, as it usually is on a laptop with both side panels open, the page is shrunk to fit
+  rather than squeezed, so **Desktop** always shows the desktop layout and **Tablet** the tablet
+  layout (including anything set to *Hide on tablet*). A reload button forces a fresh render. Clicking a section or widget directly in the
   preview selects it — the same selection state as clicking it in the Layers tree, kept in sync
   both ways.
 - **Right panel** — the **Inspector**: whatever's selected (a section or a widget) shows its

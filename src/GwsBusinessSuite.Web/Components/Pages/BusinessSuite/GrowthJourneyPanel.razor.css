@@ -49,7 +49,7 @@
 .journey-empty small, .detail-empty { margin-top: .15rem; color: #9b958e; font-size: .75rem; }
 .detail-empty { margin: .7rem 0; }
 
-@media (max-width: 700px) {
+@container gws-main (max-width: 668px) {
     .journey-panel > header { align-items: flex-start; flex-direction: column; }
     .journey-tabs { width: 100%; }
     .journey-tabs button { flex: 1; }

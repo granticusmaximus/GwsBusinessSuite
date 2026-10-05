@@ -21,7 +21,7 @@
 ::deep .devtools-color-output { background:var(--gws-panel-bg-2); border:1px solid var(--gws-panel-border); border-radius:.5rem; padding:.75rem 1rem; font-size:.85rem; white-space:pre-wrap; }
 ::deep .devtools-diff-output { font-family:var(--bs-font-monospace, monospace); font-size:.8rem; white-space:pre-wrap; border:1px solid var(--gws-panel-border); border-radius:.5rem; padding:.5rem; max-height:24rem; overflow:auto; }
 
-@media (max-width:900px) {
+@container gws-main (max-width:596px) {
     .devtools-shell { grid-template-columns:1fr; margin:-.5rem; }
     .devtools-sidebar { border-right:0; border-bottom:1px solid var(--gws-panel-border); }
     ::deep .devtools-split { grid-template-columns:1fr; }

@@ -722,13 +722,13 @@
 
 /* ── Responsive ──────────────────────────────────────────────────────────── */
 
-@media (max-width: 1499.98px) {
+@container gws-main (max-width: 1195.98px) {
 	.studio-workspace {
 		grid-template-columns: 270px minmax(0, 1fr) 310px;
 	}
 }
 
-@media (max-width: 1199.98px) {
+@container gws-main (max-width: 895.98px) {
 	.studio-shell {
 		height: auto;
 		min-height: 100vh;
@@ -860,6 +860,18 @@
 .studio-stage-shell { border-radius: 0; background: transparent; padding: 0.5rem 0; }
 .studio-stage-frame { border-radius: 0; box-shadow: 0 3px 16px rgba(35, 52, 75, 0.08); }
 .studio-stage-frame.is-desktop { width: 100%; }
+/* A device preview wider than the stage: cms-builder-bridge.js renders the page at the
+   preset's real width (Desktop 1280px, Tablet 820px, Mobile 390px) and scales it to fit, so
+   the page's own breakpoints match the device picked instead of the stage's width. */
+.studio-stage-frame.is-scaled { width: 100%; overflow: hidden; }
+.studio-stage-frame.is-scaled .studio-live-iframe {
+    flex: none;
+    width: var(--gws-preview-width);
+    height: var(--gws-preview-height);
+    margin: 0 var(--gws-preview-margin-right) var(--gws-preview-margin-bottom) 0;
+    transform: scale(var(--gws-preview-scale));
+    transform-origin: 0 0;
+}
 .studio-stage-frame.is-mobile { width: min(100%, 390px); }
 .studio-stage-panel > p { font-size: .75rem; }
 .studio-tab.is-active { color: #35669e; border-bottom-color: #35669e; }
@@ -934,12 +946,12 @@
 .studio-rail-button:hover, .studio-rail-button:focus-visible { background: #edf3fa; color: #253349; border-color: #cdd6e2; }
 .studio-panel-rail { display: flex; flex-direction: column; align-items: center; padding-top: 0.75rem; }
 .studio-panel-left[hidden] { display: none; }
-@media (min-width: 1200px) {
+@container gws-main (min-width: 896px) {
     .studio-workspace.left-collapsed { grid-template-columns: 44px minmax(0, 1fr); }
     .studio-workspace.left-collapsed.has-inspector { grid-template-columns: 44px minmax(0, 1fr) 300px; }
 }
 
-@media (min-width: 1200px) and (max-width: 1599.98px) {
+@container gws-main (min-width: 896px) and (max-width: 1295.98px) {
     .studio-header { padding: 0.5rem 0.9rem; gap: 0.6rem; }
     .studio-header p, .studio-kicker { display: none; }
     .studio-header h1 { font-size: 1.05rem; margin: 0; }

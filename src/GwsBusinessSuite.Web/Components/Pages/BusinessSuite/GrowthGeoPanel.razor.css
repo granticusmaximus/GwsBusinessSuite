@@ -202,7 +202,7 @@
     color: #86efac;
 }
 
-@media (max-width: 620px) {
+@container gws-main (max-width: 588px) {
     .geo-heading {
         align-items: flex-start;
         flex-direction: column;

@@ -42,7 +42,7 @@ body {
 .gws-cols-2-1 { grid-template-columns: 2fr 1fr; }
 .gws-cols-3   { grid-template-columns: 1fr 1fr 1fr; }
 
-@media (max-width: 760px) {
+@media (max-width: 767.98px) {
   .gws-columns { grid-template-columns: 1fr !important; }
 }
 
@@ -55,7 +55,7 @@ body {
    simple full-width stack in DOM order - not configurable per-section in this first version. */
 .gws-section-freeform-canvas { position: relative; width: 100%; max-width: 960px; margin: 0 auto; padding: 0 1.5rem; box-sizing: border-box; }
 .gws-freeform-item { position: absolute; }
-@media (max-width: 760px) {
+@media (max-width: 767.98px) {
   .gws-section-freeform-canvas { height: auto !important; }
   .gws-freeform-item {
     position: static !important; left: auto !important; top: auto !important;
@@ -64,15 +64,14 @@ body {
 }
 
 /* Phase 2 - Hide on mobile/tablet: a per-section/per-widget visibility toggle set in the
-   Inspector (see CmsBlockHtmlRenderer.HiddenClasses). The "mobile" cutoff matches this file's
-   existing 760px column-stacking breakpoint above; the "tablet" band's upper bound (900px)
-   sits deliberately between Canvas Studio's own simulated tablet (820px) and desktop (980px)
-   preview widths (see CmsBuilderEditor.razor.css's .studio-stage-frame.is-*), so switching the
-   Studio's device switcher always shows exactly one band's hidden elements disappear. */
-@media (max-width: 760px) {
+   Inspector (see CmsBlockHtmlRenderer.HiddenClasses). The bands are the standard tiers: mobile
+   below 768px, tablet 768-1023.98px. The page editor previews Tablet at 820px and Desktop at
+   1280px (scaled to fit - see cms-builder-bridge.js), so switching its device switcher always
+   shows exactly one band's hidden elements disappear. */
+@media (max-width: 767.98px) {
   .gws-hide-mobile { display: none !important; }
 }
-@media (min-width: 761px) and (max-width: 900px) {
+@media (min-width: 768px) and (max-width: 1023.98px) {
   .gws-hide-tablet { display: none !important; }
 }
 
@@ -96,7 +95,7 @@ body {
 .gws-hero-split { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: center; text-align: left; }
 .gws-hero-split .gws-hero-actions, .gws-hero-split .gws-align-center .gws-hero-actions { justify-content: flex-start; }
 .gws-hero-split-img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
-@media (max-width: 720px) { .gws-hero-split { grid-template-columns: 1fr; } .gws-hero-split-img { order: -1; } }
+@media (max-width: 767.98px) { .gws-hero-split { grid-template-columns: 1fr; } .gws-hero-split-img { order: -1; } }
 
 .gws-heading { line-height: 1.2; margin: 0; }
 .gws-paragraph { color: var(--cms-text-soft); line-height: 1.6; margin: 0; }
@@ -228,7 +227,7 @@ body {
 .gws-gallery-cols-2 { grid-template-columns: repeat(2, 1fr); }
 .gws-gallery-cols-3 { grid-template-columns: repeat(3, 1fr); }
 .gws-gallery-cols-4 { grid-template-columns: repeat(4, 1fr); }
-@media (max-width: 640px) { .gws-gallery { grid-template-columns: repeat(2, 1fr) !important; } }
+@media (max-width: 767.98px) { .gws-gallery { grid-template-columns: repeat(2, 1fr) !important; } }
 .gws-gallery-item { display: block; padding: 0; border: none; background: none; cursor: zoom-in; border-radius: 8px; overflow: hidden; }
 .gws-gallery-img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; }
 .gws-gallery-lightbox {
@@ -280,7 +279,7 @@ body {
 .gws-portfolio-grid-cols-2 { grid-template-columns: repeat(2, 1fr); }
 .gws-portfolio-grid-cols-3 { grid-template-columns: repeat(3, 1fr); }
 .gws-portfolio-grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
-@media (max-width: 640px) { .gws-portfolio-grid { grid-template-columns: repeat(2, 1fr) !important; } }
+@media (max-width: 767.98px) { .gws-portfolio-grid { grid-template-columns: repeat(2, 1fr) !important; } }
 .gws-portfolio-item { position: relative; display: block; padding: 0; border: none; background: none; cursor: pointer; border-radius: 8px; overflow: hidden; }
 .gws-portfolio-img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; }
 .gws-portfolio-item-overlay {
@@ -363,7 +362,7 @@ body {
 }
 .gws-posts-grid-list-item:hover { box-shadow: 0 4px 16px rgba(15, 23, 42, 0.08); }
 .gws-posts-grid-list-img { width: 140px; height: 100px; flex-shrink: 0; object-fit: cover; border-radius: 8px; }
-@media (max-width: 560px) { .gws-posts-grid-list-item { flex-direction: column; } .gws-posts-grid-list-img { width: 100%; height: auto; aspect-ratio: 16 / 9; } }
+@media (max-width: 575.98px) { .gws-posts-grid-list-item { flex-direction: column; } .gws-posts-grid-list-img { width: 100%; height: auto; aspect-ratio: 16 / 9; } }
 
 /* "classic": single column, large top image per post. */
 .gws-posts-grid-classic { display: flex; flex-direction: column; gap: 2rem; }
@@ -391,7 +390,7 @@ body {
    anchor article. Reuses the same auto-fit + 768px single-column collapse pattern as
    .gws-posts-grid so it never causes horizontal overflow on narrow viewports. */
 .gws-related-posts { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
-@media (max-width: 480px) { .gws-related-posts { grid-template-columns: 1fr; } }
+@media (max-width: 575.98px) { .gws-related-posts { grid-template-columns: 1fr; } }
 .gws-related-posts-item {
   display: block; min-width: 0; border: 1px solid var(--cms-border); border-radius: 10px; overflow: hidden;
   background: var(--cms-surface); text-decoration: none; color: inherit; transition: box-shadow 0.15s ease;
@@ -531,7 +530,7 @@ body {
 .gws-email-signup-form.is-done .gws-email-signup-verification,
 .gws-email-signup-form.is-done .gws-email-signup-consent { display: none; }
 .gws-email-signup-warning { margin-bottom: .75rem; padding: .6rem .8rem; border: 1px dashed #f59e0b; border-radius: 8px; font-size: .85rem; background: rgba(245, 158, 11, .1); }
-@media (max-width: 480px) { .gws-email-signup-submit { flex-basis: 100%; } }
+@media (max-width: 575.98px) { .gws-email-signup-submit { flex-basis: 100%; } }
 
 /* Location map widget (OpenStreetMap embed) */
 .gws-map { display: flex; flex-direction: column; gap: .5rem; }
@@ -563,10 +562,28 @@ body {
 .gws-copyright { margin: .75rem 0 0; font-size: .875rem; opacity: .75; }
 .gws-copyright.gws-align-center { text-align: center; }
 .gws-copyright.gws-align-right { text-align: right; }
-@media (max-width: 640px) {
+@media (max-width: 767.98px) {
   .gws-site-header .gws-columns { gap: .75rem; }
   .gws-site-header .gws-nav-menu, .gws-site-header .gws-site-logo-wrap { justify-content: center; }
 }
 
 /* Phone menu button for custom-header Nav Menus - styled and shown by public-site.css only. */
 .gws-nav-menu-toggle { display: none; }
+
+/* Touch screens: carousel arrows, carousel dots and tab buttons get 44px hit areas. The dot keeps
+   its small visual mark (drawn by ::before); only the tappable box grows. */
+@media (pointer: coarse) {
+  .gws-tabs-tab { min-height: 44px; }
+  .gws-map-directions { display: inline-flex; align-items: center; min-height: 44px; }
+  .gws-carousel-arrow { width: 44px; height: 44px; }
+  .gws-carousel-dots { gap: 0; }
+  .gws-carousel-dot {
+    position: relative; width: 44px; height: 44px; border-radius: 0; background: transparent;
+  }
+  .gws-carousel-dot::before {
+    content: ""; position: absolute; top: 50%; left: 50%; width: 0.55rem; height: 0.55rem;
+    border-radius: 50%; background: var(--cms-border); transform: translate(-50%, -50%);
+  }
+  .gws-carousel-dot.is-active { background: transparent; }
+  .gws-carousel-dot.is-active::before { background: var(--cms-accent); }
+}

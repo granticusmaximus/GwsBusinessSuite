@@ -128,6 +128,11 @@ public sealed class HybridSemanticSearchService(
 
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         var candidates = await BuildCandidatesAsync(db, cancellationToken);
+        // Nothing to search in a blank page (no title, no text - e.g. a just-created Sentinel
+        // page), and the embedding call rejects empty input: one such page used to fail its
+        // whole batch and every batch after it on every reconciliation, so new content never
+        // got indexed. Leaving it out also removes any stale document it had.
+        candidates.RemoveAll(candidate => string.IsNullOrWhiteSpace(candidate.EmbeddingInput));
         var existing = await db.SemanticSearchDocuments.ToListAsync(cancellationToken);
         var existingBySource = existing.ToDictionary(item => (item.SourceType, item.SourceId));
         var activeKeys = candidates.Select(item => (item.SourceType, item.SourceId)).ToHashSet();
