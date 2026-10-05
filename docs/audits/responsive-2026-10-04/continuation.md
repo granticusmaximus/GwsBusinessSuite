@@ -35,6 +35,20 @@ Run `dotnet test tests/GwsBusinessSuite.Tests/GwsBusinessSuite.Tests.csproj -c R
 - The public stylesheets (`public-site.css`, `cms-public.css`) rounded each width up to the next tier, so a layout collapses slightly earlier rather than overflowing.
 - The page editor's device preview renders at real device widths (1280/820/390px) and scales to fit, so its Desktop and Tablet buttons still show those layouts in a narrow stage.
 
+## Phase 2 results (2026-10-04)
+
+Final run: 811 page loads and open states, 59 routes (56 standard plus the page, automation and mind-map editors) across all 12 device sizes, with representative About/résumé and Contact content in the local database. After the fixes below, the enforced re-check of every affected route and size passed with no overflow, covered controls or undersized touch targets.
+
+Found and fixed along the way:
+
+- Sentinel's document toolbar overlapped itself on child pages (breadcrumb under the presence avatars and favorite star) whenever the content area was narrow. It now wraps intrinsically at any width.
+- Sentinel's Share panel opened underneath editor content at widths up to 991px (static toolbar ignored its z-index).
+- The command palette's result list never scrolled on short screens; lower results ran under the footer and could not be reached.
+- Touch sizes: account menu links, command palette input, carousel arrows and dots, tab buttons, accordion questions, the résumé's LinkedIn/GitHub links (live on /about) and the map's "Get directions" link.
+- Page editor: "All modules"/"Reusable" on a phone switched a panel that was out of sight; it now scrolls into view below the admin bar. Device previews render at real widths.
+- Text below 12px: Sentinel's Trash count badge and the Automation editor's connection labels.
+- Audit blind spots: public sections hidden by scroll reveal were never measured (the page is now scrolled first, instantly, because the site uses smooth scrolling); the public menu's id is generated (scope read from aria-controls); an unbounded scroll could hang a batch (capped, and every in-page evaluation now has a 30s limit).
+
 ## Remaining acceptance work
 
 - Interactive states not yet scripted: database views, canvas drag interactions, keyboard-only navigation.

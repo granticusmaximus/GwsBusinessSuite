@@ -1,7 +1,30 @@
-# Intelligence sources proposal (researched 2026-10-04) - AWAITING GRANT'S APPROVAL
+# Intelligence sources (researched 2026-10-04) - APPROVED 2026-10-04, all 7 items, DONE 2026-10-04
 
 Sources reviewed: https://github.com/0xh3xa/awesome-cyber-security-tools and https://infosec.house
-(threat-intel + OSINT sections). Nothing here is built yet; build only what Grant approves.
+(threat-intel + OSINT sections). Grant approved the whole list ("Start work on the intelligence
+additions", 2026-10-04).
+
+## Build status
+
+| # | Item | Status |
+| --- | --- | --- |
+| 1 | CISA KEV feed | done |
+| 2 | CVE detail (NVD + EPSS + KEV) | done |
+| 3 | abuse.ch feeds | done |
+| 4 | IP exposure (InternetDB, Tor exit, Spamhaus DROP) | done |
+| 5 | Domain exposure (CT subdomains via certspotter - crt.sh was down 502 every try; urlscan page.domain; Wayback first/last) | done |
+| 6 | HIBP recent public breaches | done |
+| 7 | Automation nodes (threatintel.knownExploited / lookupCve / checkIndicator) | done |
+
+Design: new services + result types (no change to DomainIntelResult's constructor). Live shapes
+captured 2026-10-04: KEV not sorted by dateAdded; EPSS values are strings; NVD metrics under
+cvssMetricV40/V31/V30/V2; urlhaus tags = array|null, threatfox tags = comma string; bazaar CSV
+'", "'-separated with # comments; Spamhaus DROP = NDJSON with a trailing metadata line;
+InternetDB answers for private IPs (skip them); urlscan `domain:` matches any contacted domain
+(use `page.domain:`); certspotter unauthenticated limit 10/window (cache per domain); Wayback CDX
+limit=-1 timed out for github.com - latest snapshot uses the availability API instead.
+Verified live in the browser 2026-10-04 (all panels, CVE-2024-3400, 1.1.1.1, github.com) and by the
+enforced responsive audit at 360/820/1280.
 
 Already integrated (Threat Intel page): defend.network briefings, RDAP/DNS/TLS domain lookups,
 AlienVault OTX pulses (free key), Focsec IP reputation (free key).

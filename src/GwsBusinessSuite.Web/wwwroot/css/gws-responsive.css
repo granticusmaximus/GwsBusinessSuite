@@ -364,6 +364,8 @@ html:has(.gws-admin-bar) {
     /* Open-state controls outside .gws-content: the account menu and command palette. */
     .gws-account-popover a,
     .gws-command-dialog input { min-height: 44px; }
+    /* Title links heading a list row (breaches, briefings, pulses) stand alone, not in prose. */
+    .gws-content .list-group-item a.fw-semibold { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; }
     .gws-content a.small:not(.btn) {
         display: inline-flex;
         align-items: center;

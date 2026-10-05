@@ -204,6 +204,23 @@ These never leave the app and never have an external side effect:
 - **Approval** — pauses the workflow for a human decision (Approve/Reject), optionally with a
   timeout after which it's treated as expired.
 
+### Threat intelligence nodes
+
+Also in the **Data** category, these three read free public security sources (so, unlike the
+nodes above, they do make outbound requests) but never change anything:
+
+- **Known Exploited Vulnerabilities** — CVEs CISA added to its exploited-in-the-wild catalog in
+  the last `sinceDays` days, as `vulnerabilities` plus `vulnerabilityCount`. For a daily alert:
+  Schedule Trigger (daily) → this node → **If** `{{ $json.vulnerabilityCount }}` greaterThan `0`
+  → **Notify**.
+- **Look Up CVE** — adds a `cve` object (description, CVSS, EPSS exploit probability, whether
+  it's on CISA's list) for `cveId`.
+- **Check Domain / IP Exposure** — adds an `indicator` object for `target`: open ports, known
+  CVEs, Tor exit and Spamhaus DROP status for an IP; certificate-log hostnames, recent urlscan.io
+  scans and Wayback Machine history for a domain.
+
+See the [Threat Intelligence guide](THREAT_INTELLIGENCE_USER_GUIDE.md) for what each source is.
+
 ## AI nodes
 
 Three nodes built around this app's self-hosted Ollama models and SentinelGPT:

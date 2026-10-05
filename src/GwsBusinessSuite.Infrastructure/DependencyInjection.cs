@@ -689,6 +689,19 @@ public static class DependencyInjection
         // Plain IHttpClientFactory.CreateClient() default client - same rationale as
         // OverpassBusinessInfoService above (one absolute-URL host, no dedicated config needed).
         services.AddScoped<IDefendNetworkFeedService, DefendNetworkFeedService>();
+        // Free, no-key intelligence sources (approved 2026-10-04): CISA KEV + NVD + EPSS,
+        // abuse.ch bulk feeds, InternetDB/Tor/Spamhaus/certspotter/urlscan/Wayback exposure
+        // checks, and HIBP's public breach list. HIBP and several others reject requests without
+        // a User-Agent; the abuse.ch exports are ~7MB, hence the longer timeout.
+        static void ThreatIntelClient(HttpClient client, TimeSpan timeout)
+        {
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-ThreatIntel/1.0 (+https://www.gwsapp.net)");
+            client.Timeout = timeout;
+        }
+        services.AddHttpClient<IVulnerabilityIntelService, VulnerabilityIntelService>(client => ThreatIntelClient(client, TimeSpan.FromSeconds(30)));
+        services.AddHttpClient<IMalwareFeedService, MalwareFeedService>(client => ThreatIntelClient(client, TimeSpan.FromSeconds(60)));
+        services.AddHttpClient<IExposureIntelService, ExposureIntelService>(client => ThreatIntelClient(client, TimeSpan.FromSeconds(20)));
+        services.AddHttpClient<IDataBreachFeedService, DataBreachFeedService>(client => ThreatIntelClient(client, TimeSpan.FromSeconds(30)));
         // Separate, short-timeout HttpClient for fetching camera snapshot bytes - distinct from
         // IOllamaService's own 2-hour client, since the snapshot fetch itself should fail fast;
         // the vision call's own ~90s budget is enforced separately, inside the service itself.

@@ -132,13 +132,14 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
             const r = el.getBoundingClientRect();
             const offscreen = r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw;
             // Scroll containers clip offscreen rows even though their layout boxes exist.
-            // Do not report a clipped row as covered by a different, visible row.
+            // Do not report a clipped row as covered by a different, visible row. A row only
+            // partly scrolled into view counts as clipped too: it is reachable by scrolling, and
+            // its centre can sit a pixel from the container's edge, over a neighbouring footer.
             let clipped = false;
             for (let parent = el.parentElement; parent; parent = parent.parentElement) {
               const cs = getComputedStyle(parent), pr = parent.getBoundingClientRect();
-              const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-              if ((/(auto|scroll|hidden|clip)/.test(cs.overflowY) && (cy < pr.top || cy > pr.bottom))
-                  || (/(auto|scroll|hidden|clip)/.test(cs.overflowX) && (cx < pr.left || cx > pr.right))) {
+              if ((/(auto|scroll|hidden|clip)/.test(cs.overflowY) && (r.top < pr.top - 1 || r.bottom > pr.bottom + 1))
+                  || (/(auto|scroll|hidden|clip)/.test(cs.overflowX) && (r.left < pr.left - 1 || r.right > pr.right + 1))) {
                 clipped = true; break;
               }
             }
