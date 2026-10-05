@@ -30,8 +30,7 @@ tags, and a count of the indicators — malicious IPs, domains, file hashes — 
 AlienVault OTX. With no search term, it shows your account's own subscribed pulses; type a
 keyword and press the search button to instead search OTX's public pulse index. Click a pulse's
 title to open the full report on OTX's own site. This panel is blank, with a plain "not
-configured" message, until a free OTX API key is added — see `ThreatIntelOptions.cs` for the
-signup link.
+configured" message, until a free OTX API key is added (see [Adding API keys](#adding-api-keys)).
 
 ## Domain / IP investigation
 
@@ -102,6 +101,19 @@ Three read-only nodes in the automation editor's **Data** category use the same 
 - **Check Domain / IP Exposure** - the Exposure section above for a domain or IP.
 
 See the [Automation guide](AUTOMATION_USER_GUIDE.md) for how to build a workflow.
+
+## Adding API keys
+
+Keys are configuration, never code - they don't go in any source file. Sign up for a free key at
+[otx.alienvault.com](https://otx.alienvault.com) (OTX pulses) or [focsec.com](https://focsec.com)
+(IP reputation), then:
+
+- **Production:** add `THREAT_INTEL_OTX_API_KEY=...` and/or `THREAT_INTEL_FOCSEC_API_KEY=...` to
+  the server's `.env`, then run `docker compose up -d --force-recreate gwssuite`. Nothing is
+  deleted; the container just restarts with the new setting.
+- **Local development:** `dotnet user-secrets set "ThreatIntel:OtxApiKey" "<key>" --project
+  src/GwsBusinessSuite.Web` (or `ThreatIntel:FocsecApiKey`). Stored in your user profile, outside
+  the repository.
 
 ## Who can see this
 

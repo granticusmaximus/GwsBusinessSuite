@@ -31,4 +31,4 @@ per provider type.
 
 Never researched yet: AK, NM, SD, WV cameras; MA re-check; Taiwan, Norway, Denmark, Estonia,
 Switzerland; Canada NS/NB/MB/SK/YT/NL/PE; Australia WA/SA/TAS/NT.
-- Test suite took 688s on 2026-10-04 night (163s earlier same night) - find out why before more Overwatch work (machine load vs a test now hitting the network).
+- Resolved: the 688s suite run on 2026-10-04 was machine load; it ran in 124s on 2026-10-05 with no code change.

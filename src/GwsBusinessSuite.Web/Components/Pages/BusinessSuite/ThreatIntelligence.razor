@@ -46,8 +46,9 @@
                 else if (string.IsNullOrWhiteSpace(Options.Value.OtxApiKey))
                 {
                     <p class="text-secondary mb-0">
-                        No OTX API key configured - pulses are unavailable until a free, self-registered key
-                        is added (see <code>ThreatIntelOptions.cs</code>).
+                        No OTX API key configured. Get a free key at
+                        <a href="https://otx.alienvault.com" target="_blank" rel="noopener">otx.alienvault.com</a>, then set
+                        <code>THREAT_INTEL_OTX_API_KEY</code> in the server's <code>.env</code> and recreate the container.
                     </p>
                 }
                 else if (_otxPulses.Count == 0)
@@ -174,8 +175,9 @@
                     else if (result.IsIpAddress && string.IsNullOrWhiteSpace(Options.Value.FocsecApiKey))
                     {
                         <p class="text-secondary small mb-0">
-                            No Focsec API key configured - IP reputation is unavailable until a free,
-                            self-registered key is added (see <code>ThreatIntelOptions.cs</code>).
+                            No Focsec API key configured, so VPN/proxy/bot reputation is off. Get a free key at
+                            <a href="https://focsec.com" target="_blank" rel="noopener">focsec.com</a>, then set
+                            <code>THREAT_INTEL_FOCSEC_API_KEY</code> in the server's <code>.env</code>.
                         </p>
                     }
                 }
