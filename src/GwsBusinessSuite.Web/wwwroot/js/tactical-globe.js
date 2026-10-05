@@ -209,6 +209,30 @@ window.tacticalGlobe = (function () {
             cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
         });
 
+        // Incidents get the same treatment: statewide work-zone feeds (WZDx) mean thousands of
+        // incident pins at a state or country zoom. Amber clusters, so they read as incidents
+        // rather than the green camera clusters.
+        const incidentDataSource = new Cesium.CustomDataSource('tg-incidents');
+        await viewer.dataSources.add(incidentDataSource);
+        incidentDataSource.clustering.enabled = true;
+        incidentDataSource.clustering.pixelRange = 45;
+        incidentDataSource.clustering.minimumClusterSize = 4;
+        incidentDataSource.clustering.clusterEvent.addEventListener(function (clusteredEntities, cluster) {
+            cluster.billboard.show = true;
+            cluster.billboard.image = pinBillboardImage;
+            cluster.billboard.width = 18;
+            cluster.billboard.height = 18;
+            cluster.billboard.color = Cesium.Color.fromCssColorString('#ffb347');
+            cluster.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            cluster.label.show = true;
+            cluster.label.text = clusteredEntities.length.toString();
+            cluster.label.font = 'bold 12px "Share Tech Mono", monospace';
+            cluster.label.fillColor = Cesium.Color.fromCssColorString('#05080a');
+            cluster.label.verticalOrigin = Cesium.VerticalOrigin.CENTER;
+            cluster.label.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
+            cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+        });
+
         const cameraEntities = new Map();
         const alertEntities = new Map();
         let debounceHandle = null;
@@ -265,7 +289,7 @@ window.tacticalGlobe = (function () {
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
         viewers.set(containerId, {
-            containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentEntities,
+            containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities,
             radarLayer, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null
         });
 
@@ -784,11 +808,12 @@ window.tacticalGlobe = (function () {
         const entry = viewers.get(containerId);
         if (!entry) return;
 
-        entry.incidentEntities.forEach(function (entity) { entry.viewer.entities.remove(entity); });
+        entry.incidentDataSource.entities.suspendEvents();
+        entry.incidentDataSource.entities.removeAll();
         entry.incidentEntities.clear();
 
         (incidents || []).forEach(function (incident) {
-            const entity = entry.viewer.entities.add({
+            const entity = entry.incidentDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(incident.lon, incident.lat),
                 billboard: {
                     image: pinBillboardImage,
@@ -801,12 +826,13 @@ window.tacticalGlobe = (function () {
             entity._tacticalGlobeIncident = incident;
             entry.incidentEntities.set(incident.id, entity);
         });
+        entry.incidentDataSource.entities.resumeEvents();
     }
 
     function clearTrafficIncidents(containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
-        entry.incidentEntities.forEach(function (entity) { entry.viewer.entities.remove(entity); });
+        entry.incidentDataSource.entities.removeAll();
         entry.incidentEntities.clear();
     }
 

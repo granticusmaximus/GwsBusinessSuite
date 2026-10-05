@@ -61,6 +61,16 @@ public static class CameraCoverageRegions
         new("Utah (UDOT WZDx Incidents)", "UDOT WZDx", 39.30, -111.70, 600_000),
         new("Oklahoma (OK Traffic WZDx Incidents)", "OK Traffic WZDx", 35.50, -97.50, 600_000),
         new("Idaho (Idaho 511 WZDx Incidents)", "Idaho 511 WZDx", 44.50, -114.50, 700_000),
+        // Second WZDx batch (2026-10-04): states with no other entry here. FL, WA, KY, MO, DE
+        // and Austin also gained work-zone incidents but are already listed for cameras.
+        new("Maryland (MDOT WZDx Incidents)", "MDOT WZDx", 39.00, -76.80, 300_000),
+        new("Wisconsin (511WI WZDx Incidents)", "511WI WZDx", 44.60, -89.90, 500_000),
+        new("New Jersey (Smart Work Zones WZDx Incidents)", "NJ Smart Work Zones WZDx", 40.10, -74.60, 250_000),
+        new("Kansas (KanDrive WZDx Incidents)", "KanDrive WZDx", 38.50, -98.40, 600_000),
+        new("Indiana (INDOT WZDx Incidents)", "INDOT WZDx", 39.90, -86.30, 450_000),
+        new("North Carolina (DriveNC WZDx Incidents)", "DriveNC WZDx", 35.50, -79.40, 600_000),
+        new("Mississippi (MDOT Traffic WZDx Incidents)", "MDOT Traffic WZDx", 32.70, -89.70, 450_000),
+        new("Louisiana (LA DOTD WZDx Incidents)", "LA DOTD WZDx", 31.00, -92.00, 450_000),
         new("British Columbia (DriveBC)", "DriveBC", 53.00, -122.00, 1_600_000),
         new("Madrid, Spain", "Madrid Traffic", 40.42, -3.70, 150_000),
         new("Finland (Fintraffic)", "Fintraffic", 64.50, 26.00, 1_800_000),

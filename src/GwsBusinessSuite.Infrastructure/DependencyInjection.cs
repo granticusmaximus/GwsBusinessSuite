@@ -594,7 +594,15 @@ public static class DependencyInjection
         // provider is always called with a full absolute feed URL (GetFromJsonAsync supports an
         // absolute URI with no BaseAddress set). Per an explicit decision, these work-zone events
         // are surfaced as regular Overwatch incidents.
-        services.AddHttpClient("wzdx", client => client.Timeout = TimeSpan.FromSeconds(20));
+        // Automatic decompression: Florida's feed is served gzip-encoded even when the request
+        // doesn't ask for it (confirmed live 2026-10-04), which plain HttpClient can't parse.
+        // User-Agent: Wisconsin's 511 platform answers 403 without one.
+        services.AddHttpClient("wzdx", client =>
+            {
+                client.Timeout = TimeSpan.FromSeconds(30);
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-OverwatchGrid/1.0 (+https://www.gwsapp.net)");
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
         services.AddScoped<ITrafficIncidentProvider>(sp => new WzdxIncidentProvider(
             sp.GetRequiredService<IHttpClientFactory>().CreateClient("wzdx"),
             sp.GetRequiredService<IMemoryCache>(),
@@ -626,6 +634,36 @@ public static class DependencyInjection
             sp.GetRequiredService<IMemoryCache>(),
             sp.GetRequiredService<ILogger<WzdxIncidentProvider>>(),
             feedUrl: "https://511.idaho.gov/api/wzdx", sourceKey: "id", sourceName: "Idaho 511 WZDx", sourceAttributionUrl: "https://511.idaho.gov"));
+        // Second WZDx batch (2026-10-04) - every key-less feed in USDOT's WZDx feed registry
+        // (datahub.transportation.gov 69qe-yiui) for a state without Overwatch incidents yet,
+        // each fetched live and checked against this provider's schema (string ids, road_names
+        // arrays, v4.0-4.2). Left out: New York (the registry URL now serves a web app, not
+        // data), New Mexico (503 at the time), Minnesota (its CARS511 events already carry
+        // roadwork), and county feeds inside states already covered.
+        foreach (var (feedUrl, sourceKey, sourceName, attributionUrl) in new[]
+        {
+            ("https://us-datacloud.one.network/fdot/feed.json?app_key=c4090b04-26de-c9ee-873b2bd9a38c", "fl", "FL511 WZDx", "https://fl511.com"),
+            ("https://filter.ritis.org/wzdx_v4.1/mdot.geojson", "md", "MDOT WZDx", "https://md511.maryland.gov"),
+            ("https://511wi.gov/api/wzdx", "wi", "511WI WZDx", "https://511wi.gov"),
+            ("https://wzdx.wsdot.wa.gov/api/v4/WorkZoneFeed", "wa", "WSDOT WZDx", "https://wsdot.wa.gov/travel"),
+            ("https://storage.googleapis.com/kytc-its-2020-openrecords/public/feeds/WZDx/kytc_wzdx_v4.1.geojson", "ky", "KYTC WZDx", "https://goky.ky.gov"),
+            ("https://smartworkzones.njit.edu/nj/wzdx", "nj", "NJ Smart Work Zones WZDx", "https://smartworkzones.njit.edu"),
+            ("https://ks.carsprogram.org/carsapi_v1/api/wzdx", "ks", "KanDrive WZDx", "https://www.kandrive.gov"),
+            ("https://in.carsprogram.org/carsapi_v1/api/wzdx", "in", "INDOT WZDx", "https://511in.org"),
+            ("https://drivenc.gov/api/wzdx", "nc", "DriveNC WZDx", "https://drivenc.gov"),
+            ("https://api.mdottraffic.com/prod/v3/data/wzdx", "ms", "MDOT Traffic WZDx", "https://www.mdottraffic.com"),
+            ("https://wzdx.e-dot.com/del_dot_feed_wzdx_v4.1.geojson", "de", "DelDOT WZDx", "https://deldot.gov"),
+            ("https://wzdx.e-dot.com/la_dot_d_feed_wzdx_v4.1.geojson", "la", "LA DOTD WZDx", "https://www.511la.org"),
+            ("https://traveler.modot.org/timconfig/feed/desktop/mo_wzdx.json", "mo", "MoDOT WZDx", "https://traveler.modot.org"),
+            ("https://data.austintexas.gov/download/d9mm-cjw9", "atx", "Austin WZDx", "https://data.austintexas.gov"),
+        })
+        {
+            services.AddScoped<ITrafficIncidentProvider>(sp => new WzdxIncidentProvider(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient("wzdx"),
+                sp.GetRequiredService<IMemoryCache>(),
+                sp.GetRequiredService<ILogger<WzdxIncidentProvider>>(),
+                feedUrl: feedUrl, sourceKey: sourceKey, sourceName: sourceName, sourceAttributionUrl: attributionUrl));
+        }
 
         // International cameras.
         services.AddHttpClient<DriveBcCameraProvider>(client =>

@@ -111,8 +111,12 @@ colored dots — red for accidents/incidents, orange for closures, yellow for ro
 see its full description, affected roadway, and lane/closure details in its own window. This
 currently covers Georgia, Missouri, North Dakota, Tennessee, the New York Thruway, Maine, New
 Hampshire, Vermont, Minnesota, Nebraska, Iowa, Queensland (Australia), plus construction/work-zone
-events (via the federal WZDx standard) for Arizona, Nevada, Utah, Oklahoma, Hawaii, and Idaho; see
-[Known limitations](#known-limitations) for other states.
+events (via the federal WZDx standard) for Arizona, Nevada, Utah, Oklahoma, Hawaii, Idaho, Florida,
+Maryland, Wisconsin, Washington, Kentucky, New Jersey, Kansas, Indiana, North Carolina,
+Mississippi, Delaware, Louisiana, Missouri and Austin (Texas); see
+[Known limitations](#known-limitations) for other states. Only work happening now is shown - the
+feeds also list planned and finished work, which is filtered out. Where many incidents sit close
+together they group into an amber numbered marker; click it (or zoom in) to split it up.
 
 ## NOAA radar and severe weather alerts
 
@@ -239,8 +243,13 @@ Overwatch requires the **AdminOnly** policy, same as the rest of the Intelligenc
   (via the shared CARS511 feed), and Queensland Australia.** Arizona, Nevada, Utah, Oklahoma,
   Hawaii, and Idaho surface construction/work-zone events (not crash-style incidents) via the
   federally-standardized WZDx format, which several state DOTs publish for free even when their own
-  camera API is key-gated. Other states publish similar open data, but each one needs its own
-  verified integration — not yet built. Missouri currently uses the traffic-impact and planned-event
+  camera API is key-gated. A second WZDx batch (2026-10-04) added every remaining key-less feed in
+  USDOT's WZDx registry: Florida, Maryland, Wisconsin, Washington, Kentucky, New Jersey, Kansas,
+  Indiana, North Carolina, Mississippi, Delaware, Louisiana (often empty), Missouri work zones and
+  Austin. Not included: New York's registered feed (now serves a web page, not data), New Mexico's
+  (unavailable when checked), and feeds that need a key (Colorado, Texas statewide, Virginia, Ohio,
+  Oregon, Massachusetts, Pennsylvania Turnpike, Illinois). Other states publish similar open data,
+  but each one needs its own verified integration — not yet built. Missouri currently uses the traffic-impact and planned-event
   point layers; its separate work-zone layers are not included.
 - **No historical storm-damage layer.** The alerts layer shows currently active severe weather in
   real time; a separate "what actually got damaged after the fact" dataset exists (NOAA's Storm

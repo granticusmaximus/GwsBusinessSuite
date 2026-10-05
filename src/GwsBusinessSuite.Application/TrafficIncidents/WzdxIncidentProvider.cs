@@ -25,7 +25,8 @@ public sealed class WzdxIncidentProvider(
     string feedUrl,
     string sourceKey,
     string sourceName,
-    string sourceAttributionUrl) : ITrafficIncidentProvider
+    string sourceAttributionUrl,
+    TimeProvider? timeProvider = null) : ITrafficIncidentProvider
 {
     private readonly string cacheKey = $"traffic-incidents:wzdx:{sourceKey}";
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
@@ -51,9 +52,14 @@ public sealed class WzdxIncidentProvider(
             var features = collection?.Features;
             if (features is null) return [];
 
+            var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
             var results = new List<TrafficIncident>();
             foreach (var feature in features)
             {
+                // Statewide feeds publish planned and finished work too - Florida's had 26,109
+                // entries of which 1,629 were happening now (2026-10-04). Only show current work;
+                // a missing date means no limit on that side.
+                if (!IsCurrent(feature.Properties, now)) continue;
                 if (!TryExtractFirstPoint(feature.Geometry, out var lon, out var lat)) continue;
 
                 var core = feature.Properties?.CoreDetails;
@@ -80,6 +86,19 @@ public sealed class WzdxIncidentProvider(
             return [];
         }
     }
+
+    private static bool IsCurrent(WzdxProperties? properties, DateTimeOffset now)
+    {
+        if (properties is null) return true;
+        if (string.Equals(properties.EventStatus, "completed", StringComparison.OrdinalIgnoreCase)) return false;
+        if (TryParseDate(properties.StartDate, out var start) && start > now) return false;
+        if (TryParseDate(properties.EndDate, out var end) && end < now) return false;
+        return true;
+    }
+
+    private static bool TryParseDate(string? value, out DateTimeOffset date) =>
+        DateTimeOffset.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal, out date);
 
     // WZDx geometry is commonly LineString (a work zone spans a road segment) but can also be
     // Point or MultiPoint - the same "descend into nested coordinate arrays until a 2-number leaf
@@ -117,7 +136,10 @@ public sealed class WzdxIncidentProvider(
     private sealed record WzdxProperties(
         [property: JsonPropertyName("core_details")] WzdxCoreDetails? CoreDetails,
         [property: JsonPropertyName("road_event_id")] string? RoadEventId,
-        [property: JsonPropertyName("vehicle_impact")] string? VehicleImpact);
+        [property: JsonPropertyName("vehicle_impact")] string? VehicleImpact,
+        [property: JsonPropertyName("start_date")] string? StartDate,
+        [property: JsonPropertyName("end_date")] string? EndDate,
+        [property: JsonPropertyName("event_status")] string? EventStatus);
 
     private sealed record WzdxCoreDetails(
         [property: JsonPropertyName("event_type")] string? EventType,

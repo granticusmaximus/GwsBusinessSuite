@@ -65,6 +65,34 @@ public sealed class WzdxIncidentProviderTests
         result.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task GetIncidentsAsync_ShouldOnlyKeepWorkHappeningNow()
+    {
+        // Shaped from Florida's live feed (2026-10-04): statewide feeds mix active, planned
+        // ("pending") and finished ("completed") work zones, with ISO start/end dates.
+        const string json = """
+            {"features":[
+              {"id":"active","properties":{"core_details":{"event_type":"work-zone","road_names":["I-4"]},"start_date":"2026-09-01T00:00:00Z","end_date":"2026-12-01T00:00:00Z","event_status":"active"},"geometry":{"type":"MultiPoint","coordinates":[[-81.4,28.5]]}},
+              {"id":"future","properties":{"core_details":{"event_type":"work-zone","road_names":["I-4"]},"start_date":"2026-11-01T00:00:00Z","end_date":"2026-12-01T00:00:00Z","event_status":"pending"},"geometry":{"type":"MultiPoint","coordinates":[[-81.4,28.5]]}},
+              {"id":"finished","properties":{"core_details":{"event_type":"work-zone","road_names":["I-4"]},"start_date":"2026-08-01T00:00:00Z","end_date":"2026-09-01T00:00:00Z"},"geometry":{"type":"MultiPoint","coordinates":[[-81.4,28.5]]}},
+              {"id":"completed-early","properties":{"core_details":{"event_type":"work-zone","road_names":["I-4"]},"start_date":"2026-09-01T00:00:00Z","end_date":"2026-12-01T00:00:00Z","event_status":"completed"},"geometry":{"type":"MultiPoint","coordinates":[[-81.4,28.5]]}},
+              {"id":"open-ended","properties":{"core_details":{"event_type":"work-zone","road_names":["I-95"]},"start_date":"2026-01-01T00:00:00Z"},"geometry":{"type":"Point","coordinates":[-81.6,30.3]}}
+            ]}
+            """;
+        var http = new HttpClient(new RecordingHandler(_ => JsonResponse(json)));
+        var provider = new WzdxIncidentProvider(http, new MemoryCache(new MemoryCacheOptions()), NullLogger<WzdxIncidentProvider>.Instance,
+            "https://example.test/wzdx", "fl", "FL511 WZDx", "https://fl511.com", new FixedClock(new DateTimeOffset(2026, 10, 4, 12, 0, 0, TimeSpan.Zero)));
+
+        var result = await provider.GetIncidentsAsync(new BoundingBox(North: 31, South: 24, East: -80, West: -88));
+
+        result.Select(incident => incident.Id).Should().Equal("wzdx-fl-active", "wzdx-fl-open-ended");
+    }
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
     private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
     {
         Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json")
