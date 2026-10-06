@@ -46,13 +46,16 @@ const BLOCK_TYPES = [
     { type: 'inline_database', label: 'Table view', icon: '▦', group: 'Database inline / full page', description: 'Data displayed in a grid of rows and columns.', keywords: 'database data collection table grid' },
     { type: 'linked_database', label: 'Linked database', icon: '▤', group: 'Database inline / full page', description: 'Show an existing database view.', keywords: 'database data view' },
     { type: '__create_database', label: 'New database', icon: '🗄️', group: 'Database inline / full page', description: 'Create a new database nested here and open it.', keywords: 'database table collection new board gallery list calendar timeline' },
+    { type: '__columns_2', label: '2-column section', icon: '▥', group: 'Layout sections', description: 'Two equal columns that can hold text or widgets.', keywords: 'columns layout section two' },
+    { type: '__columns_3', label: '3-column section', icon: '▥', group: 'Layout sections', description: 'Three equal columns that can hold text or widgets.', keywords: 'columns layout section three' },
+    { type: '__columns_sidebar_left', label: 'Left sidebar section', icon: '▥', group: 'Layout sections', description: 'A narrow left column and a wide content column.', keywords: 'columns layout section sidebar left' },
+    { type: '__columns_sidebar_right', label: 'Right sidebar section', icon: '▥', group: 'Layout sections', description: 'A wide content column and a narrow right column.', keywords: 'columns layout section sidebar right' },
+    { type: 'tab', label: 'Tabs', icon: '▤', group: 'Layout sections', description: 'Organize content into switchable tabs.', keywords: 'tabbed container panes' },
     { type: 'table_of_contents', label: 'Table of contents', icon: '☷', group: 'Advanced & inline blocks', description: 'Auto-generates a list of jump links using your page headings.', keywords: 'outline headings' },
     { type: 'equation', label: 'Block equation', icon: '∑', group: 'Advanced & inline blocks', description: 'Centers standard LaTeX scientific formulas.', keywords: 'math formula latex' },
     { type: 'synced_block', label: 'Synced block', icon: '↻', group: 'Advanced & inline blocks', description: 'Edits here update every duplicated copy of this block.', keywords: 'reusable' },
     { type: 'button', label: 'Button', icon: '▣', group: 'Advanced & inline blocks', description: 'Creates automatic action macro scripts when clicked.', keywords: 'action link automation' },
     { type: '__mention_person', label: 'Mention a person', icon: '@', group: 'Advanced & inline blocks', description: 'Inline flag for a coworker.', keywords: 'mention person user' },
-    { type: 'columns', label: 'Columns', icon: '▥', group: 'Advanced & inline blocks', description: 'Lay content out side by side.', keywords: 'layout' },
-    { type: 'tab', label: 'Tabs', icon: '▤', group: 'Advanced & inline blocks', description: 'Organize content into switchable tabs.', keywords: 'tabbed container panes' },
     { type: 'breadcrumb', label: 'Breadcrumb', icon: '›', group: 'Advanced & inline blocks', description: 'Show this page’s location.', keywords: 'navigation path' }
 ];
 // Pseudo block types handled by their own commit branch in commitBlockPickerItem rather than
@@ -61,6 +64,7 @@ const BLOCK_TYPES = [
 // __mention_person), or splice in reusable content (dynamic __template_<id> entries added to
 // the menu at open time from GetSuggestedBlockTemplates).
 const CREATE_MENU_TYPES = new Set(['__create_page', '__create_database']);
+const COLUMN_LAYOUT_TYPES = new Set(['__columns_2', '__columns_3', '__columns_sidebar_left', '__columns_sidebar_right']);
 const MEDIA_TYPES = new Set(['image', 'embed', 'video', 'audio', 'pdf', 'file']);
 const TEXTLESS_TYPES = new Set(['divider', 'page_link', 'linked_database', 'inline_database', 'breadcrumb', 'table_of_contents', ...MEDIA_TYPES]);
 const RICH_TEXT_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
@@ -448,7 +452,15 @@ export function dispose(container) {
 // ---- Block creation ----------------------------------------------------
 
 function emptyBlock(type) {
-    return { id: crypto.randomUUID(), type, indentLevel: 0, richText: [], props: {} };
+    return { id: newClientBlockId(), type, indentLevel: 0, richText: [], props: {} };
+}
+
+function newClientBlockId() {
+    if (typeof crypto?.randomUUID === 'function') return crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, character => {
+        const random = Math.floor(Math.random() * 16);
+        return (character === 'x' ? random : (random & 0x3) | 0x8).toString(16);
+    });
 }
 
 function createBlockElement(block, state) {
@@ -840,14 +852,23 @@ function createColumnsBody(block, state) {
     const fallbackColumns = (text || 'Column one ||| Column two')
         .split('|||', 5)
         .map(column => column.trim());
-    let columns = fallbackColumns.map(column => [{ text: column }]);
+    let richColumns = fallbackColumns.map(column => [{ text: column }]);
     try {
-        const richColumns = JSON.parse((block.props && block.props.columnRichTextJson) || '[]');
-        if (Array.isArray(richColumns) && richColumns.length > 0) columns = richColumns;
+        const parsed = JSON.parse((block.props && block.props.columnRichTextJson) || '[]');
+        if (Array.isArray(parsed) && parsed.length > 0) richColumns = parsed;
     } catch { /* use the plain-text fallback from older Sentinel versions */ }
-    while (columns.length < 2) columns.push('');
+    let columns = [];
+    try {
+        const parsed = JSON.parse((block.props && block.props.columnBlocksJson) || '[]');
+        if (Array.isArray(parsed) && parsed.length > 0) columns = parsed;
+    } catch { /* migrate the rich-text columns below */ }
+    if (columns.length === 0) {
+        columns = richColumns.map(value => [{ ...emptyBlock('paragraph'), richText: Array.isArray(value) ? value : [{ text: value || '' }] }]);
+    }
+    while (columns.length < 2) columns.push([emptyBlock('paragraph')]);
+    wrapper.dataset.layout = (block.props && block.props.columnLayout) || 'equal';
 
-    const renderColumn = value => {
+    const renderColumn = values => {
         const column = document.createElement('section');
         column.className = 'wiki-column-editor';
         const controls = document.createElement('div');
@@ -892,15 +913,31 @@ function createColumnsBody(block, state) {
         });
 
         const content = document.createElement('div');
-        content.className = 'wiki-block-content wiki-column-content';
-        content.contentEditable = 'true';
-        content.innerHTML = Array.isArray(value)
-            ? htmlFromRichText(value)
-            : htmlFromRichText([{ text: value || '' }]);
-        content.dataset.placeholder = 'Type in this column';
-        content.addEventListener('input', () => scheduleNotify(state));
+        content.className = 'wiki-column-blocks';
+        const nestedBlocks = Array.isArray(values) && values.length > 0 ? values : [emptyBlock('paragraph')];
+        nestedBlocks.forEach(value => content.appendChild(createBlockElement(value, state)));
+        content.querySelector('.wiki-block-content')?.classList.add('wiki-column-content');
+        const addWidget = document.createElement('button');
+        addWidget.type = 'button';
+        addWidget.className = 'wiki-column-add-widget';
+        addWidget.textContent = '+ Add text or widget';
+        addWidget.addEventListener('mousedown', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            const created = createBlockElement(emptyBlock('paragraph'), state);
+            content.appendChild(created);
+            const editor = created.querySelector('.wiki-block-content');
+            if (!editor) return;
+            focusBlock(created);
+            openSuggestionMenu(state, {
+                kind: 'slash', anchor: editor, ariaLabel: 'Insert a block or widget',
+                items: blockPickerItems(state), group: item => item.group, icon: item => item.icon,
+                label: item => item.label, description: item => item.description,
+                commit: item => commitBlockPickerItem(state, created, item)
+            });
+        });
         controls.append(moveLeft, moveRight, remove);
-        column.append(controls, content);
+        column.append(controls, content, addWidget);
         return column;
     };
 
@@ -911,7 +948,7 @@ function createColumnsBody(block, state) {
     add.textContent = '+ Add column';
     add.addEventListener('click', () => {
         if (wrapper.querySelectorAll(':scope > .wiki-column-editor').length >= 5) return;
-        wrapper.insertBefore(renderColumn(''), add);
+        wrapper.insertBefore(renderColumn([emptyBlock('paragraph')]), add);
         refreshColumnControls(wrapper);
         notifyChanged(state);
     });
@@ -2473,6 +2510,10 @@ function commitBlockPickerItem(state, blockEl, item) {
         convertToNewSyncedBlock(state, blockEl);
         return;
     }
+    if (COLUMN_LAYOUT_TYPES.has(item.type)) {
+        convertToColumnLayout(state, blockEl, item.type);
+        return;
+    }
     const content = blockEl.querySelector('.wiki-block-content');
     if (item.type === '__link_to_page') {
         if (content) openLinkToPagePicker(state, content);
@@ -2488,6 +2529,24 @@ function commitBlockPickerItem(state, blockEl, item) {
         return;
     }
     convertBlockType(state, blockEl, item.type);
+}
+
+function convertToColumnLayout(state, blockEl, layoutType) {
+    const count = layoutType === '__columns_3' ? 3 : 2;
+    const layout = layoutType === '__columns_sidebar_left' ? 'sidebar-left'
+        : layoutType === '__columns_sidebar_right' ? 'sidebar-right' : 'equal';
+    const block = serializeBlock(blockEl);
+    block.type = 'columns';
+    block.richText = [{ text: Array.from({ length: count }, () => '').join(' ||| ') }];
+    block.props = {
+        columnLayout: layout,
+        columnBlocksJson: JSON.stringify(Array.from({ length: count }, () => [emptyBlock('paragraph')]))
+    };
+    const created = createBlockElement(block, state);
+    blockEl.replaceWith(created);
+    refreshBlockPresentation(state.container);
+    focusBlock(created.querySelector('.wiki-block'));
+    notifyChanged(state);
 }
 
 // Notion-style "Page"/"New database": the server creates the child under this page, the block
@@ -3619,9 +3678,13 @@ function serializeBlock(blockEl) {
     if (type === 'toggle') props.open = blockEl.dataset.open === 'true' ? 'true' : 'false';
     if (type === 'table') props.tableJson = JSON.stringify(serializeTableRichText(blockEl));
     if (type === 'columns') {
+        const columns = [...blockEl.querySelectorAll(':scope > .wiki-block-body .wiki-column-blocks')];
+        const columnBlocks = columns.map(column =>
+            [...column.querySelectorAll(':scope > .wiki-block')].map(serializeBlock));
+        props.columnBlocksJson = JSON.stringify(columnBlocks);
         props.columnRichTextJson = JSON.stringify(
-            [...blockEl.querySelectorAll(':scope > .wiki-block-body .wiki-column-content')]
-                .map(column => richTextFromNode(column)));
+            columnBlocks.map(blocks => blocks.flatMap((child, index) =>
+                index === 0 ? child.richText : [{ text: '\n' }, ...child.richText])));
     }
     if (type === 'tab') {
         props.tabsJson = JSON.stringify(
@@ -3657,8 +3720,11 @@ function serializeBlock(blockEl) {
         ? [{ text: serializeTable(blockEl) }]
         : type === 'columns'
             ? [{
-                text: [...blockEl.querySelectorAll(':scope > .wiki-block-body .wiki-column-content')]
-                    .map(column => column.textContent.trim())
+                text: [...blockEl.querySelectorAll(':scope > .wiki-block-body .wiki-column-blocks')]
+                    .map(column => [...column.querySelectorAll(':scope > .wiki-block')]
+                        .map(child => serializeBlock(child).richText.map(span => span.text || '').join('').trim())
+                        .filter(Boolean)
+                        .join('\n'))
                     .join(' ||| ')
             }]
         : type === 'tab'

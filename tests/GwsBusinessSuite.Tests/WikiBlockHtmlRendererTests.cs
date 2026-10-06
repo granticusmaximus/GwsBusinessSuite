@@ -405,6 +405,32 @@ public sealed class WikiBlockHtmlRendererTests
     }
 
     [Fact]
+    public void RenderBlock_ShouldRenderNestedWidgetsInsideAColumnLayout()
+    {
+        var columns = new List<List<WikiBlock>>
+        {
+            new() { TextBlock(WikiBlockTypes.Callout, "Important", 0) },
+            new() { TextBlock(WikiBlockTypes.Heading2, "Details", 0), TextBlock(WikiBlockTypes.Paragraph, "Body", 0) }
+        };
+        var block = new WikiBlock(
+            Guid.NewGuid(),
+            WikiBlockTypes.Columns,
+            0,
+            [],
+            new Dictionary<string, string>
+            {
+                ["columnLayout"] = "sidebar-left",
+                ["columnBlocksJson"] = JsonSerializer.Serialize(columns, WikiBlockJson.Options)
+            });
+
+        var html = WikiBlockHtmlRenderer.RenderBlock(block);
+
+        html.Should().Contain("wiki-columns-sidebar-left");
+        html.Should().Contain("wiki-callout").And.Contain("Important");
+        html.Should().Contain("<h2>Details</h2>").And.Contain("<p>Body</p>");
+    }
+
+    [Fact]
     public void RenderBlock_ShouldFallBackToPlainTextTabsWhenStructuredPropsAreInvalid()
     {
         var block = new WikiBlock(

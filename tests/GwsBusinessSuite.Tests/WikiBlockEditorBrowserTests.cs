@@ -193,7 +193,7 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         await page.Locator(".wiki-block-add").Last.ClickAsync(new LocatorClickOptions { Force = true });
 
         await Expect(page.Locator(".wiki-editor-menu-group")).ToHaveTextAsync(
-            ["Suggested", "Basic blocks", "Media", "Database inline / full page", "Advanced & inline blocks"]);
+            ["Suggested", "Basic blocks", "Media", "Database inline / full page", "Layout sections", "Advanced & inline blocks"]);
         await Expect(page.Locator(".wiki-editor-menu-label:text-is(\"Meeting notes\")")).ToBeVisibleAsync();
         await Expect(page.Locator(".wiki-editor-menu-label:text-is(\"Page\")")).ToBeVisibleAsync();
         await Expect(page.Locator(".wiki-editor-menu-label:text-is(\"New database\")")).ToBeVisibleAsync();
@@ -763,6 +763,54 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
 
         var serialized = (await EditorBlocksAsync(page)).Single();
         serialized.PlainText.Should().Be("Second ||| Third");
+    }
+
+    [Fact]
+    public async Task ColumnSectionPreset_ShouldCreateColumnsThatAcceptRealWidgets()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.SetContentAsync("""<div id="editor" class="wiki-block-editor"></div>""");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+        await page.EvaluateAsync(
+            """
+            () => window.sentinelBlockEditor.initialize(
+                document.querySelector('#editor'),
+                { invokeMethodAsync: () => Promise.resolve([]) },
+                '[]')
+            """);
+
+        await page.GetByTitle("Insert block below").ClickAsync();
+        var picker = page.GetByRole(AriaRole.Listbox, new() { Name = "Insert a block" });
+        await picker.GetByRole(AriaRole.Option, new() { Name = "3-column section" }).ClickAsync();
+        await Expect(page.Locator(".wiki-column-editor")).ToHaveCountAsync(3);
+
+        await page.Locator(".wiki-column-editor").Nth(0)
+            .GetByRole(AriaRole.Button, new() { Name = "Add text or widget" }).ClickAsync();
+        picker = page.GetByRole(AriaRole.Listbox, new() { Name = "Insert a block or widget" });
+        await picker.GetByRole(AriaRole.Option, new() { Name = "Callout" }).ClickAsync();
+        await page.Locator(".wiki-column-editor").Nth(0)
+            .Locator(".wiki-block[data-block-type='callout'] .wiki-block-content").FillAsync("Important");
+
+        var serialized = (await EditorBlocksAsync(page)).Last();
+        serialized.Type.Should().Be(WikiBlockTypes.Columns);
+        var nested = JsonSerializer.Deserialize<List<List<WikiBlock>>>(
+            serialized.Props["columnBlocksJson"], WikiBlockJson.Options);
+        nested.Should().HaveCount(3);
+        nested![0].Should().Contain(block => block.Type == WikiBlockTypes.Callout && block.PlainText == "Important");
+
+        await page.EvaluateAsync(
+            "json => window.sentinelBlockEditor.initialize(document.querySelector('#editor'), { invokeMethodAsync: () => Promise.resolve([]) }, json)",
+            WikiBlockJson.Serialize([serialized]));
+        await Expect(page.Locator(".wiki-column-editor")).ToHaveCountAsync(3);
+        await Expect(page.Locator(".wiki-column-editor").Nth(0)
+            .Locator(".wiki-block[data-block-type='callout']")).ToContainTextAsync("Important");
     }
 
     [Fact]

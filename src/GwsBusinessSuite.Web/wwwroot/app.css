@@ -3744,6 +3744,23 @@ audio.wiki-embed-media { max-width: 100%; }
     gap: .75rem;
     width: 100%;
 }
+.sentinel-workspace .wiki-columns-editor[data-layout="sidebar-left"] { grid-template-columns: minmax(10rem, 1fr) minmax(0, 2fr); }
+.sentinel-workspace .wiki-columns-editor[data-layout="sidebar-right"] { grid-template-columns: minmax(0, 2fr) minmax(10rem, 1fr); }
+.wiki-column-blocks { display: grid; align-content: start; gap: .2rem; min-width: 0; }
+.wiki-column-blocks > .wiki-block { width: 100%; }
+.wiki-column-add-widget {
+    width: 100%;
+    padding: .35rem .5rem;
+    border: 1px dashed transparent;
+    border-radius: .35rem;
+    background: transparent;
+    color: var(--sentinel-faint);
+    font-size: .75rem;
+    text-align: left;
+    opacity: .2;
+}
+.wiki-column-editor:hover > .wiki-column-add-widget,
+.wiki-column-editor:focus-within > .wiki-column-add-widget { opacity: 1; border-color: var(--sentinel-border); }
 .sentinel-workspace .wiki-block[data-block-type="columns"] .wiki-column-editor {
     position: relative;
     min-width: 0;
@@ -3892,6 +3909,15 @@ audio.wiki-embed-media { max-width: 100%; }
 .wiki-button { display: inline-block; padding: .5rem .85rem; border-radius: .4rem; background: var(--gws-sidebar-accent); color: var(--gws-accent-contrast); font-weight: 700; text-decoration: none; }
 .wiki-synced-block { padding: .7rem .85rem; border-left: 3px solid var(--gws-sidebar-accent); background: rgba(var(--bs-primary-rgb), .06); }
 .wiki-columns { display: grid; grid-template-columns: repeat(auto-fit,minmax(12rem,1fr)); gap: 1rem; }
+.wiki-columns-sidebar-left { grid-template-columns: minmax(10rem, 1fr) minmax(0, 2fr); }
+.wiki-columns-sidebar-right { grid-template-columns: minmax(0, 2fr) minmax(10rem, 1fr); }
+@media (max-width: 767.98px) {
+    .sentinel-workspace .wiki-columns-editor,
+    .sentinel-workspace .wiki-columns-editor[data-layout="sidebar-left"],
+    .sentinel-workspace .wiki-columns-editor[data-layout="sidebar-right"],
+    .wiki-columns-sidebar-left,
+    .wiki-columns-sidebar-right { grid-template-columns: minmax(0, 1fr); }
+}
 .wiki-columns > div { padding: .75rem; border: 1px solid rgba(148,163,184,.18); border-radius: .4rem; }
 .wiki-tabs-container { width: 100%; }
 .wiki-tabs {

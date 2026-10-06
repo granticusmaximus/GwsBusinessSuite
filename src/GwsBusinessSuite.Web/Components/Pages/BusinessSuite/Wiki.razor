@@ -2242,7 +2242,7 @@
         if (SelectedDatabaseId is null && !_blockEditorInitialized)
         {
             _blockEditorRef ??= DotNetObjectReference.Create(this);
-            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=11");
+            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=12");
             await _blockEditorModule.InvokeVoidAsync(
                 "initialize",
                 _blockEditorContainer,

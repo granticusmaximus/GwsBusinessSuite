@@ -128,7 +128,7 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.TableOfContents => $"<nav class=\"wiki-table-of-contents\"{indentStyle}>Table of contents</nav>",
             WikiBlockTypes.Button => $"<a class=\"wiki-button\" href=\"{WebUtility.HtmlEncode(GetSafeLink(block.Props.GetValueOrDefault("url")) ?? "#")}\">{content}</a>",
             WikiBlockTypes.SyncedBlock => $"<div class=\"wiki-synced-block\"{indentStyle}>{content}</div>",
-            WikiBlockTypes.Columns => RenderColumns(block, indentStyle),
+            WikiBlockTypes.Columns => RenderColumns(block, indentStyle, pagesForWikiLinks),
             WikiBlockTypes.Tab => RenderTabs(block, indentStyle),
             // Legacy content from the pre-block-editor wiki still uses [[Page Title]] syntax,
             // so it's routed through the same resolver the old single-Markdown-string editor
@@ -538,8 +538,28 @@ public static class WikiBlockHtmlRenderer
         return $"<table class=\"wiki-native-table\"{indentStyle}>{head}{body}</table>";
     }
 
-    private static string RenderColumns(WikiBlock block, string indentStyle)
+    private static string RenderColumns(WikiBlock block, string indentStyle, IReadOnlyList<WikiPage>? pagesForWikiLinks)
     {
+        if (block.Props.TryGetValue("columnBlocksJson", out var columnBlocksJson))
+        {
+            try
+            {
+                var blockColumns = JsonSerializer.Deserialize<List<List<WikiBlock>>>(columnBlocksJson, WikiBlockJson.Options);
+                if (blockColumns is { Count: > 0 })
+                {
+                    var layout = block.Props.GetValueOrDefault("columnLayout", "equal");
+                    return $"<div class=\"wiki-columns wiki-columns-{WebUtility.HtmlEncode(layout)}\"{indentStyle}>"
+                        + string.Concat(blockColumns.Select(column =>
+                            $"<div>{string.Concat(column.Select(child => RenderBlock(child, pagesForWikiLinks)))}</div>"))
+                        + "</div>";
+                }
+            }
+            catch (JsonException)
+            {
+                // Older column blocks continue through the rich-text/plain-text fallbacks.
+            }
+        }
+
         if (block.Props.TryGetValue("columnRichTextJson", out var columnRichTextJson))
         {
             try
