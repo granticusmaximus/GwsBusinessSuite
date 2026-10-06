@@ -6,6 +6,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GwsBusinessSuite.Application.ThreatIntel;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -14,21 +15,15 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // Fans out a domain or IP to four independent, free data sources - each fails on its own
 // (recorded in DomainIntelResult.Errors) rather than failing the whole investigation:
 //
-//   1. RDAP (registration data) via rdap.org - a free, no-key, no-registration redirecting
-//      bootstrap service confirmed directly against both a domain (redirects to Verisign's own
-//      RDAP server for .com) and an IP (redirects to ARIN's). Chosen over hand-rolling IANA's
-//      own TLD-to-registry bootstrap file, since rdap.org already does exactly that server-side
-//      - HttpClient's default AllowAutoRedirect follows it with no extra code. Some TLDs'
-//      registries aren't wired into rdap.org's redirect table (confirmed directly: .io returns
-//      a real 404, not a redirect) - a real, accepted gap, not a bug here. Also confirmed
-//      directly (a real, non-obvious finding, not a guess): rdap.org's Cloudflare front returns
-//      a 403 for a request with no User-Agent header at all - the .NET HttpClient default - so
+//   1. RDAP (registration data): the registry's own RDAP server, looked up in IANA's bootstrap
+//      files (data.iana.org/rdap/dns.json, ipv4.json, ipv6.json - cached for a day), with rdap.org
+//      as the fallback when IANA has no entry or the registry's server fails. Some TLDs publish
+//      no RDAP at all (.io and .co have no IANA entry and rdap.org 404s them; .io has no WHOIS
+//      server either, checked 2026-10-05) - those say so rather than showing nothing.
+//      rdap.org's Cloudflare front returns a 403 for a request with no User-Agent header, so
 //      the DI registration for this service's HttpClient sets one explicitly.
-//   2. DNS (A/AAAA only) via System.Net.Dns - genuinely built into the runtime, zero
-//      dependency. Note: .NET's Dns class only resolves hostnames to addresses; it has no public
-//      API for arbitrary record types (MX/TXT/etc.) without a third-party resolver library
-//      (e.g. DnsClient.NET), which is deliberately not added here - a real scope narrowing from
-//      the original plan's assumption, not an oversight.
+//   2. DNS: A/AAAA via System.Net.Dns, plus CNAME/MX/NS/TXT/CAA via DNS-over-HTTPS
+//      (IDnsRecordLookup) - .NET's Dns class can't query other record types.
 //   3. Live TLS certificate inspection via SslStream against port 443 - the certificate
 //      validation callback always accepts, since the goal is to inspect whatever certificate a
 //      site presents (including an expired/self-signed/mismatched one, which is itself a
@@ -43,8 +38,12 @@ public sealed class DomainIntelService(
     IDnsResolver dnsResolver,
     ITlsCertificateFetcher tlsCertificateFetcher,
     IOptions<ThreatIntelOptions> options,
-    ILogger<DomainIntelService> logger) : IDomainIntelService
+    ILogger<DomainIntelService> logger,
+    IDnsRecordLookup recordLookup,
+    IMemoryCache cache) : IDomainIntelService
 {
+    private static readonly TimeSpan BootstrapCacheDuration = TimeSpan.FromHours(24);
+
     public async Task<DomainIntelResult> InvestigateAsync(string target, CancellationToken cancellationToken = default)
     {
         target = target.Trim();
@@ -64,10 +63,19 @@ public sealed class DomainIntelService(
         try
         {
             var path = isIp ? $"ip/{Uri.EscapeDataString(target)}" : $"domain/{Uri.EscapeDataString(target)}";
+            var registryBase = await TryGetRegistryRdapBaseAsync(target, isIp, ct);
+            if (registryBase is not null)
+            {
+                var direct = await TryFetchRdapAsync(registryBase + path, ct);
+                if (direct is not null) return direct;
+            }
+
             using var response = await httpClient.GetAsync($"https://rdap.org/{path}", ct);
             if (!response.IsSuccessStatusCode)
             {
-                errors.Add($"RDAP lookup returned {(int)response.StatusCode} {response.StatusCode}");
+                errors.Add(registryBase is null && !isIp && response.StatusCode == HttpStatusCode.NotFound
+                    ? $"The .{target[(target.LastIndexOf('.') + 1)..]} registry doesn't publish registration data over RDAP"
+                    : $"RDAP lookup returned {(int)response.StatusCode} {response.StatusCode}");
                 return null;
             }
 
@@ -81,6 +89,76 @@ public sealed class DomainIntelService(
             errors.Add("RDAP lookup failed");
             return null;
         }
+    }
+
+    private async Task<RegistrationInfo?> TryFetchRdapAsync(string url, CancellationToken ct)
+    {
+        try
+        {
+            using var response = await httpClient.GetAsync(url, ct);
+            if (!response.IsSuccessStatusCode) return null;
+            var root = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct))?.AsObject();
+            return root is null ? null : ParseRdap(root);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            logger.LogDebug(ex, "Registry RDAP lookup {Url} failed; falling back to rdap.org", url);
+            return null;
+        }
+    }
+
+    // The registry's RDAP base URL (always ending in "/") from IANA's bootstrap files.
+    private async Task<string?> TryGetRegistryRdapBaseAsync(string target, bool isIp, CancellationToken ct)
+    {
+        try
+        {
+            if (!isIp)
+            {
+                var tld = target.TrimEnd('.')[(target.TrimEnd('.').LastIndexOf('.') + 1)..].ToLowerInvariant();
+                var services = await GetBootstrapAsync("dns", ct);
+                return services.FirstOrDefault(service => service.Keys.Contains(tld, StringComparer.OrdinalIgnoreCase)).BaseUrl;
+            }
+
+            var ip = IPAddress.Parse(target);
+            var file = ip.AddressFamily == AddressFamily.InterNetworkV6 ? "ipv6" : "ipv4";
+            foreach (var service in await GetBootstrapAsync(file, ct))
+            {
+                if (service.Keys.Any(cidr => IPNetwork.TryParse(cidr, out var network) && network.Contains(ip))) return service.BaseUrl;
+            }
+            return null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or FormatException)
+        {
+            logger.LogDebug(ex, "IANA RDAP bootstrap lookup failed for {Target}", target);
+            return null;
+        }
+    }
+
+    private async Task<IReadOnlyList<(IReadOnlyList<string> Keys, string? BaseUrl)>> GetBootstrapAsync(string file, CancellationToken ct)
+    {
+        var cacheKey = $"threat-intel:rdap-bootstrap:{file}";
+        if (cache.TryGetValue(cacheKey, out IReadOnlyList<(IReadOnlyList<string>, string?)>? cached) && cached is not null) return cached;
+
+        var root = JsonNode.Parse(await httpClient.GetStringAsync($"https://data.iana.org/rdap/{file}.json", ct));
+        var services = ParseBootstrap(root);
+        cache.Set(cacheKey, services, BootstrapCacheDuration);
+        return services;
+    }
+
+    // services: [ [ [keys...], [urls...] ], ... ] - prefer an https URL.
+    internal static IReadOnlyList<(IReadOnlyList<string> Keys, string? BaseUrl)> ParseBootstrap(JsonNode? root)
+    {
+        var result = new List<(IReadOnlyList<string>, string?)>();
+        foreach (var service in root?["services"]?.AsArray() ?? [])
+        {
+            if (service is not JsonArray { Count: >= 2 } pair) continue;
+            var keys = (pair[0] as JsonArray)?.Select(AsString).OfType<string>().ToList() ?? [];
+            var urls = (pair[1] as JsonArray)?.Select(AsString).OfType<string>().ToList() ?? [];
+            var url = urls.FirstOrDefault(u => u.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) ?? urls.FirstOrDefault();
+            if (url is not null && !url.EndsWith('/')) url += "/";
+            result.Add((keys, url));
+        }
+        return result;
     }
 
     private static RegistrationInfo ParseRdap(JsonObject root)
@@ -162,20 +240,40 @@ public sealed class DomainIntelService(
 
     private async Task<IReadOnlyList<DnsRecordInfo>> TryGetDnsRecordsAsync(string domain, List<string> errors, CancellationToken ct)
     {
+        var records = new List<DnsRecordInfo>();
         try
         {
             var addresses = await dnsResolver.ResolveAsync(domain, ct);
-            return addresses
-                .Select(a => new DnsRecordInfo(
-                    a.AddressFamily == AddressFamily.InterNetworkV6 ? "AAAA" : "A",
-                    a.ToString()))
-                .ToList();
+            records.AddRange(addresses.Select(a => new DnsRecordInfo(
+                a.AddressFamily == AddressFamily.InterNetworkV6 ? "AAAA" : "A",
+                a.ToString())));
         }
         catch (Exception ex) when (ex is SocketException or ArgumentException)
         {
             errors.Add($"DNS lookup failed: {ex.Message}");
-            return [];
         }
+
+        var lookups = DnsRecordTypes.Investigated
+            .Select(async type => (Type: type, Values: await recordLookup.QueryAsync(domain, type, ct)))
+            .ToList();
+        try
+        {
+            foreach (var (type, values) in await Task.WhenAll(lookups))
+            {
+                records.AddRange(values.Select(value => new DnsRecordInfo(type, value)));
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException)
+        {
+            // Keep whichever record types did answer.
+            foreach (var lookup in lookups.Where(l => l.IsCompletedSuccessfully))
+            {
+                records.AddRange(lookup.Result.Values.Select(value => new DnsRecordInfo(lookup.Result.Type, value)));
+            }
+            errors.Add("Some DNS record types couldn't be looked up (DNS-over-HTTPS unavailable)");
+        }
+
+        return records;
     }
 
     private async Task<TlsCertificateInfo?> TryGetTlsCertificateAsync(string domain, List<string> errors, CancellationToken ct)

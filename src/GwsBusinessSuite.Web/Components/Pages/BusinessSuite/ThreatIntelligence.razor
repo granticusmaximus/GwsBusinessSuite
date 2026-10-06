@@ -9,6 +9,8 @@
 @inject IMalwareFeedService MalwareFeedService
 @inject IExposureIntelService ExposureService
 @inject IDataBreachFeedService BreachFeedService
+@inject IThreatIntelWorkspaceService WorkspaceService
+@inject ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<ThreatIntelligence> Logger
 
 <PageTitle>Threat Intelligence</PageTitle>
@@ -26,76 +28,79 @@
 </div>
 
 <div class="row g-4">
-    <div class="col-lg-6">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
-                <span class="fw-semibold"><i class="bi bi-broadcast"></i> OTX Threat Pulses</span>
-                <form class="d-flex gap-2" @onsubmit="SearchPulsesAsync">
-                    <input class="form-control form-control-sm" style="max-width: 12rem;" placeholder="Search pulses (optional)"
-                           value="@_otxSearchTerm" @oninput="e => _otxSearchTerm = e.Value?.ToString() ?? string.Empty" />
-                    <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@_otxLoading">
-                        <i class="bi bi-search"></i>
-                    </button>
-                </form>
-            </div>
-            <div class="card-body">
-                @if (_otxLoading)
-                {
-                    <p class="text-secondary mb-0"><i class="bi bi-arrow-repeat gws-spin"></i> Loading pulses&hellip;</p>
-                }
-                else if (string.IsNullOrWhiteSpace(Options.Value.OtxApiKey))
-                {
-                    <p class="text-secondary mb-0">
-                        No OTX API key configured. Get a free key at
-                        <a href="https://otx.alienvault.com" target="_blank" rel="noopener">otx.alienvault.com</a>, then set
-                        <code>THREAT_INTEL_OTX_API_KEY</code> in the server's <code>.env</code> and recreate the container.
-                    </p>
-                }
-                else if (_otxPulses.Count == 0)
-                {
-                    <p class="text-secondary mb-0">No pulses found.</p>
-                }
-                else
-                {
-                    <ul class="list-group list-group-flush">
-                        @foreach (var pulse in _otxPulses)
-                        {
-                            <li class="list-group-item px-0">
-                                <div class="d-flex justify-content-between align-items-start gap-2">
-                                    <a href="@pulse.PulseUrl" target="_blank" rel="noopener" class="fw-semibold">@pulse.Name</a>
-                                    <span class="badge bg-secondary-subtle text-secondary-emphasis">@pulse.IndicatorCount indicators</span>
-                                </div>
-                                @if (!string.IsNullOrWhiteSpace(pulse.Description))
-                                {
-                                    <p class="small text-secondary mb-1">@pulse.Description</p>
-                                }
-                                <div class="d-flex flex-wrap gap-1">
-                                    @foreach (var tag in pulse.Tags)
-                                    {
-                                        <span class="badge bg-light text-dark border">@tag</span>
-                                    }
-                                </div>
-                            </li>
-                        }
-                    </ul>
-                }
-            </div>
-        </div>
-    </div>
-
-    <div class="col-lg-6">
-        <div class="card border-0 shadow-sm h-100">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-bottom py-3">
-                <span class="fw-semibold"><i class="bi bi-search"></i> Domain / IP Investigation</span>
+                <span class="fw-semibold"><i class="bi bi-search"></i> Investigate</span>
             </div>
             <div class="card-body">
-                <form class="d-flex gap-2 mb-3" @onsubmit="InvestigateAsync">
-                    <input class="form-control" placeholder="example.com or 8.8.8.8"
+                <form class="d-flex flex-wrap gap-2 mb-2" @onsubmit="InvestigateAsync">
+                    <input class="form-control threat-intel-omnibox" placeholder="IP, domain, URL, file hash (MD5/SHA-1/SHA-256) or CVE id"
+                           aria-label="Indicator to investigate"
                            value="@_investigateTarget" @oninput="e => _investigateTarget = e.Value?.ToString() ?? string.Empty" />
                     <button type="submit" class="btn btn-primary" disabled="@(_investigating || string.IsNullOrWhiteSpace(_investigateTarget))">
                         @(_investigating ? "Looking up…" : "Investigate")
                     </button>
                 </form>
+                <p class="small text-secondary mb-3">
+                    Defanged input (<code>hxxp://</code>, <code>example[.]com</code>) works too. Every lookup is saved to the history below.
+                </p>
+
+                @if (_investigationError is not null)
+                {
+                    <div class="alert alert-warning py-2 small">@_investigationError</div>
+                }
+
+                @if (_currentInvestigation is { } current)
+                {
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3 threat-intel-result-bar">
+                        <div>
+                            <span class="badge bg-secondary-subtle text-secondary-emphasis me-1">@KindLabel(current.Kind)</span>
+                            <span class="fw-semibold text-break">@current.Query</span>
+                            <div class="small text-secondary">@current.Summary</div>
+                        </div>
+                        <div class="d-flex gap-2">
+                            @if (current.ExportedWikiPageId is { } exportedId)
+                            {
+                                <a class="btn btn-sm btn-outline-secondary" href="/admin/sentinel?page=@exportedId"><i class="bi bi-journal-text"></i> Open in Sentinel</a>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_exporting" @onclick="() => ExportAsync(current.Id)">
+                                    <i class="bi bi-journal-plus"></i> @(_exporting ? "Exporting…" : "Export to Sentinel")
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @if (_matches.Count > 0)
+                {
+                    <h6 class="text-danger"><i class="bi bi-exclamation-octagon"></i> Found in threat feeds (@_matches.Count)</h6>
+                    <ul class="list-group list-group-flush mb-3 threat-intel-feed">
+                        @foreach (var match in _matches.Take(25))
+                        {
+                            <li class="list-group-item px-0">
+                                <span class="badge bg-danger-subtle text-danger-emphasis me-1">@match.Feed</span>
+                                <code class="text-break">@Defang(match.MatchedValue)</code>
+                                <div class="small text-secondary">
+                                    @match.Description@(match.SeenAt is { } seen ? $" · seen {seen:yyyy-MM-dd}" : "")
+                                    · <a href="@match.ReferenceUrl" target="_blank" rel="noopener">report</a>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+                else if (_currentInvestigation is not null && _matchesChecked)
+                {
+                    <p class="small mb-3"><span class="badge bg-success-subtle text-success-emphasis">Not in abuse.ch feeds</span>
+                        <span class="text-secondary">No recent botnet C2, URLhaus, ThreatFox or MalwareBazaar entry names it.</span></p>
+                }
+
+                @if (_investigatedCve is { } investigatedCve)
+                {
+                    @RenderCve(investigatedCve, closable: false)
+                }
 
                 @if (_investigateResult is { } result)
                 {
@@ -135,7 +140,7 @@
 
                     @if (result.DnsRecords.Count > 0)
                     {
-                        <h6>DNS (A/AAAA)</h6>
+                        <h6>DNS records</h6>
                         <ul class="small mb-2">
                             @foreach (var record in result.DnsRecords)
                             {
@@ -278,6 +283,100 @@
         </div>
     </div>
 
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3">
+                <span class="fw-semibold"><i class="bi bi-clock-history"></i> Investigation history</span>
+            </div>
+            <div class="card-body">
+                @if (_history.Count == 0)
+                {
+                    <p class="text-secondary mb-0">Lookups you run above are saved here, for every admin to reopen.</p>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush threat-intel-history">
+                        @foreach (var item in _history)
+                        {
+                            <li class="list-group-item px-0 d-flex justify-content-between align-items-start gap-2">
+                                <div class="min-w-0">
+                                    <button type="button" class="btn btn-link p-0 text-start fw-semibold text-break" @onclick="() => ReopenAsync(item)">@item.Query</button>
+                                    <div class="small text-secondary">@KindLabel(item.Kind) · @item.CreatedBy · @item.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
+                                    <div class="small text-truncate">@item.Summary</div>
+                                </div>
+                                <div class="d-flex gap-1 flex-shrink-0">
+                                    @if (item.ExportedWikiPageId is { } pageId)
+                                    {
+                                        <a class="btn btn-sm btn-outline-secondary" href="/admin/sentinel?page=@pageId" title="Open in Sentinel" aria-label="Open @item.Query in Sentinel"><i class="bi bi-journal-text"></i></a>
+                                    }
+                                    <button type="button" class="btn btn-sm btn-outline-danger" title="Delete" aria-label="Delete @item.Query from history" @onclick="() => DeleteHistoryAsync(item.Id)"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span class="fw-semibold"><i class="bi bi-broadcast"></i> OTX Threat Pulses</span>
+                <form class="d-flex gap-2" @onsubmit="SearchPulsesAsync">
+                    <input class="form-control form-control-sm" style="max-width: 12rem;" placeholder="Search pulses (optional)"
+                           value="@_otxSearchTerm" @oninput="e => _otxSearchTerm = e.Value?.ToString() ?? string.Empty" />
+                    <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@_otxLoading">
+                        <i class="bi bi-search"></i>
+                    </button>
+                </form>
+            </div>
+            <div class="card-body">
+                @if (_otxLoading)
+                {
+                    <p class="text-secondary mb-0"><i class="bi bi-arrow-repeat gws-spin"></i> Loading pulses&hellip;</p>
+                }
+                else if (string.IsNullOrWhiteSpace(Options.Value.OtxApiKey))
+                {
+                    <p class="text-secondary mb-0">
+                        No OTX API key configured. Get a free key at
+                        <a href="https://otx.alienvault.com" target="_blank" rel="noopener">otx.alienvault.com</a>, then set
+                        <code>THREAT_INTEL_OTX_API_KEY</code> in the server's <code>.env</code> and recreate the container.
+                    </p>
+                }
+                else if (_otxPulses.Count == 0)
+                {
+                    <p class="text-secondary mb-0">No pulses found.</p>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush">
+                        @foreach (var pulse in _otxPulses)
+                        {
+                            <li class="list-group-item px-0">
+                                <div class="d-flex justify-content-between align-items-start gap-2">
+                                    <a href="@pulse.PulseUrl" target="_blank" rel="noopener" class="fw-semibold">@pulse.Name</a>
+                                    <span class="badge bg-secondary-subtle text-secondary-emphasis">@pulse.IndicatorCount indicators</span>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(pulse.Description))
+                                {
+                                    <p class="small text-secondary mb-1">@pulse.Description</p>
+                                }
+                                <div class="d-flex flex-wrap gap-1">
+                                    @foreach (var tag in pulse.Tags)
+                                    {
+                                        <span class="badge bg-light text-dark border">@tag</span>
+                                    }
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+
+
     <div class="col-lg-7">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -299,48 +398,7 @@
                 }
                 else if (_cveDetail is { } cveDetail)
                 {
-                    <div class="border rounded p-3 mb-3 threat-intel-cve">
-                        <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
-                            <a class="fw-semibold" href="https://nvd.nist.gov/vuln/detail/@cveDetail.CveId" target="_blank" rel="noopener">@cveDetail.CveId</a>
-                            <button type="button" class="btn-close" aria-label="Close CVE detail" @onclick="() => _cveDetail = null"></button>
-                        </div>
-                        <div class="d-flex flex-wrap gap-2 my-2">
-                            @if (cveDetail.CvssScore is { } score)
-                            {
-                                <span class="badge @SeverityClass(cveDetail.CvssSeverity)">CVSS @(cveDetail.CvssVersion) @score.ToString("0.0") @cveDetail.CvssSeverity</span>
-                            }
-                            @if (cveDetail.EpssScore is { } epss)
-                            {
-                                <span class="badge bg-light text-dark border" title="Probability of exploitation activity in the next 30 days (FIRST EPSS)">
-                                    EPSS @epss.ToString("P1") (@((cveDetail.EpssPercentile ?? 0).ToString("P0")) percentile)
-                                </span>
-                            }
-                            @if (cveDetail.KnownExploited is { } kevEntry)
-                            {
-                                <span class="badge bg-danger">Exploited in the wild - on KEV since @kevEntry.DateAdded.ToString("yyyy-MM-dd")</span>
-                                @if (kevEntry.KnownRansomwareUse)
-                                {
-                                    <span class="badge bg-danger-subtle text-danger-emphasis">Used by ransomware</span>
-                                }
-                            }
-                            else
-                            {
-                                <span class="badge bg-secondary-subtle text-secondary-emphasis">Not on KEV</span>
-                            }
-                        </div>
-                        @if (!string.IsNullOrWhiteSpace(cveDetail.Description))
-                        {
-                            <p class="small mb-2">@cveDetail.Description</p>
-                        }
-                        @if (cveDetail.KnownExploited is { } kev && !string.IsNullOrWhiteSpace(kev.RequiredAction))
-                        {
-                            <p class="small mb-2"><strong>CISA required action:</strong> @kev.RequiredAction @(kev.DueDate is { } due ? $"(due {due:yyyy-MM-dd} for US federal agencies)" : "")</p>
-                        }
-                        @if (cveDetail.Errors.Count > 0)
-                        {
-                            <p class="small text-secondary mb-0">@string.Join(" · ", cveDetail.Errors)</p>
-                        }
-                    </div>
+                    @RenderCve(cveDetail, closable: true)
                 }
 
                 @if (_kevLoading)
@@ -353,14 +411,49 @@
                 }
                 else
                 {
-                    <p class="small text-secondary">Most recently added - vulnerabilities CISA has confirmed attackers are actively exploiting.</p>
+                    <div class="d-flex flex-wrap gap-2 align-items-center mb-2 threat-intel-kev-filters">
+                        <input class="form-control form-control-sm threat-intel-kev-search" placeholder="Filter by vendor, product or name"
+                               aria-label="Filter known exploited vulnerabilities"
+                               value="@_kevFilter" @oninput="OnKevFilterInputAsync" />
+                        <select class="form-select form-select-sm w-auto" aria-label="Sort known exploited vulnerabilities"
+                                value="@_kevSort" @onchange="OnKevSortChangedAsync">
+                            <option value="newest">Newest first</option>
+                            <option value="epss">Highest EPSS first</option>
+                        </select>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="kev-ransomware" checked="@_kevRansomwareOnly"
+                                   @onchange="e => OnKevToggleAsync(() => _kevRansomwareOnly = e.Value is true)" />
+                            <label class="form-check-label small" for="kev-ransomware">Ransomware only</label>
+                        </div>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="kev-new" checked="@_kevNewOnly"
+                                   @onchange="e => OnKevToggleAsync(() => _kevNewOnly = e.Value is true)" />
+                            <label class="form-check-label small" for="kev-new">New since my last visit (@NewKevCount)</label>
+                        </div>
+                    </div>
+                    <p class="small text-secondary">
+                        Vulnerabilities CISA has confirmed attackers are actively exploiting - @FilteredKev.Count of @_kev.Count shown@(FilteredKev.Count > KevShown ? $" (first {KevShown})" : "").
+                        @if (_kevSort == "epss" && _epssLoading) { <span><i class="bi bi-arrow-repeat gws-spin"></i> loading EPSS scores&hellip;</span> }
+                    </p>
                     <ul class="list-group list-group-flush">
-                        @foreach (var entry in _kev)
+                        @foreach (var entry in FilteredKev.Take(KevShown))
                         {
                             <li class="list-group-item px-0">
                                 <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
-                                    <button type="button" class="btn btn-link p-0 fw-semibold text-start" @onclick="() => LookupCveAsync(entry.CveId)">@entry.CveId</button>
-                                    <span class="text-secondary small text-nowrap">added @entry.DateAdded.ToString("yyyy-MM-dd")</span>
+                                    <span>
+                                        <button type="button" class="btn btn-link p-0 fw-semibold text-start" @onclick="() => LookupCveAsync(entry.CveId)">@entry.CveId</button>
+                                        @if (IsNewKev(entry))
+                                        {
+                                            <span class="badge bg-primary ms-1">New</span>
+                                        }
+                                    </span>
+                                    <span class="text-secondary small text-nowrap">
+                                        @if (_epss.TryGetValue(entry.CveId, out var epssScore))
+                                        {
+                                            <span class="badge bg-light text-dark border me-1" title="FIRST EPSS: probability of exploitation in the next 30 days">EPSS @epssScore.ToString("P1")</span>
+                                        }
+                                        added @entry.DateAdded.ToString("yyyy-MM-dd")
+                                    </span>
                                 </div>
                                 <div class="small">@entry.Vendor @entry.Product - @entry.Name</div>
                                 @if (entry.KnownRansomwareUse)
@@ -370,6 +463,10 @@
                             </li>
                         }
                     </ul>
+                    @if (FilteredKev.Count == 0)
+                    {
+                        <p class="text-secondary mb-0">Nothing matches these filters.</p>
+                    }
                 }
             </div>
         </div>
@@ -561,6 +658,22 @@
     private string _investigateTarget = string.Empty;
     private bool _investigating;
     private DomainIntelResult? _investigateResult;
+    private string? _investigationError;
+    private ThreatInvestigationView? _currentInvestigation;
+    private IReadOnlyList<IndicatorMatch> _matches = [];
+    private bool _matchesChecked;
+    private CveDetail? _investigatedCve;
+    private bool _exporting;
+    private IReadOnlyList<ThreatInvestigationView> _history = [];
+
+    private const int KevShown = 25;
+    private string _kevFilter = string.Empty;
+    private string _kevSort = "newest";
+    private bool _kevRansomwareOnly;
+    private bool _kevNewOnly;
+    private DateTimeOffset? _lastKevVisit;
+    private bool _epssLoading;
+    private IReadOnlyDictionary<string, double> _epss = new Dictionary<string, double>();
 
     private bool _briefingsLoading;
     private IReadOnlyList<ThreatBriefing> _briefings = [];
@@ -594,7 +707,13 @@
         // each on a cold cache) must not hold up the rest of the page.
         await Task.WhenAll(
             Refresh(LoadPulsesAsync()), Refresh(LoadBriefingsAsync()), Refresh(LoadKevAsync()),
-            Refresh(LoadBreachesAsync()), Refresh(LoadMalwareAsync()));
+            Refresh(LoadBreachesAsync()), Refresh(LoadMalwareAsync()), Refresh(LoadHistoryAsync()));
+    }
+
+    private async Task LoadHistoryAsync()
+    {
+        try { _history = await WorkspaceService.ListInvestigationsAsync(); }
+        catch (Exception ex) { Logger.LogError(ex, "Failed to load investigation history"); }
     }
 
     private async Task Refresh(Task load)
@@ -606,9 +725,78 @@
     private async Task LoadKevAsync()
     {
         _kevLoading = true;
-        try { _kev = await VulnerabilityService.GetKnownExploitedAsync(15); }
+        try
+        {
+            var visitTask = WorkspaceService.TouchKevVisitAsync(await CurrentUserAccessor.GetCurrentUsernameAsync());
+            _kev = await VulnerabilityService.GetKnownExploitedAsync(5000);
+            _lastKevVisit = await visitTask;
+            await LoadEpssAsync(FilteredKev.Take(KevShown));
+        }
         catch (Exception ex) { Logger.LogError(ex, "Failed to load the KEV catalog"); _kev = []; }
         finally { _kevLoading = false; }
+    }
+
+    private IReadOnlyList<KnownExploitedVulnerability> FilteredKev => FilterKev(sortByEpss: _kevSort == "epss");
+
+    private IReadOnlyList<KnownExploitedVulnerability> FilterKev(bool sortByEpss)
+    {
+        var filter = _kevFilter.Trim();
+        IEnumerable<KnownExploitedVulnerability> rows = _kev;
+        if (filter.Length > 0)
+        {
+            rows = rows.Where(k => k.Vendor.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || k.Product.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || k.Name.Contains(filter, StringComparison.OrdinalIgnoreCase)
+                || k.CveId.Contains(filter, StringComparison.OrdinalIgnoreCase));
+        }
+        if (_kevRansomwareOnly) rows = rows.Where(k => k.KnownRansomwareUse);
+        if (_kevNewOnly) rows = rows.Where(IsNewKev);
+        if (sortByEpss) rows = rows.OrderByDescending(k => _epss.TryGetValue(k.CveId, out var score) ? score : -1);
+        return rows.ToList();
+    }
+
+    // KEV only records the date added, so "new" means added on or after the day of the last visit.
+    // A first visit marks nothing as new.
+    private bool IsNewKev(KnownExploitedVulnerability entry) =>
+        _lastKevVisit is { } visit && entry.DateAdded >= DateOnly.FromDateTime(visit.UtcDateTime);
+
+    private int NewKevCount => _kev.Count(IsNewKev);
+
+    // Shown rows get their EPSS badge as filters bring them into view.
+    private Task OnKevFilterInputAsync(ChangeEventArgs e) =>
+        OnKevToggleAsync(() => _kevFilter = e.Value?.ToString() ?? string.Empty);
+
+    private async Task OnKevToggleAsync(Action change)
+    {
+        change();
+        await LoadEpssAsync(FilteredKev.Take(KevShown));
+    }
+
+    private async Task OnKevSortChangedAsync(ChangeEventArgs e)
+    {
+        _kevSort = e.Value?.ToString() == "epss" ? "epss" : "newest";
+        if (_kevSort == "epss")
+        {
+            _epssLoading = true;
+            StateHasChanged();
+            // Sorting by EPSS needs a score for every row that passes the filters, not just the shown ones.
+            await LoadEpssAsync(FilterKev(sortByEpss: false));
+            _epssLoading = false;
+        }
+    }
+
+    private async Task LoadEpssAsync(IEnumerable<KnownExploitedVulnerability> entries)
+    {
+        var missing = entries.Select(k => k.CveId).Where(id => !_epss.ContainsKey(id)).ToList();
+        if (missing.Count == 0) return;
+        try
+        {
+            var scores = await VulnerabilityService.GetEpssScoresAsync(missing);
+            var merged = new Dictionary<string, double>(_epss, StringComparer.OrdinalIgnoreCase);
+            foreach (var (id, score) in scores) merged[id] = score;
+            _epss = merged;
+        }
+        catch (Exception ex) { Logger.LogWarning(ex, "Failed to load EPSS scores"); }
     }
 
     private async Task LoadBreachesAsync()
@@ -711,32 +899,196 @@
         }
     }
 
+    // One search box: works out whether the input is an IP, domain, URL, hash or CVE and runs the
+    // lookups that apply, then saves the whole result to the shared history.
     private async Task InvestigateAsync()
     {
         if (string.IsNullOrWhiteSpace(_investigateTarget)) return;
 
+        var indicator = ThreatIndicatorClassifier.Classify(_investigateTarget);
+        _investigationError = null;
+        if (indicator.Kind == IndicatorKind.Unknown)
+        {
+            _investigationError = "That doesn't look like an IP address, domain, URL, file hash or CVE id.";
+            return;
+        }
+
         _investigating = true;
+        ClearInvestigation();
         StateHasChanged();
         try
         {
-            var target = _investigateTarget.Trim();
-            var registrationTask = DomainIntelService.InvestigateAsync(target);
-            var exposureTask = ExposureService.InvestigateAsync(target);
-            await Task.WhenAll(registrationTask, exposureTask);
-            _investigateResult = await registrationTask;
-            _exposureResult = await exposureTask;
+            var matchesTask = indicator.Kind == IndicatorKind.Cve
+                ? Task.FromResult<IReadOnlyList<IndicatorMatch>>([])
+                : MalwareFeedService.FindMatchesAsync(indicator);
+            Task<DomainIntelResult>? domainTask = null;
+            Task<ExposureIntelResult>? exposureTask = null;
+            Task<CveDetail?>? cveTask = null;
+            if (indicator.Host is { } host)
+            {
+                domainTask = DomainIntelService.InvestigateAsync(host);
+                exposureTask = ExposureService.InvestigateAsync(host);
+            }
+            if (indicator.Kind == IndicatorKind.Cve) cveTask = VulnerabilityService.GetCveDetailAsync(indicator.Value);
+
+            await Task.WhenAll(new Task?[] { matchesTask, domainTask, exposureTask, cveTask }.OfType<Task>());
+            _matches = await matchesTask;
+            _matchesChecked = indicator.Kind != IndicatorKind.Cve;
+            _investigateResult = domainTask is null ? null : await domainTask;
+            _exposureResult = exposureTask is null ? null : await exposureTask;
+            _investigatedCve = cveTask is null ? null : await cveTask;
+
+            var snapshot = new ThreatInvestigationSnapshot(_investigateResult, _exposureResult, _investigatedCve, _matches);
+            var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            _currentInvestigation = await WorkspaceService.SaveInvestigationAsync(
+                indicator.Value, indicator.Kind, Summarize(indicator, snapshot), snapshot, user);
+            await LoadHistoryAsync();
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to investigate {Target}", _investigateTarget);
-            _investigateResult = null;
-            _exposureResult = null;
+            _investigationError = "The investigation failed. Try again in a moment.";
         }
         finally
         {
             _investigating = false;
         }
     }
+
+    private void ClearInvestigation()
+    {
+        _currentInvestigation = null;
+        _investigateResult = null;
+        _exposureResult = null;
+        _investigatedCve = null;
+        _matches = [];
+        _matchesChecked = false;
+    }
+
+    private static string Summarize(ClassifiedIndicator indicator, ThreatInvestigationSnapshot snapshot)
+    {
+        var parts = new List<string>();
+        if (snapshot.Matches.Count > 0)
+            parts.Add($"in threat feeds: {string.Join(", ", snapshot.Matches.Select(m => m.Feed).Distinct())}");
+        else if (indicator.Kind != IndicatorKind.Cve)
+            parts.Add("not in abuse.ch feeds");
+        if (snapshot.Exposure?.SpamhausDrop is not null) parts.Add("on Spamhaus DROP");
+        if (snapshot.Exposure?.IsTorExitNode == true) parts.Add("Tor exit node");
+        if (snapshot.Exposure?.IpExposure is { } ip)
+            parts.Add($"{ip.Ports.Count} open port{(ip.Ports.Count == 1 ? "" : "s")}{(ip.Vulnerabilities.Count > 0 ? $", {ip.Vulnerabilities.Count} known CVEs" : "")}");
+        if (snapshot.Domain?.Registration?.Registrar is { } registrar) parts.Add(registrar);
+        if (snapshot.Cve is { } cve)
+        {
+            if (cve.CvssScore is { } score) parts.Add($"CVSS {score:0.0}");
+            parts.Add(cve.KnownExploited is null ? "not on KEV" : "exploited in the wild");
+        }
+        return parts.Count == 0 ? "No findings." : char.ToUpperInvariant(parts[0][0]) + string.Join("; ", parts)[1..] + ".";
+    }
+
+    private async Task ReopenAsync(ThreatInvestigationView item)
+    {
+        _investigationError = null;
+        var snapshot = await WorkspaceService.GetInvestigationSnapshotAsync(item.Id);
+        if (snapshot is null)
+        {
+            _investigationError = "That saved investigation couldn't be opened.";
+            return;
+        }
+        ClearInvestigation();
+        _investigateTarget = item.Query;
+        _currentInvestigation = item;
+        _investigateResult = snapshot.Domain;
+        _exposureResult = snapshot.Exposure;
+        _investigatedCve = snapshot.Cve;
+        _matches = snapshot.Matches;
+        _matchesChecked = item.Kind != nameof(IndicatorKind.Cve);
+    }
+
+    private async Task ExportAsync(Guid id)
+    {
+        _exporting = true;
+        try
+        {
+            var pageId = await WorkspaceService.ExportInvestigationToSentinelAsync(id, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            if (_currentInvestigation?.Id == id) _currentInvestigation = _currentInvestigation with { ExportedWikiPageId = pageId };
+            await LoadHistoryAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Exporting investigation {Id} to Sentinel failed", id);
+            _investigationError = "Exporting to Sentinel failed.";
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private async Task DeleteHistoryAsync(Guid id)
+    {
+        await WorkspaceService.DeleteInvestigationAsync(id);
+        if (_currentInvestigation?.Id == id) _currentInvestigation = null;
+        await LoadHistoryAsync();
+    }
+
+    private static string KindLabel(string kind) => kind switch
+    {
+        nameof(IndicatorKind.IpAddress) => "IP address",
+        nameof(IndicatorKind.Domain) => "Domain",
+        nameof(IndicatorKind.Url) => "URL",
+        nameof(IndicatorKind.Cve) => "CVE",
+        nameof(IndicatorKind.Md5) => "MD5 hash",
+        nameof(IndicatorKind.Sha1) => "SHA-1 hash",
+        nameof(IndicatorKind.Sha256) => "SHA-256 hash",
+        _ => kind
+    };
+
+    private RenderFragment RenderCve(CveDetail cveDetail, bool closable) =>
+@<div class="border rounded p-3 mb-3 threat-intel-cve">
+        <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+            <a class="fw-semibold" href="https://nvd.nist.gov/vuln/detail/@cveDetail.CveId" target="_blank" rel="noopener">@cveDetail.CveId</a>
+            @if (closable)
+            {
+                <button type="button" class="btn-close" aria-label="Close CVE detail" @onclick="() => _cveDetail = null"></button>
+            }
+        </div>
+        <div class="d-flex flex-wrap gap-2 my-2">
+            @if (cveDetail.CvssScore is { } score)
+            {
+                <span class="badge @SeverityClass(cveDetail.CvssSeverity)">CVSS @(cveDetail.CvssVersion) @score.ToString("0.0") @cveDetail.CvssSeverity</span>
+            }
+            @if (cveDetail.EpssScore is { } epss)
+            {
+                <span class="badge bg-light text-dark border" title="Probability of exploitation activity in the next 30 days (FIRST EPSS)">
+                    EPSS @epss.ToString("P1") (@((cveDetail.EpssPercentile ?? 0).ToString("P0")) percentile)
+                </span>
+            }
+            @if (cveDetail.KnownExploited is { } kevEntry)
+            {
+                <span class="badge bg-danger">Exploited in the wild - on KEV since @kevEntry.DateAdded.ToString("yyyy-MM-dd")</span>
+                @if (kevEntry.KnownRansomwareUse)
+                {
+                    <span class="badge bg-danger-subtle text-danger-emphasis">Used by ransomware</span>
+                }
+            }
+            else
+            {
+                <span class="badge bg-secondary-subtle text-secondary-emphasis">Not on KEV</span>
+            }
+        </div>
+        @if (!string.IsNullOrWhiteSpace(cveDetail.Description))
+        {
+            <p class="small mb-2">@cveDetail.Description</p>
+        }
+        @if (cveDetail.KnownExploited is { } kev && !string.IsNullOrWhiteSpace(kev.RequiredAction))
+        {
+            <p class="small mb-2"><strong>CISA required action:</strong> @kev.RequiredAction @(kev.DueDate is { } due ? $"(due {due:yyyy-MM-dd} for US federal agencies)" : "")</p>
+        }
+        @if (cveDetail.Errors.Count > 0)
+        {
+            <p class="small text-secondary mb-0">@string.Join(" · ", cveDetail.Errors)</p>
+        }
+    </div>;
 
     private async Task LoadBriefingsAsync()
     {

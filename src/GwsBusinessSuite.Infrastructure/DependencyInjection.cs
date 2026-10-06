@@ -740,6 +740,15 @@ public static class DependencyInjection
         services.AddHttpClient<IMalwareFeedService, MalwareFeedService>(client => ThreatIntelClient(client, TimeSpan.FromSeconds(60)));
         services.AddHttpClient<IExposureIntelService, ExposureIntelService>(client => ThreatIntelClient(client, TimeSpan.FromSeconds(20)));
         services.AddHttpClient<IDataBreachFeedService, DataBreachFeedService>(client => ThreatIntelClient(client, TimeSpan.FromSeconds(30)));
+        services.AddHttpClient<IDnsRecordLookup, DnsOverHttpsLookup>(client => ThreatIntelClient(client, TimeSpan.FromSeconds(10)));
+        services.AddScoped<IThreatIntelWorkspaceService, ThreatIntelWorkspaceService>();
+        // "My exposure" monitor (2026-10-05): email posture, OSV.dev package advisories, the
+        // watched-asset/stack checks and the daily digest. All free, no key.
+        services.AddHttpClient<IEmailSecurityService, EmailSecurityService>(client => ThreatIntelClient(client, TimeSpan.FromSeconds(10)));
+        services.AddHttpClient<IDependencyAdvisoryService, DependencyAdvisoryService>(client => ThreatIntelClient(client, TimeSpan.FromSeconds(30)));
+        services.AddSingleton<IDependencyInventory, RuntimeDependencyInventory>();
+        services.AddScoped<IThreatMonitorService, ThreatMonitorService>();
+        services.AddHostedService<ThreatMonitorBackgroundService>();
         // Separate, short-timeout HttpClient for fetching camera snapshot bytes - distinct from
         // IOllamaService's own 2-hour client, since the snapshot fetch itself should fail fast;
         // the vision call's own ~90s budget is enforced separately, inside the service itself.

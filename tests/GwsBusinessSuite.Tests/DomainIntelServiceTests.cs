@@ -5,6 +5,7 @@ using System.Security.Cryptography.X509Certificates;
 using FluentAssertions;
 using GwsBusinessSuite.Application.ThreatIntel;
 using GwsBusinessSuite.Infrastructure.Services;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
@@ -119,6 +120,65 @@ public sealed class DomainIntelServiceTests
     }
 
     [Fact]
+    public async Task InvestigateAsync_ShouldAddMxTxtAndOtherRecords_FromDnsOverHttps()
+    {
+        var service = CreateService(
+            rdapDomainJson: DomainRdapJson,
+            dnsResolver: new FakeDnsResolver(_ => [IPAddress.Parse("93.184.216.34")]),
+            recordLookup: new FakeRecordLookup((_, type) => type switch
+            {
+                "MX" => ["10 mail.example.com."],
+                "TXT" => ["v=spf1 -all"],
+                _ => []
+            }));
+
+        var result = await service.InvestigateAsync("example.com");
+
+        result.DnsRecords.Select(r => r.RecordType).Should().Equal("A", "MX", "TXT");
+        result.DnsRecords.Should().Contain(new DnsRecordInfo("MX", "10 mail.example.com."));
+    }
+
+    [Fact]
+    public async Task InvestigateAsync_ShouldKeepAddressRecords_WhenDnsOverHttpsIsUnavailable()
+    {
+        var service = CreateService(
+            rdapDomainJson: DomainRdapJson,
+            dnsResolver: new FakeDnsResolver(_ => [IPAddress.Parse("93.184.216.34")]),
+            recordLookup: new ThrowingRecordLookup());
+
+        var result = await service.InvestigateAsync("example.com");
+
+        result.DnsRecords.Should().ContainSingle(r => r.RecordType == "A");
+        result.Errors.Should().Contain(e => e.Contains("DNS-over-HTTPS"));
+    }
+
+    [Fact]
+    public async Task InvestigateAsync_ShouldAskTheRegistryListedByIana_BeforeRdapOrg()
+    {
+        var requests = new List<string>();
+        var service = CreateService(
+            rdapDomainJson: DomainRdapJson,
+            ianaBootstrapJson: """{"services":[[["com","net"],["http://rdap.verisign.com/com/v1","https://rdap.verisign.com/com/v1"]]]}""",
+            requestedUrls: requests);
+
+        var result = await service.InvestigateAsync("example.com");
+
+        result.Registration!.Registrar.Should().Be("Example Registrar Inc.");
+        requests.Should().Contain("https://rdap.verisign.com/com/v1/domain/example.com");
+        requests.Should().NotContain(url => url.Contains("rdap.org"));
+    }
+
+    [Fact]
+    public async Task InvestigateAsync_ShouldExplainTldsWithoutRdap()
+    {
+        var service = CreateService(rdapStatus: HttpStatusCode.NotFound, ianaBootstrapJson: """{"services":[]}""");
+
+        var result = await service.InvestigateAsync("example.io");
+
+        result.Errors.Should().Contain("The .io registry doesn't publish registration data over RDAP");
+    }
+
+    [Fact]
     public async Task InvestigateAsync_ShouldRecordAnError_RatherThanThrow_WhenRdapFails()
     {
         var service = CreateService(rdapStatus: HttpStatusCode.NotFound);
@@ -177,9 +237,12 @@ public sealed class DomainIntelServiceTests
         string focsecApiKey = "",
         IDnsResolver? dnsResolver = null,
         ITlsCertificateFetcher? tlsFetcher = null,
-        Action? onFocsecRequest = null)
+        Action? onFocsecRequest = null,
+        IDnsRecordLookup? recordLookup = null,
+        string? ianaBootstrapJson = null,
+        List<string>? requestedUrls = null)
     {
-        var handler = new RoutingHandler(rdapDomainJson, rdapIpJson, rdapStatus, focsecJson, onFocsecRequest);
+        var handler = new RoutingHandler(rdapDomainJson, rdapIpJson, rdapStatus, focsecJson, onFocsecRequest, ianaBootstrapJson, requestedUrls);
         var http = new HttpClient(handler);
 
         return new DomainIntelService(
@@ -187,7 +250,21 @@ public sealed class DomainIntelServiceTests
             dnsResolver ?? new FakeDnsResolver(_ => []),
             tlsFetcher ?? new FakeTlsCertificateFetcher(_ => null),
             Options.Create(new ThreatIntelOptions { FocsecApiKey = focsecApiKey }),
-            NullLogger<DomainIntelService>.Instance);
+            NullLogger<DomainIntelService>.Instance,
+            recordLookup ?? new FakeRecordLookup((_, _) => []),
+            new MemoryCache(new MemoryCacheOptions()));
+    }
+
+    private sealed class FakeRecordLookup(Func<string, string, IReadOnlyList<string>> query) : IDnsRecordLookup
+    {
+        public Task<IReadOnlyList<string>> QueryAsync(string name, string recordType, CancellationToken cancellationToken = default) =>
+            Task.FromResult(query(name, recordType));
+    }
+
+    private sealed class ThrowingRecordLookup : IDnsRecordLookup
+    {
+        public Task<IReadOnlyList<string>> QueryAsync(string name, string recordType, CancellationToken cancellationToken = default) =>
+            throw new HttpRequestException("no resolver");
     }
 
     private sealed class FakeDnsResolver(Func<string, IReadOnlyList<IPAddress>> resolve) : IDnsResolver
@@ -219,12 +296,22 @@ public sealed class DomainIntelServiceTests
         string? rdapIpJson,
         HttpStatusCode rdapStatus,
         string? focsecJson,
-        Action? onFocsecRequest) : HttpMessageHandler
+        Action? onFocsecRequest,
+        string? ianaBootstrapJson,
+        List<string>? requestedUrls) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var host = request.RequestUri!.Host;
             var path = request.RequestUri!.AbsolutePath;
+            requestedUrls?.Add(request.RequestUri.ToString());
+
+            if (host == "data.iana.org")
+            {
+                return Task.FromResult(ianaBootstrapJson is null
+                    ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                    : JsonResponse(ianaBootstrapJson));
+            }
 
             if (host.Contains("focsec.com"))
             {

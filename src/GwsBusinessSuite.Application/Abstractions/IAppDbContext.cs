@@ -35,6 +35,12 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SentinelNavigationEntry> SentinelNavigationEntries { get; }
     DbSet<SentinelSavedSearch> SentinelSavedSearches { get; }
     DbSet<CameraFavorite> CameraFavorites { get; }
+    DbSet<ThreatWatchAsset> ThreatWatchAssets { get; }
+    DbSet<ThreatStackItem> ThreatStackItems { get; }
+    DbSet<ThreatFinding> ThreatFindings { get; }
+    DbSet<ThreatInvestigation> ThreatInvestigations { get; }
+    DbSet<ThreatMonitorSettings> ThreatMonitorSettings { get; }
+    DbSet<ThreatIntelUserState> ThreatIntelUserStates { get; }
     DbSet<SentinelDiscussion> SentinelDiscussions { get; }
     DbSet<SentinelDiscussionComment> SentinelDiscussionComments { get; }
     DbSet<SentinelDiscussionReaction> SentinelDiscussionReactions { get; }

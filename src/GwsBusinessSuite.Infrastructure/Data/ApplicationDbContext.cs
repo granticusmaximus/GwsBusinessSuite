@@ -53,6 +53,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelNavigationEntry> SentinelNavigationEntries => Set<SentinelNavigationEntry>();
     public DbSet<SentinelSavedSearch> SentinelSavedSearches => Set<SentinelSavedSearch>();
     public DbSet<CameraFavorite> CameraFavorites => Set<CameraFavorite>();
+    public DbSet<ThreatWatchAsset> ThreatWatchAssets => Set<ThreatWatchAsset>();
+    public DbSet<ThreatStackItem> ThreatStackItems => Set<ThreatStackItem>();
+    public DbSet<ThreatFinding> ThreatFindings => Set<ThreatFinding>();
+    public DbSet<ThreatInvestigation> ThreatInvestigations => Set<ThreatInvestigation>();
+    public DbSet<ThreatMonitorSettings> ThreatMonitorSettings => Set<ThreatMonitorSettings>();
+    public DbSet<ThreatIntelUserState> ThreatIntelUserStates => Set<ThreatIntelUserState>();
     public DbSet<SentinelDiscussion> SentinelDiscussions => Set<SentinelDiscussion>();
     public DbSet<SentinelDiscussionComment> SentinelDiscussionComments => Set<SentinelDiscussionComment>();
     public DbSet<SentinelDiscussionReaction> SentinelDiscussionReactions => Set<SentinelDiscussionReaction>();
@@ -343,6 +349,14 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelSavedSearch>().HasIndex(x => new { x.Username, x.CreatedAt });
         modelBuilder.Entity<CameraFavorite>().HasIndex(x => new { x.Username, x.CameraId }).IsUnique();
         modelBuilder.Entity<CameraFavorite>().HasIndex(x => new { x.Username, x.CreatedAt });
+        modelBuilder.Entity<ThreatWatchAsset>().HasIndex(x => x.Value).IsUnique();
+        modelBuilder.Entity<ThreatWatchAsset>().Property(x => x.Value).HasMaxLength(255);
+        modelBuilder.Entity<ThreatStackItem>().Property(x => x.Name).HasMaxLength(120);
+        modelBuilder.Entity<ThreatFinding>().HasIndex(x => x.Key).IsUnique();
+        modelBuilder.Entity<ThreatFinding>().Property(x => x.Key).HasMaxLength(400);
+        modelBuilder.Entity<ThreatFinding>().HasIndex(x => new { x.ResolvedAt, x.Severity });
+        modelBuilder.Entity<ThreatInvestigation>().Property(x => x.Query).HasMaxLength(500);
+        modelBuilder.Entity<ThreatIntelUserState>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<SentinelDiscussion>()
             .HasOne(x => x.WikiPage)
             .WithMany()

@@ -92,6 +92,12 @@ public sealed class AutomationThreatIntelNodesTests
             Task.FromResult(cveId.StartsWith("CVE-", StringComparison.Ordinal)
                 ? new CveDetail(cveId, "desc", null, 10.0, "CRITICAL", "3.1", 0.9, 0.99, kev.FirstOrDefault(k => k.CveId == cveId), [], [])
                 : null);
+
+        public Task<IReadOnlyDictionary<string, double>> GetEpssScoresAsync(IEnumerable<string> cveIds, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyDictionary<string, double>>(new Dictionary<string, double>());
+
+        public Task<IReadOnlyList<CveSummary>> SearchRecentCvesAsync(string keyword, int days, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<CveSummary>>([]);
     }
 
     private sealed class FakeExposureService(ExposureIntelResult result) : IExposureIntelService

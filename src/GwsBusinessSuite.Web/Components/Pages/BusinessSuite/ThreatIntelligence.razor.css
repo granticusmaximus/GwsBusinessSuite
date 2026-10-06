@@ -60,3 +60,25 @@
     background: var(--civic-surface) !important;
     border-color: var(--civic-line) !important;
 }
+
+/* One search box for every indicator type; the history list truncates long queries/summaries. */
+.threat-intel-omnibox {
+    flex: 1 1 18rem;
+    min-width: 0;
+}
+
+.threat-intel-kev-search {
+    flex: 1 1 14rem;
+    max-width: 22rem;
+}
+
+.threat-intel-history .min-w-0 {
+    min-width: 0;
+}
+
+.threat-intel-result-bar {
+    padding: .75rem 1rem;
+    border: 1px solid var(--civic-line);
+    border-radius: .75rem;
+    background: var(--civic-soft);
+}
