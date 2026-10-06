@@ -382,6 +382,7 @@ public sealed class FormSubmissionServiceTests
         public List<(Guid SiteId, string InputJson)> Calls { get; } = [];
 
         public Task<int> TriggerNewsArticlesFoundAsync(string topicName, string inputJson, CancellationToken cancellationToken = default) => Task.FromResult(0);
+        public Task<int> TriggerBiGoalCrossedAsync(string widgetTitle, string inputJson, CancellationToken cancellationToken = default) => Task.FromResult(0);
 
         public Task<int> TriggerCmsFormSubmittedAsync(Guid siteId, string inputJson, CancellationToken cancellationToken = default)
         {

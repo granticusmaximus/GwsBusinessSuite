@@ -442,6 +442,7 @@ public sealed class AutomationWorkflowService(
         workflow.TriggerSupportTicketSlaBreached = workflow.Nodes.Any(node => node.TypeKey == "support.ticketSlaBreachedTrigger" && !node.IsDisabled);
         workflow.TriggerCmsFormSubmitted = workflow.Nodes.Any(node => node.TypeKey == "cms.formSubmittedTrigger" && !node.IsDisabled);
         workflow.TriggerNewsArticlesFound = workflow.Nodes.Any(node => node.TypeKey == "news.articlesFoundTrigger" && !node.IsDisabled);
+        workflow.TriggerBiGoalCrossed = workflow.Nodes.Any(node => node.TypeKey == "bi.goalCrossedTrigger" && !node.IsDisabled);
         var wikiPageTriggerNode = workflow.Nodes.FirstOrDefault(node => node.TypeKey == "wiki.pageChangedTrigger" && !node.IsDisabled);
         workflow.TriggerWikiPageId = wikiPageTriggerNode is not null
             && Guid.TryParse(ReadStringParameter(wikiPageTriggerNode.ParametersJson, "wikiPageId"), out var wikiPageId)

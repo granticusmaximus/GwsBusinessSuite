@@ -1736,6 +1736,26 @@ public sealed class BusinessIntelligenceWidget : AuditableEntity
     public string Visualization { get; set; } = "Bar";
     public int RangeDays { get; set; } = 30;
     public int SortOrder { get; set; }
+    // Spans both dashboard columns instead of one.
+    public bool IsWide { get; set; }
+    // Optional goal on the chart's total: a floor to reach (default) or, when GoalIsCeiling, a
+    // limit to stay under (e.g. SLA breaches). GoalLastMet is the last evaluated state, so the
+    // "goal crossed" automation trigger fires once per crossing rather than on every check.
+    public decimal? GoalValue { get; set; }
+    public bool GoalIsCeiling { get; set; }
+    public bool? GoalLastMet { get; set; }
+}
+
+// One admin's scheduled BI Dashboards report email: a summary of their own pinned charts.
+public sealed class BiReportSubscription : AuditableEntity
+{
+    public required string OwnerUsername { get; set; }
+    public bool Enabled { get; set; }
+    public string? Recipient { get; set; }
+    // 0 = Sunday ... 6 = Saturday, and the hour (0-23) in the server's local time.
+    public int DayOfWeek { get; set; } = 1;
+    public int HourLocal { get; set; } = 8;
+    public DateTimeOffset? LastSentAt { get; set; }
 }
 
 // A saved mind-map document: one JSON-serialized node tree per row (Application-layer
@@ -2225,6 +2245,7 @@ public static class AutomationExecutionModes
     public const string SupportTicketSlaBreached = "SupportTicketSlaBreached";
     public const string CmsFormSubmitted = "CmsFormSubmitted";
     public const string NewsArticlesFound = "NewsArticlesFound";
+    public const string BiGoalCrossed = "BiGoalCrossed";
     public const string WikiPageChanged = "WikiPageChanged";
     // A sandboxed dry run of a past execution's recorded input against the current published
     // graph - see AutomationExecutionService.ReplayAsync. Never performs real side effects.
@@ -2281,6 +2302,8 @@ public sealed class AutomationWorkflow : AuditableEntity
     public bool TriggerCmsFormSubmitted { get; set; }
     // Same pattern, synced from an enabled "news.articlesFoundTrigger" node (Media Watch).
     public bool TriggerNewsArticlesFound { get; set; }
+    // Same pattern, synced from an enabled "bi.goalCrossedTrigger" node (BI Dashboards goals).
+    public bool TriggerBiGoalCrossed { get; set; }
     // Synced from an enabled "wiki.pageChangedTrigger" node's ParametersJson on Publish, same
     // pattern as TriggerWikiDatabaseId - a specific page id, not "any page", matching that
     // node's own single-target parameter shape. Null means this workflow has no (enabled) wiki

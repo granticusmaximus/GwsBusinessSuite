@@ -287,6 +287,34 @@ public sealed class AutomationTriggerService(
         return triggered;
     }
 
+    public async Task<int> TriggerBiGoalCrossedAsync(string widgetTitle, string inputJson, CancellationToken cancellationToken = default)
+    {
+        var subscribers = await db.AutomationWorkflows.AsNoTracking().Where(item =>
+            item.Status == AutomationWorkflowStatuses.Active && item.TriggerBiGoalCrossed)
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+
+        var triggered = 0;
+        foreach (var workflowId in subscribers)
+        {
+            try
+            {
+                var snapshot = await workflowService.GetPublishedSnapshotAsync(workflowId, cancellationToken);
+                var triggerNode = snapshot?.Nodes.FirstOrDefault(node => node.TypeKey == "bi.goalCrossedTrigger" && !node.IsDisabled);
+                if (triggerNode is null) continue;
+                var wantedTitle = ReadStringParameter(triggerNode.ParametersJson, "widgetTitle");
+                if (!string.IsNullOrWhiteSpace(wantedTitle) && !string.Equals(wantedTitle.Trim(), widgetTitle, StringComparison.OrdinalIgnoreCase)) continue;
+
+                await executionService.ExecuteAsync(workflowId, inputJson, AutomationExecutionModes.BiGoalCrossed, cancellationToken: cancellationToken);
+                triggered++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "BI goal-crossed trigger failed for automation workflow {WorkflowId}.", workflowId);
+            }
+        }
+        return triggered;
+    }
+
     public async Task<int> TriggerSentinelChatPromptSubmittedAsync(
         string prompt, Guid? conversationId, CancellationToken cancellationToken = default)
     {

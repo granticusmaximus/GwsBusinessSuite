@@ -103,4 +103,33 @@ New:
   automation trigger, Clip to Sentinel, Trends (14-day bars + rising words).
   "New 1: custom RSS feeds per topic" turned out to ALREADY EXIST (WatchedTopic.TrustedFeedUrls),
   so it was replaced with "Find a site's feed" (RSS/Atom auto-discovery) on the topic form.
-- Civic Watch, BI Dashboards, Overwatch: not started.
+- 2026-10-06: Grant: "order is moot, pick one and complete it, then the next" -> BI Dashboards,
+  built ONE ITEM AT A TIME (budget-limited), each verified before the next. Progress:
+  - Improve 1 DONE: dashboard-wide custom date range (BiDateRange, viewing-only) + PreviousTotal
+    (equally long window before) shown as ▲/▼ %; totals now computed before the top-12 cap.
+  - Improve 2 DONE: Chart.js 4.4.7 vendored at wwwroot/lib/chartjs (served from 'self'), drawn
+    by wwwroot/js/biCharts.js; display cap 12 -> 50; tooltips.
+  - New 4 DONE: per-widget Export CSV (in-page data: URI, formula-injection safe) + Export PNG.
+  - Improve 5 DONE: IMemoryCache per report definition + window (5 min), BiChartResult.DataAsOf,
+    "Refresh" button (refresh: true). Previews uncached.
+  - Improve 3 DONE: DrillDownAsync (deals by stage/month, CJ records by advertiser, article
+    views by day; max 200) opened by clicking a chart point (Chart.js onClick -> JSInvokable) or a
+    table row. Browser-checked: Chart.js renders, comparison/range/refresh work (2026-10-06).
+  - New 1 DONE (partial scope, by choice): Support tickets (count / SLA breaches / avg CSAT by
+    status, priority, month), Form submissions (by form page, month), Automation runs (by
+    status, workflow, month), each with drill-down. NOT added: email campaigns, Growth/social,
+    Sentinel activity (Growth already has its own analytics page).
+  - Improve 4 DONE (team-shared dashboards left out - optional in the plan): Move earlier/later,
+    Full/Half width (IsWide), KPI tile visualization.
+  - New 3 DONE: per-widget goal (GoalValue, floor or ceiling) with progress bar; hourly
+    BiGoalBackgroundService -> EvaluateGoalsAsync (GoalLastMet, fires once per crossing) ->
+    "bi.goalCrossedTrigger" automation trigger (AutomationWorkflow.TriggerBiGoalCrossed).
+    Migration 20261006200631_AddBiWidgetLayoutAndGoals.
+  - New 2 DONE: per-admin weekly report email (BiReportSubscriptions table, migration
+    20261006201221_AddBiReportSubscriptions; BiReportEmailService; sent from the same hourly
+    BiGoalBackgroundService tick; "Send now"). Uses Settings > Email (GrowthReportEmailOptions).
+  - New 5 DONE: "Ask about my data" - browser-local Ollama (BrowserLocalOllamaService relay)
+    picks a catalogued report via BiQuestionPlanner (validated; keyword fallback when Ollama is
+    unreachable or answers invalidly); "Open in builder to pin".
+  - BI Dashboards: ALL 10 DONE 2026-10-06. Next page: Civic Watch.
+- Civic Watch, Overwatch: not started.

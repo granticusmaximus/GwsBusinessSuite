@@ -279,4 +279,7 @@ public interface IAutomationTriggerService
     // Fires every active workflow with an enabled "news.articlesFoundTrigger" node whose
     // topicName is empty or equals topicName, after a Media Watch refresh stores new articles.
     Task<int> TriggerNewsArticlesFoundAsync(string topicName, string inputJson, CancellationToken cancellationToken = default);
+    // Fires every active workflow with an enabled "bi.goalCrossedTrigger" node whose widgetTitle
+    // is empty or equals widgetTitle, when a BI chart crosses its goal.
+    Task<int> TriggerBiGoalCrossedAsync(string widgetTitle, string inputJson, CancellationToken cancellationToken = default);
 }

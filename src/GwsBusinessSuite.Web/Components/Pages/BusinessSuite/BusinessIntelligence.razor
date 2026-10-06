@@ -3,8 +3,12 @@
 @attribute [Authorize(Policy = "AdminOnly")]
 @using System.Globalization
 @using GwsBusinessSuite.Application.BusinessIntelligence
+@using GwsBusinessSuite.Web.Services
 @inject IBusinessIntelligenceService BusinessIntelligenceService
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
+@inject IBiReportEmailService ReportEmailService
+@implements IAsyncDisposable
 
 <PageTitle>Business Intelligence</PageTitle>
 
@@ -26,6 +30,36 @@
 {
     <div class="alert alert-success" role="status">@_statusMessage</div>
 }
+
+<section class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+        <form class="bi-ask d-flex flex-wrap gap-2" @onsubmit="AskAsync" @onsubmit:preventDefault>
+            <label class="visually-hidden" for="bi-ask">Ask about your data</label>
+            <input id="bi-ask" class="form-control" placeholder="Ask about your data, e.g. &quot;pipeline value by stage this quarter&quot;"
+                   maxlength="300" @bind="_question" @bind:event="oninput" disabled="@_isBusy" />
+            <button type="submit" class="btn btn-outline-primary" disabled="@(_isBusy || string.IsNullOrWhiteSpace(_question))">
+                <i class="bi bi-stars me-1"></i>Ask
+            </button>
+        </form>
+        @if (_askNote is not null)
+        {
+            <div class="small text-secondary mt-2">@_askNote</div>
+        }
+        @if (_answer is not null && _answerEditor is not null)
+        {
+            <div class="bi-preview mt-3">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+                    <div>
+                        <div class="fw-semibold">@_answerEditor.Title</div>
+                        <div class="small text-secondary">@_answer.MetricLabel by @_answer.DimensionLabel · Last @_answerEditor.RangeDays days · total @FormatValue(_answer.Total, _answer.ValueFormat)</div>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-primary" @onclick="PinAnswer" disabled="@_isBusy"><i class="bi bi-pin-angle me-1"></i>Open in builder to pin</button>
+                </div>
+                @RenderChart(_answerEditor.Visualization, _answer, AnswerCanvasId)
+            </div>
+        }
+    </div>
+</section>
 
 @if (_showBuilder)
 {
@@ -85,9 +119,26 @@
                     <select class="form-select" @bind="_editor.Visualization" disabled="@_isBusy">
                         @foreach (var visualization in BiVisualizations.All)
                         {
-                            <option value="@visualization">@visualization chart</option>
+                            <option value="@visualization">@(visualization == BiVisualizations.Kpi ? "KPI tile (number only)" : $"{visualization} chart")</option>
                         }
                     </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold" for="bi-goal">Goal (optional)</label>
+                    <input id="bi-goal" type="number" step="any" class="form-control" placeholder="e.g. 5000" @bind="_editor.GoalValue" disabled="@_isBusy" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold" for="bi-goal-type">Goal type</label>
+                    <select id="bi-goal-type" class="form-select" @bind="_editor.GoalIsCeiling" disabled="@(_isBusy || _editor.GoalValue is null)">
+                        <option value="False">Target to reach (at or above)</option>
+                        <option value="True">Limit to stay under (at or below)</option>
+                    </select>
+                </div>
+                <div class="col-md-4 d-flex align-items-end">
+                    <div class="form-check mb-2">
+                        <input id="bi-wide" type="checkbox" class="form-check-input" @bind="_editor.IsWide" disabled="@_isBusy" />
+                        <label class="form-check-label small" for="bi-wide">Full width on the dashboard</label>
+                    </div>
                 </div>
             </div>
 
@@ -105,7 +156,7 @@
             {
                 <div class="bi-preview mt-4">
                     <div class="small text-uppercase fw-semibold text-secondary mb-2">Preview</div>
-                    @RenderChart(_editor.Visualization, _preview)
+                    @RenderChart(_editor.Visualization, _preview, PreviewCanvasId)
                 </div>
             }
         </div>
@@ -129,14 +180,75 @@ else if (_widgets.Count == 0)
 }
 else
 {
+    <div class="bi-range-bar" role="group" aria-label="Dashboard date range">
+        <span class="small fw-semibold">Date range</span>
+        <input type="date" class="form-control form-control-sm" aria-label="Start date" @bind="_rangeFrom" @bind:event="oninput" disabled="@_isBusy" />
+        <span class="small text-secondary">to</span>
+        <input type="date" class="form-control form-control-sm" aria-label="End date" @bind="_rangeTo" @bind:event="oninput" disabled="@_isBusy" />
+        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="ApplyRangeAsync" disabled="@(_isBusy || _rangeFrom is null || _rangeTo is null)">Apply</button>
+        @if (_appliedRange is not null)
+        {
+            <button type="button" class="btn btn-sm btn-link" @onclick="ClearRangeAsync" disabled="@_isBusy">Use each chart's own range</button>
+        }
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" @onclick="RefreshAsync" disabled="@_isBusy"
+                title="Charts are cached for up to 5 minutes; this recomputes them now">
+            <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+        </button>
+    </div>
+    <details class="bi-report-settings mb-3" @ontoggle="LoadReportSettingsAsync">
+        <summary class="small fw-semibold"><i class="bi bi-envelope me-1"></i>Weekly email report@(_report?.Enabled == true ? " · on" : "")</summary>
+        @if (_report is not null)
+        {
+            <div class="row g-2 align-items-end mt-1">
+                <div class="col-sm-6 col-lg-4">
+                    <label class="form-label small" for="bi-report-to">Send to</label>
+                    <input id="bi-report-to" type="email" class="form-control form-control-sm" @bind="_reportRecipient" @bind:event="oninput" disabled="@_isBusy" />
+                </div>
+                <div class="col-6 col-lg-2">
+                    <label class="form-label small" for="bi-report-day">Day</label>
+                    <select id="bi-report-day" class="form-select form-select-sm" @bind="_reportDay" disabled="@_isBusy">
+                        @for (var day = 0; day < 7; day++)
+                        {
+                            <option value="@day">@(((DayOfWeek)day).ToString())</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-6 col-lg-2">
+                    <label class="form-label small" for="bi-report-hour">Hour</label>
+                    <select id="bi-report-hour" class="form-select form-select-sm" @bind="_reportHour" disabled="@_isBusy">
+                        @for (var hour = 0; hour < 24; hour++)
+                        {
+                            <option value="@hour">@(new DateTime(2000, 1, 1, hour, 0, 0).ToString("h tt"))</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-12 col-lg-4 d-flex flex-wrap gap-2 align-items-center">
+                    <div class="form-check mb-0">
+                        <input id="bi-report-on" type="checkbox" class="form-check-input" @bind="_reportEnabled" disabled="@_isBusy" />
+                        <label class="form-check-label small" for="bi-report-on">Send weekly</label>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-primary" @onclick="SaveReportSettingsAsync" disabled="@_isBusy">Save</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="SendReportNowAsync" disabled="@_isBusy">Send now</button>
+                </div>
+            </div>
+            <div class="small text-secondary mt-2">
+                A summary of your own pinned charts: each total, its change vs the previous period, and goal status.
+                @(_report.LastSentAt is { } lastSent ? $"Last sent {lastSent.ToLocalTime():MMM d, h:mm tt}." : "")
+                @if (!_report.EmailConfigured)
+                {
+                    <span class="text-warning">Email delivery isn't set up on this server yet (Settings &gt; Email).</span>
+                }
+            </div>
+        }
+    </details>
     <div class="bi-dashboard">
         @foreach (var widget in _widgets)
         {
-            <article class="card border-0 shadow-sm bi-widget">
+            <article class="card border-0 shadow-sm bi-widget @(widget.IsWide ? "is-wide" : "") @(widget.Visualization == BiVisualizations.Kpi ? "is-kpi" : "")" @key="widget.Id">
                 <div class="card-header bg-white border-bottom d-flex align-items-start justify-content-between gap-3">
                     <div>
                         <h2 class="h5 mb-1">@widget.Title</h2>
-                        <div class="small text-secondary">@widget.Chart.MetricLabel by @widget.Chart.DimensionLabel · Last @widget.RangeDays days</div>
+                        <div class="small text-secondary">@widget.Chart.MetricLabel by @widget.Chart.DimensionLabel · @(_appliedRange is null ? $"Last {widget.RangeDays} days" : RangeLabel(widget.Chart))</div>
                     </div>
                     <div class="dropdown">
                         <button class="btn btn-sm btn-light" type="button" data-bs-toggle="dropdown" aria-label="Chart actions">
@@ -144,18 +256,99 @@ else
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end">
                             <li><button class="dropdown-item" type="button" @onclick="() => BeginEdit(widget)"><i class="bi bi-pencil me-2"></i>Edit</button></li>
+                            <li><button class="dropdown-item" type="button" @onclick="() => MoveAsync(widget, -1)" disabled="@(widget.Id == _widgets[0].Id)"><i class="bi bi-arrow-up me-2"></i>Move earlier</button></li>
+                            <li><button class="dropdown-item" type="button" @onclick="() => MoveAsync(widget, 1)" disabled="@(widget.Id == _widgets[^1].Id)"><i class="bi bi-arrow-down me-2"></i>Move later</button></li>
+                            <li><button class="dropdown-item" type="button" @onclick="() => ToggleWideAsync(widget)"><i class="bi @(widget.IsWide ? "bi-arrows-angle-contract" : "bi-arrows-angle-expand") me-2"></i>@(widget.IsWide ? "Half width" : "Full width")</button></li>
+                            @if (widget.Visualization != BiVisualizations.Table && widget.Chart.Points.Count > 0)
+                            {
+                                <li><button class="dropdown-item" type="button" @onclick="() => DownloadPngAsync(widget)"><i class="bi bi-file-earmark-image me-2"></i>Export PNG</button></li>
+                            }
+                            <li><a class="dropdown-item" href="@CsvDataUri(widget)" download="@CsvFileName(widget)"><i class="bi bi-filetype-csv me-2"></i>Export CSV</a></li>
                             <li><button class="dropdown-item text-danger" type="button" @onclick="() => DeleteAsync(widget)"><i class="bi bi-trash me-2"></i>Remove</button></li>
                         </ul>
                     </div>
                 </div>
                 <div class="card-body">
                     <div class="bi-total">@FormatValue(widget.Chart.Total, widget.Chart.ValueFormat)</div>
-                    <div class="small text-secondary mb-3">Total for selected period · refreshed @DateTimeOffset.Now.ToString("h:mm tt")</div>
-                    @RenderChart(widget.Visualization, widget.Chart)
+                    <div class="small text-secondary mb-3">
+                        @{ var change = ChangeText(widget.Chart); }
+                        <span class="@change.CssClass">@change.Text</span> vs previous period (@FormatValue(widget.Chart.PreviousTotal, widget.Chart.ValueFormat)) · data as of @widget.Chart.DataAsOf.ToLocalTime().ToString("h:mm tt")
+                    </div>
+                    @if (widget.GoalValue is { } goal)
+                    {
+                        var met = widget.GoalMet == true;
+                        var progress = goal <= 0 ? 100m : Math.Clamp(widget.Chart.Total / goal * 100m, 0m, 100m);
+                        <div class="bi-goal mb-3">
+                            <div class="d-flex justify-content-between small">
+                                <span class="@(met ? "text-success" : "text-warning") fw-semibold">
+                                    <i class="bi @(met ? "bi-check-circle-fill" : "bi-exclamation-circle") me-1"></i>@(met ? "Goal met" : widget.GoalIsCeiling ? "Over the limit" : "Below target")
+                                </span>
+                                <span class="text-secondary">@(widget.GoalIsCeiling ? "Limit" : "Target") @FormatValue(goal, widget.Chart.ValueFormat)</span>
+                            </div>
+                            <div class="progress mt-1" role="progressbar" aria-label="Progress toward goal" aria-valuenow="@((int)progress)" aria-valuemin="0" aria-valuemax="100">
+                                <div class="progress-bar @(met ? "bg-success" : "bg-warning")" style="width:@(progress.ToString("0.#", CultureInfo.InvariantCulture))%"></div>
+                            </div>
+                        </div>
+                    }
+                    @if (widget.Visualization != BiVisualizations.Kpi)
+                    {
+                        @RenderChart(widget.Visualization, widget.Chart, CanvasId(widget))
+                    }
                 </div>
             </article>
         }
     </div>
+}
+
+@if (_drillWidget is { } drillWidget)
+{
+    <div class="modal d-block bi-drill-modal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="bi-drill-title" @onkeydown="@(e => { if (e.Key == "Escape") CloseDrillDown(); })">
+        <div class="modal-dialog modal-dialog-scrollable modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <div>
+                        <h2 class="modal-title h5" id="bi-drill-title">@_drillLabel</h2>
+                        <div class="small text-secondary">@drillWidget.Title · @drillWidget.Chart.MetricLabel · @(_appliedRange is null ? $"Last {drillWidget.RangeDays} days" : RangeLabel(drillWidget.Chart))</div>
+                    </div>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="CloseDrillDown"></button>
+                </div>
+                <div class="modal-body">
+                    @if (_drillRows is null)
+                    {
+                        <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading records…</div>
+                    }
+                    else if (_drillRows.Count == 0)
+                    {
+                        <div class="bi-no-data">No records found for this point.</div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0">
+                                <thead><tr><th>Record</th><th>Detail</th><th>Date</th><th class="text-end">@drillWidget.Chart.MetricLabel</th></tr></thead>
+                                <tbody>
+                                    @foreach (var row in _drillRows)
+                                    {
+                                        <tr>
+                                            <td>@row.Title</td>
+                                            <td class="text-secondary">@row.Detail</td>
+                                            <td class="text-secondary">@(row.When?.ToLocalTime().ToString("MMM d, yyyy") ?? "—")</td>
+                                            <td class="text-end fw-semibold">@FormatValue(row.Value, drillWidget.Chart.ValueFormat)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        @if (_drillRows.Count >= 200)
+                        {
+                            <div class="small text-secondary mt-2">Showing the 200 most recent records.</div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show" @onclick="CloseDrillDown"></div>
 }
 
 <ConfirmModal Show="PendingDeleteWidget is not null" Title="Remove chart" Message="@($"Remove '{PendingDeleteWidget?.Title}' from your dashboard?")"
@@ -185,12 +378,22 @@ else
         await ReloadAsync();
     }
 
+    private async Task RefreshAsync()
+    {
+        _refreshNext = true;
+        await ReloadAsync();
+    }
+
+    private bool _refreshNext;
+
     private async Task ReloadAsync()
     {
         _isBusy = true;
         try
         {
-            _widgets = await BusinessIntelligenceService.GetDashboardAsync(_owner);
+            _widgets = await BusinessIntelligenceService.GetDashboardAsync(_owner, _appliedRange, refresh: _refreshNext);
+            _refreshNext = false;
+            _chartsDirty = true;
             _loaded = true;
         }
         catch (InvalidOperationException ex)
@@ -222,7 +425,10 @@ else
             Metric = widget.Metric,
             Dimension = widget.Dimension,
             Visualization = widget.Visualization,
-            RangeDays = widget.RangeDays
+            RangeDays = widget.RangeDays,
+            IsWide = widget.IsWide,
+            GoalValue = widget.GoalValue,
+            GoalIsCeiling = widget.GoalIsCeiling
         };
         _preview = widget.Chart;
         _errorMessage = null;
@@ -249,6 +455,7 @@ else
         await RunBusyAsync(async () =>
         {
             _preview = await BusinessIntelligenceService.PreviewAsync(_editor);
+            _chartsDirty = true;
             _statusMessage = null;
         });
     }
@@ -262,13 +469,148 @@ else
             _showBuilder = false;
             _preview = null;
             _statusMessage = editing ? "Chart updated." : "Chart pinned to your dashboard.";
-            _widgets = await BusinessIntelligenceService.GetDashboardAsync(_owner);
+            _widgets = await BusinessIntelligenceService.GetDashboardAsync(_owner, _appliedRange);
+            _chartsDirty = true;
         });
     }
 
     private BiDashboardWidget? PendingDeleteWidget { get; set; }
 
     private void DeleteAsync(BiDashboardWidget widget) => PendingDeleteWidget = widget;
+
+    private string? _question;
+    private string? _askNote;
+    private BiWidgetEditor? _answerEditor;
+    private BiChartResult? _answer;
+    private BrowserLocalOllamaService? _localModels;
+
+    // The question goes to the Ollama on this browser's machine (light server-AI mode: the
+    // droplet does no heavy generation), which only picks a catalogued report definition; the
+    // server validates and runs it. Keyword matching stands in when local Ollama can't answer.
+    private async Task AskAsync()
+    {
+        var question = _question?.Trim();
+        if (string.IsNullOrWhiteSpace(question)) return;
+        await RunBusyAsync(async () =>
+        {
+            _answer = null;
+            _askNote = "Thinking…";
+            StateHasChanged();
+            BiWidgetEditor? plan = null;
+            string? fallbackReason = null;
+            try
+            {
+                _localModels ??= new BrowserLocalOllamaService(JS);
+                var status = await _localModels.ProbeAsync();
+                var model = status.Models.FirstOrDefault(name => name.StartsWith("llama3", StringComparison.OrdinalIgnoreCase))
+                    ?? status.Models.FirstOrDefault(name => name.Contains("gemma", StringComparison.OrdinalIgnoreCase) || name.Contains("qwen", StringComparison.OrdinalIgnoreCase))
+                    ?? status.Models.FirstOrDefault();
+                if (!status.IsReachable || model is null)
+                {
+                    fallbackReason = status.Error ?? "no local Ollama model is installed";
+                }
+                else
+                {
+                    var output = await _localModels.GenerateAsync(model,
+                        BiQuestionPlanner.SystemPrompt(_queryShapes, _rangeOptions), question);
+                    plan = BiQuestionPlanner.ParseModelAnswer(output, _queryShapes, _rangeOptions);
+                    fallbackReason = plan is null ? $"{model}'s answer didn't name a valid report" : null;
+                    _askNote = plan is null ? null : $"Answered with your local {model}.";
+                }
+            }
+            catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+            {
+                fallbackReason = ex.Message;
+            }
+
+            if (plan is null)
+            {
+                plan = BiQuestionPlanner.KeywordPlan(question, _queryShapes, _rangeOptions);
+                _askNote = $"Matched by keywords ({fallbackReason}).";
+            }
+            _answerEditor = plan;
+            _answer = await BusinessIntelligenceService.PreviewAsync(plan);
+            _chartsDirty = true;
+        });
+    }
+
+    private void PinAnswer()
+    {
+        if (_answerEditor is null) return;
+        _editor = _answerEditor;
+        _preview = _answer;
+        _showBuilder = true;
+        _answer = null;
+        _answerEditor = null;
+        _askNote = null;
+        _chartsDirty = true;
+    }
+
+    private BiReportSubscriptionView? _report;
+    private bool _reportEnabled;
+    private string? _reportRecipient;
+    private int _reportDay = 1;
+    private int _reportHour = 8;
+
+    private async Task LoadReportSettingsAsync()
+    {
+        if (_report is not null) return;
+        _report = await ReportEmailService.GetSubscriptionAsync(_owner);
+        _reportEnabled = _report.Enabled;
+        _reportRecipient = _report.Recipient;
+        _reportDay = _report.DayOfWeek;
+        _reportHour = _report.HourLocal;
+    }
+
+    private async Task SaveReportSettingsAsync()
+    {
+        await RunBusyAsync(async () =>
+        {
+            await ReportEmailService.SaveSubscriptionAsync(_owner,
+                new BiReportSubscriptionView(_reportEnabled, _reportRecipient, _reportDay, _reportHour, null, true));
+            _report = null;
+            await LoadReportSettingsAsync();
+            _statusMessage = _reportEnabled ? "Weekly report saved." : "Weekly report turned off.";
+        });
+    }
+
+    private async Task SendReportNowAsync()
+    {
+        await RunBusyAsync(async () =>
+        {
+            try
+            {
+                var result = await ReportEmailService.SendAsync(_owner, force: true);
+                if (result.Sent) _statusMessage = result.Message; else _errorMessage = result.Message;
+            }
+            catch (Exception ex) when (ex is not InvalidOperationException)
+            {
+                _errorMessage = $"The report couldn't be sent: {ex.Message}";
+            }
+            _report = null;
+            await LoadReportSettingsAsync();
+        });
+    }
+
+    private async Task MoveAsync(BiDashboardWidget widget, int direction)
+    {
+        await RunBusyAsync(async () =>
+        {
+            await BusinessIntelligenceService.MoveWidgetAsync(_owner, widget.Id, direction);
+            _widgets = await BusinessIntelligenceService.GetDashboardAsync(_owner, _appliedRange);
+            _chartsDirty = true;
+        });
+    }
+
+    private async Task ToggleWideAsync(BiDashboardWidget widget)
+    {
+        await RunBusyAsync(async () =>
+        {
+            await BusinessIntelligenceService.SetWidgetWideAsync(_owner, widget.Id, !widget.IsWide);
+            _widgets = await BusinessIntelligenceService.GetDashboardAsync(_owner, _appliedRange);
+            _chartsDirty = true;
+        });
+    }
 
     private async Task ConfirmDeleteAsync()
     {
@@ -278,7 +620,8 @@ else
         {
             await BusinessIntelligenceService.DeleteWidgetAsync(_owner, widget.Id);
             _statusMessage = "Chart removed.";
-            _widgets = await BusinessIntelligenceService.GetDashboardAsync(_owner);
+            _widgets = await BusinessIntelligenceService.GetDashboardAsync(_owner, _appliedRange);
+            _chartsDirty = true;
         });
     }
 
@@ -300,107 +643,226 @@ else
         }
     }
 
-    private RenderFragment RenderChart(string visualization, BiChartResult chart) => builder =>
+    // Bar and Line draw with Chart.js (wwwroot/js/biCharts.js) on a canvas after render; Table and
+    // Line also list the exact values, which doubles as the accessible text for the line chart.
+    private RenderFragment RenderChart(string visualization, BiChartResult chart, string canvasId) =>
+        @<text>
+            @if (chart.Points.Count == 0)
+            {
+                <div class="bi-no-data">No matching data in this period.</div>
+            }
+            else
+            {
+                @if (visualization == BiVisualizations.Kpi && canvasId == PreviewCanvasId)
+                {
+                    <div class="bi-total">@FormatValue(chart.Total, chart.ValueFormat)</div>
+                    <div class="small text-secondary">@ChangeText(chart).Text vs previous period</div>
+                }
+                @if (visualization is BiVisualizations.Bar or BiVisualizations.Line)
+                {
+                    <div class="bi-canvas-wrap @(visualization == BiVisualizations.Line ? "is-line" : "")">
+                        <canvas id="@canvasId" role="img" aria-label="@($"{chart.MetricLabel} by {chart.DimensionLabel}")"></canvas>
+                    </div>
+                }
+                @if (visualization is BiVisualizations.Table or BiVisualizations.Line)
+                {
+                    <div class="table-responsive bi-data-table">
+                        <table class="table table-sm mb-0">
+                            <tbody>
+                                @foreach (var point in chart.Points)
+                                {
+                                    @if (canvasId is PreviewCanvasId or AnswerCanvasId)
+                                    {
+                                        <tr><td>@point.Label</td><td class="text-end fw-semibold">@FormatValue(point.Value, chart.ValueFormat)</td></tr>
+                                    }
+                                    else
+                                    {
+                                        <tr class="bi-drill-row" tabindex="0" title="Show the records behind this row"
+                                            @onclick="() => OnPointClicked(canvasId, point.Label)"
+                                            @onkeydown="@(e => e.Key == "Enter" ? OnPointClicked(canvasId, point.Label) : Task.CompletedTask)">
+                                            <td>@point.Label</td><td class="text-end fw-semibold">@FormatValue(point.Value, chart.ValueFormat)</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            }
+        </text>;
+
+    private const string PreviewCanvasId = "bi-preview-chart";
+    private const string AnswerCanvasId = "bi-answer-chart";
+    private static string CanvasId(BiDashboardWidget widget) => $"bi-chart-{widget.Id:N}";
+    private bool _chartsDirty;
+    private readonly HashSet<string> _renderedCanvasIds = [];
+    private IJSObjectReference? _chartsModule;
+
+    private IEnumerable<(string Id, string Visualization, BiChartResult Chart)> DrawableCharts()
     {
-        if (chart.Points.Count == 0)
-        {
-            builder.OpenElement(0, "div");
-            builder.AddAttribute(1, "class", "bi-no-data");
-            builder.AddContent(2, "No matching data in this period.");
-            builder.CloseElement();
-            return;
-        }
+        if (_showBuilder && _preview is not null) yield return (PreviewCanvasId, _editor.Visualization, _preview);
+        if (_answer is not null && _answerEditor is not null) yield return (AnswerCanvasId, _answerEditor.Visualization, _answer);
+        foreach (var widget in _widgets) yield return (CanvasId(widget), widget.Visualization, widget.Chart);
+    }
 
-        if (visualization == BiVisualizations.Line)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_chartsDirty) return;
+        _chartsDirty = false;
+        try
         {
-            builder.OpenElement(10, "div");
-            builder.AddAttribute(11, "class", "bi-line-wrap");
-            builder.OpenElement(12, "svg");
-            builder.AddAttribute(13, "viewBox", "0 0 600 180");
-            builder.AddAttribute(14, "role", "img");
-            builder.AddAttribute(15, "aria-label", $"{chart.MetricLabel} by {chart.DimensionLabel}");
-            builder.OpenElement(16, "polyline");
-            builder.AddAttribute(17, "points", PolylinePoints(chart.Points));
-            builder.AddAttribute(18, "class", "bi-line");
-            builder.CloseElement();
-            builder.CloseElement();
-            builder.CloseElement();
-        }
-        else if (visualization == BiVisualizations.Bar)
-        {
-            builder.OpenElement(20, "div");
-            builder.AddAttribute(21, "class", "bi-bars");
-            var sequence = 22;
-            foreach (var point in chart.Points)
+            _chartsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/biCharts.js");
+            var drawn = new HashSet<string>();
+            foreach (var (id, visualization, chart) in DrawableCharts())
             {
-                builder.OpenElement(sequence++, "div");
-                builder.AddAttribute(sequence++, "class", "bi-bar-row");
-                builder.OpenElement(sequence++, "span");
-                builder.AddAttribute(sequence++, "class", "bi-bar-label");
-                builder.AddAttribute(sequence++, "title", point.Label);
-                builder.AddContent(sequence++, point.Label);
-                builder.CloseElement();
-                builder.OpenElement(sequence++, "div");
-                builder.AddAttribute(sequence++, "class", "bi-bar-track");
-                builder.OpenElement(sequence++, "span");
-                builder.AddAttribute(sequence++, "class", "bi-bar-fill");
-                builder.AddAttribute(sequence++, "style", $"width:{BarPercent(point.Value, chart.Points):0.#}%");
-                builder.CloseElement();
-                builder.CloseElement();
-                builder.OpenElement(sequence++, "strong");
-                builder.AddContent(sequence++, FormatValue(point.Value, chart.ValueFormat));
-                builder.CloseElement();
-                builder.CloseElement();
+                if (visualization is not (BiVisualizations.Bar or BiVisualizations.Line) || chart.Points.Count == 0) continue;
+                await _chartsModule.InvokeVoidAsync("render", id, visualization,
+                    chart.Points.Select(point => point.Label), chart.Points.Select(point => point.Value),
+                    chart.ValueFormat, chart.MetricLabel, id is PreviewCanvasId or AnswerCanvasId ? null : (_dotNetRef ??= DotNetObjectReference.Create(this)));
+                drawn.Add(id);
             }
-            builder.CloseElement();
+            foreach (var stale in _renderedCanvasIds.Except(drawn)) await _chartsModule.InvokeVoidAsync("dispose", stale);
+            _renderedCanvasIds.Clear();
+            _renderedCanvasIds.UnionWith(drawn);
         }
+        catch (JSDisconnectedException)
+        {
+        }
+        catch (JSException)
+        {
+            _errorMessage = "Charts couldn't be drawn (the charting script failed to load). The values are still listed under each chart's Table view.";
+            StateHasChanged();
+        }
+    }
 
-        if (visualization is BiVisualizations.Table or BiVisualizations.Line)
+    private async Task DownloadPngAsync(BiDashboardWidget widget)
+    {
+        if (_chartsModule is null) return;
+        await _chartsModule.InvokeVoidAsync("downloadPng", CanvasId(widget), Path.ChangeExtension(CsvFileName(widget), ".png"));
+    }
+
+    private DotNetObjectReference<BusinessIntelligence>? _dotNetRef;
+    private BiDashboardWidget? _drillWidget;
+    private string _drillLabel = string.Empty;
+    private IReadOnlyList<BiDrillRow>? _drillRows;
+
+    [JSInvokable]
+    public async Task OnPointClicked(string canvasId, string label)
+    {
+        var widget = _widgets.FirstOrDefault(item => CanvasId(item) == canvasId);
+        if (widget is null) return;
+        _drillWidget = widget;
+        _drillLabel = label;
+        _drillRows = null;
+        StateHasChanged();
+        try
         {
-            builder.OpenElement(1000, "div");
-            builder.AddAttribute(1001, "class", "table-responsive bi-data-table");
-            builder.OpenElement(1002, "table");
-            builder.AddAttribute(1003, "class", "table table-sm mb-0");
-            builder.OpenElement(1004, "tbody");
-            var sequence = 1005;
-            foreach (var point in chart.Points)
+            _drillRows = await BusinessIntelligenceService.DrillDownAsync(new BiWidgetEditor
             {
-                builder.OpenElement(sequence++, "tr");
-                builder.OpenElement(sequence++, "td");
-                builder.AddContent(sequence++, point.Label);
-                builder.CloseElement();
-                builder.OpenElement(sequence++, "td");
-                builder.AddAttribute(sequence++, "class", "text-end fw-semibold");
-                builder.AddContent(sequence++, FormatValue(point.Value, chart.ValueFormat));
-                builder.CloseElement();
-                builder.CloseElement();
-            }
-            builder.CloseElement();
-            builder.CloseElement();
-            builder.CloseElement();
+                QueryShape = widget.QueryShape,
+                Metric = widget.Metric,
+                Dimension = widget.Dimension,
+                Visualization = widget.Visualization,
+                RangeDays = widget.RangeDays
+            }, label, _appliedRange);
         }
+        catch (InvalidOperationException ex)
+        {
+            _drillWidget = null;
+            _errorMessage = ex.Message;
+        }
+        StateHasChanged();
+    }
+
+    private void CloseDrillDown()
+    {
+        _drillWidget = null;
+        _drillRows = null;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _dotNetRef?.Dispose();
+        if (_localModels is not null) await _localModels.DisposeAsync();
+        if (_chartsModule is null) return;
+        try { await _chartsModule.DisposeAsync(); } catch (JSDisconnectedException) { }
+    }
+
+    private DateOnly? _rangeFrom;
+    private DateOnly? _rangeTo;
+    private BiDateRange? _appliedRange;
+
+    // Whole days in UTC, end date inclusive (the service's To is exclusive).
+    private async Task ApplyRangeAsync()
+    {
+        if (_rangeFrom is not { } from || _rangeTo is not { } to) return;
+        _errorMessage = null;
+        _appliedRange = new BiDateRange(
+            new DateTimeOffset(from.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero),
+            new DateTimeOffset(to.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+        await ReloadAsync();
+        if (_errorMessage is not null) _appliedRange = null;
+    }
+
+    private async Task ClearRangeAsync()
+    {
+        _appliedRange = null;
+        _rangeFrom = _rangeTo = null;
+        await ReloadAsync();
+    }
+
+    private static string RangeLabel(BiChartResult chart) =>
+        $"{chart.From:MMM d, yyyy} – {chart.To.AddDays(-1):MMM d, yyyy}";
+
+    private static (string Text, string CssClass) ChangeText(BiChartResult chart)
+    {
+        if (chart.PreviousTotal == 0)
+        {
+            return chart.Total == 0 ? ("No change", "text-secondary") : ("New activity", "text-success");
+        }
+        var percent = (chart.Total - chart.PreviousTotal) / chart.PreviousTotal * 100m;
+        return percent switch
+        {
+            > 0 => ($"▲ {percent:0.#}%", "text-success"),
+            < 0 => ($"▼ {Math.Abs(percent):0.#}%", "text-danger"),
+            _ => ("No change", "text-secondary")
+        };
+    }
+
+    // Built in the page (no export endpoint): the rows are already loaded for the chart.
+    private static string CsvDataUri(BiDashboardWidget widget)
+    {
+        var csv = new System.Text.StringBuilder();
+        csv.Append(CsvField(widget.Chart.DimensionLabel)).Append(',').Append(CsvField(widget.Chart.MetricLabel)).Append("\r\n");
+        foreach (var point in widget.Chart.Points)
+        {
+            csv.Append(CsvField(point.Label)).Append(',').Append(point.Value.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
+        }
+        csv.Append("Total,").Append(widget.Chart.Total.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
+        csv.Append("Previous period total,").Append(widget.Chart.PreviousTotal.ToString(CultureInfo.InvariantCulture)).Append("\r\n");
+        return "data:text/csv;charset=utf-8," + Uri.EscapeDataString(csv.ToString());
+    }
+
+    // Quotes every field and neutralises spreadsheet formula prefixes (CSV injection) since
+    // labels come from user-entered article titles and advertiser names.
+    private static string CsvField(string value)
+    {
+        if (value.Length > 0 && "=+-@\t\r".Contains(value[0])) value = "'" + value;
+        return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
+
+    private static string CsvFileName(BiDashboardWidget widget)
+    {
+        var safe = new string(widget.Title.Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray()).Trim('-');
+        return $"{(safe.Length == 0 ? "chart" : safe)}-{DateTime.UtcNow:yyyy-MM-dd}.csv";
+    }
+
+    private static string FormatValue(decimal value, string format) => format switch
+    {
+        "Currency" => value.ToString("C2"),
+        "Rating" => value.ToString("0.0#") + " / 5",
+        _ => value.ToString("N0")
     };
-
-    private static decimal BarPercent(decimal value, IReadOnlyList<BiDataPoint> points)
-    {
-        var max = points.Max(point => point.Value);
-        return max <= 0 ? 0 : Math.Max(2, value / max * 100);
-    }
-
-    private static string PolylinePoints(IReadOnlyList<BiDataPoint> points)
-    {
-        var max = Math.Max(1m, points.Max(point => point.Value));
-        var divisor = Math.Max(1, points.Count - 1);
-        return string.Join(" ", points.Select((point, index) =>
-        {
-            var x = 12 + index * 576m / divisor;
-            var y = 168 - point.Value / max * 150m;
-            return $"{x.ToString("0.#", CultureInfo.InvariantCulture)},{y.ToString("0.#", CultureInfo.InvariantCulture)}";
-        }));
-    }
-
-    private static string FormatValue(decimal value, string format) =>
-        format == "Currency" ? value.ToString("C2") : value.ToString("N0");
 
     private static BiWidgetEditor NewEditor() => new()
     {

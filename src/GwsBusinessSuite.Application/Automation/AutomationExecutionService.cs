@@ -76,6 +76,7 @@ public sealed class AutomationExecutionService(
                 AutomationExecutionModes.SupportTicketSlaBreached => "support.ticketSlaBreachedTrigger",
                 AutomationExecutionModes.CmsFormSubmitted => "cms.formSubmittedTrigger",
                 AutomationExecutionModes.NewsArticlesFound => "news.articlesFoundTrigger",
+                AutomationExecutionModes.BiGoalCrossed => "bi.goalCrossedTrigger",
                 _ => "core.manualTrigger"
             };
             var startNodes = snapshot.Nodes.Where(node => node.TypeKey == triggerType && !node.IsDisabled).ToList();

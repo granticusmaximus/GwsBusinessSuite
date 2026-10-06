@@ -264,6 +264,7 @@ public static class DependencyInjection
         services.AddScoped<IAffiliateSuggestionService, AffiliateSuggestionService>();
         services.AddScoped<IAffiliateAnalyticsService, AffiliateAnalyticsService>();
         services.AddScoped<IBusinessIntelligenceService, BusinessIntelligenceService>();
+        services.AddScoped<IBiReportEmailService, BiReportEmailService>();
         services.AddScoped<IMindMapService, MindMapService>();
         services.AddScoped<IDeveloperApiKeyService, DeveloperApiKeyService>();
         services.AddScoped<IDeveloperApiResourceService, DeveloperApiResourceService>();
@@ -890,6 +891,7 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddHostedService<NewsRefreshBackgroundService>();
+        services.AddHostedService<BiGoalBackgroundService>();
         services.AddHostedService<TopNewsRefreshBackgroundService>();
         services.AddHostedService<CjAdsSyncBackgroundService>();
         services.AddScoped<IPodcastListenProgressService, PodcastListenProgressService>();
