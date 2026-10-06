@@ -338,7 +338,7 @@
                             {
                                 <button type="button" class="sentinel-nav-item" @onclick="() => OpenNavigationItemAsync(item)" disabled="@IsBusy">
                                     <span>@(string.IsNullOrWhiteSpace(item.Icon) ? (item.IsDatabase ? "🗄️" : "📄") : item.Icon)</span>
-                                    <span class="text-truncate">@item.Title</span>
+                                    <span class="text-truncate">@(string.IsNullOrWhiteSpace(item.Title) ? "Untitled" : item.Title)</span>
                                 </button>
                             }
                         </div>
@@ -351,7 +351,7 @@
                             {
                                 <button type="button" class="sentinel-nav-item" @onclick="() => OpenNavigationItemAsync(item)" disabled="@IsBusy">
                                     <span>@(string.IsNullOrWhiteSpace(item.Icon) ? (item.IsDatabase ? "🗄️" : "📄") : item.Icon)</span>
-                                    <span class="text-truncate">@item.Title</span>
+                                    <span class="text-truncate">@(string.IsNullOrWhiteSpace(item.Title) ? "Untitled" : item.Title)</span>
                                 </button>
                             }
                         </div>
@@ -364,7 +364,7 @@
                             {
                                 <button type="button" class="sentinel-nav-item" @onclick="() => OpenMyWorkItemAsync(item)" disabled="@IsBusy" title="@item.Context">
                                     <i class="bi @(item.Kind == SentinelMyWorkItem.OpenTask ? "bi-square" : "bi-person-check") text-secondary"></i>
-                                    <span class="text-truncate">@item.Title</span>
+                                    <span class="text-truncate">@(string.IsNullOrWhiteSpace(item.Title) ? "Untitled" : item.Title)</span>
                                 </button>
                             }
                         </div>
@@ -488,7 +488,7 @@
                                  @ondrop="() => DropOnNodeAsync(node)">
                                 <input type="checkbox" class="form-check-input wiki-tree-select" checked="@_selectedTreeNodeIds.Contains(node.Id)"
                                        @onchange="e => ToggleTreeNodeSelect(node.Id, (bool)e.Value!)" @onclick:stopPropagation="true"
-                                       aria-label="Select @node.Title" />
+                                       aria-label="Select @NodeTitle(node)" />
                                 @if (hasChildren && string.IsNullOrWhiteSpace(SearchQuery))
                                 {
                                     <button type="button" class="wiki-tree-toggle" @onclick="() => ToggleExpanded(node.Id)"
@@ -503,7 +503,7 @@
                                 }
                                 <button type="button" class="wiki-tree-label" @onclick="() => OpenNodeAsync(node)" disabled="@IsBusy">
                                     <span class="wiki-tree-icon">@(string.IsNullOrWhiteSpace(node.Icon) ? (node.IsDatabase ? "🗄️" : "📄") : node.Icon)</span>
-                                    <span class="wiki-tree-title">@node.Title</span>
+                                    <span class="wiki-tree-title">@NodeTitle(node)</span>
                                     @if (node.IsNotionSynced)
                                     {
                                         <span class="badge rounded-pill text-bg-light border wiki-notion-badge" title="Imported from Notion">N</span>
@@ -585,12 +585,12 @@
                     {
                         <button type="button"
                                 class="sentinel-breadcrumb-up"
-                                aria-label="@($"Back to {parentBreadcrumb.Title}")"
-                                title="@($"Back to {parentBreadcrumb.Title}")"
+                                aria-label="@($"Back to {NodeTitle(parentBreadcrumb)}")"
+                                title="@($"Back to {NodeTitle(parentBreadcrumb)}")"
                                 @onclick="() => OpenNodeAsync(parentBreadcrumb)"
                                 disabled="@IsBusy">
                             <i class="bi bi-arrow-left" aria-hidden="true"></i>
-                            <span class="text-truncate">@parentBreadcrumb.Title</span>
+                            <span class="text-truncate">@NodeTitle(parentBreadcrumb)</span>
                         </button>
                         <span class="sentinel-breadcrumb-divider" aria-hidden="true"></span>
                     }
@@ -600,13 +600,13 @@
                         <i class="bi bi-chevron-right" aria-hidden="true"></i>
                         @if (breadcrumb.Id == SelectedPageId || breadcrumb.Id == SelectedDatabaseId)
                         {
-                            <span class="sentinel-breadcrumb-current text-truncate">@breadcrumb.Title</span>
+                            <span class="sentinel-breadcrumb-current text-truncate">@NodeTitle(breadcrumb)</span>
                         }
                         else
                         {
                             <button type="button" @onclick="() => OpenNodeAsync(breadcrumb)" disabled="@IsBusy">
                                 <span aria-hidden="true">@(string.IsNullOrWhiteSpace(breadcrumb.Icon) ? (breadcrumb.IsDatabase ? "🗄️" : "📄") : breadcrumb.Icon)</span>
-                                <span class="text-truncate">@breadcrumb.Title</span>
+                                <span class="text-truncate">@NodeTitle(breadcrumb)</span>
                             </button>
                         }
                     }
@@ -1119,7 +1119,10 @@
         {
             if (_navigationBackStack.Count == 0) return null;
             var (pageId, databaseId) = _navigationBackStack.Peek();
-            if (pageId is { } previousPageId) return WikiPages.FirstOrDefault(p => p.Id == previousPageId)?.Title;
+            if (pageId is { } previousPageId)
+                return WikiPages.FirstOrDefault(p => p.Id == previousPageId) is { } previousPage
+                    ? (string.IsNullOrWhiteSpace(previousPage.Title) ? "Untitled" : previousPage.Title)
+                    : null;
             if (databaseId is { } previousDatabaseId) return WikiDatabases.FirstOrDefault(d => d.Id == previousDatabaseId)?.Title;
             return null;
         }
@@ -1749,23 +1752,52 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    // Backing the "+"/"/" block picker's "Create" group (WikiDatabaseEditor... no, wiki-block-editor.js's
-    // BLOCK_TYPES "Create" group) - Notion's "+" menu creates a page/database nested under wherever
-    // you triggered it and jumps you straight into the new item, so these mirror that rather than
-    // inserting an inline reference block.
+    // Backing the "+"/"/" block picker's "Page"/"New database" entries (wiki-block-editor.js's
+    // commitBlockPickerItem). Like Notion, the child is created nested under this page, the block
+    // that triggered it becomes a link to the child, and then the child opens. Creating and opening
+    // are two calls so the editor can swap in the link block between them; OpenCreatedChildFromEditor
+    // saves the parent with that link before navigating away.
+    public sealed record CreatedChildFromEditor(string Id, string Title, string Icon);
+
     [JSInvokable]
-    public async Task<string?> CreateChildPageFromEditor(string title)
+    public async Task<CreatedChildFromEditor?> CreateChildPageFromEditor(string title)
     {
         return await CreateChildFromEditorAsync(title, isDatabase: false);
     }
 
     [JSInvokable]
-    public async Task<string?> CreateChildDatabaseFromEditor(string title)
+    public async Task<CreatedChildFromEditor?> CreateChildDatabaseFromEditor(string title)
     {
         return await CreateChildFromEditorAsync(title, isDatabase: true);
     }
 
-    private async Task<string?> CreateChildFromEditorAsync(string title, bool isDatabase)
+    [JSInvokable]
+    public async Task OpenCreatedChildFromEditor(string childId, bool isDatabase, string parentBlocksJson)
+    {
+        if (!Guid.TryParse(childId, out var id)) return;
+        if (Editor.WikiPageId.HasValue && !string.IsNullOrWhiteSpace(parentBlocksJson))
+        {
+            // The parent's link block must be saved before OpenPageAsync replaces Editor.
+            Editor.BlocksJson = parentBlocksJson;
+            _hasUnsavedAutosaveChanges = true;
+        }
+
+        if (isDatabase) await OpenDatabaseAsync(id);
+        else
+        {
+            await OpenPageAsync(id);
+            if (SelectedPageId == id)
+            {
+                // A just-created child opens ready to type its title, like "+ New page".
+                StatusMessage = string.Empty;
+                _focusTitleAfterRender = true;
+            }
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task<CreatedChildFromEditor?> CreateChildFromEditorAsync(string title, bool isDatabase)
     {
         try
         {
@@ -1789,7 +1821,7 @@
             }
 
             var user = await CurrentUserNameAsync();
-            Guid childId;
+            CreatedChildFromEditor created;
             await _saveLock.WaitAsync();
             try
             {
@@ -1797,16 +1829,18 @@
                 {
                     var database = await WikiDatabaseService.CreateDatabaseAsync(
                         string.IsNullOrWhiteSpace(title) ? "Untitled Database" : title.Trim(), parentId, user);
-                    childId = database.Id;
+                    created = new(database.Id.ToString(), database.Title, database.Icon ?? string.Empty);
                 }
                 else
                 {
+                    // An empty title shows the "Untitled" placeholder, same as "+ New page", so
+                    // the user can type the real title straight away.
                     var page = await WikiService.SavePageAsync(new WikiPageEditorModel
                     {
-                        Title = string.IsNullOrWhiteSpace(title) ? "Untitled" : title.Trim(),
+                        Title = title?.Trim() ?? string.Empty,
                         ParentWikiPageId = parentId
                     }, user);
-                    childId = page.Id;
+                    created = new(page.Id.ToString(), page.Title, page.Icon ?? string.Empty);
                 }
             }
             finally
@@ -1815,9 +1849,7 @@
             }
 
             await LoadTreeAsync(selectFirstPage: false);
-            if (isDatabase) await OpenDatabaseAsync(childId);
-            else await OpenPageAsync(childId);
-            return childId.ToString();
+            return created;
         }
         catch (Exception ex)
         {
@@ -2744,7 +2776,8 @@
                 ExpectedContentVersion = page.ContentVersion,
                 Title = page.Title,
                 Slug = page.Slug,
-                BlocksJson = page.BlocksJson,
+                BlocksJson = WikiBlockJson.RefreshPageLinkTitles(page.BlocksJson,
+                    WikiPages.ToDictionary(p => p.Id, p => (p.Title, (string?)p.Icon))),
                 BaseBlocksJson = page.BlocksJson,
                 Icon = page.Icon,
                 CoverImageUrl = page.CoverImageUrl,
@@ -2755,7 +2788,7 @@
             _editorGeneration++;
             PageConflict = null;
             DiffRevisionKey = null;
-            StatusMessage = $"Opened Sentinel page '{page.Title}'.";
+            StatusMessage = $"Opened Sentinel page '{(string.IsNullOrWhiteSpace(page.Title) ? "Untitled" : page.Title)}'.";
             ErrorMessage = string.Empty;
             await InvokeAsync(StateHasChanged);
 
@@ -3459,6 +3492,11 @@
             .Select(nodeId => byId[nodeId])
             .ToList();
     }
+
+    // A page saved with no title shows the editor's "Untitled" placeholder; navigation labels
+    // need the same fallback or the parent button renders as a bare arrow.
+    private static string NodeTitle(WikiTreeNode node) =>
+        string.IsNullOrWhiteSpace(node.Title) ? (node.IsDatabase ? "Untitled Database" : "Untitled") : node.Title;
 
     private WikiTreeNode? CurrentParentNode()
     {

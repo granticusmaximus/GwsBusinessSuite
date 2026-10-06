@@ -10,6 +10,9 @@ services:
         required: false
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      # Admin pages format times with ToLocalTime(), which follows the container's zone - UTC
+      # unless set. Override with TZ=... in .env if the business moves.
+      TZ: ${TZ:-America/New_York}
       # Point the app at the Ollama container on the internal Docker network.
       # These override the localhost defaults in appsettings.json.
       ContentStudio__BaseUrl: http://ollama:11434

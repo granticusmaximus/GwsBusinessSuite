@@ -27,6 +27,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation \
     libssl3 \
     ca-certificates \
+    # Lets TZ (docker-compose.yml) resolve, so admin pages show times in Grant's zone, not UTC.
+    tzdata \
     # --- Headless Chromium runtime deps for Microsoft.Playwright (LocalEventsScraperService) ---
     libglib2.0-0t64 \
     libnss3 \

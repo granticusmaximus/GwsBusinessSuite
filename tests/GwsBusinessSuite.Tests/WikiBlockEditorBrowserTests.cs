@@ -1793,6 +1793,54 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
             word);
     }
 
+    [Fact]
+    public async Task SlashPage_ShouldReplaceTypedCommandWithLinkToNewChild_ThenOpenIt()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = "<main class=\"sentinel-workspace\"><div id=\"editor\" class=\"wiki-block-editor\"></div></main>"
+        }));
+        await page.GotoAsync("http://localhost/editor");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot"));
+        var source = await File.ReadAllTextAsync(Path.Combine(root, "js/wiki-block-editor.js"));
+        await page.AddScriptTagAsync(new() { Type = "module", Content = source.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.editor = { initialize, getBlocksJson };" });
+        await page.WaitForFunctionAsync("() => Boolean(window.editor)");
+        await page.EvaluateAsync("""
+            () => {
+                window.calls = [];
+                window.editor.initialize(document.querySelector('#editor'), {
+                    invokeMethodAsync: (method, ...args) => {
+                        window.calls.push([method, ...args]);
+                        if (method === 'CreateChildPageFromEditor') {
+                            return Promise.resolve({ id: '44444444-4444-4444-8444-444444444444', title: '', icon: '' });
+                        }
+                        return Promise.resolve([]);
+                    }
+                }, '[]');
+            }
+            """);
+
+        await page.Locator(".wiki-block-content").First.ClickAsync();
+        await page.Keyboard.TypeAsync("/pag");
+        await page.Locator(".wiki-editor-menu-item:has(.wiki-editor-menu-label:text-is(\"Page\"))")
+            .ClickAsync(new LocatorClickOptions { Force = true });
+        await page.WaitForFunctionAsync("() => window.calls.some(call => call[0] === 'OpenCreatedChildFromEditor')");
+
+        var openCall = await page.EvaluateAsync<JsonElement>(
+            "() => window.calls.find(call => call[0] === 'OpenCreatedChildFromEditor')");
+        openCall[1].GetString().Should().Be("44444444-4444-4444-8444-444444444444");
+        openCall[2].GetBoolean().Should().BeFalse();
+        var parentBlocks = WikiBlockJson.ParseBlocks(openCall[3].GetString()!);
+        parentBlocks.Should().ContainSingle(block => block.Type == WikiBlockTypes.PageLink)
+            .Which.Props.Should().Contain(new KeyValuePair<string, string>("pageId", "44444444-4444-4444-8444-444444444444"));
+        parentBlocks.Should().NotContain(block => block.PlainText.Contains("/pag"));
+    }
+
     private static ILocatorAssertions Expect(ILocator locator) =>
         Assertions.Expect(locator);
 }

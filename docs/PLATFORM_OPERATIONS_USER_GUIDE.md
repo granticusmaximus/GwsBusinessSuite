@@ -385,6 +385,12 @@ then restart the app (`docker compose up -d`). A feature's own section (for exam
 sender for it. Until a mail server is configured, form submissions are still saved and shown in
 Form Submissions - only the notification email is skipped (the server log says so each time).
 
+### Time zone
+
+Admin pages show dates and times in the server container's time zone. `docker-compose.yml` sets
+it to `America/New_York`; to change it, add `TZ=Area/City` (for example `TZ=America/Chicago`) to
+`.env` and restart the app. Stored data is always UTC, so changing the zone only changes display.
+
 The grantwatson.dev contact form separately needs its Cloudflare Turnstile keys
 (`Turnstile__SiteKey`, `Turnstile__SecretKey`) - without them it refuses every submission; see
 `docs/CONTACT_FORM_PROTECTION.md`.

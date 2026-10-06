@@ -122,6 +122,41 @@ public static class WikiBlockJson
             });
     }
 
+    // A page_link block stores a snapshot of its target's title and icon, so a child page created
+    // as "Untitled" and renamed afterwards would keep its old name on the parent. Re-stamps every
+    // top-level link from the live page list; returns the input unchanged when nothing differs.
+    public static string RefreshPageLinkTitles(string blocksJson, IReadOnlyDictionary<Guid, (string Title, string? Icon)> pages)
+    {
+        var blocks = ParseBlocks(blocksJson);
+        var changed = false;
+        var refreshed = blocks.Select(block =>
+        {
+            if (block.Type != WikiBlockTypes.PageLink
+                || !Guid.TryParse(block.Props.GetValueOrDefault("pageId"), out var pageId)
+                || !pages.TryGetValue(pageId, out var page))
+            {
+                return block;
+            }
+
+            var current = CreatePageLink(pageId, page.Title, page.Icon);
+            if (block.Props.GetValueOrDefault("pageTitle") == current.Props["pageTitle"]
+                && block.Props.GetValueOrDefault("pageIcon") == current.Props["pageIcon"])
+            {
+                return block;
+            }
+
+            changed = true;
+            var props = new Dictionary<string, string>(block.Props)
+            {
+                ["pageTitle"] = current.Props["pageTitle"],
+                ["pageIcon"] = current.Props["pageIcon"]
+            };
+            return block with { RichText = current.RichText, Props = props };
+        }).ToList();
+
+        return changed ? Serialize(refreshed) : blocksJson;
+    }
+
     public static WikiBlock CreateEmpty(string type) => new(
         Guid.NewGuid(), type, 0, [], new Dictionary<string, string>());
 

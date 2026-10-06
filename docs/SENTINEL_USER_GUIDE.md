@@ -107,7 +107,7 @@ empty or partial line to open the block menu, grouped as follows:
 | Block | What it does |
 | --- | --- |
 | Text (paragraph) | Plain paragraph text — the default block. |
-| Page | Creates a nested sub-page and opens it. |
+| Page | Creates a nested sub-page, turns the line you typed `/page` on into a link to it, and opens it with the cursor in the title. Use the breadcrumb (or the back-arrow button) above the title to return to the parent. |
 | To-do list | Text with a clickable checkbox. |
 | Heading 1 / 2 / 3 | Section headings, three sizes. |
 | Table | A simple, standalone text table (not a database). |

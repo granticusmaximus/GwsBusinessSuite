@@ -603,7 +603,11 @@ app.Use(async (context, next) =>
             ? "script-src 'self' https://cdn.jsdelivr.net 'unsafe-eval' 'wasm-unsafe-eval';"
             : "script-src 'self' https://cdn.jsdelivr.net;";
         var allowTurnstile = IsPublicHost(context) || context.Request.Path.StartsWithSegments("/cms");
-        if (allowTurnstile) scriptSrc = scriptSrc.TrimEnd(';') + " https://challenges.cloudflare.com;";
+        // Public pages also carry CJ's affiliate deep-link script (PublicSiteHtmlRenderer
+        // .CjDeepLinkScript, allowed by Grant 2026-10-05): it loads from anrdoezrs.net, which
+        // 302s to yceml.net (CSP checks both), and POSTs page impressions to qksrv.net. Admin
+        // pages never load it and keep the stricter policy.
+        if (allowTurnstile) scriptSrc = scriptSrc.TrimEnd(';') + " https://challenges.cloudflare.com https://www.anrdoezrs.net https://www.yceml.net;";
         // A real incident: a WKWebView's persistent on-disk cache kept serving this page's
         // pre-fix CSP header indefinitely - surviving a full app quit/relaunch - while a
         // browser without that cache picked up the very same server-side fix immediately.
@@ -642,7 +646,8 @@ app.Use(async (context, next) =>
             // fixed here. localhost:11434 / 127.0.0.1:11434: Content Studio relays draft and
             // revision generation to the Ollama on the user's own machine (local-ollama.js), so
             // the server never runs the heavy model in light server-AI mode.
-            "connect-src 'self' wss: ws: http://localhost:11434 http://127.0.0.1:11434 https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov;",
+            "connect-src 'self' wss: ws: http://localhost:11434 http://127.0.0.1:11434 https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov"
+                + (allowTurnstile ? " https://www.qksrv.net;" : ";"),
             "media-src 'self' blob: https:;",
             // A real incident: script-src trusting cdn.jsdelivr.net does NOT cover Worker
             // scripts - that's worker-src's own directive, and it never included jsdelivr. Cesium

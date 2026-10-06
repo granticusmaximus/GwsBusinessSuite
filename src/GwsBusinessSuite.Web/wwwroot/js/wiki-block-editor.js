@@ -2466,8 +2466,7 @@ function blockPickerItems(state) {
 // instead of falling into convertBlockType.
 function commitBlockPickerItem(state, blockEl, item) {
     if (CREATE_MENU_TYPES.has(item.type)) {
-        const method = item.type === '__create_page' ? 'CreateChildPageFromEditor' : 'CreateChildDatabaseFromEditor';
-        state.dotNetRef.invokeMethodAsync(method, '').catch(() => { /* circuit may be gone */ });
+        createChildFromPicker(state, blockEl, item.type === '__create_database');
         return;
     }
     if (item.type === 'synced_block') {
@@ -2489,6 +2488,38 @@ function commitBlockPickerItem(state, blockEl, item) {
         return;
     }
     convertBlockType(state, blockEl, item.type);
+}
+
+// Notion-style "Page"/"New database": the server creates the child under this page, the block
+// that triggered the picker (often still holding the typed "/pag") becomes a link to it, and the
+// child then opens. The parent's blocks travel with the open call so the link is saved first.
+function createChildFromPicker(state, blockEl, isDatabase) {
+    const method = isDatabase ? 'CreateChildDatabaseFromEditor' : 'CreateChildPageFromEditor';
+    state.dotNetRef.invokeMethodAsync(method, '').then(child => {
+        if (!child || !isUuid(child.id)) return;
+        if (blockEl && blockEl.isConnected) {
+            const block = isDatabase
+                ? {
+                    id: crypto.randomUUID(),
+                    type: 'linked_database',
+                    indentLevel: blockIndent(blockEl),
+                    richText: [],
+                    props: {
+                        databaseId: child.id,
+                        databaseTitle: child.title || 'Untitled Database',
+                        databaseIcon: child.icon || '',
+                        databaseViewId: '',
+                        databaseViewName: ''
+                    }
+                }
+                : { ...pageLinkBlock(child), indentLevel: blockIndent(blockEl) };
+            blockEl.replaceWith(createBlockElement(block, state));
+            refreshBlockPresentation(state.container);
+            notifyChanged(state);
+        }
+        return state.dotNetRef.invokeMethodAsync('OpenCreatedChildFromEditor', child.id, isDatabase,
+            getBlocksJson(state.container));
+    }).catch(() => { /* circuit may be gone */ });
 }
 
 // Inserts at the current caret position with no backwards deletion - unlike insertWikiLink/

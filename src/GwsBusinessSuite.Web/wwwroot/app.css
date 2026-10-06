@@ -5268,6 +5268,11 @@ audio.wiki-embed-media { max-width: 100%; }
         padding-top: 0;
     }
     .sentinel-workspace .wiki-block-discussion { opacity: 1; }
+    /* A child-page link card's title is its tap target; give it the full 44px row. */
+    .sentinel-workspace .wiki-page-link-title {
+        display: block;
+        line-height: 44px; /* block + line-height keeps the ellipsis that flex would drop */
+    }
     .sentinel-workspace .wiki-block-gutter :is(button, .wiki-block-handle) {
         width: 44px;
         min-width: 44px;

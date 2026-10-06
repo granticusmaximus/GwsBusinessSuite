@@ -58,6 +58,12 @@ This guide is text-only (no screenshots) — see the note at the end of
   then forwards the reader to the real CJ tracking URL. Commission (sale/payout) data is a
   separate, best-effort import from CJ's own commissions API — see
   [Syncing commissions](#syncing-commissions).
+- **Deep-link automation**: every public grantwatson.dev page also loads CJ's own site-wide
+  script, which records page impressions and rewrites plain links to advertisers you're approved
+  for into CJ tracking links. It runs only on the public site, never in the admin. The site's
+  security policy allows exactly the domains it needs (`www.anrdoezrs.net`, `www.yceml.net`,
+  `www.qksrv.net`); if CJ moves the script to a new domain, the browser console will show it
+  blocked until that domain is added in `Program.cs`.
 
 ## Connecting your CJ account
 
