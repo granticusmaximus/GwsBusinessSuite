@@ -13,6 +13,9 @@ public interface IWikiService
     // the way an explicit "Save changes" click deliberately does.
     Task<WikiPage> SavePageAsync(
         WikiPageEditorModel editor, string performedBy, bool createRevisionCheckpoint = true, CancellationToken cancellationToken = default);
+    // Removes the given blocks (e.g. to-dos picked in My work) from a page through SavePageAsync,
+    // so the edit keeps every save rule and mints a revision the lines can be restored from.
+    Task<WikiPage> DeleteBlocksAsync(Guid wikiPageId, IReadOnlyCollection<Guid> blockIds, string performedBy, CancellationToken cancellationToken = default);
     Task<WikiPage> DuplicatePageAsync(Guid wikiPageId, string performedBy, CancellationToken cancellationToken = default);
 
     // Soft-delete: also trashes every descendant page, and every database parented anywhere

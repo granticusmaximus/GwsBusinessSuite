@@ -751,8 +751,9 @@ public sealed class SentinelWorkspaceService(
         string username, CancellationToken cancellationToken = default)
     {
         var items = new List<SentinelMyWorkItem>();
+        var normalizedUsername = NormalizeUsername(username);
 
-        // Open to-dos - same bounded, access-filtered page scan as GetMentionsAsync.
+        // Open to-dos that mention this user - same bounded, access-filtered page scan as GetMentionsAsync.
         var pages = await dbContext.WikiPages.AsNoTracking()
             .Where(page => page.TrashedAt == null)
             .Take(MaxScanPages)
@@ -768,7 +769,9 @@ public sealed class SentinelWorkspaceService(
             {
                 if (block.Type != WikiBlockTypes.ToDo) continue;
                 if (block.Props.GetValueOrDefault("checked") == "true") continue;
-                items.Add(new SentinelMyWorkItem(page.Id, false, page.Title, block.PlainText, SentinelMyWorkItem.OpenTask));
+                if (!ToDoMentionsUser(block, normalizedUsername)) continue;
+                items.Add(new SentinelMyWorkItem(page.Id, false, page.Title, block.PlainText, SentinelMyWorkItem.OpenTask,
+                    SourceBlockId: block.Id));
             }
         }
 
@@ -787,7 +790,6 @@ public sealed class SentinelWorkspaceService(
         databases = databases.Where(database => accessibleDatabases.Contains(
             new SentinelAccessTarget(database.Id, IsDatabase: true))).ToList();
 
-        var normalizedUsername = NormalizeUsername(username);
         foreach (var database in databases)
         {
             var personProperties = database.Properties
@@ -889,6 +891,21 @@ public sealed class SentinelWorkspaceService(
         dbContext.SentinelNavigationEntries.FirstOrDefaultAsync(entry =>
             entry.Username == username && entry.TargetId == targetId && entry.IsDatabase == isDatabase,
             cancellationToken);
+
+    // A to-do is "my work" only when it names this user - meeting notes are full of other
+    // people's action items. Matches a real @mention span, or plain text like "@Grant Watson"
+    // (Notion imports and pasted notes) by allowing a space between the username's letters.
+    private static bool ToDoMentionsUser(WikiBlock block, string normalizedUsername)
+    {
+        var expectedLink = $"usermention:{normalizedUsername}";
+        if (block.RichText.Any(span => string.Equals(span.Link, expectedLink, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        var pattern = "@" + string.Join(@"\s?", normalizedUsername.Select(c => Regex.Escape(c.ToString()))) + @"\b";
+        return Regex.IsMatch(block.PlainText, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
 
     private static string NormalizeUsername(string username) =>
         string.IsNullOrWhiteSpace(username) ? "unknown" : username.Trim().ToLowerInvariant();

@@ -2161,6 +2161,43 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 .sentinel-nav-item.is-draggable {
     cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: element;
+}
+.sentinel-my-work-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding-left: 0.75rem;
+}
+.sentinel-my-work-row .sentinel-nav-item {
+    min-width: 0;
+    padding-left: 0.1rem;
+}
+.sentinel-my-work-select {
+    flex-shrink: 0;
+    margin: 0;
+}
+.sentinel-my-work-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    line-height: 1.25;
+}
+.sentinel-my-work-text small {
+    font-size: 0.7rem;
+}
+.sentinel-my-work-bar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0.2rem 0.75rem 0.35rem;
+}
+.sentinel-nav-item[aria-disabled="true"] {
+    opacity: 0.65;
+    pointer-events: none;
 }
 .sentinel-nav-item.is-draggable:active {
     cursor: grabbing;

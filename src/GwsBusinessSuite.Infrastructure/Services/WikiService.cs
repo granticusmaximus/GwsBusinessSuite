@@ -383,6 +383,31 @@ public sealed class WikiService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<WikiPage> DeleteBlocksAsync(
+        Guid wikiPageId, IReadOnlyCollection<Guid> blockIds, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var page = await GetPageAsync(wikiPageId, cancellationToken)
+            ?? throw new InvalidOperationException("The wiki page no longer exists.");
+        var blocks = WikiBlockJson.ParseBlocks(page.BlocksJson);
+        var kept = blocks.Where(block => !blockIds.Contains(block.Id)).ToList();
+        if (kept.Count == blocks.Count) return page;
+
+        return await SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = page.Id,
+            ExpectedContentVersion = page.ContentVersion,
+            Title = page.Title,
+            Slug = page.Slug,
+            BlocksJson = WikiBlockJson.Serialize(kept),
+            BaseBlocksJson = page.BlocksJson,
+            Icon = page.Icon,
+            CoverImageUrl = page.CoverImageUrl,
+            ParentWikiPageId = page.ParentWikiPageId,
+            IsFullWidth = page.IsFullWidth,
+            FontStyle = page.FontStyle
+        }, performedBy, createRevisionCheckpoint: true, cancellationToken);
+    }
+
     public async Task<WikiPage> DuplicatePageAsync(
         Guid wikiPageId,
         string performedBy,

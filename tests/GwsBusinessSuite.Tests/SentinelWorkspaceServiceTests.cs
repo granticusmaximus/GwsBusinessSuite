@@ -172,7 +172,10 @@ public sealed class SentinelWorkspaceServiceTests
             Title = "Sprint Notes",
             BlocksJson = WikiBlockJson.Serialize([
                 new WikiBlock(Guid.NewGuid(), WikiBlockTypes.ToDo, 0,
-                    [new WikiRichTextSpan("Ship the release notes")],
+                    [new WikiRichTextSpan("@Grant", Link: "usermention:grant"), new WikiRichTextSpan(" ship the release notes")],
+                    new Dictionary<string, string> { ["checked"] = "false" }),
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.ToDo, 0,
+                    [new WikiRichTextSpan("Mike to follow up with David")],
                     new Dictionary<string, string> { ["checked"] = "false" }),
                 new WikiBlock(Guid.NewGuid(), WikiBlockTypes.ToDo, 0,
                     [new WikiRichTextSpan("Already done")],
@@ -197,8 +200,45 @@ public sealed class SentinelWorkspaceServiceTests
 
         myWork.Should().ContainSingle(item => item.Kind == SentinelMyWorkItem.OpenTask && item.Title == "Sprint Notes");
         myWork.Should().NotContain(item => item.Context == "Already done");
+        myWork.Should().NotContain(item => item.Context == "Mike to follow up with David");
+        myWork.Single(item => item.Kind == SentinelMyWorkItem.OpenTask).SourceBlockId.Should().NotBeNull();
         myWork.Should().ContainSingle(item => item.Kind == SentinelMyWorkItem.AssignedRow && item.Title == "Northstar migration");
         myWork.Should().NotContain(item => item.Title == "Someone else's task");
+    }
+
+    [Fact]
+    public async Task GetMyWorkAsync_ShouldMatchAPlainTextMention_AndDeleteBlocksAsyncShouldRemoveIt()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        var wiki = new WikiService(db);
+        var sentinel = new SentinelWorkspaceService(db, TimeProvider.System);
+
+        var page = await wiki.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = "Meetings",
+            BlocksJson = WikiBlockJson.Serialize([
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Heading2, 0, [new WikiRichTextSpan("Action Items")],
+                    new Dictionary<string, string>()),
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.ToDo, 0,
+                    [new WikiRichTextSpan("@Grant Watson to implement notifications")],
+                    new Dictionary<string, string> { ["checked"] = "false" }),
+                new WikiBlock(Guid.NewGuid(), WikiBlockTypes.ToDo, 0,
+                    [new WikiRichTextSpan("Ask @grantwatsonjr about it")],
+                    new Dictionary<string, string> { ["checked"] = "false" })])
+        }, "u");
+
+        var myWork = await sentinel.GetMyWorkAsync("grantwatson");
+        var task = myWork.Should().ContainSingle(item => item.Kind == SentinelMyWorkItem.OpenTask).Subject;
+        task.Context.Should().Be("@Grant Watson to implement notifications");
+
+        await wiki.DeleteBlocksAsync(page.Id, [task.SourceBlockId!.Value], "grantwatson");
+
+        var saved = await wiki.GetPageAsync(page.Id);
+        WikiBlockJson.ParseBlocks(saved!.BlocksJson).Select(block => block.PlainText)
+            .Should().Equal("Action Items", "Ask @grantwatsonjr about it");
+        (await sentinel.GetMyWorkAsync("grantwatson")).Should().NotContain(item => item.Kind == SentinelMyWorkItem.OpenTask);
     }
 
     [Fact]

@@ -349,15 +349,20 @@
                             <div class="sentinel-nav-heading"><i class="bi bi-clock-history"></i> Recent</div>
                             @foreach (var item in Navigation.Recents.Take(5))
                             {
-                                <button type="button" class="sentinel-nav-item @(!item.IsDatabase ? "is-draggable" : string.Empty)"
-                                        draggable="@(!item.IsDatabase ? "true" : "false")"
-                                        @ondragstart="() => StartDragRecentPage(item)"
-                                        @ondragend="EndDragNode"
-                                        @onclick="() => OpenNavigationItemAsync(item)" disabled="@IsBusy"
-                                        title="@(!item.IsDatabase ? "Drag onto a page to make this page its child" : null)">
+                                @* A div, not a <button>: WebKit (Safari, the Mac app) and Firefox never start a
+                                   drag from a button - the press just selects text - so this mirrors the
+                                   draggable wiki-tree-row instead, with role/tabindex/keydown for keyboard use. *@
+                                <div role="button" tabindex="0" class="sentinel-nav-item @(!item.IsDatabase ? "is-draggable" : string.Empty)"
+                                     aria-disabled="@(IsBusy ? "true" : "false")"
+                                     draggable="@(!item.IsDatabase ? "true" : "false")"
+                                     @ondragstart="() => StartDragRecentPage(item)"
+                                     @ondragend="EndDragNode"
+                                     @onclick="() => OpenRecentItemAsync(item)"
+                                     @onkeydown="e => OnRecentItemKeyDownAsync(e, item)"
+                                     title="@(!item.IsDatabase ? "Drag onto a page to make this page its child" : null)">
                                     <span>@(string.IsNullOrWhiteSpace(item.Icon) ? (item.IsDatabase ? "🗄️" : "📄") : item.Icon)</span>
                                     <span class="text-truncate">@(string.IsNullOrWhiteSpace(item.Title) ? "Untitled" : item.Title)</span>
-                                </button>
+                                </div>
                             }
                         </div>
                     }
@@ -365,12 +370,42 @@
                     {
                         <div class="sentinel-nav-section">
                             <div class="sentinel-nav-heading"><i class="bi bi-check2-square"></i> My work</div>
+                            @if (_selectedMyWorkTasks.Count > 0)
+                            {
+                                <div class="sentinel-my-work-bar">
+                                    <span class="small fw-semibold">@_selectedMyWorkTasks.Count selected</span>
+                                    <button type="button" class="btn btn-xs btn-outline-danger" @onclick="() => _showMyWorkDeleteConfirm = true" disabled="@IsBusy">
+                                        <i class="bi bi-trash me-1"></i>Delete
+                                    </button>
+                                    <button type="button" class="btn btn-xs btn-link" @onclick="() => _selectedMyWorkTasks.Clear()" disabled="@IsBusy">Clear</button>
+                                </div>
+                            }
                             @foreach (var item in MyWork.Take(8))
                             {
-                                <button type="button" class="sentinel-nav-item" @onclick="() => OpenMyWorkItemAsync(item)" disabled="@IsBusy" title="@item.Context">
-                                    <i class="bi @(item.Kind == SentinelMyWorkItem.OpenTask ? "bi-square" : "bi-person-check") text-secondary"></i>
-                                    <span class="text-truncate">@(string.IsNullOrWhiteSpace(item.Title) ? "Untitled" : item.Title)</span>
-                                </button>
+                                // A to-do is labelled by its own text (with its page underneath) -
+                                // labelling it by page title made every action item from one
+                                // meeting page read as an identical "Meetings" row.
+                                var isTask = item.Kind == SentinelMyWorkItem.OpenTask && item.SourceBlockId is not null;
+                                <div class="sentinel-my-work-row">
+                                    @if (isTask)
+                                    {
+                                        <input type="checkbox" class="form-check-input sentinel-my-work-select"
+                                               aria-label="@($"Select to-do: {item.Context}")"
+                                               checked="@_selectedMyWorkTasks.Contains(item)"
+                                               @onchange="e => ToggleMyWorkSelection(item, (bool)e.Value!)" disabled="@IsBusy" />
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-person-check text-secondary"></i>
+                                    }
+                                    <button type="button" class="sentinel-nav-item" @onclick="() => OpenMyWorkItemAsync(item)" disabled="@IsBusy"
+                                            title="@(isTask ? $"{item.Context} — {item.Title}" : item.Context)">
+                                        <span class="sentinel-my-work-text">
+                                            <span class="text-truncate">@(isTask ? (string.IsNullOrWhiteSpace(item.Context) ? "Untitled to-do" : item.Context) : (string.IsNullOrWhiteSpace(item.Title) ? "Untitled" : item.Title))</span>
+                                            <small class="text-truncate text-secondary">@(isTask ? (string.IsNullOrWhiteSpace(item.Title) ? "Untitled" : item.Title) : item.Context)</small>
+                                        </span>
+                                    </button>
+                                </div>
                             }
                         </div>
                     }
@@ -533,6 +568,9 @@
                                         @if (_openRowMenuNodeId == node.Id)
                                         {
                                             <div class="dropdown-menu show wiki-tree-row-dropdown">
+                                                <button type="button" class="dropdown-item" @onclick="() => RenameNodeAsync(node)">
+                                                    <i class="bi bi-pencil me-2"></i>Rename
+                                                </button>
                                                 <button type="button" class="dropdown-item" @onclick="() => DuplicateNodeAsync(node)">
                                                     <i class="bi bi-copy me-2"></i>Duplicate
                                                 </button>
@@ -1111,6 +1149,11 @@
     </div>
 }
 
+<ConfirmModal Show="_showMyWorkDeleteConfirm"
+              Title="Delete to-dos"
+              Message="@($"Delete {_selectedMyWorkTasks.Count} selected to-do(s)? Each line is removed from its page; you can bring it back from that page's version history.")"
+              ConfirmText="Delete"
+              OnConfirm="ConfirmDeleteMyWorkTasksAsync" OnCancel="() => _showMyWorkDeleteConfirm = false" />
 <ConfirmModal Show="_showPermanentDeleteConfirm"
               Title="Delete permanently"
               Message="@($"Permanently delete {_selectedTrashTargets.Count} selected item(s)? This cannot be undone.")"
@@ -2787,6 +2830,62 @@
     private Task OpenMyWorkItemAsync(SentinelMyWorkItem item) =>
         item.IsDatabase ? OpenDatabaseAsync(item.Id) : OpenPageAsync(item.Id);
 
+    private readonly HashSet<SentinelMyWorkItem> _selectedMyWorkTasks = [];
+    private bool _showMyWorkDeleteConfirm;
+
+    private void ToggleMyWorkSelection(SentinelMyWorkItem item, bool selected)
+    {
+        if (selected) _selectedMyWorkTasks.Add(item);
+        else _selectedMyWorkTasks.Remove(item);
+    }
+
+    // Deletes the selected to-do lines from their pages (one save, and one revision, per page).
+    private async Task ConfirmDeleteMyWorkTasksAsync()
+    {
+        _showMyWorkDeleteConfirm = false;
+        var byPage = _selectedMyWorkTasks
+            .Where(item => item.SourceBlockId is not null)
+            .GroupBy(item => item.Id)
+            .ToList();
+        await Work(async () =>
+        {
+            // An open page with pending edits must be saved first, or the delete would race it.
+            await FlushAutosaveAsync();
+            var user = await CurrentUserNameAsync();
+            var deleted = 0;
+            var failures = 0;
+            foreach (var page in byPage)
+            {
+                if (!await CanAccessPageOrDatabaseAsync(page.Key, isDatabase: false, SentinelAccessLevels.Edit))
+                {
+                    failures += page.Count();
+                    continue;
+                }
+                try
+                {
+                    await WikiService.DeleteBlocksAsync(page.Key, page.Select(item => item.SourceBlockId!.Value).ToList(), user);
+                    deleted += page.Count();
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or WikiPageConcurrencyException)
+                {
+                    Logger.LogWarning(ex, "Deleting My work to-dos failed for Sentinel page {PageId}.", page.Key);
+                    failures += page.Count();
+                }
+            }
+
+            _selectedMyWorkTasks.Clear();
+            await LoadWorkspaceNavigationAsync();
+            // Reload the open page so its editor doesn't keep (and later re-save) the deleted lines.
+            if (SelectedPageId is { } openPageId && byPage.Any(page => page.Key == openPageId))
+            {
+                await OpenPageAsync(openPageId);
+            }
+            StatusMessage = failures == 0
+                ? $"Deleted {deleted} to-do(s)."
+                : $"Deleted {deleted} to-do(s); {failures} could not be deleted (no edit access, or the page changed).";
+        });
+    }
+
     private async Task OpenDuplicatedDatabaseAsync(Guid wikiDatabaseId)
     {
         await LoadTreeAsync(selectFirstPage: false);
@@ -3179,6 +3278,14 @@
         _draggedNodeIsDatabase = false;
     }
 
+    // The Recent rows are divs (so they can be dragged), so they replicate the button's
+    // disabled-while-busy and Enter/Space activation themselves.
+    private Task OpenRecentItemAsync(SentinelNavigationItem item) =>
+        IsBusy ? Task.CompletedTask : OpenNavigationItemAsync(item);
+
+    private Task OnRecentItemKeyDownAsync(KeyboardEventArgs e, SentinelNavigationItem item) =>
+        e.Key is "Enter" or " " ? OpenRecentItemAsync(item) : Task.CompletedTask;
+
     private void EndDragNode()
     {
         _draggedNodeId = null;
@@ -3215,6 +3322,21 @@
 
     private void ToggleRowMenu(Guid nodeId) =>
         _openRowMenuNodeId = _openRowMenuNodeId == nodeId ? null : nodeId;
+
+    // Renaming happens in the document's own title field (which already autosaves and keeps
+    // backlinks/link cards in sync), so Rename just opens the item with that field focused.
+    private async Task RenameNodeAsync(WikiTreeNode node)
+    {
+        _openRowMenuNodeId = null;
+        if (node.IsDatabase)
+        {
+            await OpenDatabaseAsync(node.Id);
+            return;
+        }
+
+        await OpenPageAsync(node.Id);
+        if (SelectedPageId == node.Id) _focusTitleAfterRender = true;
+    }
 
     private async Task DuplicateNodeAsync(WikiTreeNode node)
     {

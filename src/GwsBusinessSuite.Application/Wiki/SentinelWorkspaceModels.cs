@@ -24,13 +24,15 @@ public sealed record SentinelBacklink(
 // navigate to) or a database row with a Person property naming this user (Id/IsDatabase = the
 // database, SourceRowId = the specific row - the exact SentinelSearchResult convention already
 // used for a database-row search hit, reused here rather than inventing a second one).
+// SourceBlockId is the to-do block itself, so My work can delete that exact line.
 public sealed record SentinelMyWorkItem(
     Guid Id,
     bool IsDatabase,
     string Title,
     string Context,
     string Kind,
-    Guid? SourceRowId = null)
+    Guid? SourceRowId = null,
+    Guid? SourceBlockId = null)
 {
     public const string OpenTask = "Open task";
     public const string AssignedRow = "Assigned to you";
