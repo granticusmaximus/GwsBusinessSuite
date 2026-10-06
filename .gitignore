@@ -48,3 +48,7 @@ apps/public-site/dist/
 
 # Playwright verification screenshots written by the browser tests
 output/
+
+# Local-only documentation, generated output and reports (kept on disk, not published)
+docs/
+reports/
