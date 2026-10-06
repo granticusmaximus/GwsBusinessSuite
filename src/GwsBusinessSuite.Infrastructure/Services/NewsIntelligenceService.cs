@@ -21,7 +21,8 @@ public sealed class NewsIntelligenceService(
     HttpClient http,
     IMemoryCache cache,
     NewsRefreshState refreshState,
-    ILogger<NewsIntelligenceService> logger) : INewsIntelligenceService
+    ILogger<NewsIntelligenceService> logger,
+    GwsBusinessSuite.Application.Automation.IAutomationTriggerService? automationTriggers = null) : INewsIntelligenceService
 {
     // Google News RSS is used exclusively because:
     // 1. It works reliably from cloud / datacenter IPs (unlike outlet-specific feeds).
@@ -65,7 +66,9 @@ public sealed class NewsIntelligenceService(
     // article's summary falls back to its RSS snippet, not a failed refresh.
     private static readonly TimeSpan ArticleExtractionTimeout = TimeSpan.FromSeconds(8);
     private const int MinExtractedArticleLength = 200;
-    private const int NewsItemTtlHours = 24;
+    // A topic keeps at most this many articles however long the retention is.
+    private const int MaxStoredPerTopic = 200;
+    private const int TrendHistoryDays = 60;
     private const int MaxConcurrentRefreshes = 3;
     private static readonly SemaphoreSlim WriteLock = new(1, 1);
     private static readonly Meter Meter = new("GwsBusinessSuite.NewsIntelligence", "1.0");
@@ -76,6 +79,10 @@ public sealed class NewsIntelligenceService(
 
     // ── CRUD ─────────────────────────────────────────────────
 
+    // How long fetched articles stay (Media Watch settings; 24 hours until changed).
+    private static async Task<int> RetentionHoursAsync(IAppDbContext db, CancellationToken ct) =>
+        await db.NewsWatchSettings.AsNoTracking().Select(x => (int?)x.RetentionHours).FirstOrDefaultAsync(ct) ?? NewsRetention.DefaultHours;
+
     public async Task<IReadOnlyList<WatchedTopicSummary>> ListTopicsAsync(CancellationToken ct = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
@@ -85,7 +92,7 @@ public sealed class NewsIntelligenceService(
             .OrderBy(t => t.Name)
             .ToListAsync(ct);
 
-        var cutoffUnixSeconds = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours).ToUnixTimeSeconds();
+        var cutoffUnixSeconds = DateTimeOffset.UtcNow.AddHours(-await RetentionHoursAsync(db, ct)).ToUnixTimeSeconds();
         var topicIds = topics.Select(t => t.Id).ToList();
 
         var recentCounts = await db.NewsItems
@@ -101,7 +108,7 @@ public sealed class NewsIntelligenceService(
 
         return topics.Select(t => new WatchedTopicSummary(
             t.Id, t.Name, t.Keywords, t.ColorHex, t.IsActive, t.LastFetchedAt,
-            countMap.GetValueOrDefault(t.Id, 0), t.TopicType, t.TrustedFeedUrls)).ToList();
+            countMap.GetValueOrDefault(t.Id, 0), t.TopicType, t.TrustedFeedUrls, t.LastRefreshIssue)).ToList();
     }
 
     public async Task<WatchedTopicSummary> CreateTopicAsync(string name, string keywords, string colorHex, string topicType, string trustedFeedUrls, CancellationToken ct = default)
@@ -184,7 +191,7 @@ public sealed class NewsIntelligenceService(
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
 
-        var cutoffUnixSeconds = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours).ToUnixTimeSeconds();
+        var cutoffUnixSeconds = DateTimeOffset.UtcNow.AddHours(-await RetentionHoursAsync(db, ct)).ToUnixTimeSeconds();
         var topicMap = await db.WatchedTopics.AsNoTracking().ToDictionaryAsync(t => t.Id, ct);
 
         IQueryable<NewsItem> query = db.NewsItems.AsNoTracking();
@@ -194,7 +201,7 @@ public sealed class NewsIntelligenceService(
         var items = await query
             .Where(n => n.FetchedAtUnixSeconds >= cutoffUnixSeconds)
             .OrderByDescending(n => n.PublishedAtUnixSeconds ?? n.FetchedAtUnixSeconds)
-            .Take(100)
+            .Take(topicId.HasValue ? MaxStoredPerTopic : 300)
             .ToListAsync(ct);
 
         var dtos = items.Select(n =>
@@ -267,12 +274,14 @@ public sealed class NewsIntelligenceService(
             try
             {
                 await using var pruneDb = await dbContextFactory.CreateDbContextAsync(ct);
-                var cutoffUnixSeconds = DateTimeOffset.UtcNow.AddHours(-NewsItemTtlHours).ToUnixTimeSeconds();
+                var cutoffUnixSeconds = DateTimeOffset.UtcNow.AddHours(-await RetentionHoursAsync(pruneDb, ct)).ToUnixTimeSeconds();
                 var pruned = await pruneDb.NewsItems
                     .Where(n => n.FetchedAtUnixSeconds < cutoffUnixSeconds)
                     .ExecuteDeleteAsync(ct);
                 if (pruned > 0)
                     logger.LogInformation("Pruned {Count} expired news items", pruned);
+                var trendCutoff = DateTimeOffset.UtcNow.AddDays(-TrendHistoryDays).ToString("yyyy-MM-dd");
+                await pruneDb.NewsTrendDays.Where(d => string.Compare(d.Day, trendCutoff) < 0).ExecuteDeleteAsync(ct);
             }
             finally
             {
@@ -318,6 +327,24 @@ public sealed class NewsIntelligenceService(
             logger.LogError(ex, "Failed to refresh {WorkItem}", workItem.Name);
             refreshState.FailItem(workItem.Name, ex, timings);
             if (ex is OperationCanceledException && ct.IsCancellationRequested) throw;
+            await TryRecordIssueAsync(workItem.TopicId, $"The last refresh failed: {ex.Message}", ct);
+        }
+    }
+
+    private async Task TryRecordIssueAsync(Guid? topicId, string issue, CancellationToken ct)
+    {
+        if (topicId is null) return;
+        try
+        {
+            await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+            var topic = await db.WatchedTopics.FindAsync([topicId.Value], ct);
+            if (topic is null) return;
+            topic.LastRefreshIssue = Truncate(issue, 500);
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Couldn't record the refresh issue for topic {TopicId}", topicId);
         }
     }
 
@@ -345,7 +372,22 @@ public sealed class NewsIntelligenceService(
             ? await FetchTechnicalArticlesAsync(keywords!, trustedFeedUrls, workItem.Name, timings, ct)
             : await FetchArticlesAsync(keywords, trustedFeedUrls, workItem.Name, timings, ct);
 
-        var selected = articles.Take(workItem.MaxItems).ToList();
+        // Articles already stored for this topic keep their row and AI take - only new ones are
+        // read and summarized, so a refresh costs Ollama time only for what's actually new.
+        HashSet<string> known;
+        await using (var db = await dbContextFactory.CreateDbContextAsync(ct))
+        {
+            known = (await db.NewsItems.AsNoTracking()
+                    .Where(n => n.TopicId == workItem.TopicId)
+                    .Select(n => n.Url)
+                    .ToListAsync(ct))
+                .Select(NewsStoryClusterer.UrlHash)
+                .ToHashSet();
+        }
+        var selected = articles
+            .Where(a => !known.Contains(NewsStoryClusterer.UrlHash(a.Url)))
+            .Take(workItem.MaxItems)
+            .ToList();
 
         // Real article text (when it can be fetched) makes for a genuinely grounded summary
         // instead of one built from a 200-character aggregator snippet - see
@@ -356,11 +398,14 @@ public sealed class NewsIntelligenceService(
             () => Task.WhenAll(selected.Select(a => ExtractArticleTextAsync(a.Url, ct))),
             timings);
 
-        var summaries = await MeasureStageAsync(
+        var summarized = await MeasureStageAsync(
             workItem.Name, "Ollama summary", selected.Count,
             () => BatchSummarizeAsync(selected, fullTexts, ct), timings);
 
-        return new PreparedRefresh(workItem, selected, summaries);
+        var issue = summarized.Failure is { } failure
+            ? $"AI takes were skipped for {selected.Count} new article{(selected.Count == 1 ? "" : "s")} ({failure}); they show the outlet's own description instead."
+            : null;
+        return new PreparedRefresh(workItem, selected, summarized.Summaries, issue);
     }
 
     private async Task CommitPreparedAsync(
@@ -375,7 +420,6 @@ public sealed class NewsIntelligenceService(
             await using var db = await dbContextFactory.CreateDbContextAsync(ct);
             await using var transaction = await db.BeginTransactionAsync(ct);
 
-            await db.NewsItems.Where(n => n.TopicId == prepared.WorkItem.TopicId).ExecuteDeleteAsync(ct);
             var fetchedAt = DateTimeOffset.UtcNow;
 
             for (var i = 0; i < prepared.Articles.Count; i++)
@@ -404,10 +448,24 @@ public sealed class NewsIntelligenceService(
                 {
                     topic.LastFetchedAt = fetchedAt;
                     topic.UpdatedAt = fetchedAt;
+                    topic.LastRefreshIssue = prepared.Issue;
                 }
             }
 
+            if (prepared.Articles.Count > 0) await RecordTrendAsync(db, prepared, fetchedAt, ct);
             await db.SaveChangesAsync(ct);
+
+            // Keep the newest MaxStoredPerTopic per topic; retention pruning handles age.
+            var overflow = (await db.NewsItems.AsNoTracking()
+                    .Where(n => n.TopicId == prepared.WorkItem.TopicId)
+                    .Select(n => new { n.Id, n.FetchedAtUnixSeconds, n.PublishedAtUnixSeconds })
+                    .ToListAsync(ct))
+                .OrderByDescending(n => n.PublishedAtUnixSeconds ?? n.FetchedAtUnixSeconds)
+                .Skip(MaxStoredPerTopic)
+                .Select(n => n.Id)
+                .ToList();
+            if (overflow.Count > 0) await db.NewsItems.Where(n => overflow.Contains(n.Id)).ExecuteDeleteAsync(ct);
+
             await transaction.CommitAsync(ct);
         }
         finally
@@ -415,6 +473,57 @@ public sealed class NewsIntelligenceService(
             timer.Stop();
             WriteLock.Release();
             RecordTiming(prepared.WorkItem.Name, "SQLite commit", timer.Elapsed, prepared.Articles.Count, timings);
+        }
+
+        await FireNewArticlesTriggerAsync(prepared, ct);
+    }
+
+    private static async Task RecordTrendAsync(IAppDbContext db, PreparedRefresh prepared, DateTimeOffset fetchedAt, CancellationToken ct)
+    {
+        var key = prepared.WorkItem.TopicId?.ToString() ?? "top";
+        var day = fetchedAt.UtcDateTime.ToString("yyyy-MM-dd");
+        var row = await db.NewsTrendDays.FirstOrDefaultAsync(d => d.TopicKey == key && d.Day == day, ct);
+        if (row is null)
+        {
+            row = new NewsTrendDay { TopicKey = key, Day = day, CreatedAt = fetchedAt };
+            db.NewsTrendDays.Add(row);
+        }
+
+        var existing = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, int>>(row.TermCountsJson) ?? [];
+        var merged = NewsTrendTerms.Merge(new Dictionary<string, int>(existing, StringComparer.OrdinalIgnoreCase),
+            NewsTrendTerms.Count(prepared.Articles.Select(a => a.Title)));
+        row.ArticleCount += prepared.Articles.Count;
+        row.TermCountsJson = System.Text.Json.JsonSerializer.Serialize(merged);
+        row.UpdatedAt = fetchedAt;
+    }
+
+    // One workflow run per refresh that brought new articles, carrying all of them - not one run
+    // per article, which would flood a workflow after a quiet night.
+    private async Task FireNewArticlesTriggerAsync(PreparedRefresh prepared, CancellationToken ct)
+    {
+        if (automationTriggers is null || prepared.Articles.Count == 0) return;
+        try
+        {
+            var payload = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                topicId = prepared.WorkItem.TopicId,
+                topicName = prepared.WorkItem.Name,
+                articleCount = prepared.Articles.Count,
+                articles = prepared.Articles.Select((a, i) => new
+                {
+                    title = a.Title,
+                    url = a.Url,
+                    source = a.Source,
+                    publishedAt = a.PublishedAt,
+                    summary = prepared.Summaries.ElementAtOrDefault(i) ?? string.Empty,
+                    description = Truncate(a.Description, 500)
+                })
+            });
+            await automationTriggers.TriggerNewsArticlesFoundAsync(prepared.WorkItem.Name, payload, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "News-articles automation trigger failed for {WorkItem}", prepared.WorkItem.Name);
         }
     }
 
@@ -839,9 +948,9 @@ public sealed class NewsIntelligenceService(
         }
     }
 
-    private async Task<List<string>> BatchSummarizeAsync(List<RawArticle> articles, string?[] fullTexts, CancellationToken ct)
+    private async Task<SummarizeResult> BatchSummarizeAsync(List<RawArticle> articles, string?[] fullTexts, CancellationToken ct)
     {
-        if (articles.Count == 0) return [];
+        if (articles.Count == 0) return new([], null);
         try
         {
             var input = articles
@@ -856,14 +965,20 @@ public sealed class NewsIntelligenceService(
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(BatchSummarizeTimeout);
             var raw = await ollama.GenerateAsync(OllamaModel, system, string.Join("\n", input), timeoutCts.Token);
-            return ParseNumberedList(raw, articles.Count);
+            var parsed = ParseNumberedList(raw, articles.Count);
+            return new(parsed, parsed.All(string.IsNullOrWhiteSpace) ? $"{OllamaModel} returned no usable takes" : null);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Ollama summarisation skipped ({Model} unavailable) — articles saved without hot takes", OllamaModel);
-            return Enumerable.Repeat(string.Empty, articles.Count).ToList();
+            var reason = ex is OperationCanceledException && !ct.IsCancellationRequested
+                ? $"{OllamaModel} didn't answer within {BatchSummarizeTimeout.TotalSeconds:0} seconds"
+                : $"{OllamaModel} was unavailable";
+            return new(Enumerable.Repeat(string.Empty, articles.Count).ToList(), reason);
         }
     }
+
+    private sealed record SummarizeResult(List<string> Summaries, string? Failure);
 
     private static List<string> ParseNumberedList(string raw, int expectedCount)
     {
@@ -969,5 +1084,6 @@ public sealed class NewsIntelligenceService(
     private sealed record PreparedRefresh(
         RefreshWorkItem WorkItem,
         List<RawArticle> Articles,
-        List<string> Summaries);
+        List<string> Summaries,
+        string? Issue);
 }

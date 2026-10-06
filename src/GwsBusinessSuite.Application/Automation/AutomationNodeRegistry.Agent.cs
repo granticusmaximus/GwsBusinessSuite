@@ -25,7 +25,7 @@ public sealed partial class AutomationNodeRegistry
     private static readonly HashSet<string> AgentForbiddenTools = new(StringComparer.OrdinalIgnoreCase)
     {
         "core.manualTrigger", "core.webhookTrigger", "core.scheduleTrigger",
-        "database.rowChangedTrigger", "crm.dealStageChangedTrigger", "cms.pagePublishedTrigger",
+        "database.rowChangedTrigger", "crm.dealStageChangedTrigger", "cms.pagePublishedTrigger", "news.articlesFoundTrigger",
         "core.wait", "core.approval", "ai.agent", "automation.subWorkflow"
     };
 

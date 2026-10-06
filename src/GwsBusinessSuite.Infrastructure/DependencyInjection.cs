@@ -849,6 +849,12 @@ public static class DependencyInjection
                 "Mozilla/5.0 (compatible; GWSuite/1.0; +https://grantwatson.dev)");
             client.Timeout = TimeSpan.FromSeconds(15);
         });
+        // Media Watch extras: read state, saved articles, Trends, feed discovery, clips, digest.
+        services.AddHttpClient<INewsWatchService, NewsWatchService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(10);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GwsBusinessSuite-MediaWatch/1.0; +https://www.gwsapp.net)");
+        });
         services.AddHttpClient<IGovernmentIntelligenceService, GovernmentIntelligenceService>(client =>
         {
             client.DefaultRequestHeaders.UserAgent.ParseAdd(

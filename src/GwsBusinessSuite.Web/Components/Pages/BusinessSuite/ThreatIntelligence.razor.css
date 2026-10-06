@@ -38,6 +38,12 @@
     --civic-accent: #e08a56;
     --civic-accent-strong: #4ade9d;
     --civic-accent-soft: rgba(74, 222, 157, .14);
+    /* The light-mode gradient starts at a hard-coded near-white, so dark mode needs its own -
+       without this the masthead's light text sat on a white fade and was unreadable. Same
+       values as Media Watch / Civic Watch. */
+    background:
+        radial-gradient(circle at 95% 0, rgba(224,138,86,.08), transparent 24rem),
+        linear-gradient(180deg, #17140f 0, var(--civic-bg) 22rem);
 }
 
 .threat-intel :global(.page-header-eyebrow) {

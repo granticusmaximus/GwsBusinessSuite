@@ -42,6 +42,10 @@ public sealed class NewsRefreshBackgroundService(
             var svc = scope.ServiceProvider.GetRequiredService<INewsIntelligenceService>();
             await svc.RefreshAllAsync(ct);
             logger.LogInformation("News Intelligence: refresh complete");
+
+            // The hourly tick doubles as the digest clock: it sends once the chosen hour has passed.
+            var digest = await scope.ServiceProvider.GetRequiredService<INewsWatchService>().SendDigestAsync(force: false, ct);
+            if (digest.Sent) logger.LogInformation("Media Watch digest: {Message}", digest.Message);
         }
         catch (OperationCanceledException)
         {

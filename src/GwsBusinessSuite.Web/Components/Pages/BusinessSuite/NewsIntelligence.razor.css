@@ -90,3 +90,62 @@
     .masthead-actions { width: 100%; }
     .masthead-actions .btn { flex: 1; }
 }
+
+/* Read stories recede; unread ones carry a dot next to the outlet. */
+.media-watch-story.is-read {
+    opacity: .72;
+}
+
+.media-watch-unread-dot {
+    display: inline-block;
+    width: .5rem;
+    height: .5rem;
+    border-radius: 50%;
+    background: var(--civic-accent);
+}
+
+.media-watch-actions .btn {
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+}
+
+.media-watch-email {
+    flex: 1 1 14rem;
+    max-width: 22rem;
+}
+
+.min-w-0 {
+    min-width: 0;
+}
+
+/* Trends: one thin bar per day, anchored to the baseline, 2px gap between bars. */
+.media-watch-trend {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 5rem;
+    border-bottom: 1px solid var(--civic-line);
+}
+
+.media-watch-trend-slot {
+    flex: 1 1 0;
+    height: 100%;
+    display: flex;
+    align-items: flex-end;
+}
+
+.media-watch-trend-slot:hover {
+    background: var(--civic-soft);
+}
+
+.media-watch-trend-bar {
+    width: 100%;
+    border-radius: 4px 4px 0 0;
+}
+
+@media (pointer: coarse) {
+    .media-watch-actions .btn {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}

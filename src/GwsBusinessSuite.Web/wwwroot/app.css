@@ -2159,6 +2159,12 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-nav-item:hover {
     background: #f8f9fa;
 }
+.sentinel-nav-item.is-draggable {
+    cursor: grab;
+}
+.sentinel-nav-item.is-draggable:active {
+    cursor: grabbing;
+}
 .sentinel-search-highlight {
     background: #fff0a8;
     border-radius: 0.15rem;

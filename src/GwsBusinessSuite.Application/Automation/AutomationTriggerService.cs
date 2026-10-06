@@ -259,6 +259,34 @@ public sealed class AutomationTriggerService(
         return triggered;
     }
 
+    public async Task<int> TriggerNewsArticlesFoundAsync(string topicName, string inputJson, CancellationToken cancellationToken = default)
+    {
+        var subscribers = await db.AutomationWorkflows.AsNoTracking().Where(item =>
+            item.Status == AutomationWorkflowStatuses.Active && item.TriggerNewsArticlesFound)
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+
+        var triggered = 0;
+        foreach (var workflowId in subscribers)
+        {
+            try
+            {
+                var snapshot = await workflowService.GetPublishedSnapshotAsync(workflowId, cancellationToken);
+                var triggerNode = snapshot?.Nodes.FirstOrDefault(node => node.TypeKey == "news.articlesFoundTrigger" && !node.IsDisabled);
+                if (triggerNode is null) continue;
+                var wantedTopic = ReadStringParameter(triggerNode.ParametersJson, "topicName");
+                if (!string.IsNullOrWhiteSpace(wantedTopic) && !string.Equals(wantedTopic.Trim(), topicName, StringComparison.OrdinalIgnoreCase)) continue;
+
+                await executionService.ExecuteAsync(workflowId, inputJson, AutomationExecutionModes.NewsArticlesFound, cancellationToken: cancellationToken);
+                triggered++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Media Watch articles-found trigger failed for automation workflow {WorkflowId}.", workflowId);
+            }
+        }
+        return triggered;
+    }
+
     public async Task<int> TriggerSentinelChatPromptSubmittedAsync(
         string prompt, Guid? conversationId, CancellationToken cancellationToken = default)
     {

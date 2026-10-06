@@ -53,6 +53,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelNavigationEntry> SentinelNavigationEntries => Set<SentinelNavigationEntry>();
     public DbSet<SentinelSavedSearch> SentinelSavedSearches => Set<SentinelSavedSearch>();
     public DbSet<CameraFavorite> CameraFavorites => Set<CameraFavorite>();
+    public DbSet<NewsWatchSettings> NewsWatchSettings => Set<NewsWatchSettings>();
+    public DbSet<NewsReadMark> NewsReadMarks => Set<NewsReadMark>();
+    public DbSet<SavedNewsArticle> SavedNewsArticles => Set<SavedNewsArticle>();
+    public DbSet<NewsTrendDay> NewsTrendDays => Set<NewsTrendDay>();
     public DbSet<ThreatWatchAsset> ThreatWatchAssets => Set<ThreatWatchAsset>();
     public DbSet<ThreatStackItem> ThreatStackItems => Set<ThreatStackItem>();
     public DbSet<ThreatFinding> ThreatFindings => Set<ThreatFinding>();
@@ -349,6 +353,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelSavedSearch>().HasIndex(x => new { x.Username, x.CreatedAt });
         modelBuilder.Entity<CameraFavorite>().HasIndex(x => new { x.Username, x.CameraId }).IsUnique();
         modelBuilder.Entity<CameraFavorite>().HasIndex(x => new { x.Username, x.CreatedAt });
+        modelBuilder.Entity<NewsReadMark>().HasIndex(x => new { x.Username, x.UrlHash }).IsUnique();
+        modelBuilder.Entity<SavedNewsArticle>().HasIndex(x => new { x.Username, x.UrlHash }).IsUnique();
+        modelBuilder.Entity<NewsTrendDay>().HasIndex(x => new { x.TopicKey, x.Day }).IsUnique();
         modelBuilder.Entity<ThreatWatchAsset>().HasIndex(x => x.Value).IsUnique();
         modelBuilder.Entity<ThreatWatchAsset>().Property(x => x.Value).HasMaxLength(255);
         modelBuilder.Entity<ThreatStackItem>().Property(x => x.Name).HasMaxLength(120);

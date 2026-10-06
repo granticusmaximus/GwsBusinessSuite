@@ -275,4 +275,8 @@ public interface IAutomationTriggerService
     // trigger method here - the caller wraps this in a try/catch so a misconfigured subscriber
     // workflow can never prevent the submission itself from saving.
     Task<int> TriggerCmsFormSubmittedAsync(Guid siteId, string inputJson, CancellationToken cancellationToken = default);
+
+    // Fires every active workflow with an enabled "news.articlesFoundTrigger" node whose
+    // topicName is empty or equals topicName, after a Media Watch refresh stores new articles.
+    Task<int> TriggerNewsArticlesFoundAsync(string topicName, string inputJson, CancellationToken cancellationToken = default);
 }

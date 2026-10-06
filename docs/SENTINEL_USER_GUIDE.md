@@ -92,7 +92,9 @@ Other page-level actions are compact icons at the top right of the page: **Share
 toggle **Favorite**, **Duplicate**, **Export** as Markdown, **Trash** (soft-delete, recoverable —
 see [Version history, trash, and duplication](#version-history-trash-and-duplication)), and **⋯**
 for Save a version plus the page's style options (full width, font). In the sidebar tree itself you can drag a page onto
-another to reparent it, use the up/down arrows or drag handle to reorder siblings, and multi-select
+another to reparent it; pages in **Recent** can also be dragged onto a parent page. A page can have
+many children, but each child has one parent, and Sentinel refuses moves that would put a page
+under one of its own descendants. You can also use the up/down arrows or drag handle to reorder siblings, and multi-select
 with the row checkboxes to bulk-move or bulk-trash several pages (and their sub-pages) at once.
 Drag a page from that same tree into the open document canvas to insert a visual linked-page card
 without moving the original page. The card opens the existing page; it does not copy its content.
@@ -320,7 +322,9 @@ one. Database rows carry the same bounded revision history for their own page bo
 **Trash** is a soft delete: trashing a page also trashes its sub-pages, and trashing a database
 also hides its rows (without touching them) — everything reappears automatically on restore. The
 Trash panel (badge shows the current count) lets you **Restore** or permanently **Delete** each
-item. Database rows can additionally be trashed one at a time from inside their own database, with
+item. Use the checkboxes and **Select all** to permanently delete several items together; Sentinel
+always asks you to confirm with **Delete** or **Cancel** because permanent deletion cannot be undone.
+Database rows can additionally be trashed one at a time from inside their own database, with
 a "Trashed rows" panel scoped to just that database. **Duplicate** is one click on any page or
 database.
 

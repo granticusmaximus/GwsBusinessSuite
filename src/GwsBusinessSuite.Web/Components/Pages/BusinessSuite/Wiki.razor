@@ -349,7 +349,12 @@
                             <div class="sentinel-nav-heading"><i class="bi bi-clock-history"></i> Recent</div>
                             @foreach (var item in Navigation.Recents.Take(5))
                             {
-                                <button type="button" class="sentinel-nav-item" @onclick="() => OpenNavigationItemAsync(item)" disabled="@IsBusy">
+                                <button type="button" class="sentinel-nav-item @(!item.IsDatabase ? "is-draggable" : string.Empty)"
+                                        draggable="@(!item.IsDatabase ? "true" : "false")"
+                                        @ondragstart="() => StartDragRecentPage(item)"
+                                        @ondragend="EndDragNode"
+                                        @onclick="() => OpenNavigationItemAsync(item)" disabled="@IsBusy"
+                                        title="@(!item.IsDatabase ? "Drag onto a page to make this page its child" : null)">
                                     <span>@(string.IsNullOrWhiteSpace(item.Icon) ? (item.IsDatabase ? "🗄️" : "📄") : item.Icon)</span>
                                     <span class="text-truncate">@(string.IsNullOrWhiteSpace(item.Title) ? "Untitled" : item.Title)</span>
                                 </button>
@@ -1031,6 +1036,20 @@
                     }
                     else
                     {
+                        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                            <label class="d-flex align-items-center gap-2 mb-0">
+                                <input type="checkbox" class="form-check-input mt-0"
+                                       checked="@AreAllTrashItemsSelected"
+                                       @onchange="e => ToggleAllTrashItems((bool)e.Value!)"
+                                       aria-label="Select all items in Trash" />
+                                <span class="small fw-semibold">Select all</span>
+                            </label>
+                            <button type="button" class="btn btn-sm btn-danger"
+                                    @onclick="RequestDeleteSelectedTrashItems"
+                                    disabled="@(IsBusy || _selectedTrashTargets.Count == 0)">
+                                Delete permanently@(_selectedTrashTargets.Count > 0 ? $" ({_selectedTrashTargets.Count})" : string.Empty)
+                            </button>
+                        </div>
                         <p class="small text-secondary">Trashing a page also trashes its sub-pages and any
                             databases nested under it. Restoring one item does not automatically restore the
                             rest of that branch.</p>
@@ -1041,13 +1060,19 @@
                                 @foreach (var trashedPage in TrashedPages)
                                 {
                                     <div class="list-group-item d-flex justify-content-between align-items-start gap-2">
-                                        <div>
+                                        <div class="d-flex align-items-start gap-2">
+                                            <input type="checkbox" class="form-check-input mt-1"
+                                                   checked="@IsTrashItemSelected(trashedPage.Id, false)"
+                                                   @onchange="e => ToggleTrashItem(trashedPage.Id, false, (bool)e.Value!)"
+                                                   aria-label="Select @trashedPage.Title for permanent deletion" />
+                                            <div>
                                             <div class="fw-semibold">@(string.IsNullOrWhiteSpace(trashedPage.Icon) ? "📄" : trashedPage.Icon) @trashedPage.Title</div>
                                             <div class="small text-secondary">trashed @trashedPage.TrashedAt?.ToLocalTime().ToString("g")</div>
+                                            </div>
                                         </div>
                                         <div class="d-flex gap-1 flex-shrink-0">
                                             <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => RestoreTrashedPageAsync(trashedPage.Id)" disabled="@IsBusy">Restore</button>
-                                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteTrashedPagePermanentlyAsync(trashedPage.Id)" disabled="@IsBusy">Delete Permanently</button>
+                                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RequestDeleteTrashItem(trashedPage.Id, false)" disabled="@IsBusy">Delete Permanently</button>
                                         </div>
                                     </div>
                                 }
@@ -1060,13 +1085,19 @@
                                 @foreach (var database in TrashedDatabases)
                                 {
                                     <div class="list-group-item d-flex justify-content-between align-items-start gap-2">
-                                        <div>
+                                        <div class="d-flex align-items-start gap-2">
+                                            <input type="checkbox" class="form-check-input mt-1"
+                                                   checked="@IsTrashItemSelected(database.Id, true)"
+                                                   @onchange="e => ToggleTrashItem(database.Id, true, (bool)e.Value!)"
+                                                   aria-label="Select @database.Title for permanent deletion" />
+                                            <div>
                                             <div class="fw-semibold">@(string.IsNullOrWhiteSpace(database.Icon) ? "🗄️" : database.Icon) @database.Title</div>
                                             <div class="small text-secondary">trashed @database.TrashedAt?.ToLocalTime().ToString("g")</div>
+                                            </div>
                                         </div>
                                         <div class="d-flex gap-1 flex-shrink-0">
                                             <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => RestoreTrashedDatabaseAsync(database.Id)" disabled="@IsBusy">Restore</button>
-                                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => DeleteTrashedDatabasePermanentlyAsync(database.Id)" disabled="@IsBusy">Delete Permanently</button>
+                                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RequestDeleteTrashItem(database.Id, true)" disabled="@IsBusy">Delete Permanently</button>
                                         </div>
                                     </div>
                                 }
@@ -1079,6 +1110,12 @@
         <div class="modal-backdrop show" style="z-index:-1"></div>
     </div>
 }
+
+<ConfirmModal Show="_showPermanentDeleteConfirm"
+              Title="Delete permanently"
+              Message="@($"Permanently delete {_selectedTrashTargets.Count} selected item(s)? This cannot be undone.")"
+              ConfirmText="Delete" CancelText="Cancel" ConfirmButtonClass="btn-danger" Busy="IsBusy"
+              OnConfirm="ConfirmDeleteSelectedTrashItemsAsync" OnCancel="CancelPermanentDelete" />
 
 @code {
     // This route was Admin-only until per-resource Sentinel sharing (SentinelAccessService)
@@ -1235,7 +1272,9 @@
     private Guid? _dragOverNodeId;
     private Guid? _openRowMenuNodeId;
     private readonly HashSet<Guid> _selectedTreeNodeIds = new();
+    private readonly HashSet<SentinelAccessTarget> _selectedTrashTargets = new();
     private bool _showBulkDeleteConfirm, _showBulkMoveModal, _showSingleDeleteConfirm, _bulkActionBusy;
+    private bool _showPermanentDeleteConfirm;
     private WikiTreeNode? _pendingSingleDelete;
     private Guid? _bulkMoveTargetParentId;
 
@@ -1638,12 +1677,14 @@
         _autosaveCts?.Dispose();
         _autosaveCts = null;
         if (!_hasUnsavedAutosaveChanges) return;
-        await PerformAutosaveAsync(CancellationToken.None);
+        await PerformAutosaveAsync(CancellationToken.None, allowWhileBusy: true);
     }
 
-    private async Task PerformAutosaveAsync(CancellationToken cancellationToken)
+    private async Task PerformAutosaveAsync(CancellationToken cancellationToken, bool allowWhileBusy = false)
     {
-        if (IsBusy) return;
+        // Debounced background saves should stay out of the way of another operation, but an
+        // explicit navigation flush must never discard the link block just inserted by /page.
+        if (IsBusy && !allowWhileBusy) return;
         if (Editor.WikiPageId is { } existingPageId
             && !await CanAccessPageOrDatabaseAsync(existingPageId, isDatabase: false, SentinelAccessLevels.Edit))
         {
@@ -1805,7 +1846,7 @@
             await FlushAutosaveAsync();
             if (!Editor.WikiPageId.HasValue)
             {
-                await PerformAutosaveAsync(CancellationToken.None);
+                await PerformAutosaveAsync(CancellationToken.None, allowWhileBusy: true);
             }
             if (!Editor.WikiPageId.HasValue || _hasUnsavedAutosaveChanges)
             {
@@ -2158,7 +2199,7 @@
         if (SelectedDatabaseId is null && !_blockEditorInitialized)
         {
             _blockEditorRef ??= DotNetObjectReference.Create(this);
-            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=10");
+            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=11");
             await _blockEditorModule.InvokeVoidAsync(
                 "initialize",
                 _blockEditorContainer,
@@ -2493,8 +2534,17 @@
         }
     }
 
-    private void OpenTrashModal() => ShowTrashModal = true;
-    private void CloseTrashModal() => ShowTrashModal = false;
+    private void OpenTrashModal()
+    {
+        _selectedTrashTargets.Clear();
+        ShowTrashModal = true;
+    }
+
+    private void CloseTrashModal()
+    {
+        _selectedTrashTargets.Clear();
+        ShowTrashModal = false;
+    }
 
     private async Task RestoreTrashedPageAsync(Guid wikiPageId)
     {
@@ -2512,22 +2562,80 @@
         });
     }
 
-    private async Task DeleteTrashedPagePermanentlyAsync(Guid wikiPageId)
-    {
-        if (!await CanAccessPageOrDatabaseAsync(wikiPageId, isDatabase: false, SentinelAccessLevels.FullAccess))
-        {
-            ErrorMessage = "You don't have permission to permanently delete this Sentinel page.";
-            return;
-        }
-        var confirmed = await JS.InvokeAsync<bool>("confirm", "Permanently delete this page? This cannot be undone.");
-        if (!confirmed) return;
+    private bool AreAllTrashItemsSelected =>
+        TrashedPages.Count + TrashedDatabases.Count > 0
+        && _selectedTrashTargets.Count == TrashedPages.Count + TrashedDatabases.Count;
 
+    private bool IsTrashItemSelected(Guid id, bool isDatabase) =>
+        _selectedTrashTargets.Contains(new SentinelAccessTarget(id, isDatabase));
+
+    private void ToggleTrashItem(Guid id, bool isDatabase, bool selected)
+    {
+        var target = new SentinelAccessTarget(id, isDatabase);
+        if (selected) _selectedTrashTargets.Add(target);
+        else _selectedTrashTargets.Remove(target);
+    }
+
+    private void ToggleAllTrashItems(bool selected)
+    {
+        _selectedTrashTargets.Clear();
+        if (!selected) return;
+        foreach (var page in TrashedPages) _selectedTrashTargets.Add(new SentinelAccessTarget(page.Id, false));
+        foreach (var database in TrashedDatabases) _selectedTrashTargets.Add(new SentinelAccessTarget(database.Id, true));
+    }
+
+    private void RequestDeleteTrashItem(Guid id, bool isDatabase)
+    {
+        _selectedTrashTargets.Clear();
+        _selectedTrashTargets.Add(new SentinelAccessTarget(id, isDatabase));
+        RequestDeleteSelectedTrashItems();
+    }
+
+    private void RequestDeleteSelectedTrashItems()
+    {
+        if (_selectedTrashTargets.Count == 0) return;
+        ShowTrashModal = false;
+        _showPermanentDeleteConfirm = true;
+    }
+
+    private void CancelPermanentDelete()
+    {
+        _showPermanentDeleteConfirm = false;
+        ShowTrashModal = true;
+    }
+
+    private async Task ConfirmDeleteSelectedTrashItemsAsync()
+    {
         await Work(async () =>
         {
             var user = await CurrentUserNameAsync();
-            await WikiService.DeletePagePermanentlyAsync(wikiPageId, user);
-            StatusMessage = "Permanently deleted.";
+            var selected = _selectedTrashTargets.ToList();
+            var failures = 0;
+            foreach (var target in selected)
+            {
+                try
+                {
+                    if (!await CanAccessPageOrDatabaseAsync(target.TargetId, target.IsDatabase, SentinelAccessLevels.FullAccess))
+                    {
+                        failures++;
+                        continue;
+                    }
+                    if (target.IsDatabase) await WikiDatabaseService.DeleteDatabasePermanentlyAsync(target.TargetId, user);
+                    else await WikiService.DeletePagePermanentlyAsync(target.TargetId, user);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Permanent deletion failed for Sentinel item {TargetId}.", target.TargetId);
+                    failures++;
+                }
+            }
+            StatusMessage = failures == 0
+                ? $"Permanently deleted {selected.Count} item(s)."
+                : $"Permanently deleted {selected.Count - failures} of {selected.Count} item(s); {failures} could not be deleted.";
+            _selectedTrashTargets.Clear();
+            _showPermanentDeleteConfirm = false;
             await LoadTreeAsync(selectFirstPage: false);
+            ShowTrashModal = TrashedPages.Count + TrashedDatabases.Count > 0;
         });
     }
 
@@ -2543,26 +2651,6 @@
             var user = await CurrentUserNameAsync();
             await WikiDatabaseService.RestoreDatabaseAsync(wikiDatabaseId, user);
             StatusMessage = "Restored from Trash.";
-            await LoadTreeAsync(selectFirstPage: false);
-        });
-    }
-
-    private async Task DeleteTrashedDatabasePermanentlyAsync(Guid wikiDatabaseId)
-    {
-        if (!await CanAccessPageOrDatabaseAsync(wikiDatabaseId, isDatabase: true, SentinelAccessLevels.FullAccess))
-        {
-            ErrorMessage = "You don't have permission to permanently delete this Sentinel database.";
-            return;
-        }
-        var confirmed = await JS.InvokeAsync<bool>(
-            "confirm", "Permanently delete this database and all its rows? This cannot be undone.");
-        if (!confirmed) return;
-
-        await Work(async () =>
-        {
-            var user = await CurrentUserNameAsync();
-            await WikiDatabaseService.DeleteDatabasePermanentlyAsync(wikiDatabaseId, user);
-            StatusMessage = "Permanently deleted.";
             await LoadTreeAsync(selectFirstPage: false);
         });
     }
@@ -3084,6 +3172,13 @@
         _draggedNodeIsDatabase = node.IsDatabase;
     }
 
+    private void StartDragRecentPage(SentinelNavigationItem item)
+    {
+        if (item.IsDatabase) return;
+        _draggedNodeId = item.Id;
+        _draggedNodeIsDatabase = false;
+    }
+
     private void EndDragNode()
     {
         _draggedNodeId = null;
@@ -3096,7 +3191,7 @@
         var draggedIsDatabase = _draggedNodeIsDatabase;
         _dragOverNodeId = null;
         _draggedNodeId = null;
-        if (draggedId is not { } nodeId || nodeId == targetNode.Id)
+        if (draggedId is not { } nodeId || nodeId == targetNode.Id || targetNode.IsDatabase)
         {
             return;
         }

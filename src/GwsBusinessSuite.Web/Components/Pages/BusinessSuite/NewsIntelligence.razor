@@ -5,6 +5,8 @@
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Infrastructure.Services
 @inject INewsIntelligenceService NewsService
+@inject INewsWatchService WatchService
+@inject ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<NewsIntelligence> Logger
 
 <PageTitle>Media Watch</PageTitle>
@@ -52,13 +54,35 @@
                     <textarea class="form-control form-control-sm mb-2" placeholder="Keywords (comma-separated)"
                               @oninput="e => _formKeywords = e.Value?.ToString() ?? string.Empty"
                               rows="2">@_formKeywords</textarea>
+                    @* value= (not child content) so a feed added by "Find" shows up in the box. *@
                     <textarea class="form-control form-control-sm mb-2" placeholder="Trusted RSS feed URLs (one per line, optional)"
+                              value="@_formTrustedFeeds"
                               @oninput="e => _formTrustedFeeds = e.Value?.ToString() ?? string.Empty"
-                              rows="2">@_formTrustedFeeds</textarea>
+                              rows="2"></textarea>
                     <div class="small text-secondary mb-2">
                         Feeds you add here are pulled in full alongside the keyword search - use this to pin
                         specific outlets you trust rather than relying only on keyword matches.
                     </div>
+                    <div class="input-group input-group-sm mb-1">
+                        <input class="form-control" placeholder="Find a site's feed, e.g. arstechnica.com" aria-label="Website to find a feed for"
+                               value="@_discoverUrl" @oninput="e => _discoverUrl = e.Value?.ToString() ?? string.Empty" />
+                        <button type="button" class="btn btn-outline-secondary" disabled="@(_discovering || string.IsNullOrWhiteSpace(_discoverUrl))" @onclick="DiscoverFeedsAsync">
+                            @(_discovering ? "Looking…" : "Find")
+                        </button>
+                    </div>
+                    @if (_discoverError is not null)
+                    {
+                        <div class="small text-danger mb-2">@_discoverError</div>
+                    }
+                    @foreach (var feed in _discovered)
+                    {
+                        <div class="d-flex justify-content-between align-items-center gap-2 small mb-1">
+                            <span class="text-truncate" title="@feed.Url">@feed.Title <span class="text-secondary">(@feed.ItemCount items)</span></span>
+                            <button type="button" class="btn btn-sm btn-outline-primary py-0 flex-shrink-0" disabled="@FormHasFeed(feed.Url)" @onclick="() => AddDiscoveredFeed(feed.Url)">
+                                @(FormHasFeed(feed.Url) ? "Added" : "Add")
+                            </button>
+                        </div>
+                    }
                     <label class="form-label small mb-1">Topic type</label>
                     <select class="form-select form-select-sm mb-1" @bind="_formTopicType">
                         <option value="@WatchedTopicTypes.General">General (Google News + dev.to)</option>
@@ -97,12 +121,34 @@
                 <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center @(_activeFilter == "all" ? "active" : "")"
                         @onclick='() => SelectFilter("all")'>
                     <span><span class="gws-topic-dot me-2" style="background:#64748b"></span>All News</span>
-                    <span class="badge @(_activeFilter == "all" ? "text-bg-light" : "text-bg-secondary") rounded-pill">@_topics.Sum(t => t.UnreadCount)</span>
+                    @if (Unread(Guid.Empty) > 0)
+                    {
+                        <span class="badge @(_activeFilter == "all" ? "text-bg-light" : "text-bg-secondary") rounded-pill" title="Unread">@Unread(Guid.Empty)</span>
+                    }
                 </button>
 
                 <button type="button" class="list-group-item list-group-item-action @(_activeFilter == "breaking" ? "active" : "")"
                         @onclick='() => SelectFilter("breaking")'>
                     <span class="gws-topic-dot me-2" style="background:#0f172a"></span>Breaking News
+                </button>
+
+                <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center @(_activeFilter == "saved" ? "active" : "")"
+                        @onclick='() => SelectFilter("saved")'>
+                    <span><i class="bi bi-bookmark-fill me-2"></i>Saved</span>
+                    @if (_savedHashes.Count > 0)
+                    {
+                        <span class="badge @(_activeFilter == "saved" ? "text-bg-light" : "text-bg-secondary") rounded-pill">@_savedHashes.Count</span>
+                    }
+                </button>
+
+                <button type="button" class="list-group-item list-group-item-action @(_activeFilter == "trends" ? "active" : "")"
+                        @onclick='() => SelectFilter("trends")'>
+                    <i class="bi bi-graph-up me-2"></i>Trends
+                </button>
+
+                <button type="button" class="list-group-item list-group-item-action @(_activeFilter == "settings" ? "active" : "")"
+                        @onclick='() => SelectFilter("settings")'>
+                    <i class="bi bi-envelope-paper me-2"></i>Digest &amp; settings
                 </button>
 
                 @foreach (var topic in _topics)
@@ -118,10 +164,14 @@
                                         <i class="bi bi-code-slash me-1" title="Technical topic (Hacker News + dev.to)"></i>
                                     }
                                     <span class="@(topic.IsActive ? "" : "text-decoration-line-through text-muted")">@topic.Name</span>
+                                    @if (topic.LastRefreshIssue is { } issue)
+                                    {
+                                        <i class="bi bi-exclamation-triangle-fill text-warning ms-1" title="@issue" aria-label="Last refresh had a problem: @issue"></i>
+                                    }
                                 </span>
-                                @if (topic.UnreadCount > 0)
+                                @if (Unread(topic.Id) > 0)
                                 {
-                                    <span class="badge @(_activeFilter == topic.Id.ToString() ? "text-bg-light" : "text-bg-secondary") rounded-pill">@topic.UnreadCount</span>
+                                    <span class="badge @(_activeFilter == topic.Id.ToString() ? "text-bg-light" : "text-bg-secondary") rounded-pill" title="Unread">@Unread(topic.Id)</span>
                                 }
                             </button>
                             <div class="d-flex flex-shrink-0 pe-2">
@@ -240,25 +290,21 @@
         {
             <LoadingIndicator Message="Loading feed…" />
         }
-        else if (_activeFilter == "all")
+        else if (_activeFilter == "saved")
         {
-            @RenderAllView()
+            @RenderSavedView()
         }
-        else if (_feed is null || CurrentItems().Count == 0)
+        else if (_activeFilter == "trends")
         {
-            <EmptyState Icon="bi-newspaper" Message="No articles yet." CssClass="text-center py-5">
-                <p class="mb-0">Click <strong>Refresh All</strong> to fetch the latest news,
-                    or add keywords to a topic and click <strong>Refresh All</strong>.</p>
-            </EmptyState>
+            @RenderTrendsView()
+        }
+        else if (_activeFilter == "settings")
+        {
+            @RenderSettingsView()
         }
         else
         {
-            <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
-                @foreach (var item in CurrentItems())
-                {
-                    @RenderCard(item)
-                }
-            </div>
+            @RenderFeedView()
         }
     </div>
 </div>
@@ -272,7 +318,27 @@
     // ── State ────────────────────────────────────────────────
     private List<WatchedTopicSummary> _topics = [];
     private NewsFeedResult? _feed;
-    private string _activeFilter = "all";   // "all" | "breaking" | topic-id string
+    private string _activeFilter = "all";   // "all" | "breaking" | "saved" | "trends" | "settings" | topic-id string
+    private string _username = string.Empty;
+    private HashSet<string> _readHashes = [];
+    private HashSet<string> _savedHashes = [];
+    private IReadOnlyDictionary<Guid, int> _unreadCounts = new Dictionary<Guid, int>();
+    private bool _unreadOnly;
+    private readonly HashSet<Guid> _expandedStories = [];
+    private IReadOnlyList<SavedArticleView> _saved = [];
+    private NewsTrendsView? _trends;
+    private NewsWatchSettingsView? _settings;
+    private int _setRetention = NewsRetention.DefaultHours;
+    private bool _setDigestEnabled;
+    private string _setDigestRecipient = string.Empty;
+    private string _setDigestFrequency = NewsDigestFrequencies.Daily;
+    private int _setDigestHour = 7;
+    private int _setDigestDay = 1;
+    private bool _sendingDigest;
+    private string _discoverUrl = string.Empty;
+    private bool _discovering;
+    private string? _discoverError;
+    private IReadOnlyList<DiscoveredFeed> _discovered = [];
     private bool _loading;
     private bool _refreshing;
     private bool _refreshingTopNews;
@@ -300,8 +366,26 @@
     protected override async Task OnInitializedAsync()
     {
         _refreshStatus = NewsService.GetRefreshStatus();
+        _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
         await ReloadAsync();
     }
+
+    private async Task LoadReadingStateAsync()
+    {
+        try
+        {
+            var read = WatchService.GetReadUrlHashesAsync(_username);
+            var saved = WatchService.GetSavedUrlHashesAsync(_username);
+            var unread = WatchService.GetUnreadCountsAsync(_username);
+            await Task.WhenAll(read, saved, unread);
+            _readHashes = (await read).ToHashSet();
+            _savedHashes = (await saved).ToHashSet();
+            _unreadCounts = await unread;
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Failed to load reading state"); }
+    }
+
+    private int Unread(Guid topicKey) => _unreadCounts.GetValueOrDefault(topicKey);
 
     // ── Data loading ─────────────────────────────────────────
 
@@ -320,6 +404,19 @@
             // Both "all" and "breaking" read from the same topicless general pool
             // (TopicId == null in the DB) - the service returns everything when
             // topicId is null, and CurrentViewItems() narrows it down client-side.
+            switch (_activeFilter)
+            {
+                case "saved":
+                    _saved = await WatchService.ListSavedAsync(_username);
+                    return;
+                case "trends":
+                    _trends = await WatchService.GetTrendsAsync();
+                    return;
+                case "settings":
+                    LoadSettingsForm(await WatchService.GetSettingsAsync());
+                    return;
+            }
+
             Guid? queryTopicId = _activeFilter == "all" || _activeFilter == "breaking"
                 ? null
                 : Guid.Parse(_activeFilter);
@@ -338,13 +435,14 @@
     // These reads use separate factory-created DbContexts, so they can safely overlap.
     // Keeping them behind one helper also avoids reintroducing serial reloads after a
     // refresh or topic mutation.
-    private Task ReloadAsync() => Task.WhenAll(LoadTopicsAsync(), LoadFeedAsync());
+    private Task ReloadAsync() => Task.WhenAll(LoadTopicsAsync(), LoadFeedAsync(), LoadReadingStateAsync());
 
     // ── Actions ──────────────────────────────────────────────
 
     private async Task SelectFilter(string filter)
     {
         _activeFilter = filter;
+        _expandedStories.Clear();
         // Sources are scoped to whatever's in the newly selected view - a source picked
         // in one topic may not exist in another, so carrying it over would silently
         // empty the feed with no visible explanation.
@@ -619,66 +717,244 @@
     private bool SourceMatches(NewsItemDto item) =>
         IsDevToSource(item.Source) || _selectedSources.Count == 0 || _selectedSources.Contains(NormalizeSourceName(item.Source));
 
-    // Signal words used to approximate "breaking news" - there's no authoritative
-    // breaking-news flag in the Google News RSS / dev.to feeds this pulls from, so this
-    // is a simple, transparent keyword heuristic rather than a real editorial signal.
-    private static readonly string[] BreakingSignalWords =
-        ["breaking", "urgent", "alert", "developing", "live updates", "just in"];
-
-    private static bool IsBreakingNews(NewsItemDto item) =>
-        BreakingSignalWords.Any(w =>
-            item.Title.Contains(w, StringComparison.OrdinalIgnoreCase) ||
-            item.Description.Contains(w, StringComparison.OrdinalIgnoreCase));
-
     private List<NewsItemDto> CurrentViewItems()
     {
         if (_feed is null) return [];
 
         return _activeFilter switch
         {
-            // "All News" is a flat, topic-free aggregator - topic items never appear here.
-            "all" => _feed.Items.Where(x => x.TopicId == null).ToList(),
-            // "Breaking News" is a keyword-filtered slice of that same topicless pool.
-            "breaking" => _feed.Items.Where(x => x.TopicId == null && IsBreakingNews(x)).ToList(),
+            // "All News" and "Breaking News" both read the topic-free general pool.
+            "all" or "breaking" => _feed.Items.Where(x => x.TopicId == null).ToList(),
             // A specific topic id - already scoped server-side by GetFeedAsync(topicId).
             _ => _feed.Items.ToList()
         };
     }
 
-    private List<NewsItemDto> CurrentItems()
+    private bool IsRead(NewsItemDto item) => _readHashes.Contains(NewsStoryClusterer.UrlHash(item.Url));
+    private bool IsSaved(NewsItemDto item) => _savedHashes.Contains(NewsStoryClusterer.UrlHash(item.Url));
+    private bool IsStoryRead(NewsStory story) => IsRead(story.Lead) && story.OtherReports.All(IsRead);
+
+    // The same story from several outlets is one card. "Breaking" is now a story that 3+ outlets
+    // reported within six hours (or a fresh "breaking"/"developing" headline) - see NewsStoryClusterer.
+    private List<NewsStory> CurrentStories()
     {
-        return CurrentViewItems().Where(SourceMatches).ToList();
+        var stories = NewsStoryClusterer.Cluster(CurrentViewItems().Where(SourceMatches).ToList(), DateTimeOffset.UtcNow);
+        IEnumerable<NewsStory> result = stories;
+        if (_activeFilter == "breaking") result = result.Where(st => st.IsBreaking);
+        if (_unreadOnly) result = result.Where(st => !IsStoryRead(st));
+        return result.ToList();
     }
 
-    // A flat, traditional aggregator of the topicless general pool - no topic grouping,
-    // no sections. Topics are only ever reachable via their own sidebar row.
-    private RenderFragment RenderAllView() => @<text>
-        @{
-            var filteredItems = CurrentViewItems().Where(SourceMatches).ToList();
+    private async Task MarkReadAsync(params string[] urls)
+    {
+        var fresh = urls.Where(u => !_readHashes.Contains(NewsStoryClusterer.UrlHash(u))).ToList();
+        if (fresh.Count == 0) return;
+        foreach (var url in fresh) _readHashes.Add(NewsStoryClusterer.UrlHash(url));
+        try
+        {
+            await WatchService.MarkReadAsync(_username, fresh);
+            _unreadCounts = await WatchService.GetUnreadCountsAsync(_username);
         }
+        catch (Exception ex) { Logger.LogWarning(ex, "Marking articles read failed"); }
+    }
+
+    private Task MarkStoryReadAsync(NewsStory story) =>
+        MarkReadAsync(story.OtherReports.Prepend(story.Lead).Select(r => r.Url).ToArray());
+
+    private Task MarkAllReadAsync() =>
+        MarkReadAsync(CurrentStories().SelectMany(st => st.OtherReports.Prepend(st.Lead)).Select(r => r.Url).ToArray());
+
+    private async Task ToggleSavedAsync(NewsItemDto item)
+    {
+        try
+        {
+            if (IsSaved(item))
+            {
+                await WatchService.UnsaveArticleAsync(_username, item.Url);
+                _savedHashes.Remove(NewsStoryClusterer.UrlHash(item.Url));
+            }
+            else
+            {
+                await WatchService.SaveArticleAsync(_username, item);
+                _savedHashes.Add(NewsStoryClusterer.UrlHash(item.Url));
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Saving an article failed");
+            _errorMessage = "Couldn't update your saved articles.";
+        }
+    }
+
+    private async Task UnsaveAsync(SavedArticleView saved)
+    {
+        await WatchService.UnsaveArticleAsync(_username, saved.Url);
+        _savedHashes.Remove(NewsStoryClusterer.UrlHash(saved.Url));
+        _saved = await WatchService.ListSavedAsync(_username);
+    }
+
+    private async Task ClipAsync(NewsItemDto item)
+    {
+        _statusMessage = _errorMessage = string.Empty;
+        try
+        {
+            var pageId = await WatchService.ClipToSentinelAsync(_username, item);
+            _savedHashes.Add(NewsStoryClusterer.UrlHash(item.Url));
+            _clipped[NewsStoryClusterer.UrlHash(item.Url)] = pageId;
+            _statusMessage = "Clipped to Sentinel under \"Media Watch clips\" (and saved).";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Clipping an article to Sentinel failed");
+            _errorMessage = "Clipping to Sentinel failed.";
+        }
+    }
+
+    private Task ClipSavedAsync(SavedArticleView saved) =>
+        ClipAsync(new NewsItemDto(saved.Id, null, saved.TopicName, "", saved.Title, saved.Url, saved.Source, saved.PublishedAt,
+            string.Empty, saved.Summary, saved.SavedAt));
+
+    private readonly Dictionary<string, Guid> _clipped = new();
+
+    private async Task DiscoverFeedsAsync()
+    {
+        _discovering = true;
+        _discoverError = null;
+        _discovered = [];
+        try
+        {
+            _discovered = await WatchService.DiscoverFeedsAsync(_discoverUrl);
+            if (_discovered.Count == 0) _discoverError = "No RSS or Atom feed found on that site.";
+        }
+        catch (ArgumentException ex) { _discoverError = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Feed discovery failed for {Url}", _discoverUrl);
+            _discoverError = "Feed search failed.";
+        }
+        finally { _discovering = false; }
+    }
+
+    private bool FormHasFeed(string url) =>
+        _formTrustedFeeds.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Contains(url, StringComparer.OrdinalIgnoreCase);
+
+    private void AddDiscoveredFeed(string url)
+    {
+        if (FormHasFeed(url)) return;
+        _formTrustedFeeds = string.IsNullOrWhiteSpace(_formTrustedFeeds) ? url : _formTrustedFeeds.TrimEnd() + "\n" + url;
+    }
+
+    private void LoadSettingsForm(NewsWatchSettingsView settings)
+    {
+        _settings = settings;
+        _setRetention = settings.RetentionHours;
+        _setDigestEnabled = settings.DigestEnabled;
+        _setDigestRecipient = settings.DigestRecipient ?? string.Empty;
+        _setDigestFrequency = settings.DigestFrequency;
+        _setDigestHour = settings.DigestHourLocal;
+        _setDigestDay = settings.DigestDayOfWeek;
+    }
+
+    private NewsWatchSettingsView SettingsFromForm() =>
+        new(_setRetention, _setDigestEnabled, _setDigestRecipient, _setDigestFrequency, _setDigestHour, _setDigestDay);
+
+    private async Task SaveSettingsAsync()
+    {
+        _statusMessage = _errorMessage = string.Empty;
+        try
+        {
+            await WatchService.SaveSettingsAsync(SettingsFromForm());
+            LoadSettingsForm(await WatchService.GetSettingsAsync());
+            _statusMessage = "Settings saved.";
+            await LoadReadingStateAsync();
+        }
+        catch (ArgumentException ex) { _errorMessage = ex.Message; }
+    }
+
+    private async Task SendDigestNowAsync()
+    {
+        _sendingDigest = true;
+        _statusMessage = _errorMessage = string.Empty;
+        try
+        {
+            await WatchService.SaveSettingsAsync(SettingsFromForm());
+            var result = await WatchService.SendDigestAsync(force: true);
+            if (result.Sent) _statusMessage = result.Message; else _errorMessage = result.Message;
+            LoadSettingsForm(await WatchService.GetSettingsAsync());
+        }
+        catch (ArgumentException ex) { _errorMessage = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Sending the Media Watch digest failed");
+            _errorMessage = "Sending the digest failed - check Settings > Email.";
+        }
+        finally { _sendingDigest = false; }
+    }
+
+    private static string RetentionLabel(int hours) => hours switch
+    {
+        24 => "1 day",
+        48 => "2 days",
+        72 => "3 days",
+        168 => "7 days",
+        _ => $"{hours} hours"
+    };
+
+    private RenderFragment RenderFeedView() => @<text>
+        @{
+            var topic = _topics.FirstOrDefault(t => t.Id.ToString() == _activeFilter);
+            var stories = CurrentStories();
+        }
+        @if (topic?.LastRefreshIssue is { } issue)
+        {
+            <div class="alert alert-warning d-flex align-items-start gap-2 mb-3" role="status">
+                <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0"></i>
+                <div>@issue</div>
+            </div>
+        }
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3 media-watch-toolbar">
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="unread-only" checked="@_unreadOnly" @onchange="e => _unreadOnly = e.Value is true" />
+                <label class="form-check-label small" for="unread-only">Unread only</label>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="small text-secondary">@stories.Count @(stories.Count == 1 ? "story" : "stories")</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(stories.Count == 0 || stories.All(IsStoryRead))" @onclick="MarkAllReadAsync">
+                    <i class="bi bi-check2-all"></i> Mark all read
+                </button>
+            </div>
+        </div>
         @if (CurrentViewItems().Count == 0)
         {
             <EmptyState Icon="bi-newspaper" Message="No articles yet." CssClass="text-center py-5">
-                <p class="mb-0">Click <strong>Refresh All</strong> to fetch the latest news.</p>
+                <p class="mb-0">Click <strong>Refresh All</strong> to fetch the latest news@(_activeFilter is "all" or "breaking" ? "" : ", or add keywords to this topic").</p>
             </EmptyState>
         }
-        else if (filteredItems.Count == 0)
+        else if (stories.Count == 0)
         {
-            <EmptyState Icon="bi-funnel" Message="No articles match the selected source filter." CssClass="text-center py-5" />
+            <EmptyState Icon="@(_activeFilter == "breaking" ? "bi-broadcast" : "bi-funnel")"
+                        Message="@(_activeFilter == "breaking" && !_unreadOnly ? "Nothing is breaking right now - no story has been picked up by 3 or more outlets in the last 6 hours." : "Nothing matches - you're all caught up or the filter excludes everything.")"
+                        CssClass="text-center py-5" />
         }
         else
         {
             <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 g-3">
-                @foreach (var item in filteredItems)
+                @foreach (var story in stories)
                 {
-                    @RenderCard(item)
+                    @RenderStory(story)
                 }
             </div>
         }
     </text>;
 
-    private RenderFragment RenderCard(NewsItemDto item) => @<div class="col">
-        <article class="card border-0 shadow-sm h-100">
+    private RenderFragment RenderStory(NewsStory story) => @<div class="col">
+        @{
+            var item = story.Lead;
+            var read = IsStoryRead(story);
+            var expanded = _expandedStories.Contains(item.Id);
+        }
+        <article class="card border-0 shadow-sm h-100 media-watch-story @(read ? "is-read" : "")">
             @if (!string.IsNullOrWhiteSpace(item.ImageUrl))
             {
                 <div class="ratio ratio-16x9 bg-light rounded-top overflow-hidden">
@@ -686,7 +962,7 @@
                 </div>
             }
             <div class="card-body d-flex flex-column">
-                <div class="d-flex align-items-center gap-2 mb-2 small text-secondary">
+                <div class="d-flex align-items-center gap-2 mb-2 small text-secondary flex-wrap">
                     <span class="gws-avatar-circle" style="background:@(string.IsNullOrWhiteSpace(item.TopicColorHex) ? "#64748b" : item.TopicColorHex)">
                         @(string.IsNullOrWhiteSpace(item.Source) ? "?" : item.Source.Trim()[..1].ToUpperInvariant())
                     </span>
@@ -695,8 +971,17 @@
                     {
                         <span>&middot; @TimeAgo(item.PublishedAt.Value)</span>
                     }
+                    @if (story.IsBreaking)
+                    {
+                        <span class="badge text-bg-danger">Breaking</span>
+                    }
+                    @if (!read)
+                    {
+                        <span class="media-watch-unread-dot" title="Unread" aria-label="Unread"></span>
+                    }
                 </div>
-                <a href="@item.Url" target="_blank" rel="noopener noreferrer" class="h6 d-block mb-2 text-body text-decoration-none">@item.Title</a>
+                <a href="@item.Url" target="_blank" rel="noopener noreferrer" class="h6 d-block mb-2 text-body text-decoration-none"
+                   @onclick="() => MarkReadAsync(item.Url)">@item.Title</a>
                 @{
                     var takeText = string.IsNullOrWhiteSpace(item.OllamaSummary) ? item.Description : item.OllamaSummary;
                 }
@@ -704,10 +989,219 @@
                 {
                     <p class="small text-secondary flex-grow-1">@takeText</p>
                 }
-                <a href="@item.Url" target="_blank" rel="noopener noreferrer" class="small fw-semibold mt-auto">Open <i class="bi bi-box-arrow-up-right"></i></a>
+                @if (story.OtherReports.Count > 0)
+                {
+                    <button type="button" class="btn btn-link btn-sm p-0 text-start mb-2 media-watch-outlets"
+                            aria-expanded="@(expanded ? "true" : "false")"
+                            @onclick="() => { if (!_expandedStories.Remove(item.Id)) _expandedStories.Add(item.Id); }">
+                        <i class="bi @(expanded ? "bi-chevron-up" : "bi-chevron-down")"></i>
+                        Also covered by @story.OtherReports.Count @Pluralize(story.OtherReports.Count, "report")
+                    </button>
+                    @if (expanded)
+                    {
+                        <ul class="list-unstyled small mb-2">
+                            @foreach (var other in story.OtherReports)
+                            {
+                                <li class="mb-1">
+                                    <a href="@other.Url" target="_blank" rel="noopener noreferrer" class="@(IsRead(other) ? "text-secondary" : "")"
+                                       @onclick="() => MarkReadAsync(other.Url)">@other.Source</a>
+                                    <span class="text-secondary">@(other.PublishedAt is { } p ? $" · {TimeAgo(p)}" : "")</span>
+                                </li>
+                            }
+                        </ul>
+                    }
+                }
+                <div class="d-flex align-items-center gap-2 mt-auto media-watch-actions">
+                    <a href="@item.Url" target="_blank" rel="noopener noreferrer" class="small fw-semibold me-auto" @onclick="() => MarkReadAsync(item.Url)">
+                        Open <i class="bi bi-box-arrow-up-right"></i>
+                    </a>
+                    @if (!read)
+                    {
+                        <button type="button" class="btn btn-sm btn-link text-secondary" title="Mark as read" aria-label="Mark as read" @onclick="() => MarkStoryReadAsync(story)">
+                            <i class="bi bi-check2"></i>
+                        </button>
+                    }
+                    <button type="button" class="btn btn-sm btn-link text-secondary" title="@(IsSaved(item) ? "Remove from saved" : "Save")"
+                            aria-label="@(IsSaved(item) ? "Remove from saved" : "Save")" aria-pressed="@(IsSaved(item) ? "true" : "false")" @onclick="() => ToggleSavedAsync(item)">
+                        <i class="bi @(IsSaved(item) ? "bi-bookmark-fill" : "bi-bookmark")"></i>
+                    </button>
+                    @if (_clipped.TryGetValue(NewsStoryClusterer.UrlHash(item.Url), out var clipPage))
+                    {
+                        <a class="btn btn-sm btn-link text-secondary" href="/admin/sentinel?page=@clipPage" title="Open the Sentinel clip" aria-label="Open the Sentinel clip">
+                            <i class="bi bi-journal-text"></i>
+                        </a>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-sm btn-link text-secondary" title="Clip to Sentinel" aria-label="Clip to Sentinel" @onclick="() => ClipAsync(item)">
+                            <i class="bi bi-journal-plus"></i>
+                        </button>
+                    }
+                </div>
             </div>
         </article>
     </div>;
+
+    private RenderFragment RenderSavedView() => @<text>
+        @if (_saved.Count == 0)
+        {
+            <EmptyState Icon="bi-bookmark" Message="Nothing saved yet." CssClass="text-center py-5">
+                <p class="mb-0">Use the bookmark on any article to keep it here after it leaves the feed.</p>
+            </EmptyState>
+        }
+        else
+        {
+            <ul class="list-group list-group-flush card border-0 shadow-sm">
+                @foreach (var saved in _saved)
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-start gap-2">
+                        <div class="min-w-0">
+                            <a href="@saved.Url" target="_blank" rel="noopener noreferrer" class="fw-semibold text-body">@saved.Title</a>
+                            <div class="small text-secondary">
+                                @saved.Source@(string.IsNullOrWhiteSpace(saved.TopicName) ? "" : $" · {saved.TopicName}") · saved @saved.SavedAt.ToLocalTime().ToString("MMM d")
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(saved.Summary))
+                            {
+                                <div class="small">@saved.Summary</div>
+                            }
+                        </div>
+                        <div class="d-flex gap-1 flex-shrink-0">
+                            @if (saved.ClippedWikiPageId is { } pageId || _clipped.TryGetValue(NewsStoryClusterer.UrlHash(saved.Url), out pageId))
+                            {
+                                <a class="btn btn-sm btn-outline-secondary" href="/admin/sentinel?page=@pageId" title="Open in Sentinel" aria-label="Open @saved.Title in Sentinel"><i class="bi bi-journal-text"></i></a>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-secondary" title="Clip to Sentinel" aria-label="Clip @saved.Title to Sentinel" @onclick="() => ClipSavedAsync(saved)"><i class="bi bi-journal-plus"></i></button>
+                            }
+                            <button type="button" class="btn btn-sm btn-outline-danger" title="Remove" aria-label="Remove @saved.Title from saved" @onclick="() => UnsaveAsync(saved)"><i class="bi bi-trash"></i></button>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+    </text>;
+
+    // One small bar chart per topic (single series each, so the heading names it - no legend).
+    // Bars carry a native tooltip with the date and count; the figure has a text summary for
+    // screen readers.
+    private RenderFragment RenderTrendsView() => @<text>
+        @if (_trends is not { } trends || trends.Topics.All(t => t.DailyCounts.Sum() == 0))
+        {
+            <EmptyState Icon="bi-graph-up" Message="No trend history yet." CssClass="text-center py-5">
+                <p class="mb-0">Trends build up as refreshes bring in new articles - check back after a day or two.</p>
+            </EmptyState>
+        }
+        else
+        {
+            <p class="small text-secondary">New articles per day over the last @trends.Days.Count days, and words showing up at least twice as often in the last two days as before.</p>
+            <div class="row row-cols-1 row-cols-md-2 g-3">
+                @foreach (var topic in trends.Topics.Where(t => t.DailyCounts.Sum() > 0))
+                {
+                    var max = Math.Max(1, topic.DailyCounts.Max());
+                    <div class="col">
+                        <figure class="card border-0 shadow-sm h-100 mb-0">
+                            <div class="card-body">
+                                <figcaption class="d-flex justify-content-between align-items-baseline mb-2">
+                                    <span class="fw-semibold"><span class="gws-topic-dot me-2" style="background:@topic.ColorHex"></span>@topic.Name</span>
+                                    <span class="small text-secondary">@topic.DailyCounts.Sum() articles</span>
+                                </figcaption>
+                                <div class="media-watch-trend" role="img"
+                                     aria-label="@($"{topic.Name}: {string.Join(", ", trends.Days.Zip(topic.DailyCounts, (d, c) => $"{d:MMM d} {c}"))}")">
+                                    @for (var i = 0; i < topic.DailyCounts.Count; i++)
+                                    {
+                                        var count = topic.DailyCounts[i];
+                                        <div class="media-watch-trend-slot" title="@($"{trends.Days[i]:ddd MMM d}: {count} {Pluralize(count, "article")}")">
+                                            <div class="media-watch-trend-bar" style="height:@(count == 0 ? 0 : Math.Max(4, 100.0 * count / max).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%; background:@topic.ColorHex"></div>
+                                        </div>
+                                    }
+                                </div>
+                                <div class="d-flex justify-content-between small text-secondary mt-1">
+                                    <span>@trends.Days[0].ToString("MMM d")</span><span>@trends.Days[^1].ToString("MMM d")</span>
+                                </div>
+                                @if (topic.RisingTerms.Count > 0)
+                                {
+                                    <div class="mt-2 d-flex flex-wrap gap-1">
+                                        <span class="small text-secondary me-1">Rising:</span>
+                                        @foreach (var term in topic.RisingTerms)
+                                        {
+                                            <span class="badge bg-light text-dark border" title="@($"{term.RecentCount} mentions in 2 days vs {term.BaselinePerDay} a day before")">
+                                                @term.Term @(term.Ratio is { } r ? $"×{r:0.#}" : "new")
+                                            </span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        </figure>
+                    </div>
+                }
+            </div>
+        }
+    </text>;
+
+    private RenderFragment RenderSettingsView() => @<text>
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h2 class="h6">Keep articles for</h2>
+                <select class="form-select form-select-sm w-auto mb-1" aria-label="How long to keep fetched articles"
+                        value="@_setRetention" @onchange="e => _setRetention = int.TryParse(e.Value?.ToString(), out var h) ? h : NewsRetention.DefaultHours">
+                    @foreach (var hours in NewsRetention.AllowedHours)
+                    {
+                        <option value="@hours">@RetentionLabel(hours)</option>
+                    }
+                </select>
+                <p class="small text-secondary">Articles leave every feed after this long. Saved articles are kept until you remove them.</p>
+
+                <h2 class="h6 mt-4">Topic digest email</h2>
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="mw-digest" checked="@_setDigestEnabled" @onchange="e => _setDigestEnabled = e.Value is true" />
+                    <label class="form-check-label" for="mw-digest">Email me the top stories for each topic</label>
+                </div>
+                <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                    <input class="form-control form-control-sm media-watch-email" type="email" placeholder="you@example.com" aria-label="Digest email address"
+                           value="@_setDigestRecipient" @oninput="e => _setDigestRecipient = e.Value?.ToString() ?? string.Empty" />
+                    <select class="form-select form-select-sm w-auto" aria-label="How often" value="@_setDigestFrequency" @onchange="e => _setDigestFrequency = e.Value?.ToString() ?? NewsDigestFrequencies.Daily">
+                        <option value="@NewsDigestFrequencies.Daily">Daily</option>
+                        <option value="@NewsDigestFrequencies.Weekly">Weekly</option>
+                    </select>
+                    @if (_setDigestFrequency == NewsDigestFrequencies.Weekly)
+                    {
+                        <select class="form-select form-select-sm w-auto" aria-label="Day of the week" value="@_setDigestDay" @onchange="e => _setDigestDay = int.TryParse(e.Value?.ToString(), out var d) ? d : 1">
+                            @foreach (var day in Enum.GetValues<DayOfWeek>())
+                            {
+                                <option value="@((int)day)">@day</option>
+                            }
+                        </select>
+                    }
+                    <span class="small text-secondary">at</span>
+                    <select class="form-select form-select-sm w-auto" aria-label="Hour" value="@_setDigestHour" @onchange="e => _setDigestHour = int.TryParse(e.Value?.ToString(), out var h) ? h : 7">
+                        @for (var hour = 0; hour < 24; hour++)
+                        {
+                            <option value="@hour">@(new DateTime(2000, 1, 1, hour, 0, 0).ToString("h tt"))</option>
+                        }
+                    </select>
+                </div>
+                <p class="small text-secondary">
+                    Up to 5 stories per active topic plus All News, grouped by story and ranked by how many outlets covered them. Skipped when nothing new arrived.
+                    @if (_settings is { CanSendEmail: false }) { <span class="text-warning-emphasis">Email delivery isn't set up on this server yet (Settings &gt; Email).</span> }
+                    @if (_settings?.LastDigestSentAt is { } lastSent) { <span>Last sent @lastSent.ToLocalTime().ToString("MMM d, h:mm tt").</span> }
+                </p>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-primary" @onclick="SaveSettingsAsync">Save</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_sendingDigest || string.IsNullOrWhiteSpace(_setDigestRecipient))" @onclick="SendDigestNowAsync">
+                        @(_sendingDigest ? "Sending…" : "Send a digest now")
+                    </button>
+                </div>
+
+                <h2 class="h6 mt-4">Automations</h2>
+                <p class="small text-secondary mb-0">
+                    To act on new articles automatically (post to a channel, file a Sentinel row, email a teammate), add the
+                    <strong>Media Watch Articles Found</strong> trigger to a workflow under <a href="/admin/automation">Automation</a>.
+                    It runs once per refresh that brings in new articles, optionally for one topic only.
+                </p>
+            </div>
+        </div>
+    </text>;
 
     private static string TimeAgo(DateTimeOffset dt)
     {

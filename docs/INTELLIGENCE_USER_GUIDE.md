@@ -18,15 +18,16 @@ for why, and how that may change later.
 2. [Media Watch: watched topics and the sidebar](#media-watch-watched-topics-and-the-sidebar)
 3. [Media Watch: reading the feed](#media-watch-reading-the-feed)
 4. [Media Watch: refreshing and hot takes](#media-watch-refreshing-and-hot-takes)
-5. [Civic Watch: the three desks](#civic-watch-the-three-desks)
-6. [Civic Watch: legislation briefs and SentinelGPT overviews](#civic-watch-legislation-briefs-and-sentinelgpt-overviews)
-7. [Civic Watch: refreshing and dark mode](#civic-watch-refreshing-and-dark-mode)
-8. [Podcast Directory: discovering and saving shows](#podcast-directory-discovering-and-saving-shows)
-9. [Podcast Directory: episodes, playback, and progress](#podcast-directory-episodes-playback-and-progress)
-10. [Business Intelligence: building and pinning a chart](#business-intelligence-building-and-pinning-a-chart)
-11. [Mind Maps: building an outline](#mind-maps-building-an-outline)
-12. [Who can see what](#who-can-see-what)
-13. [Known limitations](#known-limitations)
+5. [Media Watch: Trends, digest and automations](#media-watch-trends-digest-and-automations)
+6. [Civic Watch: the three desks](#civic-watch-the-three-desks)
+7. [Civic Watch: legislation briefs and SentinelGPT overviews](#civic-watch-legislation-briefs-and-sentinelgpt-overviews)
+8. [Civic Watch: refreshing and dark mode](#civic-watch-refreshing-and-dark-mode)
+9. [Podcast Directory: discovering and saving shows](#podcast-directory-discovering-and-saving-shows)
+10. [Podcast Directory: episodes, playback, and progress](#podcast-directory-episodes-playback-and-progress)
+11. [Business Intelligence: building and pinning a chart](#business-intelligence-building-and-pinning-a-chart)
+12. [Mind Maps: building an outline](#mind-maps-building-an-outline)
+13. [Who can see what](#who-can-see-what)
+14. [Known limitations](#known-limitations)
 
 ---
 
@@ -50,14 +51,18 @@ Each page has its own vocabulary, but two ideas repeat everywhere in this cluste
 Media Watch (`/admin/news-intelligence`) is a SentinelGPT-curated news reader built around
 **watched topics** — saved searches you define once and come back to.
 
-The left sidebar always has two built-in views plus one row per topic:
+The left sidebar has five built-in views plus one row per topic:
 
 - **All News** — a flat, topic-free aggregator of general news (see below).
-- **Breaking News** — the same pool, filtered to items whose title or description contains a
-  breaking-news signal word (`breaking`, `urgent`, `alert`, `developing`, `live updates`, `just
-  in`). This is a simple keyword heuristic, not a real editorial "breaking" flag from any source.
-- **Your topics** — each with a colored dot, a strikethrough when inactive, and a badge showing
-  how many articles are currently in that topic's feed.
+- **Breaking News** — stories from that pool that **three or more outlets** reported within the
+  last six hours, plus any headline with "breaking", "developing", "just in" or "live updates"
+  published in the last three hours.
+- **Saved** — articles you bookmarked (see below).
+- **Trends** — how much each topic has been covered day by day, and which words are rising.
+- **Digest & settings** — how long articles are kept, and the digest email.
+- **Your topics** — each with a colored dot, a strikethrough when inactive, a warning icon when
+  its last refresh had a problem (hover it for the reason), and a badge with **your** unread
+  count.
 
 Click the **+** button above the topic list to add one, or the pencil icon on an existing topic
 to edit it. A topic has:
@@ -74,6 +79,10 @@ to edit it. A topic has:
     Google News (keyword search on Google News is mostly noise for narrow programming terms like
     "Blazor" or "C#"). Best for languages and frameworks.
 
+**Find a site's feed** (in the topic form) takes a website address, finds its RSS or Atom feed
+(the page's own feed links, then the usual `/feed`, `/rss.xml` and similar paths) and lets you add
+it to the topic's trusted feeds with one click.
+
 The trash icon deletes a topic and every article it's currently holding.
 
 ## Media Watch: reading the feed
@@ -87,10 +96,26 @@ typed. dev.to is deliberately never listed as a toggleable outlet — it always 
 which outlets you've selected, since it isn't a traditional "news outlet" the way a Google-News
 publisher is.
 
+The same story reported by several outlets appears as **one card**: it leads with the earliest
+report that has an AI take, and **Also covered by N reports** lists the others. Headlines are
+matched on their meaningful words, so differently worded reports of one event usually group
+together; unrelated stories that share most of their words occasionally do too.
+
 Each card shows the outlet's initial in a colored circle, the outlet name, how long ago it was
-published, the headline (opens the original article in a new tab), a one-line take (see below),
-and an "Open" link. Articles disappear from every view 24 hours after they were fetched — there's
-no manual archive.
+published, a **Breaking** badge when it qualifies, a dot while it's unread, the headline (opens
+the original article in a new tab), a one-line take (see below), and:
+
+- **Open** — opens the article and marks it read.
+- **✓** — marks the story read without opening it.
+- **Bookmark** — saves it to **Saved**. Saved articles are a copy, so they stay after the feed
+  drops the article; remove them from the Saved view.
+- **Clip to Sentinel** — creates a Sentinel page for the article (source, link, AI take and
+  description) under a shared **Media Watch clips** page, and saves it.
+
+Read state is **per admin**: opening an article marks it read for you only. **Unread only** above
+the feed hides what you've read, and **Mark all read** clears the current view. Articles leave
+every view once they're older than the retention period (1 day by default; 2, 3 or 7 days under
+**Digest & settings**).
 
 ## Media Watch: refreshing and hot takes
 
@@ -98,7 +123,7 @@ Three refresh actions, all sharing one lock so they can't collide with each othe
 hourly background refresh:
 
 - **Refresh All** — refreshes the Top News pool and every *active* topic in parallel (up to 3 at
-  once), then prunes any article older than 24 hours.
+  once), then prunes any article older than the retention period.
 - **Refresh All News** — refreshes only the shared Top News pool behind All News/Breaking News.
 - **Refresh now** (per topic, from the sidebar) — refreshes just that one topic. This only works
   while the topic is active. Use the pencil icon and the **Active (refreshes on schedule)** switch
@@ -109,13 +134,30 @@ While a refresh runs, a "Refresh pipeline" panel shows the current phase, a comp
 progress bar, which feeds are actively being fetched, and a per-stage timing table (feed fetch,
 Ollama summary, database commit) for the slowest twelve stages.
 
-Every refresh fully replaces that topic's or pool's articles — it deletes the old set and
-re-inserts whatever came back this time, rather than merging in just what's new. That also means
-the AI "hot take" under each headline is regenerated from scratch every refresh: GWS asks the
-configured Ollama model for one sharp, opinionated sentence (under 20 words) per article in a
-single batched call, with a 60-second timeout. If Ollama is unavailable or times out, the articles
-still save — they just fall back to showing the source's own description instead of a hot take,
-silently, with no error shown on the page.
+A refresh **adds** what's new: articles already in the feed keep their place and their AI take,
+and only new articles are read and summarized. GWS asks the configured Ollama model for one sharp,
+opinionated sentence (under 20 words) per new article in a single batched call, with a 60-second
+timeout. If Ollama is unavailable or times out, the articles still save with the source's own
+description instead, and the topic gets a warning icon saying so (cleared by the next clean
+refresh). A topic keeps at most its newest 200 articles.
+
+## Media Watch: Trends, digest and automations
+
+**Trends** shows, for All News and each topic, a bar per day for the last 14 days (hover a bar for
+the date and count) and **rising** words — ones used at least twice as often in the last two days
+as their daily average before that ("new" means not seen before). History builds up from each
+refresh's new articles and is kept for 60 days, separately from article retention.
+
+**Digest & settings** sets article retention and the **topic digest email**: daily or weekly (pick
+the day), at an hour you choose. It lists up to five stories per active topic plus All News,
+grouped by story and ranked by how many outlets covered them, and is skipped when nothing new
+arrived. **Send a digest now** sends one immediately. It uses the server's normal email delivery
+(Settings > Email).
+
+For anything else, the **Media Watch Articles Found** automation trigger starts a workflow when a
+refresh brings in new articles — once per refresh with all of them (`topicName`, `articleCount`,
+and `articles[]` with title, url, source, publishedAt and summary). Set its `topicName` to react
+to one topic only.
 
 In the background, all of this also runs on its own: an hourly scheduled refresh (starting ~30
 seconds after the app boots) keeps the feed from going stale even if nobody opens Media Watch.
@@ -278,14 +320,10 @@ teammate who isn't a full admin can still browse and manage the shared podcast l
 
 ## Known limitations
 
-- **No real "unread" tracking in Media Watch.** The badge next to each topic is just a count of
-  how many articles currently sit in that topic's 24-hour window — opening a feed never marks
-  anything as read, and there's no per-user read state.
-- **"Breaking News" is a keyword heuristic**, not a real breaking-news signal from any source —
-  it just scans titles and descriptions for words like "breaking" or "urgent."
-- **Hot takes and episode/article sets are fully replaced on every refresh**, not incrementally
-  updated — refreshing the same topic twice in a row can return a different set or order of
-  articles even with identical keywords.
+- **Media Watch's "Breaking" and story grouping are judged from headlines.** No source supplies a
+  real breaking-news flag, so these rely on how many outlets carry similar headlines and when.
+- **Read state follows the article link.** The same article reached through a different link
+  (for example a Google News redirect and the outlet's own URL) counts as two articles.
 - **Civic Watch covers one fixed area** (Kathleen, Houston County, Georgia, plus Georgia state and
   U.S. federal government) — there's no per-user or per-tenant location configuration.
 - **Civic Watch's "Local law" panel is static**, not a live feed — it's curated research guidance

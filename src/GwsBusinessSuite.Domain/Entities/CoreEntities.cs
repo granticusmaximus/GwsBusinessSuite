@@ -2027,6 +2027,9 @@ public sealed class WatchedTopic : AuditableEntity
     // keyword search - lets a user pin specific trusted outlets rather than relying solely on
     // whatever Google News' aggregator surfaces for a keyword.
     public string TrustedFeedUrls { get; set; } = string.Empty;
+    // Why the last refresh of this topic fell short (a feed failed, or the AI takes timed out),
+    // shown on the page instead of failing silently. Null when the last refresh was clean.
+    public string? LastRefreshIssue { get; set; }
 }
 
 public sealed class NewsItem : AuditableEntity
@@ -2221,6 +2224,7 @@ public static class AutomationExecutionModes
     public const string SupportTicketReplied = "SupportTicketReplied";
     public const string SupportTicketSlaBreached = "SupportTicketSlaBreached";
     public const string CmsFormSubmitted = "CmsFormSubmitted";
+    public const string NewsArticlesFound = "NewsArticlesFound";
     public const string WikiPageChanged = "WikiPageChanged";
     // A sandboxed dry run of a past execution's recorded input against the current published
     // graph - see AutomationExecutionService.ReplayAsync. Never performs real side effects.
@@ -2275,6 +2279,8 @@ public sealed class AutomationWorkflow : AuditableEntity
     public bool TriggerSupportTicketSlaBreached { get; set; }
     // Same cached-subscriber-lookup pattern, synced from an enabled "cms.formSubmittedTrigger" node.
     public bool TriggerCmsFormSubmitted { get; set; }
+    // Same pattern, synced from an enabled "news.articlesFoundTrigger" node (Media Watch).
+    public bool TriggerNewsArticlesFound { get; set; }
     // Synced from an enabled "wiki.pageChangedTrigger" node's ParametersJson on Publish, same
     // pattern as TriggerWikiDatabaseId - a specific page id, not "any page", matching that
     // node's own single-target parameter shape. Null means this workflow has no (enabled) wiki

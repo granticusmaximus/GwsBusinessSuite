@@ -549,6 +549,8 @@ public sealed class SentinelGptGenerationCoordinatorTests
             Guid ticketId, string subject, string contactName, string priority, string breachType,
             DateTimeOffset dueAt, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+        public Task<int> TriggerNewsArticlesFoundAsync(string topicName, string inputJson, CancellationToken cancellationToken = default) => Task.FromResult(0);
+
         public Task<int> TriggerCmsFormSubmittedAsync(
             Guid siteId, string inputJson, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();

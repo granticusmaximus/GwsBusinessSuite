@@ -172,7 +172,7 @@ public sealed class ThreatMonitorService(
     public async Task SaveSettingsAsync(bool digestEnabled, string? digestRecipient, int digestHourLocal, CancellationToken cancellationToken = default)
     {
         var recipient = Blank(digestRecipient);
-        if (digestEnabled && (recipient is null || !MailboxAddress.TryParse(recipient, out _)))
+        if (digestEnabled && !NewsWatchService.IsEmailAddress(recipient))
             throw new ArgumentException("Enter a valid email address for the digest.");
         var settings = await EnsureSettingsAsync(cancellationToken);
         settings.DigestEnabled = digestEnabled;

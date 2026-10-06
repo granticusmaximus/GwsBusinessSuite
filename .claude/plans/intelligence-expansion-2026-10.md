@@ -96,4 +96,11 @@ New:
   ThreatMonitorService + ThreatMonitorBackgroundService, migration AddThreatIntelExposureMonitor.
   Daily digest is a dedicated service (not an automation-node workflow) so it can track which
   findings were already sent.
-- Media Watch, Civic Watch, BI Dashboards, Overwatch: not started - waiting for Grant's next pick.
+- 2026-10-06: Grant said "move on to the next unit of work" -> Media Watch (next in plan order).
+  BUILT: merge-on-refresh (only new articles summarized), per-admin read/unread, Saved +
+  configurable retention (1/2/3/7 days), story grouping across outlets, refresh issues shown per
+  topic + "Breaking" = 3+ outlets in 6h, daily/weekly digest, "Media Watch Articles Found"
+  automation trigger, Clip to Sentinel, Trends (14-day bars + rising words).
+  "New 1: custom RSS feeds per topic" turned out to ALREADY EXIST (WatchedTopic.TrustedFeedUrls),
+  so it was replaced with "Find a site's feed" (RSS/Atom auto-discovery) on the topic form.
+- Civic Watch, BI Dashboards, Overwatch: not started.

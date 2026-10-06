@@ -24,7 +24,8 @@ public sealed record WatchedTopicSummary(
     DateTimeOffset? LastFetchedAt,
     int UnreadCount,
     string TopicType,
-    string TrustedFeedUrls);
+    string TrustedFeedUrls,
+    string? LastRefreshIssue = null);
 
 public sealed record NewsItemDto(
     Guid Id,
