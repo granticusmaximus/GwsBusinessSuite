@@ -91,4 +91,9 @@ New:
 
 ## Status
 
-Awaiting Grant's picks. Build only what's approved.
+- 2026-10-05: Grant chose "one page's 10 items" -> Threat Intelligence first.
+- Threat Intelligence: all 10 BUILT 2026-10-06 (improve 1-5 + new 1-5). New "My exposure" tab,
+  ThreatMonitorService + ThreatMonitorBackgroundService, migration AddThreatIntelExposureMonitor.
+  Daily digest is a dedicated service (not an automation-node workflow) so it can track which
+  findings were already sent.
+- Media Watch, Civic Watch, BI Dashboards, Overwatch: not started - waiting for Grant's next pick.

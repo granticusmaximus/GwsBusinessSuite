@@ -124,7 +124,7 @@ public sealed class DependencyAdvisoryService(HttpClient httpClient, IMemoryCach
         }
     }
 
-    internal static DependencyAdvisory ToAdvisory(DependencyPackage package, string id, JsonNode? detail)
+    public static DependencyAdvisory ToAdvisory(DependencyPackage package, string id, JsonNode? detail)
     {
         var severity = (detail?["database_specific"]?["severity"]?.GetValue<string>() ?? "").ToUpperInvariant() switch
         {

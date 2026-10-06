@@ -57,7 +57,7 @@ public sealed class DnsOverHttpsLookup(HttpClient httpClient, IMemoryCache cache
         throw new HttpRequestException($"No DNS-over-HTTPS resolver answered for {recordType} {name}.", lastError);
     }
 
-    internal static IReadOnlyList<string> ParseAnswers(string json, int typeCode)
+    public static IReadOnlyList<string> ParseAnswers(string json, int typeCode)
     {
         var root = JsonNode.Parse(json);
         var status = root?["Status"]?.GetValue<int>() ?? 2;

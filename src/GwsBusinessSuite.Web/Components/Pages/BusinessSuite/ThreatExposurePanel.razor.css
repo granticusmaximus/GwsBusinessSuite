@@ -1,0 +1,38 @@
+.min-w-0 {
+    min-width: 0;
+}
+
+.threat-exposure-input {
+    flex: 1 1 14rem;
+    min-width: 0;
+}
+
+.threat-exposure-label {
+    flex: 1 1 8rem;
+    min-width: 0;
+}
+
+.threat-exposure-packages {
+    max-height: 18rem;
+    overflow-y: auto;
+}
+
+/* Letter grade for the email security check: green A through red F. */
+.threat-exposure-grade {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 3.25rem;
+    height: 3.25rem;
+    border-radius: 50%;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #fff;
+    background: #475569;
+}
+
+.threat-exposure-grade.grade-a { background: #15803d; }
+.threat-exposure-grade.grade-b { background: #4d7c0f; }
+.threat-exposure-grade.grade-c { background: #a16207; }
+.threat-exposure-grade.grade-d { background: #c2410c; }
+.threat-exposure-grade.grade-f { background: #b91c1c; }

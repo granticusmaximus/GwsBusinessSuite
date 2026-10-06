@@ -1,9 +1,12 @@
 # Threat Intelligence — User Guide
 
-Threat Intelligence (`/admin/threat-intel`) is one page of independent panels: subscribed threat
-pulses from AlienVault OTX, a domain/IP investigation tool, CISA's Known Exploited
-Vulnerabilities with on-demand CVE detail, recent public data breaches, live malware
-infrastructure from abuse.ch, and defend.network's daily threat briefings. Everything comes from
+Threat Intelligence (`/admin/threat-intel`) has two tabs. **Live intel** is one page of
+independent panels: a single search box that investigates any IP, domain, URL, file hash or CVE,
+a shared investigation history, subscribed threat pulses from AlienVault OTX, CISA's Known
+Exploited Vulnerabilities with on-demand CVE detail, recent public data breaches, live malware
+infrastructure from abuse.ch, and defend.network's daily threat briefings. **My exposure** watches
+what you own: your domains and servers, the software you run, this app's own packages, and your
+email security, with a daily digest email. Everything comes from
 free, public sources. Only the OTX panel and the investigation tool's Focsec IP-reputation check
 need a (free, self-registered) key; everything else works with no key at all. Each panel loads on
 its own, so a slow source never holds up the rest of the page.
@@ -13,36 +16,54 @@ This guide is text-only (no screenshots) — see the note at the end of
 
 ## Contents
 
-1. [OTX threat pulses](#otx-threat-pulses)
-2. [Domain / IP investigation](#domain--ip-investigation)
-3. [Known exploited vulnerabilities and CVE lookup](#known-exploited-vulnerabilities-and-cve-lookup)
-4. [Recent data breaches](#recent-data-breaches)
-5. [Malware infrastructure](#malware-infrastructure)
-6. [defend.network threat briefings](#defendnetwork-threat-briefings)
-7. [Automation nodes](#automation-nodes)
-8. [Who can see this](#who-can-see-this)
-9. [Known limitations](#known-limitations)
+1. [Investigate](#investigate)
+2. [Investigation history and Sentinel export](#investigation-history-and-sentinel-export)
+3. [OTX threat pulses](#otx-threat-pulses)
+4. [Known exploited vulnerabilities and CVE lookup](#known-exploited-vulnerabilities-and-cve-lookup)
+5. [Recent data breaches](#recent-data-breaches)
+6. [Malware infrastructure](#malware-infrastructure)
+7. [defend.network threat briefings](#defendnetwork-threat-briefings)
+8. [My exposure](#my-exposure)
+9. [Automation nodes](#automation-nodes)
+10. [Who can see this](#who-can-see-this)
+11. [Known limitations](#known-limitations)
 
 ## OTX threat pulses
 
-The top-left panel lists pulses (community-curated threat reports, each bundling a description,
+The panel next to the history lists pulses (community-curated threat reports, each bundling a description,
 tags, and a count of the indicators — malicious IPs, domains, file hashes — it contains) from
 AlienVault OTX. With no search term, it shows your account's own subscribed pulses; type a
 keyword and press the search button to instead search OTX's public pulse index. Click a pulse's
 title to open the full report on OTX's own site. This panel is blank, with a plain "not
 configured" message, until a free OTX API key is added (see [Adding API keys](#adding-api-keys)).
 
-## Domain / IP investigation
+## Investigate
 
-Type a domain name (e.g. `example.com`) or an IP address (e.g. `8.8.8.8`) and click
-**Investigate**. For a domain, you'll see its registration record (registrar, registration and
-expiry dates, nameservers, status codes), its A/AAAA DNS records, and — if it's currently serving
+Paste anything into the search box at the top and click **Investigate**. It works out what you
+typed and runs the lookups that apply:
+
+- **IP address or domain** (e.g. `8.8.8.8`, `example.com`) - everything below, plus a check of
+  every recent abuse.ch entry.
+- **URL** - the same, for the URL's host, plus whether that exact URL is on URLhaus.
+- **File hash** (MD5, SHA-1 or SHA-256) - whether MalwareBazaar or ThreatFox has seen the file
+  recently, with the malware family.
+- **CVE id** (e.g. `CVE-2024-3400`) - the CVE detail described under the KEV panel.
+
+Defanged input from reports (`hxxp://`, `example[.]com`) is accepted. Anything found in a threat
+feed is listed first under **Found in threat feeds**, defanged, with a link to abuse.ch's report;
+otherwise the page says it isn't in the abuse.ch feeds. The feeds are abuse.ch's *recent*
+exports (roughly the last month), so "not found" means "not recently reported", not "safe".
+
+For a domain, you'll see its registration record (registrar, registration and
+expiry dates, nameservers, status codes), its DNS records (A/AAAA plus CNAME, MX, NS, TXT and
+CAA), and — if it's currently serving
 a website — its live TLS certificate (subject, issuer, validity window, and every hostname the
 certificate covers). For an IP address, you'll see its registration record instead (the
 allocating organization, e.g. "GOOGLE") and, if a free Focsec API key is configured, whether it's
 currently flagged as a VPN, proxy, Tor exit node, or bot. Registration lookups use RDAP (the
-modern WHOIS successor) and DNS/TLS lookups use nothing but this app's own server — none of that
-needs any key. Any part of the lookup that fails (a domain with no live web server, a TLD whose
+modern WHOIS successor), asking the registry IANA lists for that TLD or address range first and
+rdap.org second. Address lookups use this server's own resolver and the other record types use
+DNS-over-HTTPS (Cloudflare, then Google). None of that needs any key. Any part of the lookup that fails (a domain with no live web server, a TLD whose
 registry isn't reachable) shows a plain warning for just that part rather than failing the whole
 lookup.
 
@@ -58,6 +79,15 @@ Below that, an **Exposure** section adds what the wider internet can see (no key
   pages, and when the **Wayback Machine** first and last archived it. You can paste a full URL;
   only its domain is used.
 
+## Investigation history and Sentinel export
+
+Every investigation is saved to **Investigation history**, shared by all admins, with a one-line
+summary (the last 200 are kept). Click one to reopen exactly what that lookup found at the time -
+it isn't re-run. **Export to Sentinel** turns the open investigation into a Sentinel page
+("Investigation: ..."), with malicious addresses written defanged; afterwards the button becomes
+**Open in Sentinel**. The trash icon removes an entry from the history (an exported Sentinel page
+stays).
+
 ## Known Exploited Vulnerabilities and CVE lookup
 
 Lists the CVEs most recently added to CISA's **Known Exploited Vulnerabilities** catalog - flaws
@@ -66,6 +96,12 @@ them. Click a CVE, or type one into the box (e.g. `CVE-2024-3400`) and press **L
 detail: the NVD description and CVSS score, its **EPSS** score (FIRST's estimate of the chance it
 is exploited in the next 30 days, with its percentile among all CVEs), and, if it is on the KEV
 list, CISA's required action and federal due date.
+
+The list covers the whole catalog, 25 rows at a time. Filter it by vendor, product, name or CVE
+id; switch on **Ransomware only**; or switch on **New since my last visit** - entries CISA added
+on or after the day you last opened this page (your own marker, per admin; nothing is "new" on
+your very first visit). **Highest EPSS first** sorts by exploit probability, loading scores for
+every row that passes the filters. Shown rows carry their EPSS score as a badge.
 
 ## Recent Data Breaches
 
@@ -89,6 +125,72 @@ visit them. The **report** links go to abuse.ch's own page about each item, whic
 The bottom panel lists defend.network's recent daily threat briefings — real vulnerabilities,
 exploits, and campaigns currently being tracked, each with a severity badge and topic tags. Click
 a briefing's title to read the full write-up on defend.network. No configuration needed.
+
+## My exposure
+
+The **My exposure** tab watches things you own. Nothing runs until someone opens this tab once;
+after that a background job checks watched domains and IPs every 12 hours, and software and
+packages once a day. **Run all checks now** runs everything immediately (it takes a minute or two
+because the NVD search waits between requests).
+
+**Findings** at the top lists what the checks found, most severe first. There are two kinds:
+
+- **States** - an expiring certificate, a missing DMARC record, a vulnerable package. These
+  resolve themselves on the next check after you fix them. **Acknowledge** records that someone
+  has seen it, but it stays listed until it's fixed.
+- **Events** - something that happened: a new certificate issued for one of your hostnames, a new
+  open port, a DNS change, a newly published CVE matching your software. These never resolve on
+  their own; **Acknowledge** closes them.
+
+Switch on **Show resolved** to see closed ones too.
+
+### Watched domains & IPs
+
+Add a domain (e.g. `grantwatson.dev`) or a public IP (e.g. your server's). Private addresses are
+refused - internet sources can't see them. Each check looks for:
+
+- **Domains:** TLS certificate expiring within 30 days (or expired), domain registration expiring
+  within 30 days, the domain appearing in abuse.ch feeds (a sign it's compromised or being
+  impersonated), new hostnames in certificate-transparency logs, A/AAAA records changing, and the
+  email security problems below.
+- **IPs:** listing on Spamhaus DROP, being a Tor exit node, appearing in abuse.ch feeds, CVEs
+  Shodan associates with the exposed software, and newly opened ports.
+
+The first check of a new asset records a baseline, so its existing hostnames and ports don't show
+up as "new".
+
+### Email security check
+
+Enter any mail domain and click **Check** for a letter grade (A to F) and its SPF, DMARC, DKIM,
+MTA-STS and TLS-RPT setup, with a plain explanation of each problem. Watched domains are graded
+automatically and their low/medium/high/critical problems become findings. A domain with no mail
+servers is only asked to publish `v=spf1 -all` and a DMARC record, so nobody can send mail as it.
+DKIM keys can only be found on known selector names (Google's `google`, Microsoft's `selector1`
+and so on); a custom selector shows as "no key on common selectors".
+
+### Software you run
+
+Add the software your business runs - or click a suggestion for this app's own stack (.NET,
+Ollama, Docker, Cloudflare Tunnel, SQLite, coturn). Each item is checked daily against:
+
+- **CISA KEV entries from the last 12 months** - matched on the vendor/product you give (or the
+  name, if you give neither). These are confirmed exploited in the wild.
+- **High-severity CVEs (CVSS 7+) published in the last 30 days** whose NVD description matches
+  your keywords (the name, if you give none). Keyword matches can include other products that
+  merely mention yours, and severity is capped at high because a match doesn't prove your version
+  is affected - read the detail before acting.
+
+### Daily digest & packages
+
+Turn on **Email me a daily digest**, enter an address and pick an hour. Once a day after that hour
+the digest emails every new finding plus the vulnerabilities CISA added since the last digest; a
+day with nothing new is skipped. **Send now** sends one immediately. It uses the server's normal
+email delivery (Settings > Email).
+
+**This app's packages** lists every NuGet package in the running build plus the browser libraries
+it loads. They're checked daily against OSV.dev (GitHub Security Advisories); a vulnerable one
+becomes a finding with the version that fixes it, and the finding resolves once the package is
+upgraded and deployed.
 
 ## Automation nodes
 
@@ -135,13 +237,15 @@ cluster.
   every 3 hours and the breach list every 6 hours.
 - **Feodo Tracker's botnet list is short** - it only tracks a few botnet families, most of which
   have been taken down, so a handful of entries is normal.
-- **RDAP lookups depend on `rdap.org`'s own redirect table**, which doesn't cover every TLD's
-  registry — a lookup for a TLD it doesn't know how to redirect returns a plain "not found" result
-  rather than a registration record, even for a domain that's genuinely registered.
-- **DNS lookups only return A/AAAA records.** .NET's built-in DNS resolver has no public API for
-  other record types (MX, TXT, etc.) without adding a third-party resolver library, which this
-  page deliberately doesn't do — those record types simply aren't shown.
+- **Some TLDs publish no registration data at all.** `.io` and `.co`, for example, have no RDAP
+  service (and `.io` no WHOIS server either), so their domains show "The .io registry doesn't
+  publish registration data over RDAP" instead of a registration record.
 - **The TLS certificate panel connects without validating the certificate**, on purpose — an
   expired, self-signed, or hostname-mismatched certificate is itself a real, useful finding for an
   investigation tool, so it's shown rather than rejected. This tool never sends or receives real
   data over that connection beyond the handshake itself.
+- **NVD allows 5 requests per 30 seconds without a key**, so the software check spaces its
+  searches 7 seconds apart. Each item uses up to 5 keywords.
+- **Package checks only see what the build declares.** NuGet packages come from the running app's
+  dependency manifest; browser libraries come from a list kept in `DependencyAdvisoryService.cs`,
+  which a test keeps in step with every pinned jsDelivr reference.

@@ -67,9 +67,10 @@ too, not that the update should be skipped.
   Business Intelligence dashboards, and Mind Maps.
 - [Overwatch](OVERWATCH_USER_GUIDE.md) — the live 3D globe for public camera feeds, weather, and
   traffic incidents.
-- [Threat Intelligence](THREAT_INTELLIGENCE_USER_GUIDE.md) — exploited vulnerabilities and CVE
-  lookup, a domain/IP investigation and exposure tool, recent data breaches, live malware
-  infrastructure, OTX threat pulses, and defend.network's daily briefings.
+- [Threat Intelligence](THREAT_INTELLIGENCE_USER_GUIDE.md) — one search box for any IP, domain,
+  URL, file hash or CVE (with saved history and Sentinel export), exploited vulnerabilities, recent
+  data breaches, live malware infrastructure, OTX pulses, defend.network briefings, and My exposure:
+  monitoring of your own domains, servers, software, packages and email security with a daily digest.
 
 ### Operations
 

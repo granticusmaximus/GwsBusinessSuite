@@ -146,7 +146,7 @@ public sealed class DomainIntelService(
     }
 
     // services: [ [ [keys...], [urls...] ], ... ] - prefer an https URL.
-    internal static IReadOnlyList<(IReadOnlyList<string> Keys, string? BaseUrl)> ParseBootstrap(JsonNode? root)
+    public static IReadOnlyList<(IReadOnlyList<string> Keys, string? BaseUrl)> ParseBootstrap(JsonNode? root)
     {
         var result = new List<(IReadOnlyList<string>, string?)>();
         foreach (var service in root?["services"]?.AsArray() ?? [])

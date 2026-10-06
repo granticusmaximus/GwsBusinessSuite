@@ -267,10 +267,10 @@ public sealed class ThreatMonitorService(
                     cert.Add(new($"{prefix}:cert:expired", ThreatFindingSeverities.Critical, $"TLS certificate for {asset.Value} has expired",
                         $"Expired {tls.NotAfter:yyyy-MM-dd}. Browsers now show a security warning.", null));
                 else if (days < 14)
-                    cert.Add(new($"{prefix}:cert:expiring", ThreatFindingSeverities.High, $"TLS certificate for {asset.Value} expires in {Math.Floor(days)} days",
+                    cert.Add(new($"{prefix}:cert:expiring", ThreatFindingSeverities.High, $"TLS certificate for {asset.Value} expires in {Math.Ceiling(days)} days",
                         $"Expires {tls.NotAfter:yyyy-MM-dd}. Check that automatic renewal is working.", null));
                 else if (days < 30)
-                    cert.Add(new($"{prefix}:cert:expiring", ThreatFindingSeverities.Medium, $"TLS certificate for {asset.Value} expires in {Math.Floor(days)} days",
+                    cert.Add(new($"{prefix}:cert:expiring", ThreatFindingSeverities.Medium, $"TLS certificate for {asset.Value} expires in {Math.Ceiling(days)} days",
                         $"Expires {tls.NotAfter:yyyy-MM-dd}.", null));
                 await ApplyAsync($"{prefix}:cert:", cert, tally, ct);
             }
@@ -282,7 +282,7 @@ public sealed class ThreatMonitorService(
                     ? new List<FindingCandidate>
                     {
                         new($"{prefix}:registration:expiring", days < 7 ? ThreatFindingSeverities.Critical : ThreatFindingSeverities.High,
-                            $"Domain registration for {asset.Value} expires in {Math.Max(0, Math.Floor(days))} days",
+                            $"Domain registration for {asset.Value} expires in {Math.Max(0, Math.Ceiling(days))} days",
                             $"Expires {registrationExpires:yyyy-MM-dd}. A lapsed domain can be registered by anyone.", null)
                     }
                     : [];
@@ -417,7 +417,8 @@ public sealed class ThreatMonitorService(
                     var epssText = epss.TryGetValue(cve.CveId, out var score) ? $" EPSS {score:P1}." : "";
                     await AddEventAsync($"{prefix}:nvd:{cve.CveId}",
                         cve.CvssScore >= 9.0 ? ThreatFindingSeverities.High : ThreatFindingSeverities.Medium,
-                        $"{item.Name}: new {cve.CvssSeverity?.ToLowerInvariant() ?? "high"}-severity {cve.CveId} (CVSS {cve.CvssScore:0.0})",
+                        // Severity is capped at high: a keyword match isn't proof the version you run is affected.
+                        $"{item.Name}: new {cve.CveId} (CVSS {cve.CvssScore:0.0}{(cve.CvssSeverity is { } nvdSeverity ? $" {nvdSeverity.ToLowerInvariant()}" : "")})",
                         $"{Truncate(cve.Description, 400)} Matched the keyword \"{keyword}\" - check whether it applies to the version you run.{epssText}",
                         tally, ct, $"https://nvd.nist.gov/vuln/detail/{cve.CveId}");
                 }

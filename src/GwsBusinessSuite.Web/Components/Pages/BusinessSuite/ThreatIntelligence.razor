@@ -21,12 +21,25 @@
         <span class="page-header-eyebrow"><i class="bi bi-shield-exclamation"></i> Threat Intelligence</span>
         <h1>Threat Intelligence</h1>
         <p>
-            Exploited vulnerabilities, live malware infrastructure, domain/IP investigation, recent data
-            breaches, OTX pulses and daily threat briefings - all from free, public sources.
+            Investigate any IP, domain, URL, file hash or CVE against free public sources, and watch your own
+            domains, servers, software and packages under My exposure.
         </p>
     </div>
 </div>
 
+<div class="btn-group mb-4 threat-intel-tabs" role="tablist" aria-label="Threat Intelligence views">
+    <button type="button" role="tab" aria-selected="@(_tab == "live")" class="btn @(_tab == "live" ? "btn-primary" : "btn-outline-primary")"
+            @onclick='() => _tab = "live"'><i class="bi bi-broadcast"></i> Live intel</button>
+    <button type="button" role="tab" aria-selected="@(_tab == "exposure")" class="btn @(_tab == "exposure" ? "btn-primary" : "btn-outline-primary")"
+            @onclick='() => _tab = "exposure"'><i class="bi bi-shield-check"></i> My exposure</button>
+</div>
+
+@if (_tab == "exposure")
+{
+    <ThreatExposurePanel />
+}
+else
+{
 <div class="row g-4">
     <div class="col-12">
         <div class="card border-0 shadow-sm">
@@ -648,9 +661,11 @@
         </div>
     </div>
 </div>
+}
 </main>
 
 @code {
+    private string _tab = "live";
     private string _otxSearchTerm = string.Empty;
     private bool _otxLoading;
     private IReadOnlyList<OtxPulse> _otxPulses = [];

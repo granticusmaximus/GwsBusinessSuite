@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using FluentAssertions;
+using GwsBusinessSuite.Application.ThreatIntel;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -131,6 +132,58 @@ public sealed class ThreatIntelFeedServicesTests
         samples[0].Signature.Should().BeNull("\"n/a\" means unclassified");
         samples[1].Signature.Should().Be("Mirai");
         samples[1].FileName.Should().Be("kushnet.x64-test");
+        samples[1].Md5.Should().Be("1486");
+
+        // Indicator matching searches every feed's full recent list.
+        var byHost = await service.FindMatchesAsync(ThreatIndicatorClassifier.Classify("180.244.15.54"));
+        byHost.Should().ContainSingle(m => m.Feed == "URLhaus" && m.MatchedValue == "http://180.244.15.54:39118/bin.sh");
+        var byIpPort = await service.FindMatchesAsync(ThreatIndicatorClassifier.Classify("188[.]165[.]224[.]129"));
+        byIpPort.Should().ContainSingle(m => m.Feed == "ThreatFox" && m.Description.StartsWith("VShell"));
+        var byC2 = await service.FindMatchesAsync(ThreatIndicatorClassifier.Classify("50.16.16.211"));
+        byC2.Should().ContainSingle(m => m.Feed == "Feodo Tracker" && m.MatchedValue == "50.16.16.211:443");
+        var bySha = await service.FindMatchesAsync(ThreatIndicatorClassifier.Classify("D07B4210DB5C2610DAEDC2831915AF6C4E9F7966739FF789A0AF2A18BB5DCA66"));
+        bySha.Should().ContainSingle(m => m.Feed == "MalwareBazaar" && m.Description.StartsWith("Mirai"));
+        var byMd5 = await service.FindMatchesAsync(new ClassifiedIndicator(IndicatorKind.Md5, "1486", null));
+        byMd5.Should().ContainSingle(m => m.Feed == "MalwareBazaar");
+        (await service.FindMatchesAsync(ThreatIndicatorClassifier.Classify("grantwatson.dev"))).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task EpssScores_ShouldBatchAndCache_AndSkipUnscoredCves()
+    {
+        var requests = new List<string>();
+        var service = new VulnerabilityIntelService(Client(request =>
+        {
+            requests.Add(request.RequestUri!.ToString());
+            return Ok(EpssJson);
+        }), Cache(), NullLogger<VulnerabilityIntelService>.Instance);
+
+        var scores = await service.GetEpssScoresAsync(["CVE-2024-3400", "cve-2021-44228", "not-a-cve"]);
+        scores.Should().ContainSingle().Which.Value.Should().BeApproximately(0.94358, 0.00001);
+        requests.Should().ContainSingle().Which.Should().Contain("cve=CVE-2024-3400,CVE-2021-44228");
+
+        await service.GetEpssScoresAsync(["CVE-2024-3400", "CVE-2021-44228"]);
+        requests.Should().HaveCount(1, "scored and unscored answers are both cached");
+    }
+
+    [Fact]
+    public async Task SearchRecentCves_ShouldSendADateBoundedKeywordSearch_AndParseScores()
+    {
+        string? url = null;
+        var service = new VulnerabilityIntelService(Client(request =>
+        {
+            url = request.RequestUri!.ToString();
+            return Ok(NvdJson);
+        }), Cache(), NullLogger<VulnerabilityIntelService>.Instance);
+
+        var results = await service.SearchRecentCvesAsync("pan-os", 500);
+
+        results.Should().ContainSingle();
+        results[0].CveId.Should().Be("CVE-2024-3400");
+        results[0].CvssScore.Should().Be(10.0);
+        url.Should().Contain("keywordSearch=pan-os").And.Contain("pubStartDate=").And.Contain("pubEndDate=");
+        var start = DateTimeOffset.Parse(System.Web.HttpUtility.ParseQueryString(new Uri(url!).Query)["pubStartDate"]!);
+        (DateTimeOffset.UtcNow - start).TotalDays.Should().BeApproximately(120, 0.1, "NVD rejects ranges over 120 days");
     }
 
     [Fact]

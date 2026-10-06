@@ -1,0 +1,495 @@
+@using GwsBusinessSuite.Application.ThreatIntel
+@inject IThreatMonitorService Monitor
+@inject IEmailSecurityService EmailSecurity
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<ThreatExposurePanel> Logger
+
+@* "My exposure": the business's own domains/IPs, software stack and this app's packages,
+   checked on a schedule by ThreatMonitorBackgroundService, plus the daily digest settings. *@
+<div class="row g-4">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <span class="fw-semibold"><i class="bi bi-exclamation-triangle"></i> Findings (@_findings.Count(f => f.ResolvedAt is null) open)</span>
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="findings-resolved" checked="@_showResolved"
+                               @onchange="ToggleResolvedAsync" />
+                        <label class="form-check-label small" for="findings-resolved">Show resolved</label>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@_running" @onclick="RunAllAsync">
+                        <i class="bi bi-arrow-repeat @(_running ? "gws-spin" : "")"></i> @(_running ? "Checking…" : "Run all checks now")
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                @if (_message is not null)
+                {
+                    <div class="alert @(_messageIsError ? "alert-warning" : "alert-info") py-2 small">@_message</div>
+                }
+                @if (_settings is { } s)
+                {
+                    <p class="small text-secondary">
+                        Assets are checked every 12 hours, software and packages daily.
+                        Last checks: assets @When(s.LastAssetCheckAt), software @When(s.LastStackCheckAt), packages @When(s.LastDependencyCheckAt).
+                    </p>
+                }
+                @if (_findings.Count == 0)
+                {
+                    <p class="text-secondary mb-0">No findings. Add your domains, servers and software below, then run the checks.</p>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush threat-exposure-findings">
+                        @foreach (var finding in _findings)
+                        {
+                            <li class="list-group-item px-0 @(finding.ResolvedAt is not null ? "opacity-75" : "")">
+                                <div class="d-flex justify-content-between align-items-start gap-2 flex-wrap">
+                                    <div class="min-w-0">
+                                        <span class="badge @SeverityClass(finding.Severity) me-1">@finding.Severity</span>
+                                        <span class="badge bg-light text-dark border me-1">@SourceLabel(finding.Source)</span>
+                                        <span class="fw-semibold">@finding.Title</span>
+                                        @if (finding.ResolvedAt is { } resolved)
+                                        {
+                                            <span class="badge bg-success-subtle text-success-emphasis ms-1">resolved @resolved.ToLocalTime().ToString("MMM d")</span>
+                                        }
+                                        else if (finding.AcknowledgedAt is not null)
+                                        {
+                                            <span class="badge bg-secondary-subtle text-secondary-emphasis ms-1">acknowledged by @finding.AcknowledgedBy</span>
+                                        }
+                                    </div>
+                                    <div class="d-flex gap-2 align-items-center flex-shrink-0">
+                                        <span class="small text-secondary text-nowrap">first seen @finding.FirstSeenAt.ToLocalTime().ToString("MMM d")</span>
+                                        @if (finding.ResolvedAt is null && finding.AcknowledgedAt is null)
+                                        {
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AcknowledgeAsync(finding.Id)">Acknowledge</button>
+                                        }
+                                    </div>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(finding.Detail))
+                                {
+                                    <div class="small text-secondary mt-1">@finding.Detail</div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(finding.ReferenceUrl))
+                                {
+                                    <a class="small" href="@finding.ReferenceUrl" target="_blank" rel="noopener">Details</a>
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3">
+                <span class="fw-semibold"><i class="bi bi-hdd-network"></i> Watched domains &amp; IPs</span>
+            </div>
+            <div class="card-body">
+                <p class="small text-secondary">
+                    Certificate and domain expiry, new certificates issued for your hostnames, DNS changes, appearances on
+                    threat feeds and blocklists, open ports and email security - for domains and servers you own.
+                </p>
+                <form class="d-flex flex-wrap gap-2 mb-3" @onsubmit="AddAssetAsync">
+                    <input class="form-control form-control-sm threat-exposure-input" placeholder="grantwatson.dev or a server IP" aria-label="Domain or IP to watch"
+                           value="@_newAsset" @oninput="e => _newAsset = e.Value?.ToString() ?? string.Empty" />
+                    <input class="form-control form-control-sm threat-exposure-label" placeholder="Label (optional)" aria-label="Label"
+                           value="@_newAssetLabel" @oninput="e => _newAssetLabel = e.Value?.ToString() ?? string.Empty" />
+                    <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@string.IsNullOrWhiteSpace(_newAsset)">Watch</button>
+                </form>
+                @if (_assets.Count == 0)
+                {
+                    <p class="text-secondary small mb-0">Nothing watched yet.</p>
+                }
+                <ul class="list-group list-group-flush">
+                    @foreach (var asset in _assets)
+                    {
+                        <li class="list-group-item px-0 d-flex justify-content-between align-items-start gap-2">
+                            <div class="min-w-0">
+                                <span class="fw-semibold text-break">@asset.Value</span>
+                                @if (asset.Label is { } label) { <span class="text-secondary small"> · @label</span> }
+                                @if (asset.OpenFindings > 0) { <span class="badge bg-danger-subtle text-danger-emphasis ms-1">@asset.OpenFindings open</span> }
+                                <div class="small text-secondary">
+                                    @(asset.Kind == "ip" ? "IP address" : "Domain") · checked @When(asset.LastCheckedAt)
+                                    @if (asset.LastError is { } error) { <span class="text-warning-emphasis"> · @error</span> }
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" title="Stop watching" aria-label="Stop watching @asset.Value"
+                                    @onclick="() => RemoveAssetAsync(asset.Id)"><i class="bi bi-trash"></i></button>
+                        </li>
+                    }
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3">
+                <span class="fw-semibold"><i class="bi bi-envelope-check"></i> Email security check</span>
+            </div>
+            <div class="card-body">
+                <p class="small text-secondary">SPF, DKIM, DMARC, MTA-STS and TLS reporting for any mail domain. Watched domains are re-checked automatically.</p>
+                <form class="d-flex gap-2 mb-3" @onsubmit="CheckEmailAsync">
+                    <input class="form-control form-control-sm" placeholder="gwsapp.net" aria-label="Mail domain to check"
+                           value="@_emailDomain" @oninput="e => _emailDomain = e.Value?.ToString() ?? string.Empty" />
+                    <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@(_emailChecking || string.IsNullOrWhiteSpace(_emailDomain))">
+                        @(_emailChecking ? "Checking…" : "Check")
+                    </button>
+                </form>
+                @if (_emailReport is { } report)
+                {
+                    <div class="d-flex align-items-center gap-3 mb-2">
+                        <span class="threat-exposure-grade grade-@report.Grade.ToLowerInvariant()" aria-label="Grade @report.Grade">@report.Grade</span>
+                        <dl class="row small mb-0 flex-grow-1">
+                            <dt class="col-4">Mail servers</dt><dd class="col-8 text-break">@(report.MxHosts.Count == 0 ? "none (doesn't receive mail)" : string.Join(", ", report.MxHosts))</dd>
+                            <dt class="col-4">SPF</dt><dd class="col-8 text-break"><code>@(report.SpfRecord ?? "missing")</code></dd>
+                            <dt class="col-4">DMARC</dt><dd class="col-8 text-break"><code>@(report.DmarcRecord ?? "missing")</code></dd>
+                            <dt class="col-4">DKIM</dt><dd class="col-8">@(report.DkimSelectorsFound.Count == 0 ? "no key on common selectors" : $"found ({string.Join(", ", report.DkimSelectorsFound)})")</dd>
+                            <dt class="col-4">MTA-STS</dt><dd class="col-8">@(report.MtaStsMode ?? "not set up")</dd>
+                            <dt class="col-4">TLS-RPT</dt><dd class="col-8">@(report.TlsRptRecord is null ? "not set up" : "set up")</dd>
+                        </dl>
+                    </div>
+                    @foreach (var issue in report.Issues)
+                    {
+                        <div class="small mb-2">
+                            <span class="badge @SeverityClass(issue.Severity) me-1">@issue.Severity</span>
+                            <strong>@issue.Title.</strong> <span class="text-secondary">@issue.Detail</span>
+                        </div>
+                    }
+                    @if (report.Errors.Count > 0)
+                    {
+                        <p class="small text-secondary mb-0">@string.Join(" · ", report.Errors)</p>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3">
+                <span class="fw-semibold"><i class="bi bi-stack"></i> Software you run</span>
+            </div>
+            <div class="card-body">
+                <p class="small text-secondary">
+                    Matched daily against CISA's exploited-in-the-wild list (last 12 months) and newly published high-severity
+                    CVEs (last 30 days). Give a vendor/product to match KEV precisely, and keywords for the CVE search.
+                </p>
+                <form class="row g-2 mb-3" @onsubmit="AddStackItemAsync">
+                    <div class="col-sm-6"><input class="form-control form-control-sm" placeholder="Name, e.g. Ollama" aria-label="Software name"
+                           value="@_stackName" @oninput="e => _stackName = e.Value?.ToString() ?? string.Empty" /></div>
+                    <div class="col-sm-6"><input class="form-control form-control-sm" placeholder="Keywords (comma-separated, optional)" aria-label="Search keywords"
+                           value="@_stackKeywords" @oninput="e => _stackKeywords = e.Value?.ToString() ?? string.Empty" /></div>
+                    <div class="col-sm-5"><input class="form-control form-control-sm" placeholder="KEV vendor (optional)" aria-label="Vendor"
+                           value="@_stackVendor" @oninput="e => _stackVendor = e.Value?.ToString() ?? string.Empty" /></div>
+                    <div class="col-sm-5"><input class="form-control form-control-sm" placeholder="KEV product (optional)" aria-label="Product"
+                           value="@_stackProduct" @oninput="e => _stackProduct = e.Value?.ToString() ?? string.Empty" /></div>
+                    <div class="col-sm-2 d-grid"><button type="submit" class="btn btn-sm btn-outline-primary" disabled="@string.IsNullOrWhiteSpace(_stackName)">Add</button></div>
+                </form>
+                <div class="d-flex flex-wrap gap-1 mb-3">
+                    <span class="small text-secondary me-1">Suggestions:</span>
+                    @foreach (var suggestion in StackSuggestions.Where(sg => !_stack.Any(i => string.Equals(i.Name, sg.Name, StringComparison.OrdinalIgnoreCase))))
+                    {
+                        <button type="button" class="btn btn-sm btn-light border py-0" @onclick="() => AddSuggestionAsync(suggestion)">+ @suggestion.Name</button>
+                    }
+                </div>
+                <ul class="list-group list-group-flush">
+                    @foreach (var item in _stack)
+                    {
+                        <li class="list-group-item px-0 d-flex justify-content-between align-items-start gap-2">
+                            <div class="min-w-0">
+                                <span class="fw-semibold">@item.Name</span>
+                                @if (item.OpenFindings > 0) { <span class="badge bg-danger-subtle text-danger-emphasis ms-1">@item.OpenFindings open</span> }
+                                <div class="small text-secondary text-break">
+                                    @(string.Join(" · ", new[] { item.Vendor is null ? null : $"vendor {item.Vendor}", item.Product is null ? null : $"product {item.Product}", $"keywords {item.Keywords ?? item.Name}" }.Where(x => x is not null)))
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-danger flex-shrink-0" title="Remove" aria-label="Remove @item.Name"
+                                    @onclick="() => RemoveStackItemAsync(item.Id)"><i class="bi bi-trash"></i></button>
+                        </li>
+                    }
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white border-bottom py-3">
+                <span class="fw-semibold"><i class="bi bi-envelope-paper"></i> Daily digest &amp; packages</span>
+            </div>
+            <div class="card-body">
+                @if (_settings is { } settings)
+                {
+                    <form class="mb-3" @onsubmit="SaveSettingsAsync">
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="digest-enabled" checked="@_digestEnabled"
+                                   @onchange="e => _digestEnabled = e.Value is true" />
+                            <label class="form-check-label" for="digest-enabled">Email me a daily digest</label>
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 align-items-center">
+                            <input class="form-control form-control-sm threat-exposure-input" type="email" placeholder="you@example.com" aria-label="Digest email address"
+                                   value="@_digestRecipient" @oninput="e => _digestRecipient = e.Value?.ToString() ?? string.Empty" />
+                            <label class="small text-secondary" for="digest-hour">at</label>
+                            <select id="digest-hour" class="form-select form-select-sm w-auto" value="@_digestHour" @onchange="e => _digestHour = int.TryParse(e.Value?.ToString(), out var h) ? h : 7">
+                                @for (var hour = 0; hour < 24; hour++)
+                                {
+                                    <option value="@hour">@(new DateTime(2000, 1, 1, hour, 0, 0).ToString("h tt"))</option>
+                                }
+                            </select>
+                            <button type="submit" class="btn btn-sm btn-outline-primary">Save</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_sendingDigest" @onclick="SendDigestNowAsync">
+                                @(_sendingDigest ? "Sending…" : "Send now")
+                            </button>
+                        </div>
+                        <p class="small text-secondary mt-2 mb-0">
+                            Contains new findings and the day's newly exploited vulnerabilities; skipped when there's nothing new.
+                            @if (!settings.CanSendEmail) { <span class="text-warning-emphasis">Email delivery isn't set up on this server yet (Settings &gt; Email).</span> }
+                            @if (settings.LastDigestSentAt is { } lastSent) { <span>Last sent @lastSent.ToLocalTime().ToString("MMM d, h:mm tt").</span> }
+                        </p>
+                    </form>
+                }
+                <h6 class="mt-3">This app's packages (@_dependencies.Count)</h6>
+                <p class="small text-secondary">
+                    Every NuGet package in the running build plus the browser libraries it loads, checked daily against OSV.dev
+                    (GitHub Security Advisories). Vulnerable ones show up as findings above.
+                </p>
+                <details>
+                    <summary class="small">Show the list</summary>
+                    <ul class="small list-unstyled mt-2 mb-0 threat-exposure-packages">
+                        @foreach (var package in _dependencies)
+                        {
+                            <li><span class="text-secondary">@package.Ecosystem</span> @package.Name <code>@package.Version</code></li>
+                        }
+                    </ul>
+                </details>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<ThreatFindingView> _findings = [];
+    private IReadOnlyList<WatchAssetView> _assets = [];
+    private IReadOnlyList<StackItemView> _stack = [];
+    private IReadOnlyList<DependencyPackage> _dependencies = [];
+    private ThreatMonitorSettingsView? _settings;
+    private bool _showResolved;
+    private bool _running;
+    private string? _message;
+    private bool _messageIsError;
+
+    private string _newAsset = string.Empty;
+    private string _newAssetLabel = string.Empty;
+
+    private string _emailDomain = string.Empty;
+    private bool _emailChecking;
+    private EmailSecurityReport? _emailReport;
+
+    private string _stackName = string.Empty;
+    private string _stackVendor = string.Empty;
+    private string _stackProduct = string.Empty;
+    private string _stackKeywords = string.Empty;
+
+    private bool _digestEnabled;
+    private string _digestRecipient = string.Empty;
+    private int _digestHour = 7;
+    private bool _sendingDigest;
+
+    private sealed record StackSuggestion(string Name, string? Vendor, string? Product, string Keywords);
+
+    // What this app's own stack runs on (Dockerfile, docker-compose.yml).
+    private static readonly StackSuggestion[] StackSuggestions =
+    [
+        new("ASP.NET Core / .NET", "Microsoft", ".NET", "ASP.NET Core,.NET Core"),
+        new("Ollama", null, "Ollama", "Ollama"),
+        new("Docker", "Docker", null, "Docker Engine"),
+        new("Cloudflare Tunnel", "Cloudflare", null, "cloudflared"),
+        new("SQLite", "SQLite", "SQLite", "SQLite"),
+        new("coturn", null, null, "coturn"),
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        if (_settings is { } settings)
+        {
+            _digestEnabled = settings.DigestEnabled;
+            _digestRecipient = settings.DigestRecipient ?? string.Empty;
+            _digestHour = settings.DigestHourLocal;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _settings = await Monitor.GetSettingsAsync();
+            _findings = await Monitor.ListFindingsAsync(_showResolved);
+            _assets = await Monitor.ListAssetsAsync();
+            _stack = await Monitor.ListStackAsync();
+            _dependencies = Monitor.ListDependencies();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load the exposure monitor");
+            Show("Couldn't load the exposure monitor.", error: true);
+        }
+    }
+
+    private async Task ToggleResolvedAsync(ChangeEventArgs e)
+    {
+        _showResolved = e.Value is true;
+        _findings = await Monitor.ListFindingsAsync(_showResolved);
+    }
+
+    private async Task RunAllAsync()
+    {
+        _running = true;
+        Show("Running every check - the software search waits between NVD requests, so this can take a minute or two.");
+        StateHasChanged();
+        try
+        {
+            var result = await Monitor.RunChecksAsync(ThreatCheckScope.All);
+            Show($"Done: {result.NewFindings} new, {result.ResolvedFindings} resolved."
+                 + (result.Errors.Count > 0 ? $" Some sources didn't answer: {string.Join("; ", result.Errors.Take(4))}." : ""),
+                 error: result.Errors.Count > 0);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Manual threat monitor run failed");
+            Show("The checks failed. Try again in a moment.", error: true);
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private async Task AcknowledgeAsync(Guid id)
+    {
+        await Monitor.AcknowledgeFindingAsync(id, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        _findings = await Monitor.ListFindingsAsync(_showResolved);
+    }
+
+    private async Task AddAssetAsync()
+    {
+        try
+        {
+            var asset = await Monitor.AddAssetAsync(_newAsset, _newAssetLabel, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            Show($"Watching {asset.Value}. It's checked on the next run - use \"Run all checks now\" to check it straight away.");
+            _newAsset = _newAssetLabel = string.Empty;
+            await LoadAsync();
+        }
+        catch (ArgumentException ex) { Show(ex.Message, error: true); }
+    }
+
+    private async Task RemoveAssetAsync(Guid id)
+    {
+        await Monitor.RemoveAssetAsync(id);
+        await LoadAsync();
+    }
+
+    private async Task CheckEmailAsync()
+    {
+        var indicator = ThreatIndicatorClassifier.Classify(_emailDomain);
+        if (indicator.Kind != IndicatorKind.Domain)
+        {
+            Show("Enter a domain like example.com.", error: true);
+            return;
+        }
+        _emailChecking = true;
+        try { _emailReport = await EmailSecurity.CheckAsync(indicator.Value); }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Email security check failed for {Domain}", indicator.Value);
+            Show("The email security check failed.", error: true);
+        }
+        finally { _emailChecking = false; }
+    }
+
+    private Task AddSuggestionAsync(StackSuggestion suggestion) =>
+        AddStackAsync(suggestion.Name, suggestion.Vendor, suggestion.Product, suggestion.Keywords);
+
+    private async Task AddStackItemAsync()
+    {
+        await AddStackAsync(_stackName, _stackVendor, _stackProduct, _stackKeywords);
+        _stackName = _stackVendor = _stackProduct = _stackKeywords = string.Empty;
+    }
+
+    private async Task AddStackAsync(string name, string? vendor, string? product, string? keywords)
+    {
+        try
+        {
+            await Monitor.AddStackItemAsync(name, vendor, product, keywords, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await LoadAsync();
+        }
+        catch (ArgumentException ex) { Show(ex.Message, error: true); }
+    }
+
+    private async Task RemoveStackItemAsync(Guid id)
+    {
+        await Monitor.RemoveStackItemAsync(id);
+        await LoadAsync();
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        try
+        {
+            await Monitor.SaveSettingsAsync(_digestEnabled, _digestRecipient, _digestHour);
+            _settings = await Monitor.GetSettingsAsync();
+            Show(_digestEnabled ? $"Digest saved - sent daily at {new DateTime(2000, 1, 1, _digestHour, 0, 0):h tt} when there's something new." : "Digest turned off.");
+        }
+        catch (ArgumentException ex) { Show(ex.Message, error: true); }
+    }
+
+    private async Task SendDigestNowAsync()
+    {
+        _sendingDigest = true;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_digestRecipient)) await Monitor.SaveSettingsAsync(_digestEnabled, _digestRecipient, _digestHour);
+            var result = await Monitor.SendDigestAsync(force: true);
+            Show(result.Message, error: !result.Sent);
+            _settings = await Monitor.GetSettingsAsync();
+        }
+        catch (ArgumentException ex) { Show(ex.Message, error: true); }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Sending the threat digest failed");
+            Show("Sending the digest failed - check Settings > Email.", error: true);
+        }
+        finally { _sendingDigest = false; }
+    }
+
+    private void Show(string message, bool error = false)
+    {
+        _message = message;
+        _messageIsError = error;
+    }
+
+    private static string When(DateTimeOffset? value) => value?.ToLocalTime().ToString("MMM d, h:mm tt") ?? "never";
+
+    private static string SourceLabel(string source) => source switch
+    {
+        "asset" => "Asset",
+        "email" => "Email",
+        "stack" => "Software",
+        "dependency" => "Package",
+        _ => source
+    };
+
+    private static string SeverityClass(string severity) => severity switch
+    {
+        "critical" => "bg-danger",
+        "high" => "bg-danger-subtle text-danger-emphasis",
+        "medium" => "bg-warning-subtle text-warning-emphasis",
+        "low" => "bg-info-subtle text-info-emphasis",
+        _ => "bg-secondary-subtle text-secondary-emphasis",
+    };
+}
