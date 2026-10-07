@@ -9,21 +9,21 @@ Standing constraints honored: free/key-less sources preferred (every endpoint ve
 before building), no social-media scraping, no Ticketmaster, light server-AI mode (droplet runs
 only short summaries on a small model).
 
-## Media Watch (/admin/news-intelligence)
+## ~~Media Watch (/admin/news-intelligence)~~ DONE 2026-10-06
 
 Improve:
-1. Incremental refresh - merge by article URL instead of delete-and-reinsert; keep existing hot takes (fewer Ollama calls, stable order).
-2. Per-user read/unread state and a "new since your last visit" badge (today the badge is just a 24h count).
-3. Save/bookmark articles so they survive the hard 24-hour expiry; make retention configurable.
-4. Cluster the same story across outlets into one card ("covered by 5 outlets").
-5. Show feed and hot-take failures on the page (they fail silently); base "Breaking" on recency + multi-outlet velocity instead of keywords.
+1. ~~Incremental refresh - merge by article URL instead of delete-and-reinsert; keep existing hot takes (fewer Ollama calls, stable order).~~
+2. ~~Per-user read/unread state and a "new since your last visit" badge (today the badge is just a 24h count).~~
+3. ~~Save/bookmark articles so they survive the hard 24-hour expiry; make retention configurable.~~
+4. ~~Cluster the same story across outlets into one card ("covered by 5 outlets").~~
+5. ~~Show feed and hot-take failures on the page (they fail silently); base "Breaking" on recency + multi-outlet velocity instead of keywords.~~
 
 New:
-1. Custom RSS/Atom feeds per topic (any outlet, no key).
-2. Daily/weekly topic digest email (reuses the email delivery + weekly digest code).
-3. Automation trigger "new article matches topic" -> notifications/workflows.
-4. "Clip to Sentinel" - save an article with summary and source into a Sentinel page.
-5. Trends view - mentions per topic over time and rising keywords (needs history retained).
+1. ~~Custom RSS/Atom feeds per topic (any outlet, no key).~~
+2. ~~Daily/weekly topic digest email (reuses the email delivery + weekly digest code).~~
+3. ~~Automation trigger "new article matches topic" -> notifications/workflows.~~
+4. ~~"Clip to Sentinel" - save an article with summary and source into a Sentinel page.~~
+5. ~~Trends view - mentions per topic over time and rising keywords (needs history retained).~~
 
 ## Civic Watch (/admin/government-intelligence)
 
@@ -41,21 +41,21 @@ New:
 4. Upcoming elections + sample-ballot/polling info for the area (source must verify key-less).
 5. Grants.gov funding opportunities matching business keywords.
 
-## BI Dashboards (/admin/business-intelligence)
+## ~~BI Dashboards (/admin/business-intelligence)~~ DONE 2026-10-06
 
 Improve:
-1. Custom date range and period-over-period comparison.
-2. Real charting library (Chart.js via the already-allowed jsDelivr) - tooltips, lifts the top-12 cap.
-3. Drill-down - click a bar to see the underlying deals/articles/advertisers.
-4. Dashboard layout - reorder/resize widgets, KPI tiles, optional team-shared dashboards.
-5. Cache heavy queries with a real "data as of" time (today everything recomputes on every load).
+1. ~~Custom date range and period-over-period comparison.~~
+2. ~~Real charting library (Chart.js via the already-allowed jsDelivr) - tooltips, lifts the top-12 cap.~~
+3. ~~Drill-down - click a bar to see the underlying deals/articles/advertisers.~~
+4. ~~Dashboard layout - reorder/resize widgets, KPI tiles, optional team-shared dashboards.~~
+5. ~~Cache heavy queries with a real "data as of" time (today everything recomputes on every load).~~
 
 New:
-1. More data sources - support tickets (volume/SLA/CSAT), email campaigns, Growth/social, form submissions, automation runs, Sentinel activity.
-2. Scheduled report emails (weekly).
-3. Goals/thresholds with progress lines and an automation trigger when crossed.
-4. CSV and image export per widget.
-5. "Ask about my data" - plain-English question -> picks source/metric/range (runs on local Ollama per light mode).
+1. ~~More data sources - support tickets (volume/SLA/CSAT), email campaigns, Growth/social, form submissions, automation runs, Sentinel activity.~~
+2. ~~Scheduled report emails (weekly).~~
+3. ~~Goals/thresholds with progress lines and an automation trigger when crossed.~~
+4. ~~CSV and image export per widget.~~
+5. ~~"Ask about my data" - plain-English question -> picks source/metric/range (runs on local Ollama per light mode).~~
 
 ## Overwatch (/admin/osint)
 
@@ -73,21 +73,21 @@ New:
 4. More key-less hazard layers - USGS earthquakes, NIFC/WFIGS wildfire perimeters, NWS river gauges (verify live first).
 5. Snapshot analysis -> saved incident report in Sentinel (location, time, image, AI notes).
 
-## Threat Intelligence (/admin/threat-intel)
+## ~~Threat Intelligence (/admin/threat-intel)~~ DONE 2026-10-06
 
 Improve:
-1. All DNS record types (MX/TXT/NS/CAA) via key-less DNS-over-HTTPS - no new resolver library needed.
-2. RDAP via IANA's bootstrap file directly, not only rdap.org's redirect table.
-3. One search box that auto-detects IP / domain / URL / hash / CVE (hash checks the cached MalwareBazaar data).
-4. KEV/CVE filters by vendor/product, EPSS sort, "new since last visit".
-5. Investigation history - saved lookups, one-click export to Sentinel.
+1. ~~All DNS record types (MX/TXT/NS/CAA) via key-less DNS-over-HTTPS - no new resolver library needed.~~
+2. ~~RDAP via IANA's bootstrap file directly, not only rdap.org's redirect table.~~
+3. ~~One search box that auto-detects IP / domain / URL / hash / CVE (hash checks the cached MalwareBazaar data).~~
+4. ~~KEV/CVE filters by vendor/product, EPSS sort, "new since last visit".~~
+5. ~~Investigation history - saved lookups, one-click export to Sentinel.~~
 
 New:
-1. Asset watchlist - your own domains/IPs (grantwatson.dev, gwsapp.net, the droplet): cert expiry, new CT subdomains, blocklist hits, exposed ports via InternetDB.
-2. Stack -> CVE matching - list your software (.NET, Docker images, Ollama) and alert on new KEV / high-EPSS CVEs.
-3. Email security posture check for your domains - SPF, DKIM, DMARC, MTA-STS.
-4. Dependency advisories for this repo's NuGet/npm packages via OSV.dev (key-less).
-5. Daily threat digest email built from the existing automation nodes.
+1. ~~Asset watchlist - your own domains/IPs (grantwatson.dev, gwsapp.net, the droplet): cert expiry, new CT subdomains, blocklist hits, exposed ports via InternetDB.~~
+2. ~~Stack -> CVE matching - list your software (.NET, Docker images, Ollama) and alert on new KEV / high-EPSS CVEs.~~
+3. ~~Email security posture check for your domains - SPF, DKIM, DMARC, MTA-STS.~~
+4. ~~Dependency advisories for this repo's NuGet/npm packages via OSV.dev (key-less).~~
+5. ~~Daily threat digest email built from the existing automation nodes.~~
 
 ## Status
 

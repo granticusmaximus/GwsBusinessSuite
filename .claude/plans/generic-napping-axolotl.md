@@ -1,5 +1,7 @@
 # Notion to Sentinel: Full-Fidelity Connector and Visual/Functional Parity
 
+> **~~SUPERSEDED~~ (audit 2026-10-07):** the Notion connection was removed on purpose 2026-10-03 (october-2026-batch item 2). Already-imported pages are kept.
+
 ## Status
 
 - **A1 (property type fidelity) — done.** People, files, relations, created/edited people,

@@ -1,5 +1,7 @@
 # Plan: "New article" email alerts + reusable signup widget
 
+> **~~CLOSED~~ (audit 2026-10-07):** built and e2e-verified 2026-10-02 (ArticleAnnouncement / EmailCampaignSubscription exist; Email Signup widget). Prod delivery depends on Settings > Email.
+
 Status: **decisions made 2026-10-02 - building** (see "Decisions" at the bottom).
 
 ## Goal

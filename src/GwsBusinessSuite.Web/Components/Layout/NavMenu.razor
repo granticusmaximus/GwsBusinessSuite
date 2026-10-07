@@ -29,11 +29,14 @@
                 <i class="bi bi-pencil-square" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>Posts</span><small>Write and publish</small></span>
             </NavLink>
-            <NavLink class="gws-nav-link" href="admin/content-studio" title="Content Studio">
-                <i class="bi bi-magic" aria-hidden="true"></i>
-                <span class="gws-nav-link-copy"><span>Content Studio</span><small>SentinelGPT-assisted drafts</small></span>
-                @if (_pendingDraftCount > 0) { <span class="gws-nav-count">@_pendingDraftCount</span> }
-            </NavLink>
+            @if (IsNativeApp)
+            {
+                <NavLink class="gws-nav-link" href="admin/content-studio" title="Content Studio">
+                    <i class="bi bi-magic" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Content Studio</span><small>Mac-local article generation</small></span>
+                    @if (_pendingDraftCount > 0) { <span class="gws-nav-count">@_pendingDraftCount</span> }
+                </NavLink>
+            }
             <NavLink class="gws-nav-link" href="admin/seo-audit" title="SEO Audit">
                 <i class="bi bi-search-heart" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>SEO Audit</span><small>Classic + AI-era readiness</small></span>
@@ -325,6 +328,7 @@
         !_hiddenNavKeys.Contains(featureKey, StringComparer.OrdinalIgnoreCase);
 
     private string _role = string.Empty;
+    private bool IsNativeApp { get; set; }
     private int _pendingCommentCount;
     private int _unreadDockerAlertCount;
     private int _pendingDraftCount;
@@ -336,6 +340,7 @@
     {
         var state = await AuthProvider.GetAuthenticationStateAsync();
         _role = state.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
+        IsNativeApp = state.User.HasClaim("amr", "device-secret");
         if (state.User.Identity?.IsAuthenticated != true) return;
 
         // Nav visibility is a display preference, so a settings failure must never take the whole

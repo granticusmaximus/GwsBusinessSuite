@@ -26,6 +26,7 @@ public sealed partial class AutomationNodeRegistry
     {
         "core.manualTrigger", "core.webhookTrigger", "core.scheduleTrigger",
         "database.rowChangedTrigger", "crm.dealStageChangedTrigger", "cms.pagePublishedTrigger", "news.articlesFoundTrigger",
+        "bi.goalCrossedTrigger", "civic.billStatusChangedTrigger",
         "core.wait", "core.approval", "ai.agent", "automation.subWorkflow"
     };
 

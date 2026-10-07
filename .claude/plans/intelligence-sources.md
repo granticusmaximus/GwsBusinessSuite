@@ -1,5 +1,7 @@
 # Intelligence sources (researched 2026-10-04) - APPROVED 2026-10-04, all 7 items, DONE 2026-10-04
 
+> **~~CLOSED~~ (audit 2026-10-07):** all 7 items built and verified 2026-10-04.
+
 Sources reviewed: https://github.com/0xh3xa/awesome-cyber-security-tools and https://infosec.house
 (threat-intel + OSINT sections). Grant approved the whole list ("Start work on the intelligence
 additions", 2026-10-04).

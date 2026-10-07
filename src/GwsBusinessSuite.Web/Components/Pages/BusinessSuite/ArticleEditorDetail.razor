@@ -37,14 +37,18 @@
                 }
                 @if (CurrentArticle.SourceDraftId.HasValue)
                 {
-                    <a href="/admin/content-studio/draft/@CurrentArticle.SourceDraftId" class="small">
-                        <i class="bi bi-box-arrow-up-right me-1"></i>View SentinelGPT Draft
-                    </a>
-                    <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
-                            @onclick="ToggleReviseWithAiPanel" disabled="@IsBusy">
-                        <i class="bi bi-magic"></i>
-                        <span>Revise with SentinelGPT</span>
-                    </button>
+                    <AuthorizeView Policy="NativeContentStudioAccess">
+                        <Authorized>
+                            <a href="/admin/content-studio/draft/@CurrentArticle.SourceDraftId" class="small">
+                                <i class="bi bi-box-arrow-up-right me-1"></i>View SentinelGPT Draft
+                            </a>
+                            <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
+                                    @onclick="ToggleReviseWithAiPanel" disabled="@IsBusy">
+                                <i class="bi bi-magic"></i>
+                                <span>Revise with SentinelGPT</span>
+                            </button>
+                        </Authorized>
+                    </AuthorizeView>
                 }
             </div>
         }

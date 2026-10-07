@@ -571,6 +571,7 @@ public sealed class SupportTicketServiceTests
             throw new NotSupportedException();
         public Task<int> TriggerNewsArticlesFoundAsync(string topicName, string inputJson, CancellationToken cancellationToken = default) => Task.FromResult(0);
         public Task<int> TriggerBiGoalCrossedAsync(string widgetTitle, string inputJson, CancellationToken cancellationToken = default) => Task.FromResult(0);
+        public Task<int> TriggerCivicBillStatusChangedAsync(string billLabel, string inputJson, CancellationToken cancellationToken = default) => Task.FromResult(0);
 
         public Task<int> TriggerCmsFormSubmittedAsync(
             Guid siteId, string inputJson, CancellationToken cancellationToken = default) =>

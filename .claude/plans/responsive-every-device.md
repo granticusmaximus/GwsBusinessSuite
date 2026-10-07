@@ -1,5 +1,7 @@
 # Responsive on every device (requested 2026-10-03)
 
+> **Audit 2026-10-07:** ~~Phases 1 and 2.1-2.4~~ DONE. Only 2.5 (Mac app WebView) and the real-device pass in 2.6 are open, and both need Grant on physical devices.
+
 Goal: every page scaled to the device it's on - fluid sizing plus layouts that adapt to the
 device's capabilities (width, container width, touch vs mouse, hover, safe areas, orientation,
 text size), never to a device name and never by zooming the page.

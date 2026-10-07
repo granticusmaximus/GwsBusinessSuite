@@ -1,5 +1,7 @@
 # Handoff: Sentinel → Notion parity — STALE, see 2026-08-21 status update below
 
+> **~~CLOSED~~ (audit 2026-10-07):** all done except Timeline drag-resize, which Grant deferred ("skip for now", 2026-08-21). It needs a schema decision from Grant first.
+
 ## 2026-08-21 status update
 This doc was last edited 2026-08-08 mid-Phase-2.5 and was never updated as work continued
 through 2026-08-16+. A full audit against current source (2026-08-21) found essentially

@@ -223,7 +223,7 @@ public sealed class ContentStudioService(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Topic);
         serverAi.EnsureHeavyAiAllowed(GenerationFeature, GenerationAlternative);
-        return GenerateArticleStreamCoreAsync(request, ollama, cancellationToken);
+        return GenerateArticleStreamCoreAsync(request, ollama, modelOverride: null, cancellationToken);
     }
 
     public IAsyncEnumerable<ContentStudioGenerationChunk> GenerateArticleStreamAsync(
@@ -233,19 +233,22 @@ public sealed class ContentStudioService(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Topic);
         ArgumentNullException.ThrowIfNull(modelRuntime);
-        return GenerateArticleStreamCoreAsync(request, modelRuntime, cancellationToken);
+        return GenerateArticleStreamCoreAsync(request, modelRuntime, request.Model, cancellationToken);
     }
 
     private async IAsyncEnumerable<ContentStudioGenerationChunk> GenerateArticleStreamCoreAsync(
         ArticleGenerationRequest request,
         IOllamaService modelRuntime,
+        string? modelOverride,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
 
         var scoredOffers = await offerScoringService.ScoreOffersAsync(request, maxOffers: AffiliateSlotTokens.Length, cancellationToken);
         var existingArticles = await GetExistingArticleLinksAsync(cancellationToken);
         var prompt = BuildPrompt(request, scoredOffers, existingArticles);
-        var model = await GetEffectiveModelAsync(cancellationToken);
+        var model = string.IsNullOrWhiteSpace(modelOverride)
+            ? await GetEffectiveModelAsync(cancellationToken)
+            : modelOverride.Trim();
         var timeout = await GetEffectiveTimeoutAsync(cancellationToken);
 
         logger.LogInformation(
@@ -403,7 +406,7 @@ public sealed class ContentStudioService(
         CancellationToken cancellationToken = default)
     {
         serverAi.EnsureHeavyAiAllowed("Revisions on the server", GenerationAlternative);
-        return RequestRevisionCoreAsync(request, ollama, cancellationToken);
+        return RequestRevisionCoreAsync(request, ollama, modelOverride: null, cancellationToken);
     }
 
     public Task<ArticleGenerationResult?> RequestRevisionAsync(
@@ -412,12 +415,13 @@ public sealed class ContentStudioService(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(modelRuntime);
-        return RequestRevisionCoreAsync(request, modelRuntime, cancellationToken);
+        return RequestRevisionCoreAsync(request, modelRuntime, request.Model, cancellationToken);
     }
 
     private async Task<ArticleGenerationResult?> RequestRevisionCoreAsync(
         DraftRevisionRequest request,
         IOllamaService modelRuntime,
+        string? modelOverride,
         CancellationToken cancellationToken)
     {
         var draft = await db.SeoArticleDrafts.FirstOrDefaultAsync(x => x.Id == request.DraftId, cancellationToken);
@@ -444,7 +448,9 @@ public sealed class ContentStudioService(
         var existingArticles = await GetExistingArticleLinksAsync(cancellationToken);
         var prompt = BuildPrompt(baseRequest, scoredOffers, existingArticles) + $"\n\nRequested revisions:\n- {revisionNotes}";
 
-        var configuredModel = await GetEffectiveModelAsync(cancellationToken);
+        var configuredModel = string.IsNullOrWhiteSpace(modelOverride)
+            ? await GetEffectiveModelAsync(cancellationToken)
+            : modelOverride.Trim();
         var timeout = await GetEffectiveTimeoutAsync(cancellationToken);
 
         // Ollama generation can take several minutes; a Blazor Server circuit can

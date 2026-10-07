@@ -41,7 +41,8 @@ public sealed class GovernmentIntelligenceService(
     private const string CountyHomeUrl = "https://www.houstoncountyga.gov/";
     private const string CountyAnnouncementsUrl = "https://www.houstoncountyga.gov/residents/announcements.cms";
     private const string CountyCalendarUrl = "https://www.houstoncountyga.gov/commissioner/calendar.cms";
-    private const string CountyResidentsUrl = "https://www.houstoncountyga.gov/residents/";
+    // /residents/ itself started answering 403; the Newcomers guide is the live residents hub.
+    private const string CountyResidentsUrl = "https://www.houstoncountyga.gov/residents/newcomers.cms";
     private const string CountyAlertsUrl = "https://www.smart911.com/";
     private const string CountyElectionsUrl = "https://www.houstoncountyga.gov/residents/board-of-elections.cms";
     private const string CountyCodeUrl = "https://www.municode.com/library/ga/houston_county/codes/code_of_ordinances";
@@ -318,13 +319,7 @@ public sealed class GovernmentIntelligenceService(
     public async Task PopulateAiOverviewsAsync(CancellationToken ct)
     {
         var snapshot = await GetSnapshotAsync(forceRefresh: false, ct);
-        var briefs = snapshot.State.SignedLegislation.Select(law => law.Legislation)
-            .Concat(snapshot.State.HouseVotes.Select(vote => vote.Legislation))
-            .Concat(snapshot.State.SenateVotes.Select(vote => vote.Legislation))
-            .Where(brief => brief is not null && !string.IsNullOrWhiteSpace(brief.OfficialUrl))
-            .Select(brief => brief!)
-            .GroupBy(brief => brief.OfficialUrl)
-            .Select(group => group.First())
+        var briefs = AllLegislationBriefs(snapshot)
             .Where(brief => !cache.TryGetValue(AiOverviewCacheKey(brief.OfficialUrl), out string? existing) || string.IsNullOrWhiteSpace(existing))
             .ToList();
 
@@ -343,16 +338,44 @@ public sealed class GovernmentIntelligenceService(
         }
     }
 
+    // Georgia laws and votes plus federal roll calls - everything that can carry an overview.
+    private static IEnumerable<LegislationDetailBrief> AllLegislationBriefs(GovernmentIntelligenceSnapshot snapshot) =>
+        snapshot.State.SignedLegislation.Select(law => law.Legislation)
+            .Concat(snapshot.State.HouseVotes.Select(vote => vote.Legislation))
+            .Concat(snapshot.State.SenateVotes.Select(vote => vote.Legislation))
+            .Concat(snapshot.Federal.SenateVotes.Select(vote => vote.Legislation))
+            .Concat(snapshot.Federal.HouseVotes.Select(vote => vote.Legislation))
+            .Where(brief => brief is not null && !string.IsNullOrWhiteSpace(brief.OfficialUrl))
+            .Select(brief => brief!)
+            .GroupBy(brief => brief.OfficialUrl)
+            .Select(group => group.First());
+
+    // The page's "Generate overview now" button. Runs at interactive priority (someone is
+    // waiting on it), but still through the shared scheduler, so it queues behind any call
+    // already in flight rather than overloading Ollama.
+    public async Task<string?> GenerateAiOverviewNowAsync(string officialUrl, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(officialUrl)) return null;
+        if (cache.TryGetValue(AiOverviewCacheKey(officialUrl), out string? cached) && !string.IsNullOrWhiteSpace(cached))
+        {
+            return cached;
+        }
+
+        var snapshot = await GetSnapshotAsync(forceRefresh: false, ct);
+        var brief = AllLegislationBriefs(snapshot).FirstOrDefault(b => string.Equals(b.OfficialUrl, officialUrl, StringComparison.OrdinalIgnoreCase));
+        return brief is null ? null : await GenerateAndCacheOverviewAsync(brief, ct);
+    }
+
     // Bill/vote text doesn't change once signed or voted, so overviews are cached for a week
     // rather than regenerated every 15-minute snapshot cycle. Failures (Ollama unavailable,
     // or a single slow generation) degrade gracefully to no overview rather than stalling
     // the rest of the sweep, mirroring NewsIntelligenceService.BatchSummarizeAsync.
-    private async Task GenerateAndCacheOverviewAsync(LegislationDetailBrief brief, CancellationToken ct)
+    private async Task<string?> GenerateAndCacheOverviewAsync(LegislationDetailBrief brief, CancellationToken ct)
     {
         try
         {
             const string system =
-                "You summarize state legislation for a local civic newsletter. Respond with 2-3 plain-language " +
+                "You summarize state and federal legislation for a local civic newsletter. Respond with 2-3 plain-language " +
                 "sentences (under 60 words total) explaining what the bill does and why a resident might care. " +
                 "No intro, no closing remarks, no markdown.";
             var factLines = brief.Facts.Select(f => $"{f.Label}: {f.Value}");
@@ -363,14 +386,16 @@ public sealed class GovernmentIntelligenceService(
             var overview = (await ollama.GenerateAsync(OllamaModel, system, userPrompt, timeoutCts.Token)).Trim();
             if (string.IsNullOrWhiteSpace(overview))
             {
-                return;
+                return null;
             }
 
             cache.Set(AiOverviewCacheKey(brief.OfficialUrl), overview, AiOverviewCacheDuration);
+            return overview;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             logger.LogWarning(ex, "SentinelGPT overview skipped ({Model} unavailable or timed out) for {Url}", OllamaModel, brief.OfficialUrl);
+            return null;
         }
     }
 
@@ -384,8 +409,8 @@ public sealed class GovernmentIntelligenceService(
         return new FederalGovernmentCoverage(
             "Federal coverage focuses on live House and Senate roll calls, with Georgia delegation votes easy to spot inside each measure.",
             "House and Senate roll-call tracking is live from official chamber sources. Federal signed-into-law status is not auto-fetched yet because Congress.gov public-laws pages are protected by a browser challenge for server-side clients; use the Public Laws link below as the official enacted-law reference.",
-            senateVotesTask.Result,
-            houseVotesTask.Result,
+            senateVotesTask.Result.Select(vote => vote with { Legislation = AttachCachedAiOverview(vote.Legislation) }).ToList(),
+            houseVotesTask.Result.Select(vote => vote with { Legislation = AttachCachedAiOverview(vote.Legislation) }).ToList(),
             [
                 new CivicResourceSection("Congress",
                 [
@@ -494,7 +519,8 @@ public sealed class GovernmentIntelligenceService(
                     CleanText(member.Element("member_full")?.Value),
                     CleanText(member.Element("party")?.Value),
                     CleanText(member.Element("state")?.Value),
-                    CleanText(member.Element("vote_cast")?.Value)))
+                    CleanText(member.Element("vote_cast")?.Value),
+                    NullIfBlank(CleanText(member.Element("lis_member_id")?.Value))))
                 .Where(vote => !string.IsNullOrWhiteSpace(vote.Name))
                 .ToList() ?? [];
 
@@ -506,7 +532,7 @@ public sealed class GovernmentIntelligenceService(
                 CleanText(root.Element("vote_result")?.Value),
                 title,
                 ParseDateTime(root.Element("vote_date")?.Value),
-                $"https://www.senate.gov/legislative/LIS/roll_call_vote_cfm.cfm?congress=119&session=2&vote={voteNumber:00000}",
+                SenateVoteDetailUrl(voteNumber),
                 ParseInt(root.Element("count")?.Element("yeas")?.Value),
                 ParseInt(root.Element("count")?.Element("nays")?.Value),
                 ParseInt(root.Element("count")?.Element("present")?.Value),
@@ -519,7 +545,7 @@ public sealed class GovernmentIntelligenceService(
                     CleanText(root.Element("question")?.Value),
                     CleanText(root.Element("vote_result")?.Value),
                     ParseDateTime(root.Element("vote_date")?.Value),
-                    $"https://www.senate.gov/legislative/LIS/roll_call_vote_cfm.cfm?congress=119&session=2&vote={voteNumber:00000}",
+                    SenateVoteDetailUrl(voteNumber),
                     ParseInt(root.Element("count")?.Element("yeas")?.Value),
                     ParseInt(root.Element("count")?.Element("nays")?.Value),
                     ParseInt(root.Element("count")?.Element("present")?.Value),
@@ -564,7 +590,8 @@ public sealed class GovernmentIntelligenceService(
                     CleanText(vote.Element("legislator")?.Value),
                     CleanText(vote.Element("legislator")?.Attribute("party")?.Value),
                     CleanText(vote.Element("legislator")?.Attribute("state")?.Value),
-                    CleanText(vote.Element("vote")?.Value)))
+                    CleanText(vote.Element("vote")?.Value),
+                    NullIfBlank(CleanText(vote.Element("legislator")?.Attribute("name-id")?.Value))))
                 .Where(vote => !string.IsNullOrWhiteSpace(vote.Name))
                 .ToList() ?? [];
 
@@ -662,7 +689,8 @@ public sealed class GovernmentIntelligenceService(
                 .Where(row => row.Member.Id > 0 && !string.Equals(row.Member.Name, "VACANT", StringComparison.OrdinalIgnoreCase))
                 .Select(row => new StateMemberVoteRecord(
                     CleanText(row.Member.Name),
-                    MapGeorgiaMemberVote(row.MemberVoted)))
+                    MapGeorgiaMemberVote(row.MemberVoted),
+                    row.Member.Id))
                 .OrderBy(row => StateVoteSortOrder(row.Vote))
                 .ThenBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList() ?? [];
@@ -1347,7 +1375,7 @@ public sealed class GovernmentIntelligenceService(
         return $"{primary}: {secondary}";
     }
 
-    private static string ComputeGeorgiaAuthenticationKey(long timestamp)
+    internal static string ComputeGeorgiaAuthenticationKey(long timestamp)
     {
         var payload = $"QFpCwKfd7f{GeorgiaApiObscureKey}letvarconst{timestamp.ToString(CultureInfo.InvariantCulture)}";
         var hash = SHA512.HashData(Encoding.UTF8.GetBytes(payload));
@@ -1376,6 +1404,11 @@ public sealed class GovernmentIntelligenceService(
             "Excused" => 3,
             _ => 4
         };
+
+    private static string SenateVoteDetailUrl(int voteNumber) =>
+        $"https://www.senate.gov/legislative/LIS/roll_call_vote_cfm.cfm?congress={CurrentCongressNumber}&session={CurrentCongressSession}&vote={voteNumber:00000}";
+
+    private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value;
 
     private static string ToAbsoluteUrl(string href, string baseUrl)
     {

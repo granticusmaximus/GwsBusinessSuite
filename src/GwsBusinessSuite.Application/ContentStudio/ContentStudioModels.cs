@@ -8,6 +8,9 @@ public sealed class ArticleGenerationRequest
     public string TargetAudience { get; init; } = string.Empty;
     public string PrimaryKeyword { get; init; } = string.Empty;
     public string SecondaryKeywords { get; init; } = string.Empty;
+    // Set only by a trusted caller-supplied runtime (the native Mac app's local Ollama). The
+    // server-owned generation overload deliberately ignores this value.
+    public string? Model { get; init; }
 }
 
 // A published article the model may link to by its real slug. Verified finding: none of this
@@ -20,6 +23,7 @@ public sealed class DraftRevisionRequest
     public Guid DraftId { get; init; }
     public string RequestedModifications { get; init; } = string.Empty;
     public string PerformedBy { get; init; } = "content-studio";
+    public string? Model { get; init; }
 }
 
 public sealed class DraftMarkdownUpdateRequest

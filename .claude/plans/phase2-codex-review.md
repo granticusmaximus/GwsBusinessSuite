@@ -1,5 +1,7 @@
 # Phase 2 coordination — Codex tests and review
 
+> **~~CLOSED~~ (audit 2026-10-07):** RelatedArticlesService now enforces Status == Published; RelatedArticlesServiceTests.cs exists; Phase 2 shipped.
+
 User assignment (2026-09-28): Claude owns implementation; Codex owns tests and review.
 Codex edits only test files and this note. Codex owns focused validation and the final release gate once implementation is stable;
 Claude owns the final commit. Avoid simultaneous builds of the shared output directories.

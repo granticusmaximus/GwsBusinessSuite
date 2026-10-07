@@ -1,4 +1,5 @@
 @using GwsBusinessSuite.Application.GovernmentIntelligence
+@inject IGovernmentIntelligenceService GovernmentService
 
 <details class="legislation-brief mt-3 pt-3 border-top">
     <summary class="fw-semibold" style="cursor:pointer;">@SummaryLabel</summary>
@@ -12,11 +13,31 @@
         <p class="text-secondary">@Brief.Summary</p>
         <div class="text-secondary small">Status: @Brief.Status</div>
 
-        @if (!string.IsNullOrWhiteSpace(Brief.AiOverview))
+        @if (!string.IsNullOrWhiteSpace(Overview))
         {
             <div class="sentinelgpt-overview d-flex flex-column gap-1 mt-3 p-3 rounded">
                 <span class="text-uppercase small fw-bold">✨ SentinelGPT overview</span>
-                <p class="mb-0 fst-italic">@Brief.AiOverview</p>
+                <p class="mb-0 fst-italic">@Overview</p>
+            </div>
+        }
+        else if (AllowGenerate && !string.IsNullOrWhiteSpace(Brief.OfficialUrl))
+        {
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="GenerateOverviewAsync" disabled="@_generating">
+                    @if (_generating)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>
+                        <span>Writing overview…</span>
+                    }
+                    else
+                    {
+                        <span>✨ Generate overview now</span>
+                    }
+                </button>
+                @if (!string.IsNullOrWhiteSpace(_generateMessage))
+                {
+                    <small class="text-secondary" role="status">@_generateMessage</small>
+                }
             </div>
         }
 
@@ -77,6 +98,39 @@
 
     [Parameter]
     public string SummaryLabel { get; set; } = "Open legislation brief";
+
+    // Shows "Generate overview now" when the brief has no SentinelGPT overview yet. Off for the
+    // hand-written local law guides, which are not bills.
+    [Parameter]
+    public bool AllowGenerate { get; set; }
+
+    private string? _generatedOverview;
+    private bool _generating;
+    private string? _generateMessage;
+
+    private string? Overview => string.IsNullOrWhiteSpace(Brief.AiOverview) ? _generatedOverview : Brief.AiOverview;
+
+    private async Task GenerateOverviewAsync()
+    {
+        _generating = true;
+        _generateMessage = null;
+        try
+        {
+            _generatedOverview = await GovernmentService.GenerateAiOverviewNowAsync(Brief.OfficialUrl);
+            if (string.IsNullOrWhiteSpace(_generatedOverview))
+            {
+                _generateMessage = "SentinelGPT couldn't write an overview right now. Try again in a few minutes.";
+            }
+        }
+        catch (Exception)
+        {
+            _generateMessage = "SentinelGPT couldn't write an overview right now. Try again in a few minutes.";
+        }
+        finally
+        {
+            _generating = false;
+        }
+    }
 
     private string GetHeadline()
     {

@@ -1,5 +1,7 @@
 # Master Plan: Overwatch Global Coverage + Full CMS Expansion
 
+> **Audit 2026-10-07:** ~~Workstreams B, C, D, E~~ DONE. Workstream A (Overwatch coverage) remains open as Overwatch "Improve 1" in intelligence-expansion-2026-10.md.
+
 **Status: supersedes every prior plan/report on these topics.** Once approved, this file is
 the single source of truth for all five workstreams below — the old blog-block-library-only
 plan (this same file, previous revision), `reports/Marketing-theme module inspiration.md`, and

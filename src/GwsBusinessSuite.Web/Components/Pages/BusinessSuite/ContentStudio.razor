@@ -1,6 +1,6 @@
 @page "/admin/content-studio"
 @rendermode InteractiveServer
-@attribute [Authorize(Policy = "ContentAccess")]
+@attribute [Authorize(Policy = "NativeContentStudioAccess")]
 @using Microsoft.AspNetCore.Authorization
 @implements IAsyncDisposable
 @using GwsBusinessSuite.Application.ContentStudio
@@ -11,7 +11,6 @@
 @inject NavigationManager Navigation
 @inject ILogger<ContentStudio> Logger
 @inject IJSRuntime JS
-@inject Microsoft.Extensions.Options.IOptions<ServerAiOptions> ServerAi
 
 <PageTitle>Content Studio</PageTitle>
 
@@ -173,6 +172,29 @@
                 <input class="form-control" @bind="SecondaryKeywords"
                        placeholder="e.g. ASP.NET Core, dependency injection" />
             </div>
+            <div class="col-md-6">
+                <label class="form-label fw-semibold small">Local Ollama Model</label>
+                <select class="form-select" @bind="SelectedModel" disabled="@(_localModelsLoading || LocalModels.Count == 0)">
+                    @foreach (var model in LocalModels)
+                    {
+                        <option value="@model">@model</option>
+                    }
+                </select>
+                <div class="form-text">
+                    @if (_localModelsLoading)
+                    {
+                        <span>Checking the models installed on this Mac…</span>
+                    }
+                    else if (LocalModels.Count == 0)
+                    {
+                        <span>Start Ollama on this Mac, then refresh the page.</span>
+                    }
+                    else
+                    {
+                        <span>Generation runs on this Mac. The web server receives the finished draft for storage.</span>
+                    }
+                </div>
+            </div>
         </div>
 
         <div class="mt-4 d-flex flex-wrap gap-2">
@@ -187,12 +209,9 @@
                 <span>Refresh Draft List</span>
             </button>
         </div>
-        @if (RunsOnLocalModels)
-        {
-            <p class="small text-secondary mt-2 mb-0">
-                <i class="bi bi-laptop me-1"></i>Drafts are written by the Ollama on this computer, not the server. Keep Ollama running here while a draft generates.
-            </p>
-        }
+        <p class="small text-secondary mt-2 mb-0">
+            <i class="bi bi-laptop me-1"></i>Drafts are written by the selected Ollama model on this Mac, not the web server. Keep Ollama running while a draft generates.
+        </p>
 
         @if (_isGeneratingDraft)
         {
@@ -293,6 +312,9 @@
     private string TargetAudience { get; set; } = "C# and ASP.NET developers";
     private string PrimaryKeyword { get; set; } = string.Empty;
     private string SecondaryKeywords { get; set; } = string.Empty;
+    private List<string> LocalModels { get; set; } = new();
+    private string SelectedModel { get; set; } = string.Empty;
+    private bool _localModelsLoading = true;
 
     private string TrendFocusArea { get; set; } = string.Empty;
     private bool TrendForceRefresh { get; set; }
@@ -325,6 +347,40 @@
     protected override async Task OnInitializedAsync()
     {
         await RefreshDrafts();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        try
+        {
+            _localModels ??= new BrowserLocalOllamaService(JS);
+            var status = await _localModels.ProbeAsync();
+            if (status.IsReachable)
+            {
+                LocalModels = status.Models.Order(StringComparer.OrdinalIgnoreCase).ToList();
+                SelectedModel = LocalModels.FirstOrDefault(model =>
+                    string.Equals(model, ContentStudioOptions.DefaultModel, StringComparison.OrdinalIgnoreCase)
+                    || model.StartsWith($"{ContentStudioOptions.DefaultModel}:", StringComparison.OrdinalIgnoreCase))
+                    ?? LocalModels.FirstOrDefault()
+                    ?? string.Empty;
+            }
+            else
+            {
+                ErrorMessage = status.Error ?? "Ollama is not reachable on this Mac.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Unable to list the Ollama models installed on this Mac.");
+            ErrorMessage = $"Unable to list local Ollama models. {ex.Message}";
+        }
+        finally
+        {
+            _localModelsLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
@@ -500,7 +556,6 @@
     private bool _isGeneratingDraft;
     private BrowserLocalOllamaService? _localModels;
 
-    private bool RunsOnLocalModels => ServerAi.Value.IsLight;
     private string _generatingMarkdownPreview = string.Empty;
 
     private async Task GenerateDraft()
@@ -508,6 +563,13 @@
         if (string.IsNullOrWhiteSpace(Topic))
         {
             ErrorMessage = "Enter an article topic before generating a draft.";
+            StatusMessage = string.Empty;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(SelectedModel))
+        {
+            ErrorMessage = "Start Ollama and select a model installed on this Mac before generating a draft.";
             StatusMessage = string.Empty;
             return;
         }
@@ -534,21 +596,14 @@
                 Topic = Topic,
                 TargetAudience = TargetAudience,
                 PrimaryKeyword = PrimaryKeyword,
-                SecondaryKeywords = SecondaryKeywords
+                SecondaryKeywords = SecondaryKeywords,
+                Model = SelectedModel
             };
-            // In light server-AI mode the draft is written by this computer's own Ollama; the
-            // server only builds the prompt, checks the code, and saves the result.
-            IAsyncEnumerable<ContentStudioGenerationChunk> stream;
-            if (RunsOnLocalModels)
-            {
-                _localModels ??= new BrowserLocalOllamaService(JS);
-                await _localModels.EnsureReachableAsync();
-                stream = ContentStudioService.GenerateArticleStreamAsync(request, _localModels);
-            }
-            else
-            {
-                stream = ContentStudioService.GenerateArticleStreamAsync(request);
-            }
+            // Content Studio is native-app-only: all expensive generation runs against the
+            // selected model on this Mac. The server builds prompts, verifies, and persists.
+            _localModels ??= new BrowserLocalOllamaService(JS);
+            await _localModels.EnsureReachableAsync();
+            var stream = ContentStudioService.GenerateArticleStreamAsync(request, _localModels);
 
             await foreach (var chunk in stream)
             {
@@ -585,9 +640,7 @@
         {
             Logger.LogError(ex, "Content Studio draft generation failed for topic '{Topic}'.", Topic);
             StatusMessage = string.Empty;
-            ErrorMessage = RunsOnLocalModels
-                ? $"Unable to generate article on this computer's Ollama. Details: {ex.Message}"
-                : $"Unable to generate article. Make sure the SentinelGPT local model is running and available. Details: {ex.Message}";
+            ErrorMessage = $"Unable to generate article on this Mac's Ollama. Details: {ex.Message}";
         }
         finally
         {

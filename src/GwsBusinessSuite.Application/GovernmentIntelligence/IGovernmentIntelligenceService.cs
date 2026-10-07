@@ -8,6 +8,11 @@ public interface IGovernmentIntelligenceService
     // have one cached yet. Must never be called from a page-load path - see the comment on
     // the implementation in GovernmentIntelligenceService for why.
     Task PopulateAiOverviewsAsync(CancellationToken ct = default);
+
+    // "Generate overview now": summarizes one Georgia or federal legislation brief on demand
+    // and caches it like the background job does. Returns null when the brief is unknown or
+    // SentinelGPT could not answer.
+    Task<string?> GenerateAiOverviewNowAsync(string officialUrl, CancellationToken ct = default);
 }
 
 public sealed record GovernmentIntelligenceSnapshot(
@@ -124,7 +129,12 @@ public sealed record CivicEvent(
     string City = CivicPlaces.Unknown,
     // Rough straight-line miles from Kathleen, for "within 15 minutes of me" style filtering.
     // Null when the city could not be resolved.
-    double? MilesFromHome = null);
+    double? MilesFromHome = null,
+    // Venue coordinates when the source publishes them (Eventbrite does). With the town's
+    // coordinates as a fallback, this lets the page measure distance from a configured home
+    // point rather than the fixed Kathleen figure above.
+    double? Latitude = null,
+    double? Longitude = null);
 
 // The communities this watch covers, centred on Kathleen in unincorporated Houston County.
 // Distances are straight-line miles from Kathleen and are for sorting/filtering only - they are
@@ -158,19 +168,52 @@ public static class CivicPlaces
     public static double? MilesFor(string city) =>
         MilesFromKathleen.TryGetValue(city ?? string.Empty, out var miles) ? miles : null;
 
+    // Approximate town-centre coordinates, used when an event has no venue coordinates of its own.
+    public static readonly IReadOnlyDictionary<string, (double Latitude, double Longitude)> TownCoordinates =
+        new Dictionary<string, (double, double)>(StringComparer.OrdinalIgnoreCase)
+        {
+            [Kathleen] = (32.4610, -83.6152),
+            [Bonaire] = (32.5485, -83.5938),
+            [WarnerRobins] = (32.6130, -83.6242),
+            [HoustonCounty] = (32.4590, -83.6660),
+            [Perry] = (32.4582, -83.7316),
+            [Centerville] = (32.6302, -83.6893),
+            [Byron] = (32.6535, -83.7596),
+            [Macon] = (32.8407, -83.6324),
+            [FortValley] = (32.5537, -83.8874),
+        };
+
+    public const string FortValley = "Fort Valley";
+
+    // Straight-line miles from an arbitrary home point to the event (venue first, then town).
+    public static double? MilesFrom(double homeLatitude, double homeLongitude, CivicEvent item)
+    {
+        if (item.Latitude is { } lat && item.Longitude is { } lon)
+        {
+            return Math.Round(MilesBetween(homeLatitude, homeLongitude, lat, lon), 1);
+        }
+
+        return TownCoordinates.TryGetValue(item.City ?? string.Empty, out var town)
+            ? Math.Round(MilesBetween(homeLatitude, homeLongitude, town.Latitude, town.Longitude), 1)
+            : null;
+    }
+
     // Kathleen, GA. Sources that publish venue coordinates (Eventbrite's schema.org markup does)
     // get a real per-venue distance instead of the coarse per-town figure above - the difference
     // is real, e.g. two Warner Robins venues 7.5 and 11.1 miles out.
     public const double HomeLatitude = 32.4610;
     public const double HomeLongitude = -83.6152;
 
-    public static double MilesFromHomeTo(double latitude, double longitude)
+    public static double MilesFromHomeTo(double latitude, double longitude) =>
+        MilesBetween(HomeLatitude, HomeLongitude, latitude, longitude);
+
+    public static double MilesBetween(double fromLatitude, double fromLongitude, double toLatitude, double toLongitude)
     {
         const double earthRadiusMiles = 3958.8;
-        var dLat = DegreesToRadians(latitude - HomeLatitude);
-        var dLon = DegreesToRadians(longitude - HomeLongitude);
+        var dLat = DegreesToRadians(toLatitude - fromLatitude);
+        var dLon = DegreesToRadians(toLongitude - fromLongitude);
         var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2)
-                + Math.Cos(DegreesToRadians(HomeLatitude)) * Math.Cos(DegreesToRadians(latitude))
+                + Math.Cos(DegreesToRadians(fromLatitude)) * Math.Cos(DegreesToRadians(toLatitude))
                 * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
         return 2 * earthRadiusMiles * Math.Asin(Math.Sqrt(a));
     }
@@ -184,7 +227,7 @@ public static class CivicPlaces
     {
         var haystack = $"{location} {source}";
         foreach (var candidate in new[]
-                 { WarnerRobins, Kathleen, Bonaire, Centerville, Byron, Perry, Macon })
+                 { WarnerRobins, Kathleen, Bonaire, Centerville, Byron, Perry, Macon, FortValley })
         {
             if (haystack.Contains(candidate, StringComparison.OrdinalIgnoreCase)) return candidate;
         }
@@ -243,15 +286,20 @@ public sealed record StateLegislativeVoteSummary(
     IReadOnlyList<StateMemberVoteRecord> Votes,
     LegislationDetailBrief? Legislation);
 
+// MemberId is the Georgia General Assembly's own member id, used to find "your" legislators.
 public sealed record StateMemberVoteRecord(
     string Name,
-    string Vote);
+    string Vote,
+    int? MemberId = null);
 
+// MemberId is the chamber's own identifier: the bioguide id for the House (name-id), the LIS id
+// for the Senate (lis_member_id). Both appear in the congress-legislators dataset.
 public sealed record MemberVoteRecord(
     string Name,
     string Party,
     string State,
-    string Vote);
+    string Vote,
+    string? MemberId = null);
 
 public sealed record LegislationDetailBrief(
     string Kind,

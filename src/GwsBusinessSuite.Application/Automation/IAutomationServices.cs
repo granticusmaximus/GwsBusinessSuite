@@ -282,4 +282,7 @@ public interface IAutomationTriggerService
     // Fires every active workflow with an enabled "bi.goalCrossedTrigger" node whose widgetTitle
     // is empty or equals widgetTitle, when a BI chart crosses its goal.
     Task<int> TriggerBiGoalCrossedAsync(string widgetTitle, string inputJson, CancellationToken cancellationToken = default);
+    // Fires every active workflow with an enabled "civic.billStatusChangedTrigger" node whose bill
+    // is empty or equals billLabel, when a watched bill's status changes.
+    Task<int> TriggerCivicBillStatusChangedAsync(string billLabel, string inputJson, CancellationToken cancellationToken = default);
 }

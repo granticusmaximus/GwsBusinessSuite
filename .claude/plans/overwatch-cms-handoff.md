@@ -1,5 +1,7 @@
 # Overwatch + CMS block library — handoff for Codex
 
+> **~~SUPERSEDED~~ (audit 2026-10-07):** Workstreams B-E are built (master plan resume status 2026-10-03). Only Overwatch coverage is open; see overwatch-coverage-2026-10.md and intelligence-expansion-2026-10.md.
+
 **Status as of 2026-09-28.** This is a point-in-time handoff, not the master plan — for full
 architecture, market research, and the complete 5-workstream scope (Overwatch global coverage,
 blog blocks, marketing blocks, 15 themes, community/intranet system), read

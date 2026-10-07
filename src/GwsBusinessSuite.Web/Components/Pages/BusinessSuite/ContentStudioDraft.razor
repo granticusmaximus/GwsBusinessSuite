@@ -1,6 +1,6 @@
 @page "/admin/content-studio/draft/{DraftId:guid}"
 @rendermode InteractiveServer
-@attribute [Authorize(Policy = "ContentAccess")]
+@attribute [Authorize(Policy = "NativeContentStudioAccess")]
 @using Microsoft.AspNetCore.Authorization
 @implements IAsyncDisposable
 @using GwsBusinessSuite.Application.ContentStudio
@@ -160,6 +160,16 @@ else
                                                        Placeholder="Describe what should be revised or explain decision notes."
                                                        AriaLabel="Revision notes" />
                         </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold small">Revision Model</label>
+                            <select class="form-select" @bind="SelectedRevisionModel" disabled="@(LocalModels.Count == 0)">
+                                @foreach (var model in LocalModels)
+                                {
+                                    <option value="@model">@model</option>
+                                }
+                            </select>
+                            <div class="form-text">The revision runs on the selected model installed on this Mac.</div>
+                        </div>
                     </div>
 
                     <div class="d-flex flex-wrap gap-2 mb-4">
@@ -304,6 +314,8 @@ else
     private string HeroUploadError { get; set; } = string.Empty;
     private string HeroImagePromptInput { get; set; } = string.Empty;
     private string EditableMarkdown { get; set; } = string.Empty;
+    private List<string> LocalModels { get; set; } = new();
+    private string SelectedRevisionModel { get; set; } = string.Empty;
     private bool HeroImageGenerationConfigured { get; set; }
     private List<ContentStudioRevisionView> RevisionHistory { get; set; } = new();
     private ContentStudioRevisionDiff? RevisionDiff { get; set; }
@@ -332,6 +344,27 @@ else
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         await JS.InvokeVoidAsync("gwsTooltips.init", "[data-bs-toggle='tooltip']");
+        if (!firstRender) return;
+
+        try
+        {
+            _localModels ??= new BrowserLocalOllamaService(JS);
+            var status = await _localModels.ProbeAsync();
+            if (status.IsReachable)
+            {
+                LocalModels = status.Models.Order(StringComparer.OrdinalIgnoreCase).ToList();
+                SelectedRevisionModel = LocalModels.FirstOrDefault(model =>
+                    string.Equals(model, ContentStudioOptions.DefaultModel, StringComparison.OrdinalIgnoreCase)
+                    || model.StartsWith($"{ContentStudioOptions.DefaultModel}:", StringComparison.OrdinalIgnoreCase))
+                    ?? LocalModels.FirstOrDefault()
+                    ?? string.Empty;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Unable to list local Ollama models for draft revision.");
+        }
     }
 
     private async Task LoadDraft()
@@ -473,29 +506,28 @@ else
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(SelectedRevisionModel))
+        {
+            ErrorMessage = "Start Ollama and select a model installed on this Mac before requesting a revision.";
+            return;
+        }
+
         var user = await CurrentUserNameAsync();
         var request = new DraftRevisionRequest
         {
             DraftId = CurrentDraft.DraftId,
             RequestedModifications = RevisionNotes,
-            PerformedBy = user
+            PerformedBy = user,
+            Model = SelectedRevisionModel
         };
         await RunWorkflowAction(
             async () =>
             {
-                // Light server-AI mode: the revision is written by this computer's Ollama.
-                if (!ServerAi.Value.IsLight)
-                {
-                    return await ContentStudioService.RequestRevisionAsync(request);
-                }
-
                 _localModels ??= new BrowserLocalOllamaService(JS);
                 await _localModels.EnsureReachableAsync();
                 return await ContentStudioService.RequestRevisionAsync(request, _localModels);
             },
-            ServerAi.Value.IsLight
-                ? "Writing a revised draft with SentinelGPT on this computer's Ollama, using your revision notes."
-                : "Requesting a revised article draft from SentinelGPT with your revision notes.",
+            "Writing a revised draft with SentinelGPT on this Mac's Ollama, using your revision notes.",
             _ => "Revision requested and persisted.");
     }
 

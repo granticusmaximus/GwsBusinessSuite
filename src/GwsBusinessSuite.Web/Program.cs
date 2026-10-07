@@ -218,6 +218,14 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("ContentAccess", policy =>
         policy.RequireAuthenticatedUser().RequireRole(AppRoles.Admin, AppRoles.Author, AppRoles.Contributor));
 
+    // Content Studio is intentionally a native-Mac capability. The device-login flow is the
+    // only authentication path that issues this amr claim; an ordinary browser session keeps
+    // access to Posts and the rest of ContentAccess, but cannot open the Studio by URL.
+    options.AddPolicy("NativeContentStudioAccess", policy =>
+        policy.RequireAuthenticatedUser()
+            .RequireRole(AppRoles.Admin, AppRoles.Author, AppRoles.Contributor)
+            .RequireClaim("amr", "device-secret"));
+
     options.AddPolicy("ContributorAccess", policy =>
         policy.RequireAuthenticatedUser().RequireRole(AppRoles.Admin, AppRoles.Contributor));
 

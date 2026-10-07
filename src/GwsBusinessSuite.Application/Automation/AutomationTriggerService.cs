@@ -315,6 +315,34 @@ public sealed class AutomationTriggerService(
         return triggered;
     }
 
+    public async Task<int> TriggerCivicBillStatusChangedAsync(string billLabel, string inputJson, CancellationToken cancellationToken = default)
+    {
+        var subscribers = await db.AutomationWorkflows.AsNoTracking().Where(item =>
+            item.Status == AutomationWorkflowStatuses.Active && item.TriggerCivicBillStatusChanged)
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+
+        var triggered = 0;
+        foreach (var workflowId in subscribers)
+        {
+            try
+            {
+                var snapshot = await workflowService.GetPublishedSnapshotAsync(workflowId, cancellationToken);
+                var triggerNode = snapshot?.Nodes.FirstOrDefault(node => node.TypeKey == "civic.billStatusChangedTrigger" && !node.IsDisabled);
+                if (triggerNode is null) continue;
+                var wantedBill = ReadStringParameter(triggerNode.ParametersJson, "bill");
+                if (!string.IsNullOrWhiteSpace(wantedBill) && !string.Equals(wantedBill.Trim(), billLabel, StringComparison.OrdinalIgnoreCase)) continue;
+
+                await executionService.ExecuteAsync(workflowId, inputJson, AutomationExecutionModes.CivicBillStatusChanged, cancellationToken: cancellationToken);
+                triggered++;
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Civic Watch bill-status trigger failed for automation workflow {WorkflowId}.", workflowId);
+            }
+        }
+        return triggered;
+    }
+
     public async Task<int> TriggerSentinelChatPromptSubmittedAsync(
         string prompt, Guid? conversationId, CancellationToken cancellationToken = default)
     {

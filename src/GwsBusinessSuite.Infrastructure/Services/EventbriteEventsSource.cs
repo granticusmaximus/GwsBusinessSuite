@@ -88,7 +88,9 @@ public sealed class EventbriteEventsSource(
                 "Eventbrite",
                 e.ImageUrl,
                 string.IsNullOrWhiteSpace(e.City) ? fallbackCity : e.City,
-                e.MilesFromHome ?? CivicPlaces.MilesFor(fallbackCity)))
+                e.MilesFromHome ?? CivicPlaces.MilesFor(fallbackCity),
+                e.Latitude,
+                e.Longitude))
             .ToList();
     }
 }

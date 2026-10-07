@@ -2246,6 +2246,7 @@ public static class AutomationExecutionModes
     public const string CmsFormSubmitted = "CmsFormSubmitted";
     public const string NewsArticlesFound = "NewsArticlesFound";
     public const string BiGoalCrossed = "BiGoalCrossed";
+    public const string CivicBillStatusChanged = "CivicBillStatusChanged";
     public const string WikiPageChanged = "WikiPageChanged";
     // A sandboxed dry run of a past execution's recorded input against the current published
     // graph - see AutomationExecutionService.ReplayAsync. Never performs real side effects.
@@ -2304,6 +2305,8 @@ public sealed class AutomationWorkflow : AuditableEntity
     public bool TriggerNewsArticlesFound { get; set; }
     // Same pattern, synced from an enabled "bi.goalCrossedTrigger" node (BI Dashboards goals).
     public bool TriggerBiGoalCrossed { get; set; }
+    // Same pattern, synced from an enabled "civic.billStatusChangedTrigger" node (Civic Watch).
+    public bool TriggerCivicBillStatusChanged { get; set; }
     // Synced from an enabled "wiki.pageChangedTrigger" node's ParametersJson on Publish, same
     // pattern as TriggerWikiDatabaseId - a specific page id, not "any page", matching that
     // node's own single-target parameter shape. Null means this workflow has no (enabled) wiki

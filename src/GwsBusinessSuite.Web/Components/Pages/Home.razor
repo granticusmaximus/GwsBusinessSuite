@@ -23,7 +23,10 @@
     </div>
     <div class="gws-dashboard-quick-actions" aria-label="Quick actions">
         <a class="btn btn-primary" href="/admin/article-editor"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Manage posts</a>
-        <a class="btn btn-outline-secondary" href="/admin/content-studio"><i class="bi bi-magic me-1" aria-hidden="true"></i>Generate draft</a>
+        @if (IsNativeApp)
+        {
+            <a class="btn btn-outline-secondary" href="/admin/content-studio"><i class="bi bi-magic me-1" aria-hidden="true"></i>Generate draft</a>
+        }
         <button type="button" class="btn btn-outline-secondary" @onclick="OpenQuickNote">
             <i class="bi bi-stickies-fill me-1" aria-hidden="true"></i>Quick Note
         </button>
@@ -167,6 +170,7 @@
     private int _dueFollowUps;
     private int _unreadAlerts;
     private string _role = string.Empty;
+    private bool IsNativeApp { get; set; }
     private bool _showQuickNote;
     private string _quickNoteStatus = string.Empty;
     private bool _showCommandPaletteHint;
@@ -195,9 +199,13 @@
         {
             var items = new List<AttentionItem>
             {
-                new("Drafts to review", "Ready for editorial review", _pendingDrafts, "/admin/content-studio", "bi-file-earmark-check", "bg-primary-subtle text-primary"),
                 new("Comments", "Waiting for moderation", _pendingComments, "/admin/comments", "bi-chat-left-text", "bg-info-subtle text-info")
             };
+
+            if (IsNativeApp)
+            {
+                items.Insert(0, new("Drafts to review", "Ready for editorial review", _pendingDrafts, "/admin/content-studio", "bi-file-earmark-check", "bg-primary-subtle text-primary"));
+            }
 
             if (IsAdmin)
             {
@@ -241,6 +249,7 @@
     {
         var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         _role = authenticationState.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
+        IsNativeApp = authenticationState.User.HasClaim("amr", "device-secret");
 
         var summary = await SummaryService.GetAsync(includeAdminMetrics: IsAdmin);
         _pendingDrafts = summary.PendingDrafts;

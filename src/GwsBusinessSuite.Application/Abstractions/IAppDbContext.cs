@@ -39,6 +39,10 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<NewsReadMark> NewsReadMarks { get; }
     DbSet<SavedNewsArticle> SavedNewsArticles { get; }
     DbSet<NewsTrendDay> NewsTrendDays { get; }
+    DbSet<CivicWatchSettings> CivicWatchSettings { get; }
+    DbSet<WatchedBill> WatchedBills { get; }
+    DbSet<CivicItemSighting> CivicItemSightings { get; }
+    DbSet<CivicMeetingDocument> CivicMeetingDocuments { get; }
     DbSet<ThreatWatchAsset> ThreatWatchAssets { get; }
     DbSet<ThreatStackItem> ThreatStackItems { get; }
     DbSet<ThreatFinding> ThreatFindings { get; }

@@ -744,25 +744,31 @@ public sealed class ContentStudioServiceTests
         var service = CreateService(db, factory, serverOllama, ServerAiMode.Light);
 
         ArticleGenerationResult? generated = null;
-        await foreach (var chunk in service.GenerateArticleStreamAsync(new ArticleGenerationRequest { Topic = "Local Drafts" }, localOllama))
+        await foreach (var chunk in service.GenerateArticleStreamAsync(new ArticleGenerationRequest
+        {
+            Topic = "Local Drafts",
+            Model = "qwen-local:latest"
+        }, localOllama))
         {
             generated = chunk.CompletedDraft ?? generated;
         }
 
         Assert.NotNull(generated);
         Assert.Contains("# Local draft", generated!.Markdown);
+        Assert.Equal("qwen-local:latest", localOllama.LastRequestedModel);
 
         localOllama.GenerateTextResult = "# Local revision";
         var revised = await service.RequestRevisionAsync(new DraftRevisionRequest
         {
             DraftId = generated.DraftId,
             RequestedModifications = "Tighten the intro.",
-            PerformedBy = "reviewer"
+            PerformedBy = "reviewer",
+            Model = "gemma-local:latest"
         }, localOllama);
 
         Assert.Contains("# Local revision", revised!.Markdown);
         Assert.Equal(1, revised.RevisionNumber);
-        Assert.Equal("sentinelgpt", localOllama.LastRequestedModel);
+        Assert.Equal("gemma-local:latest", localOllama.LastRequestedModel);
         Assert.Null(serverOllama.LastRequestedModel);
     }
 

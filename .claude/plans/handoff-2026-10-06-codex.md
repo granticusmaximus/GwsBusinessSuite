@@ -1,5 +1,11 @@
 # Handoff to Codex - 2026-10-06
 
+> **Audit 2026-10-07: everything in sections 1 and 2 is DONE** (checked against code): textarea uses
+> `value=`; script import bumped to `?v=12`; Trash has select-all + per-item checkboxes + "Delete
+> permanently" ConfirmModal; Recent rows are draggable (`StartDragRecentPage`); `/page` flush now
+> uses `PerformAutosaveAsync(allowWhileBusy: true)`. Media Watch is committed (b2f2841). Remaining
+> open work lives in `intelligence-expansion-2026-10.md` (Civic Watch, Overwatch).
+
 Claude is out of weekly budget. This file is the full state; read it before touching anything.
 
 ## Rules for this repo (from CLAUDE.md - binding)
@@ -22,7 +28,7 @@ Claude is out of weekly budget. This file is the full state; read it before touc
   A test app may still be listening on port 5399 - `lsof -ti tcp:5399 | xargs kill` first.
 - Builds/tests are slow (~2-12 min for big filters). The full suite in verify-release took ~140s last time.
 
-## 1. Working tree right now: Media Watch work, UNCOMMITTED and NOT fully verified
+## ~~1. Working tree right now: Media Watch work, UNCOMMITTED and NOT fully verified~~ (done)
 
 Everything below is in the working tree (`git status`), not committed. `verify-release.sh` has NOT
 been run on it.
@@ -56,24 +62,24 @@ Also uncommitted: `ThreatIntelligence.razor.css` dark-mode masthead fix (verifie
 and email validation tightened in `ThreatMonitorService.SaveSettingsAsync` (MimeKit accepts a bare
 "bob" as an address; both services now use `NewsWatchService.IsEmailAddress`).
 
-## 2. Grant's new request (priority - he interrupted Media Watch for this)
+## ~~2. Grant's new request (priority - he interrupted Media Watch for this)~~ (done)
 
 Sentinel (`src/GwsBusinessSuite.Web/Components/Pages/BusinessSuite/Wiki.razor`):
 
-1. **Trash: select all + permanent delete.** Today items are deleted one by one. Add select-all
+1. ~~**Trash: select all + permanent delete.**~~ DONE Today items are deleted one by one. Add select-all
    (and per-item checkboxes if missing), a "Delete permanently" action, and a confirmation modal
    with **Delete** and **Cancel**. The page already uses `<ConfirmModal ...>` for bulk trash
    (search "Move {_selectedTreeNodeIds.Count} selected item(s)") - reuse it. Check what permanent
    delete API exists in `IWikiService` / `WikiDatabaseService` (search "PermanentlyDelete" / "Purge").
    Remember trashed pages can have trashed descendants and databases.
-2. **Drag a Recent page onto a parent page to make it that page's child.** The sidebar "Recent"
+2. ~~**Drag a Recent page onto a parent page to make it that page's child.**~~ DONE The sidebar "Recent"
    list is rendered near the top of Wiki.razor (`Navigation.Recent...`, `sentinel-nav-item`).
    Tree drag-and-drop/reorder already exists (`wwwroot/js/dragReorder.js`,
    `WikiService.ReorderPageAsync`, `MoveToSelectedParentAsync`, the "move under" bulk action) -
    reuse that move path; don't build a second one. Rules from Grant: one parent can have many
    children; a child has exactly one parent. Moving under its own descendant must be refused
    (existing code already guards this in bulk move - reuse).
-3. **`/page` still "opens a blank page but doesn't connect it to the parent".** Facts so far:
+3. ~~**`/page` still "opens a blank page but doesn't connect it to the parent".**~~ DONE Facts so far:
    - The fix (commit `586c9db`, deployed 2026-10-06 01:25 UTC, deploy succeeded) makes `/page`
      create the child with `ParentWikiPageId`, replace the typed `/page` block with a page-link
      card, save the parent, then open the child with the title focused. Flow:

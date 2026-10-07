@@ -1,5 +1,7 @@
 # Handoff: "Make it production ready" — punch-list work in progress
 
+> **~~CLOSED~~ (audit 2026-10-07):** Codex finished the punch list (see 2026-08-22 update below).
+
 ## 2026-08-22 update: Codex completed essentially the entire punch list below
 
 Working in tandem, Codex (per the user: "Codex is working as well... to get double the work

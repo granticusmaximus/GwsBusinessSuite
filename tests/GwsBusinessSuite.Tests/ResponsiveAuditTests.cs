@@ -47,7 +47,7 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         "/admin/appearance/menus", "/admin/article-editor", "/admin/automation", "/admin/automation/credentials",
         "/admin/automation/help", "/admin/billing", "/admin/business-intelligence", "/admin/cj-ads",
         "/admin/cms-knowledge", "/admin/comments", "/admin/community", "/admin/community/activity",
-        "/admin/community/departments", "/admin/community/messages", "/admin/content-studio", "/admin/crm",
+        "/admin/community/departments", "/admin/community/messages", "/admin/crm",
         "/admin/deal-scoring", "/admin/dev-tools", "/admin/docker-health", "/admin/email-campaigns",
         "/admin/form-submissions", "/admin/government-intelligence", "/admin/growth", "/admin/live-show",
         "/admin/live-show-recordings", "/admin/localization", "/admin/media", "/admin/mind-maps",

@@ -1,5 +1,7 @@
 # Handoff: Developer Mode for the native SentinelGPT tab
 
+> **~~CLOSED~~ (audit 2026-10-07):** items 1, 2, 4, 5 done (Windows CI fixed 2026-09-05; Mind Maps shipped; Osiris perf done, then Osiris removed in 6b009a4). Item 3 (blazordevelopertools) was a dead end: it needs Auto render mode and this app uses InteractiveServer. Item 6 (live Mac-app smoke test) needs Grant.
+
 ## Status: shipped 2026-08-25 (commits `240f43e`, `146908f`, `6755037`)
 
 Full plan lived at `~/.claude/plans/crystalline-spinning-babbage.md` (outside this repo, may not

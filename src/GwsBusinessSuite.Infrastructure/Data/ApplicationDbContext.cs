@@ -57,6 +57,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<NewsReadMark> NewsReadMarks => Set<NewsReadMark>();
     public DbSet<SavedNewsArticle> SavedNewsArticles => Set<SavedNewsArticle>();
     public DbSet<NewsTrendDay> NewsTrendDays => Set<NewsTrendDay>();
+    public DbSet<CivicWatchSettings> CivicWatchSettings => Set<CivicWatchSettings>();
+    public DbSet<WatchedBill> WatchedBills => Set<WatchedBill>();
+    public DbSet<CivicItemSighting> CivicItemSightings => Set<CivicItemSighting>();
+    public DbSet<CivicMeetingDocument> CivicMeetingDocuments => Set<CivicMeetingDocument>();
     public DbSet<ThreatWatchAsset> ThreatWatchAssets => Set<ThreatWatchAsset>();
     public DbSet<ThreatStackItem> ThreatStackItems => Set<ThreatStackItem>();
     public DbSet<ThreatFinding> ThreatFindings => Set<ThreatFinding>();
@@ -357,6 +361,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<NewsReadMark>().HasIndex(x => new { x.Username, x.UrlHash }).IsUnique();
         modelBuilder.Entity<SavedNewsArticle>().HasIndex(x => new { x.Username, x.UrlHash }).IsUnique();
         modelBuilder.Entity<NewsTrendDay>().HasIndex(x => new { x.TopicKey, x.Day }).IsUnique();
+        modelBuilder.Entity<WatchedBill>().HasIndex(x => new { x.Jurisdiction, x.BillType, x.Number, x.Congress }).IsUnique();
+        modelBuilder.Entity<CivicItemSighting>().HasIndex(x => x.ItemKey).IsUnique();
+        modelBuilder.Entity<CivicMeetingDocument>().HasIndex(x => x.Url).IsUnique();
         modelBuilder.Entity<ThreatWatchAsset>().HasIndex(x => x.Value).IsUnique();
         modelBuilder.Entity<ThreatWatchAsset>().Property(x => x.Value).HasMaxLength(255);
         modelBuilder.Entity<ThreatStackItem>().Property(x => x.Name).HasMaxLength(120);
