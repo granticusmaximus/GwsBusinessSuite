@@ -38,3 +38,12 @@ public sealed class OverwatchAreaAlert : AuditableEntity
     public required string Message { get; set; }
     public DateTimeOffset? ReadAt { get; set; }
 }
+
+// A saved route-watch trip: an ordered list of stops (place names or "lat, lon"), re-plotted
+// with current cameras/incidents/alerts whenever it's opened.
+public sealed class OverwatchTrip : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string Name { get; set; }
+    public string StopsJson { get; set; } = "[]";
+}

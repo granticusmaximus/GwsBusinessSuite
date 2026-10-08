@@ -14,6 +14,12 @@ public sealed record RouteCamera(CameraFeed Camera, double MilesAlong, double Mi
 
 public sealed record RouteIncident(TrafficIncident Incident, double MilesAlong, double MilesOff);
 
+// One leg between consecutive stops of a trip.
+public sealed record RouteLeg(string From, string To, double DistanceMiles, double DurationMinutes, double StartsAtMile);
+
+// The resolved position of each stop (in order), so the globe can mark them.
+public sealed record RouteStop(string Label, double Latitude, double Longitude);
+
 public sealed record RouteWatchResult(
     string From,
     string To,
@@ -23,7 +29,9 @@ public sealed record RouteWatchResult(
     IReadOnlyList<RouteCamera> Cameras,
     IReadOnlyList<RouteIncident> Incidents,
     IReadOnlyList<WeatherAlert> Alerts,
-    string? Error = null)
+    string? Error = null,
+    IReadOnlyList<RouteLeg>? Legs = null,
+    IReadOnlyList<RouteStop>? Stops = null)
 {
     public static RouteWatchResult Failed(string from, string to, string error) => new(from, to, 0, 0, [], [], [], [], error);
 }
@@ -46,23 +54,32 @@ public sealed class RouteWatchService(
     public const int MaxCameras = 60;
     private const double MaxRouteMiles = 1200;
 
-    public async Task<RouteWatchResult> WatchAsync(string from, string to, CancellationToken cancellationToken = default)
+    public const int MaxStops = 10;
+
+    public Task<RouteWatchResult> WatchAsync(string from, string to, CancellationToken cancellationToken = default) =>
+        WatchTripAsync([from, to], cancellationToken);
+
+    // A trip: start, any stops, destination - routed in order as one drive.
+    public async Task<RouteWatchResult> WatchTripAsync(IReadOnlyList<string> stops, CancellationToken cancellationToken = default)
     {
-        from = (from ?? string.Empty).Trim();
-        to = (to ?? string.Empty).Trim();
-        if (from.Length == 0 || to.Length == 0) return RouteWatchResult.Failed(from, to, "Enter both a start and a destination.");
+        var names = (stops ?? []).Select(s => (s ?? string.Empty).Trim()).Where(s => s.Length > 0).ToList();
+        var from = names.FirstOrDefault() ?? string.Empty;
+        var to = names.Count > 1 ? names[^1] : string.Empty;
+        if (names.Count < 2) return RouteWatchResult.Failed(from, to, "Enter both a start and a destination.");
+        if (names.Count > MaxStops) return RouteWatchResult.Failed(from, to, $"A trip can have up to {MaxStops} stops.");
 
-        var startTask = geocoding.GeocodeAsync(from, cancellationToken);
-        var endTask = geocoding.GeocodeAsync(to, cancellationToken);
-        await Task.WhenAll(startTask, endTask);
-        if (startTask.Result is not { } start) return RouteWatchResult.Failed(from, to, $"Couldn't find \"{from}\".");
-        if (endTask.Result is not { } end) return RouteWatchResult.Failed(from, to, $"Couldn't find \"{to}\".");
+        var points = await Task.WhenAll(names.Select(n => ResolveAsync(n, cancellationToken)));
+        for (var i = 0; i < names.Count; i++)
+        {
+            if (points[i] is null) return RouteWatchResult.Failed(from, to, $"Couldn't find \"{names[i]}\".");
+        }
+        var resolved = points.Select(p => p!).ToList();
 
-        (IReadOnlyList<RoutePoint> Path, double Meters, double Seconds)? route;
+        (IReadOnlyList<RoutePoint> Path, double Meters, double Seconds, IReadOnlyList<(double Meters, double Seconds)> Legs)? route;
         try
         {
-            var url = string.Create(CultureInfo.InvariantCulture,
-                $"{OsrmRouteUrl}{start.Longitude},{start.Latitude};{end.Longitude},{end.Latitude}?overview=full&geometries=geojson");
+            var coordinates = string.Join(';', resolved.Select(p => string.Create(CultureInfo.InvariantCulture, $"{p.Longitude},{p.Latitude}")));
+            var url = $"{OsrmRouteUrl}{coordinates}?overview=full&geometries=geojson";
             route = ParseOsrmRoute(await httpClient.GetStringAsync(url, cancellationToken));
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !cancellationToken.IsCancellationRequested)
@@ -72,6 +89,15 @@ public sealed class RouteWatchService(
         }
         if (route is not { } r || r.Path.Count < 2) return RouteWatchResult.Failed(from, to, "No drivable route was found between those places.");
         var miles = r.Meters / 1609.344;
+        var legs = new List<RouteLeg>();
+        var startsAt = 0d;
+        for (var i = 0; i < r.Legs.Count && i + 1 < names.Count; i++)
+        {
+            var legMiles = r.Legs[i].Meters / 1609.344;
+            legs.Add(new RouteLeg(names[i], names[i + 1], legMiles, r.Legs[i].Seconds / 60, startsAt));
+            startsAt += legMiles;
+        }
+        var routeStops = names.Select((n, i) => new RouteStop(n, resolved[i].Latitude, resolved[i].Longitude)).ToList();
         if (miles > MaxRouteMiles) return RouteWatchResult.Failed(from, to, $"That route is {miles:N0} miles; route watch handles drives up to {MaxRouteMiles:N0} miles.");
 
         var bbox = Expand(BoundsOf(r.Path), IncidentCorridorMiles);
@@ -96,10 +122,25 @@ public sealed class RouteWatchService(
         var routeAlerts = alertsTask.Result.Where(a => TouchesRoute(a, r.Path)).ToList();
 
         return new RouteWatchResult(from, to, miles, r.Seconds / 60, r.Path,
-            ThinAlongRoute(routeCameras, MaxCameras), routeIncidents, routeAlerts);
+            ThinAlongRoute(routeCameras, MaxCameras), routeIncidents, routeAlerts, null, legs, routeStops);
     }
 
-    public static (IReadOnlyList<RoutePoint> Path, double Meters, double Seconds)? ParseOsrmRoute(string json)
+    // "32.46, -83.61" (from the map picker, or typed) is used as-is; anything else is geocoded.
+    private async Task<GeocodeResult?> ResolveAsync(string text, CancellationToken ct) =>
+        TryParseCoordinates(text) ?? await geocoding.GeocodeAsync(text, ct);
+
+    public static GeocodeResult? TryParseCoordinates(string text)
+    {
+        var parts = text.Split(',', StringSplitOptions.TrimEntries);
+        return parts.Length == 2
+               && double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var lat)
+               && double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var lon)
+               && lat is >= -90 and <= 90 && lon is >= -180 and <= 180
+            ? new GeocodeResult(lat, lon)
+            : null;
+    }
+
+    public static (IReadOnlyList<RoutePoint> Path, double Meters, double Seconds, IReadOnlyList<(double Meters, double Seconds)> Legs)? ParseOsrmRoute(string json)
     {
         using var doc = JsonDocument.Parse(json);
         if (!doc.RootElement.TryGetProperty("code", out var code) || code.GetString() != "Ok") return null;
@@ -109,7 +150,10 @@ public sealed class RouteWatchService(
         var path = route.GetProperty("geometry").GetProperty("coordinates").EnumerateArray()
             .Select(c => new RoutePoint(c[1].GetDouble(), c[0].GetDouble()))
             .ToList();
-        return (path, route.GetProperty("distance").GetDouble(), route.GetProperty("duration").GetDouble());
+        var legs = route.TryGetProperty("legs", out var legsEl) && legsEl.ValueKind == JsonValueKind.Array
+            ? legsEl.EnumerateArray().Select(l => (l.GetProperty("distance").GetDouble(), l.GetProperty("duration").GetDouble())).ToList()
+            : [];
+        return (path, route.GetProperty("distance").GetDouble(), route.GetProperty("duration").GetDouble(), legs);
     }
 
     // A long drive can pass hundreds of cameras; keep an even spread along the route instead of

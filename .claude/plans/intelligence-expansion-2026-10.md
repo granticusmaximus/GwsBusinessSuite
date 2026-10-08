@@ -179,5 +179,19 @@ New:
   - New 5 DONE: CameraIncidentReportService + SAVE REPORT button: frame copied to the media library,
     Sentinel page under "Overwatch reports" (camera, source, coords + OSM link, time, ANALYZE text).
     Browser-verified: page created, stored image renders.
+  - New 2 DONE: OverwatchWatchArea/OverwatchAreaAlert (migration AddOverwatchWatchAreas),
+    OverwatchAreaService + 10-min OverwatchAreaBackgroundService, AREAS panel, notification-bell
+    source "overwatch" (live via OverwatchAreaNotifier), /admin/osint?area= deep link. Found+fixed:
+    the bell navigated in-app, which leaves tacticalGlobe undefined (page-level script) and crashes
+    the circuit - Overwatch links now force a full load, same as the sidebar's data-enhance-nav=false.
+  - New 3 DONE: CameraTimelapseStore (files under Overwatch:TimelapsePath, 144 frames/camera,
+    500 MB total, not backed up) fed by the favorites health sweep (only changed frames, via
+    CameraHealthService.CheckWithFrameAsync); /admin/api/overwatch/timelapse endpoint (AdminOnly,
+    raster-only by magic bytes); TIME-LAPSE player in favorites. Live-verified with an Iceland camera.
+  - ALL 10 OVERWATCH ITEMS DONE 2026-10-08.
   - ADDED BY GRANT 2026-10-08 (mid-unit): "plot trips and routes with the map" -> building as an
-    extension of route watch: multi-stop trips, saved named trips, click-the-map to add a stop.
+    extension of route watch: multi-stop trips, saved named trips, click-the-map to add a stop. DONE 2026-10-08:
+    RouteWatchService.WatchTripAsync (OSRM multi-coordinate + per-leg), "lat, lon" stops, PICK ON MAP
+    (globe click -> OnMapPointPicked), stop markers, OverwatchTrip table (migration AddOverwatchTrips)
+    + OverwatchTripService, SAVED TRIPS (PLOT/X). Browser-verified: 3-stop trip, 2 legs, save + re-plot.
+    Enforced responsive audit on /admin/osint: score 0.

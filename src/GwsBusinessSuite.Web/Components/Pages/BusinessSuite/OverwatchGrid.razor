@@ -8,11 +8,13 @@
 @using GwsBusinessSuite.Application.Weather
 @inject CameraDirectoryService CameraDirectoryService
 @inject CameraHealthService CameraHealthService
+@inject CameraTimelapseStore CameraTimelapseStore
 @inject SourceStatusTracker SourceStatusTracker
 @inject GwsBusinessSuite.Application.Hazards.HazardLayerService HazardLayerService
 @inject GwsBusinessSuite.Application.RouteWatch.RouteWatchService RouteWatchService
 @inject GwsBusinessSuite.Infrastructure.Services.CameraIncidentReportService CameraIncidentReportService
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaService OverwatchAreaService
+@inject GwsBusinessSuite.Infrastructure.Services.OverwatchTripService OverwatchTripService
 @inject INwsAlertsService NwsAlertsService
 @inject INwsForecastService NwsForecastService
 @inject TrafficIncidentDirectoryService TrafficIncidentDirectoryService
@@ -203,14 +205,55 @@
     @if (_routeOpen)
     {
         <div class="tg-coverage-panel tg-route-panel" aria-label="Route watch">
-            <div class="tg-coverage-panel-header">ROUTE WATCH</div>
+            <div class="tg-coverage-panel-header">ROUTE WATCH / TRIPS</div>
             <form class="tg-route-form" @onsubmit="WatchRouteAsync" @onsubmit:preventDefault>
-                <input aria-label="Start" placeholder="FROM (city or address)" value="@_routeFrom" @oninput="e => _routeFrom = e.Value?.ToString() ?? string.Empty" />
-                <input aria-label="Destination" placeholder="TO (city or address)" value="@_routeTo" @oninput="e => _routeTo = e.Value?.ToString() ?? string.Empty" />
-                <button type="submit" disabled="@(_routeBusy || string.IsNullOrWhiteSpace(_routeFrom) || string.IsNullOrWhiteSpace(_routeTo))">
-                    @(_routeBusy ? "ROUTING..." : "WATCH ROUTE")
-                </button>
+                @for (var i = 0; i < _routeStops.Count; i++)
+                {
+                    var index = i;
+                    <div class="tg-route-stop">
+                        <input aria-label="@StopLabel(index)" placeholder="@StopPlaceholder(index)" value="@_routeStops[index]"
+                               @oninput="e => _routeStops[index] = e.Value?.ToString() ?? string.Empty" />
+                        <button type="button" title="Click the globe to set this stop" aria-label="@($"Pick {StopLabel(index)} on the map")"
+                                class="@(_pickingStop == index ? "is-on" : "")" @onclick="() => PickStopOnMapAsync(index)">@(_pickingStop == index ? "CLICK MAP" : "MAP")</button>
+                        @if (_routeStops.Count > 2)
+                        {
+                            <button type="button" aria-label="@($"Remove {StopLabel(index)}")" @onclick="() => RemoveStop(index)">X</button>
+                        }
+                    </div>
+                }
+                <div class="tg-route-row">
+                    <button type="button" disabled="@(_routeStops.Count >= GwsBusinessSuite.Application.RouteWatch.RouteWatchService.MaxStops)" @onclick="AddStop">+ STOP</button>
+                    <button type="submit" disabled="@(_routeBusy || _routeStops.Count(s => !string.IsNullOrWhiteSpace(s)) < 2)">
+                        @(_routeBusy ? "ROUTING..." : "WATCH ROUTE")
+                    </button>
+                </div>
             </form>
+            <form class="tg-route-form" @onsubmit="SaveTripAsync" @onsubmit:preventDefault>
+                <div class="tg-route-row">
+                    <input aria-label="Trip name" placeholder="NAME THIS TRIP" maxlength="80" value="@_tripName" @oninput="e => _tripName = e.Value?.ToString() ?? string.Empty" />
+                    <button type="submit" disabled="@(string.IsNullOrWhiteSpace(_tripName) || _routeStops.Count(s => !string.IsNullOrWhiteSpace(s)) < 2)">SAVE TRIP</button>
+                </div>
+            </form>
+            @if (!string.IsNullOrWhiteSpace(_tripMessage))
+            {
+                <div class="tg-favorites-empty" role="status">@_tripMessage</div>
+            }
+            @if (_trips.Count > 0)
+            {
+                <div class="tg-route-subheader">SAVED TRIPS</div>
+                <ul class="tg-coverage-list">
+                    @foreach (var trip in _trips)
+                    {
+                        <li class="tg-coverage-item">
+                            <span>@trip.Name<small>@string.Join(" > ", trip.Stops)</small></span>
+                            <span class="tg-area-actions">
+                                <button type="button" @onclick="() => PlotTripAsync(trip)">PLOT</button>
+                                <button type="button" aria-label="@($"Delete trip {trip.Name}")" @onclick="() => DeleteTripAsync(trip)">X</button>
+                            </span>
+                        </li>
+                    }
+                </ul>
+            }
             @if (_route is { } route)
             {
                 @if (!string.IsNullOrWhiteSpace(route.Error))
@@ -224,6 +267,17 @@
                         @route.Incidents.Count INCIDENTS · @route.Cameras.Count CAMERAS · @route.Alerts.Count ALERTS
                     </div>
                     <ul class="tg-coverage-list">
+                        @if (route.Legs is { Count: > 1 } legs)
+                        {
+                            @for (var legIndex = 0; legIndex < legs.Count; legIndex++)
+                            {
+                                var leg = legs[legIndex];
+                                <li class="tg-coverage-item tg-route-leg">
+                                    <span>MI @leg.StartsAtMile.ToString("0") · LEG @(legIndex + 1)
+                                        <small>@leg.From > @leg.To · @leg.DistanceMiles.ToString("N0") mi · @FormatDuration(leg.DurationMinutes)</small></span>
+                                </li>
+                            }
+                        }
                         @foreach (var alert in route.Alerts)
                         {
                             <li class="tg-coverage-item tg-route-alert"><span>ALERT · @alert.Event<small>@alert.AreaDescription</small></span></li>
@@ -288,7 +342,14 @@
                     {
                         <li class="tg-coverage-item">
                             <span>@favorite.Name</span>
-                            <button type="button" @onclick="() => GoToFavoriteAsync(favorite)">GO</button>
+                            <span class="tg-area-actions">
+                                @if (favorite.StreamKind == CameraStreamKind.Snapshot)
+                                {
+                                    <button type="button" title="Play the frames saved for this camera (one every 10 minutes when the picture changed, up to 24 hours)"
+                                            @onclick="() => OpenTimelapseAsync(favorite)">TIME-LAPSE</button>
+                                }
+                                <button type="button" @onclick="() => GoToFavoriteAsync(favorite)">GO</button>
+                            </span>
                         </li>
                     }
                 </ul>
@@ -569,6 +630,18 @@
         _favoritesOpen = !_favoritesOpen;
     }
 
+    private async Task OpenTimelapseAsync(CameraFeed favorite)
+    {
+        var frames = CameraTimelapseStore.ListFrames(favorite.Id)
+            .Select(f => new
+            {
+                url = $"/admin/api/overwatch/timelapse/{Uri.EscapeDataString(favorite.Id)}/{f.FileName}",
+                label = f.CapturedAt.ToLocalTime().ToString("MMM d, h:mm tt", System.Globalization.CultureInfo.InvariantCulture)
+            })
+            .ToList();
+        await JS.InvokeVoidAsync("tacticalGlobe.openTimelapse", favorite.Name, frames);
+    }
+
     private async Task GoToFavoriteAsync(CameraFeed favorite)
     {
         await JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", favorite.Latitude, favorite.Longitude, 3000);
@@ -814,41 +887,130 @@
 
     private bool _routeOpen;
     private bool _routeBusy;
-    private string _routeFrom = string.Empty;
-    private string _routeTo = string.Empty;
+    private readonly List<string> _routeStops = [string.Empty, string.Empty];
+    private int? _pickingStop;
+    private string _tripName = string.Empty;
+    private string? _tripMessage;
+    private List<GwsBusinessSuite.Infrastructure.Services.OverwatchTripView> _trips = new();
     private GwsBusinessSuite.Application.RouteWatch.RouteWatchResult? _route;
+
+    private static string StopLabel(int index) => index == 0 ? "start" : $"stop {index + 1}";
+
+    private string StopPlaceholder(int index) =>
+        index == 0 ? "FROM (city, address or MAP)" : index == _routeStops.Count - 1 ? "TO (city, address or MAP)" : "STOP (city, address or MAP)";
 
     private async Task ToggleRoutePanelAsync()
     {
         _routeOpen = !_routeOpen;
-        if (!_routeOpen && _route is not null)
+        if (_routeOpen)
         {
-            _route = null;
-            await JS.InvokeVoidAsync("tacticalGlobe.clearRoute");
+            _trips = (await OverwatchTripService.ListAsync(_username)).ToList();
         }
+        else
+        {
+            await CancelPickAsync();
+            if (_route is not null)
+            {
+                _route = null;
+                await JS.InvokeVoidAsync("tacticalGlobe.clearRoute");
+            }
+        }
+    }
+
+    private void AddStop() => _routeStops.Insert(_routeStops.Count - 1, string.Empty);
+
+    private void RemoveStop(int index)
+    {
+        if (_routeStops.Count > 2) _routeStops.RemoveAt(index);
+    }
+
+    private async Task PickStopOnMapAsync(int index)
+    {
+        if (_pickingStop == index)
+        {
+            await CancelPickAsync();
+            return;
+        }
+        _pickingStop = index;
+        await JS.InvokeVoidAsync("tacticalGlobe.startPickPoint", "tg-viewport");
+    }
+
+    private async Task CancelPickAsync()
+    {
+        if (_pickingStop is null) return;
+        _pickingStop = null;
+        await JS.InvokeVoidAsync("tacticalGlobe.cancelPickPoint", "tg-viewport");
+    }
+
+    // tactical-globe.js calls this with the clicked point while PICK ON MAP is armed.
+    [JSInvokable]
+    public Task OnMapPointPicked(double latitude, double longitude)
+    {
+        if (_pickingStop is { } index && index < _routeStops.Count)
+        {
+            _routeStops[index] = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{latitude:0.#####}, {longitude:0.#####}");
+        }
+        _pickingStop = null;
+        StateHasChanged();
+        return Task.CompletedTask;
     }
 
     private async Task WatchRouteAsync()
     {
         _routeBusy = true;
+        await CancelPickAsync();
+        var stops = _routeStops.Where(s => !string.IsNullOrWhiteSpace(s)).ToList();
         try
         {
-            _route = await RouteWatchService.WatchAsync(_routeFrom, _routeTo);
+            _route = await RouteWatchService.WatchTripAsync(stops);
             if (_route.Error is null)
             {
                 await JS.InvokeVoidAsync("tacticalGlobe.setRoute",
-                    _route.Path.Select(p => new[] { p.Longitude, p.Latitude }).ToList());
+                    _route.Path.Select(p => new[] { p.Longitude, p.Latitude }).ToList(), "tg-viewport",
+                    (_route.Stops ?? []).Select(st => new { lat = st.Latitude, lon = st.Longitude }).ToList());
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.LogWarning(ex, "Route watch failed");
-            _route = GwsBusinessSuite.Application.RouteWatch.RouteWatchResult.Failed(_routeFrom, _routeTo, "Route watch failed. Try again in a moment.");
+            _route = GwsBusinessSuite.Application.RouteWatch.RouteWatchResult.Failed(stops.FirstOrDefault() ?? "", stops.LastOrDefault() ?? "", "Route watch failed. Try again in a moment.");
         }
         finally
         {
             _routeBusy = false;
         }
+    }
+
+    private async Task SaveTripAsync()
+    {
+        _tripMessage = null;
+        try
+        {
+            var saved = await OverwatchTripService.SaveAsync(_username, _tripName, _routeStops);
+            _tripMessage = $"Saved \"{saved.Name}\".";
+            _tripName = string.Empty;
+            _trips = (await OverwatchTripService.ListAsync(_username)).ToList();
+        }
+        catch (ArgumentException ex)
+        {
+            _tripMessage = ex.Message;
+        }
+    }
+
+    private async Task PlotTripAsync(GwsBusinessSuite.Infrastructure.Services.OverwatchTripView trip)
+    {
+        _routeStops.Clear();
+        _routeStops.AddRange(trip.Stops);
+        while (_routeStops.Count < 2) _routeStops.Add(string.Empty);
+        _tripName = trip.Name;
+        await WatchRouteAsync();
+    }
+
+    private async Task DeleteTripAsync(GwsBusinessSuite.Infrastructure.Services.OverwatchTripView trip)
+    {
+        await OverwatchTripService.DeleteAsync(_username, trip.Id);
+        _trips = (await OverwatchTripService.ListAsync(_username)).ToList();
+        _tripMessage = $"Deleted \"{trip.Name}\".";
     }
 
     private async Task OpenRouteCameraAsync(CameraFeed camera) =>

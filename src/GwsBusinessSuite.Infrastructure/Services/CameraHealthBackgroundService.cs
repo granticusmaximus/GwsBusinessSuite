@@ -34,6 +34,7 @@ public sealed class CameraHealthBackgroundService(
         {
             await using var scope = scopeFactory.CreateAsyncScope();
             var health = scope.ServiceProvider.GetRequiredService<CameraHealthService>();
+            var timelapse = scope.ServiceProvider.GetRequiredService<CameraTimelapseStore>();
             await using var db = await scope.ServiceProvider.GetRequiredService<IAppDbContextFactory>().CreateDbContextAsync(ct);
             var favorites = (await db.CameraFavorites.AsNoTracking().ToListAsync(ct))
                 .Where(f => f.StreamKind == nameof(CameraStreamKind.Snapshot))
@@ -46,7 +47,12 @@ public sealed class CameraHealthBackgroundService(
             if (favorites.Count == 0) return;
 
             await Parallel.ForEachAsync(favorites, new ParallelOptions { MaxDegreeOfParallelism = Parallelism, CancellationToken = ct },
-                async (camera, token) => await health.CheckAsync(camera, token));
+                async (camera, token) =>
+                {
+                    // Favorites double as the time-lapse list: keep each frame that changed.
+                    var result = await health.CheckWithFrameAsync(camera, token);
+                    if (result.NewImage is { } image) await timelapse.SaveFrameAsync(camera.Id, image, DateTimeOffset.UtcNow, token);
+                });
             logger.LogDebug("Camera health: checked {Count} favorited cameras", favorites.Count);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

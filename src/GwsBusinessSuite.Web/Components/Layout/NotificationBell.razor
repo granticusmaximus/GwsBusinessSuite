@@ -264,7 +264,10 @@
         }
 
         IsOpen = false;
-        Navigation.NavigateTo(alert.NavigateTo);
+        // Overwatch loads its globe script from the page itself, which only runs on a full page
+        // load (the sidebar link sets data-enhance-nav="false" for the same reason) - an in-app
+        // navigation would leave tacticalGlobe undefined and crash the circuit.
+        Navigation.NavigateTo(alert.NavigateTo, forceLoad: alert.Kind == "overwatch");
     }
 
     public void Dispose()

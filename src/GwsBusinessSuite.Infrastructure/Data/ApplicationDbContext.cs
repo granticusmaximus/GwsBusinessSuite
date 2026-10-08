@@ -63,6 +63,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<CivicMeetingDocument> CivicMeetingDocuments => Set<CivicMeetingDocument>();
     public DbSet<OverwatchWatchArea> OverwatchWatchAreas => Set<OverwatchWatchArea>();
     public DbSet<OverwatchAreaAlert> OverwatchAreaAlerts => Set<OverwatchAreaAlert>();
+    public DbSet<OverwatchTrip> OverwatchTrips => Set<OverwatchTrip>();
     public DbSet<ThreatWatchAsset> ThreatWatchAssets => Set<ThreatWatchAsset>();
     public DbSet<ThreatStackItem> ThreatStackItems => Set<ThreatStackItem>();
     public DbSet<ThreatFinding> ThreatFindings => Set<ThreatFinding>();
@@ -368,6 +369,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<CivicMeetingDocument>().HasIndex(x => x.Url).IsUnique();
         modelBuilder.Entity<OverwatchWatchArea>().HasIndex(x => x.Username);
         modelBuilder.Entity<OverwatchAreaAlert>().HasIndex(x => new { x.Username, x.ReadAt });
+        modelBuilder.Entity<OverwatchTrip>().HasIndex(x => x.Username);
         modelBuilder.Entity<ThreatWatchAsset>().HasIndex(x => x.Value).IsUnique();
         modelBuilder.Entity<ThreatWatchAsset>().Property(x => x.Value).HasMaxLength(255);
         modelBuilder.Entity<ThreatStackItem>().Property(x => x.Name).HasMaxLength(120);

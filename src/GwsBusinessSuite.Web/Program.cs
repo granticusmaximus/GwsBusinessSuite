@@ -2751,6 +2751,26 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
 }).RequireAuthorization();
 
 // Decodes and serves a base64-stored media library asset, mirroring the /og-image pattern.
+// Overwatch time-lapse frames (favorited cameras, captured by the health sweep). AdminOnly like the
+// page itself; the store only resolves exact frame file names, and the bytes are served only when
+// they really are a raster image (some cameras send PNG under the .jpg name), never as anything a
+// browser could execute.
+app.MapGet("/admin/api/overwatch/timelapse/{cameraId}/{fileName}", async (
+    string cameraId, string fileName, GwsBusinessSuite.Application.CameraIntel.CameraTimelapseStore store, CancellationToken cancellationToken) =>
+{
+    if (store.FramePath(cameraId, fileName) is not { } path) return Results.NotFound();
+    var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
+    var contentType = bytes switch
+    {
+        [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
+        [0x89, 0x50, 0x4E, 0x47, ..] => "image/png",
+        [0x47, 0x49, 0x46, 0x38, ..] => "image/gif",
+        [0x52, 0x49, 0x46, 0x46, _, _, _, _, 0x57, 0x45, 0x42, 0x50, ..] => "image/webp",
+        _ => null
+    };
+    return contentType is null ? Results.NotFound() : Results.Bytes(bytes, contentType);
+}).RequireAuthorization("AdminOnly");
+
 app.MapGet("/media/{id:guid}", async (Guid id, IMediaLibraryService mediaLibraryService) =>
 {
     var content = await mediaLibraryService.GetContentAsync(id);

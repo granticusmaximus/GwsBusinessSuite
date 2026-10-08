@@ -269,6 +269,20 @@ window.tacticalGlobe = (function () {
         const incidentEntities = new Map();
         const clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
         clickHandler.setInputAction(function (movement) {
+            // Route watch "PICK ON MAP": the next click anywhere on the globe is a trip stop,
+            // not a camera/incident click.
+            const pickEntry = viewers.get(containerId);
+            if (pickEntry && pickEntry.pickPointMode) {
+                const cartesian = viewer.camera.pickEllipsoid(movement.position, viewer.scene.globe.ellipsoid);
+                if (cartesian) {
+                    const carto = Cesium.Cartographic.fromCartesian(cartesian);
+                    pickEntry.pickPointMode = false;
+                    viewer.container.classList.remove('tg-picking-point');
+                    pickEntry.dotNetRef.invokeMethodAsync('OnMapPointPicked',
+                        Cesium.Math.toDegrees(carto.latitude), Cesium.Math.toDegrees(carto.longitude));
+                }
+                return;
+            }
             const picked = viewer.scene.pick(movement.position);
             const entity = picked && picked.id;
             // A clustered pin's pick.id is an array of the entities it groups (Cesium's own
@@ -920,11 +934,35 @@ window.tacticalGlobe = (function () {
         incidentPanel = panel;
     }
 
-    // Route watch: draws the drive as a line and frames it.
-    function setRoute(path, containerId) {
+    function startPickPoint(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.pickPointMode = true;
+        entry.viewer.container.classList.add('tg-picking-point');
+    }
+
+    function cancelPickPoint(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.pickPointMode = false;
+        entry.viewer.container.classList.remove('tg-picking-point');
+    }
+
+    // Route watch: draws the drive as a line, marks each stop (S = start, numbers, F = finish)
+    // and frames it.
+    function setRoute(path, containerId, stops) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry || !path || path.length < 2) return;
         clearRoute(containerId);
+        entry.routeStopEntities = (stops || []).map(function (stop, i, all) {
+            const text = i === 0 ? 'S' : i === all.length - 1 ? 'F' : String(i);
+            return entry.viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(Number(stop.lon), Number(stop.lat)),
+                point: { pixelSize: 16, color: Cesium.Color.fromCssColorString('#00e5ff'), outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                label: { text: text, font: 'bold 11px monospace', fillColor: Cesium.Color.BLACK, disableDepthTestDistance: Number.POSITIVE_INFINITY }
+            });
+        });
         const flat = [];
         path.forEach(function (p) { flat.push(Number(p[0]), Number(p[1])); });
         entry.routeEntity = entry.viewer.entities.add({
@@ -947,9 +985,68 @@ window.tacticalGlobe = (function () {
 
     function clearRoute(containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
-        if (!entry || !entry.routeEntity) return;
-        entry.viewer.entities.remove(entry.routeEntity);
+        if (!entry) return;
+        if (entry.routeEntity) entry.viewer.entities.remove(entry.routeEntity);
+        (entry.routeStopEntities || []).forEach(function (e) { entry.viewer.entities.remove(e); });
         entry.routeEntity = null;
+        entry.routeStopEntities = [];
+    }
+
+    // Time-lapse player for a favorited camera's saved frames. Single window, reusing the
+    // incident window's modal handling so it closes the same way.
+    function openTimelapse(name, frames) {
+        closeIncidentPanel();
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-timelapse-panel';
+        const list = frames || [];
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header">' +
+            '<span>TIME-LAPSE // ' + escapeHtml(name) + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
+            '</div>' +
+            '<div class="tg-stream-panel-body"></div>';
+        const body = panel.querySelector('.tg-stream-panel-body');
+        let timer = null;
+        if (list.length === 0) {
+            body.innerHTML = '<div class="tg-stream-panel-meta">No frames yet. Favorited cameras are captured every 10 minutes ' +
+                '(only when the picture changes), so check back shortly.</div>';
+        } else {
+            body.innerHTML =
+                '<img alt="' + escapeHtml(name) + '">' +
+                '<div class="tg-timelapse-controls">' +
+                '<button type="button" class="tg-timelapse-play" aria-label="Play">PLAY</button>' +
+                '<input type="range" min="0" max="' + (list.length - 1) + '" value="' + (list.length - 1) + '" aria-label="Frame">' +
+                '<span class="tg-timelapse-label" role="status"></span>' +
+                '</div>';
+            const img = body.querySelector('img');
+            const range = body.querySelector('input');
+            const label = body.querySelector('.tg-timelapse-label');
+            const play = body.querySelector('.tg-timelapse-play');
+            const show = function (i) {
+                img.src = list[i].url;
+                range.value = String(i);
+                label.textContent = list[i].label + ' (' + (i + 1) + '/' + list.length + ')';
+            };
+            const stop = function () { if (timer) { clearInterval(timer); timer = null; } play.textContent = 'PLAY'; };
+            range.addEventListener('input', function () { stop(); show(Number(range.value)); });
+            play.addEventListener('click', function () {
+                if (timer) { stop(); return; }
+                play.textContent = 'PAUSE';
+                let i = Number(range.value) >= list.length - 1 ? 0 : Number(range.value);
+                show(i);
+                timer = setInterval(function () {
+                    i += 1;
+                    if (i >= list.length) { stop(); return; }
+                    show(i);
+                }, 400);
+            });
+            list.forEach(function (f) { const pre = new Image(); pre.src = f.url; });
+            show(list.length - 1);
+        }
+        const close = function () { if (timer) clearInterval(timer); closeIncidentPanel(); };
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', close);
+        if (!openAsModal(panel, close)) return;
+        incidentPanel = panel;
     }
 
     // Coverage index as a map layer: one labeled marker per known coverage region, green when
@@ -1637,6 +1734,9 @@ window.tacticalGlobe = (function () {
         setCoverageMarkers: setCoverageMarkers,
         setHazards: setHazards,
         setRoute: setRoute,
+        startPickPoint: startPickPoint,
+        cancelPickPoint: cancelPickPoint,
+        openTimelapse: openTimelapse,
         clearRoute: clearRoute,
         clearHazards: clearHazards,
         clearCoverageMarkers: clearCoverageMarkers,

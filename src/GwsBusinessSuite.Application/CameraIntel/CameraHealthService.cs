@@ -44,6 +44,10 @@ public sealed class CameraHealthService(
 
     public sealed record Sample(DateTimeOffset At, bool Ok, string? Hash, DateTimeOffset? LastModified);
 
+    // A check plus the image itself when it differs from the previous successful check - what
+    // the time-lapse keeps. Null image means "nothing new to store".
+    public sealed record CheckWithFrame(CameraHealthReport Report, byte[]? NewImage);
+
     private sealed class History
     {
         public readonly object Gate = new();
@@ -62,10 +66,13 @@ public sealed class CameraHealthService(
         }
     }
 
-    public async Task<CameraHealthReport> CheckAsync(CameraFeed camera, CancellationToken cancellationToken = default)
+    public async Task<CameraHealthReport> CheckAsync(CameraFeed camera, CancellationToken cancellationToken = default) =>
+        (await CheckWithFrameAsync(camera, cancellationToken)).Report;
+
+    public async Task<CheckWithFrame> CheckWithFrameAsync(CameraFeed camera, CancellationToken cancellationToken = default)
     {
         if (camera.StreamKind != CameraStreamKind.Snapshot)
-            return new(camera.Id, CameraHealthStatus.Unknown, "Live video stream - not health-checked.", null);
+            return new(new(camera.Id, CameraHealthStatus.Unknown, "Live video stream - not health-checked.", null), null);
 
         var now = timeProvider.GetUtcNow();
         var history = cache.GetOrCreate(Key(camera.Id), entry =>
@@ -77,19 +84,21 @@ public sealed class CameraHealthService(
         lock (history.Gate)
         {
             if (history.Samples.Count > 0 && now - history.Samples[^1].At < MinCheckInterval)
-                return Evaluate(camera.Id, history.Samples, now);
+                return new(Evaluate(camera.Id, history.Samples, now), null);
         }
 
-        var sample = await FetchSampleAsync(camera.StreamUrl, now, cancellationToken);
+        var (sample, bytes) = await FetchSampleAsync(camera.StreamUrl, now, cancellationToken);
         lock (history.Gate)
         {
+            var previousHash = history.Samples.LastOrDefault(s => s.Ok)?.Hash;
             history.Samples.Add(sample);
             if (history.Samples.Count > MaxSamples) history.Samples.RemoveRange(0, history.Samples.Count - MaxSamples);
-            return Evaluate(camera.Id, history.Samples, now);
+            var changed = sample.Ok && sample.Hash != previousHash;
+            return new(Evaluate(camera.Id, history.Samples, now), changed ? bytes : null);
         }
     }
 
-    private async Task<Sample> FetchSampleAsync(string url, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task<(Sample Sample, byte[]? Bytes)> FetchSampleAsync(string url, DateTimeOffset now, CancellationToken cancellationToken)
     {
         try
         {
@@ -102,16 +111,16 @@ public sealed class CameraHealthService(
             // - counts as not-an-image.
             if (!response.IsSuccessStatusCode || mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
                 || response.Content.Headers.ContentLength > MaxImageBytes)
-                return new(now, false, null, null);
+                return (new(now, false, null, null), null);
 
             var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
-            if (bytes.Length == 0 || bytes.Length > MaxImageBytes) return new(now, false, null, null);
-            return new(now, true, Convert.ToHexString(SHA256.HashData(bytes)), response.Content.Headers.LastModified);
+            if (bytes.Length == 0 || bytes.Length > MaxImageBytes) return (new(now, false, null, null), null);
+            return (new(now, true, Convert.ToHexString(SHA256.HashData(bytes)), response.Content.Headers.LastModified), bytes);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException && !cancellationToken.IsCancellationRequested)
         {
             logger.LogDebug(ex, "Camera health check failed for {Url}", url);
-            return new(now, false, null, null);
+            return (new(now, false, null, null), null);
         }
     }
 

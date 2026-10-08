@@ -472,3 +472,34 @@
     font-size: 0.65rem;
     opacity: 0.85;
 }
+
+.tg-timelapse-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+    font-size: 0.65rem;
+    flex-shrink: 0;
+}
+
+.tg-timelapse-controls input[type="range"] { flex: 1 1 auto; min-width: 0; }
+
+.tg-timelapse-play {
+    min-height: 32px;
+    padding: 0.15rem 0.5rem;
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    background: none;
+    color: #7dffb0;
+    font: inherit;
+    cursor: pointer;
+}
+
+@media (pointer: coarse) {
+    .tg-timelapse-play, .tg-timelapse-controls input[type="range"] { min-height: 44px; }
+}
+
+/* Route watch "PICK ON MAP" - the globe shows a crosshair until the stop is clicked. */
+.tg-picking-point,
+.tg-picking-point canvas {
+    cursor: crosshair !important;
+}

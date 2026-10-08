@@ -37,6 +37,33 @@ public sealed class RouteWatchServiceTests
     }
 
     [Fact]
+    public void ParseOsrmRoute_ShouldReadEachLegOfAMultiStopTrip()
+    {
+        const string json = """{"code":"Ok","routes":[{"distance":300000,"duration":10800,"legs":[{"distance":100000,"duration":3600},{"distance":200000,"duration":7200}],"geometry":{"coordinates":[[-83.6,32.4],[-84.0,33.0],[-84.4,33.7]]}}]}""";
+
+        var route = RouteWatchService.ParseOsrmRoute(json)!.Value;
+
+        route.Legs.Should().Equal((100000d, 3600d), (200000d, 7200d));
+    }
+
+    [Theory]
+    [InlineData("32.46, -83.61", 32.46, -83.61)]
+    [InlineData("-41.29,174.78", -41.29, 174.78)]
+    public void TryParseCoordinates_ShouldAcceptMapPickedStops(string text, double lat, double lon)
+    {
+        RouteWatchService.TryParseCoordinates(text).Should().Be(new GwsBusinessSuite.Application.Geocoding.GeocodeResult(lat, lon));
+    }
+
+    [Theory]
+    [InlineData("Atlanta, GA")]
+    [InlineData("95, 200")]
+    [InlineData("12 Main St")]
+    public void TryParseCoordinates_ShouldLeavePlaceNamesToTheGeocoder(string text)
+    {
+        RouteWatchService.TryParseCoordinates(text).Should().BeNull();
+    }
+
+    [Fact]
     public void TouchesRoute_ShouldNeedARoutePointInsideTheAlertPolygon()
     {
         var overRoad = new WeatherAlert("a", "Flood Warning", "Severe", "Area", "", [[(-84.1, 32.4), (-83.9, 32.4), (-83.9, 32.6), (-84.1, 32.6)]]);

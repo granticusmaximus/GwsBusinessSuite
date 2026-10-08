@@ -376,6 +376,9 @@
     right: auto;
     left: 1.1rem;
     width: 300px;
+    /* Below the location search / SHARE VIEW row so the panel never covers it. */
+    top: 10.5rem;
+    max-height: calc(100% - 11.5rem);
 }
 
 .tg-route-form {
@@ -422,6 +425,8 @@
     right: auto;
     left: 1.1rem;
     width: 300px;
+    top: 10.5rem;
+    max-height: calc(100% - 11.5rem);
 }
 
 .tg-area-options {
@@ -446,4 +451,31 @@
 
 @media (pointer: coarse) {
     .tg-area-options label, .tg-route-form select { min-height: 44px; }
+}
+
+.tg-route-stop,
+.tg-route-row {
+    display: flex;
+    gap: 0.3rem;
+}
+
+.tg-route-stop input,
+.tg-route-row input { flex: 1 1 auto; min-width: 0; }
+
+.tg-route-stop button,
+.tg-route-row button { flex-shrink: 0; }
+
+.tg-route-stop button.is-on { background: rgba(125, 255, 176, 0.35); }
+
+.tg-route-subheader {
+    padding: 0.35rem 0.6rem;
+    border-bottom: 1px solid rgba(125, 255, 176, 0.3);
+    letter-spacing: 0.05em;
+    font-weight: 700;
+}
+
+.tg-route-leg { color: #00e5ff; }
+
+@media (pointer: coarse) {
+    .tg-route-stop button, .tg-route-row button { min-height: 44px; min-width: 44px; }
 }

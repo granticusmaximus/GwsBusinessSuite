@@ -700,6 +700,9 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GWSuite-Overwatch/1.0; +https://grantwatson.dev)");
         });
         services.AddHostedService<CameraHealthBackgroundService>();
+        services.AddSingleton(sp => new CameraTimelapseStore(
+            configuration["Overwatch:TimelapsePath"] ?? "/app/data/overwatch-timelapse",
+            sp.GetRequiredService<ILogger<CameraTimelapseStore>>()));
         // Overwatch SAVE REPORT: copies the frame into the media library and files a Sentinel page.
         services.AddHttpClient<CameraIncidentReportService>(client =>
         {
@@ -730,6 +733,7 @@ public static class DependencyInjection
         // Overwatch watched areas: 10-minute checks -> notification bell.
         services.AddSingleton<OverwatchAreaNotifier>();
         services.AddScoped<OverwatchAreaService>();
+        services.AddScoped<OverwatchTripService>();
         services.AddHostedService<OverwatchAreaBackgroundService>();
         // Overwatch hazard layers (USGS quakes, WFIGS fires, NOAA river gauges) - key-less.
         services.AddHttpClient<GwsBusinessSuite.Application.Hazards.HazardLayerService>(client =>
