@@ -884,6 +884,15 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddHostedService<FederalCivicRefreshBackgroundService>();
+        // Civic Watch extras: location/districts, representatives, Federal Register, Grants.gov,
+        // bill watchlist, what-changed sightings, county agendas, elections.
+        services.AddHttpClient<ICivicWatchService, CivicWatchService>(client =>
+        {
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Mozilla/5.0 (compatible; GWSuite/1.0; +https://grantwatson.dev)");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddHostedService<CivicWatchBackgroundService>();
         services.AddHttpClient<IPodcastDirectoryService, PodcastDirectoryService>(client =>
         {
             client.DefaultRequestHeaders.UserAgent.ParseAdd(

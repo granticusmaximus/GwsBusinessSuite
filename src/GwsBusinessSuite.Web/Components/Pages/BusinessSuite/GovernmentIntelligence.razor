@@ -8,6 +8,8 @@
 @using GwsBusinessSuite.Application.GovernmentIntelligence
 @using GwsBusinessSuite.Infrastructure.Services
 @inject IGovernmentIntelligenceService GovernmentService
+@inject ICivicWatchService CivicService
+@inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject ILogger<GovernmentIntelligence> Logger
 @inject IJSRuntime JS
 
@@ -21,6 +23,10 @@
             <p>One calm briefing for local meetings, Georgia government, and the votes moving through Congress.</p>
         </div>
         <div class="masthead-actions">
+            <button type="button" class="btn btn-outline-secondary" @onclick="ToggleSettings" aria-expanded="@(_showSettings ? "true" : "false")">
+                <i class="bi bi-sliders"></i>
+                <span>Settings</span>
+            </button>
             <button type="button" class="btn btn-outline-secondary" @onclick="RefreshAsync" disabled="@_loading">
                 <i class="bi bi-arrow-clockwise @(_loading ? "gws-spin" : string.Empty)"></i>
                 <span>@(_loading ? "Refreshing sources…" : "Refresh sources")</span>
@@ -51,6 +57,78 @@
         </div>
     }
 
+    @if (_showSettings && _settingsForm is not null)
+    {
+        <section class="civic-panel civic-settings" aria-label="Civic Watch settings">
+            <CivicWatchPanelHeader Eyebrow="Settings" Title="Your location, keywords and alerts" Icon="bi-sliders" />
+            <p class="settings-note">
+                Distances, your districts and your representatives follow this location. The briefing's sources stay
+                Houston County and Georgia - other places get distances, districts and federal representatives, but not their own local feeds.
+            </p>
+            <div class="settings-grid">
+                <label>
+                    <span>Area name</span>
+                    <input class="form-control form-control-sm" @bind="_settingsForm.HomeLabel" @bind:event="oninput" maxlength="120" />
+                </label>
+                <label>
+                    <span>Street address (optional)</span>
+                    <input class="form-control form-control-sm" @bind="_settingsForm.HomeAddress" @bind:event="oninput"
+                           placeholder="e.g. 201 Perry Pkwy, Perry, GA 31069" />
+                    <small>Looked up with the U.S. Census geocoder and replaces the coordinates below. Stored only in this app.</small>
+                </label>
+                <label>
+                    <span>Latitude</span>
+                    <input type="number" step="0.0001" class="form-control form-control-sm" @bind="_settingsForm.HomeLatitude" />
+                </label>
+                <label>
+                    <span>Longitude</span>
+                    <input type="number" step="0.0001" class="form-control form-control-sm" @bind="_settingsForm.HomeLongitude" />
+                </label>
+                <label>
+                    <span>Federal Register keywords (one per line)</span>
+                    <textarea class="form-control form-control-sm" rows="3" value="@_settingsForm.FederalRegisterKeywords"
+                              @oninput="e => _settingsForm.FederalRegisterKeywords = e.Value?.ToString() ?? string.Empty"
+                              placeholder="cybersecurity&#10;artificial intelligence"></textarea>
+                </label>
+                <label>
+                    <span>Grant keywords (one per line)</span>
+                    <textarea class="form-control form-control-sm" rows="3" value="@_settingsForm.GrantKeywords"
+                              @oninput="e => _settingsForm.GrantKeywords = e.Value?.ToString() ?? string.Empty"
+                              placeholder="small business&#10;workforce training"></textarea>
+                </label>
+                <label class="settings-check">
+                    <input type="checkbox" class="form-check-input" @bind="_settingsForm.AlertsEnabled" />
+                    <span>Email me when a watched bill changes status</span>
+                </label>
+                <label>
+                    <span>Alert email</span>
+                    <input type="email" class="form-control form-control-sm" @bind="_settingsForm.AlertRecipient" @bind:event="oninput" />
+                </label>
+            </div>
+            <p class="settings-districts">
+                <i class="bi bi-geo"></i>
+                @if (_settings?.StateCode is { } state)
+                {
+                    <span>@DistrictSummary(_settings)</span>
+                }
+                else
+                {
+                    <span>Districts not looked up yet - save to look them up.</span>
+                }
+            </p>
+            @if (!string.IsNullOrWhiteSpace(_settingsMessage))
+            {
+                <p class="settings-message" role="status">@_settingsMessage</p>
+            }
+            <div class="settings-actions">
+                <button type="button" class="btn btn-sm btn-primary" @onclick="SaveSettingsAsync" disabled="@_savingSettings">
+                    @(_savingSettings ? "Saving…" : "Save settings")
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ToggleSettings">Close</button>
+            </div>
+        </section>
+    }
+
     @if (_loading && _snapshot is null)
     {
         <div class="civic-loading" role="status">
@@ -63,7 +141,7 @@
         <section class="civic-briefing">
             <div class="briefing-lead">
                 <span class="briefing-label">Your coverage area</span>
-                <h2>@_snapshot.AreaLabel</h2>
+                <h2>@AreaLabel</h2>
                 <p>@CurrentSummary()</p>
                 <div class="briefing-freshness">
                     <span></span>
@@ -105,6 +183,29 @@
             </button>
         </nav>
 
+        @if (_changes is { Items.Count: > 0 })
+        {
+            <section class="civic-panel civic-changes" aria-label="What changed">
+                <CivicWatchPanelHeader Eyebrow="Since yesterday" Title="What changed" Count="@_changes.Items.Count" Icon="bi-stars" />
+                <div class="news-list">
+                    @foreach (var item in _changes.Items.Take(_showAllChanges ? 40 : 5))
+                    {
+                        <a href="@item.Url" target="_blank" rel="noopener noreferrer">
+                            <span class="news-source">@DeskLabel(item.Desk) · @item.Kind · @FormatTimestamp(item.FirstSeenAt.ToLocalTime())</span>
+                            <strong>@item.Title</strong>
+                            <i class="bi bi-arrow-up-right"></i>
+                        </a>
+                    }
+                </div>
+                @if (_changes.Items.Count > 5)
+                {
+                    <button type="button" class="event-clear mt-2" @onclick="() => _showAllChanges = !_showAllChanges">
+                        @(_showAllChanges ? "Show fewer" : $"Show all {_changes.Items.Count}")
+                    </button>
+                }
+            </section>
+        }
+
         <div class="civic-content">
             @if (_activeSection == "community")
             {
@@ -129,7 +230,7 @@
                                 @foreach (var item in _snapshot.Community.Announcements)
                                 {
                                     <a href="@item.Url" target="_blank" rel="noopener noreferrer">
-                                        <span class="news-source">@item.Source</span>
+                                        <span class="news-source">@item.Source@if (IsNew("community", item.Url)) { <span class="civic-new">New</span> }</span>
                                         <strong>@item.Title</strong>
                                         @if (!string.IsNullOrWhiteSpace(item.Summary)) { <small>@item.Summary</small> }
                                         <i class="bi bi-arrow-up-right"></i>
@@ -152,7 +253,7 @@
                                 {
                                     <a href="@meeting.Url" target="_blank" rel="noopener noreferrer">
                                         <time><strong>@DateDay(meeting.MeetingDate)</strong><small>@DateMonth(meeting.MeetingDate)</small></time>
-                                        <span><strong>@meeting.Title</strong><small>@MeetingMeta(meeting)</small></span>
+                                        <span><strong>@meeting.Title@if (IsNew("community", meeting.Url)) { <span class="civic-new">New</span> }</strong><small>@MeetingMeta(meeting)</small></span>
                                         <i class="bi bi-arrow-up-right"></i>
                                     </a>
                                 }
@@ -190,7 +291,7 @@
                                     <option value="month">Next 30 days</option>
                                 </select>
                                 <select class="event-select" value="@_radiusFilter" @onchange="OnRadiusFilterChanged"
-                                        aria-label="@($"Filter events by distance from {_snapshot.AreaLabel}")">
+                                        aria-label="@($"Filter events by distance from {AreaLabel}")">
                                     <option value="0">Any distance</option>
                                     <option value="5">Within 5 mi</option>
                                     <option value="10">Within 10 mi</option>
@@ -225,7 +326,84 @@
                                 }
                             </div>
                         }
-                        <p class="panel-note"><i class="bi bi-clock-history"></i> Perry and Robins Region Chamber calendars refresh hourly.</p>
+                        <p class="panel-note"><i class="bi bi-clock-history"></i> Perry, Robins Region Chamber, Visit Macon and Eventbrite listings refresh hourly. Distances are straight-line miles from @AreaLabel.</p>
+                    </section>
+                </div>
+
+                <div class="chamber-grid">
+                    <section class="civic-panel">
+                        <CivicWatchPanelHeader Eyebrow="County commission" Title="Agendas and minutes" Count="@(_meetingDocs?.Count ?? 0)" Icon="bi-file-earmark-text" />
+                        @if (_meetingDocs is null)
+                        {
+                            <CivicWatchEmptyState Icon="bi-hourglass-split" Message="Loading commission documents…" />
+                        }
+                        else if (_meetingDocs.Count == 0)
+                        {
+                            <CivicWatchEmptyState Icon="bi-file-earmark-x" Message="No agendas or minutes collected yet. They are checked hourly." />
+                        }
+                        else
+                        {
+                            <div class="doc-list">
+                                @foreach (var doc in _meetingDocs)
+                                {
+                                    <article>
+                                        <div class="doc-head">
+                                            <span class="news-source">@doc.Kind · @doc.MeetingDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</span>
+                                            <a href="@doc.Url" target="_blank" rel="noopener noreferrer">PDF <i class="bi bi-arrow-up-right"></i></a>
+                                        </div>
+                                        @if (!string.IsNullOrWhiteSpace(doc.AiSummary))
+                                        {
+                                            <p class="doc-summary">@doc.AiSummary</p>
+                                        }
+                                        else
+                                        {
+                                            <small>@(doc.LastError ?? "SentinelGPT summary pending.")</small>
+                                        }
+                                    </article>
+                                }
+                            </div>
+                        }
+                        <p class="panel-note"><i class="bi bi-stars"></i> Summaries are written by SentinelGPT from the county's PDFs. Check the PDF before relying on a detail.</p>
+                    </section>
+                    <section class="civic-panel">
+                        <CivicWatchPanelHeader Eyebrow="Board of Elections" Title="Upcoming elections" Count="@(_elections?.Upcoming.Count ?? 0)" Icon="bi-check2-square" />
+                        @if (_elections is null)
+                        {
+                            <CivicWatchEmptyState Icon="bi-hourglass-split" Message="Loading election dates…" />
+                        }
+                        else
+                        {
+                            @if (!string.IsNullOrWhiteSpace(_elections.Error))
+                            {
+                                <CivicWatchEmptyState Icon="bi-wifi-off" Message="@_elections.Error" />
+                            }
+                            else if (_elections.Upcoming.Count == 0)
+                            {
+                                <CivicWatchEmptyState Icon="bi-calendar2-x" Message="No upcoming elections are posted yet." />
+                            }
+                            else
+                            {
+                                <div class="date-list">
+                                    @foreach (var election in _elections.Upcoming)
+                                    {
+                                        <a href="https://www.houstoncountyga.gov/residents/election-dates-municipal-elections.cms" target="_blank" rel="noopener noreferrer">
+                                            <time><strong>@election.ElectionDate.Day.ToString("00", CultureInfo.InvariantCulture)</strong><small>@election.ElectionDate.ToString("MMM", CultureInfo.InvariantCulture)</small></time>
+                                            <span><strong>@election.Name</strong><small>@ElectionMeta(election)</small></span>
+                                            <i class="bi bi-arrow-up-right"></i>
+                                        </a>
+                                    }
+                                </div>
+                            }
+                            <div class="election-docs">
+                                <a class="hearing-link" href="https://mvp.sos.ga.gov/" target="_blank" rel="noopener noreferrer"
+                                   title="Georgia Secretary of State: your registration, polling place and personal sample ballot.">My Voter Page <i class="bi bi-arrow-up-right"></i></a>
+                                @foreach (var doc in _elections.Documents)
+                                {
+                                    <a class="hearing-link" href="@doc.Url" target="_blank" rel="noopener noreferrer" title="@doc.Description">@doc.Title <i class="bi bi-arrow-up-right"></i></a>
+                                }
+                            </div>
+                        }
+                        <p class="panel-note"><i class="bi bi-person-check"></i> Your exact polling place and personal sample ballot are on Georgia's My Voter Page.</p>
                     </section>
                 </div>
 
@@ -288,7 +466,7 @@
                         }
                         else
                         {
-                            <CivicWatchLawList Laws="_snapshot.State.SignedLegislation" />
+                            <CivicWatchLawList Laws="_snapshot.State.SignedLegislation" NewKeys="NewKeys" />
                         }
                     </section>
                 </div>
@@ -296,11 +474,22 @@
                 <div class="chamber-grid">
                     <section class="civic-panel">
                         <CivicWatchPanelHeader Eyebrow="Georgia House" Title="Recent floor votes" Count="@_snapshot.State.HouseVotes.Count" Icon="bi-people" />
-                        <CivicWatchStateVotes Votes="_snapshot.State.HouseVotes" />
+                        <CivicWatchStateVotes Votes="_snapshot.State.HouseVotes" NewKeys="NewKeys" />
                     </section>
                     <section class="civic-panel">
                         <CivicWatchPanelHeader Eyebrow="Georgia Senate" Title="Recent floor votes" Count="@_snapshot.State.SenateVotes.Count" Icon="bi-people" />
-                        <CivicWatchStateVotes Votes="_snapshot.State.SenateVotes" />
+                        <CivicWatchStateVotes Votes="_snapshot.State.SenateVotes" NewKeys="NewKeys" />
+                    </section>
+                </div>
+
+                <div class="chamber-grid">
+                    <section class="civic-panel">
+                        <CivicWatchPanelHeader Eyebrow="Your district" Title="Your state legislators" Count="@StateReps.Count" Icon="bi-person-badge" />
+                        @RepresentativesBody(StateReps, "state")
+                    </section>
+                    <section class="civic-panel">
+                        <CivicWatchPanelHeader Eyebrow="Watchlist" Title="Georgia bills you follow" Count="@WatchedFor("ga").Count" Icon="bi-bookmark-star" />
+                        @WatchlistBody("ga")
                     </section>
                 </div>
 
@@ -393,11 +582,100 @@
                 <div class="chamber-grid">
                     <section class="civic-panel">
                         <CivicWatchPanelHeader Eyebrow="U.S. Senate" Title="Recent roll calls" Count="@_snapshot.Federal.SenateVotes.Count" Icon="bi-building" />
-                        <CivicWatchFederalVotes Votes="_snapshot.Federal.SenateVotes" />
+                        <CivicWatchFederalVotes Votes="_snapshot.Federal.SenateVotes" NewKeys="NewKeys" />
                     </section>
                     <section class="civic-panel">
                         <CivicWatchPanelHeader Eyebrow="U.S. House" Title="Recent roll calls" Count="@_snapshot.Federal.HouseVotes.Count" Icon="bi-building" />
-                        <CivicWatchFederalVotes Votes="_snapshot.Federal.HouseVotes" />
+                        <CivicWatchFederalVotes Votes="_snapshot.Federal.HouseVotes" NewKeys="NewKeys" />
+                    </section>
+                </div>
+
+                <div class="chamber-grid">
+                    <section class="civic-panel">
+                        <CivicWatchPanelHeader Eyebrow="Your district" Title="Your members of Congress" Count="@FederalReps.Count" Icon="bi-person-badge" />
+                        @RepresentativesBody(FederalReps, "federal")
+                    </section>
+                    <section class="civic-panel">
+                        <CivicWatchPanelHeader Eyebrow="Watchlist" Title="Federal bills you follow" Count="@WatchedFor("us").Count" Icon="bi-bookmark-star" />
+                        @WatchlistBody("us")
+                    </section>
+                </div>
+
+                <div class="chamber-grid">
+                    <section class="civic-panel">
+                        <CivicWatchPanelHeader Eyebrow="Federal Register" Title="Rules and open comment periods" Count="@(_federalRegister?.Items.Count ?? 0)" Icon="bi-journal-richtext" />
+                        @if (_federalRegister is null)
+                        {
+                            <CivicWatchEmptyState Icon="bi-hourglass-split" Message="Loading Federal Register…" />
+                        }
+                        else if (_federalRegister.Keywords.Count == 0)
+                        {
+                            <CivicWatchEmptyState Icon="bi-sliders" Message="Add Federal Register keywords in Settings to follow rules and comment periods." />
+                        }
+                        else if (!string.IsNullOrWhiteSpace(_federalRegister.Error))
+                        {
+                            <CivicWatchEmptyState Icon="bi-wifi-off" Message="@_federalRegister.Error" />
+                        }
+                        else
+                        {
+                            <div class="event-filter-row" role="group" aria-label="Filter Federal Register documents">
+                                <button type="button" class="event-chip @(_openCommentOnly ? "" : "is-on")" @onclick="() => _openCommentOnly = false">All</button>
+                                <button type="button" class="event-chip @(_openCommentOnly ? "is-on" : "")" @onclick="() => _openCommentOnly = true">Open for comment</button>
+                            </div>
+                            @if (FilteredRegister.Count == 0)
+                            {
+                                <CivicWatchEmptyState Icon="bi-funnel" Message="Nothing matches in the last 30 days." />
+                            }
+                            else
+                            {
+                                <div class="news-list">
+                                    @foreach (var doc in FilteredRegister)
+                                    {
+                                        <a href="@doc.Url" target="_blank" rel="noopener noreferrer">
+                                            <span class="news-source">@doc.Type · @FormatDateOnly(doc.PublishedOn) · "@doc.MatchedKeyword"</span>
+                                            <strong>@doc.Title</strong>
+                                            <small>@RegisterMeta(doc)</small>
+                                            <i class="bi bi-arrow-up-right"></i>
+                                        </a>
+                                    }
+                                </div>
+                            }
+                        }
+                        <p class="panel-note"><i class="bi bi-info-circle"></i> Rules, proposed rules and notices from the last 30 days, ranked by relevance. Comments are filed on the document's own page.</p>
+                    </section>
+                    <section class="civic-panel">
+                        <CivicWatchPanelHeader Eyebrow="Grants.gov" Title="Funding opportunities" Count="@(_grants?.Items.Count ?? 0)" Icon="bi-cash-coin" />
+                        @if (_grants is null)
+                        {
+                            <CivicWatchEmptyState Icon="bi-hourglass-split" Message="Loading Grants.gov…" />
+                        }
+                        else if (_grants.Keywords.Count == 0)
+                        {
+                            <CivicWatchEmptyState Icon="bi-sliders" Message="Add grant keywords in Settings to see matching funding opportunities." />
+                        }
+                        else if (!string.IsNullOrWhiteSpace(_grants.Error))
+                        {
+                            <CivicWatchEmptyState Icon="bi-wifi-off" Message="@_grants.Error" />
+                        }
+                        else if (_grants.Items.Count == 0)
+                        {
+                            <CivicWatchEmptyState Icon="bi-funnel" Message="No open or forecasted opportunities match." />
+                        }
+                        else
+                        {
+                            <div class="news-list">
+                                @foreach (var grant in _grants.Items)
+                                {
+                                    <a href="@grant.Url" target="_blank" rel="noopener noreferrer">
+                                        <span class="news-source">@grant.Status · @grant.Agency</span>
+                                        <strong>@grant.Title</strong>
+                                        <small>@GrantMeta(grant)</small>
+                                        <i class="bi bi-arrow-up-right"></i>
+                                    </a>
+                                }
+                            </div>
+                        }
+                        <p class="panel-note"><i class="bi bi-info-circle"></i> Posted and forecasted federal opportunities, soonest closing first. Eligibility is on each listing.</p>
                     </section>
                 </div>
 
@@ -424,7 +702,391 @@
     private int FederalCount => _snapshot is null ? 0 :
         _snapshot.Federal.HouseVotes.Count + _snapshot.Federal.SenateVotes.Count;
 
-    protected override async Task OnInitializedAsync() => await LoadSnapshotAsync(forceRefresh: false);
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSettingsAsync();
+        await LoadSnapshotAsync(forceRefresh: false);
+        _ = LoadExtrasAsync();
+    }
+
+    // ── Civic Watch extras (settings, changes, reps, watchlist, feeds) ─────
+    private CivicWatchSettingsView? _settings;
+    private SettingsForm? _settingsForm;
+    private bool _showSettings;
+    private bool _savingSettings;
+    private string? _settingsMessage;
+    private CivicChanges? _changes;
+    private bool _showAllChanges;
+    private CivicRepresentatives? _representatives;
+    private IReadOnlyList<WatchedBillView>? _watched;
+    private readonly Dictionary<string, string> _watchInput = new() { ["ga"] = string.Empty, ["us"] = string.Empty };
+    private readonly Dictionary<string, string?> _watchMessage = new();
+    private bool _watchBusy;
+    private CivicKeywordFeed<FederalRegisterDocument>? _federalRegister;
+    private CivicKeywordFeed<GrantOpportunity>? _grants;
+    private bool _openCommentOnly;
+    private IReadOnlyList<CivicMeetingDocumentView>? _meetingDocs;
+    private CivicElectionInfo? _elections;
+
+    private sealed class SettingsForm
+    {
+        public string HomeLabel { get; set; } = string.Empty;
+        public string? HomeAddress { get; set; }
+        public double HomeLatitude { get; set; }
+        public double HomeLongitude { get; set; }
+        public string FederalRegisterKeywords { get; set; } = string.Empty;
+        public string GrantKeywords { get; set; } = string.Empty;
+        public bool AlertsEnabled { get; set; }
+        public string? AlertRecipient { get; set; }
+    }
+
+    private string AreaLabel => _settings?.HomeLabel ?? _snapshot?.AreaLabel ?? string.Empty;
+    private IReadOnlySet<string>? NewKeys => _changes?.NewKeys;
+    private bool IsNew(string desk, string url) => _changes?.NewKeys.Contains(CivicItemKeys.For(desk, url)) == true;
+
+    private async Task LoadSettingsAsync()
+    {
+        try
+        {
+            _settings = await CivicService.GetSettingsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Civic Watch settings could not be loaded");
+        }
+    }
+
+    // Every extra is independent and network-bound, so each loads on its own and a failure in
+    // one leaves the rest of the page working.
+    private async Task LoadExtrasAsync()
+    {
+        await Task.WhenAll(
+            LoadPartAsync(async () => _changes = await CivicService.GetChangesAsync(TimeSpan.FromHours(24)), "changes"),
+            LoadPartAsync(async () => _watched = await CivicService.ListWatchedBillsAsync(), "watchlist"),
+            LoadPartAsync(async () => _representatives = await CivicService.GetRepresentativesAsync(), "representatives"),
+            LoadPartAsync(async () => _meetingDocs = await CivicService.ListMeetingDocumentsAsync(), "meeting documents"),
+            LoadPartAsync(async () => _elections = await CivicService.GetElectionsAsync(), "elections"),
+            LoadPartAsync(async () => _federalRegister = await CivicService.GetFederalRegisterAsync(), "Federal Register"),
+            LoadPartAsync(async () => _grants = await CivicService.GetGrantOpportunitiesAsync(), "Grants.gov"));
+    }
+
+    private async Task LoadPartAsync(Func<Task> load, string name)
+    {
+        try
+        {
+            await load();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Civic Watch: {Part} could not be loaded", name);
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void ToggleSettings()
+    {
+        _showSettings = !_showSettings;
+        _settingsMessage = null;
+        if (_showSettings && _settings is { } s)
+        {
+            _settingsForm = new SettingsForm
+            {
+                HomeLabel = s.HomeLabel, HomeAddress = s.HomeAddress, HomeLatitude = s.HomeLatitude, HomeLongitude = s.HomeLongitude,
+                FederalRegisterKeywords = s.FederalRegisterKeywords, GrantKeywords = s.GrantKeywords,
+                AlertsEnabled = s.AlertsEnabled, AlertRecipient = s.AlertRecipient
+            };
+        }
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        if (_settingsForm is null || _settings is null) return;
+        _savingSettings = true;
+        _settingsMessage = null;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            _settings = await CivicService.SaveSettingsAsync(_settings with
+            {
+                HomeLabel = _settingsForm.HomeLabel, HomeAddress = _settingsForm.HomeAddress,
+                HomeLatitude = _settingsForm.HomeLatitude, HomeLongitude = _settingsForm.HomeLongitude,
+                FederalRegisterKeywords = _settingsForm.FederalRegisterKeywords, GrantKeywords = _settingsForm.GrantKeywords,
+                AlertsEnabled = _settingsForm.AlertsEnabled, AlertRecipient = _settingsForm.AlertRecipient
+            }, username);
+            _settingsForm.HomeLatitude = _settings.HomeLatitude;
+            _settingsForm.HomeLongitude = _settings.HomeLongitude;
+            _settingsMessage = _settings.StateCode is null
+                ? "Saved. Districts couldn't be looked up for this point right now."
+                : "Saved.";
+            _representatives = null;
+            _federalRegister = null;
+            _grants = null;
+            _ = Task.WhenAll(
+                LoadPartAsync(async () => _representatives = await CivicService.GetRepresentativesAsync(), "representatives"),
+                LoadPartAsync(async () => _federalRegister = await CivicService.GetFederalRegisterAsync(), "Federal Register"),
+                LoadPartAsync(async () => _grants = await CivicService.GetGrantOpportunitiesAsync(), "Grants.gov"));
+        }
+        catch (ArgumentException ex)
+        {
+            _settingsMessage = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Civic Watch settings save failed");
+            _settingsMessage = "Settings couldn't be saved.";
+        }
+        finally
+        {
+            _savingSettings = false;
+        }
+    }
+
+    private static string DistrictSummary(CivicWatchSettingsView s)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(s.CountyName)) parts.Add($"{s.CountyName}, {s.StateCode}");
+        else parts.Add(s.StateCode ?? string.Empty);
+        if (s.CongressionalDistrict is { } cd) parts.Add(cd == 0 ? "at-large congressional district" : $"Congressional District {cd}");
+        if (s.StateSenateDistrict is { } sd) parts.Add($"State Senate District {sd}");
+        if (s.StateHouseDistrict is { } hd) parts.Add($"State House District {hd}");
+        return string.Join(" · ", parts);
+    }
+
+    private static string DeskLabel(string desk) => desk switch
+    {
+        "state" => "Georgia",
+        "federal" => "Congress",
+        _ => "Community"
+    };
+
+    // ── Representatives ───────────────────────────────────────────────────
+    private IReadOnlyList<CivicRepresentative> FederalReps =>
+        _representatives?.Members.Where(m => m.Level == "federal").ToList() ?? [];
+    private IReadOnlyList<CivicRepresentative> StateReps =>
+        _representatives?.Members.Where(m => m.Level == "state").ToList() ?? [];
+
+    private sealed record RepVote(string Label, string Vote, string Result, DateTimeOffset? When, string Url);
+
+    private IReadOnlyList<RepVote> VotesFor(CivicRepresentative rep)
+    {
+        if (_snapshot is null) return [];
+        if (rep.Level == "federal")
+        {
+            var votes = rep.Chamber == "Senate" ? _snapshot.Federal.SenateVotes : _snapshot.Federal.HouseVotes;
+            return votes
+                .Select(v => (Vote: v, Member: v.Votes.FirstOrDefault(m => string.Equals(m.MemberId, rep.MemberId, StringComparison.OrdinalIgnoreCase))))
+                .Where(x => x.Member is not null)
+                .Select(x => new RepVote(string.IsNullOrWhiteSpace(x.Vote.Measure) ? x.Vote.Title : x.Vote.Measure, x.Member!.Vote, x.Vote.Result, x.Vote.VotedAt, x.Vote.DetailUrl))
+                .ToList();
+        }
+        var stateVotes = rep.Chamber == "Senate" ? _snapshot.State.SenateVotes : _snapshot.State.HouseVotes;
+        return stateVotes
+            .Select(v => (Vote: v, Member: v.Votes.FirstOrDefault(m => m.MemberId?.ToString(CultureInfo.InvariantCulture) == rep.MemberId)))
+            .Where(x => x.Member is not null)
+            .Select(x => new RepVote(string.IsNullOrWhiteSpace(x.Vote.Measure) ? x.Vote.Title : x.Vote.Measure, x.Member!.Vote, x.Vote.Status, x.Vote.VotedAt, x.Vote.DetailUrl))
+            .ToList();
+    }
+
+    private RenderFragment RepresentativesBody(IReadOnlyList<CivicRepresentative> reps, string level) => @<text>
+        @if (_representatives is null)
+        {
+            <CivicWatchEmptyState Icon="bi-hourglass-split" Message="Looking up your representatives…" />
+        }
+        else if (reps.Count == 0)
+        {
+            <CivicWatchEmptyState Icon="bi-geo" Message="@(_representatives.Note ?? "No representatives found for your saved location.")" />
+        }
+        else
+        {
+            <div class="rep-list">
+                @foreach (var rep in reps)
+                {
+                    var votes = VotesFor(rep);
+                    <article class="rep-card">
+                        <div class="rep-head">
+                            <span class="news-source">@(level == "federal" ? $"U.S. {rep.Chamber}" : $"Georgia {rep.Chamber}") · @RepDistrict(rep)</span>
+                            <strong>@rep.Name <small>@rep.Party</small></strong>
+                            <span class="rep-links">
+                                @if (!string.IsNullOrWhiteSpace(rep.WebsiteUrl))
+                                {
+                                    <a href="@rep.WebsiteUrl" target="_blank" rel="noopener noreferrer">Website <i class="bi bi-arrow-up-right"></i></a>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(rep.Phone))
+                                {
+                                    <a href="@($"tel:{rep.Phone}")">@rep.Phone</a>
+                                }
+                            </span>
+                        </div>
+                        @if (votes.Count == 0)
+                        {
+                            <small class="rep-novotes">No vote recorded in the recent roll calls shown on this page.</small>
+                        }
+                        else
+                        {
+                            <ul class="rep-votes">
+                                @foreach (var vote in votes)
+                                {
+                                    <li>
+                                        <b class="@RepVoteClass(vote.Vote)">@vote.Vote</b>
+                                        <a href="@vote.Url" target="_blank" rel="noopener noreferrer">@vote.Label</a>
+                                        <small>@vote.Result</small>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </article>
+                }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_representatives.Note))
+            {
+                <p class="panel-note"><i class="bi bi-info-circle"></i> @_representatives.Note</p>
+            }
+        }
+    </text>;
+
+    private string RepDistrict(CivicRepresentative rep) =>
+        rep.Level == "federal"
+            ? rep.Chamber == "Senate" ? $"{rep.District} (statewide)" : rep.District
+            : $"District {rep.District}";
+
+    private static string RepVoteClass(string vote) => vote.ToLowerInvariant() switch
+    {
+        "yea" or "aye" or "yes" => "vote-yes",
+        "nay" or "no" => "vote-no",
+        _ => "vote-other"
+    };
+
+    // ── Bill watchlist ────────────────────────────────────────────────────
+    private IReadOnlyList<WatchedBillView> WatchedFor(string jurisdiction) =>
+        _watched?.Where(b => b.Jurisdiction == jurisdiction).ToList() ?? [];
+
+    private RenderFragment WatchlistBody(string jurisdiction) => @<text>
+        <form class="watch-form" @onsubmit="() => AddWatchedBillAsync(jurisdiction)" @onsubmit:preventDefault>
+            <input class="form-control form-control-sm" aria-label="Bill to watch"
+                   placeholder="@(jurisdiction == "ga" ? "e.g. HB 68 or SB 1" : "e.g. H.R. 1 or S. 25")"
+                   value="@_watchInput[jurisdiction]" @oninput="e => _watchInput[jurisdiction] = e.Value?.ToString() ?? string.Empty" />
+            <button type="submit" class="btn btn-sm btn-primary" disabled="@(_watchBusy || string.IsNullOrWhiteSpace(_watchInput[jurisdiction]))">Watch</button>
+        </form>
+        @if (_watchMessage.TryGetValue(jurisdiction, out var message) && !string.IsNullOrWhiteSpace(message))
+        {
+            <p class="settings-message" role="status">@message</p>
+        }
+        @if (_watched is null)
+        {
+            <CivicWatchEmptyState Icon="bi-hourglass-split" Message="Loading your watchlist…" />
+        }
+        else if (WatchedFor(jurisdiction).Count == 0)
+        {
+            <CivicWatchEmptyState Icon="bi-bookmark" Message="@(jurisdiction == "ga" ? "Follow a Georgia bill to see its status here and get alerts when it moves." : "Follow a federal bill in the current Congress to see its latest action here.")" />
+        }
+        else
+        {
+            <div class="news-list">
+                @foreach (var bill in WatchedFor(jurisdiction))
+                {
+                    <div class="watch-row">
+                        <a href="@bill.OfficialUrl" target="_blank" rel="noopener noreferrer">
+                            <span class="news-source">@bill.Label@(bill.LastChangedAt is { } changed ? $" · changed {changed.ToLocalTime():MMM d}" : string.Empty)</span>
+                            <strong>@bill.Title</strong>
+                            <small>@bill.LatestStatus@(string.IsNullOrWhiteSpace(bill.LatestStatusDate) ? string.Empty : $" ({bill.LatestStatusDate})")@(bill.LastError is null ? string.Empty : $" · {bill.LastError}")</small>
+                        </a>
+                        <button type="button" class="btn btn-sm btn-link watch-remove" aria-label="@($"Stop watching {bill.Label}")"
+                                @onclick="() => RemoveWatchedBillAsync(bill.Id)" disabled="@_watchBusy">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+                }
+            </div>
+        }
+        <p class="panel-note"><i class="bi bi-bell"></i> Checked hourly. Status changes are emailed when alerts are on in Settings, and start any workflow with a "Civic Watch Bill Status Changed" trigger.</p>
+    </text>;
+
+    private async Task AddWatchedBillAsync(string jurisdiction)
+    {
+        var text = _watchInput[jurisdiction];
+        if (string.IsNullOrWhiteSpace(text)) return;
+        _watchBusy = true;
+        _watchMessage[jurisdiction] = null;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var added = await CivicService.AddWatchedBillAsync(jurisdiction, text, username);
+            _watchInput[jurisdiction] = string.Empty;
+            _watchMessage[jurisdiction] = $"Now watching {added.Label}.";
+            _watched = await CivicService.ListWatchedBillsAsync();
+        }
+        catch (ArgumentException ex)
+        {
+            _watchMessage[jurisdiction] = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Civic Watch: adding a watched bill failed");
+            _watchMessage[jurisdiction] = "That bill couldn't be added right now.";
+        }
+        finally
+        {
+            _watchBusy = false;
+        }
+    }
+
+    private async Task RemoveWatchedBillAsync(Guid id)
+    {
+        _watchBusy = true;
+        try
+        {
+            await CivicService.RemoveWatchedBillAsync(id);
+            _watched = await CivicService.ListWatchedBillsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Civic Watch: removing a watched bill failed");
+        }
+        finally
+        {
+            _watchBusy = false;
+        }
+    }
+
+    // ── Keyword feeds, documents, elections ───────────────────────────────
+    private IReadOnlyList<FederalRegisterDocument> FilteredRegister =>
+        _federalRegister is null
+            ? []
+            : _federalRegister.Items.Where(d => !_openCommentOnly || d.IsOpenForComment(DateOnly.FromDateTime(DateTime.Now))).ToList();
+
+    private static string FormatDateOnly(DateOnly? value) =>
+        value?.ToString("MMM d, yyyy", CultureInfo.InvariantCulture) ?? "Date unavailable";
+
+    private static string RegisterMeta(FederalRegisterDocument doc)
+    {
+        var parts = new List<string>();
+        if (doc.CommentsCloseOn is { } close)
+        {
+            parts.Add(close >= DateOnly.FromDateTime(DateTime.Now)
+                ? $"Comments close {close.ToString("MMM d", CultureInfo.InvariantCulture)}"
+                : $"Comments closed {close.ToString("MMM d", CultureInfo.InvariantCulture)}");
+        }
+        if (!string.IsNullOrWhiteSpace(doc.Agencies)) parts.Add(doc.Agencies);
+        return string.Join(" · ", parts);
+    }
+
+    private static string GrantMeta(GrantOpportunity grant)
+    {
+        var parts = new List<string> { grant.Number };
+        if (grant.CloseDate is { } close) parts.Add($"Closes {close.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}");
+        else parts.Add("No close date posted");
+        parts.Add($"\"{grant.MatchedKeyword}\"");
+        return string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+    }
+
+    private static string ElectionMeta(CivicElection election)
+    {
+        var days = election.ElectionDate.DayNumber - DateOnly.FromDateTime(DateTime.Now).DayNumber;
+        var when = days switch { 0 => "Today", 1 => "Tomorrow", _ => $"In {days} days" };
+        return string.IsNullOrWhiteSpace(election.RegistrationDeadline)
+            ? $"{when} · {election.ElectionDate.Year}"
+            : $"{when} · register by {election.RegistrationDeadline}";
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -479,6 +1141,11 @@
                 return;
             }
             await LoadSnapshotAsync(forceRefresh: true);
+            if (_snapshot is not null)
+            {
+                await CivicService.RecordSightingsAsync(_snapshot);
+                _changes = await CivicService.GetChangesAsync(TimeSpan.FromHours(24));
+            }
         }
         finally
         {
@@ -552,7 +1219,9 @@
                 .Select(e => e.City)
                 .Where(c => !string.IsNullOrWhiteSpace(c) && c != CivicPlaces.Unknown)
                 .Distinct()
-                .OrderBy(c => CivicPlaces.MilesFor(c) ?? double.MaxValue)
+                .OrderBy(c => CivicPlaces.TownCoordinates.TryGetValue(c, out var town)
+                    ? CivicPlaces.MilesBetween(HomeLatitude, HomeLongitude, town.Latitude, town.Longitude)
+                    : double.MaxValue)
                 .ThenBy(c => c)
                 .ToList();
 
@@ -572,7 +1241,7 @@
             {
                 // An event whose town could not be resolved has no distance, so it is excluded
                 // from a distance filter rather than silently treated as nearby.
-                events = events.Where(e => e.MilesFromHome is { } miles && miles <= _radiusFilter);
+                events = events.Where(e => MilesFromHome(e) is { } miles && miles <= _radiusFilter);
             }
 
             if (_whenFilter != "all")
@@ -629,14 +1298,22 @@
     };
     private static string MeetingMeta(CivicMeeting meeting) =>
         string.IsNullOrWhiteSpace(meeting.Location) ? meeting.Source : $"{meeting.Location} · {meeting.Source}";
-    private static string EventMeta(CivicEvent item)
+    private double HomeLatitude => _settings?.HomeLatitude ?? CivicPlaces.HomeLatitude;
+    private double HomeLongitude => _settings?.HomeLongitude ?? CivicPlaces.HomeLongitude;
+
+    // Measured from the configured home (venue coordinates, else the town centre). Falls back to
+    // the source's own Kathleen-based figure only when neither is known.
+    private double? MilesFromHome(CivicEvent item) =>
+        CivicPlaces.MilesFrom(HomeLatitude, HomeLongitude, item) ?? (_settings is null ? item.MilesFromHome : null);
+
+    private string EventMeta(CivicEvent item)
     {
         var when = item.StartAt?.ToString("h:mm tt", CultureInfo.InvariantCulture) ?? "Time unavailable";
         // Town first after the time: with several towns in one feed, "where" is the thing being
         // scanned for. Distance rides along with it so "is that worth the drive" is answerable
         // without opening the listing.
         var where = item.City != CivicPlaces.Unknown && !string.IsNullOrWhiteSpace(item.City)
-            ? item.MilesFromHome is { } miles && miles > 0
+            ? MilesFromHome(item) is { } miles && miles > 0
                 ? $"{item.City} · {miles:0.#} mi"
                 : item.City
             : null;

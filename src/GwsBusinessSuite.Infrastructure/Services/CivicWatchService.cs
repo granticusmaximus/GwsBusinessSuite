@@ -489,6 +489,14 @@ public sealed partial class CivicWatchService(
 
     private sealed record BillStatus(string Title, string Status, string? StatusDate, string Url);
 
+    // Status is null either because the bill doesn't exist (SourceFailed false) or because the
+    // source didn't answer - congress.gov's shared DEMO_KEY is limited to ~30 requests an hour
+    // per IP and answers 429 once the hourly hearings fetch has used it up.
+    private sealed record BillLookup(BillStatus? Status, bool SourceFailed, string? FailureReason = null);
+
+    private const string CongressRateLimited =
+        "Congress.gov is rate-limiting this server right now (the shared DEMO_KEY allows about 30 requests an hour). Try again later, or set CongressApi:ApiKey to a free api.data.gov key.";
+
     public async Task<WatchedBillView> AddWatchedBillAsync(string jurisdiction, string billText, string username, CancellationToken ct = default)
     {
         var parsed = ParseBill(jurisdiction, billText) ?? throw new ArgumentException(jurisdiction == WatchedBillJurisdictions.Georgia
@@ -501,8 +509,10 @@ public sealed partial class CivicWatchService(
                                                 && b.Number == parsed.Number && b.Congress == congress, ct))
             throw new ArgumentException($"{parsed.Label} is already on your watchlist.");
 
-        var status = await LookupBillAsync(parsed, congress, ct)
-                     ?? throw new ArgumentException($"Couldn't find {parsed.Label} in the current session. Check the number, or try again if the source is down.");
+        var lookup = await LookupBillAsync(parsed, congress, ct);
+        if (lookup.SourceFailed)
+            throw new ArgumentException(lookup.FailureReason ?? $"{(parsed.Jurisdiction == WatchedBillJurisdictions.Georgia ? "The Georgia General Assembly" : "Congress.gov")} didn't answer. Try again in a few minutes.");
+        var status = lookup.Status ?? throw new ArgumentException($"Couldn't find {parsed.Label} in the current session. Check the number.");
         var now = timeProvider.GetUtcNow();
         var row = new WatchedBill
         {
@@ -530,11 +540,13 @@ public sealed partial class CivicWatchService(
         {
             ct.ThrowIfCancellationRequested();
             var now = timeProvider.GetUtcNow();
-            var status = await LookupBillAsync(new(bill.Jurisdiction, bill.BillType, bill.Number, bill.Label), bill.Congress, ct);
+            var lookup = await LookupBillAsync(new(bill.Jurisdiction, bill.BillType, bill.Number, bill.Label), bill.Congress, ct);
             bill.LastCheckedAt = now;
-            if (status is null)
+            if (lookup.Status is not { } status)
             {
-                bill.LastError = "The source didn't answer on the last check.";
+                bill.LastError = lookup.SourceFailed
+                    ? lookup.FailureReason is null ? "The source didn't answer on the last check." : "Congress.gov was rate-limiting on the last check."
+                    : "The source no longer lists this bill.";
                 continue;
             }
             bill.LastError = null;
@@ -561,19 +573,20 @@ public sealed partial class CivicWatchService(
 
     private static string Normalize(string? value) => Regex.Replace((value ?? string.Empty).Trim(), @"\s+", " ");
 
-    private async Task<BillStatus?> LookupBillAsync(ParsedBill bill, int? congress, CancellationToken ct) =>
+    private async Task<BillLookup> LookupBillAsync(ParsedBill bill, int? congress, CancellationToken ct) =>
         bill.Jurisdiction == WatchedBillJurisdictions.Georgia
             ? await LookupGeorgiaBillAsync(bill, ct)
             : await LookupFederalBillAsync(bill, congress ?? CurrentCongressNumber(timeProvider.GetUtcNow()), ct);
 
-    private async Task<BillStatus?> LookupGeorgiaBillAsync(ParsedBill bill, CancellationToken ct)
+    private async Task<BillLookup> LookupGeorgiaBillAsync(ParsedBill bill, CancellationToken ct)
     {
         var token = await GetGeorgiaTokenAsync(ct);
-        if (token is null) return null;
+        if (token is null) return new(null, true);
         var json = await GeorgiaPostAsync($"Legislation/searchquery/20/0?query={Uri.EscapeDataString(bill.Label)}", token, ct);
-        return json is null ? null : PickGeorgiaBill(json, bill) is { } hit
-            ? new BillStatus(hit.Title, hit.Status, hit.StatusDate, GeorgiaLegislationPageUrl + hit.LegislationId.ToString(CultureInfo.InvariantCulture))
-            : null;
+        if (json is null) return new(null, true);
+        return PickGeorgiaBill(json, bill) is { } hit
+            ? new(new BillStatus(hit.Title, hit.Status, hit.StatusDate, GeorgiaLegislationPageUrl + hit.LegislationId.ToString(CultureInfo.InvariantCulture)), false)
+            : new(null, false);
     }
 
     public sealed record GeorgiaBillHit(int LegislationId, string Title, string Status, string? StatusDate);
@@ -602,11 +615,23 @@ public sealed partial class CivicWatchService(
         return fallback;
     }
 
-    private async Task<BillStatus?> LookupFederalBillAsync(ParsedBill bill, int congress, CancellationToken ct)
+    private async Task<BillLookup> LookupFederalBillAsync(ParsedBill bill, int congress, CancellationToken ct)
     {
-        var json = await GetStringOrNullAsync(
-            $"{CongressApiBaseUrl}bill/{congress}/{bill.BillType}/{bill.Number}?api_key={Uri.EscapeDataString(congressApi.ApiKey)}&format=json", ct);
-        return json is null ? null : ParseFederalBill(json, bill, congress) is { } s ? new BillStatus(s.Title, s.Status, s.StatusDate, s.Url) : null;
+        var url = $"{CongressApiBaseUrl}bill/{congress}/{bill.BillType}/{bill.Number}?api_key={Uri.EscapeDataString(congressApi.ApiKey)}&format=json";
+        try
+        {
+            using var response = await http.GetAsync(url, ct);
+            if (response.StatusCode == HttpStatusCode.NotFound) return new(null, false);
+            if (response.StatusCode == HttpStatusCode.TooManyRequests) return new(null, true, CongressRateLimited);
+            if (!response.IsSuccessStatusCode) return new(null, true);
+            var parsed = ParseFederalBill(await response.Content.ReadAsStringAsync(ct), bill, congress);
+            return parsed is null ? new(null, false) : new(new BillStatus(parsed.Title, parsed.Status, parsed.StatusDate, parsed.Url), false);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Civic Watch: congress.gov lookup failed for {Bill}", bill.Label);
+            return new(null, true);
+        }
     }
 
     public sealed record FederalBillStatus(string Title, string Status, string? StatusDate, string Url);

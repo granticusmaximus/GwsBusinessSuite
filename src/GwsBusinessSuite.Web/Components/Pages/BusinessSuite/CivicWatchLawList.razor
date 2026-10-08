@@ -3,7 +3,7 @@
 <div class="law-list">
     @foreach (var law in Laws.Take(VisibleCount))
     {
-        <CivicWatchLawCard Law="law" />
+        <CivicWatchLawCard Law="law" IsNew="@IsNew(law)" />
     }
 </div>
 
@@ -14,7 +14,7 @@
         <div class="law-list">
             @foreach (var law in Laws.Skip(VisibleCount))
             {
-                <CivicWatchLawCard Law="law" />
+                <CivicWatchLawCard Law="law" IsNew="@IsNew(law)" />
             }
         </div>
     </details>
@@ -23,4 +23,7 @@
 @code {
     [Parameter, EditorRequired] public IReadOnlyList<LawSummary> Laws { get; set; } = [];
     [Parameter] public int VisibleCount { get; set; } = 5;
+    [Parameter] public IReadOnlySet<string>? NewKeys { get; set; }
+
+    private bool IsNew(LawSummary law) => NewKeys?.Contains(CivicItemKeys.For("state", law.Url)) == true;
 }

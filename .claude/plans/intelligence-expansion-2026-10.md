@@ -25,21 +25,21 @@ New:
 4. ~~"Clip to Sentinel" - save an article with summary and source into a Sentinel page.~~
 5. ~~Trends view - mentions per topic over time and rising keywords (needs history retained).~~
 
-## Civic Watch (/admin/government-intelligence)
+## ~~Civic Watch (/admin/government-intelligence)~~ DONE 2026-10-08
 
 Improve:
-1. Configurable location (area is hard-coded to Kathleen / Houston County, GA).
-2. "Generate overview now" button, and extend SentinelGPT overviews to federal bills.
-3. Fix dead/missing local sources - Houston County calendar URL 404s; Visit Macon /events/ is server-rendered and unscraped.
-4. "What changed" highlighting since the last refresh (new votes, newly signed laws).
-5. Show how your own representatives voted (district lookup), not just highlight the GA delegation.
+1. ~~Configurable location (area is hard-coded to Kathleen / Houston County, GA).~~
+2. ~~"Generate overview now" button, and extend SentinelGPT overviews to federal bills.~~
+3. ~~Fix dead/missing local sources - Houston County calendar URL 404s; Visit Macon /events/ is server-rendered and unscraped.~~
+4. ~~"What changed" highlighting since the last refresh (new votes, newly signed laws).~~
+5. ~~Show how your own representatives voted (district lookup), not just highlight the GA delegation.~~
 
 New:
-1. Bill watchlist - follow GA/federal bills, alert on status changes (email or automation).
-2. County commission agendas/minutes ingestion with short AI summaries.
-3. Federal Register rules and open comment periods matching keywords (key-less API).
-4. Upcoming elections + sample-ballot/polling info for the area (source must verify key-less).
-5. Grants.gov funding opportunities matching business keywords.
+1. ~~Bill watchlist - follow GA/federal bills, alert on status changes (email or automation).~~
+2. ~~County commission agendas/minutes ingestion with short AI summaries.~~
+3. ~~Federal Register rules and open comment periods matching keywords (key-less API).~~
+4. ~~Upcoming elections + sample-ballot/polling info for the area (source must verify key-less).~~
+5. ~~Grants.gov funding opportunities matching business keywords.~~
 
 ## ~~BI Dashboards (/admin/business-intelligence)~~ DONE 2026-10-06
 
@@ -132,4 +132,22 @@ New:
     picks a catalogued report via BiQuestionPlanner (validated; keyword fallback when Ollama is
     unreachable or answers invalidly); "Open in builder to pin".
   - BI Dashboards: ALL 10 DONE 2026-10-06. Next page: Civic Watch.
-- Civic Watch, Overwatch: not started.
+- 2026-10-07/08: Civic Watch - ALL 10 BUILT (new ICivicWatchService/CivicWatchService +
+  CivicWatchBackgroundService; tables CivicWatchSettings, WatchedBills, CivicItemSightings,
+  CivicMeetingDocuments via migration 20261007235525_AddCivicWatch). Notes per item:
+  - Improve 1: home label/address/lat-lon in Settings; Census geocoder + district lookup. Feeds stay
+    Houston County/Georgia (scope decision - other states' sources are not swappable).
+  - Improve 2: "Generate overview now" in LegislationBriefPanel; overviews extended to federal roll calls.
+  - Improve 3: /residents/ (403) -> newcomers.cms; Visit Macon added via Playwright (Algolia list
+    renders only after scrolling). County calendar.cms actually answers 200 now.
+  - Improve 4: CivicItemSightings (first run = baseline) -> "What changed" strip + New pills.
+  - Improve 5: exact member-ID match (House name-id/bioguide, Senate lis_member_id via
+    congress-legislators; GA members/list/{session}?chamber=1|2 ids).
+  - New 1: watchlist (GA searchquery, congress.gov v3/bill) hourly + email + civic.billStatusChangedTrigger.
+    congress.gov DEMO_KEY (~30 req/h/IP) is mostly used by the hearings fetch -> recommend a free
+    api.data.gov key in CongressApi:ApiKey.
+  - New 2: county /minutes/*.pdf agendas/minutes, PdfPig text, 2 summaries/hour (background priority).
+  - New 3: Federal Register (relevance, 30 days, RULE/PRORULE/NOTICE). New 4: county election-dates
+    table + Board of Elections docs (no key-less per-voter ballot source; links to My Voter Page).
+  - New 5: Grants.gov search2.
+- Overwatch: not started (next).

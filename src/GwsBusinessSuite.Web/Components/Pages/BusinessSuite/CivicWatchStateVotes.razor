@@ -12,7 +12,7 @@ else
         {
             <article class="vote-card">
                 <div class="vote-meta">
-                    <span>@vote.Chamber vote @vote.RollCallNumber</span>
+                    <span>@vote.Chamber vote @vote.RollCallNumber@if (IsNew(vote)) { <span class="civic-new">New</span> }</span>
                     <time>@FormatTimestamp(vote.VotedAt)</time>
                 </div>
                 <h3>@vote.Measure · @vote.Title</h3>
@@ -57,6 +57,12 @@ else
 }
 
 @code {
+    // Keys of items first seen in the last day (CivicItemKeys); drives the "New" pill.
+    [Parameter] public IReadOnlySet<string>? NewKeys { get; set; }
+
+    private bool IsNew(StateLegislativeVoteSummary vote) =>
+        NewKeys?.Contains(CivicItemKeys.For("state", vote.DetailUrl + "#" + vote.Chamber + vote.RollCallNumber)) == true;
+
     [Parameter, EditorRequired] public IReadOnlyList<StateLegislativeVoteSummary> Votes { get; set; } = [];
 
     private static string FormatTimestamp(DateTimeOffset? value) =>

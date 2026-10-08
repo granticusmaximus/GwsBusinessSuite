@@ -23,7 +23,7 @@ public interface ILocalEventsScraperService
 // real (headless) browser to execute their client-side JS before the DOM contains
 // anything. This is the only Playwright-based scraper in the app; every other
 // GovernmentIntelligenceService source is plain HttpClient + regex because it happens to
-// be server-rendered. Two other candidate sources (Warner Robins city + its CVB) actively
+// be server-rendered. Visit Macon (Algolia, client-rendered) joined these in 2026-10. Two other candidate sources (Warner Robins city + its CVB) actively
 // block headless Chrome entirely, and two more (Visit Perry/Wix, Perry Area Chamber) are
 // client-only app shells with no discoverable public event data - neither is scraped here.
 public sealed class LocalEventsScraperService(
@@ -36,6 +36,10 @@ public sealed class LocalEventsScraperService(
 
     private const string PerryCalendarUrl = "https://www.perry-ga.gov/calendar-all-events";
     private const string ChamberEventsUrl = "https://chamber.robinsregion.com/events/";
+    // Visit Macon's listings come from an Algolia index rendered client-side, and the list only
+    // fills once it is scrolled into view (verified 2026-10-07) - hence Playwright plus scrolling.
+    private const string VisitMaconEventsUrl = "https://www.visitmacon.org/events/";
+    private const string VisitMaconSource = "Visit Macon";
 
     private static readonly Regex TitlePunctuationRegex = new(@"[^\w\s]", RegexOptions.Compiled);
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
@@ -125,7 +129,100 @@ public sealed class LocalEventsScraperService(
             logger.LogWarning(ex, "Local Events: Robins Region Chamber scrape failed");
         }
 
+        try
+        {
+            await using var maconPage = await browser.NewPageAsync();
+            await maconPage.GotoAsync(VisitMaconEventsUrl, new PageGotoOptions { WaitUntil = WaitUntilState.Load, Timeout = 60000 });
+            var listings = await maconPage.QuerySelectorAsync(".block.listings");
+            if (listings is not null) await listings.ScrollIntoViewIfNeededAsync();
+            for (var i = 0; i < 6; i++)
+            {
+                await maconPage.Mouse.WheelAsync(0, 1500);
+                await maconPage.WaitForTimeoutAsync(600);
+            }
+            await maconPage.WaitForSelectorAsync(".block.listings .card__heading", new PageWaitForSelectorOptions { Timeout = 15000 });
+            events.AddRange(await ExtractVisitMaconEventsAsync(maconPage, DateOnly.FromDateTime(DateTime.Now)));
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Local Events: Visit Macon scrape failed");
+        }
+
         return DeduplicateEvents(events);
+    }
+
+    public static async Task<List<CivicEvent>> ExtractVisitMaconEventsAsync(IPage page, DateOnly today)
+    {
+        var results = new List<CivicEvent>();
+        foreach (var card in await page.QuerySelectorAllAsync(".block.listings .card__inner"))
+        {
+            var heading = await card.QuerySelectorAsync("a.card__heading");
+            if (heading is null) continue;
+            var title = CleanText(await heading.InnerTextAsync());
+            var href = await heading.GetAttributeAsync("href");
+            if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(href)) continue;
+
+            var dateEl = await card.QuerySelectorAsync(".card__date-heading");
+            var (start, end) = ParseVisitMaconDateRange(dateEl is null ? string.Empty : await dateEl.InnerTextAsync(), today);
+            var venueEl = await card.QuerySelectorAsync(".card__location");
+            var venue = venueEl is null ? string.Empty : CleanText(await venueEl.InnerTextAsync());
+            var addressEl = await card.QuerySelectorAsync(".card__address");
+            var address = addressEl is null ? string.Empty : CleanText(await addressEl.InnerTextAsync());
+            var city = CivicPlaces.Resolve(string.Empty, $"{address} {venue}");
+
+            results.Add(new CivicEvent(
+                title,
+                new Uri(new Uri(VisitMaconEventsUrl), href).AbsoluteUri,
+                start,
+                end,
+                string.Join(", ", new[] { venue, address }.Where(x => !string.IsNullOrWhiteSpace(x))),
+                VisitMaconSource,
+                null,
+                city,
+                CivicPlaces.MilesFor(city)));
+        }
+        return results;
+    }
+
+    private static readonly Regex VisitMaconDateRegex = new(
+        @"^(?<m1>[A-Za-z]{3,9})\.?\s+(?<d1>\d{1,2})(?:\s*[-\u2013]\s*(?:(?<m2>[A-Za-z]{3,9})\.?\s+)?(?<d2>\d{1,2}))?",
+        RegexOptions.Compiled);
+
+    // "Oct 7", "Oct 7 - 31", "Oct 30 - Nov 2", "Dec 31 - Jan 2". No year is shown: a month
+    // earlier than this one belongs to next year. Date-only, so StartAt carries no time of day.
+    public static (DateTimeOffset? Start, DateTimeOffset? End) ParseVisitMaconDateRange(string text, DateOnly today)
+    {
+        var m = VisitMaconDateRegex.Match(CleanText(text ?? string.Empty));
+        if (!m.Success || !TryMonth(m.Groups["m1"].Value, out var m1)) return (null, null);
+        var y1 = m1 < today.Month - 1 ? today.Year + 1 : today.Year;
+        if (!TryDate(y1, m1, int.Parse(m.Groups["d1"].Value), out var start)) return (null, null);
+        DateTimeOffset? end = null;
+        if (m.Groups["d2"].Success)
+        {
+            var m2 = m1;
+            if (m.Groups["m2"].Success && !TryMonth(m.Groups["m2"].Value, out m2)) m2 = m1;
+            var y2 = m2 < m1 ? y1 + 1 : y1;
+            if (TryDate(y2, m2, int.Parse(m.Groups["d2"].Value), out var e)) end = e;
+        }
+        return (start, end);
+    }
+
+    private static bool TryMonth(string text, out int month)
+    {
+        month = 0;
+        if (text.Length < 3) return false;
+        var names = System.Globalization.CultureInfo.InvariantCulture.DateTimeFormat.AbbreviatedMonthNames;
+        var index = Array.FindIndex(names, n => n.Length > 0 && text[..3].Equals(n, StringComparison.OrdinalIgnoreCase));
+        month = index + 1;
+        return index >= 0;
+    }
+
+    private static bool TryDate(int year, int month, int day, out DateTimeOffset value)
+    {
+        value = default;
+        if (day < 1 || day > DateTime.DaysInMonth(year, month)) return false;
+        value = new DateTimeOffset(new DateTime(year, month, day), TimeSpan.Zero);
+        return true;
     }
 
     // Public + operates on IPage so tests can call it directly against

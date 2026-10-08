@@ -40,8 +40,19 @@ public sealed class GovernmentIntelligenceRefreshBackgroundService(
             logger.LogInformation("Government Intelligence: starting scheduled refresh");
             await using var scope = scopeFactory.CreateAsyncScope();
             var svc = scope.ServiceProvider.GetRequiredService<IGovernmentIntelligenceService>();
-            await svc.GetSnapshotAsync(forceRefresh: true, ct);
+            var snapshot = await svc.GetSnapshotAsync(forceRefresh: true, ct);
             logger.LogInformation("Government Intelligence: refresh complete");
+
+            // "What changed": remember when each item first appeared. A failure here must not
+            // stop the overview sweep below.
+            try
+            {
+                await scope.ServiceProvider.GetRequiredService<ICivicWatchService>().RecordSightingsAsync(snapshot, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Civic Watch: recording sightings failed");
+            }
 
             // Off the request path by construction (this only ever runs from this timer),
             // so it's safe for PopulateAiOverviewsAsync to serialize through the shared

@@ -1,7 +1,7 @@
 @using GwsBusinessSuite.Application.GovernmentIntelligence
 
 <article class="law-card">
-    <span>@Law.DocumentNumber</span>
+    <span>@Law.DocumentNumber@if (IsNew) { <span class="civic-new">New</span> }</span>
     <h3>@Law.Title</h3>
     <a href="@Law.Url" target="_blank" rel="noopener noreferrer">Official signed law <i class="bi bi-arrow-up-right"></i></a>
     @if (Law.Legislation is not null)
@@ -12,4 +12,5 @@
 
 @code {
     [Parameter, EditorRequired] public LawSummary Law { get; set; } = default!;
+    [Parameter] public bool IsNew { get; set; }
 }
