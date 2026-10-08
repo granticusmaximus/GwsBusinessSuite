@@ -51,6 +51,8 @@ public sealed class CameraCoverageRegionsTests
         names.Should().Contain(n => n.Contains("Iceland"));
         names.Should().Contain(n => n.Contains("Singapore"));
         names.Should().Contain(n => n.Contains("Hong Kong"));
+        names.Should().Contain(n => n.Contains("Estonia"));
+        names.Should().Contain(n => n.Contains("Norway"));
         names.Should().Contain(n => n.Contains("British Columbia"));
         names.Should().Contain(n => n.Contains("Madrid"));
         names.Should().Contain(n => n.Contains("Finland"));

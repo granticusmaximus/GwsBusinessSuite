@@ -16,10 +16,8 @@ public sealed record CameraFeed(
 
 // Most public traffic-camera APIs (WSDOT, Windy, etc.) serve a periodically-refreshed still
 // image rather than continuous video - Snapshot means "re-fetch StreamUrl on an interval" (the
-// client appends its own cache-busting query param). Hls is for a future source that serves a
-// real HLS manifest, reusing the same hls.js-based playback already established for Civic
-// Watch's floor-video feature (see civicWatchVideo.js) - no pilot source below produces this
-// yet, but the render path is written to support it now rather than bolted on later.
+// client appends its own cache-busting query param). Hls is for sources that serve a real HLS
+// manifest (including Norway, Missouri and Delaware); the globe uses its hls.js playback path.
 public enum CameraStreamKind
 {
     Snapshot,

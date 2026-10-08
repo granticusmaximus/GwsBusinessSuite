@@ -78,6 +78,48 @@ public sealed class InternationalCameraProviderTests
         (await new IcelandRoadCameraProvider(Client("https://a/", Fail), cache, NullLogger<IcelandRoadCameraProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
         (await new SingaporeLtaCameraProvider(Client("https://a/", Fail), cache, NullLogger<SingaporeLtaCameraProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
         (await new HongKongTdCameraProvider(Client("https://a/", Fail), cache, NullLogger<HongKongTdCameraProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
+        (await new EstoniaRoadCameraProvider(Client("https://a/", Fail), cache, NullLogger<EstoniaRoadCameraProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
+        (await new NorwayRoadCameraProvider(Client("https://a/", Fail), cache, NullLogger<NorwayRoadCameraProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Estonia_ShouldMapSafeCurrentJpegPaths()
+    {
+        const string json = """
+            {"features":[
+              {"attributes":{"objectid":11,"site_name":"Jõhvi","image_path":"94/94_202610081731.jpg"},"geometry":{"x":27.44067,"y":59.36536}},
+              {"attributes":{"objectid":12,"site_name":"Unsafe","image_path":"../secret.jpg"},"geometry":{"x":25.0,"y":58.5}}
+            ]}
+            """;
+        var provider = new EstoniaRoadCameraProvider(Client("https://tarktee.ee/", _ => Json(json)),
+            new MemoryCache(new MemoryCacheOptions()), NullLogger<EstoniaRoadCameraProvider>.Instance);
+
+        var cameras = await provider.GetCamerasAsync(World);
+
+        cameras.Should().ContainSingle().Which.Should().Match<CameraFeed>(camera =>
+            camera.Id == "estonia-tarktee-11"
+            && camera.Name == "Estonia: Jõhvi"
+            && camera.StreamUrl == "https://tarktee.ee/images/94/94_202610081731.jpg");
+    }
+
+    [Fact]
+    public async Task Norway_ShouldExposeOnlyWorkingPublicHlsCameras()
+    {
+        const string json = """
+            {"measurementSites":[{"id":"2000065","name":"Aisaroaivi","location":{"geometry":{"type":"Point","coordinates":[24.10096,70.27835]}},"cameras":[
+              {"id":"2000065_1","orientationDescription":"Sennalandet","stillImageUrl":"https://kamera.atlas.vegvesen.no/api/images/2000065_1","videoUrl":"https://kamera.vegvesen.no/public/2000065_1/manifest.m3u8","status":"OK","lastUpdated":"2026-10-08T14:51:16+02:00"},
+              {"id":"2000065_2","orientationDescription":"Skaidi","stillImageUrl":"https://kamera.atlas.vegvesen.no/api/images/2000065_2","videoUrl":"","status":"OK","lastUpdated":"2026-10-08T14:51:16+02:00"}
+            ]}],"metadata":{}}
+            """;
+        var provider = new NorwayRoadCameraProvider(Client("https://road-weather-and-view.atlas.vegvesen.no/", _ => Json(json)),
+            new MemoryCache(new MemoryCacheOptions()), NullLogger<NorwayRoadCameraProvider>.Instance);
+
+        var cameras = await provider.GetCamerasAsync(World);
+
+        cameras.Should().ContainSingle().Which.Should().Match<CameraFeed>(camera =>
+            camera.Id == "norway-vegvesen-2000065_1"
+            && camera.StreamKind == CameraStreamKind.Hls
+            && camera.Name.Contains("Sennalandet"));
     }
 
     private static HttpResponseMessage Json(string json) =>

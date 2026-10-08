@@ -728,6 +728,20 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(30);
         });
         services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<HongKongTdCameraProvider>());
+        services.AddHttpClient<EstoniaRoadCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://tarktee.ee/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<EstoniaRoadCameraProvider>());
+        services.AddHttpClient<NorwayRoadCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://road-weather-and-view.atlas.vegvesen.no/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.svv.v1+json; charset=utf-8");
+            client.DefaultRequestHeaders.Add("X-System-ID", "vvtraf");
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<NorwayRoadCameraProvider>());
 
         services.AddSingleton<SourceStatusTracker>();
         // Overwatch watched areas: 10-minute checks -> notification bell.

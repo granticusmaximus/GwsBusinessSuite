@@ -32,3 +32,33 @@ per provider type.
 Never researched yet: AK, NM, SD, WV cameras; MA re-check; Taiwan, Norway, Denmark, Estonia,
 Switzerland; Canada NS/NB/MB/SK/YT/NL/PE; Australia WA/SA/TAS/NT.
 - Resolved: the 688s suite run on 2026-10-04 was machine load; it ran in 124s on 2026-10-05 with no code change.
+
+## Camera research 2026-10-08 (cameras batch above: Iceland, Hong Kong, Singapore BUILT; TN/CO/MN/NE plow excluded)
+
+**Waiting on Grant - same 511 platform covers 8 regions:** Alaska (511.alaska.gov), Nova Scotia
+(511.novascotia.ca), New Brunswick (511.gnb.ca), Manitoba (manitoba511.ca), Saskatchewan
+(hotline.gov.sk.ca), Yukon (511yukon.ca), Newfoundland (511nl.ca), PEI (511.gov.pe.ca).
+- Key-less public-site data works: `GET /List/GetData/Cameras?query={"start":0,"length":N,...}`
+  (header X-Requested-With) returns location, roadway, WKT point, images[] (imageUrl `/map/Cctv/{id}`,
+  disabled/blocked flags); images are real JPEGs. `/map/mapIcons/Cameras` gives counts (AK 130 sites).
+- BUT the official developer API "Requires a developer key" (free, registered account). Using the
+  site's internal endpoint would sidestep that - same class as the deferred "self-registered key"
+  states. Decision needed: (A) Grant registers free keys (also unlocks AZ/WI/NV/UT/LA/NC/CT/NJ/PA/
+  ON/AB from the guide's key-gated list) and one generic keyed provider reads them from config, or
+  (B) use the key-less public endpoint, or (C) skip.
+
+**Built 2026-10-08:**
+- Estonia: official Tark Tee ArcGIS `tram/road_cameras` layer; metadata and full-size JPEGs at
+  `/images/{image_path}` both verified live.
+- Norway: official Statens vegvesen `road-weather-and-view.atlas.vegvesen.no` endpoint returns
+  790 measurement sites. Its still-image service returned HTTP 500 for every sampled camera, so
+  the provider deliberately exposes only the 134 active cameras with verified public, CORS-enabled
+  HLS manifests and segments.
+
+**Still in progress:**
+- Denmark: the current official Trafikinfo map exposes no camera layer in its UI or initial data
+  calls. Do not add a provider until a first-party camera dataset and real images are found.
+
+**Not yet researched:** Taiwan (tisvcloud.freeway.gov.tw timed out), Switzerland (likely no public
+DOT cams), NM (nmroads.com), SD (sd511.org), WV (wv511.org), MA (mass511.com - possibly Iteris like
+SC), Australia WA/SA/TAS/NT (SA/TAS behind Cloudflare challenge).

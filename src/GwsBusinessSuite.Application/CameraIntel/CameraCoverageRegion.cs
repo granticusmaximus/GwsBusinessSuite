@@ -77,5 +77,7 @@ public static class CameraCoverageRegions
         new("Iceland (Vegagerðin)", "Vegagerðin", 64.90, -18.60, 900_000),
         new("Singapore (LTA)", "Singapore LTA", 1.35, 103.82, 60_000),
         new("Hong Kong (Transport Department)", "HK Transport Department", 22.35, 114.13, 90_000),
+        new("Estonia (Tark Tee)", "Estonia Tark Tee", 58.60, 25.00, 500_000),
+        new("Norway (Statens vegvesen)", "Statens vegvesen", 64.50, 17.00, 1_500_000),
     ];
 }
