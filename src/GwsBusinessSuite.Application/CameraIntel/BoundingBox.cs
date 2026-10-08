@@ -10,4 +10,7 @@ public sealed record BoundingBox(double North, double South, double East, double
     // longitude) - an acceptable v1 gap since no pilot provider has cameras anywhere near there.
     public bool Contains(double latitude, double longitude) =>
         latitude <= North && latitude >= South && longitude <= East && longitude >= West;
+
+    public bool Intersects(BoundingBox other) =>
+        South <= other.North && North >= other.South && West <= other.East && East >= other.West;
 }

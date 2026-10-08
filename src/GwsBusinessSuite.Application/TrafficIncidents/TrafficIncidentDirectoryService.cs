@@ -13,7 +13,7 @@ public sealed class TrafficIncidentDirectoryService(
     {
         var tasks = providers.Select(provider => FetchSafelyAsync(provider, bbox, cancellationToken));
         var results = await Task.WhenAll(tasks);
-        return results.SelectMany(incidents => incidents).ToList();
+        return results.SelectMany(incidents => incidents).Select(IncidentNormalizer.Normalize).ToList();
     }
 
     private async Task<IReadOnlyList<TrafficIncident>> FetchSafelyAsync(ITrafficIncidentProvider provider, BoundingBox bbox, CancellationToken cancellationToken)

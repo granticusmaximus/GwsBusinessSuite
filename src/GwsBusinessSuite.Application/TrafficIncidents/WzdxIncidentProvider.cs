@@ -76,7 +76,12 @@ public sealed class WzdxIncidentProvider(
                     Latitude: lat,
                     Longitude: lon,
                     SourceName: sourceName,
-                    SourceAttributionUrl: sourceAttributionUrl));
+                    SourceAttributionUrl: sourceAttributionUrl,
+                    // WZDx is structured enough to fill these directly; the rest of the
+                    // normalization (category, severity) happens in IncidentNormalizer.
+                    Category: core.EventType == "detour" ? IncidentCategories.Closure : IncidentCategories.Roadwork,
+                    Lanes: IncidentNormalizer.WzdxLanes(feature.Properties!.VehicleImpact),
+                    EndsAt: TryParseDate(feature.Properties!.EndDate, out var endsAt) ? endsAt : null));
             }
             return results;
         }

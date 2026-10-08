@@ -150,4 +150,10 @@ New:
   - New 3: Federal Register (relevance, 30 days, RULE/PRORULE/NOTICE). New 4: county election-dates
     table + Board of Elections docs (no key-less per-voter ballot source; links to My Voter Page).
   - New 5: Grants.gov search2.
-- Overwatch: not started (next).
+- 2026-10-08: Overwatch started (Grant: "move on to the next unit of work"). One item at a time:
+  - Improve 1 DONE: Iceland (Vegagerðin, 496), Hong Kong (TD, ~1,013; file has a DOUBLE UTF-16
+    BOM), Singapore (LTA, list re-read every minute - image URLs rotate). Excluded after live
+    checks: Tennessee (TDOT API needs the key embedded in SmartWay's app config), Colorado
+    (carsprogram camera API still undocumented), MN plow cams (images 403), NE plow cams (dead since 2023).
+  - Improve 2 DONE: CameraHealthService (server-side hash history; Frozen/Stale/Offline/Live),
+    10-min favorites sweep (CameraHealthBackgroundService), stream-panel badge, HEALTHY ONLY toggle.

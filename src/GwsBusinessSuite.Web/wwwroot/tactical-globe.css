@@ -147,6 +147,22 @@
     flex-shrink: 0;
 }
 
+.tg-stream-panel-health {
+    margin-top: 0.4rem;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid rgba(125, 255, 176, 0.35);
+    border-radius: 0.25rem;
+    font-size: 0.65rem;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+}
+
+.tg-stream-panel-health[data-status="live"] { color: #7dffb0; }
+.tg-stream-panel-health[data-status="frozen"],
+.tg-stream-panel-health[data-status="stale"] { color: #ffd166; border-color: rgba(255, 209, 102, 0.5); }
+.tg-stream-panel-health[data-status="offline"] { color: #ff8080; border-color: rgba(255, 128, 128, 0.5); }
+.tg-stream-panel-health[data-status="unknown"] { opacity: 0.7; }
+
 .tg-stream-panel-error {
     padding: 1.5rem 0.5rem;
     text-align: center;
@@ -399,3 +415,22 @@
     opacity: 0.75;
     white-space: nowrap;
 }
+
+.tg-hud-thinned {
+    display: block;
+    opacity: 0.7;
+    font-size: 0.85em;
+}
+
+.tg-incident-facts {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.15rem 0.6rem;
+    margin: 0.4rem 0;
+    font-size: 0.65rem;
+}
+
+.tg-incident-facts dt { opacity: 0.7; font-weight: normal; }
+.tg-incident-facts dd { margin: 0; }
+
+.tg-incident-filters { margin-top: 0.3rem; }

@@ -25,6 +25,8 @@ public sealed class MadridCameraProvider(
 
     public string SourceName => "Madrid Traffic";
 
+    public BoundingBox? Coverage { get; } = new(40.7, 40.2, -3.4, -4.0);
+
     public async Task<IReadOnlyList<CameraFeed>> GetCamerasAsync(BoundingBox bbox, CancellationToken cancellationToken = default)
     {
         if (!cache.TryGetValue(CacheKey, out IReadOnlyList<CameraFeed>? allCameras) || allCameras is null)

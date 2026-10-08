@@ -7,6 +7,7 @@
 @using GwsBusinessSuite.Application.TrafficIncidents
 @using GwsBusinessSuite.Application.Weather
 @inject CameraDirectoryService CameraDirectoryService
+@inject CameraHealthService CameraHealthService
 @inject INwsAlertsService NwsAlertsService
 @inject INwsForecastService NwsForecastService
 @inject TrafficIncidentDirectoryService TrafficIncidentDirectoryService
@@ -76,7 +77,13 @@
             </div>
         </div>
         <div class="tg-hud-status">
-            <div>CAMERAS IN VIEW: @_visibleCameras.Count</div>
+            <div>
+                CAMERAS IN VIEW: @_camerasInViewTotal
+                @if (_camerasInViewTotal > _visibleCameras.Count)
+                {
+                    <span class="tg-hud-thinned" title="Wide views show an even spread of cameras. Zoom in to see every camera.">(SHOWING @_visibleCameras.Count - ZOOM IN FOR ALL)</span>
+                }
+            </div>
             <div class="tg-hud-toggles">
                 <button type="button" data-tg-toggle="radar" class="tg-toggle @(_radarOn ? "tg-toggle-on" : "")" title="Toggle NOAA radar (R)" @onclick="ToggleRadarAsync">
                     RADAR [@(_radarOn ? "ON" : "OFF")]
@@ -86,6 +93,10 @@
                 </button>
                 <button type="button" data-tg-toggle="incidents" class="tg-toggle @(_incidentsOn ? "tg-toggle-on" : "")" title="Toggle traffic accidents/roadwork/closures (I)" @onclick="ToggleIncidentsAsync">
                     INCIDENTS [@(_incidentsOn ? "ON" : "OFF")]
+                </button>
+                <button type="button" data-tg-toggle="healthy" class="tg-toggle @(_hideUnhealthy ? "tg-toggle-on" : "")"
+                        title="Hide cameras found frozen, stale or offline (checked when opened, and every 10 minutes for favorites)" @onclick="ToggleHideUnhealthyAsync">
+                    HEALTHY ONLY [@(_hideUnhealthy ? "ON" : "OFF")]
                 </button>
                 <button type="button" data-tg-toggle="coverage" class="tg-toggle @(_coverageIndexOpen ? "tg-toggle-on" : "")" title="Show known camera coverage regions (C)" @onclick="ToggleCoverageIndex">
                     COVERAGE
@@ -104,6 +115,22 @@
                     <i class="bi bi-arrows-fullscreen" aria-hidden="true"></i>
                 </button>
             </div>
+            @if (_incidentsOn && _lastIncidents.Count > 0)
+            {
+                <div class="tg-hud-toggles tg-incident-filters" role="group" aria-label="Filter incidents by type">
+                    @foreach (var category in IncidentCategories.All)
+                    {
+                        var count = _lastIncidents.Count(i => i.Category == category);
+                        if (count == 0) continue;
+                        var shown = !_hiddenIncidentCategories.Contains(category);
+                        <button type="button" class="tg-toggle @(shown ? "tg-toggle-on" : "")" aria-pressed="@(shown ? "true" : "false")"
+                                title="@(shown ? "Hide" : "Show") @IncidentCategories.Label(category).ToLowerInvariant()"
+                                @onclick="() => ToggleIncidentCategoryAsync(category)">
+                            @IncidentCategories.Label(category).ToUpperInvariant() @count
+                        </button>
+                    }
+                </div>
+            }
         </div>
     </div>
 
@@ -194,6 +221,8 @@
     private bool _hasSettledOnce;
     private bool _radarOn;
     private bool _alertsOn;
+    private bool _hideUnhealthy;
+    private int _camerasInViewTotal;
     private bool _incidentsOn;
     private bool _coverageIndexOpen;
     private bool _selectModeOn;
@@ -310,8 +339,36 @@
         streamKind = camera.StreamKind.ToString(),
         sourceName = camera.SourceName,
         sourceAttributionUrl = camera.SourceAttributionUrl,
-        isFavorite = _favoriteCameraIds.Contains(camera.Id)
+        isFavorite = _favoriteCameraIds.Contains(camera.Id),
+        health = CameraHealthService.GetKnown(camera.Id)?.Status.ToString() ?? nameof(CameraHealthStatus.Unknown)
     };
+
+    private bool IsKnownUnhealthy(string cameraId) =>
+        CameraHealthService.GetKnown(cameraId)?.Status is CameraHealthStatus.Frozen or CameraHealthStatus.Stale or CameraHealthStatus.Offline;
+
+    private async Task ToggleHideUnhealthyAsync()
+    {
+        _hideUnhealthy = !_hideUnhealthy;
+        if (_hasSettledOnce)
+        {
+            await OnGlobeViewChanged(_lastBbox.North, _lastBbox.South, _lastBbox.East, _lastBbox.West);
+        }
+    }
+
+    // Called from the stream panel when it opens (and every few minutes while it stays open).
+    // Same positional camera identity as ToggleCameraFavoriteAsync.
+    [JSInvokable]
+    public async Task<CameraHealthDto> GetCameraHealthAsync(
+        string cameraId, string name, double lat, double lon, string streamUrl, string streamKind,
+        string sourceName, string sourceAttributionUrl)
+    {
+        var camera = new CameraFeed(cameraId, name, lat, lon, streamUrl,
+            Enum.Parse<CameraStreamKind>(streamKind), sourceName, sourceAttributionUrl);
+        var report = await CameraHealthService.CheckAsync(camera);
+        return new CameraHealthDto(report.Status.ToString(), report.Detail);
+    }
+
+    public sealed record CameraHealthDto(string Status, string Detail);
 
     // Called from the stream panel's favorite-star button (tactical-globe.js threads the current
     // camera payload through). Returns the new favorite state so the star's visual can update
@@ -408,13 +465,15 @@
         var centerLatitude = (north + south) / 2.0;
         var centerLongitude = (east + west) / 2.0;
 
-        var camerasTask = CameraDirectoryService.GetCamerasInBoundingBoxAsync(_lastBbox);
+        var camerasTask = CameraDirectoryService.GetCamerasForViewAsync(_lastBbox,
+            include: _hideUnhealthy ? c => !IsKnownUnhealthy(c.Id) : null);
         var alertsTask = _alertsOn ? NwsAlertsService.GetActiveAlertsAsync(_lastBbox) : NoAlerts;
         var incidentsTask = _incidentsOn ? TrafficIncidentDirectoryService.GetIncidentsInBoundingBoxAsync(_lastBbox) : NoIncidents;
         var weatherTask = NwsForecastService.GetSnapshotAsync(centerLatitude, centerLongitude);
         await Task.WhenAll(camerasTask, alertsTask, incidentsTask, weatherTask);
 
-        _visibleCameras = camerasTask.Result.ToList();
+        _visibleCameras = camerasTask.Result.Cameras.ToList();
+        _camerasInViewTotal = camerasTask.Result.TotalInView;
         // Reset the dismiss so a future empty area shows the hint again - this isn't a
         // one-time app-level notice like the provider-setup banner, it's per-location
         // information that should reappear whenever it becomes true again.
@@ -564,21 +623,37 @@
 
     // Split from PushIncidentsAsync for the same reason as ApplyAlertsAsync above - lets
     // OnGlobeViewChanged fetch incidents in parallel with cameras/alerts/weather.
+    private List<TrafficIncident> _lastIncidents = new();
+    private readonly HashSet<string> _hiddenIncidentCategories = new();
+
+    private async Task ToggleIncidentCategoryAsync(string category)
+    {
+        if (!_hiddenIncidentCategories.Remove(category)) _hiddenIncidentCategories.Add(category);
+        await ApplyIncidentsAsync(_lastIncidents);
+    }
+
     private async Task ApplyIncidentsAsync(IReadOnlyList<TrafficIncident> incidents)
     {
-        var payload = incidents.Select(i => new
+        _lastIncidents = incidents.ToList();
+        var payload = incidents.Where(i => !_hiddenIncidentCategories.Contains(i.Category)).Select(i => new
         {
             id = i.Id,
             roadwayName = i.RoadwayName,
             description = i.Description,
             eventType = i.EventType,
             severity = i.Severity,
+            category = i.Category,
+            categoryLabel = IncidentCategories.Label(i.Category),
+            severityLevel = i.SeverityLevel,
+            lanes = i.Lanes,
+            endsAt = i.EndsAt?.ToLocalTime().ToString("MMM d, h:mm tt", System.Globalization.CultureInfo.InvariantCulture),
             lat = i.Latitude,
             lon = i.Longitude,
             sourceName = i.SourceName,
             sourceAttributionUrl = i.SourceAttributionUrl
         }).ToList();
         await JS.InvokeVoidAsync("tacticalGlobe.setTrafficIncidents", payload);
+        StateHasChanged();
     }
 
     public async ValueTask DisposeAsync()

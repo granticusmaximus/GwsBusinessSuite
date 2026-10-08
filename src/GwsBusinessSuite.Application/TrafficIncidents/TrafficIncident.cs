@@ -13,4 +13,12 @@ public sealed record TrafficIncident(
     double Latitude,
     double Longitude,
     string SourceName,
-    string SourceAttributionUrl);
+    string SourceAttributionUrl,
+    // Normalized across sources by IncidentNormalizer (filled in by TrafficIncidentDirectoryService
+    // when a provider leaves them empty): one of IncidentCategories / IncidentSeverityLevels.
+    string Category = "",
+    string SeverityLevel = "",
+    // Plain-language lane impact ("Some lanes closed", "Right lane blocked") when known.
+    string? Lanes = null,
+    // When the source says the incident or work is expected to end.
+    DateTimeOffset? EndsAt = null);

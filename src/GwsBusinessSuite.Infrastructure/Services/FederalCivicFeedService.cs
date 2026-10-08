@@ -100,8 +100,20 @@ public sealed class FederalCivicFeedService(
             .ToList();
     }
 
+    // Logged once per process so "is the real key configured?" can be answered from the durable
+    // logs: a missing or misnamed setting silently falls back to the rate-limited DEMO_KEY.
+    private static int _keyModeLogged;
+
     public async Task RefreshAsync(CancellationToken ct = default)
     {
+        if (Interlocked.Exchange(ref _keyModeLogged, 1) == 0)
+        {
+            if (string.Equals(settings.ApiKey, "DEMO_KEY", StringComparison.Ordinal))
+                logger.LogWarning("Congress API: using the shared DEMO_KEY (~30 requests/hour). Set CongressApi__ApiKey in .env to use your own key.");
+            else
+                logger.LogInformation("Congress API: using the configured CongressApi:ApiKey.");
+        }
+
         var newsTask = RefreshNewsAsync(ct);
         var floorTask = RefreshFloorStatusAsync(ct);
         var hearingsTask = RefreshHearingsAsync(ct);

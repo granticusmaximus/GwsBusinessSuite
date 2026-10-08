@@ -74,5 +74,8 @@ public static class CameraCoverageRegions
         new("British Columbia (DriveBC)", "DriveBC", 53.00, -122.00, 1_600_000),
         new("Madrid, Spain", "Madrid Traffic", 40.42, -3.70, 150_000),
         new("Finland (Fintraffic)", "Fintraffic", 64.50, 26.00, 1_800_000),
+        new("Iceland (Vegagerðin)", "Vegagerðin", 64.90, -18.60, 900_000),
+        new("Singapore (LTA)", "Singapore LTA", 1.35, 103.82, 60_000),
+        new("Hong Kong (Transport Department)", "HK Transport Department", 22.35, 114.13, 90_000),
     ];
 }

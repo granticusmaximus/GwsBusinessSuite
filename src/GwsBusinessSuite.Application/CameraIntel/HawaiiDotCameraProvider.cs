@@ -22,6 +22,8 @@ public sealed class HawaiiDotCameraProvider(
 
     public string SourceName => "HDOT";
 
+    public BoundingBox? Coverage { get; } = new(22.3, 18.8, -154.7, -160.3);
+
     public async Task<IReadOnlyList<CameraFeed>> GetCamerasAsync(BoundingBox bbox, CancellationToken cancellationToken = default)
     {
         if (!cache.TryGetValue(CacheKey, out IReadOnlyList<CameraFeed>? allCameras) || allCameras is null)

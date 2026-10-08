@@ -692,6 +692,33 @@ public static class DependencyInjection
             AutomaticDecompression = System.Net.DecompressionMethods.GZip
         });
         services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<FinlandCameraProvider>());
+        // Overwatch camera health (frozen/stale/offline): fetched server-side because the page
+        // can't read cross-origin camera pixels. History lives in IMemoryCache.
+        services.AddHttpClient<CameraHealthService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GWSuite-Overwatch/1.0; +https://grantwatson.dev)");
+        });
+        services.AddHostedService<CameraHealthBackgroundService>();
+        // October 2026 international batch (each verified live 2026-10-08, no key).
+        services.AddHttpClient<IcelandRoadCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://gagnaveita.vegagerdin.is/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<IcelandRoadCameraProvider>());
+        services.AddHttpClient<SingaporeLtaCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.data.gov.sg/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<SingaporeLtaCameraProvider>());
+        services.AddHttpClient<HongKongTdCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://static.data.gov.hk/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<HongKongTdCameraProvider>());
 
         services.AddScoped<TrafficIncidentDirectoryService>();
         services.AddScoped<CameraDirectoryService>();

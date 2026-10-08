@@ -26,6 +26,8 @@ public sealed class FinlandCameraProvider(
 
     public string SourceName => "Fintraffic";
 
+    public BoundingBox? Coverage { get; } = new(70.2, 59.6, 31.7, 19.0);
+
     public async Task<IReadOnlyList<CameraFeed>> GetCamerasAsync(BoundingBox bbox, CancellationToken cancellationToken = default)
     {
         if (!cache.TryGetValue(CacheKey, out IReadOnlyList<CameraFeed>? allCameras) || allCameras is null)

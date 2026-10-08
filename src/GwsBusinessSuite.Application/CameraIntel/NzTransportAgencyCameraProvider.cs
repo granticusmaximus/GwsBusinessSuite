@@ -27,6 +27,8 @@ public sealed class NzTransportAgencyCameraProvider(
 
     public string SourceName => "NZTA";
 
+    public BoundingBox? Coverage { get; } = new(-34, -48, 179, 166);
+
     public async Task<IReadOnlyList<CameraFeed>> GetCamerasAsync(BoundingBox bbox, CancellationToken cancellationToken = default)
     {
         if (!cache.TryGetValue(CacheKey, out IReadOnlyList<CameraFeed>? allCameras) || allCameras is null)

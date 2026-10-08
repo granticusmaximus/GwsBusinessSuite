@@ -20,6 +20,8 @@ public sealed class DriveBcCameraProvider(
 
     public string SourceName => "DriveBC";
 
+    public BoundingBox? Coverage { get; } = new(60.1, 48.2, -114.0, -139.1);
+
     public async Task<IReadOnlyList<CameraFeed>> GetCamerasAsync(BoundingBox bbox, CancellationToken cancellationToken = default)
     {
         if (!cache.TryGetValue(CacheKey, out IReadOnlyList<CameraFeed>? allCameras) || allCameras is null)

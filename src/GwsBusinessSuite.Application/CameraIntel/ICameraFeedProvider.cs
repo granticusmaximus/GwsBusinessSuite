@@ -20,4 +20,9 @@ public interface ICameraFeedProvider
     // whole list) fetch everything and let CameraDirectoryService apply the bbox filter - see
     // its own comment for why that's centralized there instead of duplicated per provider.
     Task<IReadOnlyList<CameraFeed>> GetCamerasAsync(BoundingBox bbox, CancellationToken cancellationToken = default);
+
+    // Where this source's cameras can possibly be. CameraDirectoryService skips the provider for
+    // any view that doesn't overlap it, so a view over Texas never fetches Hong Kong's list.
+    // Null means "anywhere" (global aggregators, or a provider nobody has bounded yet).
+    BoundingBox? Coverage => null;
 }

@@ -904,6 +904,7 @@ window.tacticalGlobe = (function () {
             '</div>' +
             '<div class="tg-stream-panel-body">' +
             '<div class="tg-incident-type">' + escapeHtml(formatIncidentType(incident.eventType)) + '</div>' +
+            incidentFactsHtml(incident) +
             '<div>' + escapeHtml(incident.description) + '</div>' +
             '<div class="tg-stream-panel-meta">SOURCE: ' + escapeHtml(incident.sourceName) + '</div>' +
             '</div>';
@@ -918,6 +919,19 @@ window.tacticalGlobe = (function () {
             incidentPanel._tgBackdrop.parentNode.removeChild(incidentPanel._tgBackdrop);
         }
         incidentPanel = null;
+    }
+
+    // Normalized fields from IncidentNormalizer - only the ones the source actually supplied.
+    function incidentFactsHtml(incident) {
+        const facts = [];
+        if (incident.categoryLabel) facts.push(['TYPE', incident.categoryLabel]);
+        if (incident.severityLevel && incident.severityLevel !== 'unknown') facts.push(['SEVERITY', incident.severityLevel]);
+        if (incident.lanes) facts.push(['LANES', incident.lanes]);
+        if (incident.endsAt) facts.push(['EXPECTED END', incident.endsAt]);
+        if (facts.length === 0) return '';
+        return '<dl class="tg-incident-facts">' + facts.map(function (f) {
+            return '<dt>' + f[0] + '</dt><dd>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
+        }).join('') + '</dl>';
     }
 
     function formatIncidentType(eventType) {
@@ -1108,6 +1122,43 @@ window.tacticalGlobe = (function () {
 
         const body = panel.querySelector('.tg-stream-panel-body');
         panel._tgStreamDispose = renderStream(body, camera);
+
+        // Camera health (frozen/stale/offline) is judged server-side - the page can't read a
+        // cross-origin image's pixels. Checked on open, then every 5 minutes while it stays open.
+        if (dotNetRef && camera.streamKind !== 'Hls') {
+            const checkHealth = function () {
+                dotNetRef.invokeMethodAsync('GetCameraHealthAsync',
+                    camera.id, camera.name, camera.lat, camera.lon, camera.streamUrl, camera.streamKind,
+                    camera.sourceName, camera.sourceAttributionUrl
+                ).then(function (health) {
+                    if (streamPanel !== panel || !panel.isConnected) return;
+                    renderHealthBadge(panel.querySelector('.tg-stream-panel-body'), health);
+                }).catch(function () { /* health is advisory; a failed check just shows nothing */ });
+            };
+            checkHealth();
+            const healthTimer = setInterval(checkHealth, 300000);
+            const disposeStream = panel._tgStreamDispose;
+            panel._tgStreamDispose = function () {
+                clearInterval(healthTimer);
+                if (disposeStream) disposeStream();
+            };
+        }
+    }
+
+    const healthLabels = { Live: 'LIVE', Frozen: 'FROZEN', Stale: 'STALE', Offline: 'OFFLINE', Unknown: 'CHECKING' };
+
+    function renderHealthBadge(body, health) {
+        if (!body || !health) return;
+        let badge = body.querySelector('.tg-stream-panel-health');
+        if (!badge) {
+            badge = document.createElement('div');
+            badge.className = 'tg-stream-panel-health';
+            badge.setAttribute('role', 'status');
+            body.appendChild(badge);
+        }
+        const status = health.status || 'Unknown';
+        badge.dataset.status = status.toLowerCase();
+        badge.textContent = (healthLabels[status] || status.toUpperCase()) + ' \u2014 ' + (health.detail || '');
     }
 
     // Returns a dispose() handle instead of writing to a shared module-level timer/video
