@@ -12,7 +12,7 @@
     <!-- IPasswordHasher<T>/PasswordHasher<T> only - not the full ASP.NET Core Identity
          stack - needed by UserManagementService without pulling in the web SDK's shared
          framework into this class library. -->
-    <PackageReference Include="Microsoft.Extensions.Identity.Core" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Identity.Core" Version="10.0.12" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
@@ -39,21 +39,21 @@
          only uses SshClient/SftpClient (see SshTerminalService.cs, DatabaseBackupService.cs),
          never ScpClient, but the NuGet audit flags the package regardless of which APIs are used. -->
     <PackageReference Include="SSH.NET" Version="2026.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.11" />
-    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.9.0" />
-    <PackageReference Include="SkiaSharp" Version="4.153.0" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.153.0" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.10.0" />
+    <PackageReference Include="SkiaSharp" Version="4.153.1" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.153.1" />
     <!-- Community license (free for individuals/small companies) - accepted at
          startup via QuestPDF.Settings.License in ResumePdfService. -->
-    <PackageReference Include="QuestPDF" Version="2026.8.0" />
+    <PackageReference Include="QuestPDF" Version="2026.9.1" />
     <!-- Text extraction for Civic Watch county commission agendas/minutes (QuestPDF only writes PDFs). -->
     <PackageReference Include="PdfPig" Version="0.1.16" />
     <!-- Headless-browser scraping for LocalEventsScraperService - the only sources this
          needs (Perry, GA's FullCalendar widget and Robins Region Chamber's GrowthZone
          cards) render their event data client-side, so plain HttpClient + regex (this
          file's usual pattern for GovernmentIntelligenceService) can't see it at all. -->
-    <PackageReference Include="Microsoft.Playwright" Version="1.62.0" />
-    <PackageReference Include="Stripe.net" Version="52.4.0" />
+    <PackageReference Include="Microsoft.Playwright" Version="1.63.0" />
+    <PackageReference Include="Stripe.net" Version="53.0.0" />
   </ItemGroup>
 
   <PropertyGroup>
