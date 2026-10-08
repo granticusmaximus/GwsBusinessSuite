@@ -22,6 +22,16 @@ public static class IncidentCategories
         Event => "Events",
         _ => "Other"
     };
+
+    public static string SingularLabel(string category) => category switch
+    {
+        Crash => "Crash",
+        Closure => "Closure",
+        Roadwork => "Roadwork",
+        Hazard => "Hazard",
+        Event => "Event",
+        _ => "Incident"
+    };
 }
 
 public static class IncidentSeverityLevels
@@ -117,7 +127,7 @@ public static partial class IncidentNormalizer
     [GeneratedRegex(@"\b(accidents?|crash(es)?|collisions?|wreck|overturned|rollover|vehicle fire|incidents?)\b")]
     private static partial Regex CrashWords();
 
-    [GeneratedRegex(@"\b(road ?works?|work ?zones?|construction|maintenance|paving|resurfacing|bridge (work|repair)|utility work|striping|mowing)\b")]
+    [GeneratedRegex(@"\b(road ?works?|work ?zones?|construction|maintenance|paving|resurfacing|bridge (work|repair)|utility work|striping|mowing|brush removal|operations)\b")]
     private static partial Regex RoadworkWords();
 
     [GeneratedRegex(@"\b(special events?|events?|parade|concert|game day|marathon|festival)\b")]

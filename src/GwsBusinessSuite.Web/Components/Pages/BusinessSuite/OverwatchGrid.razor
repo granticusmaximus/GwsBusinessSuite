@@ -8,6 +8,11 @@
 @using GwsBusinessSuite.Application.Weather
 @inject CameraDirectoryService CameraDirectoryService
 @inject CameraHealthService CameraHealthService
+@inject SourceStatusTracker SourceStatusTracker
+@inject GwsBusinessSuite.Application.Hazards.HazardLayerService HazardLayerService
+@inject GwsBusinessSuite.Application.RouteWatch.RouteWatchService RouteWatchService
+@inject GwsBusinessSuite.Infrastructure.Services.CameraIncidentReportService CameraIncidentReportService
+@inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaService OverwatchAreaService
 @inject INwsAlertsService NwsAlertsService
 @inject INwsForecastService NwsForecastService
 @inject TrafficIncidentDirectoryService TrafficIncidentDirectoryService
@@ -94,6 +99,18 @@
                 <button type="button" data-tg-toggle="incidents" class="tg-toggle @(_incidentsOn ? "tg-toggle-on" : "")" title="Toggle traffic accidents/roadwork/closures (I)" @onclick="ToggleIncidentsAsync">
                     INCIDENTS [@(_incidentsOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="route" class="tg-toggle @(_routeOpen ? "tg-toggle-on" : "")"
+                        title="Watch a drive: cameras, incidents and weather alerts along a route" @onclick="ToggleRoutePanelAsync">
+                    ROUTE
+                </button>
+                <button type="button" data-tg-toggle="areas" class="tg-toggle @(_areasOpen ? "tg-toggle-on" : "")"
+                        title="Get notified about new incidents, severe weather and hazards in areas you choose" @onclick="ToggleAreasPanelAsync">
+                    AREAS
+                </button>
+                <button type="button" data-tg-toggle="hazards" class="tg-toggle @(_hazardsOn ? "tg-toggle-on" : "")"
+                        title="Earthquakes (USGS), active wildfires (NIFC) and flooding river gauges (NOAA)" @onclick="ToggleHazardsAsync">
+                    HAZARDS [@(_hazardsOn ? "ON" : "OFF")]
+                </button>
                 <button type="button" data-tg-toggle="healthy" class="tg-toggle @(_hideUnhealthy ? "tg-toggle-on" : "")"
                         title="Hide cameras found frozen, stale or offline (checked when opened, and every 10 minutes for favorites)" @onclick="ToggleHideUnhealthyAsync">
                     HEALTHY ONLY [@(_hideUnhealthy ? "ON" : "OFF")]
@@ -115,6 +132,10 @@
                     <i class="bi bi-arrows-fullscreen" aria-hidden="true"></i>
                 </button>
             </div>
+            @if (_hazardsOn && !string.IsNullOrWhiteSpace(_hazardSummary))
+            {
+                <div class="tg-hazard-summary">@_hazardSummary</div>
+            }
             @if (_incidentsOn && _lastIncidents.Count > 0)
             {
                 <div class="tg-hud-toggles tg-incident-filters" role="group" aria-label="Filter incidents by type">
@@ -134,15 +155,117 @@
         </div>
     </div>
 
+    @if (_areasOpen)
+    {
+        <div class="tg-coverage-panel tg-areas-panel" aria-label="Watched areas">
+            <div class="tg-coverage-panel-header">WATCHED AREAS</div>
+            <form class="tg-route-form" @onsubmit="AddAreaAsync" @onsubmit:preventDefault>
+                <input aria-label="Area name" placeholder="NAME FOR THE CURRENT VIEW" maxlength="80" value="@_areaName" @oninput="e => _areaName = e.Value?.ToString() ?? string.Empty" />
+                <div class="tg-area-options">
+                    <label><input type="checkbox" @bind="_areaIncidents" /> INCIDENTS</label>
+                    <label><input type="checkbox" @bind="_areaWeather" /> WEATHER</label>
+                    <label><input type="checkbox" @bind="_areaHazards" /> HAZARDS</label>
+                </div>
+                <select aria-label="Minimum severity" value="@_areaSeverity" @onchange="e => _areaSeverity = e.Value?.ToString() ?? OverwatchAreaSeverityAny">
+                    <option value="major">MAJOR ONLY</option>
+                    <option value="moderate">MODERATE AND UP</option>
+                    <option value="any">ANYTHING</option>
+                </select>
+                <button type="submit" disabled="@(_areaBusy || string.IsNullOrWhiteSpace(_areaName))">WATCH THIS VIEW</button>
+            </form>
+            @if (!string.IsNullOrWhiteSpace(_areaMessage))
+            {
+                <div class="tg-favorites-empty" role="status">@_areaMessage</div>
+            }
+            @if (_areas.Count == 0)
+            {
+                <div class="tg-favorites-empty">Frame an area on the globe, name it, and Overwatch checks it every 10 minutes - new crashes, closures, severe weather and hazards show up in the notification bell.</div>
+            }
+            else
+            {
+                <ul class="tg-coverage-list">
+                    @foreach (var area in _areas)
+                    {
+                        <li class="tg-coverage-item">
+                            <span>@area.Name
+                                <small>@AreaDescription(area)</small></span>
+                            <span class="tg-area-actions">
+                                <button type="button" @onclick="() => GoToAreaAsync(area)">GO</button>
+                                <button type="button" aria-label="@($"Stop watching {area.Name}")" @onclick="() => RemoveAreaAsync(area)">X</button>
+                            </span>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    }
+
+    @if (_routeOpen)
+    {
+        <div class="tg-coverage-panel tg-route-panel" aria-label="Route watch">
+            <div class="tg-coverage-panel-header">ROUTE WATCH</div>
+            <form class="tg-route-form" @onsubmit="WatchRouteAsync" @onsubmit:preventDefault>
+                <input aria-label="Start" placeholder="FROM (city or address)" value="@_routeFrom" @oninput="e => _routeFrom = e.Value?.ToString() ?? string.Empty" />
+                <input aria-label="Destination" placeholder="TO (city or address)" value="@_routeTo" @oninput="e => _routeTo = e.Value?.ToString() ?? string.Empty" />
+                <button type="submit" disabled="@(_routeBusy || string.IsNullOrWhiteSpace(_routeFrom) || string.IsNullOrWhiteSpace(_routeTo))">
+                    @(_routeBusy ? "ROUTING..." : "WATCH ROUTE")
+                </button>
+            </form>
+            @if (_route is { } route)
+            {
+                @if (!string.IsNullOrWhiteSpace(route.Error))
+                {
+                    <div class="tg-favorites-empty" role="status">@route.Error</div>
+                }
+                else
+                {
+                    <div class="tg-route-summary" role="status">
+                        @route.DistanceMiles.ToString("N0") MI · @FormatDuration(route.DurationMinutes) ·
+                        @route.Incidents.Count INCIDENTS · @route.Cameras.Count CAMERAS · @route.Alerts.Count ALERTS
+                    </div>
+                    <ul class="tg-coverage-list">
+                        @foreach (var alert in route.Alerts)
+                        {
+                            <li class="tg-coverage-item tg-route-alert"><span>ALERT · @alert.Event<small>@alert.AreaDescription</small></span></li>
+                        }
+                        @foreach (var item in route.Incidents)
+                        {
+                            <li class="tg-coverage-item">
+                                <span>MI @item.MilesAlong.ToString("0") · @IncidentCategories.Label(item.Incident.Category).ToUpperInvariant()
+                                    <small>@item.Incident.RoadwayName - @item.Incident.Description</small></span>
+                            </li>
+                        }
+                        @foreach (var item in route.Cameras)
+                        {
+                            <li class="tg-coverage-item">
+                                <span>MI @item.MilesAlong.ToString("0") · CAMERA<small>@item.Camera.Name</small></span>
+                                <button type="button" @onclick="() => OpenRouteCameraAsync(item.Camera)">VIEW</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            }
+        </div>
+    }
+
     @if (_coverageIndexOpen)
     {
         <div class="tg-coverage-panel">
-            <div class="tg-coverage-panel-header">KNOWN COVERAGE</div>
+            <div class="tg-coverage-panel-header">
+                <span>KNOWN COVERAGE</span>
+                <button type="button" class="tg-coverage-map-toggle" aria-pressed="@(_coverageOnMap ? "true" : "false")" @onclick="ToggleCoverageOnMapAsync">
+                    @(_coverageOnMap ? "HIDE ON MAP" : "SHOW ON MAP")
+                </button>
+            </div>
             <ul class="tg-coverage-list">
                 @foreach (var region in CameraCoverageRegions.All)
                 {
+                    var status = RegionStatus(region);
                     <li class="tg-coverage-item">
-                        <span>@region.Name</span>
+                        <span>
+                            @region.Name
+                            <small class="tg-coverage-status @(status.Ok ? "is-ok" : "")">@status.Text</small>
+                        </span>
                         <button type="button" @onclick="() => FlyToRegionAsync(region)">GO</button>
                     </li>
                 }
@@ -212,6 +335,10 @@
     [SupplyParameterFromQuery(Name = "v")]
     public string? SharedViewToken { get; set; }
 
+    // A watched area to frame on load - the notification bell links here.
+    [SupplyParameterFromQuery(Name = "area")]
+    public Guid? AreaId { get; set; }
+
     private DotNetObjectReference<OverwatchGrid>? _dotNetRef;
     private List<CameraFeed> _visibleCameras = new();
     private bool _bootComplete;
@@ -222,6 +349,8 @@
     private bool _radarOn;
     private bool _alertsOn;
     private bool _hideUnhealthy;
+    private bool _hazardsOn;
+    private string? _hazardSummary;
     private int _camerasInViewTotal;
     private bool _incidentsOn;
     private bool _coverageIndexOpen;
@@ -273,6 +402,15 @@
             _initError = "The globe failed to start. Check the browser console for details, or try reloading.";
             StateHasChanged();
             return;
+        }
+
+        if (AreaId is { } areaId && await OverwatchAreaService.GetAreaAsync(_username, areaId) is { } linkedArea)
+        {
+            await JS.InvokeVoidAsync("tacticalGlobe.flyToBounds", "tg-viewport",
+                linkedArea.Bounds.West, linkedArea.Bounds.South, linkedArea.Bounds.East, linkedArea.Bounds.North);
+            _areasOpen = true;
+            _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
+            StateHasChanged();
         }
 
         var sharedView = SharedGridViewCodec.TryDecode(SharedViewToken);
@@ -369,6 +507,20 @@
     }
 
     public sealed record CameraHealthDto(string Status, string Detail);
+
+    // Stream panel SAVE REPORT. analysis is whatever ANALYZE last returned in that panel (or null).
+    [JSInvokable]
+    public async Task<CameraReportDto> SaveCameraReportAsync(
+        string cameraId, string name, double lat, double lon, string streamUrl, string streamKind,
+        string sourceName, string sourceAttributionUrl, string? analysis)
+    {
+        var camera = new CameraFeed(cameraId, name, lat, lon, streamUrl,
+            Enum.Parse<CameraStreamKind>(streamKind), sourceName, sourceAttributionUrl);
+        var result = await CameraIncidentReportService.SaveReportAsync(camera, analysis, _username);
+        return new CameraReportDto(result.Saved, result.Message, result.PageId is { } id ? $"/admin/sentinel?page={id}" : null);
+    }
+
+    public sealed record CameraReportDto(bool Saved, string Message, string? Url);
 
     // Called from the stream panel's favorite-star button (tactical-globe.js threads the current
     // camera payload through). Returns the new favorite state so the star's visual can update
@@ -470,7 +622,8 @@
         var alertsTask = _alertsOn ? NwsAlertsService.GetActiveAlertsAsync(_lastBbox) : NoAlerts;
         var incidentsTask = _incidentsOn ? TrafficIncidentDirectoryService.GetIncidentsInBoundingBoxAsync(_lastBbox) : NoIncidents;
         var weatherTask = NwsForecastService.GetSnapshotAsync(centerLatitude, centerLongitude);
-        await Task.WhenAll(camerasTask, alertsTask, incidentsTask, weatherTask);
+        var hazardsTask = _hazardsOn ? PushHazardsAsync() : Task.CompletedTask;
+        await Task.WhenAll(camerasTask, alertsTask, incidentsTask, weatherTask, hazardsTask);
 
         _visibleCameras = camerasTask.Result.Cameras.ToList();
         _camerasInViewTotal = camerasTask.Result.TotalInView;
@@ -599,6 +752,201 @@
     private void ToggleCoverageIndex()
     {
         _coverageIndexOpen = !_coverageIndexOpen;
+    }
+
+    private bool _coverageOnMap;
+
+    private const string OverwatchAreaSeverityAny = "any";
+    private bool _areasOpen;
+    private bool _areaBusy;
+    private string _areaName = string.Empty;
+    private bool _areaIncidents = true;
+    private bool _areaWeather = true;
+    private bool _areaHazards = true;
+    private string _areaSeverity = "moderate";
+    private string? _areaMessage;
+    private List<GwsBusinessSuite.Infrastructure.Services.OverwatchAreaView> _areas = new();
+
+    private async Task ToggleAreasPanelAsync()
+    {
+        _areasOpen = !_areasOpen;
+        _areaMessage = null;
+        if (_areasOpen) _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
+    }
+
+    private async Task AddAreaAsync()
+    {
+        _areaBusy = true;
+        _areaMessage = null;
+        try
+        {
+            var added = await OverwatchAreaService.AddAreaAsync(_username, _areaName, _lastBbox, _areaIncidents, _areaWeather, _areaHazards, _areaSeverity);
+            _areaName = string.Empty;
+            _areaMessage = $"Watching {added.Name}. The first check learns what's already there; after that, new items appear in the bell.";
+            _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
+        }
+        catch (ArgumentException ex)
+        {
+            _areaMessage = ex.Message;
+        }
+        finally
+        {
+            _areaBusy = false;
+        }
+    }
+
+    private async Task RemoveAreaAsync(GwsBusinessSuite.Infrastructure.Services.OverwatchAreaView area)
+    {
+        await OverwatchAreaService.RemoveAreaAsync(_username, area.Id);
+        _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
+    }
+
+    private async Task GoToAreaAsync(GwsBusinessSuite.Infrastructure.Services.OverwatchAreaView area) =>
+        await JS.InvokeVoidAsync("tacticalGlobe.flyToBounds", "tg-viewport", area.Bounds.West, area.Bounds.South, area.Bounds.East, area.Bounds.North);
+
+    private static string AreaDescription(GwsBusinessSuite.Infrastructure.Services.OverwatchAreaView area)
+    {
+        var what = new[] { area.WatchIncidents ? "incidents" : null, area.WatchWeather ? "weather" : null, area.WatchHazards ? "hazards" : null }
+            .Where(w => w is not null);
+        var checkedText = area.LastCheckedAt is { } at ? $"checked {Ago(at)}" : "first check pending";
+        return $"{string.Join(", ", what)} · {area.MinSeverity} · {checkedText}";
+    }
+
+    private bool _routeOpen;
+    private bool _routeBusy;
+    private string _routeFrom = string.Empty;
+    private string _routeTo = string.Empty;
+    private GwsBusinessSuite.Application.RouteWatch.RouteWatchResult? _route;
+
+    private async Task ToggleRoutePanelAsync()
+    {
+        _routeOpen = !_routeOpen;
+        if (!_routeOpen && _route is not null)
+        {
+            _route = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearRoute");
+        }
+    }
+
+    private async Task WatchRouteAsync()
+    {
+        _routeBusy = true;
+        try
+        {
+            _route = await RouteWatchService.WatchAsync(_routeFrom, _routeTo);
+            if (_route.Error is null)
+            {
+                await JS.InvokeVoidAsync("tacticalGlobe.setRoute",
+                    _route.Path.Select(p => new[] { p.Longitude, p.Latitude }).ToList());
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Route watch failed");
+            _route = GwsBusinessSuite.Application.RouteWatch.RouteWatchResult.Failed(_routeFrom, _routeTo, "Route watch failed. Try again in a moment.");
+        }
+        finally
+        {
+            _routeBusy = false;
+        }
+    }
+
+    private async Task OpenRouteCameraAsync(CameraFeed camera) =>
+        await JS.InvokeVoidAsync("tacticalGlobe.openCamera", ToPinPayload(camera));
+
+    private static string FormatDuration(double minutes) =>
+        minutes >= 60 ? $"{(int)(minutes / 60)} H {(int)(minutes % 60)} MIN" : $"{(int)minutes} MIN";
+
+    private async Task ToggleHazardsAsync()
+    {
+        _hazardsOn = !_hazardsOn;
+        if (_hazardsOn)
+        {
+            await PushHazardsAsync();
+        }
+        else
+        {
+            _hazardSummary = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearHazards");
+        }
+    }
+
+    private async Task PushHazardsAsync()
+    {
+        try
+        {
+            var result = await HazardLayerService.GetHazardsAsync(_lastBbox);
+            var payload = result.Features.Select(h => new
+            {
+                id = h.Id,
+                kind = h.Kind,
+                title = h.Title,
+                detail = h.Detail,
+                severity = h.Severity,
+                url = h.Url,
+                observedAt = h.ObservedAt?.ToLocalTime().ToString("MMM d, h:mm tt", System.Globalization.CultureInfo.InvariantCulture),
+                lat = h.Latitude,
+                lon = h.Longitude
+            }).ToList();
+            var counts = new[]
+            {
+                (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Earthquake, Label: "QUAKES"),
+                (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Wildfire, Label: "FIRES"),
+                (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.River, Label: "FLOODING GAUGES")
+            }.Select(k => $"{k.Label} {result.Features.Count(f => f.Kind == k.Kind)}");
+            _hazardSummary = string.Join(" · ", counts) + (result.Notes.Count > 0 ? " - " + string.Join(" ", result.Notes) : string.Empty);
+            await JS.InvokeVoidAsync("tacticalGlobe.setHazards", payload);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch hazard layer failed");
+            _hazardSummary = "Hazard sources couldn't be reached.";
+        }
+    }
+
+    // Region rows say what this session has actually seen from the source. Most providers report
+    // a failed fetch as an empty answer, so "nothing returned yet" is the honest wording rather
+    // than "down".
+    private (bool Ok, string Text) RegionStatus(CameraCoverageRegion region)
+    {
+        var kind = region.Name.Contains("Incidents", StringComparison.OrdinalIgnoreCase)
+            ? SourceStatusTracker.IncidentKind
+            : SourceStatusTracker.CameraKind;
+        var status = SourceStatusTracker.Get(region.SourceName, kind);
+        if (status is null) return (false, "not queried yet - fly there to check");
+        if (status.LastAttemptFailed) return (false, $"failing ({status.LastError})");
+        if (status.LastNonEmptyAt is { } seen)
+            return (true, $"up to {status.MaxItemsSeen:N0} {kind} in one view · last returned {Ago(seen)}");
+        return (false, $"answered with no {kind} so far");
+    }
+
+    private static string Ago(DateTimeOffset when)
+    {
+        var span = DateTimeOffset.UtcNow - when;
+        return span.TotalMinutes < 1 ? "just now"
+            : span.TotalMinutes < 90 ? $"{(int)span.TotalMinutes} min ago"
+            : $"{(int)span.TotalHours} h ago";
+    }
+
+    private async Task ToggleCoverageOnMapAsync()
+    {
+        _coverageOnMap = !_coverageOnMap;
+        if (_coverageOnMap)
+        {
+            var markers = CameraCoverageRegions.All.Select(region => new
+            {
+                label = region.Name,
+                lat = region.Latitude,
+                lon = region.Longitude,
+                ok = RegionStatus(region).Ok
+            }).ToList();
+            await JS.InvokeVoidAsync("tacticalGlobe.setCoverageMarkers", markers);
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("tacticalGlobe.clearCoverageMarkers");
+        }
     }
 
     private async Task FlyToRegionAsync(CameraCoverageRegion region)

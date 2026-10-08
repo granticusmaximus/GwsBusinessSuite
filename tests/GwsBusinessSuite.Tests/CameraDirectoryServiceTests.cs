@@ -64,6 +64,20 @@ public sealed class CameraDirectoryServiceTests
     }
 
     [Fact]
+    public void Thin_ShouldStillFillTheCap_WhenCamerasAreClusteredInATinyPartOfAWideView()
+    {
+        // Live regression: a world view of 28,035 clustered cameras used to keep only 54 pins.
+        var clustered = Enumerable.Range(0, 5000)
+            .Select(i => Camera($"c{i:0000}", "Crowd") with { Latitude = 33 + i % 100 * 0.001, Longitude = -84 - i / 100 * 0.001 })
+            .ToList();
+
+        var thinned = CameraDirectoryService.Thin(clustered, AnyBbox, 1500);
+
+        thinned.Should().HaveCount(1500);
+        thinned.Select(c => c.Id).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
     public async Task GetCamerasForViewAsync_ShouldReturnEverything_WhenUnderTheCap_AndApplyTheFilter()
     {
         var service = new CameraDirectoryService([new FakeCameraFeedProvider("One", [Camera("a", "One"), Camera("b", "One")])], NullLogger<CameraDirectoryService>.Instance);
@@ -73,6 +87,28 @@ public sealed class CameraDirectoryServiceTests
         view.Cameras.Select(c => c.Id).Should().Equal("a");
         view.TotalInView.Should().Be(1);
         view.IsThinned.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task StatusTracker_ShouldRecordWhatEachSourceReturned_AndWhichOneThrew()
+    {
+        var tracker = new SourceStatusTracker(TimeProvider.System);
+        var service = new CameraDirectoryService(
+            [new FakeCameraFeedProvider("Busy", [Camera("a", "Busy"), Camera("b", "Busy")]),
+             new FakeCameraFeedProvider("Quiet", []),
+             new ThrowingCameraFeedProvider("Broken")],
+            NullLogger<CameraDirectoryService>.Instance, tracker);
+
+        await service.GetCamerasInBoundingBoxAsync(AnyBbox);
+
+        var busy = tracker.Get("Busy", SourceStatusTracker.CameraKind)!;
+        busy.MaxItemsSeen.Should().Be(2);
+        busy.LastNonEmptyAt.Should().NotBeNull();
+        tracker.Get("Quiet", SourceStatusTracker.CameraKind)!.LastNonEmptyAt.Should().BeNull("an empty answer isn't proof the source works");
+        var broken = tracker.Get("Broken", SourceStatusTracker.CameraKind)!;
+        broken.LastAttemptFailed.Should().BeTrue();
+        broken.LastError.Should().Be(nameof(InvalidOperationException));
+        tracker.Get("Busy", SourceStatusTracker.IncidentKind).Should().BeNull();
     }
 
     [Fact]

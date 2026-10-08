@@ -700,6 +700,12 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GWSuite-Overwatch/1.0; +https://grantwatson.dev)");
         });
         services.AddHostedService<CameraHealthBackgroundService>();
+        // Overwatch SAVE REPORT: copies the frame into the media library and files a Sentinel page.
+        services.AddHttpClient<CameraIncidentReportService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GWSuite-Overwatch/1.0; +https://grantwatson.dev)");
+        });
         // October 2026 international batch (each verified live 2026-10-08, no key).
         services.AddHttpClient<IcelandRoadCameraProvider>(client =>
         {
@@ -720,8 +726,25 @@ public static class DependencyInjection
         });
         services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<HongKongTdCameraProvider>());
 
+        services.AddSingleton<SourceStatusTracker>();
+        // Overwatch watched areas: 10-minute checks -> notification bell.
+        services.AddSingleton<OverwatchAreaNotifier>();
+        services.AddScoped<OverwatchAreaService>();
+        services.AddHostedService<OverwatchAreaBackgroundService>();
+        // Overwatch hazard layers (USGS quakes, WFIGS fires, NOAA river gauges) - key-less.
+        services.AddHttpClient<GwsBusinessSuite.Application.Hazards.HazardLayerService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(25);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        });
         services.AddScoped<TrafficIncidentDirectoryService>();
         services.AddScoped<CameraDirectoryService>();
+        // Overwatch route watch: OSRM public router (key-less) + the camera/incident/alert directories.
+        services.AddHttpClient<GwsBusinessSuite.Application.RouteWatch.RouteWatchService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        });
         // Overpass + Wikimedia Commons - both called via a plain IHttpClientFactory.CreateClient()
         // client with full absolute URLs (two different hosts, neither needs a dedicated
         // BaseAddress/timeout), so no AddHttpClient<T> registration is needed here.

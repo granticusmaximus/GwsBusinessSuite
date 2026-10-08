@@ -7,7 +7,8 @@ namespace GwsBusinessSuite.Application.TrafficIncidents;
 // in parallel, isolating one misbehaving source from taking down every other source's incidents.
 public sealed class TrafficIncidentDirectoryService(
     IEnumerable<ITrafficIncidentProvider> providers,
-    ILogger<TrafficIncidentDirectoryService> logger)
+    ILogger<TrafficIncidentDirectoryService> logger,
+    SourceStatusTracker? statusTracker = null)
 {
     public async Task<IReadOnlyList<TrafficIncident>> GetIncidentsInBoundingBoxAsync(BoundingBox bbox, CancellationToken cancellationToken = default)
     {
@@ -20,10 +21,13 @@ public sealed class TrafficIncidentDirectoryService(
     {
         try
         {
-            return await provider.GetIncidentsAsync(bbox, cancellationToken);
+            var incidents = await provider.GetIncidentsAsync(bbox, cancellationToken);
+            statusTracker?.RecordSuccess(provider.SourceName, SourceStatusTracker.IncidentKind, incidents.Count);
+            return incidents;
         }
         catch (Exception ex)
         {
+            statusTracker?.RecordFailure(provider.SourceName, SourceStatusTracker.IncidentKind, ex.GetType().Name);
             logger.LogWarning(ex, "Traffic incident provider {SourceName} failed; continuing with the other sources.", provider.SourceName);
             return [];
         }

@@ -233,6 +233,11 @@ window.tacticalGlobe = (function () {
             cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
         });
 
+        // Hazard layer (earthquakes, wildfires, flooding river gauges) - unclustered: there are
+        // rarely more than a few hundred in view and each is worth seeing individually.
+        const hazardDataSource = new Cesium.CustomDataSource('tg-hazards');
+        await viewer.dataSources.add(hazardDataSource);
+
         const cameraEntities = new Map();
         const alertEntities = new Map();
         let debounceHandle = null;
@@ -285,12 +290,14 @@ window.tacticalGlobe = (function () {
                 }
             } else if (entity && entity._tacticalGlobeIncident) {
                 openIncidentPanel(entity._tacticalGlobeIncident);
+            } else if (entity && entity._tacticalGlobeHazard) {
+                openHazardPanel(entity._tacticalGlobeHazard);
             }
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
         viewers.set(containerId, {
             containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities,
-            radarLayer, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null
+            hazardDataSource, radarLayer, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null
         });
 
         // Fire once for the initial view so cameras appear without requiring a drag/zoom first.
@@ -676,6 +683,12 @@ window.tacticalGlobe = (function () {
     // location search, just parameterized instead of driven by a geocode result.
     // durationSeconds is optional: omitted keeps Cesium's own distance-based animation (every
     // existing caller); 0 places the camera immediately.
+    function flyToBounds(containerId, west, south, east, north) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(Number(west), Number(south), Number(east), Number(north)) });
+    }
+
     function flyTo(containerId, lat, lon, heightMeters, durationSeconds) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
@@ -819,7 +832,7 @@ window.tacticalGlobe = (function () {
                     image: pinBillboardImage,
                     width: 14,
                     height: 14,
-                    color: incidentTypeColor(incident.eventType),
+                    color: incidentTypeColor(incident.category || incident.eventType),
                     disableDepthTestDistance: Number.POSITIVE_INFINITY
                 }
             });
@@ -836,13 +849,141 @@ window.tacticalGlobe = (function () {
         entry.incidentEntities.clear();
     }
 
-    function incidentTypeColor(eventType) {
-        switch (eventType) {
+    // Keyed on the normalized category (IncidentNormalizer) so every source colors the same
+    // way; GDOT's raw names are kept as a fallback for any payload without a category.
+    function incidentTypeColor(categoryOrEventType) {
+        switch (categoryOrEventType) {
+            case 'crash':
             case 'accidentsAndIncidents': return Cesium.Color.fromCssColorString('#ff3b3b');
+            case 'closure':
             case 'closures': return Cesium.Color.fromCssColorString('#ff9d3b');
             case 'roadwork': return Cesium.Color.fromCssColorString('#ffe83b');
+            case 'hazard': return Cesium.Color.fromCssColorString('#c77dff');
+            case 'event': return Cesium.Color.fromCssColorString('#7dffb0');
             default: return Cesium.Color.fromCssColorString('#8fd3ff');
         }
+    }
+
+    const hazardColors = { earthquake: '#ff6bd6', wildfire: '#ff5a1f', river: '#3ba7ff' };
+    const hazardSizes = { major: 20, moderate: 15, minor: 11 };
+
+    function setHazards(hazards, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.hazardDataSource.entities.suspendEvents();
+        entry.hazardDataSource.entities.removeAll();
+        (hazards || []).forEach(function (hazard) {
+            const size = hazardSizes[hazard.severity] || 11;
+            const entity = entry.hazardDataSource.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(hazard.lon, hazard.lat),
+                billboard: {
+                    image: pinBillboardImage,
+                    width: size,
+                    height: size,
+                    color: Cesium.Color.fromCssColorString(hazardColors[hazard.kind] || '#ffffff'),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                }
+            });
+            entity._tacticalGlobeHazard = hazard;
+        });
+        entry.hazardDataSource.entities.resumeEvents();
+    }
+
+    function clearHazards(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) entry.hazardDataSource.entities.removeAll();
+    }
+
+    const hazardKindLabels = { earthquake: 'EARTHQUAKE', wildfire: 'WILDFIRE', river: 'RIVER FLOODING' };
+
+    // Reuses the incident window (same chrome, same single-instance handling).
+    function openHazardPanel(hazard) {
+        closeIncidentPanel();
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel';
+        const facts = [['TYPE', hazardKindLabels[hazard.kind] || hazard.kind], ['SEVERITY', hazard.severity]];
+        if (hazard.observedAt) facts.push(['AS OF', hazard.observedAt]);
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header">' +
+            '<span>' + escapeHtml(hazard.title) + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
+            '</div>' +
+            '<div class="tg-stream-panel-body">' +
+            '<dl class="tg-incident-facts">' + facts.map(function (f) {
+                return '<dt>' + f[0] + '</dt><dd>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
+            }).join('') + '</dl>' +
+            '<div>' + escapeHtml(hazard.detail || '') + '</div>' +
+            '<div class="tg-stream-panel-meta"><a href="' + escapeHtml(hazard.url) + '" target="_blank" rel="noopener noreferrer">OFFICIAL SOURCE</a></div>' +
+            '</div>';
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        if (!openAsModal(panel, closeIncidentPanel)) return;
+        incidentPanel = panel;
+    }
+
+    // Route watch: draws the drive as a line and frames it.
+    function setRoute(path, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry || !path || path.length < 2) return;
+        clearRoute(containerId);
+        const flat = [];
+        path.forEach(function (p) { flat.push(Number(p[0]), Number(p[1])); });
+        entry.routeEntity = entry.viewer.entities.add({
+            polyline: {
+                positions: Cesium.Cartesian3.fromDegreesArray(flat),
+                width: 4,
+                material: Cesium.Color.fromCssColorString('#00e5ff').withAlpha(0.85),
+                clampToGround: true
+            }
+        });
+        let west = 180, east = -180, south = 90, north = -90;
+        path.forEach(function (p) {
+            west = Math.min(west, p[0]); east = Math.max(east, p[0]);
+            south = Math.min(south, p[1]); north = Math.max(north, p[1]);
+        });
+        const padLon = Math.max(0.1, (east - west) * 0.15);
+        const padLat = Math.max(0.1, (north - south) * 0.15);
+        entry.viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(west - padLon, south - padLat, east + padLon, north + padLat) });
+    }
+
+    function clearRoute(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry || !entry.routeEntity) return;
+        entry.viewer.entities.remove(entry.routeEntity);
+        entry.routeEntity = null;
+    }
+
+    // Coverage index as a map layer: one labeled marker per known coverage region, green when
+    // its source has returned data this session, grey otherwise.
+    function setCoverageMarkers(regions, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        clearCoverageMarkers(containerId);
+        entry.coverageEntities = (regions || []).map(function (region) {
+            const color = Cesium.Color.fromCssColorString(region.ok ? '#7dffb0' : '#9aa5b1');
+            return entry.viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(Number(region.lon), Number(region.lat)),
+                point: { pixelSize: 9, color: color.withAlpha(0.85), outlineColor: Cesium.Color.BLACK, outlineWidth: 1 },
+                label: {
+                    text: region.label,
+                    font: '11px monospace',
+                    fillColor: color,
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 2,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    pixelOffset: new Cesium.Cartesian2(0, -16),
+                    // Dots only from a whole-globe height (dozens of labels overlap there);
+                    // names appear once zoomed to roughly continent scale.
+                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 7000000)
+                }
+            });
+        });
+    }
+
+    function clearCoverageMarkers(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry || !entry.coverageEntities) return;
+        entry.coverageEntities.forEach(function (e) { entry.viewer.entities.remove(e); });
+        entry.coverageEntities = [];
     }
 
     // Wraps a panel in a full-shell backdrop overlay and centers it as a modal - shared by
@@ -1067,6 +1208,7 @@ window.tacticalGlobe = (function () {
             '<span class="tg-stream-panel-header-actions">' +
             '<button type="button" class="tg-stream-panel-favorite" aria-label="Toggle favorite" aria-pressed="' + (camera.isFavorite ? 'true' : 'false') + '">' + (camera.isFavorite ? '★' : '☆') + '</button>' +
             '<button type="button" class="tg-stream-panel-analyze" aria-label="Analyze snapshot">ANALYZE</button>' +
+            '<button type="button" class="tg-stream-panel-report" aria-label="Save a report of this camera to Sentinel">SAVE REPORT</button>' +
             '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
             '</span>' +
             '</div>' +
@@ -1104,6 +1246,7 @@ window.tacticalGlobe = (function () {
                     if (streamPanel !== panel || !panel.isConnected) return;
                     analyzeButton.disabled = false;
                     analyzeButton.textContent = 'ANALYZE';
+                    panel._tgLastAnalysis = resultText;
                     renderAnalysisResult(panel.querySelector('.tg-stream-panel-body'), resultText);
                 }).catch(function () {
                     if (streamPanel !== panel || !panel.isConnected) return;
@@ -1114,6 +1257,30 @@ window.tacticalGlobe = (function () {
             });
         } else {
             analyzeButton.disabled = true;
+        }
+
+        const reportButton = panel.querySelector('.tg-stream-panel-report');
+        if (dotNetRef) {
+            reportButton.addEventListener('click', function () {
+                reportButton.disabled = true;
+                reportButton.textContent = 'SAVING...';
+                dotNetRef.invokeMethodAsync('SaveCameraReportAsync',
+                    camera.id, camera.name, camera.lat, camera.lon, camera.streamUrl, camera.streamKind,
+                    camera.sourceName, camera.sourceAttributionUrl, panel._tgLastAnalysis || null
+                ).then(function (result) {
+                    if (streamPanel !== panel || !panel.isConnected) return;
+                    reportButton.disabled = false;
+                    reportButton.textContent = 'SAVE REPORT';
+                    renderReportResult(panel.querySelector('.tg-stream-panel-body'), result);
+                }).catch(function () {
+                    if (streamPanel !== panel || !panel.isConnected) return;
+                    reportButton.disabled = false;
+                    reportButton.textContent = 'SAVE REPORT';
+                    renderReportResult(panel.querySelector('.tg-stream-panel-body'), { saved: false, message: 'Saving the report failed.' });
+                });
+            });
+        } else {
+            reportButton.disabled = true;
         }
 
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeStreamPanel);
@@ -1218,6 +1385,26 @@ window.tacticalGlobe = (function () {
         meta.className = 'tg-stream-panel-meta';
         meta.textContent = 'SOURCE: ' + camera.sourceName;
         body.appendChild(meta);
+    }
+
+    function renderReportResult(body, result) {
+        if (!body || !result) return;
+        let div = body.querySelector('.tg-stream-panel-report-result');
+        if (!div) {
+            div = document.createElement('div');
+            div.className = 'tg-stream-panel-analysis tg-stream-panel-report-result';
+            div.setAttribute('role', 'status');
+            body.appendChild(div);
+        }
+        div.textContent = result.message || '';
+        if (result.saved && result.url) {
+            const link = document.createElement('a');
+            link.href = result.url;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = ' OPEN IN SENTINEL';
+            div.appendChild(link);
+        }
     }
 
     // Replaces-in-place on repeat ANALYZE clicks rather than stacking a new div each time.
@@ -1432,6 +1619,7 @@ window.tacticalGlobe = (function () {
     return {
         init: init,
         flyTo: flyTo,
+        flyToBounds: flyToBounds,
         setCameraPins: setCameraPins,
         setSelectModeEnabled: setSelectModeEnabled,
         openWatchWall: openWatchWall,
@@ -1446,6 +1634,12 @@ window.tacticalGlobe = (function () {
         getCameraAlertSeverity: getCameraAlertSeverity,
         setTrafficIncidents: setTrafficIncidents,
         clearTrafficIncidents: clearTrafficIncidents,
+        setCoverageMarkers: setCoverageMarkers,
+        setHazards: setHazards,
+        setRoute: setRoute,
+        clearRoute: clearRoute,
+        clearHazards: clearHazards,
+        clearCoverageMarkers: clearCoverageMarkers,
         setWeatherSnapshot: setWeatherSnapshot,
         dispose: dispose,
         isCoverageBannerDismissed: isCoverageBannerDismissed,

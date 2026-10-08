@@ -157,3 +157,27 @@ New:
     (carsprogram camera API still undocumented), MN plow cams (images 403), NE plow cams (dead since 2023).
   - Improve 2 DONE: CameraHealthService (server-side hash history; Frozen/Stale/Offline/Live),
     10-min favorites sweep (CameraHealthBackgroundService), stream-panel badge, HEALTHY ONLY toggle.
+  - Improve 3 DONE: ICameraFeedProvider.Coverage (regional providers skipped for views that don't
+    overlap) + CameraDirectoryService.GetCamerasForViewAsync thinning to 1,500 pins, coarse-to-fine
+    (live: a world view = 28,034 cameras -> 1,500 pins; a fixed grid had kept only 54).
+  - Improve 4 DONE: IncidentNormalizer (category/severity/lanes/end time) applied centrally in
+    TrafficIncidentDirectoryService; WZDx fills lanes + end time directly; HUD type filter chips;
+    incident window shows the normalized facts. Live: 12,087 U.S. incidents, 70 left as "other".
+  - Improve 5 DONE: SourceStatusTracker (fed by both directory services) -> per-region status in the
+    coverage list; SHOW ON MAP coverage layer; incident dots now colored by normalized category.
+    Caveat: providers swallow HTTP errors as empty lists, so status says "answered with no cameras"
+    rather than claiming "down".
+  - New 4 DONE: HazardLayerService - USGS M2.5+ day feed, WFIGS current incident locations (WF/CX
+    only: 152 of 496 "current" fires were RX prescribed burns), NOAA NWPS flooding gauges (only for
+    views <= 12 degrees; ~0.6 MB per state). HAZARDS toggle + summary + detail window. Points, not
+    fire perimeters (deliberate).
+  - New 1 DONE: RouteWatchService (page geocoder + OSRM public router + camera/incident/NWS
+    directories; corridor 0.5 mi cameras / 1 mi incidents; alerts by point-in-polygon). Live:
+    Warner Robins -> Atlanta 101 mi, 39 cameras, 8 incidents. OSM routers are TLS 1.3-only, which
+    .NET on macOS can't do by default (works on Linux prod; verified locally with the
+    System.Net.Security.UseNetworkFramework switch in a script only).
+  - New 5 DONE: CameraIncidentReportService + SAVE REPORT button: frame copied to the media library,
+    Sentinel page under "Overwatch reports" (camera, source, coords + OSM link, time, ANALYZE text).
+    Browser-verified: page created, stored image renders.
+  - ADDED BY GRANT 2026-10-08 (mid-unit): "plot trips and routes with the map" -> building as an
+    extension of route watch: multi-stop trips, saved named trips, click-the-map to add a stop.

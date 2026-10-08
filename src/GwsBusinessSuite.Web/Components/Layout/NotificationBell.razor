@@ -7,6 +7,8 @@
 @inject SocialPublishingNotifier SocialNotifier
 @inject GwsBusinessSuite.Application.Community.IChatService ChatService
 @inject GwsBusinessSuite.Application.Community.ChatNotifier ChatNotifier
+@inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaService OverwatchAreaService
+@inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaNotifier OverwatchAreaNotifier
 @inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject ILogger<NotificationBell> Logger
@@ -90,12 +92,40 @@
         var dockerAlerts = (await DockerHealthService.ListAlertsAsync(unreadOnly: false)).Select(ToBellAlert);
         var socialAlerts = (await SocialPublishingService.ListAlertsAsync(unreadOnly: false)).Select(ToBellAlert);
         var chatAlerts = await LoadChatAlertsAsync();
-        UnreadCount = dockerUnread + socialUnread + chatAlerts.Count;
-        RecentAlerts = dockerAlerts.Concat(socialAlerts).Concat(chatAlerts).OrderByDescending(a => a.CreatedAt).Take(10).ToList();
+        var (overwatchUnread, overwatchAlerts) = await LoadOverwatchAlertsAsync();
+        UnreadCount = dockerUnread + socialUnread + chatAlerts.Count + overwatchUnread;
+        RecentAlerts = dockerAlerts.Concat(socialAlerts).Concat(chatAlerts).Concat(overwatchAlerts).OrderByDescending(a => a.CreatedAt).Take(10).ToList();
 
         DockerNotifier.OnAlert += HandleDockerAlert;
         SocialNotifier.OnAlert += HandleSocialAlert;
         ChatNotifier.OnMessage += HandleChatMessage;
+        OverwatchAreaNotifier.OnAlert += HandleOverwatchAlert;
+    }
+
+    // Overwatch watched-area alerts (per admin). LoadChatAlertsAsync has already set _currentUsername.
+    private async Task<(int Unread, List<BellAlert> Alerts)> LoadOverwatchAlertsAsync()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_currentUsername)) return (0, []);
+            var unread = await OverwatchAreaService.CountUnreadAlertsAsync(_currentUsername);
+            var alerts = (await OverwatchAreaService.ListAlertsAsync(_currentUsername)).Select(ToBellAlert).ToList();
+            return (unread, alerts);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Couldn't load Overwatch area alerts for the bell.");
+            return (0, []);
+        }
+    }
+
+    private static BellAlert ToBellAlert(GwsBusinessSuite.Infrastructure.Services.OverwatchAreaAlertView alert) => new(
+        "overwatch", alert.Id, alert.Title, alert.Message, alert.IsRead, alert.CreatedAt, $"/admin/osint?area={alert.AreaId}");
+
+    private void HandleOverwatchAlert(string username, GwsBusinessSuite.Infrastructure.Services.OverwatchAreaAlertView alert)
+    {
+        if (!string.Equals(username, _currentUsername, StringComparison.OrdinalIgnoreCase)) return;
+        AddAlert(ToBellAlert(alert));
     }
 
     private static BellAlert ToBellAlert(DockerHealthAlertView alert) => new(
@@ -188,6 +218,7 @@
 
         if (alert.Kind == "docker") await DockerHealthService.MarkAlertReadAsync(alert.Id);
         else if (alert.Kind == "chat") { /* opening the conversation marks it read */ }
+        else if (alert.Kind == "overwatch") await OverwatchAreaService.MarkAlertReadAsync(_currentUsername, alert.Id);
         else await SocialPublishingService.MarkAlertReadAsync(alert.Id);
 
         var index = RecentAlerts.FindIndex(a => a.Kind == alert.Kind && a.Id == alert.Id);
@@ -205,6 +236,7 @@
         await SocialPublishingService.MarkAllAlertsReadAsync();
         if (!string.IsNullOrWhiteSpace(_currentUsername))
         {
+            await OverwatchAreaService.MarkAllAlertsReadAsync(_currentUsername);
             foreach (var chat in RecentAlerts.Where(a => a.Kind == "chat" && !a.IsRead))
             {
                 await ChatService.MarkThreadReadAsync(chat.Id, _currentUsername);
@@ -240,5 +272,6 @@
         DockerNotifier.OnAlert -= HandleDockerAlert;
         SocialNotifier.OnAlert -= HandleSocialAlert;
         ChatNotifier.OnMessage -= HandleChatMessage;
+        OverwatchAreaNotifier.OnAlert -= HandleOverwatchAlert;
     }
 }

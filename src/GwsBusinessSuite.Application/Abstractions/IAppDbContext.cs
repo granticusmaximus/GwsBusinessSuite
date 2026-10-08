@@ -43,6 +43,8 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<WatchedBill> WatchedBills { get; }
     DbSet<CivicItemSighting> CivicItemSightings { get; }
     DbSet<CivicMeetingDocument> CivicMeetingDocuments { get; }
+    DbSet<OverwatchWatchArea> OverwatchWatchAreas { get; }
+    DbSet<OverwatchAreaAlert> OverwatchAreaAlerts { get; }
     DbSet<ThreatWatchAsset> ThreatWatchAssets { get; }
     DbSet<ThreatStackItem> ThreatStackItems { get; }
     DbSet<ThreatFinding> ThreatFindings { get; }

@@ -10,7 +10,8 @@ namespace GwsBusinessSuite.Application.CameraIntel;
 // use) from taking down every other source's cameras.
 public sealed class CameraDirectoryService(
     IEnumerable<ICameraFeedProvider> providers,
-    ILogger<CameraDirectoryService> logger)
+    ILogger<CameraDirectoryService> logger,
+    SourceStatusTracker? statusTracker = null)
 {
     // Pins pushed to the globe for one view. A world-wide view would otherwise send every camera
     // from every source over the circuit and into Cesium; past this many, the view is thinned.
@@ -30,10 +31,13 @@ public sealed class CameraDirectoryService(
     {
         try
         {
-            return await provider.GetCamerasAsync(bbox, cancellationToken);
+            var cameras = await provider.GetCamerasAsync(bbox, cancellationToken);
+            statusTracker?.RecordSuccess(provider.SourceName, SourceStatusTracker.CameraKind, cameras.Count);
+            return cameras;
         }
         catch (Exception ex)
         {
+            statusTracker?.RecordFailure(provider.SourceName, SourceStatusTracker.CameraKind, ex.GetType().Name);
             logger.LogWarning(ex, "Camera provider {SourceName} failed; continuing with the other sources.", provider.SourceName);
             return [];
         }
@@ -49,24 +53,57 @@ public sealed class CameraDirectoryService(
     }
 
     // Keeps the view's geographic spread rather than the first N cameras (which would all come
-    // from whichever source happened to answer first): the view is split into a grid of about
-    // maxPins cells and the first camera (by id, so it's stable between pans) in each cell kept.
+    // from whichever source happened to answer first). Cameras cluster heavily (a world view is
+    // mostly the U.S. and Europe), so a single fixed grid leaves most cells empty - found live: a
+    // 38x38 world grid kept 54 of 28,035 cameras. Coarse to fine instead: one camera per cell of
+    // a coarse grid first (so an isolated camera is never dropped), then the grid is refined and
+    // cells not yet represented add one camera each (evenly spaced when there are more cells
+    // than room left), and finally any remaining room is filled round-robin. Ordering by id keeps
+    // the choice stable between pans.
     public static IReadOnlyList<CameraFeed> Thin(IReadOnlyList<CameraFeed> cameras, BoundingBox bbox, int maxPins)
     {
         if (maxPins <= 0) return [];
         if (cameras.Count <= maxPins) return cameras;
 
-        var side = Math.Max(1, (int)Math.Floor(Math.Sqrt(maxPins)));
+        var ordered = cameras.OrderBy(c => c.Id, StringComparer.Ordinal).ToList();
         var latSpan = Math.Max(1e-9, bbox.North - bbox.South);
         var lonSpan = Math.Max(1e-9, bbox.East - bbox.West);
-        return cameras
-            .OrderBy(c => c.Id, StringComparer.Ordinal)
-            .GroupBy(c => (
-                Row: Math.Clamp((int)((c.Latitude - bbox.South) / latSpan * side), 0, side - 1),
-                Col: Math.Clamp((int)((c.Longitude - bbox.West) / lonSpan * side), 0, side - 1)))
-            .Select(g => g.First())
-            .Take(maxPins)
-            .ToList();
+        var picked = new List<CameraFeed>(maxPins);
+        var pickedIds = new HashSet<string>(StringComparer.Ordinal);
+
+        void Pick(CameraFeed camera)
+        {
+            if (picked.Count < maxPins && pickedIds.Add(camera.Id)) picked.Add(camera);
+        }
+
+        for (var side = Math.Max(1, (int)Math.Floor(Math.Sqrt(maxPins))); side <= 8192 && picked.Count < maxPins; side *= 2)
+        {
+            var newCells = ordered
+                .GroupBy(c => (
+                    Row: Math.Clamp((int)((c.Latitude - bbox.South) / latSpan * side), 0, side - 1),
+                    Col: Math.Clamp((int)((c.Longitude - bbox.West) / lonSpan * side), 0, side - 1)))
+                .Where(g => !g.Any(c => pickedIds.Contains(c.Id)))
+                .OrderBy(g => g.Key.Row).ThenBy(g => g.Key.Col)
+                .Select(g => g.First())
+                .ToList();
+            var room = maxPins - picked.Count;
+            if (newCells.Count <= room)
+            {
+                newCells.ForEach(Pick);
+            }
+            else
+            {
+                var step = newCells.Count / (double)room;
+                for (var i = 0; i < room; i++) Pick(newCells[(int)(i * step)]);
+            }
+        }
+
+        foreach (var camera in ordered)
+        {
+            if (picked.Count >= maxPins) break;
+            Pick(camera);
+        }
+        return picked;
     }
 }
 

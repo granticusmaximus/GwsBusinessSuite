@@ -94,7 +94,8 @@
     cursor: default;
 }
 
-.tg-stream-panel-analyze {
+.tg-stream-panel-analyze,
+.tg-stream-panel-report {
     background: none;
     border: 1px solid rgba(125, 255, 176, 0.5);
     color: #7dffb0;
@@ -104,7 +105,8 @@
     padding: 0.15rem 0.4rem;
 }
 
-.tg-stream-panel-analyze:disabled {
+.tg-stream-panel-analyze:disabled,
+.tg-stream-panel-report:disabled {
     opacity: 0.5;
     cursor: default;
 }
@@ -434,3 +436,39 @@
 .tg-incident-facts dd { margin: 0; }
 
 .tg-incident-filters { margin-top: 0.3rem; }
+
+.tg-coverage-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.tg-coverage-map-toggle {
+    min-height: 32px;
+    padding: 0.15rem 0.5rem;
+    border: 1px solid rgba(125, 255, 176, 0.45);
+    border-radius: 0.25rem;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 0.65rem;
+}
+
+.tg-coverage-status {
+    display: block;
+    opacity: 0.6;
+    font-size: 0.6rem;
+}
+
+.tg-coverage-status.is-ok { color: #7dffb0; opacity: 0.85; }
+
+@media (pointer: coarse) {
+    .tg-coverage-map-toggle { min-height: 44px; }
+}
+
+.tg-hazard-summary {
+    margin-top: 0.3rem;
+    font-size: 0.65rem;
+    opacity: 0.85;
+}
