@@ -94,6 +94,12 @@ async function run(requestId, baseUrl, request, receiver, controller) {
         if (request.numPredict) {
             payload.options = { num_predict: request.numPredict };
         }
+        if (Array.isArray(request.images) && request.images.length > 0) {
+            payload.images = request.images;
+        }
+        if (request.format) {
+            payload.format = request.format;
+        }
 
         const response = await fetch(`${baseUrl}/api/generate`, {
             method: "POST",

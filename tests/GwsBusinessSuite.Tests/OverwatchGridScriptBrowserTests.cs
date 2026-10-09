@@ -237,6 +237,11 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                 window.tacticalGlobe.clearMessageSigns();
                 window.tacticalGlobe.setRoute([[-83.9, 32.84], [-83.4, 32.84]], 'tg-viewport', []);
                 window.tacticalGlobe.setRouteHighlights('tg-viewport', [{ kind: 'SunGlare', path: [[-83.9, 32.84], [-83.6, 32.84]] }, { kind: 'Dark', path: [[-83.6, 32.84], [-83.4, 32.84]] }]);
+                window.tacticalGlobe.setRouteConditions('tg-viewport', [{ lat: 32.84, lon: -83.6, level: 'bad' }, { lat: 32.84, lon: -83.5, level: 'ok' }]);
+                window.tacticalGlobe.setRoadWeather([{ id: 'r1', name: 'Savage', lat: 47.4, lon: -104.4, pavementF: 31, airF: 36, dewpointF: 30,
+                  precipitation: 'Light Snow', observedAt: 'Oct 9, 9:00 AM', risk: 'ice-likely', reason: 'pavement 31F with light snow',
+                  sourceName: '511MT', sourceAttributionUrl: 'https://www.511mt.net' }]);
+                window.tacticalGlobe.clearRoadWeather();
                 window.tacticalGlobe.clearRoute('tg-viewport');
                 window.tacticalGlobe.setWeatherAlerts([{
                   id: 'alert-1', eventName: 'Severe Thunderstorm Warning', severity: 'Severe', areaDescription: 'Test Area',

@@ -633,3 +633,15 @@
 }
 
 .tg-route-sign { border-left: 3px solid #ffb000; }
+
+/* Route watch ice risk (RoadIceRiskClassifier), matching the ROAD TEMPS pin colors. */
+.tg-route-ice { border-left: 3px solid #ff3b3b; }
+.tg-route-cold { border-left: 3px solid #5ec8ff; }
+
+/* "Ask the cameras" results (CameraConditions levels), matching the dots on the globe. */
+.tg-condition-bad { border-left: 3px solid #ff3b3b; }
+.tg-condition-caution { border-left: 3px solid #ffb000; }
+.tg-condition-ok { border-left: 3px solid #7dffb0; }
+.tg-condition-unknown { border-left: 3px solid #8a8a8a; }
+.tg-route-form select { min-width: 0; flex: 1 1 auto; }
+

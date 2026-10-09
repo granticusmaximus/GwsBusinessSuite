@@ -233,6 +233,8 @@ window.tacticalGlobe = (function () {
         await viewer.dataSources.add(hazardDataSource);
         const signDataSource = new Cesium.CustomDataSource('tg-signs');
         await viewer.dataSources.add(signDataSource);
+        const roadWeatherDataSource = new Cesium.CustomDataSource('tg-road-weather');
+        await viewer.dataSources.add(roadWeatherDataSource);
 
         const cameraEntities = new Map();
         const alertEntities = new Map();
@@ -304,12 +306,14 @@ window.tacticalGlobe = (function () {
                 openHazardPanel(entity._tacticalGlobeHazard);
             } else if (entity && entity._tacticalGlobeSign) {
                 openSignPanel(entity._tacticalGlobeSign);
+            } else if (entity && entity._tacticalGlobeRoadWeather) {
+                openRoadWeatherPanel(entity._tacticalGlobeRoadWeather);
             }
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
         viewers.set(containerId, {
             containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities,
-            hazardDataSource, signDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null
+            hazardDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null
         });
 
         // Fire once for the initial view so cameras appear without requiring a drag/zoom first.
@@ -1178,6 +1182,67 @@ window.tacticalGlobe = (function () {
         if (entry) entry.signDataSource.entities.removeAll();
     }
 
+    const roadRiskColors = { 'ice-likely': '#ff3b3b', 'near-freezing': '#5ec8ff', 'clear': '#7dffb0' };
+    const roadRiskLabels = { 'ice-likely': 'ICE LIKELY', 'near-freezing': 'NEAR FREEZING', 'clear': 'NO ICE RISK' };
+
+    // stations: [{ id, name, lat, lon, pavementF, airF, dewpointF, precipitation, observedAt, risk,
+    // reason, sourceName, sourceAttributionUrl }] - roadside weather stations colored by ice risk.
+    function setRoadWeather(stations, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.roadWeatherDataSource.entities.suspendEvents();
+        entry.roadWeatherDataSource.entities.removeAll();
+        (stations || []).forEach(function (station) {
+            const entity = entry.roadWeatherDataSource.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(Number(station.lon), Number(station.lat)),
+                billboard: {
+                    image: pinBillboardImage,
+                    width: station.risk === 'clear' ? 9 : 14,
+                    height: station.risk === 'clear' ? 9 : 14,
+                    color: Cesium.Color.fromCssColorString(roadRiskColors[station.risk] || '#ffffff'),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                }
+            });
+            entity._tacticalGlobeRoadWeather = station;
+        });
+        entry.roadWeatherDataSource.entities.resumeEvents();
+    }
+
+    function clearRoadWeather(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) entry.roadWeatherDataSource.entities.removeAll();
+    }
+
+    function openRoadWeatherPanel(station) {
+        closeIncidentPanel();
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel';
+        const degrees = function (value) { return value === null || value === undefined ? null : Math.round(value) + '\u00b0F'; };
+        const facts = [
+            ['ICE RISK', roadRiskLabels[station.risk] || station.risk],
+            ['PAVEMENT', degrees(station.pavementF) || 'NOT MEASURED HERE'],
+            ['AIR', degrees(station.airF)],
+            ['DEW POINT', degrees(station.dewpointF)],
+            ['PRECIP', station.precipitation],
+            ['AS OF', station.observedAt]
+        ].filter(function (f) { return f[1]; });
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header">' +
+            '<span>' + escapeHtml(station.name) + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
+            '</div>' +
+            '<div class="tg-stream-panel-body">' +
+            '<dl class="tg-incident-facts">' + facts.map(function (f) {
+                return '<dt>' + f[0] + '</dt><dd>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
+            }).join('') + '</dl>' +
+            '<div>' + escapeHtml(station.reason || '') + '</div>' +
+            '<div class="tg-stream-panel-meta">SOURCE: <a href="' + escapeHtml(station.sourceAttributionUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(station.sourceName) + '</a></div>' +
+            '</div>';
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        if (!openAsModal(panel, closeIncidentPanel)) return;
+        incidentPanel = panel;
+    }
+
     // Shows the sign's pages the way the sign itself does - amber, centered, line for line.
     function openSignPanel(sign) {
         closeIncidentPanel();
@@ -1300,6 +1365,22 @@ window.tacticalGlobe = (function () {
             });
     }
 
+    // points: [{ lat, lon, level: 'bad'|'caution'|'ok'|'unknown' }] - "ask the cameras" results
+    // as colored dots along the route; replaced on every call.
+    const conditionColors = { bad: '#ff3b3b', caution: '#ffb000', ok: '#7dffb0', unknown: '#8a8a8a' };
+    function setRouteConditions(containerId, points) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        (entry.routeConditionEntities || []).forEach(function (e) { entry.viewer.entities.remove(e); });
+        entry.routeConditionEntities = (points || []).map(function (point) {
+            return entry.viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(Number(point.lon), Number(point.lat)),
+                point: { pixelSize: 14, color: Cesium.Color.fromCssColorString(conditionColors[point.level] || '#8a8a8a'),
+                    outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY }
+            });
+        });
+    }
+
     function clearRouteHighlights(entry) {
         (entry.routeHighlightEntities || []).forEach(function (e) { entry.viewer.entities.remove(e); });
         entry.routeHighlightEntities = [];
@@ -1309,6 +1390,7 @@ window.tacticalGlobe = (function () {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
         clearRouteHighlights(entry);
+        setRouteConditions(containerId, []);
         if (entry.routeEntity) entry.viewer.entities.remove(entry.routeEntity);
         (entry.routeStopEntities || []).forEach(function (e) { entry.viewer.entities.remove(e); });
         entry.routeEntity = null;
@@ -2063,9 +2145,12 @@ window.tacticalGlobe = (function () {
         setCoverageMarkers: setCoverageMarkers,
         setHazards: setHazards,
         setMessageSigns: setMessageSigns,
+        setRoadWeather: setRoadWeather,
+        clearRoadWeather: clearRoadWeather,
         clearMessageSigns: clearMessageSigns,
         setRoute: setRoute,
         setRouteHighlights: setRouteHighlights,
+        setRouteConditions: setRouteConditions,
         startPickPoint: startPickPoint,
         cancelPickPoint: cancelPickPoint,
         openTimelapse: openTimelapse,

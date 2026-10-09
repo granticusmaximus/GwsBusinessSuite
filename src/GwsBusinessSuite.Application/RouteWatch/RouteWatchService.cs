@@ -3,6 +3,7 @@ using System.Text.Json;
 using GwsBusinessSuite.Application.CameraIntel;
 using GwsBusinessSuite.Application.Geocoding;
 using GwsBusinessSuite.Application.MessageSigns;
+using GwsBusinessSuite.Application.RoadWeather;
 using GwsBusinessSuite.Application.TrafficIncidents;
 using GwsBusinessSuite.Application.Weather;
 using Microsoft.Extensions.Logging;
@@ -16,6 +17,8 @@ public sealed record RouteCamera(CameraFeed Camera, double MilesAlong, double Mi
 public sealed record RouteIncident(TrafficIncident Incident, double MilesAlong, double MilesOff);
 
 public sealed record RouteSign(MessageSign Sign, double MilesAlong, double MilesOff);
+
+public sealed record RouteRoadWeather(RoadWeatherStation Station, double MilesAlong, double MilesOff);
 
 // One leg between consecutive stops of a trip.
 public sealed record RouteLeg(string From, string To, double DistanceMiles, double DurationMinutes, double StartsAtMile);
@@ -35,7 +38,8 @@ public sealed record RouteWatchResult(
     string? Error = null,
     IReadOnlyList<RouteLeg>? Legs = null,
     IReadOnlyList<RouteStop>? Stops = null,
-    IReadOnlyList<RouteSign>? Signs = null)
+    IReadOnlyList<RouteSign>? Signs = null,
+    IReadOnlyList<RouteRoadWeather>? RoadWeather = null)
 {
     public static RouteWatchResult Failed(string from, string to, string error) => new(from, to, 0, 0, [], [], [], [], error);
 }
@@ -51,7 +55,8 @@ public sealed class RouteWatchService(
     TrafficIncidentDirectoryService incidents,
     INwsAlertsService alerts,
     ILogger<RouteWatchService> logger,
-    MessageSignDirectoryService? signs = null)
+    MessageSignDirectoryService? signs = null,
+    RoadWeatherDirectoryService? roadWeather = null)
 {
     private const string OsrmRouteUrl = "https://router.project-osrm.org/route/v1/driving/";
     public const double CameraCorridorMiles = 0.5;
@@ -112,7 +117,8 @@ public sealed class RouteWatchService(
         var incidentsTask = incidents.GetIncidentsInBoundingBoxAsync(bbox, cancellationToken);
         var alertsTask = alerts.GetActiveAlertsAsync(bbox, cancellationToken);
         var signsTask = signs?.GetSignsInBoundingBoxAsync(bbox, cancellationToken) ?? Task.FromResult<IReadOnlyList<MessageSign>>([]);
-        await Task.WhenAll(camerasTask, incidentsTask, alertsTask, signsTask);
+        var roadWeatherTask = roadWeather?.GetStationsInBoundingBoxAsync(bbox, cancellationToken) ?? Task.FromResult<IReadOnlyList<RoadWeatherStation>>([]);
+        await Task.WhenAll(camerasTask, incidentsTask, alertsTask, signsTask, roadWeatherTask);
 
         var index = new RouteIndex(r.Path);
         var routeCameras = camerasTask.Result
@@ -135,8 +141,17 @@ public sealed class RouteWatchService(
             .Select(x => new RouteSign(x.Sign, x.Hit.MilesAlong, x.Hit.MilesOff))
             .ToList();
 
+        // Only stations that change the plan: ice likely or near freezing on the road.
+        var routeRoadWeather = roadWeatherTask.Result
+            .Where(station => station.Risk != RoadIceRisk.Clear)
+            .Select(station => (Station: station, Hit: index.Locate(station.Latitude, station.Longitude)))
+            .Where(x => x.Hit.MilesOff <= IncidentCorridorMiles)
+            .OrderBy(x => x.Hit.MilesAlong)
+            .Select(x => new RouteRoadWeather(x.Station, x.Hit.MilesAlong, x.Hit.MilesOff))
+            .ToList();
+
         return new RouteWatchResult(from, to, miles, r.Seconds / 60, r.Path,
-            ThinAlongRoute(routeCameras, MaxCameras), routeIncidents, routeAlerts, null, legs, routeStops, routeSigns);
+            ThinAlongRoute(routeCameras, MaxCameras), routeIncidents, routeAlerts, null, legs, routeStops, routeSigns, routeRoadWeather);
     }
 
     // "32.46, -83.61" (from the map picker, or typed) is used as-is; anything else is geocoded.

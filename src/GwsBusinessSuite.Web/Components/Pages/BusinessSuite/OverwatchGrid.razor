@@ -16,10 +16,12 @@
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaService OverwatchAreaService
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchTripService OverwatchTripService
 @inject GwsBusinessSuite.Infrastructure.Services.IncidentCaptureService IncidentCaptureService
+@inject GwsBusinessSuite.Infrastructure.Services.CameraSnapshotDownloader CameraSnapshotDownloader
 @inject INwsAlertsService NwsAlertsService
 @inject INwsForecastService NwsForecastService
 @inject IRadarTimelineService RadarTimelineService
 @inject GwsBusinessSuite.Application.MessageSigns.MessageSignDirectoryService MessageSignDirectoryService
+@inject GwsBusinessSuite.Application.RoadWeather.RoadWeatherDirectoryService RoadWeatherDirectoryService
 @inject TrafficIncidentDirectoryService TrafficIncidentDirectoryService
 @inject IGeocodingService GeocodingService
 @inject ICameraFavoritesService CameraFavoritesService
@@ -119,6 +121,10 @@
                 <button type="button" data-tg-toggle="signs" class="tg-toggle @(_signsOn ? "tg-toggle-on" : "")"
                         title="What highway message signs say right now (Caltrans, Montana)" @onclick="ToggleSignsAsync">
                     SIGNS [@(_signsOn ? "ON" : "OFF")]
+                </button>
+                <button type="button" data-tg-toggle="roadtemps" class="tg-toggle @(_roadWeatherOn ? "tg-toggle-on" : "")"
+                        title="Road surface temperature and ice risk from roadside weather stations (Montana, South Dakota)" @onclick="ToggleRoadWeatherAsync">
+                    ROAD TEMPS [@(_roadWeatherOn ? "ON" : "OFF")]
                 </button>
                 <button type="button" data-tg-toggle="healthy" class="tg-toggle @(_hideUnhealthy ? "tg-toggle-on" : "")"
                         title="Hide cameras found frozen, stale or offline (checked when opened, and every 10 minutes for favorites)" @onclick="ToggleHideUnhealthyAsync">
@@ -322,6 +328,13 @@
                         {
                             <li class="tg-coverage-item tg-route-alert"><span>ALERT · @alert.Event<small>@alert.AreaDescription</small></span></li>
                         }
+                        @foreach (var item in route.RoadWeather ?? [])
+                        {
+                            <li class="tg-coverage-item @(item.Station.Risk == GwsBusinessSuite.Application.RoadWeather.RoadIceRisk.IceLikely ? "tg-route-ice" : "tg-route-cold")">
+                                <span>MI @item.MilesAlong.ToString("0") · @(item.Station.Risk == GwsBusinessSuite.Application.RoadWeather.RoadIceRisk.IceLikely ? "ICE LIKELY" : "NEAR FREEZING")
+                                    <small>@item.Station.Name - @item.Station.Reason</small></span>
+                            </li>
+                        }
                         @foreach (var item in route.Signs ?? [])
                         {
                             <li class="tg-coverage-item tg-route-sign">
@@ -344,6 +357,49 @@
                             </li>
                         }
                     </ul>
+                    <div class="tg-route-subheader">ASK THE CAMERAS <small>(a vision model on this computer's Ollama reads each camera)</small></div>
+                    @if (_visionModels.Count == 0)
+                    {
+                        <div class="tg-favorites-empty" role="status">@(_conditionError ?? "Looking for Ollama on this computer...")</div>
+                    }
+                    else
+                    {
+                        <form class="tg-route-form" @onsubmit="AskCamerasAsync" @onsubmit:preventDefault>
+                            <div class="tg-route-row">
+                                <select aria-label="Vision model" value="@_conditionModel" @onchange="e => _conditionModel = e.Value?.ToString() ?? string.Empty">
+                                    @foreach (var model in _visionModels)
+                                    {
+                                        <option value="@model">@model@(GwsBusinessSuite.Application.RouteWatch.CameraConditions.LooksVisionCapable(model) ? "" : " (may not see images)")</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="tg-route-row">
+                                <input aria-label="Question for the cameras" placeholder="OPTIONAL QUESTION, E.G. IS IT SNOWING?" maxlength="200"
+                                       value="@_conditionQuestion" @oninput="e => _conditionQuestion = e.Value?.ToString() ?? string.Empty" />
+                                <button type="submit" disabled="@(_conditionBusy || RouteConditionCameras(route).Count == 0)">
+                                    @(_conditionBusy ? $"READING {_conditionResults.Count}/{RouteConditionCameras(route).Count}" : $"CHECK {RouteConditionCameras(route).Count} CAMERAS")
+                                </button>
+                            </div>
+                        </form>
+                        @if (!string.IsNullOrWhiteSpace(_conditionError))
+                        {
+                            <div class="tg-favorites-empty" role="status">@_conditionError</div>
+                        }
+                    }
+                    @if (_conditionResults.Count > 0)
+                    {
+                        <div class="tg-route-summary" role="status">@ConditionSummary()</div>
+                        <ul class="tg-coverage-list">
+                            @foreach (var (camera, reading) in _conditionResults)
+                            {
+                                <li class="tg-coverage-item tg-condition-@reading.Level">
+                                    <span>MI @camera.MilesAlong.ToString("0") · @ConditionLabel(reading)
+                                        <small>@camera.Camera.Name@(string.IsNullOrWhiteSpace(reading.Answer) ? "" : " - " + reading.Answer)@(string.IsNullOrWhiteSpace(reading.Note) ? "" : " - " + reading.Note)</small></span>
+                                    <button type="button" @onclick="() => OpenRouteCameraAsync(camera.Camera)">VIEW</button>
+                                </li>
+                            }
+                        </ul>
+                    }
                 }
             }
         </div>
@@ -459,6 +515,7 @@
     private bool _hideUnhealthy;
     private bool _hazardsOn;
     private bool _signsOn;
+    private bool _roadWeatherOn;
     private string? _hazardSummary;
     private int _camerasInViewTotal;
     private bool _incidentsOn;
@@ -747,7 +804,8 @@
         var hazardsTask = _hazardsOn ? PushHazardsAsync() : Task.CompletedTask;
         var radarTask = _radarOn ? PushRadarAsync(centerLatitude, centerLongitude) : Task.CompletedTask;
         var signsTask = _signsOn ? PushSignsAsync() : Task.CompletedTask;
-        await Task.WhenAll(camerasTask, alertsTask, incidentsTask, weatherTask, hazardsTask, radarTask, signsTask);
+        var roadWeatherTask = _roadWeatherOn ? PushRoadWeatherAsync() : Task.CompletedTask;
+        await Task.WhenAll(camerasTask, alertsTask, incidentsTask, weatherTask, hazardsTask, radarTask, signsTask, roadWeatherTask);
 
         _visibleCameras = camerasTask.Result.Cameras.ToList();
         _camerasInViewTotal = camerasTask.Result.TotalInView;
@@ -1013,6 +1071,122 @@
     private GwsBusinessSuite.Application.RouteWatch.RouteWatchResult? _route;
     // "datetime-local" value (yyyy-MM-ddTHH:mm) in this server's local time zone - the same zone
     // every other admin time on this page is shown in. Blank means "leaving now".
+    // "Ask the cameras": still-image cameras along the route read by a vision model on the Ollama
+    // of the computer the browser is on (BrowserLocalOllamaService) - never the server's.
+    public const int MaxConditionCameras = 12;
+    private static readonly TimeSpan ConditionTimeout = TimeSpan.FromSeconds(90);
+    private GwsBusinessSuite.Web.Services.BrowserLocalOllamaService? _localModels;
+    private List<string> _visionModels = new();
+    private string _conditionModel = string.Empty;
+    private string _conditionQuestion = string.Empty;
+    private string? _conditionError;
+    private bool _conditionBusy;
+    private readonly List<(GwsBusinessSuite.Application.RouteWatch.RouteCamera Camera, GwsBusinessSuite.Application.RouteWatch.CameraConditionReading Reading)> _conditionResults = new();
+
+    private static IReadOnlyList<GwsBusinessSuite.Application.RouteWatch.RouteCamera> RouteConditionCameras(GwsBusinessSuite.Application.RouteWatch.RouteWatchResult route) =>
+        GwsBusinessSuite.Application.RouteWatch.RouteWatchService.ThinAlongRoute(
+            route.Cameras.Where(c => c.Camera.StreamKind == CameraStreamKind.Snapshot).ToList(), MaxConditionCameras);
+
+    private async Task LoadVisionModelsAsync()
+    {
+        if (_visionModels.Count > 0) return;
+        try
+        {
+            _localModels ??= new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            var status = await _localModels.ProbeAsync();
+            if (!status.IsReachable)
+            {
+                _conditionError = status.Error ?? "Ollama isn't reachable on this computer.";
+                return;
+            }
+            _visionModels = status.Models.OrderBy(m => GwsBusinessSuite.Application.RouteWatch.CameraConditions.LooksVisionCapable(m) ? 0 : 1)
+                .ThenBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
+            _conditionModel = _visionModels.FirstOrDefault() ?? string.Empty;
+            _conditionError = _visionModels.Count == 0 ? "No models are installed in this computer's Ollama." : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Couldn't list local Ollama models for ask-the-cameras");
+            _conditionError = "Couldn't reach Ollama on this computer.";
+        }
+    }
+
+    private async Task AskCamerasAsync()
+    {
+        if (_route is not { Error: null } route || _localModels is null || string.IsNullOrWhiteSpace(_conditionModel)) return;
+        _conditionBusy = true;
+        _conditionError = null;
+        _conditionResults.Clear();
+        await JS.InvokeVoidAsync("tacticalGlobe.setRouteConditions", "tg-viewport", Array.Empty<object>());
+        try
+        {
+            foreach (var camera in RouteConditionCameras(route))
+            {
+                GwsBusinessSuite.Application.RouteWatch.CameraConditionReading reading;
+                var frame = await CameraSnapshotDownloader.DownloadAsync(camera.Camera.StreamUrl);
+                if (frame is null)
+                {
+                    reading = new("unknown", "unknown", "unknown", "Couldn't get a frame from this camera.", "", GwsBusinessSuite.Application.RouteWatch.CameraConditions.UnknownLevel);
+                }
+                else
+                {
+                    using var timeout = new CancellationTokenSource(ConditionTimeout);
+                    try
+                    {
+                        var output = await _localModels.GenerateWithImagesAsync(_conditionModel,
+                            GwsBusinessSuite.Application.RouteWatch.CameraConditions.SystemPrompt,
+                            GwsBusinessSuite.Application.RouteWatch.CameraConditions.UserPrompt(_conditionQuestion),
+                            [Convert.ToBase64String(frame)], json: true, timeout.Token);
+                        reading = GwsBusinessSuite.Application.RouteWatch.CameraConditions.Parse(output);
+                    }
+                    catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+                    {
+                        reading = new("unknown", "unknown", "unknown", "The model took too long on this frame.", "", GwsBusinessSuite.Application.RouteWatch.CameraConditions.UnknownLevel);
+                    }
+                }
+
+                _conditionResults.Add((camera, reading));
+                await JS.InvokeVoidAsync("tacticalGlobe.setRouteConditions", "tg-viewport", _conditionResults.Select(r => new
+                {
+                    lat = r.Camera.Camera.Latitude,
+                    lon = r.Camera.Camera.Longitude,
+                    level = r.Reading.Level
+                }).ToList());
+                StateHasChanged();
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The relay's own failures (Ollama stopped, model not installed, site not allowed) are
+            // already worded for the person reading them.
+            _conditionError = ex.Message;
+        }
+        finally
+        {
+            _conditionBusy = false;
+        }
+    }
+
+    private static string ConditionLabel(GwsBusinessSuite.Application.RouteWatch.CameraConditionReading reading) =>
+        reading.Level == GwsBusinessSuite.Application.RouteWatch.CameraConditions.UnknownLevel
+            ? "NO READING"
+            : string.Join(" · ", new[]
+            {
+                reading.Road == "unknown" ? null : "ROAD " + reading.Road.ToUpperInvariant(),
+                reading.Visibility is "unknown" or "clear" ? null : reading.Visibility.ToUpperInvariant(),
+                reading.Traffic == "unknown" ? null : reading.Traffic.ToUpperInvariant() + " TRAFFIC"
+            }.Where(part => part is not null));
+
+    private string ConditionSummary()
+    {
+        var bad = _conditionResults.Where(r => r.Reading.Level == GwsBusinessSuite.Application.RouteWatch.CameraConditions.BadLevel).ToList();
+        var caution = _conditionResults.Count(r => r.Reading.Level == GwsBusinessSuite.Application.RouteWatch.CameraConditions.CautionLevel);
+        var ok = _conditionResults.Count(r => r.Reading.Level == GwsBusinessSuite.Application.RouteWatch.CameraConditions.OkLevel);
+        var unread = _conditionResults.Count(r => r.Reading.Level == GwsBusinessSuite.Application.RouteWatch.CameraConditions.UnknownLevel);
+        var where = bad.Count > 0 ? $" - worst from MI {bad.Min(r => r.Camera.MilesAlong):0} to {bad.Max(r => r.Camera.MilesAlong):0}" : string.Empty;
+        return $"{bad.Count} BAD · {caution} CAUTION · {ok} CLEAR · {unread} NO READING{where}";
+    }
+
     private string _departureLocal = string.Empty;
     private IReadOnlyList<GwsBusinessSuite.Application.RouteWatch.DrivingLightStretch> _drivingLight = [];
 
@@ -1137,6 +1311,8 @@
                     (_route.Stops ?? []).Select(st => new { lat = st.Latitude, lon = st.Longitude }).ToList());
             }
             await UpdateDrivingLightAsync();
+            _conditionResults.Clear();
+            if (_route.Error is null) await LoadVisionModelsAsync();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1186,6 +1362,47 @@
 
     private static string FormatDuration(double minutes) =>
         minutes >= 60 ? $"{(int)(minutes / 60)} H {(int)(minutes % 60)} MIN" : $"{(int)minutes} MIN";
+
+    private async Task ToggleRoadWeatherAsync()
+    {
+        _roadWeatherOn = !_roadWeatherOn;
+        if (_roadWeatherOn)
+        {
+            await PushRoadWeatherAsync();
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("tacticalGlobe.clearRoadWeather");
+        }
+    }
+
+    private async Task PushRoadWeatherAsync()
+    {
+        try
+        {
+            var stations = await RoadWeatherDirectoryService.GetStationsInBoundingBoxAsync(_lastBbox);
+            await JS.InvokeVoidAsync("tacticalGlobe.setRoadWeather", stations.Select(station => new
+            {
+                id = station.Id,
+                name = station.Name,
+                lat = station.Latitude,
+                lon = station.Longitude,
+                pavementF = station.PavementF,
+                airF = station.AirF,
+                dewpointF = station.DewpointF,
+                precipitation = station.Precipitation,
+                observedAt = station.ObservedUtc?.ToLocalTime().ToString("MMM d, h:mm tt", System.Globalization.CultureInfo.InvariantCulture),
+                risk = station.Risk,
+                reason = station.Reason,
+                sourceName = station.SourceName,
+                sourceAttributionUrl = station.SourceAttributionUrl
+            }).ToList());
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Road weather failed to load");
+        }
+    }
 
     private async Task ToggleSignsAsync()
     {
@@ -1383,5 +1600,6 @@
         {
         }
         _dotNetRef?.Dispose();
+        if (_localModels is not null) await _localModels.DisposeAsync();
     }
 }

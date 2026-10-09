@@ -54,6 +54,20 @@ public sealed class BrowserLocalOllamaService(IJSRuntime js) : IOllamaService, I
         return builder.ToString();
     }
 
+    // A vision call: the images (base64, no data: prefix) go with the prompt, and json=true asks
+    // Ollama for a JSON-only answer (its "format" option).
+    public async Task<string> GenerateWithImagesAsync(string model, string systemPrompt, string userPrompt,
+        IReadOnlyList<string> base64Images, bool json, CancellationToken ct = default)
+    {
+        var builder = new System.Text.StringBuilder();
+        await foreach (var fragment in StreamCoreAsync(model, systemPrompt, userPrompt, null, ct, base64Images, json ? "json" : null))
+        {
+            builder.Append(fragment);
+        }
+
+        return builder.ToString();
+    }
+
     public IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
         StreamCoreAsync(model, systemPrompt, userPrompt, null, ct);
 
@@ -140,7 +154,9 @@ public sealed class BrowserLocalOllamaService(IJSRuntime js) : IOllamaService, I
         string systemPrompt,
         string userPrompt,
         int? maxOutputTokens,
-        [EnumeratorCancellation] CancellationToken ct)
+        [EnumeratorCancellation] CancellationToken ct,
+        IReadOnlyList<string>? images = null,
+        string? format = null)
     {
         var module = await GetModuleAsync();
         _selfReference ??= DotNetObjectReference.Create(this);
@@ -156,7 +172,7 @@ public sealed class BrowserLocalOllamaService(IJSRuntime js) : IOllamaService, I
                 ct,
                 requestId,
                 BaseUrl,
-                new { model, system = systemPrompt, prompt = userPrompt, numPredict = maxOutputTokens },
+                new { model, system = systemPrompt, prompt = userPrompt, numPredict = maxOutputTokens, images, format },
                 _selfReference);
 
             await foreach (var fragment in channel.Reader.ReadAllAsync(ct))

@@ -38,6 +38,7 @@ using GwsBusinessSuite.Application.SshTerminal;
 using GwsBusinessSuite.Application.Users;
 using GwsBusinessSuite.Application.Weather;
 using GwsBusinessSuite.Application.MessageSigns;
+using GwsBusinessSuite.Application.RoadWeather;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
@@ -788,6 +789,25 @@ public static class DependencyInjection
             stateCode: "mt", sourceName: "511MT", sourceAttributionUrl: "https://www.511mt.net",
             coverage: new BoundingBox(North: 49.1, South: 44.3, East: -104.0, West: -116.1)));
         services.AddScoped<MessageSignDirectoryService>();
+        // Road weather stations (pavement temperature / ice risk), Iteris 511 RWIS layers.
+        services.AddScoped<IRoadWeatherProvider>(sp => new IterisRoadWeatherProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("iteris-atis"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<IterisRoadWeatherProvider>>(),
+            stateCode: "mt", sourceName: "511MT", sourceAttributionUrl: "https://www.511mt.net",
+            coverage: new BoundingBox(North: 49.1, South: 44.3, East: -104.0, West: -116.1)));
+        services.AddScoped<IRoadWeatherProvider>(sp => new IterisRoadWeatherProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("iteris-atis"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<IterisRoadWeatherProvider>>(),
+            stateCode: "sd", sourceName: "SD511", sourceAttributionUrl: "https://www.sd511.org",
+            coverage: new BoundingBox(North: 46.0, South: 42.4, East: -96.4, West: -104.1)));
+        services.AddScoped<RoadWeatherDirectoryService>();
+        services.AddHttpClient<CameraSnapshotDownloader>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GWSuite-Overwatch/1.0; +https://grantwatson.dev)");
+        });
 
         services.AddSingleton<SourceStatusTracker>();
         // Overwatch watched areas: 10-minute checks -> notification bell.
