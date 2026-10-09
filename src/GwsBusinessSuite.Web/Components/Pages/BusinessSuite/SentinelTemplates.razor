@@ -64,7 +64,7 @@
                     <div class="sentinel-template-card-icon">@(string.IsNullOrWhiteSpace(template.Icon) ? "📄" : template.Icon)</div>
                     <div class="sentinel-template-card-body">
                         <div class="sentinel-template-card-name text-truncate">@template.Name</div>
-                        <div class="sentinel-template-card-meta text-truncate">Page · @template.BlockCount blocks</div>
+                        <div class="sentinel-template-card-meta text-truncate">Page · @template.BlockCount blocks@(template.UseForDailyNotes ? " · daily notes" : string.Empty)</div>
                     </div>
                     @if (PendingDeleteId == template.Id)
                     {
@@ -77,6 +77,12 @@
                     {
                         <div class="sentinel-template-card-actions">
                             <button type="button" class="btn btn-xs btn-warning" @onclick="() => UseAsync(template.Id)" disabled="@IsBusy">Use</button>
+                            <button type="button" class="btn btn-xs @(template.UseForDailyNotes ? "btn-success" : "btn-outline-secondary")" disabled="@IsBusy"
+                                    @onclick="() => SetDailyNoteTemplateAsync(template.UseForDailyNotes ? null : template.Id)"
+                                    aria-pressed="@(template.UseForDailyNotes ? "true" : "false")"
+                                    title="@(template.UseForDailyNotes ? "New daily notes start from this template - click to stop" : "Start new daily notes from this template")">
+                                <i class="bi bi-calendar-day"></i>
+                            </button>
                             <button type="button" class="btn btn-xs btn-link text-danger" @onclick="() => PendingDeleteId = template.Id" disabled="@IsBusy" title="Delete template">
                                 <i class="bi bi-trash"></i>
                             </button>
@@ -363,6 +369,12 @@
     });
 
     private void CancelDelete() => PendingDeleteId = null;
+
+    private async Task SetDailyNoteTemplateAsync(Guid? templateId) => await RunAsync(async () =>
+    {
+        await TemplateService.SetDailyNoteTemplateAsync(templateId);
+        await LoadAsync();
+    });
 
     private async Task DeleteBlockTemplateAsync(Guid templateId) => await RunAsync(async () =>
     {

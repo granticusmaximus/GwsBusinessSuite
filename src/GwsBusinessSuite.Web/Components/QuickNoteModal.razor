@@ -3,6 +3,7 @@
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.Wiki
 @inject IQuickNoteService QuickNoteService
+@inject IDailyNoteService DailyNoteService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject ILogger<QuickNoteModal> Logger
@@ -26,6 +27,11 @@
                    @bind="Title" @bind:event="oninput" />
 
             <textarea id="@EditorElementId" class="qn-textarea">@_body</textarea>
+
+            <div class="form-check small mt-2 mb-0">
+                <input id="qn-daily" class="form-check-input" type="checkbox" checked="@_toDailyNote" @onchange="e => _toDailyNote = e.Value is true" />
+                <label class="form-check-label" for="qn-daily">Add to today's daily note instead</label>
+            </div>
 
             @if (!string.IsNullOrWhiteSpace(ErrorMessage))
             {
@@ -53,6 +59,7 @@
     private string _body = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private bool _isSaving;
+    private bool _toDailyNote;
     private bool _editorInitialized;
     private DotNetObjectReference<QuickNoteModal>? _editorRef;
 
@@ -89,8 +96,15 @@
         try
         {
             var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
-            await QuickNoteService.AddQuickNoteAsync(
-                string.IsNullOrWhiteSpace(Title) ? "Untitled note" : Title, _body, performedBy);
+            if (_toDailyNote)
+            {
+                await DailyNoteService.AppendAsync(DateOnly.FromDateTime(DateTime.Now), Title, _body, performedBy);
+            }
+            else
+            {
+                await QuickNoteService.AddQuickNoteAsync(
+                    string.IsNullOrWhiteSpace(Title) ? "Untitled note" : Title, _body, performedBy);
+            }
             await OnSaved.InvokeAsync();
             await CloseAsync();
         }

@@ -1122,6 +1122,7 @@ app.MapPost("/admin/api/native/quick-notes", async (
     NativeQuickNoteRequest request,
     HttpContext httpContext,
     GwsBusinessSuite.Application.Wiki.IQuickNoteService quickNotes,
+    GwsBusinessSuite.Application.Wiki.IDailyNoteService dailyNotes,
     CancellationToken cancellationToken) =>
 {
     if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
@@ -1130,7 +1131,11 @@ app.MapPost("/admin/api/native/quick-notes", async (
     var markdown = request.Markdown ?? string.Empty;
     if (title.Length is 0 or > 200) return Results.BadRequest(new { error = "Give the note a title (up to 200 characters)." });
     if (markdown.Length > 200_000) return Results.BadRequest(new { error = "The note is too long to save as one page." });
-    var page = await quickNotes.AddQuickNoteAsync(title, markdown, httpContext.User.Identity?.Name ?? "mac-app", cancellationToken);
+    var performedBy = httpContext.User.Identity?.Name ?? "mac-app";
+    // DailyNote: add it as a section of today's daily note rather than a page of its own.
+    var page = request.DailyNote == true
+        ? await dailyNotes.AppendAsync(DateOnly.FromDateTime(DateTime.Now), title, markdown, performedBy, cancellationToken)
+        : await quickNotes.AddQuickNoteAsync(title, markdown, performedBy, cancellationToken);
     return Results.Json(new { id = page.Id, url = $"/admin/sentinel?page={page.Id}" });
 })
     .RequireAuthorization("AdminOnly")
@@ -4510,7 +4515,7 @@ record ArticleUpsertRequest(
     string BodyMarkdown);
 
 record MobileDeviceRegistrationRequest(string Platform, string PushToken, string? DeviceName);
-record NativeQuickNoteRequest(string? Title, string? Markdown);
+record NativeQuickNoteRequest(string? Title, string? Markdown, bool? DailyNote = null);
 record NativeContactRequest(string? FullName, string? Email, string? Company);
 record MobileApprovalResolutionRequest(bool Approved, string? Comment);
 

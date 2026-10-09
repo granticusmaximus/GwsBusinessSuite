@@ -185,7 +185,7 @@ public partial class VoiceNotesPage : ContentPage
         SaveStatusLabel.Text = "Saving...";
         try
         {
-            var result = await _session.SaveQuickNoteAsync(title, markdown);
+            var result = await _session.SaveQuickNoteAsync(title, markdown, DailyNoteCheckBox.IsChecked);
             if (result.Error is not null)
             {
                 SaveStatusLabel.Text = result.Error;

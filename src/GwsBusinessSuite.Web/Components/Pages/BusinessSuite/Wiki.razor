@@ -14,6 +14,10 @@
 @inject IWikiSyncedBlockService WikiSyncedBlockService
 @inject ISentinelWorkspaceService SentinelWorkspaceService
 @inject ISentinelAccessService SentinelAccessService
+@inject ISentinelPageVerificationService PageVerificationService
+@inject IDailyNoteService DailyNoteService
+@inject GwsBusinessSuite.Application.Automation.IAutomationWorkflowService AutomationWorkflowService
+@inject GwsBusinessSuite.Application.Automation.IAutomationExecutionService AutomationExecutionService
 @inject IMediaLibraryService MediaLibraryService
 @inject ISentinelTemplateService SentinelTemplateService
 @inject ISentinelWritingAssistant WritingAssistant
@@ -114,6 +118,10 @@
             <i class="bi bi-search me-1"></i>Quick find
             <kbd>⌘K</kbd>
         </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary sentinel-daily-today"
+                @onclick="() => OpenDailyNoteAsync(Today)" disabled="@IsBusy" title="Open today's daily note (Ctrl/⌘ + Shift + D)">
+            <i class="bi bi-calendar-day me-1"></i>Today
+        </button>
         <button type="button" class="btn btn-sm btn-outline-secondary sentinel-mobile-nav-toggle"
                 @onclick="ToggleMobileWorkspaceNav" aria-controls="sentinel-workspace-browser"
                 aria-expanded="@_mobileWorkspaceNavOpen">
@@ -140,6 +148,7 @@
                         <h6>Navigation</h6>
                         <div class="sentinel-shortcut-row"><span>Quick find</span><kbd>⌘K</kbd><kbd>⌘⇧F</kbd></div>
                         <div class="sentinel-shortcut-row"><span>Toggle the sidebar</span><kbd>⌘\</kbd></div>
+                        <div class="sentinel-shortcut-row"><span>Today's daily note</span><kbd>⌘⇧D</kbd></div>
                         <div class="sentinel-shortcut-row"><span>Move between blocks</span><kbd>↑</kbd><kbd>↓</kbd></div>
                         <div class="sentinel-shortcut-row"><span>Close a menu or dialog</span><kbd>Esc</kbd></div>
                     </div>
@@ -409,6 +418,24 @@
                             }
                         </div>
                     }
+                    @if (NeedsReview.Count > 0)
+                    {
+                        <div class="sentinel-nav-section">
+                            <div class="sentinel-nav-heading"><i class="bi bi-patch-exclamation"></i> Needs review</div>
+                            @foreach (var item in NeedsReview.Take(6))
+                            {
+                                var expired = item.Reason == SentinelNeedsReviewReasons.Expired;
+                                <button type="button" class="sentinel-nav-item" @onclick="() => OpenPageAsync(item.PageId)" disabled="@IsBusy"
+                                        title="@(expired ? $"Verification expired {item.Since.ToLocalTime():MMM d, yyyy}" : $"Never verified; last edited {item.Since.ToLocalTime():MMM d, yyyy}")">
+                                    <i class="bi @(expired ? "bi-patch-exclamation-fill text-warning" : "bi-patch-question text-secondary")"></i>
+                                    <span class="sentinel-my-work-text">
+                                        <span class="text-truncate">@(string.IsNullOrWhiteSpace(item.Title) ? "Untitled" : item.Title)</span>
+                                        <small class="text-truncate text-secondary">@(expired ? "Verification expired" : "Never verified")@(item.OwnerUsername is { } owner ? $" · {owner}" : string.Empty)</small>
+                                    </span>
+                                </button>
+                            }
+                        </div>
+                    }
                     @if (Mentions.Count > 0)
                     {
                         <div class="sentinel-nav-section">
@@ -663,10 +690,22 @@
                    no Save button here - "Save a version" in the ⋯ menu adds a version-history
                    restore point, the one thing autosave deliberately doesn't do on every save. *@
                 <div class="d-flex align-items-center gap-1 sentinel-toolbar-actions">
+                    @if (SelectedPageId is { } dailyPageId && dailyPageId == _dailyNotePageId && _dailyNoteDate is { } dailyDate)
+                    {
+                        <div class="d-flex align-items-center gap-1 sentinel-daily-nav" role="group" aria-label="Daily notes">
+                            <button type="button" class="btn btn-sm sentinel-tool-btn" @onclick="() => OpenDailyNoteAsync(dailyDate.AddDays(-1))"
+                                    disabled="@IsBusy" title="Previous day" aria-label="Previous day"><i class="bi bi-chevron-left"></i></button>
+                            <input type="date" class="form-control form-control-sm sentinel-daily-date" aria-label="Go to a day's note"
+                                   value="@dailyDate.ToString("yyyy-MM-dd")" @onchange="OnDailyDatePicked" disabled="@IsBusy" />
+                            <button type="button" class="btn btn-sm sentinel-tool-btn" @onclick="() => OpenDailyNoteAsync(dailyDate.AddDays(1))"
+                                    disabled="@IsBusy" title="Next day" aria-label="Next day"><i class="bi bi-chevron-right"></i></button>
+                        </div>
+                    }
                     @if (SelectedPageId is { } selectedPageId)
                     {
                         <SentinelPresence WikiPageId="selectedPageId" />
                         <SentinelSharePanel TargetId="selectedPageId" TargetName="@(Editor.Title ?? "page")" />
+                        <SentinelPageVerificationPanel WikiPageId="selectedPageId" />
                         <button type="button" class="btn btn-sm sentinel-tool-btn @(IsFavorite(selectedPageId, false) ? "is-active" : string.Empty)"
                                 @onclick="() => ToggleFavoriteAsync(selectedPageId, false)"
                                 title="@(IsFavorite(selectedPageId, false) ? "Remove from favorites" : "Add to favorites")"
@@ -1290,6 +1329,7 @@
     private SentinelNavigationState Navigation { get; set; } = new([], []);
     private List<SentinelMention> Mentions { get; set; } = new();
     private List<SentinelMyWorkItem> MyWork { get; set; } = new();
+    private List<SentinelNeedsReviewItem> NeedsReview { get; set; } = new();
     private List<SentinelSavedSearchView> SavedSearches { get; set; } = new();
     private bool IsCurrentSearchSaved => SavedSearches.Any(saved =>
         string.Equals(saved.Query, SearchQuery.Trim(), StringComparison.Ordinal));
@@ -1440,6 +1480,57 @@
         _showCoverPicker = false;
         ScheduleAutosave();
     }
+
+    // Button blocks (wiki-block-editor.js createButtonSettings). Automation is Admin-only, so
+    // only Admins see workflows to pick or can run one; everyone else gets an empty list.
+    [JSInvokable]
+    public async Task<IReadOnlyList<ButtonWorkflowOption>> ListButtonWorkflows()
+    {
+        if (!await IsAdminNowAsync()) return [];
+        return (await AutomationWorkflowService.ListAsync())
+            .Where(workflow => workflow.CurrentVersion > 0)
+            .OrderBy(workflow => workflow.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(workflow => new ButtonWorkflowOption(workflow.Id.ToString(), workflow.Name))
+            .ToList();
+    }
+
+    [JSInvokable]
+    public async Task<string> RunButtonWorkflow(string blockId, string workflowId)
+    {
+        if (!await IsAdminNowAsync()) return "Only Admins can run automations.";
+        if (!Guid.TryParse(workflowId, out var id)) return "Choose a workflow first.";
+        try
+        {
+            // The same fields a page-changed trigger would give, plus who pressed it.
+            var payload = new System.Text.Json.Nodes.JsonObject
+            {
+                ["wikiPageId"] = SelectedPageId?.ToString(),
+                ["pageTitle"] = Editor.Title,
+                ["blockId"] = blockId,
+                ["triggeredBy"] = CurrentUsername
+            };
+            var execution = await AutomationExecutionService.ExecuteAsync(
+                id, payload.ToJsonString(), GwsBusinessSuite.Domain.Entities.AutomationExecutionModes.Manual);
+            return execution.Status switch
+            {
+                GwsBusinessSuite.Domain.Entities.AutomationExecutionStatuses.Failed =>
+                    string.IsNullOrWhiteSpace(execution.ErrorMessage) ? "The workflow failed." : $"The workflow failed: {execution.ErrorMessage}",
+                GwsBusinessSuite.Domain.Entities.AutomationExecutionStatuses.Succeeded => "Done.",
+                var status => $"Started ({status})."
+            };
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException)
+        {
+            Logger.LogWarning(ex, "Button block workflow {WorkflowId} failed to start", id);
+            return ex.Message;
+        }
+    }
+
+    public sealed record ButtonWorkflowOption(string Id, string Name);
+
+    // Read from the sign-in itself rather than _isAdmin, which starts out true until loaded.
+    private async Task<bool> IsAdminNowAsync() =>
+        AuthState is not null && (await AuthState).User.IsInRole(AppRoles.Admin);
 
     [JSInvokable]
     public Task<IReadOnlyList<WikiLinkSuggestion>> SearchWikiLinkSuggestions(string query) =>
@@ -2284,6 +2375,7 @@
         Navigation = await SentinelWorkspaceService.GetNavigationAsync(CurrentUsername);
         Mentions = (await SentinelWorkspaceService.GetMentionsAsync(CurrentUsername)).ToList();
         MyWork = (await SentinelWorkspaceService.GetMyWorkAsync(CurrentUsername)).ToList();
+        NeedsReview = (await PageVerificationService.ListNeedsReviewAsync(CurrentUsername)).ToList();
         SavedSearches = (await SentinelWorkspaceService.ListSavedSearchesAsync(CurrentUsername)).ToList();
     }
 
@@ -2924,6 +3016,31 @@
 
     private Task OpenPageAsync(Guid wikiPageId) => OpenPageAsync(wikiPageId, recordHistory: true);
 
+    // Daily notes (DailyNoteService): set when the open page is a day's note, for the
+    // previous/next/date controls in the toolbar.
+    private DateOnly? _dailyNoteDate;
+    private Guid? _dailyNotePageId;
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Now);
+
+    // Also reached from Ctrl/Cmd+Shift+D (sentinel-workspace.js clicks .sentinel-daily-today).
+    private async Task OpenDailyNoteAsync(DateOnly date)
+    {
+        try
+        {
+            var page = await DailyNoteService.OpenOrCreateAsync(date, CurrentUsername);
+            if (WikiPages.All(existing => existing.Id != page.Id)) await LoadTreeAsync(selectFirstPage: false);
+            await OpenPageAsync(page.Id);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or WikiPageConcurrencyException)
+        {
+            Logger.LogWarning(ex, "Opening the daily note for {Date} failed", date);
+            ErrorMessage = "Couldn't open that day's note. Try again.";
+        }
+    }
+
+    private Task OnDailyDatePicked(ChangeEventArgs args) =>
+        DateOnly.TryParse(args.Value?.ToString(), out var date) ? OpenDailyNoteAsync(date) : Task.CompletedTask;
+
     private async Task OpenPageAsync(Guid wikiPageId, bool recordHistory)
     {
         // Flush any pending autosave from whatever was previously open before this method
@@ -2956,6 +3073,8 @@
             SelectedDatabaseId = null;
             LeaveCursorTracking();
             SelectedPageId = page.Id;
+            _dailyNoteDate = DailyNotes.DateFromSystemKey(page.SystemKey);
+            _dailyNotePageId = _dailyNoteDate is null ? null : page.Id;
             ExpandAncestorPath(page.Id);
             Editor = new WikiPageEditorModel
             {

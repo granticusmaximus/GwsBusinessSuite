@@ -2,7 +2,7 @@
 // cms-builder-bridge.js's handleKeydown (registered on window, so it runs after this one,
 // which is on document). They're only ever mounted on different pages today (Wiki vs. Canvas
 // Studio) so there's no live collision, and their key combos don't currently overlap (this
-// one: Cmd/Ctrl+Shift+F, Cmd/Ctrl+\, Escape) - but if the two features are ever mounted
+// one: Cmd/Ctrl+Shift+F, Cmd/Ctrl+Shift+D, Cmd/Ctrl+\, Escape) - but if the two features are ever mounted
 // together, re-check both for overlapping bindings before assuming they'll coexist cleanly.
 let shortcutHandler = null;
 let searchInput = null;
@@ -16,6 +16,13 @@ export function initialize(input) {
             // Let Blazor open the responsive workspace browser before focusing. Calling
             // focus() directly would be ignored when the sidebar is collapsed on mobile.
             document.querySelector('.sentinel-global-search')?.click();
+            return;
+        }
+
+        // Today's daily note (the sidebar header's Today button).
+        if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd') {
+            event.preventDefault();
+            document.querySelector('.sentinel-daily-today')?.click();
             return;
         }
 

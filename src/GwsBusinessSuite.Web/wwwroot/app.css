@@ -3252,6 +3252,8 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 .sentinel-tool-btn.is-active { color: var(--gws-sidebar-accent); }
+.sentinel-tool-btn.sentinel-verified { color: var(--bs-success); }
+.sentinel-tool-btn.sentinel-verification-expired { color: var(--bs-warning); }
 .sentinel-tool-btn-danger:hover:not(:disabled) { color: #f87171; }
 
 .sentinel-tool-btn-label {
@@ -3966,6 +3968,10 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-block.is-toggle-hidden { display: none; }
 
 .sentinel-workspace .wiki-media-block { position: relative; width: 100%; padding: .25rem 0; }
+.wiki-button-settings { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .35rem; }
+.wiki-button-settings > select { width: auto; max-width: 16rem; }
+.wiki-button-settings > input { flex: 1 1 12rem; min-width: 0; }
+.wiki-button-settings .wiki-button-status { color: var(--gws-text-muted, #6b7280); }
 .sentinel-workspace .wiki-media-block > .form-control { border-color: var(--sentinel-border); background: var(--sentinel-canvas-raised); color: var(--gws-text-strong); }
 .sentinel-workspace .wiki-media-block.has-source > .form-control {
     position: absolute;

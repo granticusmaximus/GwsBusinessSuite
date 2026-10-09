@@ -972,6 +972,7 @@ public static class DependencyInjection
         services.AddScoped<IWikiSyncedBlockService, WikiSyncedBlockService>();
         services.AddScoped<IWikiService, WikiService>();
         services.AddScoped<IQuickNoteService, QuickNoteService>();
+        services.AddScoped<IDailyNoteService, DailyNoteService>();
         services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();
         services.AddScoped<IWikiDatabaseRecurrenceService, WikiDatabaseRecurrenceService>();
         services.AddScoped<ISentinelTemplateService, SentinelTemplateService>();
@@ -982,6 +983,9 @@ public static class DependencyInjection
         services.AddHostedService<SemanticIndexBackgroundService>();
         services.AddScoped<ISentinelCollaborationService, SentinelCollaborationService>();
         services.AddScoped<ISentinelAccessService, SentinelAccessService>();
+        services.AddScoped<ISentinelPageVerificationService, SentinelPageVerificationService>();
+        services.AddScoped<ISentinelDatabaseRuleService, SentinelDatabaseRuleService>();
+        services.AddHostedService<SentinelPageVerificationBackgroundService>();
         services.AddScoped<ISentinelAiService, SentinelAiService>();
         services.AddScoped<ISentinelWritingAssistant, SentinelWritingAssistantService>();
         services.AddSingleton<SentinelCollaborationNotifier>();

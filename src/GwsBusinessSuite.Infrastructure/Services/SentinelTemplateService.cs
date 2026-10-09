@@ -87,6 +87,20 @@ public sealed class SentinelTemplateService(
         }, NormalizeUser(performedBy), cancellationToken: cancellationToken);
     }
 
+    public async Task SetDailyNoteTemplateAsync(Guid? templateId, CancellationToken cancellationToken = default)
+    {
+        var templates = await dbContext.SentinelPageTemplates
+            .Where(item => item.UseForDailyNotes || item.Id == templateId)
+            .ToListAsync(cancellationToken);
+        if (templateId is { } id && templates.All(item => item.Id != id))
+        {
+            throw new InvalidOperationException("The Sentinel template no longer exists.");
+        }
+
+        foreach (var template in templates) template.UseForDailyNotes = template.Id == templateId;
+        await dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task DeleteAsync(Guid templateId, CancellationToken cancellationToken = default)
     {
         var template = await dbContext.SentinelPageTemplates
@@ -345,7 +359,8 @@ public sealed class SentinelTemplateService(
         template.Icon,
         WikiBlockJson.ParseBlocks(template.BlocksJson).Count,
         template.CreatedAt,
-        template.CreatedBy);
+        template.CreatedBy,
+        template.UseForDailyNotes);
 
     private static SentinelDatabaseTemplateView ToDatabaseView(SentinelDatabaseTemplate template)
     {

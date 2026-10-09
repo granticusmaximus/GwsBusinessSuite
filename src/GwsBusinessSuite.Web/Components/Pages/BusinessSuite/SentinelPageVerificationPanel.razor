@@ -1,0 +1,174 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject ISentinelPageVerificationService VerificationService
+@inject ISentinelWorkspaceService WorkspaceService
+@inject ISentinelAccessService AccessService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<SentinelPageVerificationPanel> Logger
+
+@* Page verification (see SentinelPageVerification.cs): a badge in the page toolbar, opening a
+   popover to verify for a period, remove verification, or set the page's owner. *@
+<div class="sentinel-share-panel">
+    <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-tool-btn-label @BadgeClass" @onclick="ToggleAsync"
+            title="@BadgeTitle" aria-label="@BadgeTitle" aria-expanded="@(_open ? "true" : "false")">
+        <i class="bi @BadgeIcon"></i><span>@BadgeText</span>
+    </button>
+    @if (_open)
+    {
+        <div class="sentinel-share-popover shadow-lg" role="dialog" aria-label="Page verification">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+                <strong>Verification</strong>
+                <button type="button" class="btn-close btn-close-white" aria-label="Close verification" @onclick="() => _open = false"></button>
+            </div>
+            <p class="small mb-3">@StatusSentence</p>
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger py-1 px-2 small" role="alert">@_error</div>
+            }
+            @if (_canEdit)
+            {
+                <div class="form-label small">@(_view?.State == SentinelVerificationStates.Verified ? "Verify again for" : "Verify as accurate for")</div>
+                <div class="d-flex flex-wrap gap-1 mb-3">
+                    @foreach (var days in SentinelPageVerificationRules.PeriodDays)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-success" disabled="@_busy" @onclick="() => VerifyAsync(days)">@PeriodLabel(days)</button>
+                    }
+                </div>
+                @if (_view?.State is SentinelVerificationStates.Verified or SentinelVerificationStates.Expired)
+                {
+                    <button type="button" class="btn btn-sm btn-link text-danger p-0 mb-3" disabled="@_busy" @onclick="UnverifyAsync">Remove verification</button>
+                }
+                <label class="form-label small" for="sentinel-page-owner">Owner <span class="text-secondary">(gets the reminder when it lapses)</span></label>
+                <select id="sentinel-page-owner" class="form-select form-select-sm" disabled="@_busy" value="@(_view?.OwnerUsername ?? string.Empty)"
+                        @onchange="e => SetOwnerAsync(e.Value?.ToString())">
+                    <option value="">No owner</option>
+                    @foreach (var username in _usernames)
+                    {
+                        <option value="@username.ToLowerInvariant()">@username</option>
+                    }
+                </select>
+            }
+            else
+            {
+                <p class="small text-secondary mb-0">You need edit access to verify this page.</p>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid WikiPageId { get; set; }
+
+    private SentinelPageVerificationView? _view;
+    private IReadOnlyList<string> _usernames = [];
+    private bool _open;
+    private bool _busy;
+    private bool _canEdit;
+    private string _error = string.Empty;
+    private Guid _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == WikiPageId) return;
+        _loadedFor = WikiPageId;
+        _open = false;
+        _error = string.Empty;
+        _view = await VerificationService.GetAsync(WikiPageId);
+    }
+
+    private async Task ToggleAsync()
+    {
+        _open = !_open;
+        if (!_open) return;
+        _error = string.Empty;
+        _view = await VerificationService.GetAsync(WikiPageId);
+        var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        _canEdit = await AccessService.CanAccessAsync(WikiPageId, isDatabase: false, username, SentinelAccessLevels.Edit);
+        if (_canEdit && _usernames.Count == 0) _usernames = await WorkspaceService.ListActiveUsernamesAsync();
+    }
+
+    private Task VerifyAsync(int days) =>
+        RunAsync(username => VerificationService.VerifyAsync(WikiPageId, days, username));
+
+    private Task UnverifyAsync() =>
+        RunAsync(username => VerificationService.UnverifyAsync(WikiPageId, username));
+
+    private Task SetOwnerAsync(string? owner) =>
+        RunAsync(username => VerificationService.SetOwnerAsync(WikiPageId, owner, username));
+
+    private async Task RunAsync(Func<string, Task<SentinelPageVerificationView>> change)
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = string.Empty;
+        try
+        {
+            _view = await change(await CurrentUserAccessor.GetCurrentUsernameAsync());
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or KeyNotFoundException or ArgumentOutOfRangeException)
+        {
+            Logger.LogWarning(ex, "Changing verification of page {PageId} failed", WikiPageId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private string State => _view?.State ?? SentinelVerificationStates.Unverified;
+
+    private string BadgeIcon => State switch
+    {
+        SentinelVerificationStates.Verified => "bi-patch-check-fill",
+        SentinelVerificationStates.Expired => "bi-patch-exclamation-fill",
+        _ => "bi-patch-check"
+    };
+
+    private string BadgeClass => State switch
+    {
+        SentinelVerificationStates.Verified => "sentinel-verified",
+        SentinelVerificationStates.Expired => "sentinel-verification-expired",
+        _ => string.Empty
+    };
+
+    private string BadgeText => State switch
+    {
+        SentinelVerificationStates.Verified => "Verified",
+        SentinelVerificationStates.Expired => "Expired",
+        _ => "Verify"
+    };
+
+    private string BadgeTitle => State switch
+    {
+        SentinelVerificationStates.Verified => $"Verified until {_view!.VerifiedUntil!.Value.ToLocalTime():MMM d, yyyy}",
+        SentinelVerificationStates.Expired => "Verification expired - review this page",
+        _ => "Verify this page"
+    };
+
+    private string StatusSentence
+    {
+        get
+        {
+            var owner = string.IsNullOrEmpty(_view?.OwnerUsername) ? "No owner set." : $"Owner: {_view.OwnerUsername}.";
+            return State switch
+            {
+                SentinelVerificationStates.Verified =>
+                    $"Verified by {_view!.VerifiedBy} on {_view.VerifiedAt!.Value.ToLocalTime():MMM d, yyyy}, until {_view.VerifiedUntil!.Value.ToLocalTime():MMM d, yyyy}. {owner}",
+                SentinelVerificationStates.Expired =>
+                    $"Verification by {_view!.VerifiedBy} expired on {_view.VerifiedUntil!.Value.ToLocalTime():MMM d, yyyy}. {owner}",
+                _ => $"Not verified. {owner}"
+            };
+        }
+    }
+
+    private static string PeriodLabel(int days) => days switch
+    {
+        30 => "30 days",
+        90 => "90 days",
+        180 => "6 months",
+        365 => "1 year",
+        _ => $"{days} days"
+    };
+}

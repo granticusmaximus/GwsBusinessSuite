@@ -27,6 +27,10 @@ public interface IWikiDatabaseService
 
     Task<WikiDatabaseRow> SaveRowAsync(Guid wikiDatabaseId, WikiDatabaseRowEditor editor, string performedBy, CancellationToken cancellationToken = default);
 
+    // Stores an upload for a Files property and returns the value to add to the row (see
+    // WikiFileValues). Saving the row itself is a separate SaveRowAsync, as for any other edit.
+    Task<string> StorePropertyFileAsync(Guid wikiDatabaseId, Guid propertyId, string fileName, byte[] content, CancellationToken cancellationToken = default);
+
     // See WikiDatabaseBulkUpdateResult's own comment for why this is best-effort per row
     // rather than all-or-nothing. value is passed through as-is (already the right JSON shape
     // for propertyId's type, e.g. built via WikiPropertyValues.SetText/SetNumber/SetCheckbox on

@@ -1041,6 +1041,40 @@ public sealed class WikiDatabaseService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<string> StorePropertyFileAsync(
+        Guid wikiDatabaseId,
+        Guid propertyId,
+        string fileName,
+        byte[] content,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        if (content.Length == 0) throw new InvalidOperationException("The file is empty.");
+        if (content.Length > WikiFileValues.MaxBytes)
+        {
+            throw new InvalidOperationException($"Files can be up to {WikiFileValues.MaxBytes / 1024 / 1024} MB.");
+        }
+
+        var isFilesProperty = await dbContext.WikiDatabaseProperties.AsNoTracking()
+            .AnyAsync(property => property.Id == propertyId && property.WikiDatabaseId == wikiDatabaseId
+                && property.Type == WikiDatabasePropertyTypes.Files, cancellationToken);
+        if (!isFilesProperty) throw new KeyNotFoundException("That Files property no longer exists.");
+
+        var name = WikiFileValues.CleanFileName(fileName);
+        var file = new SentinelImportedFile
+        {
+            // Not from a Notion import: records which property the upload belongs to instead.
+            NotionBlockId = $"files-property:{propertyId}",
+            FileName = name,
+            ContentType = WikiFileValues.ContentTypeFor(name),
+            Content = content,
+            SizeBytes = content.LongLength
+        };
+        await dbContext.SentinelImportedFiles.AddAsync(file, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return WikiFileValues.Format(file.Id, name);
+    }
+
     public async Task<WikiDatabaseRow> SaveRowAsync(
         Guid wikiDatabaseId,
         WikiDatabaseRowEditor editor,

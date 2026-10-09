@@ -9,7 +9,8 @@ public sealed record SentinelPageTemplateView(
     string? Icon,
     int BlockCount,
     DateTimeOffset CreatedAt,
-    string CreatedBy);
+    string CreatedBy,
+    bool UseForDailyNotes = false);
 
 public sealed record SentinelDatabaseTemplateView(
     Guid Id,
@@ -79,6 +80,9 @@ public interface ISentinelTemplateService
         Guid? parentWikiPageId,
         string performedBy,
         CancellationToken cancellationToken = default);
+
+    // Makes this template the starting point for new daily notes (null: start them blank).
+    Task SetDailyNoteTemplateAsync(Guid? templateId, CancellationToken cancellationToken = default);
 
     Task DeleteAsync(
         Guid templateId,

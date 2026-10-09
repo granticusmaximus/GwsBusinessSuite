@@ -155,6 +155,9 @@ public interface ISentinelWorkspaceService
         bool isDatabase,
         CancellationToken cancellationToken = default);
 
+    // Active GWS usernames, for Person property pickers.
+    Task<IReadOnlyList<string>> ListActiveUsernamesAsync(CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestionsAsync(
         string query,
         string username,

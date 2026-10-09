@@ -3,6 +3,7 @@
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Application.Automation
 @inject IWikiDatabaseService WikiDatabaseService
+@inject ISentinelWorkspaceService SentinelWorkspaceService
 @inject IWikiDatabaseRecurrenceService WikiDatabaseRecurrenceService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IAutomationWorkflowService AutomationWorkflowService
@@ -35,6 +36,12 @@ else
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _showRowTemplates = !_showRowTemplates" disabled="@IsBusy">
                     <i class="bi bi-file-earmark-plus me-1"></i>Templates@(RowTemplates.Count > 0 ? $" ({RowTemplates.Count})" : "")
                 </button>
+                <AuthorizeView Policy="AdminOnly">
+                    <button type="button" class="btn btn-sm @(_showRules ? "btn-secondary" : "btn-outline-secondary")" @onclick="() => _showRules = !_showRules" disabled="@IsBusy"
+                            title="Rules that run when rows change" aria-pressed="@(_showRules ? "true" : "false")">
+                        <i class="bi bi-lightning-charge me-1"></i>Automations
+                    </button>
+                </AuthorizeView>
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _showCsvImport = !_showCsvImport" disabled="@IsBusy" title="Append rows from a CSV file">
                     <i class="bi bi-filetype-csv me-1"></i>Import
                 </button>
@@ -179,6 +186,13 @@ else
                         </div>
                     }
                 </div>
+            }
+
+            @if (_showRules)
+            {
+                <AuthorizeView Policy="AdminOnly">
+                    <SentinelDatabaseRulesPanel Database="Database" />
+                </AuthorizeView>
             }
 
             @if (_showCsvImport)
@@ -1284,9 +1298,68 @@ else
                                                     }
                                                     break;
                                                 case WikiDatabasePropertyTypes.Person:
+                                                    var assignees = WikiPersonValues.Resolve(GetMultiSelect(row, property), _usernames);
+                                                    <details class="sentinel-relation-picker">
+                                                        <summary>@PersonSummary(assignees)</summary>
+                                                        <div class="sentinel-relation-options">
+                                                            @foreach (var username in _usernames)
+                                                            {
+                                                                <label class="form-check mb-1">
+                                                                    <input class="form-check-input" type="checkbox" checked="@assignees.Any(a => a.Username == username)"
+                                                                           @onchange="e => TogglePersonAsync(row, property, username, (bool)(e.Value ?? false))" disabled="@IsBusy" />
+                                                                    <span class="form-check-label small"><span class="sentinel-person-avatar" aria-hidden="true">@Initial(username)</span>@username</span>
+                                                                </label>
+                                                            }
+                                                            @foreach (var other in assignees.Where(a => !a.IsUser))
+                                                            {
+                                                                <div class="d-flex align-items-center gap-1 small mb-1">
+                                                                    <span class="text-secondary" title="Not a GWS user">@other.Value</span>
+                                                                    <button type="button" class="btn btn-link btn-sm p-0" disabled="@IsBusy" aria-label="@($"Remove {other.Value}")"
+                                                                            @onclick="() => RemovePersonValueAsync(row, property, other.Value)"><i class="bi bi-x-lg"></i></button>
+                                                                </div>
+                                                            }
+                                                            @if (_usernames.Count == 0)
+                                                            {
+                                                                <span class="small text-secondary">No active users found.</span>
+                                                            }
+                                                        </div>
+                                                    </details>
+                                                    break;
                                                 case WikiDatabasePropertyTypes.Files:
-                                                    <input class="form-control form-control-sm" value="@string.Join(", ", GetMultiSelect(row, property))" disabled="@IsBusy"
-                                                           @onchange="e => SetMultiValueAsync(row, property, e.Value?.ToString())" placeholder="Comma-separated values" />
+                                                    <div class="sentinel-files-cell">
+                                                        @foreach (var value in GetMultiSelect(row, property))
+                                                        {
+                                                            var file = WikiFileValues.Parse(value);
+                                                            <div class="d-flex align-items-center gap-1 small">
+                                                                @if (file is not null)
+                                                                {
+                                                                    <a href="@file.DownloadUrl" target="_blank" rel="noopener" class="text-truncate" title="@file.FileName">
+                                                                        <i class="bi @(file.IsImage ? "bi-file-earmark-image" : "bi-file-earmark") me-1" aria-hidden="true"></i>@file.FileName
+                                                                    </a>
+                                                                }
+                                                                else if (Uri.TryCreate(value, UriKind.Absolute, out var link) && link.Scheme is "http" or "https")
+                                                                {
+                                                                    <a href="@value" target="_blank" rel="noopener noreferrer" class="text-truncate" title="@value"><i class="bi bi-link-45deg me-1" aria-hidden="true"></i>@value</a>
+                                                                }
+                                                                else
+                                                                {
+                                                                    <span class="text-truncate" title="@value">@value</span>
+                                                                }
+                                                                @if (CanEdit)
+                                                                {
+                                                                    <button type="button" class="btn btn-link btn-sm p-0 ms-auto" disabled="@IsBusy" aria-label="@($"Remove {file?.FileName ?? value}")"
+                                                                            @onclick="() => RemoveFileValueAsync(row, property, value)"><i class="bi bi-x-lg"></i></button>
+                                                                }
+                                                            </div>
+                                                        }
+                                                        @if (CanEdit)
+                                                        {
+                                                            <label class="btn btn-sm btn-outline-secondary mt-1 mb-0">
+                                                                <i class="bi bi-paperclip me-1" aria-hidden="true"></i>Attach
+                                                                <InputFile multiple class="d-none" disabled="@IsBusy" OnChange="e => UploadFilesAsync(row, property, e)" />
+                                                            </label>
+                                                        }
+                                                    </div>
                                                     break;
                                                 case WikiDatabasePropertyTypes.Relation:
                                                     var relatedDatabase = GetRelatedDatabase(property);
@@ -1541,6 +1614,7 @@ else
     private bool _showProperties;
     private bool _showRowTemplates;
     private bool _showCsvImport;
+    private bool _showRules;
     private bool _showTrashedRows;
     private List<WikiDatabaseRow> TrashedRows { get; set; } = new();
     private List<WikiDatabaseRowTemplate> RowTemplates { get; set; } = new();
@@ -1583,6 +1657,7 @@ else
     private List<WikiDatabase> _databaseChoices = [];
     private List<AutomationWorkflowSummary> _workflowChoices = [];
     private readonly Dictionary<Guid, WikiDatabase> _relatedDatabases = [];
+    private IReadOnlyList<string> _usernames = [];
     private DateOnly _calendarMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1);
     private Guid _filterPropertyId;
     private string _filterOperator = "contains";
@@ -1783,6 +1858,7 @@ else
             Database = await WikiDatabaseService.GetDatabaseAsync(WikiDatabaseId);
             _databaseChoices = (await WikiDatabaseService.ListDatabasesAsync()).OrderBy(database => database.Title).ToList();
             _workflowChoices = (await AutomationWorkflowService.ListAsync()).OrderBy(workflow => workflow.Name).ToList();
+            _usernames = await SentinelWorkspaceService.ListActiveUsernamesAsync();
             if (Database is not null)
             {
                 _title = Database.Title;
@@ -3079,10 +3155,6 @@ else
     private Task SetSelectAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string? optionId) =>
         SaveRowValueAsync(row, values => WikiPropertyValues.SetText(values, property.Id, string.IsNullOrEmpty(optionId) ? null : optionId));
 
-    private Task SetMultiValueAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string? raw) =>
-        SaveRowValueAsync(row, values => WikiPropertyValues.SetMultiSelect(values, property.Id,
-            (raw ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)));
-
     private Task ToggleMultiSelectAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string optionId, bool isChecked)
     {
         var current = WikiPropertyValues.GetMultiSelect(WikiPropertyValues.ParseObject(row.PropertyValuesJson), property.Id).ToList();
@@ -3097,6 +3169,74 @@ else
 
         return SaveRowValueAsync(row, values => WikiPropertyValues.SetMultiSelect(values, property.Id, current));
     }
+
+    private Task RemoveFileValueAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string value)
+    {
+        var updated = GetMultiSelect(row, property).Where(existing => existing != value).ToList();
+        return SaveRowValueAsync(row, values => WikiPropertyValues.SetMultiSelect(values, property.Id, updated));
+    }
+
+    // Stores each file, then saves the row once with all of them added.
+    private async Task UploadFilesAsync(WikiDatabaseRow row, WikiDatabaseProperty property, InputFileChangeEventArgs args)
+    {
+        var added = new List<string>();
+        var problems = new List<string>();
+        foreach (var file in args.GetMultipleFiles(WikiFileValues.MaxFilesPerUpload))
+        {
+            if (file.Size > WikiFileValues.MaxBytes)
+            {
+                problems.Add($"{file.Name} is over {WikiFileValues.MaxBytes / 1024 / 1024} MB");
+                continue;
+            }
+
+            try
+            {
+                using var buffer = new MemoryStream();
+                await using (var stream = file.OpenReadStream(WikiFileValues.MaxBytes))
+                {
+                    await stream.CopyToAsync(buffer);
+                }
+                added.Add(await WikiDatabaseService.StorePropertyFileAsync(WikiDatabaseId, property.Id, file.Name, buffer.ToArray()));
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException or IOException)
+            {
+                Logger.LogWarning(ex, "Uploading {FileName} to a Files property failed", file.Name);
+                problems.Add($"{file.Name}: {ex.Message}");
+            }
+        }
+
+        if (added.Count > 0)
+        {
+            var updated = GetMultiSelect(row, property).Concat(added).ToList();
+            await SaveRowValueAsync(row, values => WikiPropertyValues.SetMultiSelect(values, property.Id, updated));
+        }
+
+        if (problems.Count > 0)
+        {
+            ErrorMessage = "Some files weren't attached: " + string.Join("; ", problems) + ".";
+        }
+    }
+
+    private Task TogglePersonAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string username, bool assign)
+    {
+        var updated = WikiPersonValues.Toggle(GetMultiSelect(row, property), username, assign);
+        return SaveRowValueAsync(row, values => WikiPropertyValues.SetMultiSelect(values, property.Id, updated));
+    }
+
+    private Task RemovePersonValueAsync(WikiDatabaseRow row, WikiDatabaseProperty property, string value)
+    {
+        var updated = WikiPersonValues.Remove(GetMultiSelect(row, property), value);
+        return SaveRowValueAsync(row, values => WikiPropertyValues.SetMultiSelect(values, property.Id, updated));
+    }
+
+    private static string PersonSummary(IReadOnlyList<WikiPersonAssignee> assignees) => assignees.Count switch
+    {
+        0 => "Assign people",
+        <= 2 => string.Join(", ", assignees.Select(a => a.Username ?? a.Value)),
+        _ => $"{assignees.Count} people"
+    };
+
+    private static string Initial(string username) => username.Length == 0 ? "?" : username[..1].ToUpperInvariant();
 
     private Task ToggleRelationAsync(WikiDatabaseRow row, WikiDatabaseProperty property, Guid relatedRowId, bool isChecked)
     {

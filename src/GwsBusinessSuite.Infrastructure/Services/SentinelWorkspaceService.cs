@@ -294,6 +294,28 @@ public sealed class SentinelWorkspaceService(
             }
         }
 
+        // Currently-verified pages win near-ties (SentinelPageVerificationRules.SearchBoost).
+        var pageResultIds = results.Where(result => !result.IsDatabase).Select(result => result.Id).Distinct().ToList();
+        if (pageResultIds.Count > 0)
+        {
+            var nowUnix = timeProvider.GetUtcNow().ToUnixTimeSeconds();
+            var verifiedIds = (await dbContext.WikiPages.AsNoTracking()
+                    .Where(page => pageResultIds.Contains(page.Id) && page.VerifiedUntilUnix != null && page.VerifiedUntilUnix > nowUnix)
+                    .Select(page => page.Id)
+                    .ToListAsync(cancellationToken))
+                .ToHashSet();
+            for (var index = 0; index < results.Count; index++)
+            {
+                var result = results[index];
+                if (result.IsDatabase || !verifiedIds.Contains(result.Id)) continue;
+                results[index] = result with
+                {
+                    Score = result.Score + SentinelPageVerificationRules.SearchBoost,
+                    MatchKind = $"{result.MatchKind} · verified"
+                };
+            }
+        }
+
         return results
             .OrderByDescending(result => result.Score)
             .ThenBy(result => result.Title, StringComparer.OrdinalIgnoreCase)
@@ -651,6 +673,15 @@ public sealed class SentinelWorkspaceService(
         return entry.IsFavorite;
     }
 
+    public async Task<IReadOnlyList<string>> ListActiveUsernamesAsync(CancellationToken cancellationToken = default)
+    {
+        var usernames = await dbContext.AppUsers.AsNoTracking()
+            .Where(user => user.IsActive)
+            .Select(user => user.Username)
+            .ToListAsync(cancellationToken);
+        return usernames.Order(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
     public async Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestionsAsync(
         string query,
         string username,
@@ -776,8 +807,8 @@ public sealed class SentinelWorkspaceService(
         }
 
         // Rows with a Person property naming this user - Person values are stored the same way
-        // as MultiSelect (free-text ids, not a predefined option list), so this reads them the
-        // same way WikiDatabaseService's own CSV export does for that property type.
+        // as MultiSelect (usernames from the picker, or older free text), matched the same way
+        // the editor's picker does (WikiPersonValues).
         var databases = await dbContext.WikiDatabases.AsNoTracking()
             .Where(database => database.TrashedAt == null)
             .Include(database => database.Properties)
@@ -802,8 +833,7 @@ public sealed class SentinelWorkspaceService(
             {
                 var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
                 var isAssignedToMe = personProperties.Any(property =>
-                    WikiPropertyValues.GetMultiSelect(values, property.Id).Any(
-                        assignee => string.Equals(NormalizeUsername(assignee), normalizedUsername, StringComparison.Ordinal)));
+                    WikiPersonValues.IsAssigned(WikiPropertyValues.GetMultiSelect(values, property.Id), normalizedUsername));
                 if (!isAssignedToMe) continue;
 
                 var title = titleProperty is null ? "Untitled" : WikiPropertyValues.GetText(values, titleProperty.Id) ?? "Untitled";

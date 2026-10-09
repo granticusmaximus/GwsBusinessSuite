@@ -1889,6 +1889,72 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         parentBlocks.Should().NotContain(block => block.PlainText.Contains("/pag"));
     }
 
+    [Fact]
+    public async Task ButtonBlock_ShouldRunAChosenWorkflowAfterConfirming_AndRefuseUnsafeLinks()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<main class="sentinel-workspace"><div id="editor" class="wiki-block-editor"></div></main>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = (await File.ReadAllTextAsync(scriptPath)).Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var blocksJson = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Button, 0, [new WikiRichTextSpan("Send welcome")], new Dictionary<string, string>())
+        ]);
+        await page.EvaluateAsync(
+            """
+            json => {
+                window.calls = [];
+                window.opened = [];
+                window.confirm = () => true;
+                window.open = url => { window.opened.push(url); return null; };
+                window.sentinelBlockEditor.initialize(document.querySelector('#editor'), {
+                    invokeMethodAsync: (method, ...args) => {
+                        window.calls.push([method, ...args]);
+                        if (method === 'ListButtonWorkflows') return Promise.resolve([{ id: 'wf-1', name: 'Welcome email' }]);
+                        if (method === 'RunButtonWorkflow') return Promise.resolve('Done.');
+                        return Promise.resolve([]);
+                    }
+                }, json);
+            }
+            """,
+            blocksJson);
+
+        var settings = page.Locator(".wiki-button-settings");
+        // Link mode refuses a javascript: URL instead of opening it.
+        await settings.Locator("input").FillAsync("javascript:alert(1)");
+        await settings.Locator("button").ClickAsync();
+        await Expect(settings.Locator(".wiki-button-status")).ToContainTextAsync("Enter a web address");
+        (await page.EvaluateAsync<int>("() => window.opened.length")).Should().Be(0);
+
+        await settings.Locator("select").First.SelectOptionAsync("workflow");
+        var workflowSelect = settings.Locator("select").Nth(1);
+        await workflowSelect.FocusAsync();
+        await Expect(workflowSelect.Locator("option[value='wf-1']")).ToHaveCountAsync(1);
+        await workflowSelect.SelectOptionAsync("wf-1");
+        await settings.Locator("button").ClickAsync();
+        await Expect(settings.Locator(".wiki-button-status")).ToHaveTextAsync("Done.");
+
+        var run = await page.EvaluateAsync<JsonElement>("() => window.calls.find(call => call[0] === 'RunButtonWorkflow')");
+        run[2].GetString().Should().Be("wf-1");
+        var saved = WikiBlockJson.ParseBlocks(await page.EvaluateAsync<string>(
+            "() => window.sentinelBlockEditor.getBlocksJson(document.querySelector('#editor'))")).Single();
+        saved.Props.Should().Contain(new KeyValuePair<string, string>("action", "workflow"))
+            .And.Contain(new KeyValuePair<string, string>("workflowId", "wf-1"))
+            .And.Contain(new KeyValuePair<string, string>("workflowName", "Welcome email"));
+    }
+
     private static ILocatorAssertions Expect(ILocator locator) =>
         Assertions.Expect(locator);
 }

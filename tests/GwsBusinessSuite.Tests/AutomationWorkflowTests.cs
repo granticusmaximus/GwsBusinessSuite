@@ -1351,6 +1351,76 @@ public sealed class AutomationWorkflowTests
         (await db.AutomationExecutions.CountAsync(e => e.WorkflowId == watcher.Id)).Should().Be(expectedWatcherExecutions);
     }
 
+    // --- Sentinel database rules (SentinelDatabaseRuleService) ---
+
+    [Fact]
+    public async Task DatabaseRule_StatusDone_ShouldStampCompletedOnce_AndBeRemovable()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.AddRange(
+            new AppUser { Username = "user", Role = AppRoles.Admin, IsActive = true },
+            new AppUser { Username = "author", Role = AppRoles.Author, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var serviceProvider = new FakeServiceProvider();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), dbContextFactory: new FakeAppDbContextFactory(options), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var wikiDatabaseService = new WikiDatabaseService(db, triggerService);
+        serviceProvider.Register<IWikiDatabaseService>(wikiDatabaseService);
+        var rules = new SentinelDatabaseRuleService(db, workflowService, wikiDatabaseService);
+
+        var database = await wikiDatabaseService.CreateDatabaseAsync("Tasks", null, "user");
+        var status = await wikiDatabaseService.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor
+            {
+                Name = "Status", Type = WikiDatabasePropertyTypes.Status,
+                Options = [new WikiDatabasePropertyOption("todo", "To do", "gray"), new WikiDatabasePropertyOption("done", "Done", "green")]
+            }, "user");
+        var done = WikiDatabasePropertyConfig.GetOptions(status).Single(option => option.Label == "Done");
+        var completed = await wikiDatabaseService.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Completed", Type = WikiDatabasePropertyTypes.Date }, "user");
+        database = (await wikiDatabaseService.GetDatabaseAsync(database.Id))!;
+
+        var rule = new SentinelDatabaseRule(database.Id, SentinelDatabaseRuleKinds.WhenPropertyEquals, status.Id, done.Id,
+            SentinelDatabaseRuleKinds.ThenSetProperty, completed.Id, SetToNow: true, OnlyIfEmpty: true);
+        var forbidden = () => rules.CreateAsync(rule, "author");
+        await forbidden.Should().ThrowAsync<UnauthorizedAccessException>();
+        var created = await rules.CreateAsync(rule, "user");
+        created.Summary.Should().Be("When Status is Done, set Completed to now (only if empty)");
+        (await rules.ListAsync(database.Id)).Should().ContainSingle(view => view.WorkflowId == created.WorkflowId);
+
+        var values = new System.Text.Json.Nodes.JsonObject();
+        WikiPropertyValues.SetText(values, status.Id, done.Id);
+        var row = await wikiDatabaseService.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Values = values.ToDictionary(kv => kv.Key, kv => kv.Value) }, "user");
+
+        var stamped = WikiPropertyValues.GetDate(WikiPropertyValues.ParseObject(
+            (await db.WikiDatabaseRows.AsNoTracking().SingleAsync(item => item.Id == row.Id)).PropertyValuesJson), completed.Id);
+        stamped.Should().NotBeNull();
+
+        // Saving the row again while it's still Done keeps the first date (only if empty).
+        var current = await db.WikiDatabaseRows.AsNoTracking().SingleAsync(item => item.Id == row.Id);
+        var again = WikiPropertyValues.ParseObject(current.PropertyValuesJson);
+        WikiPropertyValues.SetText(again, status.Id, done.Id);
+        again["note"] = "touched";
+        await wikiDatabaseService.SaveRowAsync(database.Id,
+            new WikiDatabaseRowEditor { Id = row.Id, Values = again.ToDictionary(kv => kv.Key, kv => kv.Value?.DeepClone()) }, "user");
+        WikiPropertyValues.GetDate(WikiPropertyValues.ParseObject(
+            (await db.WikiDatabaseRows.AsNoTracking().SingleAsync(item => item.Id == row.Id)).PropertyValuesJson), completed.Id)
+            .Should().Be(stamped);
+
+        await rules.DeleteAsync(database.Id, created.WorkflowId, "user");
+        (await rules.ListAsync(database.Id)).Should().BeEmpty();
+        (await db.AutomationWorkflows.AnyAsync(workflow => workflow.Id == created.WorkflowId)).Should().BeFalse();
+    }
+
     // --- Part 4.2: cross-module triggers (CRM deal stage changed, CMS page published) ---
 
     [Fact]

@@ -659,6 +659,15 @@ public sealed class WikiPage : AuditableEntity
     // revision snapshot when changed. Null FontStyle means "use the default sans font".
     public bool IsFullWidth { get; set; }
     public string? FontStyle { get; set; }
+    // Page verification (SentinelPageVerificationService): who answers for the page, and who
+    // last confirmed it's accurate until when. Times are Unix seconds because SQLite can't
+    // compare DateTimeOffset in a query, and the lapse sweep filters on VerifiedUntilUnix.
+    // VerificationLapseNotifiedUnix makes the "verification expired" bell fire once per lapse.
+    public string? OwnerUsername { get; set; }
+    public string? VerifiedBy { get; set; }
+    public long? VerifiedAtUnix { get; set; }
+    public long? VerifiedUntilUnix { get; set; }
+    public long? VerificationLapseNotifiedUnix { get; set; }
     public ICollection<WikiPageRevision> Revisions { get; set; } = new List<WikiPageRevision>();
 }
 
@@ -700,6 +709,8 @@ public sealed class SentinelPageTemplate : AuditableEntity
     public string BlocksJson { get; set; } = "[]";
     public string? Icon { get; set; }
     public string? CoverImageUrl { get; set; }
+    // At most one template has this set: new daily notes start from it (DailyNoteService).
+    public bool UseForDailyNotes { get; set; }
 }
 
 // Durable snapshot of a reusable group of Sentinel blocks. Materializing a template always

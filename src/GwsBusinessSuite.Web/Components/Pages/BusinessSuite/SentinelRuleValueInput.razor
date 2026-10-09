@@ -1,0 +1,39 @@
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+
+@* A value for a database rule, shaped like the property it's for: an option list for
+   Select/Status, yes/no for a checkbox, and free text otherwise. Values are what the row
+   stores (option ids, "true"/"false"), so the rule's trigger condition matches them exactly. *@
+@if (Property is null)
+{
+    <input id="@Id" class="form-control form-control-sm" disabled placeholder="Choose a property first" />
+}
+else if (Property.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status)
+{
+    <select id="@Id" class="form-select form-select-sm" value="@Value" @onchange="e => ValueChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty)">
+        <option value="">Choose…</option>
+        @foreach (var option in WikiDatabasePropertyConfig.GetOptions(Property))
+        {
+            <option value="@option.Id">@option.Label</option>
+        }
+    </select>
+}
+else if (Property.Type == WikiDatabasePropertyTypes.Checkbox)
+{
+    <select id="@Id" class="form-select form-select-sm" value="@Value" @onchange="e => ValueChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty)">
+        <option value="">Choose…</option>
+        <option value="true">Ticked</option>
+        <option value="false">Not ticked</option>
+    </select>
+}
+else
+{
+    <input id="@Id" class="form-control form-control-sm" value="@Value" @oninput="e => ValueChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty)" />
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public WikiDatabaseProperty? Property { get; set; }
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+}

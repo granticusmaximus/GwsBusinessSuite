@@ -1,0 +1,223 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Automation
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject ISentinelDatabaseRuleService RuleService
+@inject IAutomationWorkflowService WorkflowService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<SentinelDatabaseRulesPanel> Logger
+
+@* Database automations (SentinelDatabaseRules.cs): simple when/then rules, each saved as an
+   Automation workflow. Shown to Admins only (see WikiDatabaseEditor). *@
+<div class="wiki-db-rules border rounded-3 p-3 mb-3">
+    <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+        <div>
+            <div class="fw-semibold small">Automations</div>
+            <div class="small text-secondary">Rules that run when rows change. Each one is a workflow in Automation, where it can be edited further.</div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger py-1 px-2 small" role="alert">@_error</div>
+    }
+
+    @if (_rules.Count > 0)
+    {
+        <ul class="list-unstyled small mb-3">
+            @foreach (var rule in _rules)
+            {
+                <li class="d-flex align-items-center gap-2 py-1 border-bottom">
+                    <i class="bi @(rule.Status == AutomationWorkflowStatuses.Active ? "bi-lightning-charge-fill text-success" : "bi-lightning-charge text-secondary")"
+                       title="@rule.Status" aria-label="@rule.Status"></i>
+                    <a class="flex-grow-1 text-break" href="@($"admin/automation/{rule.WorkflowId}")">@rule.Summary</a>
+                    <button type="button" class="btn btn-xs btn-link text-danger p-0" disabled="@_busy" aria-label="@($"Remove rule: {rule.Summary}")"
+                            @onclick="() => DeleteAsync(rule.WorkflowId)"><i class="bi bi-x-lg"></i></button>
+                </li>
+            }
+        </ul>
+    }
+
+    <div class="row g-2 align-items-end">
+        <div class="col-md-6">
+            <label class="form-label small mb-1" for="rule-when">When</label>
+            <select id="rule-when" class="form-select form-select-sm" value="@_when" @onchange="e => { _when = e.Value?.ToString() ?? string.Empty; _whenValue = string.Empty; }">
+                <option value="@SentinelDatabaseRuleKinds.WhenRowAdded">A row is added</option>
+                <option value="@SentinelDatabaseRuleKinds.WhenPropertyEquals">A property is set to…</option>
+            </select>
+        </div>
+        @if (_when == SentinelDatabaseRuleKinds.WhenPropertyEquals)
+        {
+            <div class="col-md-3">
+                <label class="form-label small mb-1" for="rule-when-property">Property</label>
+                <select id="rule-when-property" class="form-select form-select-sm" value="@_whenPropertyId" @onchange="e => { _whenPropertyId = e.Value?.ToString() ?? string.Empty; _whenValue = string.Empty; }">
+                    <option value="">Choose…</option>
+                    @foreach (var property in Database.Properties.Where(SentinelDatabaseRuleBuilder.CanWatch).OrderBy(p => p.SortOrder))
+                    {
+                        <option value="@property.Id">@property.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small mb-1" for="rule-when-value">Value</label>
+                <SentinelRuleValueInput Id="rule-when-value" Property="@Find(_whenPropertyId)" Value="@_whenValue" ValueChanged="value => _whenValue = value" />
+            </div>
+        }
+
+        <div class="col-md-6">
+            <label class="form-label small mb-1" for="rule-then">Then</label>
+            <select id="rule-then" class="form-select form-select-sm" value="@_then" @onchange="OnThenChanged">
+                <option value="@SentinelDatabaseRuleKinds.ThenSetProperty">Set a property</option>
+                <option value="@SentinelDatabaseRuleKinds.ThenEmail">Send an email</option>
+                <option value="@SentinelDatabaseRuleKinds.ThenRunWorkflow">Run a workflow</option>
+            </select>
+        </div>
+        @if (_then == SentinelDatabaseRuleKinds.ThenSetProperty)
+        {
+            var target = Find(_setPropertyId);
+            <div class="col-md-3">
+                <label class="form-label small mb-1" for="rule-set-property">Property</label>
+                <select id="rule-set-property" class="form-select form-select-sm" value="@_setPropertyId" @onchange="e => { _setPropertyId = e.Value?.ToString() ?? string.Empty; _setValue = string.Empty; }">
+                    <option value="">Choose…</option>
+                    @foreach (var property in Database.Properties.Where(SentinelDatabaseRuleBuilder.CanSet).OrderBy(p => p.SortOrder))
+                    {
+                        <option value="@property.Id">@property.Name</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-3">
+                @if (target?.Type == WikiDatabasePropertyTypes.Date)
+                {
+                    <div class="form-text mb-1">Set to the time the rule runs.</div>
+                }
+                else
+                {
+                    <label class="form-label small mb-1" for="rule-set-value">To</label>
+                    <SentinelRuleValueInput Id="rule-set-value" Property="@target" Value="@_setValue" ValueChanged="value => _setValue = value" />
+                }
+            </div>
+            <div class="col-12">
+                <div class="form-check small">
+                    <input id="rule-only-empty" class="form-check-input" type="checkbox" checked="@_onlyIfEmpty" @onchange="e => _onlyIfEmpty = e.Value is true" />
+                    <label class="form-check-label" for="rule-only-empty">Only if it's empty (keep a value that's already there)</label>
+                </div>
+            </div>
+        }
+        else if (_then == SentinelDatabaseRuleKinds.ThenEmail)
+        {
+            <div class="col-md-6">
+                <label class="form-label small mb-1" for="rule-email">Email address</label>
+                <input id="rule-email" type="email" class="form-control form-control-sm" value="@_emailTo" @oninput="e => _emailTo = e.Value?.ToString() ?? string.Empty" />
+            </div>
+        }
+        else
+        {
+            <div class="col-md-6">
+                <label class="form-label small mb-1" for="rule-workflow">Workflow</label>
+                <select id="rule-workflow" class="form-select form-select-sm" value="@_runWorkflowId" @onchange="e => _runWorkflowId = e.Value?.ToString() ?? string.Empty">
+                    <option value="">Choose…</option>
+                    @foreach (var workflow in _workflows)
+                    {
+                        <option value="@workflow.Id">@workflow.Name</option>
+                    }
+                </select>
+                <div class="form-text">It must be published. It receives the row's id and values.</div>
+            </div>
+        }
+        <div class="col-12">
+            <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="CreateAsync"><i class="bi bi-plus-lg me-1"></i>Add rule</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public WikiDatabase Database { get; set; } = default!;
+
+    private IReadOnlyList<SentinelDatabaseRuleView> _rules = [];
+    private IReadOnlyList<AutomationWorkflowSummary> _workflows = [];
+    private string _when = SentinelDatabaseRuleKinds.WhenPropertyEquals;
+    private string _whenPropertyId = string.Empty;
+    private string _whenValue = string.Empty;
+    private string _then = SentinelDatabaseRuleKinds.ThenSetProperty;
+    private string _setPropertyId = string.Empty;
+    private string _setValue = string.Empty;
+    private bool _onlyIfEmpty = true;
+    private string _emailTo = string.Empty;
+    private string _runWorkflowId = string.Empty;
+    private bool _busy;
+    private string _error = string.Empty;
+    private Guid _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == Database.Id) return;
+        _loadedFor = Database.Id;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _rules = await RuleService.ListAsync(Database.Id);
+        var ruleIds = _rules.Select(rule => rule.WorkflowId).ToHashSet();
+        _workflows = (await WorkflowService.ListAsync())
+            .Where(workflow => !ruleIds.Contains(workflow.Id) && workflow.CurrentVersion > 0)
+            .OrderBy(workflow => workflow.Name)
+            .ToList();
+    }
+
+    private WikiDatabaseProperty? Find(string id) =>
+        Guid.TryParse(id, out var propertyId) ? Database.Properties.FirstOrDefault(property => property.Id == propertyId) : null;
+
+    private void OnThenChanged(ChangeEventArgs args)
+    {
+        _then = args.Value?.ToString() ?? string.Empty;
+        _error = string.Empty;
+    }
+
+    private async Task CreateAsync()
+    {
+        var setTarget = Find(_setPropertyId);
+        var rule = new SentinelDatabaseRule(
+            Database.Id,
+            _when,
+            Find(_whenPropertyId)?.Id,
+            _whenValue,
+            _then,
+            setTarget?.Id,
+            _setValue,
+            SetToNow: setTarget?.Type == WikiDatabasePropertyTypes.Date,
+            OnlyIfEmpty: _onlyIfEmpty,
+            EmailTo: _emailTo,
+            RunWorkflowId: Guid.TryParse(_runWorkflowId, out var workflowId) ? workflowId : null);
+
+        await RunAsync(async username =>
+        {
+            await RuleService.CreateAsync(rule, username);
+            _whenValue = _setValue = _emailTo = string.Empty;
+        });
+    }
+
+    private Task DeleteAsync(Guid workflowId) =>
+        RunAsync(username => RuleService.DeleteAsync(Database.Id, workflowId, username));
+
+    private async Task RunAsync(Func<string, Task> action)
+    {
+        if (_busy) return;
+        _busy = true;
+        _error = string.Empty;
+        try
+        {
+            await action(await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await LoadAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or KeyNotFoundException)
+        {
+            Logger.LogWarning(ex, "Changing the automations of database {DatabaseId} failed", Database.Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

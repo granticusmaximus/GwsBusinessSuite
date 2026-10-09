@@ -454,4 +454,16 @@ public sealed class WikiBlockHtmlRendererTests
             indentLevel,
             [new WikiRichTextSpan(text)],
             new Dictionary<string, string>());
+
+    [Fact]
+    public void RenderBlock_WorkflowButton_ShouldShowItsLabelWithoutALink()
+    {
+        var workflowButton = new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Button, 0, [new WikiRichTextSpan("Send welcome")],
+            new Dictionary<string, string> { ["action"] = "workflow", ["workflowId"] = Guid.NewGuid().ToString() });
+        var linkButton = new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Button, 0, [new WikiRichTextSpan("Docs")],
+            new Dictionary<string, string> { ["action"] = "link", ["url"] = "https://example.com/" });
+
+        WikiBlockHtmlRenderer.RenderBlock(workflowButton).Should().Contain("aria-disabled=\"true\"").And.NotContain("href");
+        WikiBlockHtmlRenderer.RenderBlock(linkButton).Should().Contain("href=\"https://example.com/\"");
+    }
 }

@@ -126,6 +126,10 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Equation => RenderEquation(block, indentStyle),
             WikiBlockTypes.Breadcrumb => $"<nav class=\"wiki-breadcrumb\"{indentStyle} aria-label=\"Breadcrumb\">{content}</nav>",
             WikiBlockTypes.TableOfContents => $"<nav class=\"wiki-table-of-contents\"{indentStyle}>Table of contents</nav>",
+            // A workflow button only works inside Sentinel (it needs an Admin session), so
+            // exports and public shares show its label without a link.
+            WikiBlockTypes.Button when block.Props.GetValueOrDefault("action") == "workflow" =>
+                $"<span class=\"wiki-button\" aria-disabled=\"true\">{content}</span>",
             WikiBlockTypes.Button => $"<a class=\"wiki-button\" href=\"{WebUtility.HtmlEncode(GetSafeLink(block.Props.GetValueOrDefault("url")) ?? "#")}\">{content}</a>",
             WikiBlockTypes.SyncedBlock => $"<div class=\"wiki-synced-block\"{indentStyle}>{content}</div>",
             WikiBlockTypes.Columns => RenderColumns(block, indentStyle, pagesForWikiLinks),

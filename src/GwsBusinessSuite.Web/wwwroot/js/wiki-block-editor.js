@@ -54,7 +54,7 @@ const BLOCK_TYPES = [
     { type: 'table_of_contents', label: 'Table of contents', icon: '☷', group: 'Advanced & inline blocks', description: 'Auto-generates a list of jump links using your page headings.', keywords: 'outline headings' },
     { type: 'equation', label: 'Block equation', icon: '∑', group: 'Advanced & inline blocks', description: 'Centers standard LaTeX scientific formulas.', keywords: 'math formula latex' },
     { type: 'synced_block', label: 'Synced block', icon: '↻', group: 'Advanced & inline blocks', description: 'Edits here update every duplicated copy of this block.', keywords: 'reusable' },
-    { type: 'button', label: 'Button', icon: '▣', group: 'Advanced & inline blocks', description: 'Creates automatic action macro scripts when clicked.', keywords: 'action link automation' },
+    { type: 'button', label: 'Button', icon: '▣', group: 'Advanced & inline blocks', description: 'Opens a link or runs an Automation workflow when clicked.', keywords: 'action link automation workflow' },
     { type: '__mention_person', label: 'Mention a person', icon: '@', group: 'Advanced & inline blocks', description: 'Inline flag for a coworker.', keywords: 'mention person user' },
     { type: 'breadcrumb', label: 'Breadcrumb', icon: '›', group: 'Advanced & inline blocks', description: 'Show this page’s location.', keywords: 'navigation path' }
 ];
@@ -704,7 +704,138 @@ function createBlockBody(block, state) {
     if (block.type === 'equation' || block.type === 'code') {
         attachRichPreview(body, content, block);
     }
+    if (block.type === 'button') {
+        body.appendChild(createButtonSettings(block, state));
+    }
     return body;
+}
+
+// ---- Button block ----
+// The label is the block's own text; this row picks what clicking it does. Settings live in the
+// block's props (action, url, workflowId, workflowName), so they save, undo and copy with the
+// block. Workflows are listed and run by the Wiki component (ListButtonWorkflows /
+// RunButtonWorkflow), which only allows Admins - the Automation area is Admin-only.
+function createButtonSettings(block, state) {
+    const props = block.props || {};
+    const row = document.createElement('div');
+    row.className = 'wiki-button-settings';
+    row.contentEditable = 'false';
+
+    const action = document.createElement('select');
+    action.className = 'form-select form-select-sm';
+    action.setAttribute('aria-label', 'What the button does');
+    for (const [value, label] of [['link', 'Open a link'], ['workflow', 'Run an automation']]) {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        action.appendChild(option);
+    }
+    action.value = props.action === 'workflow' ? 'workflow' : 'link';
+
+    const url = document.createElement('input');
+    url.type = 'text';
+    url.className = 'form-control form-control-sm';
+    url.placeholder = 'https://… or /admin/…';
+    url.setAttribute('aria-label', 'Button link');
+    url.value = props.url || '';
+
+    const workflow = document.createElement('select');
+    workflow.className = 'form-select form-select-sm';
+    workflow.setAttribute('aria-label', 'Workflow to run');
+    const current = document.createElement('option');
+    current.value = props.workflowId || '';
+    current.textContent = props.workflowName || 'Choose a workflow…';
+    workflow.appendChild(current);
+    let workflowsLoaded = false;
+    const loadWorkflows = () => {
+        if (workflowsLoaded) return;
+        workflowsLoaded = true;
+        state.dotNetRef.invokeMethodAsync('ListButtonWorkflows').then(items => {
+            workflow.replaceChildren();
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = items.length ? 'Choose a workflow…' : 'Only Admins can use automations';
+            workflow.appendChild(placeholder);
+            for (const item of items) {
+                const option = document.createElement('option');
+                option.value = item.id;
+                option.textContent = item.name;
+                workflow.appendChild(option);
+            }
+            workflow.value = props.workflowId || '';
+        }).catch(() => { workflowsLoaded = false; });
+    };
+    workflow.addEventListener('focus', loadWorkflows);
+    workflow.addEventListener('mousedown', loadWorkflows);
+
+    const run = document.createElement('button');
+    run.type = 'button';
+    run.className = 'btn btn-sm btn-primary';
+    const status = document.createElement('span');
+    status.className = 'wiki-button-status small';
+    status.setAttribute('role', 'status');
+
+    const save = () => {
+        const el = row.closest('.wiki-block');
+        if (!el) return;
+        let stored = {};
+        try { stored = JSON.parse(el.dataset.propsJson || '{}'); } catch { stored = {}; }
+        stored.action = action.value;
+        stored.url = url.value.trim();
+        stored.workflowId = workflow.value || '';
+        stored.workflowName = workflow.value ? (workflow.selectedOptions[0]?.textContent || '') : '';
+        el.dataset.propsJson = JSON.stringify(stored);
+        notifyChanged(state);
+    };
+    const refresh = () => {
+        const isWorkflow = action.value === 'workflow';
+        url.hidden = isWorkflow;
+        workflow.hidden = !isWorkflow;
+        run.textContent = isWorkflow ? 'Run' : 'Open';
+        status.textContent = '';
+    };
+    action.addEventListener('change', () => { refresh(); save(); if (action.value === 'workflow') loadWorkflows(); });
+    url.addEventListener('change', save);
+    url.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); save(); } });
+    workflow.addEventListener('change', save);
+
+    run.addEventListener('click', async () => {
+        const label = row.closest('.wiki-block')?.querySelector('[contenteditable="true"]')?.textContent.trim() || 'this button';
+        if (action.value === 'link') {
+            const target = safeButtonUrl(url.value.trim());
+            if (target) window.open(target, '_blank', 'noopener');
+            else status.textContent = 'Enter a web address (https://…) or a path in this site first.';
+            return;
+        }
+        if (!workflow.value) { status.textContent = 'Choose a workflow first.'; return; }
+        const name = workflow.selectedOptions[0]?.textContent || 'the workflow';
+        if (!window.confirm(`Run "${name}" from "${label}"?`)) return;
+        run.disabled = true;
+        status.textContent = 'Running…';
+        try {
+            status.textContent = await state.dotNetRef.invokeMethodAsync('RunButtonWorkflow', row.closest('.wiki-block')?.dataset.blockId || '', workflow.value);
+        } catch {
+            status.textContent = 'The workflow could not be started.';
+        } finally {
+            run.disabled = false;
+        }
+    });
+
+    refresh();
+    row.append(action, url, workflow, run, status);
+    return row;
+}
+
+// http(s) links and paths on this site only - never javascript: or data: URLs.
+function safeButtonUrl(value) {
+    if (!value) return null;
+    if (value.startsWith('/') && !value.startsWith('//')) return value;
+    try {
+        const parsed = new URL(value);
+        return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : null;
+    } catch {
+        return null;
+    }
 }
 
 // Equation/code blocks show a rendered KaTeX/highlight.js preview whenever the block isn't

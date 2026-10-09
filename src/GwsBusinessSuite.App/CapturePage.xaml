@@ -30,9 +30,13 @@
                     Placeholder="The text found in the capture appears here - you can edit it." PlaceholderColor="#78716C" AutoSize="Disabled" />
         </Grid>
 
-        <Grid Grid.Row="3" Padding="16,10,16,0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+        <Grid Grid.Row="3" Padding="16,10,16,0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
             <Entry x:Name="TitleEntry" Placeholder="Note title" PlaceholderColor="#78716C" TextColor="#FAFAF9" BackgroundColor="#1C1917" MaxLength="200" />
-            <Button Grid.Column="1" Text="Save to Sentinel" BackgroundColor="#2563EB" TextColor="#FAFAF9" CornerRadius="8" Clicked="OnSaveClicked" />
+            <HorizontalStackLayout Grid.Column="1" Spacing="4" VerticalOptions="Center">
+                <CheckBox x:Name="DailyNoteCheckBox" Color="#2563EB" VerticalOptions="Center" />
+                <Label Text="Today's daily note" TextColor="#E7E5E4" FontSize="12" VerticalOptions="Center" />
+            </HorizontalStackLayout>
+            <Button Grid.Column="2" Text="Save to Sentinel" BackgroundColor="#2563EB" TextColor="#FAFAF9" CornerRadius="8" Clicked="OnSaveClicked" />
         </Grid>
 
         <Grid Grid.Row="4" Padding="16,10,16,0" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10">

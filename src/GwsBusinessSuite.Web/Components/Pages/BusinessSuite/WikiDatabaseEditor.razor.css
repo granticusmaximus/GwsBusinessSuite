@@ -306,3 +306,25 @@
         padding-left: 0;
     }
 }
+
+.sentinel-person-avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-right: 0.35rem;
+    border-radius: 50%;
+    background: var(--bs-primary-bg-subtle);
+    color: var(--bs-primary-text-emphasis);
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.sentinel-files-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 10rem;
+    max-width: 18rem;
+}

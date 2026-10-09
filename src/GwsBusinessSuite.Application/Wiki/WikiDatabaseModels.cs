@@ -388,7 +388,10 @@ public static class WikiPropertyValues
             WikiDatabasePropertyTypes.Checkbox => GetCheckbox(values, property.Id) ? "✓" : string.Empty,
             WikiDatabasePropertyTypes.Number => GetNumber(values, property.Id)?.ToString() ?? string.Empty,
             WikiDatabasePropertyTypes.Date => GetDate(values, property.Id)?.ToLocalTime().ToString("MMM d, yyyy") ?? string.Empty,
-            WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Files or WikiDatabasePropertyTypes.Person or WikiDatabasePropertyTypes.Relation =>
+            // Uploaded files show by name rather than as their stored "sentinel-file:..." reference.
+            WikiDatabasePropertyTypes.Files =>
+                string.Join(", ", GetMultiSelect(values, property.Id).Select(value => WikiFileValues.Parse(value)?.FileName ?? value)),
+            WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Person or WikiDatabasePropertyTypes.Relation =>
                 string.Join(", ", WikiDatabasePropertyConfig.GetOptions(property).Count > 0
                     ? ResolveOptionLabels(property, GetMultiSelect(values, property.Id))
                     : GetMultiSelect(values, property.Id)),

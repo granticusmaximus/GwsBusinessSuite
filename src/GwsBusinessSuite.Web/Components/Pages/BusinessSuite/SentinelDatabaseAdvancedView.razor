@@ -4,6 +4,7 @@
 @using GwsBusinessSuite.Domain.Entities
 @implements IAsyncDisposable
 @inject IWikiDatabaseService WikiDatabaseService
+@inject ISentinelWorkspaceService SentinelWorkspaceService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 
@@ -199,6 +200,16 @@ else if (View.Type == WikiDatabaseViewTypes.Form)
                         }
                     </select>
                 }
+                else if (property.Type == WikiDatabasePropertyTypes.Person)
+                {
+                    <select value="@FormValue(property.Id)" @onchange="eventArgs => _formValues[property.Id] = eventArgs.Value?.ToString() ?? string.Empty">
+                        <option value="">—</option>
+                        @foreach (var username in _usernames)
+                        {
+                            <option value="@username">@username</option>
+                        }
+                    </select>
+                }
                 else
                 {
                     <input type="@(property.Type == WikiDatabasePropertyTypes.Number ? "number" : property.Type == WikiDatabasePropertyTypes.Date ? "date" : property.Type == WikiDatabasePropertyTypes.Url ? "url" : "text")"
@@ -303,6 +314,17 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
     private IJSObjectReference? _mapModule;
     private DotNetObjectReference<SentinelDatabaseAdvancedView>? _selfRef;
     private string? _mapMarkersRenderedFor;
+
+    private IReadOnlyList<string> _usernames = [];
+
+    // Only the form view offers a Person picker, so only it pays for the user lookup.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (View.Type == WikiDatabaseViewTypes.Form && _usernames.Count == 0)
+        {
+            _usernames = await SentinelWorkspaceService.ListActiveUsernamesAsync();
+        }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

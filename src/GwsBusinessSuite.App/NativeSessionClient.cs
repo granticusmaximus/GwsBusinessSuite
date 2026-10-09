@@ -16,9 +16,10 @@ public sealed record ContactCreateResult(string? Url, string? FullName, string? 
 
 public sealed class NativeSessionClient(HttpClient httpClient)
 {
-    public async Task<QuickNoteSaveResult> SaveQuickNoteAsync(string title, string markdown, CancellationToken cancellationToken = default)
+    // toDailyNote adds it to today's daily note instead of making a Quick Notes page.
+    public async Task<QuickNoteSaveResult> SaveQuickNoteAsync(string title, string markdown, bool toDailyNote = false, CancellationToken cancellationToken = default)
     {
-        var (json, error) = await PostAsync("/admin/api/native/quick-notes", new { title, markdown }, cancellationToken);
+        var (json, error) = await PostAsync("/admin/api/native/quick-notes", new { title, markdown, dailyNote = toDailyNote }, cancellationToken);
         return json is { } body ? new(AppEndpoints.BaseUrl + body.GetProperty("url").GetString(), null) : new(null, error);
     }
 

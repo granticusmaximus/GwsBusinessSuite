@@ -126,8 +126,11 @@ public partial class CapturePage : ContentPage
             return;
         }
         var title = string.IsNullOrWhiteSpace(TitleEntry.Text) ? $"Capture - {DateTime.Now:MMM d, h:mm tt}" : TitleEntry.Text.Trim();
-        var result = await _session.SaveQuickNoteAsync(title, text);
-        StatusLabel.Text = result.Error ?? $"Saved to Sentinel under Quick Notes as \"{title}\".";
+        var toDailyNote = DailyNoteCheckBox.IsChecked;
+        var result = await _session.SaveQuickNoteAsync(title, text, toDailyNote);
+        StatusLabel.Text = result.Error ?? (toDailyNote
+            ? $"Added \"{title}\" to today's daily note."
+            : $"Saved to Sentinel under Quick Notes as \"{title}\".");
     }
 
     private async void OnAskClicked(object? sender, EventArgs e)
