@@ -1,0 +1,221 @@
+@page "/admin/content-calendar"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.ContentCalendar
+@inject IContentCalendarService ContentCalendarService
+@inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<ContentCalendar> Logger
+
+<PageTitle>Content Calendar</PageTitle>
+
+<div class="page-header d-flex flex-wrap justify-content-between align-items-start gap-2">
+    <div>
+        <h1><i class="bi bi-calendar3 me-2 text-primary"></i>Content Calendar</h1>
+        <p class="mb-0">Everything scheduled to go out - posts, pages, social posts and emails - in one view. Drag a scheduled post, page or social post to another day to move it.</p>
+    </div>
+    <div class="d-flex flex-wrap gap-1 align-items-center">
+        <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Previous month" @onclick="() => MoveMonthAsync(-1)"><i class="bi bi-chevron-left"></i></button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => MoveMonthAsync(0)">Today</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Next month" @onclick="() => MoveMonthAsync(1)"><i class="bi bi-chevron-right"></i></button>
+        <span class="fw-semibold ms-2">@Month.ToString("MMMM yyyy")</span>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-success" role="status">@StatusMessage</div>
+}
+@if (!IsLoading && NextWeekIsEmpty)
+{
+    <div class="alert alert-warning" role="status"><i class="bi bi-exclamation-triangle me-1"></i>Nothing is scheduled to publish in the next 7 days.</div>
+}
+
+<div class="d-flex flex-wrap gap-1 mb-3" role="group" aria-label="Show kinds">
+    @foreach (var kind in ContentCalendarKinds.All)
+    {
+        var shown = !HiddenKinds.Contains(kind);
+        <button type="button" class="btn btn-sm @(shown ? "btn-outline-dark" : "btn-outline-secondary opacity-50") cc-kind-toggle" aria-pressed="@(shown ? "true" : "false")" @onclick="() => ToggleKind(kind)">
+            <span class="cc-swatch cc-@kind" aria-hidden="true"></span>@ContentCalendarKinds.Label(kind) @Items.Count(i => i.Kind == kind)
+        </button>
+    }
+</div>
+
+@if (Selected is { } selected)
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body d-flex flex-wrap gap-3 align-items-end">
+            <div class="flex-grow-1 text-break">
+                <div class="small text-secondary">@ContentCalendarKinds.Label(selected.Kind) · @selected.Status</div>
+                <div class="fw-semibold"><a href="@selected.Link">@selected.Title</a></div>
+                <div class="small">@selected.At.ToLocalTime().ToString("dddd, MMM d, yyyy h:mm tt")</div>
+            </div>
+            @if (selected.CanReschedule)
+            {
+                <div>
+                    <label class="form-label small mb-1" for="cc-move">Move to</label>
+                    <input id="cc-move" type="datetime-local" class="form-control form-control-sm" value="@MoveValue" @onchange="e => MoveValue = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <button type="button" class="btn btn-sm btn-primary" @onclick="MoveSelectedAsync" disabled="@IsBusy">Move</button>
+            }
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => Selected = null">Close</button>
+        </div>
+    </div>
+}
+
+@if (IsLoading)
+{
+    <LoadingIndicator Message="Loading calendar..." CssClass="text-secondary" />
+}
+else
+{
+    <div class="cc-grid" role="grid" aria-label="@Month.ToString("MMMM yyyy")">
+        @foreach (var name in new[] { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" })
+        {
+            <div class="cc-weekday" role="columnheader">@name</div>
+        }
+        @foreach (var day in GridDays)
+        {
+            var dayItems = VisibleItems.Where(i => DateOnly.FromDateTime(i.At.ToLocalTime().DateTime) == day).ToList();
+            <div class="cc-day @(day.Month == Month.Month ? "" : "cc-other-month") @(day == Today ? "cc-today" : "") @(dayItems.Count == 0 ? "cc-empty" : "") @(DropTarget == day ? "cc-drop" : "")"
+                 role="gridcell"
+                 @ondragover="() => DropTarget = day" @ondragover:preventDefault
+                 @ondragleave="() => { if (DropTarget == day) DropTarget = null; }"
+                 @ondrop="() => DropAsync(day)" @ondrop:preventDefault>
+                <div class="cc-date">@day.ToString(day.Day == 1 ? "MMM d" : "%d")<span class="cc-date-long">@day.ToString(" - dddd, MMM d")</span></div>
+                @foreach (var item in dayItems)
+                {
+                    <button type="button" class="cc-item cc-@item.Kind @(item.Upcoming ? "" : "cc-past")" draggable="@(item.CanReschedule ? "true" : "false")"
+                            title="@($"{item.At.ToLocalTime():h:mm tt} · {item.Title} · {item.Status}")"
+                            @ondragstart="() => Dragging = item" @onclick="() => Select(item)">
+                        <span class="cc-time">@item.At.ToLocalTime().ToString("h:mm")</span> @item.Title
+                    </button>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private DateOnly Today { get; } = DateOnly.FromDateTime(DateTime.Now);
+    private DateOnly Month { get; set; } = new(DateTime.Now.Year, DateTime.Now.Month, 1);
+    private List<ContentCalendarItem> Items { get; set; } = new();
+    private bool NextWeekIsEmpty { get; set; }
+    private readonly HashSet<string> HiddenKinds = new();
+    private ContentCalendarItem? Dragging { get; set; }
+    private DateOnly? DropTarget { get; set; }
+    private ContentCalendarItem? Selected { get; set; }
+    private string MoveValue { get; set; } = string.Empty;
+    private bool IsLoading { get; set; } = true;
+    private bool IsBusy { get; set; }
+    private string ErrorMessage { get; set; } = string.Empty;
+    private string StatusMessage { get; set; } = string.Empty;
+
+    private IEnumerable<ContentCalendarItem> VisibleItems => Items.Where(i => !HiddenKinds.Contains(i.Kind));
+
+    // Whole weeks, Monday first, covering the month.
+    private IEnumerable<DateOnly> GridDays
+    {
+        get
+        {
+            var start = Month.AddDays(-(((int)Month.DayOfWeek + 6) % 7));
+            var end = Month.AddMonths(1).AddDays(-1);
+            end = end.AddDays(6 - (((int)end.DayOfWeek + 6) % 7));
+            for (var day = start; day <= end; day = day.AddDays(1)) yield return day;
+        }
+    }
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        IsLoading = true;
+        try
+        {
+            var days = GridDays.ToList();
+            Items = (await ContentCalendarService.GetItemsAsync(LocalStart(days[0]), LocalStart(days[^1].AddDays(1)))).ToList();
+            var now = DateTimeOffset.UtcNow;
+            var nextWeek = await ContentCalendarService.GetItemsAsync(now, now.AddDays(7));
+            NextWeekIsEmpty = !nextWeek.Any(i => ContentCalendarKinds.Publishing.Contains(i.Kind));
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Content calendar failed to load");
+            ErrorMessage = "The calendar couldn't be loaded.";
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task MoveMonthAsync(int months)
+    {
+        Month = months == 0 ? new DateOnly(DateTime.Now.Year, DateTime.Now.Month, 1) : Month.AddMonths(months);
+        Selected = null;
+        await LoadAsync();
+    }
+
+    private void ToggleKind(string kind)
+    {
+        if (!HiddenKinds.Remove(kind)) HiddenKinds.Add(kind);
+    }
+
+    private void Select(ContentCalendarItem item)
+    {
+        Selected = item;
+        MoveValue = item.At.ToLocalTime().ToString("yyyy-MM-ddTHH:mm");
+    }
+
+    // Dropping on a day keeps the item's time of day.
+    private async Task DropAsync(DateOnly day)
+    {
+        DropTarget = null;
+        if (Dragging is not { CanReschedule: true } item) return;
+        Dragging = null;
+        var local = item.At.ToLocalTime();
+        if (DateOnly.FromDateTime(local.DateTime) == day) return;
+        var target = day.ToDateTime(TimeOnly.FromDateTime(local.DateTime));
+        await RescheduleAsync(item, new DateTimeOffset(target, TimeZoneInfo.Local.GetUtcOffset(target)));
+    }
+
+    private async Task MoveSelectedAsync()
+    {
+        if (Selected is not { } item || !DateTime.TryParse(MoveValue, out var local)) return;
+        var unspecified = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+        await RescheduleAsync(item, new DateTimeOffset(unspecified, TimeZoneInfo.Local.GetUtcOffset(unspecified)));
+    }
+
+    private async Task RescheduleAsync(ContentCalendarItem item, DateTimeOffset newTime)
+    {
+        if (IsBusy) return;
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        try
+        {
+            await ContentCalendarService.RescheduleAsync(item.Kind, item.Id, newTime.ToUniversalTime(), await CurrentUserAccessor.GetCurrentUsernameAsync());
+            StatusMessage = $"Moved \"{item.Title}\" to {newTime.ToLocalTime():dddd, MMM d, h:mm tt}.";
+            Selected = null;
+            await LoadAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static DateTimeOffset LocalStart(DateOnly day)
+    {
+        var midnight = day.ToDateTime(TimeOnly.MinValue);
+        return new DateTimeOffset(midnight, TimeZoneInfo.Local.GetUtcOffset(midnight)).ToUniversalTime();
+    }
+}

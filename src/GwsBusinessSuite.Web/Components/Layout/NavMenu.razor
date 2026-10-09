@@ -37,6 +37,13 @@
                     @if (_pendingDraftCount > 0) { <span class="gws-nav-count">@_pendingDraftCount</span> }
                 </NavLink>
             }
+            @if (IsAdmin)
+            {
+                <NavLink class="gws-nav-link" href="admin/content-calendar" title="Content Calendar">
+                    <i class="bi bi-calendar3" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Content Calendar</span><small>Everything scheduled to go out</small></span>
+                </NavLink>
+            }
             <NavLink class="gws-nav-link" href="admin/seo-audit" title="SEO Audit">
                 <i class="bi bi-search-heart" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>SEO Audit</span><small>Classic + AI-era readiness</small></span>
@@ -176,6 +183,13 @@
                     <NavLink class="gws-nav-link" href="admin/billing" title="Billing">
                         <i class="bi bi-receipt" aria-hidden="true"></i>
                         <span class="gws-nav-link-copy"><span>Billing</span><small>Draft and send invoices</small></span>
+                    </NavLink>
+                }
+                @if (Shown("billing"))
+                {
+                    <NavLink class="gws-nav-link" href="admin/time" title="Time Tracking">
+                        <i class="bi bi-stopwatch" aria-hidden="true"></i>
+                        <span class="gws-nav-link-copy"><span>Time Tracking</span><small>Timers and billable hours</small></span>
                     </NavLink>
                 }
                 @if (Shown("support"))

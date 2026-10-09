@@ -1110,6 +1110,51 @@ app.MapDelete("/admin/api/mobile/devices/{pushToken}", async (
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");
 
+// The Mac app's voice notes and screen captures land in Sentinel as Quick Notes. Cookie session
+// (the app reads it from its own WebView), AdminOnly like the mobile endpoints above. The
+// X-GWS-Native header is an extra guard on top of the session cookie's SameSite=Lax: a page on
+// another site can't add a custom header to a cross-site request without a CORS preflight this
+// app never answers.
+app.MapPost("/admin/api/native/quick-notes", async (
+    NativeQuickNoteRequest request,
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.IQuickNoteService quickNotes,
+    CancellationToken cancellationToken) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    var title = (request.Title ?? string.Empty).Trim();
+    var markdown = request.Markdown ?? string.Empty;
+    if (title.Length is 0 or > 200) return Results.BadRequest(new { error = "Give the note a title (up to 200 characters)." });
+    if (markdown.Length > 200_000) return Results.BadRequest(new { error = "The note is too long to save as one page." });
+    var page = await quickNotes.AddQuickNoteAsync(title, markdown, httpContext.User.Identity?.Name ?? "mac-app", cancellationToken);
+    return Results.Json(new { id = page.Id, url = $"/admin/sentinel?page={page.Id}" });
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
+// The Mac app's screen capture: a contact read from captured text (e.g. an email signature).
+// Matched by email first, so capturing someone already in the CRM opens them instead of
+// duplicating them. Same session/header rules as quick-notes above.
+app.MapPost("/admin/api/native/contacts", async (
+    NativeContactRequest request,
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Crm.ICrmService crm,
+    CancellationToken cancellationToken) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    var email = (request.Email ?? string.Empty).Trim();
+    if (email.Length is 0 or > 320 || !email.Contains('@')) return Results.BadRequest(new { error = "A contact needs a valid email address." });
+    var name = (request.FullName ?? string.Empty).Trim();
+    var company = (request.Company ?? string.Empty).Trim();
+    var contact = await crm.FindOrCreateContactAsync(email, name.Length is > 0 and <= 200 ? name : null,
+        company.Length is > 0 and <= 200 ? company : null, "mac-app-capture", cancellationToken);
+    return Results.Json(new { id = contact.Id, url = $"/admin/crm/contacts/{contact.Id}", fullName = contact.FullName });
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
 app.MapGet("/admin/api/mobile/approvals/pending", async (
     IMobileApprovalService approvalService,
     CancellationToken cancellationToken) =>
@@ -4462,6 +4507,8 @@ record ArticleUpsertRequest(
     string BodyMarkdown);
 
 record MobileDeviceRegistrationRequest(string Platform, string PushToken, string? DeviceName);
+record NativeQuickNoteRequest(string? Title, string? Markdown);
+record NativeContactRequest(string? FullName, string? Email, string? Company);
 record MobileApprovalResolutionRequest(bool Approved, string? Comment);
 
 // Bundles both named theme locations (Primary/header, Footer) so callers that render a full

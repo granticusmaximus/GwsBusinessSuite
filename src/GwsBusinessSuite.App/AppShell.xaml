@@ -25,6 +25,14 @@
             Title="SentinelGPT"
             ContentTemplate="{DataTemplate local:SentinelGptPage}"
             Route="SentinelGptPage" />
+        <ShellContent
+            Title="Notes"
+            ContentTemplate="{DataTemplate local:VoiceNotesPage}"
+            Route="VoiceNotesPage" />
+        <ShellContent
+            Title="Capture"
+            ContentTemplate="{DataTemplate local:CapturePage}"
+            Route="CapturePage" />
     </TabBar>
 
 </Shell>

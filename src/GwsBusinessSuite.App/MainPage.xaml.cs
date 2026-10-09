@@ -61,6 +61,12 @@ public partial class MainPage : ContentPage
         MacToolbarActions.SyncSelectedTab?.Invoke("MainPage");
 #endif
 
+        // Another tab (e.g. Notes after saving) asked to open a page here.
+        if (_startedLoading && WorkspaceNavigation.TakePending() is { } pendingUrl)
+        {
+            WorkspaceView.Source = pendingUrl;
+        }
+
         // Only attempt device login once per launch - re-appearing (e.g. returning from another
         // Shell tab) must never re-show the sign-in prompt over an already-loading/loaded WebView.
         if (!_startedLoading)

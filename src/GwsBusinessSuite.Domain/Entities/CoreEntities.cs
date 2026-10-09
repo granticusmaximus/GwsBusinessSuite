@@ -246,6 +246,29 @@ public sealed class InvoiceLineItem : AuditableEntity
     public Invoice? Invoice { get; set; }
 }
 
+// Time spent for a contact - from a start/stop timer (EndedAt null while it runs) or entered by
+// hand. Optionally tied to one of the contact's deals or support tickets. Billable entries with no
+// InvoiceId are "unbilled"; billing them adds one line to a Draft invoice and sets InvoiceId, which
+// is cleared again if that draft is deleted or the invoice voided. Username is the staff member who
+// did the work (display label, not an FK - same as SupportTicket.AssignedToUsername).
+public sealed class TimeEntry : AuditableEntity
+{
+    public required string Username { get; set; }
+    public Guid ContactId { get; set; }
+    public Guid? DealId { get; set; }
+    public Guid? TicketId { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public DateTimeOffset StartedAt { get; set; }
+    // Mirrors StartedAt for date-range filtering and sorting in SQL (SQLite can't compare or
+    // ORDER BY a DateTimeOffset) - same convention as Deal.CreatedAtUnixSeconds.
+    public long StartedAtUnixSeconds { get; set; }
+    public DateTimeOffset? EndedAt { get; set; }
+    public int Minutes { get; set; }
+    public bool Billable { get; set; } = true;
+    public decimal HourlyRateUsd { get; set; }
+    public Guid? InvoiceId { get; set; }
+}
+
 public static class SupportTicketStatuses
 {
     public const string Open = "Open";

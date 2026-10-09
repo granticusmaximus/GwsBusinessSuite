@@ -14,6 +14,9 @@
 @inject IBookingService BookingService
 @inject IFormSubmissionService FormSubmissionService
 @inject IEmailCampaignService EmailCampaignService
+@inject IContactTimelineService ContactTimelineService
+@inject GwsBusinessSuite.Application.TimeTracking.ITimeTrackingService TimeTrackingService
+@inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject ILogger<ContactDetail> Logger
 
@@ -262,6 +265,23 @@ else
                 </div>
             </div>
 
+            <div class="card border-0 shadow-sm mb-4">
+                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Time</span>
+                    <a class="small" href="/admin/time?contact=@ContactId">Track time</a>
+                </div>
+                <div class="card-body">
+                    @{ var unbilled = TimeEntries.Where(t => t.Billable && t.InvoiceId is null && !t.IsRunning).ToList(); }
+                    <div class="small mb-2">
+                        @TimeEntries.Sum(t => t.Minutes / 60m).ToString("0.##") h tracked in total ·
+                        <strong>@unbilled.Sum(t => t.Minutes / 60m).ToString("0.##") h unbilled (@unbilled.Sum(t => t.AmountUsd).ToString("C2"))</strong>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="BillTimeAsync" disabled="@(IsBusy || unbilled.Count == 0)">
+                        <i class="bi bi-receipt me-1"></i>Create draft invoice from unbilled time
+                    </button>
+                </div>
+            </div>
+
             <div class="card border-0 shadow-sm">
                 <div class="card-header bg-white border-bottom py-3"><span class="fw-semibold">Form Submissions</span></div>
                 <div class="list-group list-group-flush">
@@ -281,6 +301,46 @@ else
                 </div>
             </div>
         </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mt-4">
+        <div class="card-header bg-white border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <span class="fw-semibold">History <span class="text-secondary small fw-normal">everything with this contact, newest first</span></span>
+            <div class="d-flex flex-wrap gap-1" role="group" aria-label="Filter history">
+                <button type="button" class="btn btn-sm @(HistoryFilter is null ? "btn-primary" : "btn-outline-secondary")" @onclick="() => SetHistoryFilter(null)">All @History.Count</button>
+                @foreach (var kind in ContactTimelineKinds.All.Where(k => History.Any(e => e.Kind == k)))
+                {
+                    <button type="button" class="btn btn-sm @(HistoryFilter == kind ? "btn-primary" : "btn-outline-secondary")"
+                            @onclick="() => SetHistoryFilter(kind)">@ContactTimelineKinds.Label(kind) @History.Count(e => e.Kind == kind)</button>
+                }
+            </div>
+        </div>
+        <ul class="list-group list-group-flush">
+            @if (FilteredHistory.Count == 0)
+            {
+                <li class="list-group-item text-secondary small">Nothing yet.</li>
+            }
+            @foreach (var entry in FilteredHistory.Take(HistoryShown))
+            {
+                <li class="list-group-item d-flex gap-3 align-items-start">
+                    <i class="bi @HistoryIcon(entry.Kind) text-secondary mt-1" aria-hidden="true"></i>
+                    <div class="flex-grow-1 text-break">
+                        <div>@if (entry.Link is { } link) { <a href="@link">@entry.Title</a> } else { @entry.Title }</div>
+                        @if (!string.IsNullOrWhiteSpace(entry.Detail))
+                        {
+                            <div class="small text-secondary text-break">@entry.Detail</div>
+                        }
+                    </div>
+                    <div class="small text-secondary text-nowrap">@entry.At.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</div>
+                </li>
+            }
+            @if (FilteredHistory.Count > HistoryShown)
+            {
+                <li class="list-group-item">
+                    <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => HistoryShown += HistoryPageSize">Show @Math.Min(HistoryPageSize, FilteredHistory.Count - HistoryShown) more</button>
+                </li>
+            }
+        </ul>
     </div>
 }
 
@@ -305,6 +365,55 @@ else
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private bool ShowTrashConfirm { get; set; }
+    private List<GwsBusinessSuite.Application.TimeTracking.TimeEntryView> TimeEntries { get; set; } = new();
+
+    private async Task BillTimeAsync()
+    {
+        if (IsBusy) return;
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        try
+        {
+            var invoice = await TimeTrackingService.BillUnbilledAsync(ContactId, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            StatusMessage = $"Draft invoice \"{invoice.Title}\" created ({invoice.TotalUsd:C2}) - review and send it from Billing.";
+            Invoices = (await BillingService.ListInvoicesForContactAsync(ContactId)).ToList();
+            TimeEntries = (await TimeTrackingService.ListForContactAsync(ContactId)).ToList();
+        }
+        catch (InvalidOperationException ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private const int HistoryPageSize = 50;
+    private List<ContactTimelineEntry> History { get; set; } = new();
+    private string? HistoryFilter { get; set; }
+    private int HistoryShown { get; set; } = HistoryPageSize;
+    private List<ContactTimelineEntry> FilteredHistory =>
+        HistoryFilter is null ? History : History.Where(e => e.Kind == HistoryFilter).ToList();
+
+    private void SetHistoryFilter(string? kind)
+    {
+        HistoryFilter = kind;
+        HistoryShown = HistoryPageSize;
+    }
+
+    private static string HistoryIcon(string kind) => kind switch
+    {
+        ContactTimelineKinds.Deal => "bi-briefcase",
+        ContactTimelineKinds.Invoice => "bi-receipt",
+        ContactTimelineKinds.Ticket => "bi-life-preserver",
+        ContactTimelineKinds.Booking => "bi-calendar-event",
+        ContactTimelineKinds.Form => "bi-clipboard-data",
+        ContactTimelineKinds.Email => "bi-envelope",
+        ContactTimelineKinds.Portal => "bi-box-arrow-in-right",
+        _ => "bi-journal-text"
+    };
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -333,6 +442,8 @@ else
             Bookings = (await BookingService.ListBookingsForContactAsync(ContactId)).ToList();
             Enrollments = (await EmailCampaignService.ListEnrollmentsForContactAsync(ContactId)).ToList();
             FormSubmissions = (await FormSubmissionService.ListForContactAsync(ContactId)).ToList();
+            History = (await ContactTimelineService.GetTimelineAsync(ContactId)).ToList();
+            TimeEntries = (await TimeTrackingService.ListForContactAsync(ContactId)).ToList();
         }
         catch (Exception ex)
         {
@@ -402,6 +513,7 @@ else
             var activity = await CrmService.AddActivityAsync(ContactId, NewActivityNote);
             Activities.Insert(0, activity);
             NewActivityNote = string.Empty;
+            History = (await ContactTimelineService.GetTimelineAsync(ContactId)).ToList();
         }
         catch (Exception ex)
         {

@@ -40,6 +40,12 @@ public static class DeveloperApiSentinelEndpointExtensions
             Results.Ok(await service.GetSystemHealthAsync(ct)))
             .RequireAuthorization(DeveloperApiPolicies.ForScope(DeveloperApiScopes.SentinelRead));
 
+        // The menu-bar companion's glance: counts that want attention, plus the key owner's own
+        // unread messages/area alerts and running timer. Read-only like everything above.
+        api.MapGet("/status", async (ClaimsPrincipal user, IDeveloperApiStatusService service, CancellationToken ct) =>
+            Results.Ok(await service.GetSummaryAsync(Owner(user), ct)))
+            .RequireAuthorization(DeveloperApiPolicies.ForScope(DeveloperApiScopes.SentinelRead));
+
         return app;
     }
 

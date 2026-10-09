@@ -206,6 +206,10 @@ public static class DependencyInjection
         services.AddScoped<ICmsKnowledgeService, CmsKnowledgeService>();
         services.AddScoped<IContentStudioService, ContentStudioService>();
         services.AddScoped<ICrmService, CrmService>();
+        services.AddScoped<IContactTimelineService, ContactTimelineService>();
+        services.AddScoped<GwsBusinessSuite.Application.DeveloperApi.IDeveloperApiStatusService, DeveloperApiStatusService>();
+        services.AddScoped<GwsBusinessSuite.Application.ContentCalendar.IContentCalendarService, ContentCalendarService>();
+        services.AddScoped<GwsBusinessSuite.Application.TimeTracking.ITimeTrackingService, TimeTrackingService>();
         services.AddScoped<IStripeInvoicingClient, StripeInvoicingClient>();
         services.AddScoped<IBillingService, BillingService>();
         services.AddOptions<GwsBusinessSuite.Application.Support.SupportNotificationOptions>()

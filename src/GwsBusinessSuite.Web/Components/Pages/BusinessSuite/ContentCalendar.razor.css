@@ -1,0 +1,88 @@
+/* Month grid: 7 equal columns; below ~760px of content width it becomes an agenda list (only
+   days with something on them, full date shown) so nothing scrolls sideways on a phone. */
+.cc-grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    border-top: 1px solid var(--bs-border-color);
+    border-left: 1px solid var(--bs-border-color);
+}
+
+.cc-weekday {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    color: var(--bs-secondary-color);
+    border-right: 1px solid var(--bs-border-color);
+    border-bottom: 1px solid var(--bs-border-color);
+}
+
+.cc-day {
+    min-height: 7.5rem;
+    padding: 0.35rem;
+    border-right: 1px solid var(--bs-border-color);
+    border-bottom: 1px solid var(--bs-border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-width: 0;
+}
+
+.cc-other-month { background: var(--bs-tertiary-bg); }
+.cc-other-month .cc-date { opacity: 0.55; }
+.cc-today .cc-date { color: var(--bs-primary); font-weight: 700; }
+.cc-drop { outline: 2px dashed var(--bs-primary); outline-offset: -3px; }
+
+.cc-date { font-size: 0.8rem; }
+.cc-date-long { display: none; }
+
+.cc-item {
+    display: block;
+    width: 100%;
+    padding: 0.15rem 0.35rem;
+    border: 0;
+    border-left: 3px solid currentColor;
+    border-radius: 0.2rem;
+    background: var(--bs-secondary-bg);
+    font-size: 0.75rem;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.cc-item[draggable="true"] { cursor: grab; }
+.cc-item.cc-past { opacity: 0.65; }
+.cc-time { font-variant-numeric: tabular-nums; opacity: 0.75; }
+
+/* One color per kind, shared by the chips and the filter swatches. */
+.cc-post { color: #0d6efd; }
+.cc-page { color: #6f42c1; }
+.cc-social { color: #d63384; }
+.cc-alert-email { color: #fd7e14; }
+.cc-drip { color: #198754; }
+.cc-live { color: #dc3545; }
+
+.cc-swatch {
+    display: inline-block;
+    width: 0.65rem;
+    height: 0.65rem;
+    margin-right: 0.35rem;
+    border-radius: 50%;
+    background: currentColor;
+    vertical-align: baseline;
+}
+
+@container gws-main (max-width: 760px) {
+    .cc-grid { display: block; border: 0; }
+    .cc-weekday, .cc-empty { display: none; }
+    .cc-day { min-height: 0; border: 0; border-bottom: 1px solid var(--bs-border-color); padding: 0.5rem 0; }
+    .cc-date { font-weight: 600; }
+    .cc-date-long { display: inline; }
+    .cc-item { font-size: 0.85rem; white-space: normal; }
+}
+
+@media (pointer: coarse) {
+    .cc-item, .cc-kind-toggle { min-height: 44px; }
+}

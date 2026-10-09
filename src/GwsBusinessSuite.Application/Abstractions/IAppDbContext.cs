@@ -11,6 +11,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<ClientPortalLoginToken> ClientPortalLoginTokens { get; }
     DbSet<Deal> Deals { get; }
     DbSet<Invoice> Invoices { get; }
+    DbSet<TimeEntry> TimeEntries { get; }
     DbSet<InvoiceLineItem> InvoiceLineItems { get; }
     DbSet<SupportTicket> SupportTickets { get; }
     DbSet<SupportTicketMessage> SupportTicketMessages { get; }

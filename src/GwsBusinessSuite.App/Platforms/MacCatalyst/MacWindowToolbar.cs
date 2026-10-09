@@ -54,6 +54,8 @@ internal sealed class MacWindowToolbar : NSToolbarDelegate
 {
     private const string WorkspaceId = "gws.tab.workspace";
     private const string SentinelGptId = "gws.tab.sentinelgpt";
+    private const string NotesId = "gws.tab.notes";
+    private const string CaptureId = "gws.tab.capture";
     private const string ReloadId = "gws.reload";
     private const string DeviceLoginId = "gws.deviceLogin";
 
@@ -89,24 +91,29 @@ internal sealed class MacWindowToolbar : NSToolbarDelegate
     }
 
     private static string RouteToIdentifier(string route) =>
-        route.Contains("Sentinel", StringComparison.OrdinalIgnoreCase) ? SentinelGptId : WorkspaceId;
+        route.Contains("VoiceNotes", StringComparison.OrdinalIgnoreCase) ? NotesId
+        : route.Contains("Capture", StringComparison.OrdinalIgnoreCase) ? CaptureId
+        : route.Contains("Sentinel", StringComparison.OrdinalIgnoreCase) ? SentinelGptId
+        : WorkspaceId;
 
     public override string[] AllowedItemIdentifiers(NSToolbar toolbar) =>
-        [WorkspaceId, SentinelGptId, NSToolbar.NSToolbarFlexibleSpaceItemIdentifier, DeviceLoginId, ReloadId];
+        [WorkspaceId, SentinelGptId, NotesId, CaptureId, NSToolbar.NSToolbarFlexibleSpaceItemIdentifier, DeviceLoginId, ReloadId];
 
     public override string[] DefaultItemIdentifiers(NSToolbar toolbar) =>
-        [WorkspaceId, SentinelGptId, NSToolbar.NSToolbarFlexibleSpaceItemIdentifier, DeviceLoginId, ReloadId];
+        [WorkspaceId, SentinelGptId, NotesId, CaptureId, NSToolbar.NSToolbarFlexibleSpaceItemIdentifier, DeviceLoginId, ReloadId];
 
     // Selectable items (a segmented radio group of one) let NSToolbar draw the current tab as
     // pressed-in without any custom highlight logic - toolbar.SelectedItemIdentifier is all
     // that is needed to move the highlight.
-    public override string[] SelectableItemIdentifiers(NSToolbar toolbar) => [WorkspaceId, SentinelGptId];
+    public override string[] SelectableItemIdentifiers(NSToolbar toolbar) => [WorkspaceId, SentinelGptId, NotesId, CaptureId];
 
     public override NSToolbarItem? WillInsertItem(NSToolbar toolbar, string itemIdentifier, bool willBeInserted) =>
         itemIdentifier switch
         {
             WorkspaceId => BuildTabButton(WorkspaceId, "Workspace", "MainPage", "toolbar-workspace"),
             SentinelGptId => BuildTabButton(SentinelGptId, "SentinelGPT", "SentinelGptPage", "toolbar-sentinelgpt"),
+            NotesId => BuildTabButton(NotesId, "Notes", "VoiceNotesPage", "toolbar-notes"),
+            CaptureId => BuildTabButton(CaptureId, "Capture", "CapturePage", "toolbar-capture"),
             ReloadId => BuildActionButton(ReloadId, "Reload", "Reload the workspace", "toolbar-reload", () => MacToolbarActions.Reload?.Invoke()),
             DeviceLoginId => BuildDeviceLoginButton(),
             _ => null

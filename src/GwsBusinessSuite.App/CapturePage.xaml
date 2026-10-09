@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="GwsBusinessSuite.App.CapturePage"
+             BackgroundColor="#141210"
+             Shell.NavBarIsVisible="False">
+
+    <Grid RowDefinitions="Auto,Auto,*,Auto,Auto,Auto">
+
+        <Grid Grid.Row="0" Padding="16,12" ColumnDefinitions="*,Auto" ColumnSpacing="10" BackgroundColor="#1C1917">
+            <VerticalStackLayout Grid.Column="0" Spacing="2" VerticalOptions="Center">
+                <Label Text="Screen capture to text (on this Mac)" TextColor="#FAFAF9" FontAttributes="Bold" FontSize="16" />
+                <Label x:Name="StatusLabel" Text="Press Control-Shift-Command-4 and drag over anything on screen - that copies it - then Paste screenshot here. Text is read on this Mac."
+                       TextColor="#A8A29E" FontSize="12" />
+            </VerticalStackLayout>
+            <Picker x:Name="ModelPicker" Grid.Column="1" Title="Local model" TextColor="#FAFAF9" VerticalOptions="Center" WidthRequest="190" />
+        </Grid>
+
+        <HorizontalStackLayout Grid.Row="1" Padding="16,10" Spacing="10">
+            <Button Text="Paste screenshot" BackgroundColor="#F59E0B" TextColor="#1C1917" FontAttributes="Bold" CornerRadius="8" Clicked="OnPasteClicked" />
+            <Button Text="Choose image..." BackgroundColor="#292524" TextColor="#E7E5E4" CornerRadius="8" Clicked="OnChooseClicked" />
+            <Button Text="Copy text" BackgroundColor="#292524" TextColor="#E7E5E4" CornerRadius="8" Clicked="OnCopyClicked" />
+        </HorizontalStackLayout>
+
+        <Grid Grid.Row="2" ColumnDefinitions="2*,3*" ColumnSpacing="12" Padding="16,0">
+            <Border Grid.Column="0" Stroke="#292524" BackgroundColor="#1C1917">
+                <Image x:Name="PreviewImage" Aspect="AspectFit" />
+            </Border>
+            <Editor Grid.Column="1" x:Name="TextEditor" TextColor="#FAFAF9" BackgroundColor="#1C1917" FontSize="14"
+                    Placeholder="The text found in the capture appears here - you can edit it." PlaceholderColor="#78716C" AutoSize="Disabled" />
+        </Grid>
+
+        <Grid Grid.Row="3" Padding="16,10,16,0" ColumnDefinitions="*,Auto" ColumnSpacing="10">
+            <Entry x:Name="TitleEntry" Placeholder="Note title" PlaceholderColor="#78716C" TextColor="#FAFAF9" BackgroundColor="#1C1917" MaxLength="200" />
+            <Button Grid.Column="1" Text="Save to Sentinel" BackgroundColor="#2563EB" TextColor="#FAFAF9" CornerRadius="8" Clicked="OnSaveClicked" />
+        </Grid>
+
+        <Grid Grid.Row="4" Padding="16,10,16,0" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="10">
+            <Entry x:Name="QuestionEntry" Placeholder="Ask about this text, e.g. what's the deadline?" PlaceholderColor="#78716C"
+                   TextColor="#FAFAF9" BackgroundColor="#1C1917" Completed="OnAskClicked" />
+            <Button Grid.Column="1" x:Name="AskButton" Text="Ask SentinelGPT" BackgroundColor="#292524" TextColor="#E7E5E4" CornerRadius="8" Clicked="OnAskClicked" />
+            <Label Grid.Row="1" Grid.ColumnSpan="2" x:Name="AnswerLabel" TextColor="#E7E5E4" FontSize="13" Margin="0,6,0,0" />
+        </Grid>
+
+        <Grid Grid.Row="5" Padding="16,10,16,14" ColumnDefinitions="Auto,*,*,*,Auto" ColumnSpacing="8">
+            <Button Grid.Column="0" x:Name="FindContactButton" Text="Find a contact" BackgroundColor="#292524" TextColor="#E7E5E4" CornerRadius="8" Clicked="OnFindContactClicked" />
+            <Entry Grid.Column="1" x:Name="ContactNameEntry" Placeholder="Name" PlaceholderColor="#78716C" TextColor="#FAFAF9" BackgroundColor="#1C1917" />
+            <Entry Grid.Column="2" x:Name="ContactEmailEntry" Placeholder="Email" PlaceholderColor="#78716C" TextColor="#FAFAF9" BackgroundColor="#1C1917" Keyboard="Email" />
+            <Entry Grid.Column="3" x:Name="ContactCompanyEntry" Placeholder="Company" PlaceholderColor="#78716C" TextColor="#FAFAF9" BackgroundColor="#1C1917" />
+            <Button Grid.Column="4" Text="Add to CRM" BackgroundColor="#2563EB" TextColor="#FAFAF9" CornerRadius="8" Clicked="OnAddContactClicked" />
+        </Grid>
+    </Grid>
+</ContentPage>

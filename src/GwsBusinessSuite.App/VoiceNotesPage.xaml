@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="GwsBusinessSuite.App.VoiceNotesPage"
+             BackgroundColor="#141210"
+             Shell.NavBarIsVisible="False">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Padding="0">
+
+        <Grid Grid.Row="0" Padding="16,12" ColumnDefinitions="*,Auto" ColumnSpacing="10" BackgroundColor="#1C1917">
+            <VerticalStackLayout Grid.Column="0" Spacing="2" VerticalOptions="Center">
+                <Label Text="Voice notes (on this Mac)" TextColor="#FAFAF9" FontAttributes="Bold" FontSize="16" />
+                <Label x:Name="StatusLabel" Text="Record a meeting or dictate a note. Speech is transcribed on this Mac and summarised by your local model." TextColor="#A8A29E" FontSize="12" />
+            </VerticalStackLayout>
+            <Picker x:Name="ModelPicker" Grid.Column="1" Title="Local model" TextColor="#FAFAF9" VerticalOptions="Center" WidthRequest="190" />
+        </Grid>
+
+        <HorizontalStackLayout Grid.Row="1" Padding="16,10" Spacing="10">
+            <Button x:Name="RecordButton" Text="&#x25CF; Record" BackgroundColor="#DC2626" TextColor="#FAFAF9" FontAttributes="Bold"
+                    CornerRadius="8" Clicked="OnRecordClicked" />
+            <Button x:Name="TranscribeFileButton" Text="Transcribe a recording..." BackgroundColor="#292524" TextColor="#E7E5E4"
+                    CornerRadius="8" Clicked="OnTranscribeFileClicked" />
+            <Label x:Name="ElapsedLabel" TextColor="#A8A29E" FontSize="13" VerticalOptions="Center" />
+        </HorizontalStackLayout>
+
+        <Entry Grid.Row="2" x:Name="TitleEntry" Margin="16,0,16,8" Placeholder="Title" PlaceholderColor="#78716C"
+               TextColor="#FAFAF9" BackgroundColor="#1C1917" MaxLength="200" />
+
+        <Grid Grid.Row="3" ColumnDefinitions="*,*" ColumnSpacing="12" Padding="16,0">
+            <Grid Grid.Column="0" RowDefinitions="Auto,*">
+                <Label Text="Transcript" TextColor="#D6D3D1" FontSize="12" FontAttributes="Bold" Margin="0,0,0,4" />
+                <Editor Grid.Row="1" x:Name="TranscriptEditor" TextColor="#FAFAF9" BackgroundColor="#1C1917" FontSize="14"
+                        Placeholder="The transcript appears here as you speak - you can edit it." PlaceholderColor="#78716C"
+                        AutoSize="Disabled" />
+            </Grid>
+            <Grid Grid.Column="1" RowDefinitions="Auto,*">
+                <HorizontalStackLayout Spacing="8" Margin="0,0,0,4">
+                    <Label Text="Notes" TextColor="#D6D3D1" FontSize="12" FontAttributes="Bold" VerticalOptions="Center" />
+                    <Button x:Name="SummarizeButton" Text="Summarize with local model" FontSize="12" Padding="10,2"
+                            BackgroundColor="#F59E0B" TextColor="#1C1917" CornerRadius="6" Clicked="OnSummarizeClicked" />
+                </HorizontalStackLayout>
+                <Editor Grid.Row="1" x:Name="SummaryEditor" TextColor="#FAFAF9" BackgroundColor="#1C1917" FontSize="14"
+                        Placeholder="Summary, decisions and action items appear here - edit before saving." PlaceholderColor="#78716C"
+                        AutoSize="Disabled" />
+            </Grid>
+        </Grid>
+
+        <HorizontalStackLayout Grid.Row="4" Padding="16,12" Spacing="10">
+            <Button x:Name="SaveButton" Text="Save to Sentinel" BackgroundColor="#2563EB" TextColor="#FAFAF9" FontAttributes="Bold"
+                    CornerRadius="8" Clicked="OnSaveClicked" />
+            <Button x:Name="OpenSavedButton" Text="Open in Workspace" BackgroundColor="#292524" TextColor="#E7E5E4"
+                    CornerRadius="8" IsVisible="False" Clicked="OnOpenSavedClicked" />
+            <Label x:Name="SaveStatusLabel" TextColor="#A8A29E" FontSize="12" VerticalOptions="Center" />
+        </HorizontalStackLayout>
+    </Grid>
+</ContentPage>

@@ -159,7 +159,18 @@ public sealed class BillingService(
 
         db.InvoiceLineItems.RemoveRange(invoice.LineItems);
         db.Invoices.Remove(invoice);
+        await ReleaseTimeEntriesAsync(invoice.Id, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    // Time billed on an invoice that's deleted or voided goes back to unbilled, so it can be billed
+    // again (TimeTrackingService.BillUnbilledAsync).
+    private async Task ReleaseTimeEntriesAsync(Guid invoiceId, CancellationToken cancellationToken)
+    {
+        foreach (var entry in await db.TimeEntries.Where(t => t.InvoiceId == invoiceId).ToListAsync(cancellationToken))
+        {
+            entry.InvoiceId = null;
+        }
     }
 
     public async Task<InvoiceView> SendInvoiceAsync(Guid invoiceId, string? actor = null, CancellationToken cancellationToken = default)
@@ -246,6 +257,7 @@ public sealed class BillingService(
         invoice.Status = InvoiceStatuses.Void;
         invoice.UpdatedAt = timeProvider.GetUtcNow();
         invoice.UpdatedBy = actor ?? "system";
+        await ReleaseTimeEntriesAsync(invoice.Id, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
         var contactName = await db.Contacts.AsNoTracking()

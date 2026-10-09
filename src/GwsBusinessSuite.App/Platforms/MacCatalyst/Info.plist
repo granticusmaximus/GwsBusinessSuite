@@ -4,8 +4,10 @@
 <dict>
 	<key>NSCameraUsageDescription</key>
 	<string>GWS Business Suite uses the camera when you start a Live Show preview.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Voice notes are transcribed on this Mac - audio is never sent to Apple or to the server.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>GWS Business Suite uses the microphone when you start a Live Show preview.</string>
+	<string>GWS Business Suite uses the microphone when you start a Live Show preview or record a voice note.</string>
 	<!-- App Transport Security blocks plain HTTP by default. SentinelGPT's local-model tab talks
 	     to Ollama on 127.0.0.1 with no TLS (a loopback-only server has no certificate to offer).
 	     NSAllowsLocalNetworking permits loopback/local-network HTTP specifically, without the

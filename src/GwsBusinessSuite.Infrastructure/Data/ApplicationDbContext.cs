@@ -29,6 +29,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<ClientPortalLoginToken> ClientPortalLoginTokens => Set<ClientPortalLoginToken>();
     public DbSet<Deal> Deals => Set<Deal>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<TimeEntry> TimeEntries => Set<TimeEntry>();
     public DbSet<InvoiceLineItem> InvoiceLineItems => Set<InvoiceLineItem>();
     public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
     public DbSet<SupportTicketMessage> SupportTicketMessages => Set<SupportTicketMessage>();
@@ -485,6 +486,13 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WikiPage>().HasIndex(x => x.SystemKey).IsUnique();
         modelBuilder.Entity<WikiDatabase>().HasIndex(x => x.TrashedAt);
         modelBuilder.Entity<WikiDatabaseRow>().HasIndex(x => x.TrashedAt);
+        modelBuilder.Entity<TimeEntry>(entity =>
+        {
+            entity.Property(x => x.Username).HasMaxLength(256);
+            entity.Property(x => x.Description).HasMaxLength(500);
+            entity.HasIndex(x => new { x.ContactId, x.InvoiceId });
+            entity.HasIndex(x => new { x.Username, x.StartedAtUnixSeconds });
+        });
         modelBuilder.Entity<CmsSite>().HasIndex(x => x.Slug).IsUnique();
         // Slugs are unique per parent, not per site — /services/pricing and
         // /products/pricing can coexist since their full paths differ.

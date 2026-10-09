@@ -10,6 +10,7 @@ public class NavMenuGroupsTests
         // Content & Publishing
         ["admin/article-editor", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/content-studio", nameof(NavMenuGroups.ContentPublishingPrefixes)],
+        ["admin/content-calendar", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/seo-audit", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/localization", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/growth", nameof(NavMenuGroups.ContentPublishingPrefixes)],
@@ -28,6 +29,7 @@ public class NavMenuGroupsTests
         ["admin/crm", nameof(NavMenuGroups.RelationshipPrefixes)],
         ["admin/deal-scoring", nameof(NavMenuGroups.RelationshipPrefixes)],
         ["admin/billing", nameof(NavMenuGroups.RelationshipPrefixes)],
+        ["admin/time", nameof(NavMenuGroups.RelationshipPrefixes)],
         ["admin/support", nameof(NavMenuGroups.RelationshipPrefixes)],
         ["admin/scheduling", nameof(NavMenuGroups.RelationshipPrefixes)],
         ["admin/email-campaigns", nameof(NavMenuGroups.RelationshipPrefixes)],

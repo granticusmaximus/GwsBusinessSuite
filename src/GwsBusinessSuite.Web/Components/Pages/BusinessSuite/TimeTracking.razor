@@ -1,0 +1,360 @@
+@page "/admin/time"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Crm
+@using GwsBusinessSuite.Application.Support
+@using GwsBusinessSuite.Application.TimeTracking
+@using GwsBusinessSuite.Domain.Entities
+@inject ITimeTrackingService TimeTrackingService
+@inject ICrmService CrmService
+@inject ISupportTicketService SupportTicketService
+@inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<TimeTracking> Logger
+@implements IDisposable
+
+<PageTitle>Time Tracking</PageTitle>
+
+<div class="page-header">
+    <h1><i class="bi bi-stopwatch me-2 text-primary"></i>Time Tracking</h1>
+    <p class="mb-0">Track time against contacts, deals and support tickets, then bill unbilled hours as a draft invoice.</p>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(ErrorMessage))
+{
+    <div class="alert alert-danger" role="alert">@ErrorMessage</div>
+}
+@if (!string.IsNullOrWhiteSpace(StatusMessage))
+{
+    <div class="alert alert-success" role="status">@StatusMessage</div>
+}
+
+@if (Running is { } running)
+{
+    <div class="alert alert-primary d-flex flex-wrap align-items-center justify-content-between gap-2" role="status">
+        <div>
+            <i class="bi bi-record-circle text-danger me-1" aria-hidden="true"></i>
+            <strong>@FormatMinutes(ElapsedMinutes(running))</strong> on <strong>@running.ContactName</strong>@EntryContext(running)
+        </div>
+        <button type="button" class="btn btn-sm btn-primary" @onclick="StopAsync" disabled="@IsBusy"><i class="bi bi-stop-fill me-1"></i>Stop</button>
+    </div>
+}
+
+<div class="row g-4">
+    <div class="col-xl-5">
+        <div class="card border-0 shadow-sm mb-4">
+            <div class="card-header bg-white border-bottom py-3"><span class="fw-semibold">Track time</span></div>
+            <div class="card-body">
+                <div class="mb-2">
+                    <label class="form-label small" for="time-contact">Contact</label>
+                    <select id="time-contact" class="form-select" value="@SelectedContactId" @onchange="OnContactChangedAsync">
+                        <option value="">Choose a contact...</option>
+                        @foreach (var contact in Contacts)
+                        {
+                            <option value="@contact.Id">@contact.FullName@(string.IsNullOrWhiteSpace(contact.Company) ? "" : $" ({contact.Company})")</option>
+                        }
+                    </select>
+                </div>
+                @if (Deals.Count > 0 || Tickets.Count > 0)
+                {
+                    <div class="row g-2 mb-2">
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="time-deal">Deal (optional)</label>
+                            <select id="time-deal" class="form-select" value="@Input.DealId" @onchange="e => Input.DealId = ParseGuid(e.Value)">
+                                <option value="">None</option>
+                                @foreach (var deal in Deals) { <option value="@deal.Id">@deal.Title</option> }
+                            </select>
+                        </div>
+                        <div class="col-sm-6">
+                            <label class="form-label small" for="time-ticket">Support ticket (optional)</label>
+                            <select id="time-ticket" class="form-select" value="@Input.TicketId" @onchange="e => Input.TicketId = ParseGuid(e.Value)">
+                                <option value="">None</option>
+                                @foreach (var ticket in Tickets) { <option value="@ticket.Id">@ticket.Subject</option> }
+                            </select>
+                        </div>
+                    </div>
+                }
+                <div class="mb-2">
+                    <label class="form-label small" for="time-description">What you're doing</label>
+                    <input id="time-description" class="form-control" maxlength="500" value="@Input.Description" @oninput="e => Input.Description = e.Value?.ToString() ?? string.Empty" />
+                </div>
+                <div class="row g-2 align-items-end mb-3">
+                    <div class="col-6">
+                        <label class="form-label small" for="time-rate">Hourly rate (USD)</label>
+                        <input id="time-rate" type="number" min="0" step="1" class="form-control" value="@Input.HourlyRateUsd"
+                               @oninput="e => Input.HourlyRateUsd = decimal.TryParse(e.Value?.ToString(), out var rate) ? rate : 0" />
+                    </div>
+                    <div class="col-6">
+                        <div class="form-check mb-2">
+                            <input id="time-billable" class="form-check-input" type="checkbox" checked="@Input.Billable" @onchange="e => Input.Billable = e.Value is true" />
+                            <label class="form-check-label" for="time-billable">Billable</label>
+                        </div>
+                    </div>
+                </div>
+                <button type="button" class="btn btn-primary w-100 mb-3" @onclick="StartAsync" disabled="@(IsBusy || Input.ContactId == Guid.Empty)">
+                    <i class="bi bi-play-fill me-1"></i>@(Running is null ? "Start timer" : "Switch timer to this")
+                </button>
+                <div class="border-top pt-3">
+                    <div class="small text-secondary mb-2">Or log time you've already spent:</div>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-sm-5">
+                            <label class="form-label small" for="time-date">Date</label>
+                            <input id="time-date" type="date" class="form-control" value="@ManualDate.ToString("yyyy-MM-dd")"
+                                   @onchange="e => ManualDate = DateOnly.TryParse(e.Value?.ToString(), out var d) ? d : ManualDate" />
+                        </div>
+                        <div class="col-sm-3">
+                            <label class="form-label small" for="time-hours">Hours</label>
+                            <input id="time-hours" type="number" min="0" max="24" step="0.25" class="form-control" value="@ManualHours"
+                                   @oninput="e => ManualHours = decimal.TryParse(e.Value?.ToString(), out var h) ? h : 0" />
+                        </div>
+                        <div class="col-sm-4">
+                            <button type="button" class="btn btn-outline-primary w-100" @onclick="LogManualAsync" disabled="@(IsBusy || Input.ContactId == Guid.Empty || ManualHours <= 0)">Log time</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3"><span class="fw-semibold">Unbilled time</span></div>
+            <ul class="list-group list-group-flush">
+                @if (Unbilled.Count == 0)
+                {
+                    <li class="list-group-item text-secondary small">No unbilled time.</li>
+                }
+                @foreach (var summary in Unbilled)
+                {
+                    <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div>
+                            <a href="/admin/crm/contacts/@summary.ContactId">@summary.ContactName</a>
+                            <div class="small text-secondary">@FormatMinutes(summary.Minutes) · @summary.EntryCount @(summary.EntryCount == 1 ? "entry" : "entries") · @summary.AmountUsd.ToString("C2")</div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => BillAsync(summary)" disabled="@IsBusy">Create draft invoice</button>
+                    </li>
+                }
+            </ul>
+        </div>
+    </div>
+
+    <div class="col-xl-7">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-white border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                <span class="fw-semibold">Week of @WeekStart.ToString("MMM d, yyyy") <span class="text-secondary small fw-normal">· @FormatMinutes(WeekEntries.Sum(e => e.Minutes))</span></span>
+                <div class="d-flex flex-wrap gap-1">
+                    <button type="button" class="btn btn-sm @(ShowEveryone ? "btn-outline-secondary" : "btn-primary")" @onclick="() => SetEveryoneAsync(false)">Mine</button>
+                    <button type="button" class="btn btn-sm @(ShowEveryone ? "btn-primary" : "btn-outline-secondary")" @onclick="() => SetEveryoneAsync(true)">Everyone</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Previous week" @onclick="() => MoveWeekAsync(-7)"><i class="bi bi-chevron-left"></i></button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => MoveWeekAsync(0)">This week</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Next week" @onclick="() => MoveWeekAsync(7)"><i class="bi bi-chevron-right"></i></button>
+                </div>
+            </div>
+            <ul class="list-group list-group-flush">
+                @if (WeekEntries.Count == 0)
+                {
+                    <li class="list-group-item text-secondary small">No time tracked this week.</li>
+                }
+                @foreach (var day in WeekEntries.GroupBy(e => DateOnly.FromDateTime(e.StartedAt.ToLocalTime().DateTime)))
+                {
+                    <li class="list-group-item bg-light small fw-semibold d-flex justify-content-between">
+                        <span>@day.Key.ToString("dddd, MMM d")</span><span>@FormatMinutes(day.Sum(e => e.Minutes))</span>
+                    </li>
+                    @foreach (var entry in day)
+                    {
+                        <li class="list-group-item d-flex flex-wrap gap-2 align-items-start">
+                            <div class="flex-grow-1 text-break">
+                                <a href="/admin/crm/contacts/@entry.ContactId">@entry.ContactName</a>@EntryContext(entry)
+                                @if (!string.IsNullOrWhiteSpace(entry.Description)) { <div class="small">@entry.Description</div> }
+                                <div class="small text-secondary">
+                                    @entry.StartedAt.ToLocalTime().ToString("h:mm tt")@(entry.IsRunning ? " · running" : "")
+                                    @(ShowEveryone ? $" · {entry.Username}" : "")
+                                    · @(entry.Billable ? entry.InvoiceId is null ? $"unbilled {entry.AmountUsd:C2}" : $"billed {entry.AmountUsd:C2}" : "not billable")
+                                </div>
+                            </div>
+                            <div class="text-nowrap fw-semibold">@FormatMinutes(entry.Minutes)</div>
+                            @if (entry.InvoiceId is null && !entry.IsRunning)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger" aria-label="Delete this entry" @onclick="() => DeleteAsync(entry)" disabled="@IsBusy"><i class="bi bi-trash"></i></button>
+                            }
+                        </li>
+                    }
+                }
+            </ul>
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "contact")] public Guid? ContactQuery { get; set; }
+
+    private string _username = string.Empty;
+    private List<Contact> Contacts { get; set; } = new();
+    private List<DealView> Deals { get; set; } = new();
+    private List<SupportTicketView> Tickets { get; set; } = new();
+    private TimeEntryInput Input { get; set; } = new();
+    private Guid? SelectedContactId => Input.ContactId == Guid.Empty ? null : Input.ContactId;
+    private TimeEntryView? Running { get; set; }
+    private List<TimeEntryView> WeekEntries { get; set; } = new();
+    private List<UnbilledTimeSummary> Unbilled { get; set; } = new();
+    private DateOnly WeekStart { get; set; } = StartOfWeek(DateOnly.FromDateTime(DateTime.Now));
+    private DateOnly ManualDate { get; set; } = DateOnly.FromDateTime(DateTime.Now);
+    private decimal ManualHours { get; set; } = 1;
+    private bool ShowEveryone { get; set; }
+    private bool IsBusy { get; set; }
+    private string ErrorMessage { get; set; } = string.Empty;
+    private string StatusMessage { get; set; } = string.Empty;
+    // Keeps a running timer's elapsed time current without a reload.
+    private readonly CancellationTokenSource _lifetime = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        Contacts = (await CrmService.ListContactsAsync()).OrderBy(c => c.FullName, StringComparer.OrdinalIgnoreCase).ToList();
+        Input.HourlyRateUsd = await TimeTrackingService.GetLastRateAsync(_username);
+        if (ContactQuery is { } contactId && Contacts.Any(c => c.Id == contactId)) await SelectContactAsync(contactId);
+        await RefreshAsync();
+        _ = TickAsync();
+    }
+
+    private async Task TickAsync()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(_lifetime.Token))
+            {
+                if (Running is not null) await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        Running = await TimeTrackingService.GetRunningAsync(_username);
+        var from = new DateTimeOffset(WeekStart.ToDateTime(TimeOnly.MinValue), TimeZoneInfo.Local.GetUtcOffset(WeekStart.ToDateTime(TimeOnly.MinValue)));
+        var to = from.AddDays(7);
+        WeekEntries = (await TimeTrackingService.ListAsync(from, to, ShowEveryone ? null : _username)).ToList();
+        Unbilled = (await TimeTrackingService.ListUnbilledAsync()).ToList();
+    }
+
+    private async Task OnContactChangedAsync(ChangeEventArgs e)
+    {
+        if (ParseGuid(e.Value) is { } id) await SelectContactAsync(id);
+        else
+        {
+            Input.ContactId = Guid.Empty;
+            Deals = new();
+            Tickets = new();
+        }
+    }
+
+    private async Task SelectContactAsync(Guid contactId)
+    {
+        Input.ContactId = contactId;
+        Input.DealId = null;
+        Input.TicketId = null;
+        Deals = (await CrmService.ListDealsForContactAsync(contactId)).Where(d => DealStages.Open.Contains(d.Stage)).ToList();
+        Tickets = (await SupportTicketService.ListTicketsForContactAsync(contactId))
+            .Where(t => !SupportTicketStatuses.Terminal.Contains(t.Status)).ToList();
+    }
+
+    private Task StartAsync() => RunAsync(async () =>
+    {
+        var started = await TimeTrackingService.StartAsync(_username, Input);
+        StatusMessage = $"Timer started for {started.ContactName}.";
+    });
+
+    private Task StopAsync() => RunAsync(async () =>
+    {
+        if (await TimeTrackingService.StopAsync(_username) is { } stopped)
+            StatusMessage = $"Stopped: {FormatMinutes(stopped.Minutes)} on {stopped.ContactName}.";
+    });
+
+    private Task LogManualAsync() => RunAsync(async () =>
+    {
+        // Logged time is placed at 9:00 on the chosen day, local time.
+        var start = ManualDate.ToDateTime(new TimeOnly(9, 0));
+        var input = new TimeEntryInput
+        {
+            ContactId = Input.ContactId,
+            DealId = Input.DealId,
+            TicketId = Input.TicketId,
+            Description = Input.Description,
+            Billable = Input.Billable,
+            HourlyRateUsd = Input.HourlyRateUsd,
+            StartedAt = new DateTimeOffset(start, TimeZoneInfo.Local.GetUtcOffset(start)),
+            Minutes = (int)Math.Round(ManualHours * 60)
+        };
+        var logged = await TimeTrackingService.AddManualAsync(_username, input);
+        StatusMessage = $"Logged {FormatMinutes(logged.Minutes)} for {logged.ContactName}.";
+    });
+
+    private Task DeleteAsync(TimeEntryView entry) => RunAsync(async () =>
+    {
+        await TimeTrackingService.DeleteAsync(entry.Id);
+        StatusMessage = "Entry deleted.";
+    });
+
+    private Task BillAsync(UnbilledTimeSummary summary) => RunAsync(async () =>
+    {
+        var invoice = await TimeTrackingService.BillUnbilledAsync(summary.ContactId, _username);
+        StatusMessage = $"Draft invoice \"{invoice.Title}\" created for {summary.ContactName} ({invoice.TotalUsd:C2}) - review and send it from Billing.";
+    });
+
+    private async Task SetEveryoneAsync(bool everyone)
+    {
+        ShowEveryone = everyone;
+        await RefreshAsync();
+    }
+
+    private async Task MoveWeekAsync(int days)
+    {
+        WeekStart = days == 0 ? StartOfWeek(DateOnly.FromDateTime(DateTime.Now)) : WeekStart.AddDays(days);
+        await RefreshAsync();
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (IsBusy) return;
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        try
+        {
+            await action();
+            await RefreshAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Time tracking action failed");
+            ErrorMessage = "That didn't work - try again.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static int ElapsedMinutes(TimeEntryView entry) => Math.Max(0, (int)(DateTimeOffset.UtcNow - entry.StartedAt).TotalMinutes);
+
+    private static string EntryContext(TimeEntryView entry) =>
+        entry.TicketSubject is { } ticket ? $" · ticket: {ticket}" : entry.DealTitle is { } deal ? $" · deal: {deal}" : string.Empty;
+
+    public static string FormatMinutes(int minutes) => minutes >= 60 ? $"{minutes / 60} h {minutes % 60:00} min" : $"{minutes} min";
+
+    private static Guid? ParseGuid(object? value) => Guid.TryParse(value?.ToString(), out var id) ? id : null;
+
+    private static DateOnly StartOfWeek(DateOnly day) => day.AddDays(-(((int)day.DayOfWeek + 6) % 7));
+
+    public void Dispose()
+    {
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}
