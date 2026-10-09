@@ -68,6 +68,8 @@ public sealed class NewsIntelligenceService(
     private const int MinExtractedArticleLength = 200;
     // A topic keeps at most this many articles however long the retention is.
     private const int MaxStoredPerTopic = 200;
+    // Earlier articles still missing an AI take that ride along with each refresh's batch.
+    private const int MaxSummaryRetriesPerRefresh = 10;
     private const int TrendHistoryDays = 60;
     private const int MaxConcurrentRefreshes = 3;
     private static readonly SemaphoreSlim WriteLock = new(1, 1);
@@ -375,6 +377,7 @@ public sealed class NewsIntelligenceService(
         // Articles already stored for this topic keep their row and AI take - only new ones are
         // read and summarized, so a refresh costs Ollama time only for what's actually new.
         HashSet<string> known;
+        List<(Guid Id, RawArticle Article)> retries;
         await using (var db = await dbContextFactory.CreateDbContextAsync(ct))
         {
             known = (await db.NewsItems.AsNoTracking()
@@ -383,29 +386,46 @@ public sealed class NewsIntelligenceService(
                     .ToListAsync(ct))
                 .Select(NewsStoryClusterer.UrlHash)
                 .ToHashSet();
+
+            // Stored articles whose AI take was skipped (Ollama down, slow or erroring at the
+            // time) get another try with this batch - otherwise a brief outage would leave them
+            // on the outlet's own description for good, since only new articles are summarized.
+            retries = (await db.NewsItems.AsNoTracking()
+                    .Where(n => n.TopicId == workItem.TopicId && n.OllamaSummary == string.Empty)
+                    .Select(n => new { n.Id, n.Title, n.Url, n.Source, n.PublishedAt, n.Description, n.FetchedAtUnixSeconds })
+                    .ToListAsync(ct))
+                .OrderByDescending(n => n.FetchedAtUnixSeconds)
+                .Take(MaxSummaryRetriesPerRefresh)
+                .Select(n => (n.Id, new RawArticle(n.Title, n.Url, n.Source, n.PublishedAt, n.Description)))
+                .ToList();
         }
         var selected = articles
             .Where(a => !known.Contains(NewsStoryClusterer.UrlHash(a.Url)))
             .Take(workItem.MaxItems)
             .ToList();
+        var toSummarize = selected.Concat(retries.Select(r => r.Article)).ToList();
 
         // Real article text (when it can be fetched) makes for a genuinely grounded summary
         // instead of one built from a 200-character aggregator snippet - see
         // ExtractArticleTextAsync. Per-article failures/timeouts fall back to null, which
         // BatchSummarizeAsync treats the same as "no full text available" today.
         var fullTexts = await MeasureStageAsync(
-            workItem.Name, "Article extraction", selected.Count,
-            () => Task.WhenAll(selected.Select(a => ExtractArticleTextAsync(a.Url, ct))),
+            workItem.Name, "Article extraction", toSummarize.Count,
+            () => Task.WhenAll(toSummarize.Select(a => ExtractArticleTextAsync(a.Url, ct))),
             timings);
 
         var summarized = await MeasureStageAsync(
-            workItem.Name, "Ollama summary", selected.Count,
-            () => BatchSummarizeAsync(selected, fullTexts, ct), timings);
+            workItem.Name, "Ollama summary", toSummarize.Count,
+            () => BatchSummarizeAsync(toSummarize, fullTexts, ct), timings);
 
         var issue = summarized.Failure is { } failure
-            ? $"AI takes were skipped for {selected.Count} new article{(selected.Count == 1 ? "" : "s")} ({failure}); they show the outlet's own description instead."
+            ? $"AI takes were skipped for {toSummarize.Count} article{(toSummarize.Count == 1 ? "" : "s")} ({failure}); they show the outlet's own description instead and will be retried on the next refresh."
             : null;
-        return new PreparedRefresh(workItem, selected, summarized.Summaries, issue);
+        var retriedTakes = retries
+            .Select((retry, i) => (retry.Id, Summary: summarized.Summaries.ElementAtOrDefault(selected.Count + i) ?? string.Empty))
+            .Where(take => !string.IsNullOrWhiteSpace(take.Summary))
+            .ToList();
+        return new PreparedRefresh(workItem, selected, summarized.Summaries.Take(selected.Count).ToList(), retriedTakes, issue);
     }
 
     private async Task CommitPreparedAsync(
@@ -439,6 +459,12 @@ public sealed class NewsIntelligenceService(
                     FetchedAt = fetchedAt,
                     FetchedAtUnixSeconds = fetchedAt.ToUnixTimeSeconds()
                 });
+            }
+
+            foreach (var (id, summary) in prepared.RetriedTakes)
+            {
+                var stored = await db.NewsItems.FindAsync([id], ct);
+                if (stored is not null && string.IsNullOrEmpty(stored.OllamaSummary)) stored.OllamaSummary = summary;
             }
 
             if (prepared.WorkItem.TopicId is { } topicId)
@@ -970,13 +996,21 @@ public sealed class NewsIntelligenceService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Ollama summarisation skipped ({Model} unavailable) — articles saved without hot takes", OllamaModel);
-            var reason = ex is OperationCanceledException && !ct.IsCancellationRequested
-                ? $"{OllamaModel} didn't answer within {BatchSummarizeTimeout.TotalSeconds:0} seconds"
-                : $"{OllamaModel} was unavailable";
-            return new(Enumerable.Repeat(string.Empty, articles.Count).ToList(), reason);
+            logger.LogWarning(ex, "Ollama summarisation skipped for {Model} — articles saved without hot takes", OllamaModel);
+            return new(Enumerable.Repeat(string.Empty, articles.Count).ToList(), DescribeSummaryFailure(ex, ct));
         }
     }
+
+    // The reason shown on the topic. "Unavailable" alone hid which of several different problems
+    // it was (Ollama down, the model missing, out of memory), so name the actual one.
+    private string DescribeSummaryFailure(Exception ex, CancellationToken ct) => ex switch
+    {
+        OperationCanceledException when !ct.IsCancellationRequested =>
+            $"{OllamaModel} didn't answer within {BatchSummarizeTimeout.TotalSeconds:0} seconds",
+        HttpRequestException { StatusCode: not null } http => Truncate(http.Message, 300),
+        HttpRequestException http => Truncate($"the server's Ollama couldn't be reached ({http.Message})", 300),
+        _ => Truncate($"{OllamaModel} failed: {ex.Message}", 300)
+    };
 
     private sealed record SummarizeResult(List<string> Summaries, string? Failure);
 
@@ -1085,5 +1119,6 @@ public sealed class NewsIntelligenceService(
         RefreshWorkItem WorkItem,
         List<RawArticle> Articles,
         List<string> Summaries,
+        List<(Guid Id, string Summary)> RetriedTakes,
         string? Issue);
 }

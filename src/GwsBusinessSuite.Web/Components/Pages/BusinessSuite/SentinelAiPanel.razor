@@ -28,7 +28,7 @@
             </div>
             @if (ServerAi.Value.IsLight)
             {
-                <small class="text-secondary d-block mb-1">This server runs a small model for summaries only. Use SentinelGPT in the GWS Suite Mac app for everything else.</small>
+                <small class="text-secondary d-block mb-1">This server runs a small model, so only Summarize is available here. Use SentinelGPT chat, or the GWS Suite Mac app for the other actions.</small>
             }
             <ProfessionalWysiwygEditor @bind-Value="_instruction" Compact="true" MinHeight="120px"
                                        Placeholder="@InstructionPlaceholder" AriaLabel="SentinelGPT instruction" />

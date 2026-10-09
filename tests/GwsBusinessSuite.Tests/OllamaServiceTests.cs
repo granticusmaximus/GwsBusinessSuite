@@ -22,6 +22,22 @@ public sealed class OllamaServiceTests
     }
 
     [Fact]
+    public async Task GenerateAsync_OnNonSuccessStatus_ShouldKeepOllamasErrorTextAndStatusCode()
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        {
+            Content = new StringContent("""{"error":"model 'sentinelgpt' not found"}""")
+        });
+        var service = CreateService(handler, new RecordingLogger<OllamaService>());
+
+        var action = async () => await service.GenerateAsync("sentinelgpt", "system", "prompt");
+
+        var thrown = await action.Should().ThrowAsync<HttpRequestException>();
+        thrown.Which.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        thrown.Which.Message.Should().Contain("404").And.Contain("model 'sentinelgpt' not found");
+    }
+
+    [Fact]
     public async Task GenerateAsync_ShouldLogWarningAndRethrow_OnTimeout()
     {
         var logger = new RecordingLogger<OllamaService>();

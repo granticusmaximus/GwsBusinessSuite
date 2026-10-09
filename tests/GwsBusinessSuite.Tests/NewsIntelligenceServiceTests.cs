@@ -408,6 +408,81 @@ public sealed class NewsIntelligenceServiceTests
         Assert.Contains("A short description.", capturingOllama.LastUserPrompt);
     }
 
+    // Grant saw "AI takes were skipped ... (sentinelgpt was unavailable)" on Media Watch with no
+    // way to tell why, and the skipped articles never got a take afterwards because each refresh
+    // only summarizes articles it hasn't stored yet. The issue now names Ollama's actual error,
+    // and the next refresh retries the stored articles that are still missing a take.
+    [Fact]
+    public async Task RefreshTopicAsync_WhenOllamaFails_ShouldNameTheErrorAndRetryTheMissingTakeNextRefresh()
+    {
+        var (db, factory) = await CreateDbAsync();
+        var topic = new WatchedTopic
+        {
+            Name = "Python",
+            Keywords = "python",
+            ColorHex = "#2563eb",
+            TopicType = WatchedTopicTypes.General
+        };
+        db.WatchedTopics.Add(topic);
+        await db.SaveChangesAsync();
+
+        var handler = new RecordingHandler(request =>
+            request.RequestUri!.AbsoluteUri.Contains("news.google.com", StringComparison.OrdinalIgnoreCase)
+                ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(SampleGoogleNewsRss, Encoding.UTF8, "application/rss+xml") }
+                : new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        var ollama = new ScriptedOllamaService(_ => throw new HttpRequestException(
+            "Ollama answered 404 (Not Found) for model 'llama3.2': model 'llama3.2' not found", null, HttpStatusCode.NotFound));
+        var service = CreateService(factory, new HttpClient(handler), ollama);
+
+        await service.RefreshTopicAsync(topic.Id);
+
+        await using (var check = new ApplicationDbContext(CreateOptions(db)))
+        {
+            var stored = await check.NewsItems.SingleAsync(n => n.TopicId == topic.Id);
+            Assert.Equal(string.Empty, stored.OllamaSummary);
+            var issue = (await check.WatchedTopics.SingleAsync(t => t.Id == topic.Id)).LastRefreshIssue;
+            Assert.Contains("model 'llama3.2' not found", issue);
+            Assert.Contains("retried on the next refresh", issue);
+        }
+
+        ollama.Respond = _ => Task.FromResult("1. Python 4 finally lands.");
+        await service.RefreshTopicAsync(topic.Id);
+
+        await using (var check = new ApplicationDbContext(CreateOptions(db)))
+        {
+            var stored = await check.NewsItems.SingleAsync(n => n.TopicId == topic.Id);
+            Assert.Equal("Python 4 finally lands.", stored.OllamaSummary);
+            Assert.Null((await check.WatchedTopics.SingleAsync(t => t.Id == topic.Id)).LastRefreshIssue);
+        }
+    }
+
+    private static DbContextOptions<ApplicationDbContext> CreateOptions(ApplicationDbContext db) =>
+        new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(db.Database.GetDbConnection()).Options;
+
+    private sealed class ScriptedOllamaService(Func<string, Task<string>> respond) : IOllamaService
+    {
+        public Func<string, Task<string>> Respond { get; set; } = respond;
+
+        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
+            Respond(userPrompt);
+
+        public async IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+
+        public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyCollection<string>>(Array.Empty<string>());
+
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) =>
+            Task.FromResult(string.Empty);
+    }
+
     private const string SampleTrustedFeedRss = """
         <?xml version="1.0" encoding="UTF-8"?>
         <rss version="2.0"><channel>

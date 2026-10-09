@@ -200,14 +200,8 @@ public sealed partial class AutomationNodeRegistry(
             return SingleOutput("main", historicalOutput);
         }
 
-        // ai.saveApprovedLesson only writes a wiki page; every other ai.* node runs one or more
-        // model generations, which the light-mode server deliberately doesn't do.
-        if (node.TypeKey.StartsWith("ai.", StringComparison.Ordinal) && node.TypeKey != "ai.saveApprovedLesson")
-        {
-            (serviceProvider?.GetService(typeof(Microsoft.Extensions.Options.IOptions<ServerAiOptions>))
-                as Microsoft.Extensions.Options.IOptions<ServerAiOptions>)
-                .EnsureHeavyAiAllowed($"The '{node.TypeKey}' automation node", "Run AI workflows from a local copy of the suite.");
-        }
+        // ai.* nodes run on whatever Ollama this server has, light mode included (Grant,
+        // 2026-10-09) - on the production droplet that's the small llama3.2 set only.
 
         return node.TypeKey switch
         {

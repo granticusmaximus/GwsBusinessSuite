@@ -25,7 +25,7 @@ public sealed class ContentStudioService(
 {
     private const string GenerationFeature = "Article generation on the server";
     private const string GenerationAlternative =
-        "Content Studio runs drafts and revisions on the Ollama of the computer you're using instead - start Ollama there and try again.";
+        "Drafts and revisions are written in the GWS Suite Mac app, on that Mac's own Ollama - open Content Studio there.";
 
     private static readonly string[] AffiliateSlotTokens = ["{{CJ_AD_SLOT_1}}", "{{CJ_AD_SLOT_2}}", "{{CJ_AD_SLOT_3}}"];
 

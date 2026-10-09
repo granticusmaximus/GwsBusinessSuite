@@ -82,7 +82,8 @@ public sealed class SentinelGptGenerationCoordinator(
             throw new ArgumentException("A requesting user is required.", nameof(requestedBy));
         if (!SentinelGptResponseBudgets.IsSupported(maxOutputTokens))
             throw new ArgumentOutOfRangeException(nameof(maxOutputTokens), "Choose a supported response length.");
-        serverAi.EnsureHeavyAiAllowed("SentinelGPT chat");
+        // Chat stays available in light server-AI mode (Grant, 2026-10-09) - it just runs on
+        // the server's small model. Only article generation is reserved for the Mac app.
 
         var state = Enqueue(
             conversationId,

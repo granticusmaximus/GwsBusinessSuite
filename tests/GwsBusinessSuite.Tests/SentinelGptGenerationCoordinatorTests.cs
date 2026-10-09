@@ -257,14 +257,13 @@ public sealed class SentinelGptGenerationCoordinatorTests
     }
 
     [Fact]
-    public async Task LightServerAiMode_ShouldAllowOnlySummarize()
+    public async Task LightServerAiMode_ShouldAllowChatAndSummarize_ButNotOtherPanelActions()
     {
         var sentinel = new ControllableSentinelAiService();
         var coordinator = CreateCoordinator(sentinel, serverAiMode: ServerAiMode.Light);
 
-        var chat = () => coordinator.StartAsync(
-            Guid.NewGuid(), null, "Hello", "grant", includeInternet: false, useDeepAnalysis: false);
-        await chat.Should().ThrowAsync<ServerAiUnavailableException>();
+        var chat = await coordinator.StartAsync(
+            Guid.NewGuid(), null, "Hello", "alex", includeInternet: false, useDeepAnalysis: false);
 
         var rewrite = () => coordinator.StartActionAsync(null, SentinelAiActions.Rewrite, "Some text", "grant");
         await rewrite.Should().ThrowAsync<ServerAiUnavailableException>();
@@ -273,6 +272,8 @@ public sealed class SentinelGptGenerationCoordinatorTests
         sentinel.Release.TrySetResult();
         var completed = await WaitForTerminalAsync(coordinator, summary.Id, "grant");
         completed.Status.Should().Be(SentinelGptGenerationStatuses.Completed);
+        (await WaitForTerminalAsync(coordinator, chat.Id, "alex")).Status
+            .Should().Be(SentinelGptGenerationStatuses.Completed);
     }
 
     private static SentinelGptGenerationCoordinator CreateCoordinator(

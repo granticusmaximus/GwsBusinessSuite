@@ -54,7 +54,7 @@ public sealed class OllamaService(
             LogQueueWait(model, queueTimer.Elapsed);
             var stopwatch = Stopwatch.StartNew();
             using var response = await http.PostAsJsonAsync("/api/generate", payload, ct);
-            response.EnsureSuccessStatusCode();
+            await EnsureOllamaSuccessAsync(response, model, ct);
 
             var result = await response.Content.ReadFromJsonAsync<OllamaGenerateResponse>(cancellationToken: ct);
             stopwatch.Stop();
@@ -359,6 +359,37 @@ public sealed class OllamaService(
             logger.LogWarning(ex, "Ollama chat request failed for model '{Model}'.", model);
             throw;
         }
+    }
+
+    // EnsureSuccessStatusCode discards the response body, and Ollama's body is the only part of a
+    // failure that says what went wrong ("model 'x' not found", "model requires more system
+    // memory ..."). Keep it in the exception so callers' logs and UI messages can show it.
+    private static async Task EnsureOllamaSuccessAsync(HttpResponseMessage response, string model, CancellationToken ct)
+    {
+        if (response.IsSuccessStatusCode) return;
+
+        string? detail = null;
+        try
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty("error", out var error)
+                && error.ValueKind == JsonValueKind.String)
+            {
+                detail = error.GetString();
+            }
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or HttpRequestException)
+        {
+            // No readable error body - the status code alone still goes into the exception.
+        }
+
+        var message = $"Ollama answered {(int)response.StatusCode} ({response.ReasonPhrase}) for model '{model}'";
+        throw new HttpRequestException(
+            string.IsNullOrWhiteSpace(detail) ? message : $"{message}: {detail}",
+            inner: null,
+            response.StatusCode);
     }
 
     private static JsonNode ParseJsonOrEmptyObject(string json)

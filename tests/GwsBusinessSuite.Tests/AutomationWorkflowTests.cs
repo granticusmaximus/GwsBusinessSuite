@@ -913,7 +913,7 @@ public sealed class AutomationWorkflowTests
     }
 
     [Fact]
-    public async Task AiModelNodes_ShouldBeRefused_InLightServerAiMode()
+    public async Task AiModelNodes_ShouldRun_InLightServerAiMode()
     {
         var ollama = new FakeOllamaService();
         var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
@@ -934,8 +934,8 @@ public sealed class AutomationWorkflowTests
             input,
             null);
 
-        await act.Should().ThrowAsync<GwsBusinessSuite.Application.Abstractions.ServerAiUnavailableException>();
-        ollama.RequestedModels.Should().BeEmpty();
+        await act.Should().NotThrowAsync();
+        ollama.RequestedModels.Should().Equal("qwen2.5-coder");
     }
 
     [Fact]

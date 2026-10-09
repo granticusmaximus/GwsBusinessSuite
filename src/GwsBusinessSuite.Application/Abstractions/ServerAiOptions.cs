@@ -8,11 +8,12 @@ public enum ServerAiMode
     // default, so local development (dotnet run against a local Ollama) and tests are unchanged.
     Full,
 
-    // The production droplet. Its Ollama holds only a small model, enough for short summaries
-    // (Media Watch, Civic Watch overviews, Content Studio trend research). Heavy generation -
-    // SentinelGPT chat/agents, multi-model advisors, app generation, and server-side article
-    // generation - is refused here; Content Studio drafts and revisions instead run on the Ollama
-    // of the machine the browser is on (see BrowserLocalOllamaService).
+    // The production droplet. Its Ollama holds only a small model. Summaries (Media Watch, Civic
+    // Watch overviews, Content Studio trend research), SentinelGPT chat and ai.* automation nodes
+    // run on it. Refused here: SentinelGPT panel actions other than Summarize, app generation,
+    // and server-side article generation/revision/hero images - articles are written only in
+    // the Mac app (NativeContentStudioAccess), on that Mac's own Ollama via
+    // BrowserLocalOllamaService.
     Light
 }
 
@@ -35,7 +36,7 @@ public sealed class ServerAiUnavailableException(string feature, string alternat
 public static class ServerAiGuard
 {
     public const string UseLocalSentinelGpt =
-        "Use SentinelGPT in the GWS Suite Mac app, which runs on your own machine. Summaries still work here.";
+        "Use SentinelGPT in the GWS Suite Mac app, which runs on your own machine. Chat and summaries still work here.";
 
     public static bool IsLight(this IOptions<ServerAiOptions>? options) => options?.Value.IsLight == true;
 
