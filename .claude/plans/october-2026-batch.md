@@ -13,7 +13,7 @@ verified with `./scripts/verify-release.sh` before it is marked done. Grant comm
 | 6 | ~~Small leftovers: Osiris durable Wikidata cache; Developer Mode folder memory~~ | n/a - Osiris was removed (6b009a4); folder memory already shipped (b81df78, d741485) |
 | 7 | ~~Community gaps: group conversations, message attachments, unread notifications (live bell + 15-min email), more activity-feed sources (multiple departments done in 5)~~ | done 2026-10-03 (verify-release PASS) |
 | 8 | ~~Email gaps: weekly digest mode for alert lists; per-campaign unsubscribe for drip sequences (+ FOUND BUG: drip unsubscribe page unsubscribed on page load - link scanners could unsubscribe people; now a confirm step)~~ | done 2026-10-03 (verify-release PASS) |
-| 9 | Overwatch coverage: research + add free, key-less sources for unresearched states/countries | IN PROGRESS - WZDx incident batch done 2026-10-04 (14 states); cameras next, see overwatch-coverage-2026-10.md |
+| 9 | Overwatch coverage: research + add free, key-less sources for unresearched states/countries | research DONE 2026-10-09 (SD/MT/WV/NM cameras built); only Grant's 511 developer-key decision remains, see overwatch-coverage-2026-10.md |
 | 10 | ~~Housekeeping: refresh stale master-plan status; triage failing Dependabot PRs~~ | done - master plan refreshed; no open Dependabot PRs remain (checked 2026-10-03) |
 | 11 | ~~Hand Grant: Turnstile key steps~~ | done (in chat) |
 

@@ -62,3 +62,26 @@ Switzerland; Canada NS/NB/MB/SK/YT/NL/PE; Australia WA/SA/TAS/NT.
 **Not yet researched:** Taiwan (tisvcloud.freeway.gov.tw timed out), Switzerland (likely no public
 DOT cams), NM (nmroads.com), SD (sd511.org), WV (wv511.org), MA (mass511.com - possibly Iteris like
 SC), Australia WA/SA/TAS/NT (SA/TAS behind Cloudflare challenge).
+
+## Research + build 2026-10-09 (everything that didn't need Grant)
+
+**Built (verify-release PASS):**
+- South Dakota + Montana: `IterisAtisCameraProvider` (one class, one DI instance per state) reads
+  `{state}.cdn.iteris-atis.com/geojson/icons/metadata/icons.cameras.geojson` + `icons.rwis.geojson`
+  (sites with nested cameras[]; MT's own cams are only in the RWIS layer). Live: SD 699, MT 464.
+  Probed every other state code on that CDN: all 403.
+- West Virginia: `WestVirginia511CameraProvider` - camera_data JS object from
+  `wsvc/gmap.asmx/buildCamerasJSONjs`, HLS URL per camera from `flowplayeri.aspx?CAMID=` (host
+  vtc1/2/3.roadsummary.com is per-camera; other hosts answer 204). Manifest probed; live 111/133.
+  CORS-open; native HLS plays under our CSP in Chromium (Playwright check). ~19s to resolve, cached 6h.
+- New Mexico: `NmRoadsCameraProvider` - `servicev5.nmroads.com/RealMapWAR/GetCameraInfo` (185), images
+  via https `GetCameraImage?cameraName=` (snapshotFile is http-only on ss.nmroads.com, no TLS).
+
+**Excluded:** Massachusetts (Castle Rock OneWeb, undocumented API - same bucket as CO; could join
+Grant's internal-endpoint decision), Taiwan (TDX "Valid API Key Required"; freeway.gov.tw hosts
+unreachable), Denmark (vejdirektoratet.dk camera page 403s automation; DATEX portal needs
+registration), Switzerland/WA/NT (no official public camera feed found), SA/TAS (Cloudflare
+challenge), NM WZDx (blyncsy still 503 on 2026-10-09).
+
+Nothing researchable without Grant remains in this file; open items are the 511-platform key
+decision (A/B/C above) plus Massachusetts/Colorado if he picks B.

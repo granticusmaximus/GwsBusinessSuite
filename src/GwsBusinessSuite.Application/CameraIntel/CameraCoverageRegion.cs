@@ -79,5 +79,9 @@ public static class CameraCoverageRegions
         new("Hong Kong (Transport Department)", "HK Transport Department", 22.35, 114.13, 90_000),
         new("Estonia (Tark Tee)", "Estonia Tark Tee", 58.60, 25.00, 500_000),
         new("Norway (Statens vegvesen)", "Statens vegvesen", 64.50, 17.00, 1_500_000),
+        new("South Dakota (SD511)", "SD511", 44.40, -100.30, 700_000),
+        new("Montana (511MT)", "511MT", 47.00, -109.60, 900_000),
+        new("West Virginia (WV511)", "WV511", 38.60, -80.60, 500_000),
+        new("New Mexico (NMRoads)", "NMRoads", 34.50, -106.10, 800_000),
     ];
 }

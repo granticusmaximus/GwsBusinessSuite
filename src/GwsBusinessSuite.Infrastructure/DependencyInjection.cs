@@ -742,6 +742,36 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.Add("X-System-ID", "vvtraf");
         });
         services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<NorwayRoadCameraProvider>());
+        services.AddHttpClient<NmRoadsCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://servicev5.nmroads.com/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<NmRoadsCameraProvider>());
+        services.AddHttpClient<WestVirginia511CameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://wv511.org/");
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-OverwatchGrid/1.0 (+https://www.gwsapp.net)");
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<WestVirginia511CameraProvider>());
+        // Iteris ATIS 511 states (verified live 2026-10-09, no key): the public 511 map's own
+        // GeoJSON layers on {state}.cdn.iteris-atis.com. Absolute URLs, so no BaseAddress.
+        services.AddHttpClient("iteris-atis", client => client.Timeout = TimeSpan.FromSeconds(30));
+        services.AddScoped<ICameraFeedProvider>(sp => new IterisAtisCameraProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("iteris-atis"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<IterisAtisCameraProvider>>(),
+            stateCode: "sd", sourceName: "SD511", sourceAttributionUrl: "https://www.sd511.org",
+            coverage: new BoundingBox(North: 46.2, South: 42.3, East: -96.2, West: -104.3)));
+        // Montana's camera layer also carries neighbouring Wyoming/Idaho/North Dakota and
+        // Canadian border cameras MDT republishes, hence the box reaching past the state line.
+        services.AddScoped<ICameraFeedProvider>(sp => new IterisAtisCameraProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("iteris-atis"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<IterisAtisCameraProvider>>(),
+            stateCode: "mt", sourceName: "511MT", sourceAttributionUrl: "https://www.511mt.net",
+            coverage: new BoundingBox(North: 50.6, South: 44.0, East: -103.0, West: -116.8)));
 
         services.AddSingleton<SourceStatusTracker>();
         // Overwatch watched areas: 10-minute checks -> notification bell.
