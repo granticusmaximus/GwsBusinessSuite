@@ -34,6 +34,79 @@ public sealed class NwsForecastService(HttpClient httpClient, IMemoryCache cache
         return snapshot;
     }
 
+    public async Task<IReadOnlyList<HourlyForecastPeriod>> GetHourlyAsync(double latitude, double longitude, CancellationToken cancellationToken = default)
+    {
+        var cacheKey = $"weather:nws:hourly:{latitude.ToString("F2", CultureInfo.InvariantCulture)},{longitude.ToString("F2", CultureInfo.InvariantCulture)}";
+        if (cache.TryGetValue(cacheKey, out IReadOnlyList<HourlyForecastPeriod>? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        var hours = await FetchHourlyAsync(latitude, longitude, cancellationToken);
+        if (hours.Count > 0)
+        {
+            // NWS issues hourly grids roughly hourly; half that keeps the scrubber current.
+            cache.Set(cacheKey, hours, TimeSpan.FromMinutes(30));
+        }
+        return hours;
+    }
+
+    private async Task<IReadOnlyList<HourlyForecastPeriod>> FetchHourlyAsync(double latitude, double longitude, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var lat = latitude.ToString(CultureInfo.InvariantCulture);
+            var lon = longitude.ToString(CultureInfo.InvariantCulture);
+            var pointResponse = await httpClient.GetAsync($"points/{lat},{lon}", cancellationToken);
+            if (!pointResponse.IsSuccessStatusCode)
+            {
+                return []; // 404 outside NWS coverage is routine, not a failure worth a warning.
+            }
+            var pointRoot = JsonNode.Parse(await pointResponse.Content.ReadAsStringAsync(cancellationToken));
+            var hourlyUrl = pointRoot?["properties"]?["forecastHourly"]?.GetValue<string>();
+            if (hourlyUrl is null)
+            {
+                return [];
+            }
+
+            var hourlyResponse = await httpClient.GetAsync(hourlyUrl, cancellationToken);
+            hourlyResponse.EnsureSuccessStatusCode();
+            var hourlyRoot = JsonNode.Parse(await hourlyResponse.Content.ReadAsStringAsync(cancellationToken));
+            var periods = hourlyRoot?["properties"]?["periods"]?.AsArray();
+            if (periods is null)
+            {
+                return [];
+            }
+
+            var hours = new List<HourlyForecastPeriod>();
+            foreach (var period in periods)
+            {
+                if (period is null
+                    || !DateTimeOffset.TryParse(period["startTime"]?.GetValue<string>(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var start)
+                    || !DateTimeOffset.TryParse(period["endTime"]?.GetValue<string>(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var end)
+                    || period["temperature"]?.GetValue<double?>() is not { } temperature)
+                {
+                    continue;
+                }
+
+                hours.Add(new HourlyForecastPeriod(
+                    start.ToUniversalTime(),
+                    end.ToUniversalTime(),
+                    temperature,
+                    period["probabilityOfPrecipitation"]?["value"]?.GetValue<int?>(),
+                    period["shortForecast"]?.GetValue<string>() ?? "",
+                    period["windSpeed"]?.GetValue<string>() ?? "",
+                    period["windDirection"]?.GetValue<string>() ?? ""));
+            }
+            return hours;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException or TaskCanceledException or InvalidOperationException)
+        {
+            logger.LogWarning(ex, "NWS hourly forecast lookup failed for {Latitude},{Longitude}.", latitude, longitude);
+            return [];
+        }
+    }
+
     private async Task<WeatherSnapshot?> FetchSnapshotAsync(double latitude, double longitude, CancellationToken cancellationToken)
     {
         try

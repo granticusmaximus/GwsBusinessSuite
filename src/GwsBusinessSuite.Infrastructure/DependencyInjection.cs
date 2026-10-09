@@ -870,6 +870,12 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-OverwatchGrid/1.0 (+https://www.gwsapp.net)");
             client.Timeout = TimeSpan.FromSeconds(20);
         });
+        services.AddHttpClient<IRadarTimelineService, RadarTimelineService>(client =>
+        {
+            client.BaseAddress = new Uri("https://mesonet.agron.iastate.edu/");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-OverwatchGrid/1.0 (+https://www.gwsapp.net)");
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
         // Both free, no API key/registration - see GeocodingService's own comment for why each
         // is called server-side rather than straight from the browser.
         services.AddHttpClient<IPhotonGeocoder, PhotonGeocoder>(client =>

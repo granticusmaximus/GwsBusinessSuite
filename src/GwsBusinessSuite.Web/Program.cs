@@ -642,9 +642,10 @@ app.Use(async (context, next) =>
             // Workers/Assets/ThirdParty bundle at runtime from the same jsdelivr origin already
             // trusted in script-src above. server.arcgisonline.com: the globe's base imagery -
             // real satellite/aerial tiles up to zoom 23, confirmed CORS-open, no API key/
-            // registration required, not a Google product. nowcoast.noaa.gov: the optional NOAA
-            // radar overlay's WMS tiles - fetched directly by the browser (confirmed CORS-open),
-            // unlike NWS alert data which is proxied server-side instead (see NwsAlertsService).
+            // registration required, not a Google product. mesonet.agron.iastate.edu: the radar
+            // timeline's tiles (past NEXRAD scans + HRRR future radar, see RadarTimelineService) -
+            // fetched directly by the browser (confirmed CORS-open), unlike NWS alert data which
+            // is proxied server-side instead (see NwsAlertsService).
             // Overwatch's own location search is geocoded server-side now (see
             // GeocodingService), so photon.komoot.io needs no browser-side entry here.
             // nominatim.openstreetmap.org and tile.openstreetmap.org are kept only for
@@ -654,7 +655,7 @@ app.Use(async (context, next) =>
             // fixed here. localhost:11434 / 127.0.0.1:11434: Content Studio relays draft and
             // revision generation to the Ollama on the user's own machine (local-ollama.js), so
             // the server never runs the heavy model in light server-AI mode.
-            "connect-src 'self' wss: ws: http://localhost:11434 http://127.0.0.1:11434 https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov"
+            "connect-src 'self' wss: ws: http://localhost:11434 http://127.0.0.1:11434 https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://mesonet.agron.iastate.edu"
                 + (allowTurnstile ? " https://www.qksrv.net;" : ";"),
             "media-src 'self' blob: https:;",
             // A real incident: script-src trusting cdn.jsdelivr.net does NOT cover Worker

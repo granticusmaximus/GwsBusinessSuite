@@ -51,7 +51,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; " +
         "img-src 'self' data: blob: https:; " +
         "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; " +
-        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://nowcoast.noaa.gov; " +
+        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://mesonet.agron.iastate.edu; " +
         "media-src 'self' blob: https:; " +
         "worker-src 'self' blob: https://cdn.jsdelivr.net; " +
         "frame-src 'self'; " +
@@ -95,6 +95,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
             .tg-watch-wall-panel { position: absolute; top: 3.6rem; right: 1.1rem; width: 560px; height: 420px; min-width: 320px; min-height: 240px; }
             .tg-watch-wall-grid { display: grid; }
             .tg-selection-indicator { position: absolute; bottom: 2.6rem; right: 1.1rem; }
+            .tg-radar-bar { position: absolute; z-index: 7; left: 1rem; right: 1rem; bottom: 2.6rem; display: none; }
           </style>
         </head>
         <body>
@@ -228,6 +229,9 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                   sourceName: 'WSDOT', sourceAttributionUrl: 'https://wsdot.wa.gov'
                 }]);
                 window.tacticalGlobe.setRadarVisible(true);
+                window.tacticalGlobe.setRadarTimeline({ nowIndex: 0, modelRunUtc: null, frames: [
+                  { validUtc: new Date().toISOString(), kind: 'Observed', tileUrlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png' }] });
+                window.tacticalGlobe.setHourlyForecast([]);
                 window.tacticalGlobe.setWeatherAlerts([{
                   id: 'alert-1', eventName: 'Severe Thunderstorm Warning', severity: 'Severe', areaDescription: 'Test Area',
                   rings: [[[-122.5, 47.5], [-122.0, 47.5], [-122.0, 48.0], [-122.5, 48.0], [-122.5, 47.5]]]
@@ -452,6 +456,94 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await page.EvaluateAsync("() => { window.tacticalGlobe.setWeatherSnapshot(null); }");
         var display = await page.EvaluateAsync<string>("document.querySelector('.tg-weather-panel').style.display");
         display.Should().Be("none");
+    }
+
+    // Two past frames, the latest scan, and two HRRR future frames - real IEM tile templates, so
+    // the test also proves the browser can actually fetch radar tiles under the real CSP.
+    private const string RadarTimelineScript = """
+        () => {
+          const now = Date.now();
+          const iso = (minutes) => new Date(now + minutes * 60000).toISOString();
+          const base = 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/';
+          window.tacticalGlobe.setRadarTimeline({
+            nowIndex: 2,
+            modelRunUtc: iso(-150),
+            frames: [
+              { validUtc: iso(-10), kind: 'Observed', tileUrlTemplate: base + 'nexrad-n0q-900913-m10m/{z}/{x}/{y}.png' },
+              { validUtc: iso(-5), kind: 'Observed', tileUrlTemplate: base + 'nexrad-n0q-900913-m05m/{z}/{x}/{y}.png' },
+              { validUtc: iso(0), kind: 'Observed', tileUrlTemplate: base + 'nexrad-n0q-900913/{z}/{x}/{y}.png' },
+              { validUtc: iso(60), kind: 'Forecast', tileUrlTemplate: base + 'hrrr::REFD-F0060-0/{z}/{x}/{y}.png' },
+              { validUtc: iso(120), kind: 'Forecast', tileUrlTemplate: base + 'hrrr::REFD-F0120-0/{z}/{x}/{y}.png' }
+            ]
+          });
+          window.tacticalGlobe.setHourlyForecast([
+            { startUtc: iso(30), endUtc: iso(90), temperatureFahrenheit: 71.6, chanceOfPrecipitationPercent: 60, shortForecast: 'Showers Likely' }
+          ]);
+        }
+        """;
+
+    [Fact]
+    public async Task RadarTimeline_ShouldOpenOnTheLatestScan_LoadRealTilesUnderTheCsp_AndStepIntoTheForecast()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+        var radarTileResponses = new List<int>();
+        page.Response += (_, response) =>
+        {
+            if (response.Url.StartsWith("https://mesonet.agron.iastate.edu/", StringComparison.Ordinal))
+            {
+                lock (radarTileResponses) radarTileResponses.Add(response.Status);
+            }
+        };
+
+        await page.EvaluateAsync(RadarTimelineScript);
+        await page.EvaluateAsync("() => window.tacticalGlobe.setRadarVisible(true)");
+        await page.WaitForFunctionAsync("document.querySelector('.tg-radar-bar') && document.querySelector('.tg-radar-bar').style.display === 'block'", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        (await page.TextContentAsync(".tg-radar-kind")).Should().Be("LATEST RADAR");
+        (await page.InputValueAsync(".tg-radar-slider")).Should().Be("2");
+
+        await page.ClickAsync("[data-radar='forward']");
+        (await page.TextContentAsync(".tg-radar-kind")).Should().StartWith("FUTURE RADAR · HRRR MODEL");
+        (await page.InputValueAsync(".tg-radar-slider")).Should().Be("3");
+
+        await page.ClickAsync("[data-radar='now']");
+        (await page.InputValueAsync(".tg-radar-slider")).Should().Be("2");
+
+        await page.ClickAsync("[data-radar='play']");
+        (await page.GetAttributeAsync(".tg-radar-play", "aria-label")).Should().Be("Pause radar loop");
+        await page.ClickAsync("[data-radar='play']");
+        (await page.GetAttributeAsync(".tg-radar-play", "aria-label")).Should().Be("Play radar loop");
+
+        await page.WaitForTimeoutAsync(4000);
+        lock (radarTileResponses) radarTileResponses.Should().Contain(200, "the globe should actually fetch radar tiles from IEM");
+        consoleErrors.Should().NotContain(msg => msg.Contains("Content Security Policy", StringComparison.OrdinalIgnoreCase));
+
+        await page.EvaluateAsync("() => window.tacticalGlobe.setRadarVisible(false)");
+        (await page.EvaluateAsync<string>("document.querySelector('.tg-radar-bar').style.display")).Should().Be("none");
+    }
+
+    [Fact]
+    public async Task RadarTimeline_ShouldShowTheHourlyForecast_ForTheSelectedFutureFrameOnly()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+        await page.EvaluateAsync("() => { window.tacticalGlobe.setWeatherSnapshot({ currentTemperatureFahrenheit: 70, currentConditions: 'Clear', forecastTemperatureFahrenheit: 70, shortForecast: 'Clear', detailedForecast: 'Clear', windSpeed: '5 mph', windDirection: 'E', chanceOfPrecipitationPercent: 10 }); }");
+        await page.EvaluateAsync(RadarTimelineScript);
+        await page.EvaluateAsync("() => window.tacticalGlobe.setRadarVisible(true)");
+
+        (await page.EvaluateAsync<string>("document.querySelector('.tg-weather-at').style.display")).Should().Be("none",
+            "the latest scan is 'now' - the panel's main lines already cover it");
+
+        await page.ClickAsync("[data-radar='forward']");
+        var line = await page.TextContentAsync(".tg-weather-at");
+        line.Should().StartWith("AT ").And.Contain("72°F").And.Contain("60% precip").And.Contain("Showers Likely");
+
+        await page.ClickAsync("[data-radar='forward']");
+        (await page.EvaluateAsync<string>("document.querySelector('.tg-weather-at').style.display")).Should().Be("none",
+            "no hourly period covers that frame's time");
     }
 
     [Fact]

@@ -17,6 +17,7 @@
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchTripService OverwatchTripService
 @inject INwsAlertsService NwsAlertsService
 @inject INwsForecastService NwsForecastService
+@inject IRadarTimelineService RadarTimelineService
 @inject TrafficIncidentDirectoryService TrafficIncidentDirectoryService
 @inject IGeocodingService GeocodingService
 @inject ICameraFavoritesService CameraFavoritesService
@@ -92,7 +93,7 @@
                 }
             </div>
             <div class="tg-hud-toggles">
-                <button type="button" data-tg-toggle="radar" class="tg-toggle @(_radarOn ? "tg-toggle-on" : "")" title="Toggle NOAA radar (R)" @onclick="ToggleRadarAsync">
+                <button type="button" data-tg-toggle="radar" class="tg-toggle @(_radarOn ? "tg-toggle-on" : "")" title="Radar: past hour and future radar (HRRR model), with play/scrub (R)" @onclick="ToggleRadarAsync">
                     RADAR [@(_radarOn ? "ON" : "OFF")]
                 </button>
                 <button type="button" data-tg-toggle="alerts" class="tg-toggle @(_alertsOn ? "tg-toggle-on" : "")" title="Toggle NWS severe weather alerts (A)" @onclick="ToggleAlertsAsync">
@@ -696,7 +697,8 @@
         var incidentsTask = _incidentsOn ? TrafficIncidentDirectoryService.GetIncidentsInBoundingBoxAsync(_lastBbox) : NoIncidents;
         var weatherTask = NwsForecastService.GetSnapshotAsync(centerLatitude, centerLongitude);
         var hazardsTask = _hazardsOn ? PushHazardsAsync() : Task.CompletedTask;
-        await Task.WhenAll(camerasTask, alertsTask, incidentsTask, weatherTask, hazardsTask);
+        var radarTask = _radarOn ? PushRadarAsync(centerLatitude, centerLongitude) : Task.CompletedTask;
+        await Task.WhenAll(camerasTask, alertsTask, incidentsTask, weatherTask, hazardsTask, radarTask);
 
         _visibleCameras = camerasTask.Result.Cameras.ToList();
         _camerasInViewTotal = camerasTask.Result.TotalInView;
@@ -743,7 +745,45 @@
     private async Task ToggleRadarAsync()
     {
         _radarOn = !_radarOn;
+        if (_radarOn && _lastBbox is { } bbox)
+        {
+            await PushRadarAsync((bbox.North + bbox.South) / 2.0, (bbox.East + bbox.West) / 2.0);
+        }
         await JS.InvokeVoidAsync("tacticalGlobe.setRadarVisible", _radarOn);
+    }
+
+    // The radar timeline (cached server-side for 5 minutes, so re-sending it on every settle
+    // costs nothing and keeps it current; the script ignores an unchanged timeline) plus the NWS
+    // hourly forecast for the view's center, which the scrubber shows for future frames.
+    private async Task PushRadarAsync(double centerLatitude, double centerLongitude)
+    {
+        var timelineTask = RadarTimelineService.GetTimelineAsync();
+        var hourlyTask = NwsForecastService.GetHourlyAsync(centerLatitude, centerLongitude);
+        await Task.WhenAll(timelineTask, hourlyTask);
+
+        var timeline = timelineTask.Result;
+        await JS.InvokeVoidAsync("tacticalGlobe.setRadarTimeline", new
+        {
+            nowIndex = timeline.NowIndex,
+            modelRunUtc = timeline.ModelRunUtc,
+            frames = timeline.Frames.Select(frame => new
+            {
+                validUtc = frame.ValidUtc,
+                kind = frame.Kind.ToString(),
+                tileUrlTemplate = frame.TileUrlTemplate
+            })
+        });
+        await JS.InvokeVoidAsync("tacticalGlobe.setHourlyForecast", hourlyTask.Result
+            .Where(hour => hour.EndUtc > DateTimeOffset.UtcNow)
+            .Take(24)
+            .Select(hour => new
+            {
+                startUtc = hour.StartUtc,
+                endUtc = hour.EndUtc,
+                temperatureFahrenheit = hour.TemperatureFahrenheit,
+                chanceOfPrecipitationPercent = hour.ChanceOfPrecipitationPercent,
+                shortForecast = hour.ShortForecast
+            }));
     }
 
     private async Task ToggleAlertsAsync()

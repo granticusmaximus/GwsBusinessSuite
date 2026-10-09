@@ -168,16 +168,10 @@ window.tacticalGlobe = (function () {
                 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer'));
         viewer.imageryLayers.add(roadsLabelsLayer);
 
-        // NOAA nowCOAST's public radar WMS (confirmed CORS-open and token-free directly against
-        // the live endpoint during implementation) - added once, hidden by default, toggled via
-        // .show rather than added/removed per toggle so re-enabling it is instant.
-        const radarLayer = viewer.imageryLayers.addImageryProvider(new Cesium.WebMapServiceImageryProvider({
-            url: 'https://nowcoast.noaa.gov/geoserver/observations/weather_radar/ows',
-            layers: 'conus_base_reflectivity_mosaic',
-            parameters: { transparent: true, format: 'image/png', styles: '' }
-        }));
-        radarLayer.show = false;
-        radarLayer.alpha = 0.75;
+        // Radar is a timeline of frames (past scans + HRRR future radar) rather than one live
+        // layer - see setRadarTimeline. Frames are added lazily as Cesium imagery layers the
+        // first time they're shown, so turning radar on costs one frame's tiles, not forty.
+        const radar = { visible: false, frames: [], nowIndex: 0, modelRunUtc: null, layers: new Map(), index: -1, timer: null, bar: null, hours: [], key: '' };
 
         // GDOT (~3,829 cameras) and Datumfeed (~9,000 across several regions) mean a wide zoom
         // can render thousands of individual pins at once - plain viewer.entities has no
@@ -311,7 +305,7 @@ window.tacticalGlobe = (function () {
 
         viewers.set(containerId, {
             containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities,
-            hazardDataSource, radarLayer, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null
+            hazardDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null
         });
 
         // Fire once for the initial view so cameras appear without requiring a drag/zoom first.
@@ -721,7 +715,251 @@ window.tacticalGlobe = (function () {
             visible = maybeVisible;
         }
         const entry = viewers.get(containerId);
-        if (entry) entry.radarLayer.show = !!visible;
+        if (!entry) return;
+        const radar = entry.radar;
+        radar.visible = !!visible;
+        if (!radar.visible) {
+            stopRadarPlayback(radar);
+            radar.layers.forEach(function (layer) { layer.show = false; });
+        } else if (radar.frames.length > 0) {
+            showRadarFrame(entry, radar.index >= 0 ? radar.index : radar.nowIndex);
+        }
+        renderRadarBar(entry);
+    }
+
+    // timeline: { frames: [{ validUtc, kind: 'Observed'|'Forecast', tileUrlTemplate }], nowIndex,
+    // modelRunUtc } from RadarTimelineService. Re-sent every few minutes while radar is on; an
+    // unchanged timeline is ignored so playback isn't interrupted, and a changed one keeps the
+    // scrubber on the nearest valid time to where it was.
+    function setRadarTimeline(containerIdOrTimeline, maybeTimeline) {
+        let containerId = 'tg-viewport';
+        let timeline = containerIdOrTimeline;
+        if (typeof containerIdOrTimeline === 'string') {
+            containerId = containerIdOrTimeline;
+            timeline = maybeTimeline;
+        }
+        const entry = viewers.get(containerId);
+        if (!entry || !timeline || !Array.isArray(timeline.frames)) return;
+        const radar = entry.radar;
+        const key = timeline.frames.map(function (f) { return f.tileUrlTemplate + '@' + f.validUtc; }).join('|');
+        if (key === radar.key) return;
+
+        const shownTime = radar.index >= 0 && radar.frames[radar.index] ? Date.parse(radar.frames[radar.index].validUtc) : null;
+        radar.layers.forEach(function (layer) { entry.viewer.imageryLayers.remove(layer, true); });
+        radar.layers = new Map();
+        radar.key = key;
+        radar.frames = timeline.frames;
+        radar.nowIndex = Math.min(Math.max(timeline.nowIndex || 0, 0), Math.max(timeline.frames.length - 1, 0));
+        radar.modelRunUtc = timeline.modelRunUtc || null;
+        radar.index = -1;
+        if (radar.frames.length === 0) {
+            renderRadarBar(entry);
+            return;
+        }
+
+        let index = radar.nowIndex;
+        if (shownTime !== null) {
+            let best = Infinity;
+            radar.frames.forEach(function (frame, i) {
+                const distance = Math.abs(Date.parse(frame.validUtc) - shownTime);
+                if (distance < best) { best = distance; index = i; }
+            });
+        }
+        if (radar.visible) showRadarFrame(entry, index); else radar.index = index;
+        renderRadarBar(entry);
+    }
+
+    // hours: [{ startUtc, endUtc, temperatureFahrenheit, chanceOfPrecipitationPercent,
+    // shortForecast }] - NWS hourly forecast for the view's center, shown beside the scrubber
+    // for whatever future time is selected.
+    function setHourlyForecast(containerIdOrHours, maybeHours) {
+        let containerId = 'tg-viewport';
+        let hours = containerIdOrHours;
+        if (typeof containerIdOrHours === 'string') {
+            containerId = containerIdOrHours;
+            hours = maybeHours;
+        }
+        const entry = viewers.get(containerId);
+        if (!entry) return;
+        entry.radar.hours = Array.isArray(hours) ? hours : [];
+        updateRadarForecastLine(entry);
+    }
+
+    function ensureRadarLayer(entry, index) {
+        const radar = entry.radar;
+        let layer = radar.layers.get(index);
+        if (!layer) {
+            layer = entry.viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+                url: radar.frames[index].tileUrlTemplate,
+                // Radar is ~1 km resolution; beyond this Cesium upsamples instead of requesting
+                // street-level tiles the source doesn't really have.
+                maximumLevel: 10,
+                credit: 'Radar: NOAA NEXRAD / HRRR via Iowa Environmental Mesonet'
+            }));
+            layer.show = false;
+            radar.layers.set(index, layer);
+        }
+        return layer;
+    }
+
+    function showRadarFrame(entry, index) {
+        const radar = entry.radar;
+        if (radar.frames.length === 0) return;
+        index = Math.min(Math.max(index, 0), radar.frames.length - 1);
+        const current = ensureRadarLayer(entry, index);
+        radar.layers.forEach(function (layer, i) {
+            if (i !== index) layer.show = false;
+        });
+        current.alpha = 0.75;
+        current.show = true;
+        // Start the next frame's tiles loading invisibly so playback doesn't flash empty frames.
+        const nextIndex = index + 1 < radar.frames.length ? index + 1 : null;
+        if (nextIndex !== null) {
+            const next = ensureRadarLayer(entry, nextIndex);
+            next.alpha = 0;
+            next.show = true;
+        }
+        radar.index = index;
+        updateRadarBarState(entry);
+        updateRadarForecastLine(entry);
+    }
+
+    function stopRadarPlayback(radar) {
+        if (radar.timer) clearInterval(radar.timer);
+        radar.timer = null;
+    }
+
+    function toggleRadarPlayback(entry) {
+        const radar = entry.radar;
+        if (radar.timer) {
+            stopRadarPlayback(radar);
+        } else {
+            if (radar.index >= radar.frames.length - 1) showRadarFrame(entry, 0);
+            let holdAtEnd = 0;
+            radar.timer = setInterval(function () {
+                if (radar.index >= radar.frames.length - 1) {
+                    // Linger on the last frame for a moment before looping, like weather apps do.
+                    if (++holdAtEnd < 3) return;
+                    holdAtEnd = 0;
+                    showRadarFrame(entry, 0);
+                } else {
+                    showRadarFrame(entry, radar.index + 1);
+                }
+            }, 700);
+        }
+        updateRadarBarState(entry);
+    }
+
+    function formatRadarTime(iso) {
+        const date = new Date(iso);
+        if (isNaN(date.getTime())) return '';
+        return date.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }).toUpperCase();
+    }
+
+    function renderRadarBar(entry) {
+        const radar = entry.radar;
+        const shell = document.getElementById(entry.containerId);
+        const shellEl = shell && shell.closest('.tg-shell');
+        if (!shellEl) return;
+        const show = radar.visible && radar.frames.length > 0;
+        shellEl.classList.toggle('tg-radar-active', show);
+        if (!show) {
+            if (radar.bar) radar.bar.style.display = 'none';
+            updateRadarForecastLine(entry);
+            return;
+        }
+
+        if (!radar.bar) {
+            const bar = document.createElement('div');
+            bar.className = 'tg-radar-bar';
+            bar.innerHTML =
+                '<div class="tg-radar-controls">' +
+                '<button type="button" class="tg-radar-btn" data-radar="back" title="Previous frame" aria-label="Previous frame">&#9664;&#9664;</button>' +
+                '<button type="button" class="tg-radar-btn tg-radar-play" data-radar="play" title="Play / pause" aria-label="Play radar loop">&#9654;</button>' +
+                '<button type="button" class="tg-radar-btn" data-radar="forward" title="Next frame" aria-label="Next frame">&#9654;&#9654;</button>' +
+                '<input type="range" class="tg-radar-slider" min="0" step="1" aria-label="Radar time" />' +
+                '<button type="button" class="tg-radar-btn" data-radar="now" title="Jump to the latest observed radar">NOW</button>' +
+                '</div>' +
+                '<div class="tg-radar-label"><span class="tg-radar-time"></span><span class="tg-radar-kind"></span></div>' +
+                '<div class="tg-radar-scale" aria-hidden="true"><span>LIGHT</span><span class="tg-radar-gradient"></span><span>HEAVY</span></div>';
+            bar.addEventListener('click', function (event) {
+                const button = event.target.closest('[data-radar]');
+                if (!button) return;
+                const action = button.getAttribute('data-radar');
+                if (action === 'play') {
+                    toggleRadarPlayback(entry);
+                    return;
+                }
+                stopRadarPlayback(entry.radar);
+                if (action === 'back') showRadarFrame(entry, entry.radar.index - 1);
+                else if (action === 'forward') showRadarFrame(entry, entry.radar.index + 1);
+                else if (action === 'now') showRadarFrame(entry, entry.radar.nowIndex);
+            });
+            bar.querySelector('.tg-radar-slider').addEventListener('input', function (event) {
+                stopRadarPlayback(entry.radar);
+                showRadarFrame(entry, Number(event.target.value));
+            });
+            shellEl.appendChild(bar);
+            radar.bar = bar;
+        }
+        radar.bar.style.display = 'block';
+        updateRadarBarState(entry);
+    }
+
+    function updateRadarBarState(entry) {
+        const radar = entry.radar;
+        const bar = radar.bar;
+        if (!bar || radar.index < 0 || !radar.frames[radar.index]) return;
+        const frame = radar.frames[radar.index];
+        const slider = bar.querySelector('.tg-radar-slider');
+        slider.max = String(radar.frames.length - 1);
+        slider.value = String(radar.index);
+        // Marks where "now" sits on the slider so past and future read at a glance.
+        const nowPercent = radar.frames.length > 1 ? (radar.nowIndex / (radar.frames.length - 1)) * 100 : 0;
+        slider.style.setProperty('--tg-radar-now', nowPercent + '%');
+        bar.querySelector('.tg-radar-time').textContent = formatRadarTime(frame.validUtc);
+        const kind = bar.querySelector('.tg-radar-kind');
+        if (frame.kind === 'Forecast') {
+            const run = radar.modelRunUtc ? new Date(radar.modelRunUtc) : null;
+            kind.textContent = 'FUTURE RADAR \u00b7 HRRR MODEL' + (run && !isNaN(run.getTime()) ? ' ' + String(run.getUTCHours()).padStart(2, '0') + 'Z' : '');
+            kind.className = 'tg-radar-kind tg-radar-kind-forecast';
+        } else {
+            kind.textContent = radar.index === radar.nowIndex ? 'LATEST RADAR' : 'PAST RADAR';
+            kind.className = 'tg-radar-kind';
+        }
+        const play = bar.querySelector('.tg-radar-play');
+        play.innerHTML = radar.timer ? '&#10074;&#10074;' : '&#9654;';
+        play.setAttribute('aria-label', radar.timer ? 'Pause radar loop' : 'Play radar loop');
+    }
+
+    // The weather panel's "at this time" line: the NWS hourly forecast for the hour the
+    // scrubber is on, only for future frames (past/now are already the panel's main lines).
+    function updateRadarForecastLine(entry) {
+        if (!weatherPanel) return;
+        let line = weatherPanel.querySelector('.tg-weather-at');
+        if (!line) {
+            line = document.createElement('div');
+            line.className = 'tg-weather-meta tg-weather-at';
+            weatherPanel.appendChild(line);
+        }
+        const radar = entry.radar;
+        const frame = radar.visible && radar.index >= 0 ? radar.frames[radar.index] : null;
+        const at = frame && frame.kind === 'Forecast' ? Date.parse(frame.validUtc) : NaN;
+        const hour = isNaN(at) ? null : radar.hours.find(function (h) {
+            return Date.parse(h.startUtc) <= at && at < Date.parse(h.endUtc);
+        });
+        if (!hour) {
+            line.textContent = '';
+            line.style.display = 'none';
+            return;
+        }
+        const parts = [Math.round(hour.temperatureFahrenheit) + '\u00b0F'];
+        if (hour.chanceOfPrecipitationPercent !== null && hour.chanceOfPrecipitationPercent !== undefined) {
+            parts.push(hour.chanceOfPrecipitationPercent + '% precip');
+        }
+        if (hour.shortForecast) parts.push(hour.shortForecast);
+        line.textContent = 'AT ' + formatRadarTime(frame.validUtc) + ': ' + parts.join(' \u00b7 ');
+        line.style.display = 'block';
     }
 
     // alerts: [{ id, eventName, severity, areaDescription, rings: [[[lon,lat],...], ...] }] -
@@ -1225,6 +1463,8 @@ window.tacticalGlobe = (function () {
             '<div class="tg-weather-meta">' + escapeHtml(snapshot.shortForecast || '') + '</div>' +
             '<div class="tg-weather-meta">' + [windLine, precip].filter(Boolean).map(escapeHtml).join(' · ') + '</div>';
         weatherPanel.style.display = 'block';
+        const radarEntry = viewers.get(containerId);
+        if (radarEntry) updateRadarForecastLine(radarEntry);
     }
 
     // Shared by the camera-stream and incident-detail panels - drag via the header, resize via a
@@ -1685,6 +1925,8 @@ window.tacticalGlobe = (function () {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
         entry.clickHandler.destroy();
+        stopRadarPlayback(entry.radar);
+        if (entry.radar.bar) entry.radar.bar.remove();
         if (entry.hoverIdentify) entry.hoverIdentify.dispose();
         entry.viewer.dataSources.remove(entry.cameraDataSource, true);
         entry.viewer.destroy();
@@ -1725,6 +1967,8 @@ window.tacticalGlobe = (function () {
         openCamera: openCamera,
         buildShareLink: buildShareLink,
         setRadarVisible: setRadarVisible,
+        setRadarTimeline: setRadarTimeline,
+        setHourlyForecast: setHourlyForecast,
         setWeatherAlerts: setWeatherAlerts,
         clearWeatherAlerts: clearWeatherAlerts,
         setCameraAlertHighlights: setCameraAlertHighlights,

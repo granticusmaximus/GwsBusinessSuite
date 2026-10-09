@@ -503,3 +503,92 @@
 .tg-picking-point canvas {
     cursor: crosshair !important;
 }
+
+/* Radar timeline - past scans, the latest scan and HRRR future radar, built by
+   tactical-globe.js's renderRadarBar. Sits bottom-center; the weather panel moves up above it
+   while radar is on (.tg-radar-active on the shell) so the two never overlap at any width. */
+.tg-radar-bar {
+    position: absolute;
+    z-index: 7;
+    left: 50%;
+    bottom: 2.6rem;
+    transform: translateX(-50%);
+    width: min(640px, calc(100% - 2rem));
+    padding: 0.45rem 0.6rem;
+    background: rgba(5, 8, 10, 0.82);
+    border: 1px solid rgba(125, 255, 176, 0.4);
+    color: #7dffb0;
+    font-family: "Share Tech Mono", ui-monospace, monospace;
+    display: none;
+}
+
+.tg-radar-active .tg-weather-panel { bottom: 8.4rem; }
+
+.tg-radar-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.tg-radar-btn {
+    min-height: 32px;
+    min-width: 32px;
+    padding: 0.15rem 0.45rem;
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    background: none;
+    color: #7dffb0;
+    font: inherit;
+    font-size: 0.7rem;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.tg-radar-btn:hover,
+.tg-radar-btn:focus-visible { background: rgba(125, 255, 176, 0.15); }
+
+/* The track carries a bright tick at "now" (--tg-radar-now, set per timeline) so the observed
+   past and the forecast future read at a glance. */
+.tg-radar-slider {
+    flex: 1 1 auto;
+    min-width: 0;
+    accent-color: #7dffb0;
+    background: linear-gradient(90deg,
+        transparent calc(var(--tg-radar-now, 0%) - 1px),
+        #ffd166 calc(var(--tg-radar-now, 0%) - 1px),
+        #ffd166 calc(var(--tg-radar-now, 0%) + 1px),
+        transparent calc(var(--tg-radar-now, 0%) + 1px));
+}
+
+.tg-radar-label {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.2rem 0.6rem;
+    margin-top: 0.3rem;
+    font-size: 0.7rem;
+}
+
+.tg-radar-time { font-weight: 700; letter-spacing: 0.03em; }
+.tg-radar-kind { opacity: 0.85; }
+.tg-radar-kind-forecast { color: #ffd166; opacity: 1; }
+
+.tg-radar-scale {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.3rem;
+    font-size: 0.55rem;
+    opacity: 0.8;
+}
+
+/* Approximates the standard NWS reflectivity colors the radar tiles use. */
+.tg-radar-gradient {
+    flex: 1 1 auto;
+    height: 6px;
+    background: linear-gradient(90deg, #04e9e7, #019ff4, #02fd02, #01c501, #fdf802, #fd9500, #fd0000, #bc0000, #f800fd);
+}
+
+@media (pointer: coarse) {
+    .tg-radar-btn, .tg-radar-slider { min-height: 44px; }
+    .tg-radar-active .tg-weather-panel { bottom: 9.6rem; }
+}

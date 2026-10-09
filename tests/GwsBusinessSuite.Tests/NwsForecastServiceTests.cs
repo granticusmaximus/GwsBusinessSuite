@@ -88,6 +88,43 @@ public sealed class NwsForecastServiceTests
         requestCount.Should().Be(4, "points+forecast+stations+observation should only be fetched once for effectively the same location");
     }
 
+    [Fact]
+    public async Task GetHourlyAsync_ShouldParseTheHourlyPeriods_AsUtc()
+    {
+        var service = CreateService(request =>
+        {
+            var url = request.RequestUri!.AbsoluteUri;
+            if (url.Contains("/points/")) return JsonResponse("""{"properties":{"forecastHourly":"https://api.weather.gov/gridpoints/FFC/84,38/forecast/hourly"}}""");
+            if (url.EndsWith("/forecast/hourly")) return JsonResponse("""
+                {"properties":{"periods":[
+                  {"startTime":"2026-10-09T09:00:00-04:00","endTime":"2026-10-09T10:00:00-04:00","temperature":65,"probabilityOfPrecipitation":{"value":3},"windSpeed":"10 mph","windDirection":"NE","shortForecast":"Mostly Cloudy"},
+                  {"startTime":"2026-10-09T10:00:00-04:00","endTime":"2026-10-09T11:00:00-04:00","temperature":68,"probabilityOfPrecipitation":{"value":null},"windSpeed":"10 mph","windDirection":"NE","shortForecast":"Showers"}
+                ]}}
+                """);
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var hours = await service.GetHourlyAsync(32.6, -83.6);
+
+        hours.Should().HaveCount(2);
+        hours[0].StartUtc.Should().Be(new DateTimeOffset(2026, 10, 9, 13, 0, 0, TimeSpan.Zero));
+        hours[0].EndUtc.Should().Be(new DateTimeOffset(2026, 10, 9, 14, 0, 0, TimeSpan.Zero));
+        hours[0].TemperatureFahrenheit.Should().Be(65);
+        hours[0].ChanceOfPrecipitationPercent.Should().Be(3);
+        hours[0].ShortForecast.Should().Be("Mostly Cloudy");
+        hours[1].ChanceOfPrecipitationPercent.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetHourlyAsync_ShouldReturnEmpty_OutsideNwsCoverage()
+    {
+        var service = CreateService(_ => new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        var hours = await service.GetHourlyAsync(51.5, -0.1);
+
+        hours.Should().BeEmpty();
+    }
+
     private static Func<HttpRequestMessage, HttpResponseMessage> RoutingResponder() => request =>
     {
         var path = request.RequestUri!.AbsolutePath;
