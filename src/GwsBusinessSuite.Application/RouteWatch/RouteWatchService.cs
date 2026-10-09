@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using GwsBusinessSuite.Application.CameraIntel;
 using GwsBusinessSuite.Application.Geocoding;
+using GwsBusinessSuite.Application.MessageSigns;
 using GwsBusinessSuite.Application.TrafficIncidents;
 using GwsBusinessSuite.Application.Weather;
 using Microsoft.Extensions.Logging;
@@ -13,6 +14,8 @@ public sealed record RoutePoint(double Latitude, double Longitude);
 public sealed record RouteCamera(CameraFeed Camera, double MilesAlong, double MilesOff);
 
 public sealed record RouteIncident(TrafficIncident Incident, double MilesAlong, double MilesOff);
+
+public sealed record RouteSign(MessageSign Sign, double MilesAlong, double MilesOff);
 
 // One leg between consecutive stops of a trip.
 public sealed record RouteLeg(string From, string To, double DistanceMiles, double DurationMinutes, double StartsAtMile);
@@ -31,7 +34,8 @@ public sealed record RouteWatchResult(
     IReadOnlyList<WeatherAlert> Alerts,
     string? Error = null,
     IReadOnlyList<RouteLeg>? Legs = null,
-    IReadOnlyList<RouteStop>? Stops = null)
+    IReadOnlyList<RouteStop>? Stops = null,
+    IReadOnlyList<RouteSign>? Signs = null)
 {
     public static RouteWatchResult Failed(string from, string to, string error) => new(from, to, 0, 0, [], [], [], [], error);
 }
@@ -46,11 +50,14 @@ public sealed class RouteWatchService(
     CameraDirectoryService cameras,
     TrafficIncidentDirectoryService incidents,
     INwsAlertsService alerts,
-    ILogger<RouteWatchService> logger)
+    ILogger<RouteWatchService> logger,
+    MessageSignDirectoryService? signs = null)
 {
     private const string OsrmRouteUrl = "https://router.project-osrm.org/route/v1/driving/";
     public const double CameraCorridorMiles = 0.5;
     public const double IncidentCorridorMiles = 1.0;
+    // Signs stand at the roadside; this keeps those on the route's own road, not a parallel one.
+    public const double SignCorridorMiles = 0.3;
     public const int MaxCameras = 60;
     private const double MaxRouteMiles = 1200;
 
@@ -104,7 +111,8 @@ public sealed class RouteWatchService(
         var camerasTask = cameras.GetCamerasInBoundingBoxAsync(bbox, cancellationToken);
         var incidentsTask = incidents.GetIncidentsInBoundingBoxAsync(bbox, cancellationToken);
         var alertsTask = alerts.GetActiveAlertsAsync(bbox, cancellationToken);
-        await Task.WhenAll(camerasTask, incidentsTask, alertsTask);
+        var signsTask = signs?.GetSignsInBoundingBoxAsync(bbox, cancellationToken) ?? Task.FromResult<IReadOnlyList<MessageSign>>([]);
+        await Task.WhenAll(camerasTask, incidentsTask, alertsTask, signsTask);
 
         var index = new RouteIndex(r.Path);
         var routeCameras = camerasTask.Result
@@ -120,9 +128,15 @@ public sealed class RouteWatchService(
             .Select(x => new RouteIncident(x.Incident, x.Hit.MilesAlong, x.Hit.MilesOff))
             .ToList();
         var routeAlerts = alertsTask.Result.Where(a => TouchesRoute(a, r.Path)).ToList();
+        var routeSigns = signsTask.Result
+            .Select(sign => (Sign: sign, Hit: index.Locate(sign.Latitude, sign.Longitude)))
+            .Where(x => x.Hit.MilesOff <= SignCorridorMiles)
+            .OrderBy(x => x.Hit.MilesAlong)
+            .Select(x => new RouteSign(x.Sign, x.Hit.MilesAlong, x.Hit.MilesOff))
+            .ToList();
 
         return new RouteWatchResult(from, to, miles, r.Seconds / 60, r.Path,
-            ThinAlongRoute(routeCameras, MaxCameras), routeIncidents, routeAlerts, null, legs, routeStops);
+            ThinAlongRoute(routeCameras, MaxCameras), routeIncidents, routeAlerts, null, legs, routeStops, routeSigns);
     }
 
     // "32.46, -83.61" (from the map picker, or typed) is used as-is; anything else is geocoded.

@@ -18,7 +18,8 @@ public sealed record OverwatchAreaView(Guid Id, string Name, BoundingBox Bounds,
 public sealed record OverwatchAreaAlertView(Guid Id, Guid AreaId, string Title, string Message, bool IsRead, DateTimeOffset CreatedAt);
 
 // One thing worth telling someone about, with a stable key so it's only reported once.
-public sealed record OverwatchAreaItem(string Key, string Text, string Severity);
+// Latitude/Longitude are set for incidents, which can start an incident capture.
+public sealed record OverwatchAreaItem(string Key, string Text, string Severity, double? Latitude = null, double? Longitude = null);
 
 // Raised when a check writes an alert, so an open notification bell updates without a reload.
 public sealed class OverwatchAreaNotifier
@@ -34,11 +35,15 @@ public sealed class OverwatchAreaService(
     HazardLayerService hazards,
     OverwatchAreaNotifier notifier,
     TimeProvider timeProvider,
-    ILogger<OverwatchAreaService> logger)
+    ILogger<OverwatchAreaService> logger,
+    IncidentCaptureService? captures = null)
 {
     public const int MaxAreasPerUser = 20;
     private const int MaxSeenKeys = 2000;
     private const int MaxItemsInMessage = 4;
+    // New incidents per check that start a camera capture - a pile-up of closures in one sweep
+    // shouldn't fan out into dozens of captures.
+    private const int MaxCapturesPerCheck = 3;
     // Roadwork and events are routine and plentiful (thousands nationally); an area alert is for
     // things that change a plan.
     private static readonly HashSet<string> AlertingCategories =
@@ -168,17 +173,38 @@ public sealed class OverwatchAreaService(
         // flood of "new" items that were happening before it was saved.
         if (isBaseline || fresh.Count == 0) return null;
 
+        var captured = await StartCapturesAsync(area, fresh, ct);
         var alert = new OverwatchAreaAlert
         {
             Username = area.Username,
             AreaId = area.Id,
             Title = $"Overwatch: {area.Name}",
-            Message = Summary(fresh),
+            Message = Summary(fresh) + (captured > 0 ? $" - recording {captured} camera{(captured == 1 ? "" : "s")} nearby (AREAS > CAPTURES)" : string.Empty),
             CreatedAt = timeProvider.GetUtcNow(),
             CreatedBy = "overwatch"
         };
         db.OverwatchAreaAlerts.Add(alert);
         return alert;
+    }
+
+    // Returns how many cameras started recording across the new incidents.
+    private async Task<int> StartCapturesAsync(OverwatchWatchArea area, IReadOnlyList<OverwatchAreaItem> fresh, CancellationToken ct)
+    {
+        if (captures is null) return 0;
+        var cameraCount = 0;
+        foreach (var item in fresh.Where(i => i.Latitude is not null && i.Longitude is not null).Take(MaxCapturesPerCheck))
+        {
+            try
+            {
+                var capture = await captures.StartAsync(area.Username, area.Id, area.Name, item.Text, item.Latitude!.Value, item.Longitude!.Value, ct);
+                cameraCount += capture?.Cameras.Count ?? 0;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Incident capture couldn't start for {Item} in area {Area}", item.Key, area.Id);
+            }
+        }
+        return cameraCount;
     }
 
     public static string Summary(IReadOnlyList<OverwatchAreaItem> fresh)
@@ -208,7 +234,7 @@ public sealed class OverwatchAreaService(
             .Where(i => PassesSeverity(i.SeverityLevel, minSeverity)
                         || (i.SeverityLevel == IncidentSeverityLevels.Unknown && minSeverity != OverwatchAreaSeverity.Major))
             .Select(i => new OverwatchAreaItem($"incident:{i.Id}",
-                $"{IncidentCategories.SingularLabel(i.Category)} on {i.RoadwayName}", i.SeverityLevel));
+                $"{IncidentCategories.SingularLabel(i.Category)} on {i.RoadwayName}", i.SeverityLevel, i.Latitude, i.Longitude));
 
     // NWS severities: Extreme/Severe -> major, Moderate -> moderate, Minor/Unknown -> minor.
     public static IEnumerable<OverwatchAreaItem> WeatherItems(IEnumerable<WeatherAlert> list, string minSeverity) =>

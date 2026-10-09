@@ -232,6 +232,12 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                 window.tacticalGlobe.setRadarTimeline({ nowIndex: 0, modelRunUtc: null, frames: [
                   { validUtc: new Date().toISOString(), kind: 'Observed', tileUrlTemplate: 'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/nexrad-n0q-900913/{z}/{x}/{y}.png' }] });
                 window.tacticalGlobe.setHourlyForecast([]);
+                window.tacticalGlobe.setMessageSigns([{ id: 's1', name: 'Test sign', lat: 34.05, lon: -118.25, road: 'I-405', direction: 'North',
+                  pages: [['CRASH AHEAD', 'LEFT LANE CLOSED']], sourceName: 'Caltrans', sourceAttributionUrl: 'https://quickmap.dot.ca.gov' }]);
+                window.tacticalGlobe.clearMessageSigns();
+                window.tacticalGlobe.setRoute([[-83.9, 32.84], [-83.4, 32.84]], 'tg-viewport', []);
+                window.tacticalGlobe.setRouteHighlights('tg-viewport', [{ kind: 'SunGlare', path: [[-83.9, 32.84], [-83.6, 32.84]] }, { kind: 'Dark', path: [[-83.6, 32.84], [-83.4, 32.84]] }]);
+                window.tacticalGlobe.clearRoute('tg-viewport');
                 window.tacticalGlobe.setWeatherAlerts([{
                   id: 'alert-1', eventName: 'Severe Thunderstorm Warning', severity: 'Severe', areaDescription: 'Test Area',
                   rings: [[[-122.5, 47.5], [-122.0, 47.5], [-122.0, 48.0], [-122.5, 48.0], [-122.5, 47.5]]]

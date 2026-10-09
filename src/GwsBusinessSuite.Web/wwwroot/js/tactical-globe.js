@@ -231,6 +231,8 @@ window.tacticalGlobe = (function () {
         // rarely more than a few hundred in view and each is worth seeing individually.
         const hazardDataSource = new Cesium.CustomDataSource('tg-hazards');
         await viewer.dataSources.add(hazardDataSource);
+        const signDataSource = new Cesium.CustomDataSource('tg-signs');
+        await viewer.dataSources.add(signDataSource);
 
         const cameraEntities = new Map();
         const alertEntities = new Map();
@@ -300,12 +302,14 @@ window.tacticalGlobe = (function () {
                 openIncidentPanel(entity._tacticalGlobeIncident);
             } else if (entity && entity._tacticalGlobeHazard) {
                 openHazardPanel(entity._tacticalGlobeHazard);
+            } else if (entity && entity._tacticalGlobeSign) {
+                openSignPanel(entity._tacticalGlobeSign);
             }
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
         viewers.set(containerId, {
             containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities,
-            hazardDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null
+            hazardDataSource, signDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null
         });
 
         // Fire once for the initial view so cameras appear without requiring a drag/zoom first.
@@ -1146,6 +1150,59 @@ window.tacticalGlobe = (function () {
         if (entry) entry.hazardDataSource.entities.removeAll();
     }
 
+    // signs: [{ id, name, lat, lon, road, direction, pages: [[line, ...], ...], sourceName,
+    // sourceAttributionUrl }] - highway message signs currently showing a message.
+    function setMessageSigns(signs, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.signDataSource.entities.suspendEvents();
+        entry.signDataSource.entities.removeAll();
+        (signs || []).forEach(function (sign) {
+            const entity = entry.signDataSource.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(Number(sign.lon), Number(sign.lat)),
+                billboard: {
+                    image: pinBillboardImage,
+                    width: 12,
+                    height: 12,
+                    color: Cesium.Color.fromCssColorString('#ffb000'),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                }
+            });
+            entity._tacticalGlobeSign = sign;
+        });
+        entry.signDataSource.entities.resumeEvents();
+    }
+
+    function clearMessageSigns(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) entry.signDataSource.entities.removeAll();
+    }
+
+    // Shows the sign's pages the way the sign itself does - amber, centered, line for line.
+    function openSignPanel(sign) {
+        closeIncidentPanel();
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel';
+        const where = [sign.road, sign.direction].filter(Boolean).join(' ');
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header">' +
+            '<span>' + escapeHtml(sign.name) + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
+            '</div>' +
+            '<div class="tg-stream-panel-body">' +
+            (sign.pages || []).map(function (page) {
+                return '<div class="tg-sign-face">' + (page || []).map(function (line) {
+                    return '<div>' + escapeHtml(line) + '</div>';
+                }).join('') + '</div>';
+            }).join('') +
+            (where ? '<div class="tg-incident-type">' + escapeHtml(where.toUpperCase()) + '</div>' : '') +
+            '<div class="tg-stream-panel-meta">SOURCE: <a href="' + escapeHtml(sign.sourceAttributionUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(sign.sourceName) + '</a></div>' +
+            '</div>';
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        if (!openAsModal(panel, closeIncidentPanel)) return;
+        incidentPanel = panel;
+    }
+
     const hazardKindLabels = { earthquake: 'EARTHQUAKE', wildfire: 'WILDFIRE', river: 'RIVER FLOODING' };
 
     // Reuses the incident window (same chrome, same single-instance handling).
@@ -1221,9 +1278,37 @@ window.tacticalGlobe = (function () {
         entry.viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(west - padLon, south - padLat, east + padLon, north + padLat) });
     }
 
+    // highlights: [{ kind: 'SunGlare'|'Dark', path: [[lon, lat], ...] }] - stretches of the
+    // current route drawn over its line (glare amber, dark violet); replaced on every call.
+    function setRouteHighlights(containerId, highlights) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        clearRouteHighlights(entry);
+        entry.routeHighlightEntities = (highlights || [])
+            .filter(function (h) { return h && Array.isArray(h.path) && h.path.length >= 2; })
+            .map(function (h) {
+                const flat = [];
+                h.path.forEach(function (p) { flat.push(Number(p[0]), Number(p[1])); });
+                return entry.viewer.entities.add({
+                    polyline: {
+                        positions: Cesium.Cartesian3.fromDegreesArray(flat),
+                        width: 8,
+                        material: Cesium.Color.fromCssColorString(h.kind === 'Dark' ? '#8b5cf6' : '#ffb000').withAlpha(0.9),
+                        clampToGround: true
+                    }
+                });
+            });
+    }
+
+    function clearRouteHighlights(entry) {
+        (entry.routeHighlightEntities || []).forEach(function (e) { entry.viewer.entities.remove(e); });
+        entry.routeHighlightEntities = [];
+    }
+
     function clearRoute(containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
+        clearRouteHighlights(entry);
         if (entry.routeEntity) entry.viewer.entities.remove(entry.routeEntity);
         (entry.routeStopEntities || []).forEach(function (e) { entry.viewer.entities.remove(e); });
         entry.routeEntity = null;
@@ -1977,7 +2062,10 @@ window.tacticalGlobe = (function () {
         clearTrafficIncidents: clearTrafficIncidents,
         setCoverageMarkers: setCoverageMarkers,
         setHazards: setHazards,
+        setMessageSigns: setMessageSigns,
+        clearMessageSigns: clearMessageSigns,
         setRoute: setRoute,
+        setRouteHighlights: setRouteHighlights,
         startPickPoint: startPickPoint,
         cancelPickPoint: cancelPickPoint,
         openTimelapse: openTimelapse,

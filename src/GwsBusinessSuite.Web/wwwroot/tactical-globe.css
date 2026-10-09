@@ -592,3 +592,44 @@
     .tg-radar-btn, .tg-radar-slider { min-height: 44px; }
     .tg-radar-active .tg-weather-panel { bottom: 9.6rem; }
 }
+
+/* Route watch: departure time and the sun glare / darkness stretches it drives
+   (DrivingLightAnalyzer). Colors match the stretches drawn over the route on the globe. */
+.tg-route-depart {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.3rem 0.5rem;
+    margin: 0.3rem 0;
+    font-size: 0.65rem;
+}
+
+.tg-route-depart small { opacity: 0.7; }
+
+.tg-route-depart input { min-width: 0; flex: 1 1 11rem; color-scheme: dark; }
+
+.tg-route-glare { border-left: 3px solid #ffb000; }
+.tg-route-dark { border-left: 3px solid #8b5cf6; }
+
+@media (pointer: coarse) {
+    .tg-route-depart input { min-height: 44px; }
+}
+
+/* A highway message sign's face (openSignPanel): amber dot-matrix style, one block per page. */
+.tg-sign-face {
+    margin: 0 0 0.5rem;
+    padding: 0.5rem 0.6rem;
+    background: #111;
+    border: 2px solid #333;
+    color: #ffb000;
+    font-family: "Share Tech Mono", ui-monospace, monospace;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    line-height: 1.35;
+    text-align: center;
+    text-transform: uppercase;
+}
+
+.tg-route-sign { border-left: 3px solid #ffb000; }

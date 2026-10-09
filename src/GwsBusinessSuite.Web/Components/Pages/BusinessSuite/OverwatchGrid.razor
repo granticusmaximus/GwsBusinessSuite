@@ -15,9 +15,11 @@
 @inject GwsBusinessSuite.Infrastructure.Services.CameraIncidentReportService CameraIncidentReportService
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaService OverwatchAreaService
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchTripService OverwatchTripService
+@inject GwsBusinessSuite.Infrastructure.Services.IncidentCaptureService IncidentCaptureService
 @inject INwsAlertsService NwsAlertsService
 @inject INwsForecastService NwsForecastService
 @inject IRadarTimelineService RadarTimelineService
+@inject GwsBusinessSuite.Application.MessageSigns.MessageSignDirectoryService MessageSignDirectoryService
 @inject TrafficIncidentDirectoryService TrafficIncidentDirectoryService
 @inject IGeocodingService GeocodingService
 @inject ICameraFavoritesService CameraFavoritesService
@@ -114,6 +116,10 @@
                         title="Earthquakes (USGS), active wildfires (NIFC) and flooding river gauges (NOAA)" @onclick="ToggleHazardsAsync">
                     HAZARDS [@(_hazardsOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="signs" class="tg-toggle @(_signsOn ? "tg-toggle-on" : "")"
+                        title="What highway message signs say right now (Caltrans, Montana)" @onclick="ToggleSignsAsync">
+                    SIGNS [@(_signsOn ? "ON" : "OFF")]
+                </button>
                 <button type="button" data-tg-toggle="healthy" class="tg-toggle @(_hideUnhealthy ? "tg-toggle-on" : "")"
                         title="Hide cameras found frozen, stale or offline (checked when opened, and every 10 minutes for favorites)" @onclick="ToggleHideUnhealthyAsync">
                     HEALTHY ONLY [@(_hideUnhealthy ? "ON" : "OFF")]
@@ -182,7 +188,7 @@
             }
             @if (_areas.Count == 0)
             {
-                <div class="tg-favorites-empty">Frame an area on the globe, name it, and Overwatch checks it every 10 minutes - new crashes, closures, severe weather and hazards show up in the notification bell.</div>
+                <div class="tg-favorites-empty">Frame an area on the globe, name it, and Overwatch checks it every 10 minutes - new crashes, closures, severe weather and hazards show up in the notification bell, and the nearest cameras to a new crash or closure start recording (CAPTURES).</div>
             }
             else
             {
@@ -195,6 +201,28 @@
                             <span class="tg-area-actions">
                                 <button type="button" @onclick="() => GoToAreaAsync(area)">GO</button>
                                 <button type="button" aria-label="@($"Stop watching {area.Name}")" @onclick="() => RemoveAreaAsync(area)">X</button>
+                            </span>
+                        </li>
+                    }
+                </ul>
+            }
+            @if (_captures.Count > 0)
+            {
+                <div class="tg-route-subheader">CAPTURES <small>(cameras recorded around new incidents)</small></div>
+                <ul class="tg-coverage-list">
+                    @foreach (var capture in _captures)
+                    {
+                        <li class="tg-coverage-item tg-capture-item">
+                            <span>@capture.Title
+                                <small>@capture.AreaName · @capture.StartedAt.ToLocalTime().ToString("MMM d, h:mm tt", System.Globalization.CultureInfo.InvariantCulture)@(capture.Until > DateTimeOffset.UtcNow ? " · RECORDING" : "")</small></span>
+                            <span class="tg-area-actions">
+                                @foreach (var camera in capture.Cameras)
+                                {
+                                    var frameCount = CaptureFrameCount(camera);
+                                    <button type="button" disabled="@(frameCount == 0)" title="@camera.Name (@camera.MilesAway.ToString("0.0") mi away)"
+                                            @onclick="() => OpenCaptureCameraAsync(capture, camera)">CAM @(capture.Cameras.IndexOf(camera) + 1) (@frameCount)</button>
+                                }
+                                <button type="button" aria-label="@($"Delete capture {capture.Title}")" @onclick="() => DeleteCapture(capture)">X</button>
                             </span>
                         </li>
                     }
@@ -222,6 +250,10 @@
                         }
                     </div>
                 }
+                <label class="tg-route-depart">
+                    <span>LEAVE AT <small>(blank = now)</small></span>
+                    <input type="datetime-local" aria-label="Departure time" value="@_departureLocal" @onchange="OnDepartureChangedAsync" />
+                </label>
                 <div class="tg-route-row">
                     <button type="button" disabled="@(_routeStops.Count >= GwsBusinessSuite.Application.RouteWatch.RouteWatchService.MaxStops)" @onclick="AddStop">+ STOP</button>
                     <button type="submit" disabled="@(_routeBusy || _routeStops.Count(s => !string.IsNullOrWhiteSpace(s)) < 2)">
@@ -279,9 +311,23 @@
                                 </li>
                             }
                         }
+                        @foreach (var stretch in _drivingLight)
+                        {
+                            <li class="tg-coverage-item @(stretch.Kind == GwsBusinessSuite.Application.RouteWatch.DrivingLightKind.Dark ? "tg-route-dark" : "tg-route-glare")">
+                                <span>MI @stretch.StartMile.ToString("0")-@stretch.EndMile.ToString("0") · @(stretch.Kind == GwsBusinessSuite.Application.RouteWatch.DrivingLightKind.Dark ? "DARK" : "SUN GLARE")
+                                    <small>@FormatClock(stretch.StartUtc)-@FormatClock(stretch.EndUtc) · @stretch.Heading@(stretch.Kind == GwsBusinessSuite.Application.RouteWatch.DrivingLightKind.SunGlare ? " · low sun ahead" : " · headlights")</small></span>
+                            </li>
+                        }
                         @foreach (var alert in route.Alerts)
                         {
                             <li class="tg-coverage-item tg-route-alert"><span>ALERT · @alert.Event<small>@alert.AreaDescription</small></span></li>
+                        }
+                        @foreach (var item in route.Signs ?? [])
+                        {
+                            <li class="tg-coverage-item tg-route-sign">
+                                <span>MI @item.MilesAlong.ToString("0") · SIGN@(item.Sign.Direction is { } signDirection ? " · " + signDirection.ToUpperInvariant() : "")
+                                    <small>@item.Sign.Text</small></span>
+                            </li>
                         }
                         @foreach (var item in route.Incidents)
                         {
@@ -412,6 +458,7 @@
     private bool _alertsOn;
     private bool _hideUnhealthy;
     private bool _hazardsOn;
+    private bool _signsOn;
     private string? _hazardSummary;
     private int _camerasInViewTotal;
     private bool _incidentsOn;
@@ -472,6 +519,7 @@
                 linkedArea.Bounds.West, linkedArea.Bounds.South, linkedArea.Bounds.East, linkedArea.Bounds.North);
             _areasOpen = true;
             _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
+            _captures = IncidentCaptureService.ListForUser(_username).ToList();
             StateHasChanged();
         }
 
@@ -698,7 +746,8 @@
         var weatherTask = NwsForecastService.GetSnapshotAsync(centerLatitude, centerLongitude);
         var hazardsTask = _hazardsOn ? PushHazardsAsync() : Task.CompletedTask;
         var radarTask = _radarOn ? PushRadarAsync(centerLatitude, centerLongitude) : Task.CompletedTask;
-        await Task.WhenAll(camerasTask, alertsTask, incidentsTask, weatherTask, hazardsTask, radarTask);
+        var signsTask = _signsOn ? PushSignsAsync() : Task.CompletedTask;
+        await Task.WhenAll(camerasTask, alertsTask, incidentsTask, weatherTask, hazardsTask, radarTask, signsTask);
 
         _visibleCameras = camerasTask.Result.Cameras.ToList();
         _camerasInViewTotal = camerasTask.Result.TotalInView;
@@ -884,7 +933,36 @@
     {
         _areasOpen = !_areasOpen;
         _areaMessage = null;
-        if (_areasOpen) _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
+        if (_areasOpen)
+        {
+            _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
+            _captures = IncidentCaptureService.ListForUser(_username).ToList();
+        }
+    }
+
+    private List<GwsBusinessSuite.Infrastructure.Services.IncidentCapture> _captures = new();
+
+    private int CaptureFrameCount(GwsBusinessSuite.Infrastructure.Services.IncidentCaptureCamera camera) =>
+        CameraTimelapseStore.ListFrames(camera.FrameKey).Count;
+
+    private async Task OpenCaptureCameraAsync(GwsBusinessSuite.Infrastructure.Services.IncidentCapture capture,
+        GwsBusinessSuite.Infrastructure.Services.IncidentCaptureCamera camera)
+    {
+        var frames = CameraTimelapseStore.ListFrames(camera.FrameKey)
+            .Select(f => new
+            {
+                url = $"/admin/api/overwatch/timelapse/{Uri.EscapeDataString(camera.FrameKey)}/{f.FileName}",
+                label = (f.CapturedAt < capture.StartedAt ? "BEFORE · " : "") +
+                        f.CapturedAt.ToLocalTime().ToString("MMM d, h:mm tt", System.Globalization.CultureInfo.InvariantCulture)
+            })
+            .ToList();
+        await JS.InvokeVoidAsync("tacticalGlobe.openTimelapse", $"{capture.Title} - {camera.Name}", frames);
+    }
+
+    private void DeleteCapture(GwsBusinessSuite.Infrastructure.Services.IncidentCapture capture)
+    {
+        IncidentCaptureService.Delete(_username, capture.Id);
+        _captures.RemoveAll(c => c.Id == capture.Id);
     }
 
     private async Task AddAreaAsync()
@@ -933,6 +1011,54 @@
     private string? _tripMessage;
     private List<GwsBusinessSuite.Infrastructure.Services.OverwatchTripView> _trips = new();
     private GwsBusinessSuite.Application.RouteWatch.RouteWatchResult? _route;
+    // "datetime-local" value (yyyy-MM-ddTHH:mm) in this server's local time zone - the same zone
+    // every other admin time on this page is shown in. Blank means "leaving now".
+    private string _departureLocal = string.Empty;
+    private IReadOnlyList<GwsBusinessSuite.Application.RouteWatch.DrivingLightStretch> _drivingLight = [];
+
+    private DateTimeOffset DepartureUtc()
+    {
+        if (DateTime.TryParse(_departureLocal, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var local))
+        {
+            var unspecified = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
+            return new DateTimeOffset(unspecified, TimeZoneInfo.Local.GetUtcOffset(unspecified)).ToUniversalTime();
+        }
+        return DateTimeOffset.UtcNow;
+    }
+
+    private static string FormatClock(DateTimeOffset utc) => utc.ToLocalTime().ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+
+    private async Task OnDepartureChangedAsync(ChangeEventArgs e)
+    {
+        _departureLocal = e.Value?.ToString() ?? string.Empty;
+        await UpdateDrivingLightAsync();
+    }
+
+    // Sun glare and darkness for the current route at the chosen departure time - pure maths on
+    // the route already in hand, so changing the time never re-routes.
+    private async Task UpdateDrivingLightAsync()
+    {
+        if (_route is not { Error: null } route)
+        {
+            _drivingLight = [];
+            return;
+        }
+        _drivingLight = GwsBusinessSuite.Application.RouteWatch.DrivingLightAnalyzer.Analyze(
+            route.Path, route.Legs, route.DurationMinutes, DepartureUtc());
+        await JS.InvokeVoidAsync("tacticalGlobe.setRouteHighlights", "tg-viewport", _drivingLight.Select(stretch => new
+        {
+            kind = stretch.Kind.ToString(),
+            path = ThinPath(stretch.Path, 400).Select(p => new[] { p.Longitude, p.Latitude })
+        }).ToList());
+    }
+
+    private static IEnumerable<GwsBusinessSuite.Application.RouteWatch.RoutePoint> ThinPath(
+        IReadOnlyList<GwsBusinessSuite.Application.RouteWatch.RoutePoint> path, int max)
+    {
+        if (path.Count <= max) return path;
+        var step = (path.Count - 1) / (double)(max - 1);
+        return Enumerable.Range(0, max).Select(i => path[(int)Math.Round(i * step)]);
+    }
 
     private static string StopLabel(int index) => index == 0 ? "start" : $"stop {index + 1}";
 
@@ -952,6 +1078,7 @@
             if (_route is not null)
             {
                 _route = null;
+                _drivingLight = [];
                 await JS.InvokeVoidAsync("tacticalGlobe.clearRoute");
             }
         }
@@ -1009,6 +1136,7 @@
                     _route.Path.Select(p => new[] { p.Longitude, p.Latitude }).ToList(), "tg-viewport",
                     (_route.Stops ?? []).Select(st => new { lat = st.Latitude, lon = st.Longitude }).ToList());
             }
+            await UpdateDrivingLightAsync();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -1058,6 +1186,43 @@
 
     private static string FormatDuration(double minutes) =>
         minutes >= 60 ? $"{(int)(minutes / 60)} H {(int)(minutes % 60)} MIN" : $"{(int)minutes} MIN";
+
+    private async Task ToggleSignsAsync()
+    {
+        _signsOn = !_signsOn;
+        if (_signsOn)
+        {
+            await PushSignsAsync();
+        }
+        else
+        {
+            await JS.InvokeVoidAsync("tacticalGlobe.clearMessageSigns");
+        }
+    }
+
+    private async Task PushSignsAsync()
+    {
+        try
+        {
+            var signs = await MessageSignDirectoryService.GetSignsInBoundingBoxAsync(_lastBbox);
+            await JS.InvokeVoidAsync("tacticalGlobe.setMessageSigns", signs.Select(sign => new
+            {
+                id = sign.Id,
+                name = sign.Name,
+                lat = sign.Latitude,
+                lon = sign.Longitude,
+                road = sign.Road,
+                direction = sign.Direction,
+                pages = sign.Pages,
+                sourceName = sign.SourceName,
+                sourceAttributionUrl = sign.SourceAttributionUrl
+            }).ToList());
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Message signs failed to load");
+        }
+    }
 
     private async Task ToggleHazardsAsync()
     {

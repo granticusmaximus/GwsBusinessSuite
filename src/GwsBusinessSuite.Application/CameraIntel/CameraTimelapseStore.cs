@@ -58,6 +58,41 @@ public sealed partial class CameraTimelapseStore(string rootPath, ILogger<Camera
             .ToList();
     }
 
+    // Copies a camera's frames captured since `since` to another key (an incident capture's
+    // "before" frames come from the camera's own time-lapse, when it's a favorite).
+    public int CopyFramesSince(string fromKey, string toKey, DateTimeOffset since)
+    {
+        var copied = 0;
+        try
+        {
+            var target = Path.Combine(rootPath, FolderFor(toKey));
+            foreach (var frame in ListFrames(fromKey).Where(f => f.CapturedAt >= since))
+            {
+                Directory.CreateDirectory(target);
+                File.Copy(Path.Combine(rootPath, FolderFor(fromKey), frame.FileName), Path.Combine(target, frame.FileName), overwrite: true);
+                copied++;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Time-lapse: couldn't copy frames from {From} to {To}", fromKey, toKey);
+        }
+        return copied;
+    }
+
+    public void DeleteFrames(string key)
+    {
+        try
+        {
+            var folder = Path.Combine(rootPath, FolderFor(key));
+            if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Time-lapse: couldn't delete frames for {Key}", key);
+        }
+    }
+
     // Null unless the name is exactly a frame file name - the endpoint passes user input here.
     public string? FramePath(string cameraId, string fileName)
     {

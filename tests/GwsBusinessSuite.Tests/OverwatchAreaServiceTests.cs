@@ -54,6 +54,51 @@ public sealed class OverwatchAreaServiceTests
     }
 
     [Fact]
+    public async Task NewCrash_ShouldStartRecordingTheNearestStillCamera_ForAnHour()
+    {
+        var incidents = new List<TrafficIncident>();
+        var clock = new Clock(new DateTimeOffset(2026, 10, 9, 14, 0, 0, TimeSpan.Zero));
+        var cameras = new[]
+        {
+            new CameraFeed("near", "I-75 @ Exit 160", 32.801, -83.601, "https://cams.test/near.jpg", CameraStreamKind.Snapshot, "GDOT", "https://511ga.org"),
+            new CameraFeed("video", "I-75 video", 32.8005, -83.6005, "https://cams.test/v.m3u8", CameraStreamKind.Hls, "GDOT", "https://511ga.org"),
+            new CameraFeed("far", "Far away", 32.95, -83.75, "https://cams.test/far.jpg", CameraStreamKind.Snapshot, "GDOT", "https://511ga.org")
+        };
+        var root = Path.Combine(Path.GetTempPath(), "gws-capture-test-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            await using var f = await Fixture.CreateAsync(incidents, cameras, root, clock);
+            await f.Service.AddAreaAsync("grant", "Macon", Macon, true, false, false, "moderate");
+            await f.Service.CheckAllAsync();
+
+            incidents.Add(Incident("crash", "accidentsAndIncidents"));
+            await f.Service.CheckAllAsync();
+
+            (await f.Service.ListAlertsAsync("grant")).Single().Message.Should().EndWith("- recording 1 camera nearby (AREAS > CAPTURES)");
+            var capture = f.Captures!.ListForUser("grant").Should().ContainSingle().Subject;
+            capture.Title.Should().Be("Crash on I-75");
+            capture.Cameras.Should().ContainSingle().Which.CameraId.Should().Be("near",
+                "only still-image cameras within a mile are recorded");
+            f.Frames!.ListFrames(capture.Cameras[0].FrameKey).Should().HaveCount(1, "a first frame is taken right away");
+
+            clock.Advance(TimeSpan.FromMinutes(5));
+            (await f.Captures.SweepAsync()).Should().Be(1);
+            f.Frames.ListFrames(capture.Cameras[0].FrameKey).Should().HaveCount(2);
+
+            clock.Advance(TimeSpan.FromHours(1));
+            (await f.Captures.SweepAsync()).Should().Be(0, "a capture records for an hour");
+
+            f.Captures.Delete("grant", capture.Id);
+            f.Captures.ListForUser("grant").Should().BeEmpty();
+            f.Frames.ListFrames(capture.Cameras[0].FrameKey).Should().BeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task AddArea_ShouldRefuseAViewTooLargeToWatch()
     {
         await using var f = await Fixture.CreateAsync([]);
@@ -100,7 +145,11 @@ public sealed class OverwatchAreaServiceTests
         public OverwatchAreaService Service { get; private set; } = null!;
         public OverwatchAreaNotifier Notifier { get; } = new();
 
-        public static async Task<Fixture> CreateAsync(List<TrafficIncident> incidents)
+        public IncidentCaptureService? Captures { get; private set; }
+        public CameraTimelapseStore? Frames { get; private set; }
+
+        public static async Task<Fixture> CreateAsync(List<TrafficIncident> incidents, IReadOnlyList<CameraFeed>? cameras = null,
+            string? captureRoot = null, TimeProvider? clock = null)
         {
             var f = new Fixture { _connection = new SqliteConnection("Data Source=:memory:") };
             await f._connection.OpenAsync();
@@ -108,8 +157,20 @@ public sealed class OverwatchAreaServiceTests
             await using (var db = new ApplicationDbContext(options)) await db.Database.EnsureCreatedAsync();
             var directory = new TrafficIncidentDirectoryService([new ListProvider(incidents)], NullLogger<TrafficIncidentDirectoryService>.Instance);
             var hazards = new HazardLayerService(new HttpClient(new EmptyHandler()), new MemoryCache(new MemoryCacheOptions()), NullLogger<HazardLayerService>.Instance);
-            f.Service = new OverwatchAreaService(new Factory(options), directory, new NoAlerts(), hazards, f.Notifier, TimeProvider.System,
-                NullLogger<OverwatchAreaService>.Instance);
+            var time = clock ?? TimeProvider.System;
+            if (cameras is not null && captureRoot is not null)
+            {
+                f.Frames = new CameraTimelapseStore(captureRoot, NullLogger<CameraTimelapseStore>.Instance);
+                f.Captures = new IncidentCaptureService(
+                    new CameraDirectoryService([new CameraListProvider(cameras)], NullLogger<CameraDirectoryService>.Instance),
+                    new CameraHealthService(new HttpClient(new ChangingJpegHandler()), new MemoryCache(new MemoryCacheOptions()), time, NullLogger<CameraHealthService>.Instance),
+                    f.Frames,
+                    new IncidentCaptureManifestStore(captureRoot, NullLogger<IncidentCaptureManifestStore>.Instance),
+                    time,
+                    NullLogger<IncidentCaptureService>.Instance);
+            }
+            f.Service = new OverwatchAreaService(new Factory(options), directory, new NoAlerts(), hazards, f.Notifier, time,
+                NullLogger<OverwatchAreaService>.Instance, f.Captures);
             return f;
         }
 
@@ -121,6 +182,35 @@ public sealed class OverwatchAreaServiceTests
         public string SourceName => "Test";
         public Task<IReadOnlyList<TrafficIncident>> GetIncidentsAsync(BoundingBox bbox, CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<TrafficIncident>>(incidents.ToList());
+    }
+
+    private sealed class CameraListProvider(IReadOnlyList<CameraFeed> cameras) : ICameraFeedProvider
+    {
+        public string SourceName => "Test";
+        public Task<IReadOnlyList<CameraFeed>> GetCamerasAsync(BoundingBox bbox, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<CameraFeed>>(cameras.Where(c => bbox.Contains(c.Latitude, c.Longitude)).ToList());
+    }
+
+    // A camera whose picture changes on every fetch, so every check yields a new frame.
+    private sealed class ChangingJpegHandler : HttpMessageHandler
+    {
+        private int _count;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var bytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0 };
+            bytes[^1] = (byte)Interlocked.Increment(ref _count);
+            var response = new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
+            response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+            return Task.FromResult(response);
+        }
+    }
+
+    private sealed class Clock(DateTimeOffset now) : TimeProvider
+    {
+        private DateTimeOffset _now = now;
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan by) => _now += by;
     }
 
     private sealed class NoAlerts : INwsAlertsService

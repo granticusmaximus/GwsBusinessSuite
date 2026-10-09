@@ -37,6 +37,7 @@ using Microsoft.Extensions.Logging;
 using GwsBusinessSuite.Application.SshTerminal;
 using GwsBusinessSuite.Application.Users;
 using GwsBusinessSuite.Application.Weather;
+using GwsBusinessSuite.Application.MessageSigns;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
@@ -773,9 +774,29 @@ public static class DependencyInjection
             stateCode: "mt", sourceName: "511MT", sourceAttributionUrl: "https://www.511mt.net",
             coverage: new BoundingBox(North: 50.6, South: 44.0, East: -103.0, West: -116.8)));
 
+        // Highway message signs (Overwatch SIGNS layer + route watch), verified live 2026-10-09.
+        services.AddHttpClient<CaltransMessageSignProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://cwwp2.dot.ca.gov/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddScoped<IMessageSignProvider>(sp => sp.GetRequiredService<CaltransMessageSignProvider>());
+        services.AddScoped<IMessageSignProvider>(sp => new IterisMessageSignProvider(
+            sp.GetRequiredService<IHttpClientFactory>().CreateClient("iteris-atis"),
+            sp.GetRequiredService<IMemoryCache>(),
+            sp.GetRequiredService<ILogger<IterisMessageSignProvider>>(),
+            stateCode: "mt", sourceName: "511MT", sourceAttributionUrl: "https://www.511mt.net",
+            coverage: new BoundingBox(North: 49.1, South: 44.3, East: -104.0, West: -116.1)));
+        services.AddScoped<MessageSignDirectoryService>();
+
         services.AddSingleton<SourceStatusTracker>();
         // Overwatch watched areas: 10-minute checks -> notification bell.
         services.AddSingleton<OverwatchAreaNotifier>();
+        services.AddSingleton(sp => new IncidentCaptureManifestStore(
+            configuration["Overwatch:TimelapsePath"] ?? "/app/data/overwatch-timelapse",
+            sp.GetRequiredService<ILogger<IncidentCaptureManifestStore>>()));
+        services.AddScoped<IncidentCaptureService>();
+        services.AddHostedService<IncidentCaptureBackgroundService>();
         services.AddScoped<OverwatchAreaService>();
         services.AddScoped<OverwatchTripService>();
         services.AddHostedService<OverwatchAreaBackgroundService>();
