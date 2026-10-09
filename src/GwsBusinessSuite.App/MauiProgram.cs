@@ -9,6 +9,10 @@ public static class MauiProgram
 {
 	public static MauiApp CreateMauiApp()
 	{
+#if MACCATALYST
+		// Before any store below reads its file.
+		LegacyContainerData.CopyMissingIntoAppData();
+#endif
 		var builder = MauiApp.CreateBuilder();
 		builder
 			.UseMauiApp<App>()

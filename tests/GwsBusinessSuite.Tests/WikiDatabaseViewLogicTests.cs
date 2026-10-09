@@ -299,6 +299,28 @@ public sealed class WikiDatabaseViewLogicTests
     }
 
     [Fact]
+    public void GroupForBoard_OnAStatusProperty_ShouldOrderColumnsByStatusGroup()
+    {
+        var status = NewProperty(WikiDatabasePropertyTypes.Status);
+        // Stored out of workflow order - the board should still read To-do, In progress, Complete.
+        status.ConfigJson = WikiDatabasePropertyConfig.Serialize(
+        [
+            new WikiDatabasePropertyOption("done", "Done", "#0f0", WikiDatabaseStatusGroups.Complete),
+            new WikiDatabasePropertyOption("doing", "Doing", "#00f", WikiDatabaseStatusGroups.InProgress),
+            new WikiDatabasePropertyOption("backlog", "Backlog", "#ccc", WikiDatabaseStatusGroups.ToDo),
+            new WikiDatabasePropertyOption("next", "Next up", "#ccc", WikiDatabaseStatusGroups.ToDo)
+        ]);
+        var rows = new[] { RowWithText(status.Id, "doing"), RowWithText(status.Id, "backlog") };
+
+        var groups = WikiDatabaseViewLogic.GroupForBoard(rows, status);
+
+        groups.Select(g => g.Label).Should().Equal("Backlog", "Next up", "Doing", "Done", "No status");
+        groups.Single(g => g.Label == "Doing").Rows.Should().ContainSingle();
+        WikiDatabaseViewLogic.CanGroupBoard(status).Should().BeTrue();
+        WikiDatabaseViewLogic.CanGroupBoard(NewProperty(WikiDatabasePropertyTypes.Text)).Should().BeFalse();
+    }
+
+    [Fact]
     public void GroupForBoardMatrix_ShouldCrossTabulateRowsByBothProperties()
     {
         var statusProperty = NewProperty(WikiDatabasePropertyTypes.Select);

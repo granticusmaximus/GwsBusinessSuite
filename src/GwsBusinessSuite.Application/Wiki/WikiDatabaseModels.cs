@@ -792,7 +792,7 @@ public static class WikiDatabaseViewLogic
         IReadOnlyList<WikiDatabaseRow> rows,
         WikiDatabaseProperty groupByProperty)
     {
-        var options = WikiDatabasePropertyConfig.GetOptions(groupByProperty);
+        var options = BoardColumnOrder(groupByProperty);
         var byOption = rows
             .Select(row => (Row: row, OptionId: WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), groupByProperty.Id) ?? string.Empty))
             .ToLookup(entry => entry.OptionId);
@@ -812,6 +812,26 @@ public static class WikiDatabaseViewLogic
         return groups;
     }
 
+    // The properties a Board can group by (columns or swimlanes).
+    public static bool CanGroupBoard(WikiDatabaseProperty property) =>
+        property.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status;
+
+    // A Status board reads left to right through its groups (To-do, In progress, Complete) - the
+    // order the work flows - keeping each group's own option order; Select keeps its option order.
+    private static IReadOnlyList<WikiDatabasePropertyOption> BoardColumnOrder(WikiDatabaseProperty property)
+    {
+        var options = WikiDatabasePropertyConfig.GetOptions(property);
+        if (property.Type != WikiDatabasePropertyTypes.Status) return options;
+        return options
+            .Select((option, index) => (Option: option, Index: index))
+            .OrderBy(entry => entry.Option.Group is { } group && WikiDatabaseStatusGroups.All.Contains(group)
+                ? WikiDatabaseStatusGroups.All.ToList().IndexOf(group)
+                : WikiDatabaseStatusGroups.All.Count)
+            .ThenBy(entry => entry.Index)
+            .Select(entry => entry.Option)
+            .ToList();
+    }
+
     // A Board view with a second grouping property becomes a swimlane matrix: the same column
     // set GroupForBoard already computes (one row of columns per secondary-property option, plus
     // "No status"), each holding only the rows that also match that swimlane. Every swimlane
@@ -827,7 +847,7 @@ public static class WikiDatabaseViewLogic
             .Select(group => new WikiDatabaseBoardGroup(group.OptionId, group.Label, []))
             .ToList();
 
-        var secondaryOptions = WikiDatabasePropertyConfig.GetOptions(secondaryProperty);
+        var secondaryOptions = BoardColumnOrder(secondaryProperty);
         var bySecondaryOption = rows
             .Select(row => (
                 Row: row,

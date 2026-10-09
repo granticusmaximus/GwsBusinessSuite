@@ -966,11 +966,11 @@ else
 
             @if (ActiveView is { Type: WikiDatabaseViewTypes.Board })
             {
-                var groupByProperty = Database.Properties.FirstOrDefault(p => p.Id.ToString() == ActiveViewConfig?.GroupByPropertyId)
-                    ?? Database.Properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.Select);
+                var groupByProperty = Database.Properties.FirstOrDefault(p => p.Id.ToString() == ActiveViewConfig?.GroupByPropertyId && WikiDatabaseViewLogic.CanGroupBoard(p))
+                    ?? Database.Properties.FirstOrDefault(WikiDatabaseViewLogic.CanGroupBoard);
                 if (groupByProperty is null)
                 {
-                    <div class="text-secondary small">This Board view's Select property was removed. Add a Select property to use it again.</div>
+                    <div class="text-secondary small">This Board view's grouping property was removed. Add a Select or Status property to use it again.</div>
                 }
                 else
                 {
@@ -981,12 +981,20 @@ else
                     var swimlaneProperty = Database.Properties.FirstOrDefault(p =>
                         p.Id.ToString() == ActiveViewConfig?.SecondaryGroupByPropertyId && p.Id != groupByProperty.Id);
 
-                    <div class="d-flex align-items-center gap-2 mb-2">
+                    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                        <label class="small text-secondary mb-0" for="wiki-board-group-by">Group by</label>
+                        <select id="wiki-board-group-by" class="form-select form-select-sm w-auto" style="min-width:10rem"
+                                @onchange="e => SetBoardGroupByPropertyAsync((string)e.Value!)" disabled="@IsBusy">
+                            @foreach (var candidate in Database.Properties.Where(WikiDatabaseViewLogic.CanGroupBoard))
+                            {
+                                <option value="@candidate.Id" selected="@(candidate.Id == groupByProperty.Id)">@candidate.Name</option>
+                            }
+                        </select>
                         <label class="small text-secondary mb-0">Swimlanes</label>
                         <select class="form-select form-select-sm w-auto" style="min-width:10rem"
                                 @onchange="e => SetSwimlanePropertyAsync((string)e.Value!)" disabled="@IsBusy">
                             <option value="" selected="@(swimlaneProperty is null)">None</option>
-                            @foreach (var candidate in Database.Properties.Where(p => p.Type == WikiDatabasePropertyTypes.Select && p.Id != groupByProperty.Id))
+                            @foreach (var candidate in Database.Properties.Where(p => WikiDatabaseViewLogic.CanGroupBoard(p) && p.Id != groupByProperty.Id))
                             {
                                 <option value="@candidate.Id" selected="@(candidate.Id == swimlaneProperty?.Id)">@candidate.Name</option>
                             }
@@ -2296,10 +2304,13 @@ else
 
     private async Task AddBoardViewAsync()
     {
-        var groupByProperty = Database?.Properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.Select);
+        // A Status property is what most boards are about (To-do / In progress / Complete), so it
+        // wins over a Select when the database has both; "Group by" switches it afterwards.
+        var groupByProperty = Database?.Properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.Status)
+            ?? Database?.Properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.Select);
         if (groupByProperty is null)
         {
-            ErrorMessage = "Add a Select property before creating a Board view.";
+            ErrorMessage = "Add a Select or Status property before creating a Board view.";
             return;
         }
 
@@ -3006,6 +3017,14 @@ else
         WikiPropertyValues.SetText(values, propertyId, text);
         return values.ToDictionary(kv => kv.Key, kv => kv.Value);
     }
+
+    // Switching the column property clears swimlanes that would now duplicate it.
+    private Task SetBoardGroupByPropertyAsync(string propertyId) =>
+        UpdateActiveViewConfigAsync(config => config with
+        {
+            GroupByPropertyId = propertyId,
+            SecondaryGroupByPropertyId = config.SecondaryGroupByPropertyId == propertyId ? null : config.SecondaryGroupByPropertyId
+        });
 
     private Task SetSwimlanePropertyAsync(string propertyId) =>
         UpdateActiveViewConfigAsync(config => config with
