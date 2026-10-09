@@ -123,6 +123,9 @@ builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions
 {
     options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(10);
 });
+// Evidence for the periodic "Rejoining the server..." popup - see CircuitDiagnostics.cs.
+builder.Services.AddScoped<Microsoft.AspNetCore.Components.Server.Circuits.CircuitHandler, GwsBusinessSuite.Web.Services.CircuitDiagnosticsHandler>();
+builder.Services.AddHostedService<GwsBusinessSuite.Web.Services.ServerStallMonitor>();
 
 builder.Services.AddSingleton<IPasswordHasher<AppUser>, PasswordHasher<AppUser>>();
 

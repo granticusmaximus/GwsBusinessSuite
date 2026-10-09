@@ -39,7 +39,7 @@
     @foreach (var kind in ContentCalendarKinds.All)
     {
         var shown = !HiddenKinds.Contains(kind);
-        <button type="button" class="btn btn-sm @(shown ? "btn-outline-dark" : "btn-outline-secondary opacity-50") cc-kind-toggle" aria-pressed="@(shown ? "true" : "false")" @onclick="() => ToggleKind(kind)">
+        <button type="button" class="btn btn-sm btn-outline-secondary cc-kind-toggle @(shown ? "" : "opacity-50 text-decoration-line-through")" aria-pressed="@(shown ? "true" : "false")" @onclick="() => ToggleKind(kind)">
             <span class="cc-swatch cc-@kind" aria-hidden="true"></span>@ContentCalendarKinds.Label(kind) @Items.Count(i => i.Kind == kind)
         </button>
     }
