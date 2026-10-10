@@ -813,8 +813,26 @@ public sealed class SentinelNotification : AuditableEntity
     public Guid WikiPageId { get; set; }
     public Guid? SentinelDiscussionId { get; set; }
     public Guid? SentinelDiscussionCommentId { get; set; }
+    // The block the notification is about (e.g. a date reminder), so opening it can scroll there.
+    public Guid? WikiBlockId { get; set; }
     public required string Message { get; set; }
     public DateTimeOffset? ReadAt { get; set; }
+}
+
+// A reminder on a date mention in a Sentinel page (SentinelReminderService). Times are Unix
+// seconds so the minute sweep can query them in SQLite. SentUnix and CancelledUnix make a
+// reminder fire at most once; a reminder that can't be delivered (page gone, access lost) is
+// cancelled rather than sent.
+public sealed class PageReminder : AuditableEntity
+{
+    public Guid WikiPageId { get; set; }
+    public Guid WikiBlockId { get; set; }
+    public required string OwnerUsername { get; set; }
+    // What the chip says, e.g. "16-10-26 15:00", for the notification text.
+    public required string Label { get; set; }
+    public long DueUnix { get; set; }
+    public long? SentUnix { get; set; }
+    public long? CancelledUnix { get; set; }
 }
 
 public static class SentinelWorkspaceRoles

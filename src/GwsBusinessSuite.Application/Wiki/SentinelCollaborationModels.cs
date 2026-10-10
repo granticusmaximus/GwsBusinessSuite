@@ -72,7 +72,9 @@ public sealed record SentinelNotificationView(
     Guid? DiscussionId,
     string Message,
     DateTimeOffset CreatedAt,
-    bool IsRead);
+    bool IsRead,
+    // Set for notifications about one block (date reminders), so opening one scrolls to it.
+    Guid? WikiBlockId = null);
 
 // A block-relative character range for an active (unresolved) discussion's anchor - used to
 // render an inline highlight over the exact commented text, not just a per-block pin icon.

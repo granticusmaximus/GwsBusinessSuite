@@ -258,7 +258,8 @@ public sealed class SentinelCollaborationService(
                 notification.SentinelDiscussionId,
                 notification.Message,
                 notification.CreatedAt,
-                notification.ReadAt.HasValue))
+                notification.ReadAt.HasValue,
+                notification.WikiBlockId))
             .ToList();
     }
 
