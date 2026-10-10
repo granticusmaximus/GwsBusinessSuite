@@ -18,9 +18,10 @@ public partial class VoiceNotesPage : ContentPage
     private readonly NativeSessionClient _session;
 #if MACCATALYST
     private readonly OnDeviceSpeechTranscriber _transcriber = new();
-#endif
+    // Recording (and so its elapsed-time clock) only exists on the Mac.
     private IDispatcherTimer? _clock;
     private DateTimeOffset _recordingStarted;
+#endif
     private string? _savedUrl;
 
     public VoiceNotesPage(OllamaClient ollama, NativeSessionClient session)
@@ -97,7 +98,9 @@ public partial class VoiceNotesPage : ContentPage
 
     private void OnRecordingStopped(string transcript)
     {
+#if MACCATALYST
         _clock?.Stop();
+#endif
         RecordButton.Text = "● Record";
         TranscribeFileButton.IsEnabled = true;
         if (!string.IsNullOrWhiteSpace(transcript)) TranscriptEditor.Text = transcript;

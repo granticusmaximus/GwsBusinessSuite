@@ -2,6 +2,7 @@ using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
@@ -15,6 +16,7 @@ public sealed class ContactTimelineService(IAppDbContextFactory dbContextFactory
     // what's useful in a history, and the module pages hold the rest.
     private const int MaxTicketMessages = 100;
     private const int MaxEmailSends = 100;
+    private static readonly CultureInfo UsCurrencyCulture = CultureInfo.GetCultureInfo("en-US");
 
     public async Task<IReadOnlyList<ContactTimelineEntry>> GetTimelineAsync(Guid contactId, CancellationToken cancellationToken = default)
     {
@@ -38,16 +40,16 @@ public sealed class ContactTimelineService(IAppDbContextFactory dbContextFactory
 
         foreach (var deal in await db.Deals.AsNoTracking().Where(d => d.ContactId == contactId).ToListAsync(cancellationToken))
         {
-            entries.Add(new(deal.CreatedAt, ContactTimelineKinds.Deal, $"Deal opened: {deal.Title}", $"{deal.ValueUsd:C0} · {deal.Stage}", "/admin/crm"));
+            entries.Add(new(deal.CreatedAt, ContactTimelineKinds.Deal, $"Deal opened: {deal.Title}", $"{deal.ValueUsd.ToString("C0", UsCurrencyCulture)} · {deal.Stage}", "/admin/crm"));
             if (deal.ClosedAt is { } closed)
             {
-                entries.Add(new(closed, ContactTimelineKinds.Deal, $"Deal {(deal.Stage == DealStages.Won ? "won" : "lost")}: {deal.Title}", $"{deal.ValueUsd:C0}", "/admin/crm"));
+                entries.Add(new(closed, ContactTimelineKinds.Deal, $"Deal {(deal.Stage == DealStages.Won ? "won" : "lost")}: {deal.Title}", deal.ValueUsd.ToString("C0", UsCurrencyCulture), "/admin/crm"));
             }
         }
 
         foreach (var invoice in await db.Invoices.AsNoTracking().Include(i => i.LineItems).Where(i => i.ContactId == contactId).ToListAsync(cancellationToken))
         {
-            var total = $"{invoice.LineItems.Sum(l => l.Quantity * l.UnitPriceUsd):C2}";
+            var total = invoice.LineItems.Sum(l => l.Quantity * l.UnitPriceUsd).ToString("C2", UsCurrencyCulture);
             entries.Add(new(invoice.CreatedAt, ContactTimelineKinds.Invoice, $"Invoice drafted: {invoice.Title}", total, "/admin/billing"));
             if (invoice.SentAt is { } sent) entries.Add(new(sent, ContactTimelineKinds.Invoice, $"Invoice sent: {invoice.Title}", Join(total, invoice.DueDate is { } due ? $"due {due:MMM d, yyyy}" : null), "/admin/billing"));
             if (invoice.PaidAt is { } paid) entries.Add(new(paid, ContactTimelineKinds.Invoice, $"Invoice paid: {invoice.Title}", total, "/admin/billing"));

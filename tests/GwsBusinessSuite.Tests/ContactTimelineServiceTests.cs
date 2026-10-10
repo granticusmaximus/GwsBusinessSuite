@@ -6,6 +6,7 @@ using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -50,7 +51,19 @@ public sealed class ContactTimelineServiceTests
             await db.SaveChangesAsync();
         }
 
-        var timeline = await new ContactTimelineService(new Factory(options)).GetTimelineAsync(contact.Id);
+        // GitHub's Ubuntu runner exposed the former ambient-culture bug as a generic currency
+        // marker. Force a non-US culture here so USD display stays deterministic everywhere.
+        var previousCulture = CultureInfo.CurrentCulture;
+        IReadOnlyList<ContactTimelineEntry> timeline;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("fr-FR");
+            timeline = await new ContactTimelineService(new Factory(options)).GetTimelineAsync(contact.Id);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+        }
 
         timeline.Select(e => e.At).Should().BeInDescendingOrder();
         timeline.Select(e => e.Title).Should().ContainInOrder(
