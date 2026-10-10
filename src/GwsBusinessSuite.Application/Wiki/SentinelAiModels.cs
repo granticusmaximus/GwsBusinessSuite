@@ -111,6 +111,22 @@ public sealed record DatabaseAutofillResult(
     IReadOnlyList<DatabaseAutofillSuggestion> Suggestions,
     IReadOnlyList<string> Warnings);
 
+public sealed record SentinelDatabaseDesignProperty(
+    string Name, string Type, IReadOnlyList<string> Options);
+
+public sealed record SentinelDatabaseDesignView(
+    string Name, string Type, string? GroupByPropertyName = null);
+
+public sealed record SentinelDatabaseDesignRow(
+    IReadOnlyDictionary<string, string> Values);
+
+public sealed record SentinelDatabaseDesign(
+    string Title,
+    IReadOnlyList<SentinelDatabaseDesignProperty> Properties,
+    IReadOnlyList<SentinelDatabaseDesignView> Views,
+    IReadOnlyList<SentinelDatabaseDesignRow> StarterRows,
+    IReadOnlyList<string> Warnings);
+
 public interface ISentinelAiService
 {
     bool IsInternetConfigured { get; }
@@ -170,4 +186,10 @@ public interface ISentinelAiService
     // WikiDatabaseService.SaveInlineCellAsync.
     Task<DatabaseAutofillResult> SuggestDatabaseRowValuesAsync(
         Guid wikiDatabaseId, Guid rowId, string performedBy, CancellationToken cancellationToken = default);
+
+    // Produces a review-only database design. Nothing is persisted until the caller explicitly
+    // confirms it through IWikiDatabaseService.CreateDatabaseFromDesignAsync.
+    Task<SentinelDatabaseDesign> ProposeDatabaseDesignAsync(
+        string description, string performedBy, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("AI database design is not available in this integration.");
 }

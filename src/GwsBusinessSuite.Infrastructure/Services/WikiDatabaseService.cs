@@ -166,6 +166,69 @@ public sealed class WikiDatabaseService(
         return database;
     }
 
+    public async Task<WikiDatabase> CreateDatabaseFromDesignAsync(
+        SentinelDatabaseDesign design, Guid? parentWikiPageId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(design);
+        if (design.Properties.Count > 12 || design.Views.Count > 5 || design.StarterRows.Count > 8)
+            throw new ArgumentException("The proposed database is larger than the supported preview limits.", nameof(design));
+
+        var database = await CreateDatabaseAsync(design.Title, parentWikiPageId, performedBy, cancellationToken);
+        var propertiesByName = database.Properties.ToDictionary(property => property.Name, StringComparer.OrdinalIgnoreCase);
+        foreach (var proposed in design.Properties)
+        {
+            var options = proposed.Options.Select((label, index) => new WikiDatabasePropertyOption(
+                Guid.NewGuid().ToString(), label.Trim(), "#6c757d",
+                proposed.Type == WikiDatabasePropertyTypes.Status
+                    ? index == proposed.Options.Count - 1 ? WikiDatabaseStatusGroups.Complete : index == 0 ? WikiDatabaseStatusGroups.ToDo : WikiDatabaseStatusGroups.InProgress
+                    : null)).ToList();
+            var property = await SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor
+            {
+                Name = proposed.Name,
+                Type = proposed.Type,
+                Options = options
+            }, performedBy, cancellationToken);
+            propertiesByName[property.Name] = property;
+        }
+
+        var defaultView = database.Views.Single();
+        var proposedViews = design.Views.Count == 0 ? [new SentinelDatabaseDesignView("Table", WikiDatabaseViewTypes.Table)] : design.Views;
+        for (var index = 0; index < proposedViews.Count; index++)
+        {
+            var proposed = proposedViews[index];
+            var groupProperty = proposed.GroupByPropertyName is not null && propertiesByName.TryGetValue(proposed.GroupByPropertyName, out var found) ? found : null;
+            await SaveViewAsync(database.Id, index == 0 ? defaultView.Id : null, proposed.Name, proposed.Type,
+                WikiDatabaseViewConfig.Empty with { GroupByPropertyId = groupProperty?.Id.ToString() }, performedBy, cancellationToken);
+        }
+
+        foreach (var proposedRow in design.StarterRows)
+        {
+            var values = new JsonObject();
+            foreach (var (name, raw) in proposedRow.Values)
+            {
+                if (!propertiesByName.TryGetValue(name, out var property)) continue;
+                switch (property.Type)
+                {
+                    case WikiDatabasePropertyTypes.Number when decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out var number): WikiPropertyValues.SetNumber(values, property.Id, number); break;
+                    case WikiDatabasePropertyTypes.Checkbox when bool.TryParse(raw, out var flag): WikiPropertyValues.SetCheckbox(values, property.Id, flag); break;
+                    case WikiDatabasePropertyTypes.Date when DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var date): WikiPropertyValues.SetDate(values, property.Id, date); break;
+                    case WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status:
+                        var option = WikiDatabasePropertyConfig.GetOptions(property).FirstOrDefault(candidate => string.Equals(candidate.Label, raw, StringComparison.OrdinalIgnoreCase));
+                        if (option is not null) WikiPropertyValues.SetText(values, property.Id, option.Id);
+                        break;
+                    case WikiDatabasePropertyTypes.MultiSelect:
+                        var labels = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        var ids = WikiDatabasePropertyConfig.GetOptions(property).Where(option => labels.Contains(option.Label, StringComparer.OrdinalIgnoreCase)).Select(option => option.Id).ToList();
+                        WikiPropertyValues.SetMultiSelect(values, property.Id, ids);
+                        break;
+                    default: WikiPropertyValues.SetText(values, property.Id, raw); break;
+                }
+            }
+            await SaveRowAsync(database.Id, new WikiDatabaseRowEditor { Values = values.ToDictionary(pair => pair.Key, pair => pair.Value) }, performedBy, cancellationToken);
+        }
+        return await GetDatabaseAsync(database.Id, cancellationToken) ?? database;
+    }
+
     public async Task<WikiDatabase> DuplicateDatabaseAsync(
         Guid wikiDatabaseId,
         string performedBy,

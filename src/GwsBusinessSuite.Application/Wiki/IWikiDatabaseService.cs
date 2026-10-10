@@ -8,6 +8,7 @@ public interface IWikiDatabaseService
     Task<IReadOnlyList<WikiDatabase>> ListTrashedDatabasesAsync(CancellationToken cancellationToken = default);
     Task<WikiDatabase?> GetDatabaseAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default);
     Task<WikiDatabase> CreateDatabaseAsync(string title, Guid? parentWikiPageId, string performedBy, CancellationToken cancellationToken = default);
+    Task<WikiDatabase> CreateDatabaseFromDesignAsync(SentinelDatabaseDesign design, Guid? parentWikiPageId, string performedBy, CancellationToken cancellationToken = default);
     Task<WikiDatabase> DuplicateDatabaseAsync(Guid wikiDatabaseId, string performedBy, CancellationToken cancellationToken = default);
     Task<WikiDatabaseTemplateSnapshot> CreateTemplateSnapshotAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default);
     Task<WikiDatabase> CreateDatabaseFromTemplateAsync(WikiDatabaseTemplateSnapshot snapshot, Guid? parentWikiPageId, string performedBy, CancellationToken cancellationToken = default);

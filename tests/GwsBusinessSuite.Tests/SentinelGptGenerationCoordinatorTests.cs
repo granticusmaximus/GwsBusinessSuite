@@ -500,6 +500,12 @@ public sealed class SentinelGptGenerationCoordinatorTests
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public Task<SentinelDatabaseDesign> ProposeDatabaseDesignAsync(
+            string description,
+            string performedBy,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<SentinelAiRunView> ResolvePendingToolActionAsync(
             Guid runId,
             bool approved,

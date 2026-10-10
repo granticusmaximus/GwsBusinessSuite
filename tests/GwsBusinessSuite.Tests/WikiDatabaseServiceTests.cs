@@ -12,6 +12,33 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class WikiDatabaseServiceTests
 {
+    [Fact]
+    public async Task CreateDatabaseFromDesignAsync_ShouldCreateReviewedSchemaViewsAndStarterRows()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var design = new SentinelDatabaseDesign(
+            "Client projects",
+            [new("Status", WikiDatabasePropertyTypes.Status, ["Planned", "Active", "Done"]),
+             new("Budget", WikiDatabasePropertyTypes.Number, [])],
+            [new("Table", WikiDatabaseViewTypes.Table), new("Board", WikiDatabaseViewTypes.Board, "Status")],
+            [new(new Dictionary<string, string> { ["Name"] = "Website refresh", ["Status"] = "Active", ["Budget"] = "2500" })],
+            []);
+
+        var created = await service.CreateDatabaseFromDesignAsync(design, null, "grant");
+
+        created.Title.Should().Be("Client projects");
+        created.Properties.Select(property => property.Name).Should().BeEquivalentTo("Name", "Status", "Budget");
+        created.Views.Should().HaveCount(2);
+        var status = created.Properties.Single(property => property.Name == "Status");
+        WikiDatabaseViewConfigJson.Parse(created.Views.Single(view => view.Type == WikiDatabaseViewTypes.Board).ConfigJson)
+            .GroupByPropertyId.Should().Be(status.Id.ToString());
+        var row = created.Rows.Should().ContainSingle().Subject;
+        var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+        WikiPropertyValues.GetDisplayText(status, values, row.CreatedAt, row.UpdatedAt, row.CreatedBy, row.UpdatedBy).Should().Be("Active");
+        WikiPropertyValues.GetNumber(values, created.Properties.Single(property => property.Name == "Budget").Id).Should().Be(2500);
+    }
+
     // Regression guard for a real gap: nothing previously capped a database's total row count -
     // WikiDatabaseCsvImportLimits.MaxRows (10,000) only ever bounded a single CSV import, and a
     // database could sail past it one row-by-row create at a time, at which point

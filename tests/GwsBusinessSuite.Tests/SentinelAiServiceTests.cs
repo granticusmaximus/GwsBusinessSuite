@@ -15,6 +15,36 @@ namespace GwsBusinessSuite.Tests;
 public sealed class SentinelAiServiceTests
 {
     [Fact]
+    public async Task ProposeDatabaseDesignAsync_ShouldReturnAValidatedReviewOnlyDesign()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var ollama = new FakeStreamingOllamaService(["""
+            {"title":"Projects","properties":[
+              {"name":"Status","type":"status","options":["Planned","Active","Done"]},
+              {"name":"Danger","type":"relation","options":[]}
+            ],"views":[{"name":"Board","type":"board","groupByPropertyName":"Status"}],
+            "starterRows":[{"values":{"Name":"Launch","Status":"Active","Ignored":"no"}}]}
+            """]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+
+        var design = await service.ProposeDatabaseDesignAsync("Track projects", "grant");
+
+        design.Title.Should().Be("Projects");
+        design.Properties.Should().ContainSingle(property => property.Name == "Status");
+        design.Properties.Should().NotContain(property => property.Name == "Danger");
+        design.Views.Should().Contain(view => view.Type == WikiDatabaseViewTypes.Table);
+        design.Views.Should().Contain(view => view.Type == WikiDatabaseViewTypes.Board && view.GroupByPropertyName == "Status");
+        design.StarterRows.Should().ContainSingle().Which.Values.Keys.Should().BeEquivalentTo("Name", "Status");
+        ollama.LastUserPrompt.Should().Be("Track projects");
+    }
+
+    [Fact]
     public async Task StreamAsync_ShouldYieldFragmentsThenAPersistedRunCitingMatchedPages()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

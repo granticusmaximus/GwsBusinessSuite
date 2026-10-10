@@ -21,6 +21,7 @@
 @inject IMediaLibraryService MediaLibraryService
 @inject ISentinelTemplateService SentinelTemplateService
 @inject ISentinelWritingAssistant WritingAssistant
+@inject ISentinelAiService SentinelAiService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject SentinelCursorTracker CursorTracker
 @inject IJSRuntime JS
@@ -276,6 +277,9 @@
                     </div>
                     <button class="btn btn-sm btn-outline-secondary" @onclick="CreateNewDatabaseAsync" disabled="@IsBusy" title="New database">
                         <i class="bi bi-grid-3x3-gap-fill"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="OpenAiDatabaseDesigner" disabled="@IsBusy" title="Build a database with local AI">
+                        <i class="bi bi-stars"></i>
                     </button>
                     <button class="btn btn-sm btn-outline-secondary position-relative" @onclick="OpenTrashModal" disabled="@IsBusy" title="Trash">
                         <i class="bi bi-trash3"></i>
@@ -1052,6 +1056,73 @@
             </aside>
         }
 </div>
+
+@if (_showAiDatabaseDesigner)
+{
+    <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="aiDatabaseDesignerTitle">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="aiDatabaseDesignerTitle"><i class="bi bi-stars me-2"></i>Build a database with local AI</h5>
+                    <button type="button" class="btn-close" @onclick="CloseAiDatabaseDesigner" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label fw-semibold" for="aiDatabaseDescription">What do you want to track?</label>
+                    <textarea id="aiDatabaseDescription" class="form-control" rows="4" maxlength="4000"
+                              @bind="_aiDatabaseDescription" @bind:event="oninput"
+                              placeholder="Client projects with an owner, status, deadline, budget, and a few example projects"></textarea>
+                    <div class="form-text">SentinelGPT runs on your configured Ollama model. It only proposes a structure; nothing is created until you confirm.</div>
+
+                    @if (_aiDatabaseDesign is { } design)
+                    {
+                        <div class="border rounded-3 p-3 mt-4" data-testid="ai-database-preview">
+                            <h6 class="mb-3">@design.Title</h6>
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <div class="small text-secondary text-uppercase fw-semibold mb-2">Properties</div>
+                                    <ul class="list-group list-group-flush border rounded-2">
+                                        <li class="list-group-item py-2"><strong>Name</strong> <span class="badge text-bg-light border float-end">title</span></li>
+                                        @foreach (var property in design.Properties)
+                                        {
+                                            <li class="list-group-item py-2">
+                                                <strong>@property.Name</strong><span class="badge text-bg-light border float-end">@property.Type</span>
+                                                @if (property.Options.Count > 0) { <div class="small text-secondary mt-1">@string.Join(" · ", property.Options)</div> }
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="small text-secondary text-uppercase fw-semibold mb-2">Views and starter rows</div>
+                                    <div class="small mb-2">@string.Join(", ", design.Views.Select(view => $"{view.Name} ({view.Type})"))</div>
+                                    <div class="small text-secondary">@design.StarterRows.Count starter row@(design.StarterRows.Count == 1 ? "" : "s")</div>
+                                </div>
+                            </div>
+                            @if (design.Warnings.Count > 0)
+                            {
+                                <div class="alert alert-warning py-2 small mt-3 mb-0">@string.Join(" ", design.Warnings)</div>
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" @onclick="CloseAiDatabaseDesigner" disabled="@IsBusy">Cancel</button>
+                    @if (_aiDatabaseDesign is null)
+                    {
+                        <button type="button" class="btn btn-primary" @onclick="ProposeAiDatabaseAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(_aiDatabaseDescription))">
+                            <i class="bi bi-stars me-1"></i>Preview structure
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-outline-primary" @onclick="ProposeAiDatabaseAsync" disabled="@IsBusy">Regenerate</button>
+                        <button type="button" class="btn btn-primary" @onclick="ConfirmAiDatabaseAsync" disabled="@IsBusy">Confirm and create</button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop show"></div>
+}
 </div>
 
 @* These three ConfirmModal instances are deliberately rendered here, outside
@@ -1277,6 +1348,39 @@
     private bool _workspaceBrowserCollapsed;
     private bool _showShortcutsModal;
     private void ToggleShortcutsModal() => _showShortcutsModal = !_showShortcutsModal;
+    private bool _showAiDatabaseDesigner;
+    private string _aiDatabaseDescription = string.Empty;
+    private SentinelDatabaseDesign? _aiDatabaseDesign;
+
+    private void OpenAiDatabaseDesigner()
+    {
+        _aiDatabaseDesign = null;
+        _showAiDatabaseDesigner = true;
+    }
+
+    private void CloseAiDatabaseDesigner()
+    {
+        if (IsBusy) return;
+        _showAiDatabaseDesigner = false;
+        _aiDatabaseDesign = null;
+    }
+
+    private async Task ProposeAiDatabaseAsync() => await Work(async () =>
+    {
+        _aiDatabaseDesign = await SentinelAiService.ProposeDatabaseDesignAsync(_aiDatabaseDescription, await CurrentUserNameAsync());
+    });
+
+    private async Task ConfirmAiDatabaseAsync() => await Work(async () =>
+    {
+        if (_aiDatabaseDesign is null) return;
+        var database = await WikiDatabaseService.CreateDatabaseFromDesignAsync(_aiDatabaseDesign, null, await CurrentUserNameAsync());
+        _showAiDatabaseDesigner = false;
+        _aiDatabaseDesign = null;
+        _aiDatabaseDescription = string.Empty;
+        await LoadTreeAsync(selectFirstPage: false);
+        await OpenDatabaseAsync(database.Id);
+        StatusMessage = $"Created database '{database.Title}' from the reviewed AI proposal.";
+    });
 
     private bool _showGraphModal;
     private SentinelPageGraph? _pageGraph;

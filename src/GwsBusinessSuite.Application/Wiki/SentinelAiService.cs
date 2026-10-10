@@ -1227,6 +1227,95 @@ public sealed class SentinelAiService(
         return ParseDatabaseAutofillResponse(rawResponse, emptyProperties);
     }
 
+    public async Task<SentinelDatabaseDesign> ProposeDatabaseDesignAsync(
+        string description, string performedBy, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            throw new ArgumentException("Describe what you want to track.", nameof(description));
+        }
+        if (description.Length > 4_000)
+        {
+            throw new ArgumentException("The database description can be up to 4,000 characters.", nameof(description));
+        }
+
+        var systemPrompt =
+            "Design a practical Sentinel database from the user's description. Return ONLY JSON with this shape: " +
+            "{\"title\":\"...\",\"properties\":[{\"name\":\"...\",\"type\":\"text|number|select|multiSelect|date|checkbox|url|email|phone|status\",\"options\":[\"...\"]}]," +
+            "\"views\":[{\"name\":\"...\",\"type\":\"table|board|list|gallery|calendar\",\"groupByPropertyName\":\"... or null\"}]," +
+            "\"starterRows\":[{\"values\":{\"Name\":\"...\",\"Other property\":\"...\"}}]}. " +
+            "Do not include a title property; Sentinel adds Name automatically. Use no more than 12 properties, 5 views, or 8 starter rows. " +
+            "Only select, multiSelect, and status may have options. A board must group by a select or status property. Include a table view.";
+        var settings = await siteSettings.GetSettingsAsync(cancellationToken);
+        var model = string.IsNullOrWhiteSpace(settings.OllamaModelOverride) ? SentinelGptDefaults.Model : settings.OllamaModelOverride;
+        var raw = await ollama.GenerateAsync(model, systemPrompt, description.Trim(), cancellationToken);
+        return ParseDatabaseDesign(raw);
+    }
+
+    private static SentinelDatabaseDesign ParseDatabaseDesign(string raw)
+    {
+        var json = ExtractJsonObject(raw) ?? throw new InvalidOperationException("SentinelGPT did not return a valid database design.");
+        JsonObject root;
+        try { root = JsonNode.Parse(json)?.AsObject() ?? throw new JsonException(); }
+        catch (JsonException) { throw new InvalidOperationException("SentinelGPT did not return a valid database design."); }
+
+        var warnings = new List<string>();
+        var title = root["title"]?.GetValue<string>()?.Trim();
+        if (string.IsNullOrWhiteSpace(title)) title = "AI database";
+
+        var allowedPropertyTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            WikiDatabasePropertyTypes.Text, WikiDatabasePropertyTypes.Number, WikiDatabasePropertyTypes.Select,
+            WikiDatabasePropertyTypes.MultiSelect, WikiDatabasePropertyTypes.Date, WikiDatabasePropertyTypes.Checkbox,
+            WikiDatabasePropertyTypes.Url, WikiDatabasePropertyTypes.Email, WikiDatabasePropertyTypes.Phone,
+            WikiDatabasePropertyTypes.Status
+        };
+        var properties = new List<SentinelDatabaseDesignProperty>();
+        foreach (var node in root["properties"]?.AsArray().Take(12) ?? [])
+        {
+            if (node is not JsonObject item) continue;
+            var name = item["name"]?.GetValue<string>()?.Trim();
+            var type = item["type"]?.GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(type) || !allowedPropertyTypes.Contains(type))
+            {
+                warnings.Add("One unsupported or unnamed property was omitted.");
+                continue;
+            }
+            if (properties.Any(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)) || string.Equals(name, "Name", StringComparison.OrdinalIgnoreCase)) continue;
+            var canonicalType = allowedPropertyTypes.First(candidate => string.Equals(candidate, type, StringComparison.OrdinalIgnoreCase));
+            var options = canonicalType is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Status
+                ? item["options"]?.AsArray().Select(value => value?.GetValue<string>()?.Trim()).Where(value => !string.IsNullOrWhiteSpace(value)).Distinct(StringComparer.OrdinalIgnoreCase).Take(12).Select(value => value!).ToList() ?? []
+                : [];
+            properties.Add(new(name, canonicalType, options));
+        }
+
+        var knownProperties = properties.Select(p => p.Name).Append("Name").ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var views = new List<SentinelDatabaseDesignView>();
+        var allowedViews = new HashSet<string>([WikiDatabaseViewTypes.Table, WikiDatabaseViewTypes.Board, WikiDatabaseViewTypes.List, WikiDatabaseViewTypes.Gallery, WikiDatabaseViewTypes.Calendar], StringComparer.OrdinalIgnoreCase);
+        foreach (var node in root["views"]?.AsArray().Take(5) ?? [])
+        {
+            if (node is not JsonObject item) continue;
+            var type = item["type"]?.GetValue<string>()?.Trim();
+            if (type is null || !allowedViews.Contains(type)) continue;
+            var canonicalType = allowedViews.First(candidate => string.Equals(candidate, type, StringComparison.OrdinalIgnoreCase));
+            var name = item["name"]?.GetValue<string>()?.Trim();
+            var groupBy = item["groupByPropertyName"]?.GetValue<string>()?.Trim();
+            if (groupBy is not null && !knownProperties.Contains(groupBy)) groupBy = null;
+            views.Add(new(string.IsNullOrWhiteSpace(name) ? canonicalType : name, canonicalType, groupBy));
+        }
+        if (!views.Any(view => view.Type == WikiDatabaseViewTypes.Table)) views.Insert(0, new("Table", WikiDatabaseViewTypes.Table));
+
+        var rows = new List<SentinelDatabaseDesignRow>();
+        foreach (var node in root["starterRows"]?.AsArray().Take(8) ?? [])
+        {
+            if (node?["values"] is not JsonObject values) continue;
+            var rowValues = values.Where(pair => pair.Value is not null && knownProperties.Contains(pair.Key))
+                .ToDictionary(pair => pair.Key, pair => pair.Value!.GetValueKind() == JsonValueKind.String ? pair.Value.GetValue<string>() : pair.Value.ToJsonString(), StringComparer.OrdinalIgnoreCase);
+            if (rowValues.Count > 0) rows.Add(new(rowValues));
+        }
+        return new(title[..Math.Min(title.Length, 200)], properties, views, rows, warnings.Distinct().ToList());
+    }
+
     private static DatabaseAutofillResult ParseDatabaseAutofillResponse(
         string rawResponse, IReadOnlyList<WikiDatabaseProperty> emptyProperties)
     {
