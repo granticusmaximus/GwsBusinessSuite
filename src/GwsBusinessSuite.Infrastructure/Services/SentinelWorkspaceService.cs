@@ -701,19 +701,28 @@ public sealed class SentinelWorkspaceService(
             .Select(username => new SentinelMentionSuggestion("user", username, $"@{username}", "Person"))
             .ToList();
 
-        var today = timeProvider.GetLocalNow().Date;
-        var dates = new[]
+        // Dates: the common words while typing, plus whatever the phrase itself means
+        // ("next friday 3pm", "in 3 days", "oct 16"). The chip's text is the absolute date
+        // (SentinelDateExpressions), so it never goes stale; the editor shows how far away it is.
+        var now = timeProvider.GetUtcNow();
+        var zone = timeProvider.LocalTimeZone;
+        foreach (var token in new[] { "today", "tomorrow", "yesterday", "next week" })
         {
-            (Token: "today", Date: today),
-            (Token: "tomorrow", Date: today.AddDays(1)),
-            (Token: "yesterday", Date: today.AddDays(-1))
-        };
-        suggestions.AddRange(dates
-            .Where(item => item.Token.Contains(normalized, StringComparison.OrdinalIgnoreCase))
-            .Select(item => new SentinelMentionSuggestion(
-                "date", item.Date.ToString("yyyy-MM-dd"), $"@{item.Token}", item.Date.ToString("D"))));
+            if (token.StartsWith(normalized, StringComparison.OrdinalIgnoreCase)
+                && SentinelDateExpressions.TryParse(token, now, zone, out var common, out _))
+            {
+                suggestions.Add(new SentinelMentionSuggestion("date", common!.MentionValue, common.Label, char.ToUpperInvariant(token[0]) + token[1..]));
+            }
+        }
+        if (SentinelDateExpressions.TryParse(normalized, now, zone, out var phrase, out _)
+            && suggestions.All(item => item.Kind != "date" || item.Value != phrase!.MentionValue))
+        {
+            suggestions.Add(new SentinelMentionSuggestion("date", phrase!.MentionValue, phrase.Label,
+                phrase.Time is null ? "Date" : "Date and time"));
+        }
 
-        if (normalized.Length > 0)
+        // A phrase with spaces is only ever a date; people and rows are matched on single words.
+        if (normalized.Length > 0 && !normalized.Contains(' '))
         {
             var databases = await dbContext.WikiDatabases.AsNoTracking()
                 .Include(database => database.Properties)

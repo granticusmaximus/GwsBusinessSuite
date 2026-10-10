@@ -60,7 +60,20 @@ Do not call CI fixed until Grant commits/pushes and replacement runs pass.
 6. Add final counts/results to the master plan progress log.
 7. Stop for Grant to commit/push. Then monitor both replacement workflows and inspect logs.
 
-## Next implementation: item 13, date mentions and reminders
+## CI after the push of ee133ab (2026-10-10, read by Claude)
+
+- Deploy run 38010579554: the currency test now passes in CI (2,800/2,801). The one failure was
+  `OverwatchGridScriptBrowserTests.AnalyzeButton_ShouldShowADisabledAnalyzingState...`: a test
+  race (text and `disabled` read in two calls; the 2 s mocked reply landed in between). Fixed
+  locally by checking both in one `WaitForFunction`; app code was already correct.
+- Native run 38010579588: Android and Windows pass; Apple now runs on the xcode-27 image and gets
+  past the Xcode check, then failed with "SupportedOSPlatformVersion 15.0 is lower than the minimum
+  17.0" for Mac Catalyst. Fixed locally: Mac Catalyst minimum raised to 17.0 (macOS 14) in
+  GwsBusinessSuite.App.csproj; iOS 15.0 is still accepted by the 27.0 pack. Not CI-verified until
+  the next push.
+- Item 13 is complete locally (see the master progress log); its migration already shipped in ee133ab.
+
+## Next implementation: item 13, date mentions and reminders (DONE 2026-10-10, kept below for reference)
 
 Goal: `@today`, `@tomorrow`, and phrases such as `@next Friday 3pm` insert a date chip. A user can
 set a reminder on it; a minute sweep sends exactly one collaboration-bell notification linking to

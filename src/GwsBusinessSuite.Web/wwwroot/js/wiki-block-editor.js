@@ -128,6 +128,13 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
     container.addEventListener('pointerup', event => onHandlePointerUp(state, event));
     container.addEventListener('pointercancel', event => onHandlePointerUp(state, event));
     container.addEventListener('click', state.linkClickHandler = event => {
+        const dateChip = event.target.closest?.('a[href^="datemention:"]');
+        if (dateChip && container.contains(dateChip)) {
+            event.preventDefault();
+            event.stopPropagation();
+            openDateReminderPanel(state, dateChip);
+            return;
+        }
         const anchor = wikiLinkAnchorFromEvent(event);
         if (!anchor) return;
 
@@ -429,6 +436,7 @@ export function dispose(container) {
     closeFloatingMenus(state);
     if (state.focusInHandler) container.removeEventListener('focusin', state.focusInHandler);
     if (state.linkClickHandler) container.removeEventListener('click', state.linkClickHandler);
+    closeDateReminderPanel(state);
     if (state.selectionHandler) {
         container.removeEventListener('mouseup', state.selectionHandler);
         container.removeEventListener('keyup', state.selectionHandler);
@@ -1330,6 +1338,7 @@ function serializeTableRichText(blockEl) {
 function refreshBlockPresentation(container) {
     refreshNumberedListMarkers(container);
     refreshToggleVisibility(container);
+    refreshDateChips(container);
 }
 
 function refreshNumberedListMarkers(container) {
@@ -2966,7 +2975,9 @@ function checkMentionTrigger(state, content) {
     if (!range) return;
 
     const textBeforeCaret = textBefore(content, range);
-    const match = textBeforeCaret.match(/(?:^|\s)@([\w.-]*)$/);
+    // Up to four words, so date phrases like "@next friday 3pm" can be typed; the server only
+    // treats multi-word queries as dates (people and rows match single words).
+    const match = textBeforeCaret.match(/(?:^|\s)@((?:[\w.:-]+(?: [\w.:-]+){0,3})|[\w.:-]*)$/);
     if (!match) return;
 
     const query = match[1];
@@ -3006,9 +3017,134 @@ function insertMention(state, content, query, suggestion) {
     anchor.textContent = suggestion.label;
     deleteRange.insertNode(anchor);
     anchor.after(document.createTextNode(' '));
+    if (suggestion.kind === 'date') refreshDateChip(anchor);
     placeCaretAtTextOffset(content, content.textContent.length);
     scheduleNotify(state);
 }
+
+// ---- Date chips and reminders ----
+// A date mention's saved text is its absolute date ("16-10-26 15:00"). How far away it is
+// ("tomorrow", "in 3 days") is shown with CSS from data-relative, so it's never saved as text.
+// Values: "yyyy-MM-dd" for a whole day, or a UTC instant "yyyy-MM-ddTHH:mm:ssZ".
+function parseDateMentionValue(value) {
+    const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+    if (day) return { date: new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])), hasTime: false };
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(value || '')) {
+        const instant = new Date(value);
+        if (!Number.isNaN(instant.getTime())) return { date: instant, hasTime: true };
+    }
+    return null;
+}
+
+function relativeDays(parsed, now) {
+    const startOf = date => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+    return Math.round((startOf(parsed.date) - startOf(now)) / 86400000);
+}
+
+function relativeDateText(days) {
+    if (days === 0) return 'today';
+    if (days === 1) return 'tomorrow';
+    if (days === -1) return 'yesterday';
+    return days > 1 ? `in ${days} days` : `${-days} days ago`;
+}
+
+function refreshDateChip(anchor, now = new Date()) {
+    const parsed = parseDateMentionValue((anchor.getAttribute('href') || '').substring('datemention:'.length));
+    if (!parsed) {
+        delete anchor.dataset.relative;
+        return;
+    }
+    const days = relativeDays(parsed, now);
+    anchor.classList.add('wiki-date-chip');
+    anchor.dataset.relative = relativeDateText(days);
+    anchor.classList.toggle('is-past', parsed.hasTime ? parsed.date.getTime() < now.getTime() : days < 0);
+}
+
+function refreshDateChips(container) {
+    const now = new Date();
+    container.querySelectorAll('a[href^="datemention:"]').forEach(anchor => refreshDateChip(anchor, now));
+}
+
+function closeDateReminderPanel(state) {
+    state.dateReminderPanel?.remove();
+    state.dateReminderPanel = null;
+    if (state.dateReminderOutsideHandler) {
+        document.removeEventListener('mousedown', state.dateReminderOutsideHandler, true);
+        document.removeEventListener('keydown', state.dateReminderOutsideHandler, true);
+        state.dateReminderOutsideHandler = null;
+    }
+}
+
+// Set or cancel a reminder for this chip. The server decides the owner (the signed-in user)
+// and checks access; this only shows the state and sends the choice.
+function openDateReminderPanel(state, chip) {
+    closeDateReminderPanel(state);
+    const value = (chip.getAttribute('href') || '').substring('datemention:'.length);
+    const blockId = chip.closest('.wiki-block')?.dataset.blockId || '';
+    const panel = document.createElement('div');
+    panel.className = 'wiki-date-reminder-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Date reminder');
+    const title = document.createElement('div');
+    title.className = 'wiki-date-reminder-title';
+    title.textContent = chip.textContent.trim() + (chip.dataset.relative ? ` (${chip.dataset.relative})` : '');
+    const status = document.createElement('div');
+    status.className = 'wiki-date-reminder-status';
+    status.setAttribute('role', 'status');
+    status.textContent = 'Checking…';
+    const actions = document.createElement('div');
+    actions.className = 'wiki-date-reminder-actions';
+    panel.append(title, status, actions);
+    document.body.appendChild(panel);
+    const rect = chip.getBoundingClientRect();
+    panel.style.top = `${window.scrollY + rect.bottom + 6}px`;
+    panel.style.left = `${Math.max(8, Math.min(window.scrollX + rect.left, window.scrollX + document.documentElement.clientWidth - panel.offsetWidth - 8))}px`;
+    state.dateReminderPanel = panel;
+    state.dateReminderOutsideHandler = event => {
+        if (event.type === 'keydown' ? event.key === 'Escape' : !panel.contains(event.target)) closeDateReminderPanel(state);
+    };
+    document.addEventListener('mousedown', state.dateReminderOutsideHandler, true);
+    document.addEventListener('keydown', state.dateReminderOutsideHandler, true);
+
+    const button = (label, onClick, variant) => {
+        const element = document.createElement('button');
+        element.type = 'button';
+        element.className = `btn btn-sm ${variant}`;
+        element.textContent = label;
+        element.addEventListener('click', onClick);
+        return element;
+    };
+    const show = info => {
+        actions.replaceChildren();
+        if (!info) {
+            status.textContent = 'Reminders are unavailable right now.';
+            return;
+        }
+        status.textContent = info.message;
+        if (info.state === 'scheduled' && info.reminderId) {
+            actions.append(button('Cancel reminder', async () => {
+                show(await state.dotNetRef.invokeMethodAsync('CancelDateReminder', info.reminderId, blockId, value).catch(() => null));
+            }, 'btn-outline-danger'));
+        } else if (info.canRemind) {
+            actions.append(button('Remind me', async () => {
+                status.textContent = 'Saving…';
+                show(await state.dotNetRef.invokeMethodAsync('SetDateReminder', blockId, value, chip.textContent.trim()).catch(() => null));
+            }, 'btn-primary'));
+        }
+    };
+    state.dotNetRef.invokeMethodAsync('GetDateReminder', blockId, value).then(show).catch(() => show(null));
+}
+
+// Scrolls a block into view and highlights it briefly (opening a reminder from the bell).
+export function revealBlock(container, blockId) {
+    const block = container?.querySelector(`.wiki-block[data-block-id="${cssEscape(blockId)}"]`);
+    if (!block) return false;
+    block.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    block.classList.add('wiki-block-revealed');
+    setTimeout(() => block.classList.remove('wiki-block-revealed'), 2400);
+    return true;
+}
+
 
 function closeMentionMenu(state) {
     closeSuggestionMenu(state, 'mention');

@@ -1955,6 +1955,90 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
             .And.Contain(new KeyValuePair<string, string>("workflowName", "Welcome email"));
     }
 
+    [Fact]
+    public async Task DateMention_ShouldSaveTheAbsoluteDate_ShowRelativeTextOnlyVisually_AndSetAReminder()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<main class="sentinel-workspace"><div id="editor" class="wiki-block-editor"></div></main>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../src/GwsBusinessSuite.Web/wwwroot"));
+        await page.AddStyleTagAsync(new() { Content = await File.ReadAllTextAsync(Path.Combine(root, "app.css")) });
+        var moduleSource = (await File.ReadAllTextAsync(Path.Combine(root, "js/wiki-block-editor.js")))
+            .Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose, revealBlock };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        // "Tomorrow" in the browser's own time zone, the way the server would offer it.
+        var tomorrowValue = await page.EvaluateAsync<string>("""
+            () => { const d = new Date(); d.setDate(d.getDate() + 1);
+                    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
+            """);
+        var label = DateOnly.Parse(tomorrowValue).ToString("dd-MM-yy");
+        await page.EvaluateAsync(
+            """
+            args => {
+                window.calls = [];
+                window.sentinelBlockEditor.initialize(document.querySelector('#editor'), {
+                    invokeMethodAsync: (method, ...rest) => {
+                        window.calls.push([method, ...rest]);
+                        if (method === 'SearchMentionSuggestions') {
+                            return Promise.resolve(rest[0].startsWith('tom')
+                                ? [{ kind: 'date', value: args.value, label: args.label, description: 'Tomorrow' }]
+                                : []);
+                        }
+                        if (method === 'GetDateReminder') return Promise.resolve({ state: 'none', message: 'Get a reminder at 09:00.', canRemind: true });
+                        if (method === 'SetDateReminder') return Promise.resolve({ state: 'scheduled', message: 'Reminder set.', canRemind: false, reminderId: 'r1' });
+                        return Promise.resolve([]);
+                    }
+                }, '[]');
+            }
+            """,
+            new { value = tomorrowValue, label });
+
+        var content = page.Locator(".wiki-block-content");
+        await content.FillAsync("Ship it @tom");
+        var mentionMenu = page.GetByRole(AriaRole.Listbox, new() { Name = "Mention a person, date, or database row" });
+        await Expect(mentionMenu).ToContainTextAsync("Dates");
+        await content.PressAsync("Enter");
+
+        var chip = page.Locator("a.wiki-date-chip");
+        await Expect(chip).ToHaveTextAsync(label);
+        await Expect(chip).ToHaveAttributeAsync("data-relative", "tomorrow");
+        var after = await chip.EvaluateAsync<string>("el => getComputedStyle(el, '::after').content");
+        after.Should().Contain("tomorrow");
+
+        // Saved: the absolute date and its value only - never "tomorrow" or the "@tom" query.
+        var saved = (await EditorBlocksAsync(page)).Single();
+        saved.RichText.Should().Contain(span => span.Text == label && span.Link == $"datemention:{tomorrowValue}");
+        string.Concat(saved.RichText.Select(span => span.Text)).Should().NotContain("tomorrow").And.NotContain("@tom");
+
+        // The chip opens the reminder panel; "Remind me" sends this block, value and label.
+        await chip.ClickAsync();
+        var panel = page.GetByRole(AriaRole.Dialog, new() { Name = "Date reminder" });
+        await Expect(panel).ToContainTextAsync("Get a reminder at 09:00.");
+        await panel.GetByRole(AriaRole.Button, new() { Name = "Remind me" }).ClickAsync();
+        await Expect(panel).ToContainTextAsync("Reminder set.");
+        await Expect(panel.GetByRole(AriaRole.Button, new() { Name = "Cancel reminder" })).ToBeVisibleAsync();
+        var set = await page.EvaluateAsync<JsonElement>("() => window.calls.find(call => call[0] === 'SetDateReminder')");
+        set[1].GetString().Should().Be(saved.Id.ToString());
+        set[2].GetString().Should().Be(tomorrowValue);
+        set[3].GetString().Should().Be(label);
+        await page.Keyboard.PressAsync("Escape");
+        await Expect(panel).ToHaveCountAsync(0);
+
+        // Reloading the saved blocks brings the chip back with its relative text.
+        var json = await page.EvaluateAsync<string>("() => window.sentinelBlockEditor.getBlocksJson(document.querySelector('#editor'))");
+        await page.EvaluateAsync("json => window.sentinelBlockEditor.initialize(document.querySelector('#editor'), { invokeMethodAsync: () => Promise.resolve([]) }, json)", json);
+        await Expect(page.Locator("a.wiki-date-chip")).ToHaveAttributeAsync("data-relative", "tomorrow");
+        (await page.EvaluateAsync<bool>($"() => window.sentinelBlockEditor.revealBlock(document.querySelector('#editor'), '{saved.Id}')")).Should().BeTrue();
+    }
+
     private static ILocatorAssertions Expect(ILocator locator) =>
         Assertions.Expect(locator);
 }

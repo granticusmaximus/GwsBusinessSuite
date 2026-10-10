@@ -3968,6 +3968,13 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-workspace .wiki-block.is-toggle-hidden { display: none; }
 
 .sentinel-workspace .wiki-media-block { position: relative; width: 100%; padding: .25rem 0; }
+.wiki-mention.wiki-date-chip[data-relative]::after { content: " · " attr(data-relative); opacity: .7; font-size: .85em; }
+.wiki-mention.wiki-date-chip.is-past { opacity: .75; }
+.wiki-date-reminder-panel { position: absolute; z-index: 1085; min-width: 14rem; max-width: min(22rem, calc(100vw - 1rem)); padding: .75rem; border: 1px solid rgba(148,163,184,.3); border-radius: .6rem; background: var(--bs-body-bg, #fff); color: var(--bs-body-color, #111); box-shadow: 0 .5rem 1.5rem rgba(0,0,0,.18); }
+.wiki-date-reminder-title { font-weight: 600; margin-bottom: .25rem; }
+.wiki-date-reminder-status { font-size: .85rem; margin-bottom: .5rem; }
+.wiki-date-reminder-actions { display: flex; gap: .4rem; }
+.wiki-block.wiki-block-revealed { outline: 2px solid var(--bs-warning, #f59e0b); outline-offset: 2px; border-radius: .35rem; }
 .wiki-button-settings { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .35rem; }
 .wiki-button-settings > select { width: auto; max-width: 16rem; }
 .wiki-button-settings > input { flex: 1 1 12rem; min-width: 0; }

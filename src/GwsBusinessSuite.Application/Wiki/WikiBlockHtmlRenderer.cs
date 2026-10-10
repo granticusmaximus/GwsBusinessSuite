@@ -41,7 +41,16 @@ public static class WikiBlockHtmlRenderer
             if (!string.IsNullOrWhiteSpace(span.Link))
             {
                 var safeLink = GetSafeLink(span.Link);
-                if (safeLink is not null)
+                if (safeLink is not null && safeLink.StartsWith("datemention:", StringComparison.OrdinalIgnoreCase))
+                {
+                    // A date isn't somewhere to go: render it as <time> with its machine value.
+                    // An unreadable value (old or hand-edited data) keeps just its text.
+                    var dateValue = safeLink["datemention:".Length..];
+                    text = SentinelDateExpressions.TryReadMentionValue(dateValue, TimeZoneInfo.Utc, out _, out _)
+                        ? $"<time class=\"wiki-mention wiki-date-chip\" datetime=\"{WebUtility.HtmlEncode(dateValue)}\">{text}</time>"
+                        : $"<span class=\"wiki-mention\">{text}</span>";
+                }
+                else if (safeLink is not null)
                 {
                     var isMention = safeLink.StartsWith("usermention:", StringComparison.OrdinalIgnoreCase)
                         || safeLink.StartsWith("datemention:", StringComparison.OrdinalIgnoreCase)

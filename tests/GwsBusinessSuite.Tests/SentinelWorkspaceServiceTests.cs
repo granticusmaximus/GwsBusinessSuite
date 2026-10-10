@@ -479,8 +479,21 @@ public sealed class SentinelWorkspaceServiceTests
 
         html.Should().Contain("class=\"wiki-mention\"");
         html.Should().Contain("href=\"usermention:grant\"");
-        html.Should().Contain("href=\"datemention:2026-07-21\"");
+        html.Should().Contain("<time class=\"wiki-mention wiki-date-chip\" datetime=\"2026-07-21\">@tomorrow</time>");
         html.Should().NotContain("target=\"_blank\"");
+    }
+
+    [Fact]
+    public void RenderRichText_ShouldRenderTimedDatesAsTime_AndKeepOnlyTheTextOfUnreadableOnes()
+    {
+        var html = WikiBlockHtmlRenderer.RenderRichText([
+            new WikiRichTextSpan("16-10-26 15:00", Link: "datemention:2026-10-16T19:00:00Z"),
+            new WikiRichTextSpan("someday", Link: "datemention:not-a-date")
+        ]);
+
+        html.Should().Contain("<time class=\"wiki-mention wiki-date-chip\" datetime=\"2026-10-16T19:00:00Z\">16-10-26 15:00</time>");
+        html.Should().Contain("<span class=\"wiki-mention\">someday</span>");
+        html.Should().NotContain("datemention:");
     }
 
     [Fact]
@@ -495,6 +508,32 @@ public sealed class SentinelWorkspaceServiceTests
         html.Should().Contain("class=\"wiki-mention\"");
         html.Should().Contain($"href=\"rowmention:{databaseId}:{rowId}\"");
         html.Should().NotContain("target=\"_blank\"");
+    }
+
+    [Fact]
+    public async Task SearchMentionSuggestionsAsync_ShouldOfferATypedDatePhrase_WithAnAbsoluteLabel()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var db = await CreateDbAsync(connection);
+        db.AppUsers.Add(new GwsBusinessSuite.Domain.Entities.AppUser { Username = "next", IsActive = true });
+        await db.SaveChangesAsync();
+        // Friday 9 October 2026, noon in New York.
+        var sentinel = new SentinelWorkspaceService(db, new NewYorkClock(new DateTimeOffset(2026, 10, 9, 16, 0, 0, TimeSpan.Zero)));
+
+        var phrase = await sentinel.SearchMentionSuggestionsAsync("next friday 3pm", "u");
+        var tomorrow = await sentinel.SearchMentionSuggestionsAsync("tom", "u");
+
+        phrase.Should().ContainSingle().Which.Should().Be(
+            new SentinelMentionSuggestion("date", "2026-10-16T19:00:00Z", "16-10-26 15:00", "Date and time"));
+        tomorrow.Should().ContainSingle(item => item.Kind == "date")
+            .Which.Should().Be(new SentinelMentionSuggestion("date", "2026-10-10", "10-10-26", "Tomorrow"));
+    }
+
+    private sealed class NewYorkClock(DateTimeOffset utcNow) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => utcNow;
+        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
     }
 
     [Fact]

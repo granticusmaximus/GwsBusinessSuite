@@ -204,6 +204,8 @@
     [Parameter, EditorRequired] public Guid WikiPageId { get; set; }
     [Parameter] public string BlocksJson { get; set; } = "[]";
     [Parameter] public EventCallback<Guid> OnOpenPage { get; set; }
+    // A notification about one block (a date reminder): open its page and scroll to the block.
+    [Parameter] public EventCallback<SentinelBlockTarget> OnOpenBlock { get; set; }
     [Parameter] public EventCallback<IReadOnlyDictionary<Guid, int>> OnDiscussionCountsChanged { get; set; }
     [Parameter] public EventCallback<IReadOnlyDictionary<Guid, IReadOnlyList<SentinelDiscussionHighlight>>> OnDiscussionHighlightsChanged { get; set; }
 
@@ -405,7 +407,11 @@
     {
         await CollaborationService.MarkNotificationReadAsync(notification.Id, CurrentUsername);
         await ReloadAsync();
-        if (notification.WikiPageId != WikiPageId)
+        if (notification.WikiBlockId is { } blockId && OnOpenBlock.HasDelegate)
+        {
+            await OnOpenBlock.InvokeAsync(new SentinelBlockTarget(notification.WikiPageId, blockId));
+        }
+        else if (notification.WikiPageId != WikiPageId)
         {
             await OnOpenPage.InvokeAsync(notification.WikiPageId);
         }

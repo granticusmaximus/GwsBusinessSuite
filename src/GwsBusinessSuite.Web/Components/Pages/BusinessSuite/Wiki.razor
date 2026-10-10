@@ -16,6 +16,8 @@
 @inject ISentinelAccessService SentinelAccessService
 @inject ISentinelPageVerificationService PageVerificationService
 @inject IDailyNoteService DailyNoteService
+@inject ISentinelReminderService ReminderService
+@inject TimeProvider Clock
 @inject GwsBusinessSuite.Application.Automation.IAutomationWorkflowService AutomationWorkflowService
 @inject GwsBusinessSuite.Application.Automation.IAutomationExecutionService AutomationExecutionService
 @inject IMediaLibraryService MediaLibraryService
@@ -934,6 +936,7 @@
                                  WikiPageId="SelectedPageId.Value"
                                  BlocksJson="Editor.BlocksJson"
                                  OnOpenPage="OpenPageAsync"
+                                 OnOpenBlock="OpenPageBlockAsync"
                                  OnDiscussionCountsChanged="UpdateDiscussionCountsAsync"
                                  OnDiscussionHighlightsChanged="UpdateDiscussionHighlightsAsync" />
 
@@ -1631,6 +1634,59 @@
     }
 
     public sealed record ButtonWorkflowOption(string Id, string Name);
+
+    // Date chip reminders (wiki-block-editor.js openDateReminderPanel). The owner is always the
+    // signed-in user; SentinelReminderService checks access to the page.
+    public sealed record DateReminderInfo(string State, string Message, bool CanRemind, string? ReminderId = null);
+
+    [JSInvokable]
+    public async Task<DateReminderInfo> GetDateReminder(string blockId, string value)
+    {
+        if (SelectedPageId is not { } pageId || !Guid.TryParse(blockId, out var block)
+            || !SentinelDateExpressions.TryReadMentionValue(value, Clock.LocalTimeZone, out var date, out var instant))
+        {
+            return new DateReminderInfo("none", "Reminders work on dates in saved Sentinel pages.", false);
+        }
+        var due = SentinelDateExpressions.ReminderInstant(date, instant, Clock.LocalTimeZone);
+        var existing = (await ReminderService.ListScheduledForPageAsync(pageId, CurrentUsername))
+            .FirstOrDefault(reminder => reminder.WikiBlockId == block && reminder.DueAt == due);
+        if (existing is not null)
+        {
+            return new DateReminderInfo(SentinelReminderStates.Scheduled,
+                $"You'll get a reminder in the bell at {existing.DueAt.ToLocalGwsDateTime()}.", false, existing.Id.ToString());
+        }
+        return due > Clock.GetUtcNow()
+            ? new DateReminderInfo("none", $"Get a reminder in the bell at {due.ToLocalGwsDateTime()}.", true)
+            : new DateReminderInfo("none", "This date has passed.", false);
+    }
+
+    [JSInvokable]
+    public async Task<DateReminderInfo> SetDateReminder(string blockId, string value, string label)
+    {
+        if (SelectedPageId is not { } pageId || !Guid.TryParse(blockId, out var block))
+        {
+            return new DateReminderInfo("none", "Reminders work on dates in saved Sentinel pages.", false);
+        }
+        try
+        {
+            // The line holding the chip may only exist in a pending autosave so far.
+            await FlushAutosaveAsync();
+            var reminder = await ReminderService.CreateAsync(pageId, block, value, label, CurrentUsername);
+            return new DateReminderInfo(SentinelReminderStates.Scheduled,
+                $"Reminder set for {reminder.DueAt.ToLocalGwsDateTime()}.", false, reminder.Id.ToString());
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or KeyNotFoundException)
+        {
+            return new DateReminderInfo("none", ex.Message, false);
+        }
+    }
+
+    [JSInvokable]
+    public async Task<DateReminderInfo> CancelDateReminder(string reminderId, string blockId, string value)
+    {
+        if (Guid.TryParse(reminderId, out var id)) await ReminderService.CancelAsync(id, CurrentUsername);
+        return await GetDateReminder(blockId, value);
+    }
 
     // Read from the sign-in itself rather than _isAdmin, which starts out true until loaded.
     private async Task<bool> IsAdminNowAsync() =>
@@ -2437,7 +2493,7 @@
         if (SelectedDatabaseId is null && !_blockEditorInitialized)
         {
             _blockEditorRef ??= DotNetObjectReference.Create(this);
-            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=12");
+            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=13");
             await _blockEditorModule.InvokeVoidAsync(
                 "initialize",
                 _blockEditorContainer,
@@ -2466,6 +2522,13 @@
             // owns this ElementReference, guarantees a loaded page renders its persisted blocks.
             await blockEditorModule.InvokeVoidAsync("setRemoteCursors", _blockEditorContainer, BuildRemoteCursorPayload());
             _blockEditorSyncedGeneration = _editorGeneration;
+        }
+
+        if (_pendingRevealBlockId is { } revealBlockId && _blockEditorInitialized && _blockEditorModule is not null
+            && _blockEditorSyncedGeneration == _editorGeneration)
+        {
+            _pendingRevealBlockId = null;
+            await _blockEditorModule.InvokeVoidAsync("revealBlock", _blockEditorContainer, revealBlockId.ToString());
         }
     }
 
@@ -3119,6 +3182,18 @@
     }
 
     private Task OpenPageAsync(Guid wikiPageId) => OpenPageAsync(wikiPageId, recordHistory: true);
+
+    // From the bell (date reminders): open the page if needed, then scroll to the block once the
+    // editor has its content (see the end of OnAfterRenderAsync).
+    private Guid? _pendingRevealBlockId;
+
+    private async Task OpenPageBlockAsync(SentinelBlockTarget target)
+    {
+        if (SelectedPageId != target.WikiPageId) await OpenPageAsync(target.WikiPageId);
+        if (SelectedPageId != target.WikiPageId) return;
+        _pendingRevealBlockId = target.WikiBlockId;
+        StateHasChanged();
+    }
 
     // Daily notes (DailyNoteService): set when the open page is a day's note, for the
     // previous/next/date controls in the toolbar.

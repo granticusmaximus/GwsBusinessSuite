@@ -7,6 +7,8 @@ public static class SentinelReminderStates
     public const string Cancelled = "cancelled";
 }
 
+public sealed record SentinelBlockTarget(Guid WikiPageId, Guid WikiBlockId);
+
 public sealed record SentinelReminderView(
     Guid Id,
     Guid WikiPageId,

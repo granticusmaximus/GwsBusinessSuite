@@ -948,12 +948,15 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         // click() call itself returns, especially on a slower/loaded runner. The 2s mock delay
         // above leaves a wide, safe window for this to become true well before the mocked
         // response resolves and reverts it.
-        await page.WaitForFunctionAsync(
-            "document.querySelector('.tg-stream-panel-analyze').textContent === 'ANALYZING...'",
+        //
+        // Text and disabled are checked in ONE evaluation: reading them in two separate calls
+        // let the mocked response land in between on a loaded CI runner (2026-10-10 deploy run
+        // 38010579554), which re-enabled the button and failed the test with no app bug.
+        var duringBoth = await page.WaitForFunctionAsync(
+            "(() => { const b = document.querySelector('.tg-stream-panel-analyze'); return b.textContent === 'ANALYZING...' && b.disabled; })()",
+            null,
             new PageWaitForFunctionOptions { Timeout = 5000 });
-
-        var duringDisabled = await page.EvaluateAsync<bool>("document.querySelector('.tg-stream-panel-analyze').disabled");
-        duringDisabled.Should().BeTrue();
+        (await duringBoth.JsonValueAsync<bool>()).Should().BeTrue();
 
         await page.WaitForFunctionAsync(
             "!!document.querySelector('.tg-stream-panel-analysis') && document.querySelector('.tg-stream-panel-analysis').textContent === 'clear skies'",
