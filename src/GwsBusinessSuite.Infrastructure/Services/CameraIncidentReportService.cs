@@ -64,7 +64,7 @@ public sealed class CameraIncidentReportService(
             var parentId = await EnsureParentAsync(username, ct);
             var page = await wikiService.SavePageAsync(new WikiPageEditorModel
             {
-                Title = Truncate($"{camera.Name} - {capturedAt.ToLocalTime():MMM d, yyyy h:mm tt}", 200),
+                Title = Truncate($"{camera.Name} - {capturedAt.ToLocalTime():dd-MM-yy HH:mm}", 200),
                 Icon = "📹",
                 ParentWikiPageId = parentId,
                 BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(
@@ -90,7 +90,7 @@ public sealed class CameraIncidentReportService(
         md.Append("**Source:** [").Append(Escape(camera.SourceName)).Append("](").Append(camera.SourceAttributionUrl).AppendLine(")").AppendLine();
         md.Append("**Location:** ").Append(lat).Append(", ").Append(lon)
           .Append(" ([map](https://www.openstreetmap.org/?mlat=").Append(lat).Append("&mlon=").Append(lon).Append("#map=15/").Append(lat).Append('/').Append(lon).AppendLine("))").AppendLine();
-        md.Append("**Captured:** ").Append(capturedAt.ToLocalTime().ToString("dddd, MMM d, yyyy h:mm tt", CultureInfo.InvariantCulture))
+        md.Append("**Captured:** ").Append(capturedAt.ToLocalTime().ToString("dd-MM-yy HH:mm", CultureInfo.InvariantCulture))
           .Append(" (").Append(capturedAt.ToString("u", CultureInfo.InvariantCulture)).AppendLine(")").AppendLine();
         md.Append("**Saved by:** ").AppendLine(Escape(username)).AppendLine();
         md.AppendLine("## SentinelGPT notes").AppendLine();

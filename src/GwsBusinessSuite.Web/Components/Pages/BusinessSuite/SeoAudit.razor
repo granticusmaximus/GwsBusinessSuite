@@ -84,7 +84,7 @@ else
                         @foreach (var run in RunHistory)
                         {
                             <div class="list-group-item d-flex justify-content-between small">
-                                <span>@run.RunAt.ToLocalTime().ToString("MMM d, h:mm tt")</span>
+                                <span>@run.RunAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</span>
                                 <span class="fw-semibold">@run.Score</span>
                             </div>
                         }

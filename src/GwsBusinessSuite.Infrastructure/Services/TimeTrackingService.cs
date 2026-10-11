@@ -114,8 +114,8 @@ public sealed class TimeTrackingService(IAppDbContext db, IBillingService billin
         {
             ContactId = contactId,
             Title = first.Date == last.Date
-                ? $"Time for {first.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}"
-                : $"Time for {first.ToString("MMM d", CultureInfo.InvariantCulture)} - {last.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}",
+                ? $"Time for {first.ToString("dd-MM-yy", CultureInfo.InvariantCulture)}"
+                : $"Time for {first.ToString("dd-MM-yy", CultureInfo.InvariantCulture)} - {last.ToString("dd-MM-yy", CultureInfo.InvariantCulture)}",
             LineItems = views.Select(v => new InvoiceLineItemEditorModel
             {
                 Description = LineDescription(v),
@@ -134,7 +134,7 @@ public sealed class TimeTrackingService(IAppDbContext db, IBillingService billin
     // live in the description because an invoice line's quantity is a whole number.
     public static string LineDescription(TimeEntryView entry)
     {
-        var parts = new List<string> { entry.StartedAt.ToLocalTime().ToString("MMM d", CultureInfo.InvariantCulture) };
+        var parts = new List<string> { entry.StartedAt.ToLocalTime().ToString("dd-MM-yy", CultureInfo.InvariantCulture) };
         if (entry.TicketSubject is { } ticket) parts.Add($"Support: {ticket}");
         else if (entry.DealTitle is { } deal) parts.Add(deal);
         if (!string.IsNullOrWhiteSpace(entry.Description)) parts.Add(entry.Description.Trim());

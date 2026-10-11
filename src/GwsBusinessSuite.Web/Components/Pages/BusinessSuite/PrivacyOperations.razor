@@ -43,7 +43,7 @@ else
                 {
                     <tr class="@(request.CompletedAt is null && request.DueAt < DateTimeOffset.UtcNow ? "table-danger" : "")">
                         <td><strong>@request.RequestNumber</strong><br><small>@request.RequestType</small></td>
-                        <td>@request.SubjectIdentifier</td><td>@request.DueAt.ToLocalTime().ToString("MMM d, yyyy")</td><td>@request.Status</td>
+                        <td>@request.SubjectIdentifier</td><td>@request.DueAt.ToLocalTime().ToString("dd-MM-yy")</td><td>@request.Status</td>
                         <td class="text-nowrap">
                             @if (request.IdentityVerifiedAt is null) { <button class="btn btn-sm btn-outline-secondary" @onclick="() => VerifyAsync(request.Id)" disabled="@_busy">Verify identity</button> }
                             @if (request.RequestType == PrivacyRequestTypes.Access && request.IdentityVerifiedAt is not null) { <a class="btn btn-sm btn-outline-primary ms-1" href="@($"/admin/api/privacy/requests/{request.Id}/export")">Export</a> }
@@ -58,7 +58,7 @@ else
                                     }
                                     else
                                     {
-                                        <span class="badge text-bg-success ms-1">Erased @request.DeletionExecutedAt.Value.ToLocalTime().ToString("MMM d, h:mm tt")</span>
+                                        <span class="badge text-bg-success ms-1">Erased @request.DeletionExecutedAt.Value.ToLocalTime().ToString("dd-MM-yy HH:mm")</span>
                                     }
                                 }
                                 <button class="btn btn-sm btn-success ms-1" @onclick="() => CompleteAsync(request)" disabled="@(_busy || (request.RequestType == PrivacyRequestTypes.Erasure && request.DeletionExecutedAt is null))" title="@(request.RequestType == PrivacyRequestTypes.Erasure && request.DeletionExecutedAt is null ? "Run erasure first - this app requires real deletion evidence, not a manual attestation" : null)">Fulfill</button>
@@ -113,7 +113,7 @@ else
             {
                 <div class="list-group-item privacy-incident">
                     <div><strong>@incident.IncidentNumber · @incident.Title</strong><br><small>@incident.Severity · @incident.Status · owner: @(string.IsNullOrWhiteSpace(incident.Owner) ? "Unassigned" : incident.Owner)</small></div>
-                    @if (incident.RegulatorNotificationDueAt is not null && incident.RegulatorNotifiedAt is null) { <span class="badge text-bg-warning">72h due @incident.RegulatorNotificationDueAt.Value.ToLocalTime().ToString("MMM d, h:mm tt")</span> }
+                    @if (incident.RegulatorNotificationDueAt is not null && incident.RegulatorNotifiedAt is null) { <span class="badge text-bg-warning">72h due @incident.RegulatorNotificationDueAt.Value.ToLocalTime().ToString("dd-MM-yy HH:mm")</span> }
                     <div class="incident-controls">
                         <select class="form-select form-select-sm" value="@incident.RiskAssessment" @onchange="e => SetRisk(incident.Id, e.Value?.ToString())"><option>Pending</option><option>Unlikely</option><option>Likely</option><option>High</option></select>
                         <select class="form-select form-select-sm" value="@incident.Status" @onchange="e => SetIncidentStatus(incident.Id, e.Value?.ToString())">@foreach (var status in IncidentStatuses.All) { <option>@status</option> }</select>

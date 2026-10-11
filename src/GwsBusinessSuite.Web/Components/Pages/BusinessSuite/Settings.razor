@@ -287,7 +287,7 @@ else
                                     <span>@SemanticIndexStatus.DocumentCount documents · model <code>@SemanticIndexStatus.Model</code></span>
                                     @if (SemanticIndexStatus.LastIndexedAt is { } indexedAt)
                                     {
-                                        <span> · updated @indexedAt.ToLocalTime().ToString("g")</span>
+                                        <span> · updated @indexedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</span>
                                     }
                                 }
                             </div>
@@ -376,10 +376,10 @@ else
                         @foreach (var key in ApiKeys)
                         {
                             <tr>
-                                <td><strong>@key.Name</strong><div class="small text-secondary">Created @key.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</div></td>
+                                <td><strong>@key.Name</strong><div class="small text-secondary">Created @key.CreatedAt.ToLocalTime().ToString("dd-MM-yy")</div></td>
                                 <td><code>@key.KeyPrefix…</code></td>
                                 <td><div class="d-flex flex-wrap gap-1">@foreach (var scope in key.Scopes) { <span class="badge text-bg-light border">@scope</span> }</div></td>
-                                <td><span>@key.RequestCount.ToString("N0") requests</span><div class="small text-secondary">@(key.LastUsedAt?.ToLocalTime().ToString("MMM d, h:mm tt") ?? "Never used") · @key.RateLimitPerMinute/min</div></td>
+                                <td><span>@key.RequestCount.ToString("N0") requests</span><div class="small text-secondary">@(key.LastUsedAt?.ToLocalTime().ToString("dd-MM-yy HH:mm") ?? "Never used") · @key.RateLimitPerMinute/min</div></td>
                                 <td>
                                     @if (key.RevokedAt is not null) { <span class="badge text-bg-secondary">Revoked</span> }
                                     else if (key.ExpiresAt <= DateTimeOffset.UtcNow) { <span class="badge text-bg-warning">Expired</span> }

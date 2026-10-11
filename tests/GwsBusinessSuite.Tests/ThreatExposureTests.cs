@@ -333,7 +333,7 @@ public sealed class ThreatExposureTests
 
         var pageId = await service.ExportInvestigationToSentinelAsync(saved.Id, "grant");
         wiki.Saved.Should().ContainSingle();
-        wiki.Saved[0].Title.Should().Be($"Investigation: bad[.]example[.]org ({saved.CreatedAt:yyyy-MM-dd})");
+        wiki.Saved[0].Title.Should().Be($"Investigation: bad[.]example[.]org ({saved.CreatedAt:dd-MM-yy})");
         wiki.Saved[0].BlocksJson.Should().Contain("hxxp://bad[.]example[.]org/x[.]exe").And.NotContain("http://bad.example.org");
         (await service.ListInvestigationsAsync()).Single().ExportedWikiPageId.Should().Be(pageId);
     }

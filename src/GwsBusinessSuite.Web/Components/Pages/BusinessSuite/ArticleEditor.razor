@@ -671,5 +671,5 @@
         && publishAt > DateTimeOffset.UtcNow;
 
     private static string FormatDate(DateTimeOffset value) =>
-        value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+        value.ToLocalTime().ToString("dd-MM-yy HH:mm");
 }

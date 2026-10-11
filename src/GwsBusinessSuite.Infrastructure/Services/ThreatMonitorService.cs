@@ -265,13 +265,13 @@ public sealed class ThreatMonitorService(
                 snapshot.CertificateExpires = tls.NotAfter;
                 if (days < 0)
                     cert.Add(new($"{prefix}:cert:expired", ThreatFindingSeverities.Critical, $"TLS certificate for {asset.Value} has expired",
-                        $"Expired {tls.NotAfter:yyyy-MM-dd}. Browsers now show a security warning.", null));
+                        $"Expired {tls.NotAfter:dd-MM-yy}. Browsers now show a security warning.", null));
                 else if (days < 14)
                     cert.Add(new($"{prefix}:cert:expiring", ThreatFindingSeverities.High, $"TLS certificate for {asset.Value} expires in {Math.Ceiling(days)} days",
-                        $"Expires {tls.NotAfter:yyyy-MM-dd}. Check that automatic renewal is working.", null));
+                        $"Expires {tls.NotAfter:dd-MM-yy}. Check that automatic renewal is working.", null));
                 else if (days < 30)
                     cert.Add(new($"{prefix}:cert:expiring", ThreatFindingSeverities.Medium, $"TLS certificate for {asset.Value} expires in {Math.Ceiling(days)} days",
-                        $"Expires {tls.NotAfter:yyyy-MM-dd}.", null));
+                        $"Expires {tls.NotAfter:dd-MM-yy}.", null));
                 await ApplyAsync($"{prefix}:cert:", cert, tally, ct);
             }
 
@@ -283,7 +283,7 @@ public sealed class ThreatMonitorService(
                     {
                         new($"{prefix}:registration:expiring", days < 7 ? ThreatFindingSeverities.Critical : ThreatFindingSeverities.High,
                             $"Domain registration for {asset.Value} expires in {Math.Max(0, Math.Ceiling(days))} days",
-                            $"Expires {registrationExpires:yyyy-MM-dd}. A lapsed domain can be registered by anyone.", null)
+                            $"Expires {registrationExpires:dd-MM-yy}. A lapsed domain can be registered by anyone.", null)
                     }
                     : [];
                 await ApplyAsync($"{prefix}:registration:", registration, tally, ct);
@@ -389,7 +389,7 @@ public sealed class ThreatMonitorService(
                 .Select(entry => new FindingCandidate($"{prefix}:kev:{entry.CveId}",
                     entry.KnownRansomwareUse ? ThreatFindingSeverities.Critical : ThreatFindingSeverities.High,
                     $"{item.Name}: {entry.CveId} is being exploited in the wild",
-                    $"{entry.Vendor} {entry.Product} - {entry.Name}. CISA added it {entry.DateAdded:yyyy-MM-dd}. {entry.RequiredAction}",
+                    $"{entry.Vendor} {entry.Product} - {entry.Name}. CISA added it {entry.DateAdded:dd-MM-yy}. {entry.RequiredAction}",
                     $"https://nvd.nist.gov/vuln/detail/{entry.CveId}"))
                 .ToList();
             await ApplyAsync($"{prefix}:kev:", kevFindings, tally, ct);

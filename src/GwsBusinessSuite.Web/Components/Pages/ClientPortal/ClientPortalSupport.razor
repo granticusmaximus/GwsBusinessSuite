@@ -86,7 +86,7 @@
                             @foreach (var message in SelectedTicket.Messages)
                             {
                                 <div class="mb-3 @(message.AuthorType == SupportTicketAuthorTypes.Contact ? "text-end" : "")">
-                                    <div class="small text-secondary">@message.AuthorName &middot; @message.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
+                                    <div class="small text-secondary">@message.AuthorName &middot; @message.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
                                     <SafeMarkdownContent Content="@message.Body"
                                                          CssClass="@(message.AuthorType == SupportTicketAuthorTypes.Contact ? "d-inline-block p-2 rounded bg-primary-subtle" : "d-inline-block p-2 rounded bg-secondary-subtle")"
                                                          style="max-width: 80%; text-align: left;" />

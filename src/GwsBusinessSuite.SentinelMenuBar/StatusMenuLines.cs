@@ -51,7 +51,7 @@ internal static class StatusMenuLines
     private static string Count(int count, string noun) => $"{count} {noun}{(count == 1 ? "" : "s")}";
 
     private static string When(DateTimeOffset at, DateTimeOffset now) =>
-        at.Date == now.Date ? $"today {at:h:mm tt}"
-        : at.Date == now.Date.AddDays(1) ? $"tomorrow {at:h:mm tt}"
-        : $"{at:ddd MMM d, h:mm tt}";
+        at.Date == now.Date ? $"today {at:HH:mm}"
+        : at.Date == now.Date.AddDays(1) ? $"tomorrow {at:HH:mm}"
+        : $"{at:dd-MM-yy HH:mm}";
 }

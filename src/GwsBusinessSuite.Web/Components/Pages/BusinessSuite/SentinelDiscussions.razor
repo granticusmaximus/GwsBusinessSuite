@@ -72,7 +72,7 @@
                         <button type="button" class="list-group-item list-group-item-action text-start @(notification.IsRead ? "" : "bg-primary-subtle")"
                                 @onclick="() => OpenNotificationAsync(notification)">
                             <div class="small">@notification.Message</div>
-                            <div class="small text-secondary mt-1">@notification.CreatedAt.ToLocalTime().ToString("g")</div>
+                            <div class="small text-secondary mt-1">@notification.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
                         </button>
                     }
                 </div>
@@ -157,7 +157,7 @@
                         <div class="sentinel-discussion-comment @(comment.ParentCommentId.HasValue ? "is-reply" : "")">
                             <div class="d-flex justify-content-between gap-2">
                                 <span class="small fw-semibold">@comment.Author</span>
-                                <span class="small text-secondary">@comment.CreatedAt.ToLocalTime().ToString("g")</span>
+                                <span class="small text-secondary">@comment.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</span>
                             </div>
                             <SafeMarkdownContent Content="@comment.Body" CssClass="small mt-1 sentinel-discussion-body" />
                             <div class="d-flex flex-wrap align-items-center gap-1 mt-2">

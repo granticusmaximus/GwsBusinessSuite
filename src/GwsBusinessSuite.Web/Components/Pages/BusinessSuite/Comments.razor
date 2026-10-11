@@ -115,7 +115,7 @@
                             <td>
                                 <a href="/blog/@comment.ArticleSlug" target="_blank" rel="noopener noreferrer">@comment.ArticleTitle</a>
                             </td>
-                            <td class="small text-secondary">@comment.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</td>
+                            <td class="small text-secondary">@comment.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</td>
                             <td>
                                 <span class="badge @StatusBadgeClass(comment.Status)">@comment.Status</span>
                             </td>

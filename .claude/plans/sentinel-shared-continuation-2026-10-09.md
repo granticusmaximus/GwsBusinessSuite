@@ -128,6 +128,18 @@ stats, 20 PDF/Word export; then Phases 2 and 3. Each Phase-4 item (9, 10, 11, 12
 reviewed sub-plan before code. Stop for Grant's choice before item 29 (mailbox/provider), item 8
 (unpacked extension versus store), and item 9 (timing/risk).
 
+## App-wide date/time format (Grant, 2026-10-09)
+
+Every date or time shown to a person is `dd-MM-yy` and 24-hour `HH:mm` (e.g. `09-10-26 15:05`),
+everywhere: admin, public site, emails, Sentinel, Mac apps, CLI. `GwsDateFormat`
+(Application/Abstractions) holds the patterns and helpers; use them in new code. Done by Claude
+2026-10-10 as an explicit per-site sweep (~200 sites + the radar timeline JS). Deliberately NOT a
+global CultureInfo change: several feeds parse dates with culture-dependent TryParse, and a
+dd-MM culture would swap day/month in those imports. Machine formats stay as they are: ISO in
+storage/APIs/JSON, `yyyy-MM-dd` input values, file-name stamps, sitemap lastmod, model prompts,
+and CSV exports (CSV import reads dates back with invariant US order). Month headings ("October
+2026") and weekday names keep their names.
+
 ## Non-negotiable invariants
 
 - Local AI only; no external LLM APIs.

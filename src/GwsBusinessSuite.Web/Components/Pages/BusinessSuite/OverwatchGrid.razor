@@ -220,7 +220,7 @@
                     {
                         <li class="tg-coverage-item tg-capture-item">
                             <span>@capture.Title
-                                <small>@capture.AreaName · @capture.StartedAt.ToLocalTime().ToString("MMM d, h:mm tt", System.Globalization.CultureInfo.InvariantCulture)@(capture.Until > DateTimeOffset.UtcNow ? " · RECORDING" : "")</small></span>
+                                <small>@capture.AreaName · @capture.StartedAt.ToLocalTime().ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture)@(capture.Until > DateTimeOffset.UtcNow ? " · RECORDING" : "")</small></span>
                             <span class="tg-area-actions">
                                 @foreach (var camera in capture.Cameras)
                                 {
@@ -742,7 +742,7 @@
             .Select(f => new
             {
                 url = $"/admin/api/overwatch/timelapse/{Uri.EscapeDataString(favorite.Id)}/{f.FileName}",
-                label = f.CapturedAt.ToLocalTime().ToString("MMM d, h:mm tt", System.Globalization.CultureInfo.InvariantCulture)
+                label = f.CapturedAt.ToLocalTime().ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture)
             })
             .ToList();
         await JS.InvokeVoidAsync("tacticalGlobe.openTimelapse", favorite.Name, frames);
@@ -1011,7 +1011,7 @@
             {
                 url = $"/admin/api/overwatch/timelapse/{Uri.EscapeDataString(camera.FrameKey)}/{f.FileName}",
                 label = (f.CapturedAt < capture.StartedAt ? "BEFORE · " : "") +
-                        f.CapturedAt.ToLocalTime().ToString("MMM d, h:mm tt", System.Globalization.CultureInfo.InvariantCulture)
+                        f.CapturedAt.ToLocalTime().ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture)
             })
             .ToList();
         await JS.InvokeVoidAsync("tacticalGlobe.openTimelapse", $"{capture.Title} - {camera.Name}", frames);
@@ -1200,7 +1200,7 @@
         return DateTimeOffset.UtcNow;
     }
 
-    private static string FormatClock(DateTimeOffset utc) => utc.ToLocalTime().ToString("h:mm tt", System.Globalization.CultureInfo.InvariantCulture);
+    private static string FormatClock(DateTimeOffset utc) => utc.ToLocalTime().ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture);
 
     private async Task OnDepartureChangedAsync(ChangeEventArgs e)
     {
@@ -1391,7 +1391,7 @@
                 airF = station.AirF,
                 dewpointF = station.DewpointF,
                 precipitation = station.Precipitation,
-                observedAt = station.ObservedUtc?.ToLocalTime().ToString("MMM d, h:mm tt", System.Globalization.CultureInfo.InvariantCulture),
+                observedAt = station.ObservedUtc?.ToLocalTime().ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture),
                 risk = station.Risk,
                 reason = station.Reason,
                 sourceName = station.SourceName,
@@ -1468,7 +1468,7 @@
                 detail = h.Detail,
                 severity = h.Severity,
                 url = h.Url,
-                observedAt = h.ObservedAt?.ToLocalTime().ToString("MMM d, h:mm tt", System.Globalization.CultureInfo.InvariantCulture),
+                observedAt = h.ObservedAt?.ToLocalTime().ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture),
                 lat = h.Latitude,
                 lon = h.Longitude
             }).ToList();
@@ -1578,7 +1578,7 @@
             categoryLabel = IncidentCategories.Label(i.Category),
             severityLevel = i.SeverityLevel,
             lanes = i.Lanes,
-            endsAt = i.EndsAt?.ToLocalTime().ToString("MMM d, h:mm tt", System.Globalization.CultureInfo.InvariantCulture),
+            endsAt = i.EndsAt?.ToLocalTime().ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture),
             lat = i.Latitude,
             lon = i.Longitude,
             sourceName = i.SourceName,

@@ -207,7 +207,7 @@ public sealed class FederalCivicFeedService(
             var senateStatus = new FloorStatus(
                 inSession,
                 inSession
-                    ? $"Senate floor proceedings on record for {sessionDate:MMMM d, yyyy} (Congressional Record Issue {latestIssue.Issue})."
+                    ? $"Senate floor proceedings on record for {sessionDate:dd-MM-yy} (Congressional Record Issue {latestIssue.Issue})."
                     : "The Senate is not currently in session.",
                 null,
                 senateSummary);
@@ -353,7 +353,7 @@ public sealed class FederalCivicFeedService(
         var sessionDateUtc = new DateTimeOffset(sessionDate.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
         var description =
             $"Official Congressional Record, {chamber} Section — Congress {issue.Congress}, Session {issue.Session}, " +
-            $"Volume {issue.Volume}, Issue {issue.Issue}, published {sessionDate:MMMM d, yyyy}. " +
+            $"Volume {issue.Volume}, Issue {issue.Issue}, published {sessionDate:dd-MM-yy}. " +
             "Full proceedings text is published as PDF by Congress.gov; the link below opens the official document.";
 
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);

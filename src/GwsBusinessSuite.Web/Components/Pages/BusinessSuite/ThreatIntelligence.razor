@@ -97,7 +97,7 @@ else
                                 <span class="badge bg-danger-subtle text-danger-emphasis me-1">@match.Feed</span>
                                 <code class="text-break">@Defang(match.MatchedValue)</code>
                                 <div class="small text-secondary">
-                                    @match.Description@(match.SeenAt is { } seen ? $" · seen {seen:yyyy-MM-dd}" : "")
+                                    @match.Description@(match.SeenAt is { } seen ? $" · seen {seen:dd-MM-yy}" : "")
                                     · <a href="@match.ReferenceUrl" target="_blank" rel="noopener">report</a>
                                 </div>
                             </li>
@@ -134,11 +134,11 @@ else
                             <dt class="col-4">Registrar / Org</dt><dd class="col-8">@(reg.Registrar ?? "Unknown")</dd>
                             @if (reg.Registered is { } registered)
                             {
-                                <dt class="col-4">Registered</dt><dd class="col-8">@registered.ToString("yyyy-MM-dd")</dd>
+                                <dt class="col-4">Registered</dt><dd class="col-8">@registered.ToString("dd-MM-yy")</dd>
                             }
                             @if (reg.Expires is { } expires)
                             {
-                                <dt class="col-4">Expires</dt><dd class="col-8">@expires.ToString("yyyy-MM-dd")</dd>
+                                <dt class="col-4">Expires</dt><dd class="col-8">@expires.ToString("dd-MM-yy")</dd>
                             }
                             @if (reg.Nameservers.Count > 0)
                             {
@@ -168,7 +168,7 @@ else
                         <dl class="row small mb-2">
                             <dt class="col-4">Subject</dt><dd class="col-8">@tls.Subject</dd>
                             <dt class="col-4">Issuer</dt><dd class="col-8">@tls.Issuer</dd>
-                            <dt class="col-4">Valid</dt><dd class="col-8">@tls.NotBefore.ToString("yyyy-MM-dd") &ndash; @tls.NotAfter.ToString("yyyy-MM-dd")</dd>
+                            <dt class="col-4">Valid</dt><dd class="col-8">@tls.NotBefore.ToString("dd-MM-yy") &ndash; @tls.NotAfter.ToString("dd-MM-yy")</dd>
                             @if (tls.SubjectAlternativeNames.Count > 0)
                             {
                                 <dt class="col-4">SANs</dt><dd class="col-8">@string.Join(", ", tls.SubjectAlternativeNames)</dd>
@@ -272,7 +272,7 @@ else
                         {
                             <h6>Web archive</h6>
                             <p class="small mb-2">
-                                First seen @(archive.FirstSnapshot?.ToString("yyyy-MM-dd") ?? "-"), last captured @(archive.LastSnapshot?.ToString("yyyy-MM-dd") ?? "-")
+                                First seen @(archive.FirstSnapshot?.ToString("dd-MM-yy") ?? "-"), last captured @(archive.LastSnapshot?.ToString("dd-MM-yy") ?? "-")
                                 · <a href="@archive.HistoryUrl" target="_blank" rel="noopener">history</a>
                             </p>
                         }
@@ -314,7 +314,7 @@ else
                             <li class="list-group-item px-0 d-flex justify-content-between align-items-start gap-2">
                                 <div class="min-w-0">
                                     <button type="button" class="btn btn-link p-0 text-start fw-semibold text-break" @onclick="() => ReopenAsync(item)">@item.Query</button>
-                                    <div class="small text-secondary">@KindLabel(item.Kind) · @item.CreatedBy · @item.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
+                                    <div class="small text-secondary">@KindLabel(item.Kind) · @item.CreatedBy · @item.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
                                     <div class="small text-truncate">@item.Summary</div>
                                 </div>
                                 <div class="d-flex gap-1 flex-shrink-0">
@@ -465,7 +465,7 @@ else
                                         {
                                             <span class="badge bg-light text-dark border me-1" title="FIRST EPSS: probability of exploitation in the next 30 days">EPSS @epssScore.ToString("P1")</span>
                                         }
-                                        added @entry.DateAdded.ToString("yyyy-MM-dd")
+                                        added @entry.DateAdded.ToString("dd-MM-yy")
                                     </span>
                                 </div>
                                 <div class="small">@entry.Vendor @entry.Product - @entry.Name</div>
@@ -510,7 +510,7 @@ else
                                     <span class="text-secondary small text-nowrap">@breach.AccountCount.ToString("N0") accounts</span>
                                 </div>
                                 <div class="small text-secondary">
-                                    @(breach.Domain ?? "no domain") · breached @(breach.BreachDate?.ToString("yyyy-MM-dd") ?? "unknown") · published @breach.AddedDate.ToString("yyyy-MM-dd")
+                                    @(breach.Domain ?? "no domain") · breached @(breach.BreachDate?.ToString("dd-MM-yy") ?? "unknown") · published @breach.AddedDate.ToString("dd-MM-yy")
                                     @if (!breach.IsVerified)
                                     {
                                         <span class="badge bg-warning-subtle text-warning-emphasis ms-1">unverified</span>
@@ -554,7 +554,7 @@ else
                             <li class="list-group-item px-0">
                                 <code class="text-break">@Defang(url.Url)</code>
                                 <div class="small text-secondary">
-                                    @url.Threat · @(url.IsOnline ? "online" : "offline") · @(url.DateAdded?.ToString("yyyy-MM-dd HH:mm") ?? "") UTC
+                                    @url.Threat · @(url.IsOnline ? "online" : "offline") · @(url.DateAdded?.ToString("dd-MM-yy HH:mm") ?? "") UTC
                                     @if (url.Tags.Count > 0) { <span> · @string.Join(", ", url.Tags)</span> }
                                     · <a href="@url.ReferenceUrl" target="_blank" rel="noopener">report</a>
                                 </div>
@@ -571,7 +571,7 @@ else
                             <li class="list-group-item px-0">
                                 <code class="text-break">@Defang(ioc.Value)</code>
                                 <div class="small text-secondary">
-                                    @ioc.Malware · @ioc.ThreatType (@ioc.IndicatorType) · confidence @ioc.ConfidenceLevel% · @(ioc.FirstSeen?.ToString("yyyy-MM-dd HH:mm") ?? "") UTC
+                                    @ioc.Malware · @ioc.ThreatType (@ioc.IndicatorType) · confidence @ioc.ConfidenceLevel% · @(ioc.FirstSeen?.ToString("dd-MM-yy HH:mm") ?? "") UTC
                                     · <a href="@ioc.ReferenceUrl" target="_blank" rel="noopener">report</a>
                                 </div>
                             </li>
@@ -587,7 +587,7 @@ else
                             <li class="list-group-item px-0">
                                 <div class="d-flex flex-wrap gap-2 align-items-baseline">
                                     <span class="fw-semibold">@(sample.Signature ?? "Unclassified")</span>
-                                    <span class="small text-secondary">@sample.FileType · @(sample.FileName ?? "unnamed") · @(sample.FirstSeen?.ToString("yyyy-MM-dd HH:mm") ?? "") UTC</span>
+                                    <span class="small text-secondary">@sample.FileType · @(sample.FileName ?? "unnamed") · @(sample.FirstSeen?.ToString("dd-MM-yy HH:mm") ?? "") UTC</span>
                                 </div>
                                 <a class="small text-break font-monospace" href="@sample.ReferenceUrl" target="_blank" rel="noopener">@sample.Sha256</a>
                             </li>
@@ -604,7 +604,7 @@ else
                                 <span><code>@Defang($"{server.IpAddress}:{server.Port}")</code> <span class="fw-semibold">@server.Malware</span></span>
                                 <span class="small text-secondary">
                                     <span class="badge @(server.IsOnline ? "bg-danger" : "bg-secondary-subtle text-secondary-emphasis")">@(server.IsOnline ? "online" : "offline")</span>
-                                    @string.Join(" · ", new[] { server.Country, server.AsName, server.LastOnline is { } last ? $"last online {last:yyyy-MM-dd}" : null }.Where(v => !string.IsNullOrWhiteSpace(v)))
+                                    @string.Join(" · ", new[] { server.Country, server.AsName, server.LastOnline is { } last ? $"last online {last:dd-MM-yy}" : null }.Where(v => !string.IsNullOrWhiteSpace(v)))
                                 </span>
                             </li>
                         }
@@ -639,7 +639,7 @@ else
                                     <a href="@briefing.Url" target="_blank" rel="noopener" class="fw-semibold">@briefing.Title</a>
                                     @if (briefing.PublishedAt is { } published)
                                     {
-                                        <span class="text-secondary small text-nowrap">@published.ToString("yyyy-MM-dd")</span>
+                                        <span class="text-secondary small text-nowrap">@published.ToString("dd-MM-yy")</span>
                                     }
                                 </div>
                                 <p class="small text-secondary mb-1">@briefing.Description</p>
@@ -1080,7 +1080,7 @@ else
             }
             @if (cveDetail.KnownExploited is { } kevEntry)
             {
-                <span class="badge bg-danger">Exploited in the wild - on KEV since @kevEntry.DateAdded.ToString("yyyy-MM-dd")</span>
+                <span class="badge bg-danger">Exploited in the wild - on KEV since @kevEntry.DateAdded.ToString("dd-MM-yy")</span>
                 @if (kevEntry.KnownRansomwareUse)
                 {
                     <span class="badge bg-danger-subtle text-danger-emphasis">Used by ransomware</span>
@@ -1097,7 +1097,7 @@ else
         }
         @if (cveDetail.KnownExploited is { } kev && !string.IsNullOrWhiteSpace(kev.RequiredAction))
         {
-            <p class="small mb-2"><strong>CISA required action:</strong> @kev.RequiredAction @(kev.DueDate is { } due ? $"(due {due:yyyy-MM-dd} for US federal agencies)" : "")</p>
+            <p class="small mb-2"><strong>CISA required action:</strong> @kev.RequiredAction @(kev.DueDate is { } due ? $"(due {due:dd-MM-yy} for US federal agencies)" : "")</p>
         }
         @if (cveDetail.Errors.Count > 0)
         {

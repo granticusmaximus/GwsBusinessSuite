@@ -58,12 +58,12 @@ else
                 @if (container.StartedAt.HasValue)
                 {
                     <dt class="col-4 text-secondary">Started</dt>
-                    <dd class="col-8">@container.StartedAt.Value.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</dd>
+                    <dd class="col-8">@container.StartedAt.Value.ToLocalTime().ToString("dd-MM-yy HH:mm")</dd>
                 }
                 @if (container.FinishedAt.HasValue)
                 {
                     <dt class="col-4 text-secondary">Finished</dt>
-                    <dd class="col-8">@container.FinishedAt.Value.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</dd>
+                    <dd class="col-8">@container.FinishedAt.Value.ToLocalTime().ToString("dd-MM-yy HH:mm")</dd>
                 }
             </dl>
 
@@ -147,7 +147,7 @@ else
                                         <div class="small text-secondary">@log.ResultSummary</div>
                                     }
                                 </div>
-                                <span class="small text-secondary text-nowrap">@log.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</span>
+                                <span class="small text-secondary text-nowrap">@log.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</span>
                             </div>
                         </div>
                     }
@@ -172,7 +172,7 @@ else
                                     <span class="badge @(alert.Severity == "Error" ? "text-bg-danger" : "text-bg-warning") me-2">@alert.Severity</span>
                                     @alert.Message
                                 </div>
-                                <span class="small text-secondary">@alert.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</span>
+                                <span class="small text-secondary">@alert.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</span>
                             </div>
                         </div>
                     }

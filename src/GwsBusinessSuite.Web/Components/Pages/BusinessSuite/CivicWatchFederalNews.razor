@@ -25,5 +25,5 @@ else
     [Parameter] public string Chamber { get; set; } = "Congress";
 
     private static string FormatDate(DateTimeOffset? value) =>
-        value is null ? "Date unavailable" : value.Value.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
+        value is null ? "Date unavailable" : value.Value.ToString("dd-MM-yy", CultureInfo.InvariantCulture);
 }

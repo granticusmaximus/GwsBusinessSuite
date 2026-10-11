@@ -576,7 +576,7 @@ public static class PublicSiteHtmlRenderer
         string? replyToAuthorName = null,
         IReadOnlyList<RelatedArticleView>? relatedArticles = null)
     {
-        var dateLabel = publishedAt?.ToString("MMMM d, yyyy") ?? "";
+        var dateLabel = publishedAt?.ToString("dd-MM-yy") ?? "";
         var heroHtml = string.IsNullOrWhiteSpace(heroImageUrl)
             ? string.Empty
             : $"""
@@ -754,7 +754,7 @@ public static class PublicSiteHtmlRenderer
             <div class="comment-item">
               <div class="comment-item-meta">
                 <span class="comment-item-author">{Html(comment.AuthorName)}</span>
-                <span class="comment-item-date">{Html(comment.CreatedAt.ToString("MMMM d, yyyy"))}</span>
+                <span class="comment-item-date">{Html(comment.CreatedAt.ToString("dd-MM-yy"))}</span>
               </div>
               <p class="comment-item-body">{Html(comment.Body)}</p>
               <a class="comment-reply-link" href="/blog/{Html(slug)}?replyTo={Html(comment.Id.ToString())}#comment-form">Reply</a>

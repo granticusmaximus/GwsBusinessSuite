@@ -73,7 +73,7 @@
             Dashboard.RetentionCohorts.Select(item => item.Periods.Count).DefaultIfEmpty(0).Max());
 
     private string CohortLabel(DateOnly date) =>
-        Dashboard.RetentionPeriodLabel == "Week" ? $"Week of {date:MMM d}" : date.ToString("MMM d");
+        Dashboard.RetentionPeriodLabel == "Week" ? $"Week of {date:dd-MM-yy}" : date.ToString("dd-MM-yy");
 
     private static string CellStyle(decimal? rate)
     {

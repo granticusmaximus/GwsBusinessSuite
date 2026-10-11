@@ -66,5 +66,5 @@ else
     [Parameter, EditorRequired] public IReadOnlyList<StateLegislativeVoteSummary> Votes { get; set; } = [];
 
     private static string FormatTimestamp(DateTimeOffset? value) =>
-        value is null ? "Date unavailable" : value.Value.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
+        value is null ? "Date unavailable" : value.Value.ToString("dd-MM-yy", CultureInfo.InvariantCulture);
 }

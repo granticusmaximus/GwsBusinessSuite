@@ -61,7 +61,7 @@ else
                 <img src="@asset.ThumbnailUrl" alt="@asset.AltText" loading="lazy" />
                 <div class="media-card-body">
                     <div class="small text-truncate fw-semibold" title="@asset.FileName">@asset.FileName</div>
-                    <div class="small text-secondary">@FormatSize(asset.SizeBytes) · @asset.CreatedAt.ToLocalTime().ToString("MMM d, yyyy")</div>
+                    <div class="small text-secondary">@FormatSize(asset.SizeBytes) · @asset.CreatedAt.ToLocalTime().ToString("dd-MM-yy")</div>
                 </div>
             </div>
         }
@@ -85,7 +85,7 @@ else
                         <dt class="col-4 text-secondary">Size</dt>
                         <dd class="col-8">@FormatSize(SelectedAsset.SizeBytes)</dd>
                         <dt class="col-4 text-secondary">Uploaded</dt>
-                        <dd class="col-8">@SelectedAsset.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</dd>
+                        <dd class="col-8">@SelectedAsset.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</dd>
                         <dt class="col-4 text-secondary">URL</dt>
                         <dd class="col-8">
                             <code class="small">@SelectedAsset.Url</code>

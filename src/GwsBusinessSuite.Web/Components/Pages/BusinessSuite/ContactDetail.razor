@@ -121,7 +121,7 @@ else
                             {
                                 <li class="mb-2 pb-2 border-bottom">
                                     <div>@activity.Note</div>
-                                    <div class="small text-secondary">@activity.CreatedBy &middot; @activity.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</div>
+                                    <div class="small text-secondary">@activity.CreatedBy &middot; @activity.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
                                 </li>
                             }
                         </ul>
@@ -219,7 +219,7 @@ else
                         {
                             <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
                                 <div class="fw-semibold small">@booking.BookingTypeTitle</div>
-                                <span class="small">@booking.StartsAt.ToLocalTime().ToString("MMM d, yyyy") &middot; @booking.Status</span>
+                                <span class="small">@booking.StartsAt.ToLocalTime().ToString("dd-MM-yy") &middot; @booking.Status</span>
                             </div>
                         }
                     }
@@ -246,11 +246,11 @@ else
                                     <div class="small text-secondary">
                                         @if (enrollment.NextSendAt is { } nextSendAt)
                                         {
-                                            @($"Next send {nextSendAt.ToLocalTime():MMM d, yyyy}")
+                                            @($"Next send {nextSendAt.ToLocalTime():dd-MM-yy}")
                                         }
                                         else if (enrollment.CompletedAt is { } completedAt)
                                         {
-                                            @($"Completed {completedAt.ToLocalTime():MMM d, yyyy}")
+                                            @($"Completed {completedAt.ToLocalTime():dd-MM-yy}")
                                         }
                                         else
                                         {
@@ -294,7 +294,7 @@ else
                         @foreach (var submission in FormSubmissions)
                         {
                             <a class="list-group-item list-group-item-action" href="/admin/form-submissions/@submission.Id">
-                                <div class="small">@submission.CreatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</div>
+                                <div class="small">@submission.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
                             </a>
                         }
                     }
@@ -331,7 +331,7 @@ else
                             <div class="small text-secondary text-break">@entry.Detail</div>
                         }
                     </div>
-                    <div class="small text-secondary text-nowrap">@entry.At.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</div>
+                    <div class="small text-secondary text-nowrap">@entry.At.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
                 </li>
             }
             @if (FilteredHistory.Count > HistoryShown)

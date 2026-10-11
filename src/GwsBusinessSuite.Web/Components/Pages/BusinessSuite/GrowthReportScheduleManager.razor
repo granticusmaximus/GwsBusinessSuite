@@ -49,11 +49,11 @@
                             <small>@DeliveryLabel(schedule)</small>
                             @if (schedule.LastDeliveredAt is { } delivered)
                             {
-                                <small>Last delivered @delivered.ToString("MMM d, yyyy h:mm tt 'UTC'")</small>
+                                <small>Last delivered @delivered.ToString("dd-MM-yy HH:mm 'UTC'")</small>
                             }
                             else if (schedule.LastAttemptAt is { } attempted)
                             {
-                                <small>Last attempted @attempted.ToString("MMM d, yyyy h:mm tt 'UTC'")</small>
+                                <small>Last attempted @attempted.ToString("dd-MM-yy HH:mm 'UTC'")</small>
                             }
                             @if (!string.IsNullOrWhiteSpace(schedule.LastError))
                             {
@@ -196,8 +196,8 @@
         : $"Every {Ordinal(schedule.DeliveryDay)} at {HourLabel(schedule.DeliveryHourUtc)} · {schedule.RangeDays}-day report";
     private static string DeliveryLabel(AnalyticsReportScheduleView schedule) => !schedule.IsActive
         ? "Paused"
-        : schedule.NextRunAt is { } next ? $"Next {next:MMM d, yyyy h:mm tt} UTC" : "Next delivery pending";
-    private static string HourLabel(int hour) => new DateTime(2000, 1, 1, hour, 0, 0).ToString("h:mm tt 'UTC'");
+        : schedule.NextRunAt is { } next ? $"Next {next:dd-MM-yy HH:mm} UTC" : "Next delivery pending";
+    private static string HourLabel(int hour) => new DateTime(2000, 1, 1, hour, 0, 0).ToString("HH:mm 'UTC'");
     private static string Ordinal(int value)
     {
         var suffix = value % 100 is 11 or 12 or 13

@@ -17,7 +17,7 @@
 
 <div class="page-header gws-dashboard-header">
     <div>
-        <span class="gws-eyebrow">@DateTimeOffset.Now.ToString("dddd, MMMM d")</span>
+        <span class="gws-eyebrow">@DateTimeOffset.Now.ToString("dd-MM-yy")</span>
         <h1>Good @GreetingPeriod()</h1>
         <p>@DashboardDescription</p>
     </div>
@@ -79,7 +79,7 @@
     <section aria-labelledby="kpi-heading" class="mb-5">
         <div class="gws-section-heading">
             <div><span class="gws-eyebrow">Business</span><h2 id="kpi-heading">At a glance</h2></div>
-            <span class="text-secondary small">Generated @mc.GeneratedAt.ToLocalTime().ToString("h:mm tt")</span>
+            <span class="text-secondary small">Generated @mc.GeneratedAt.ToLocalTime().ToString("HH:mm")</span>
         </div>
         <div class="row g-3">
             <div class="col-md-3 col-6">
@@ -130,7 +130,7 @@
                                 <div class="fw-semibold text-truncate">@failure.WorkflowName <span class="text-secondary fw-normal">&middot; @failure.Mode</span></div>
                                 <div class="small text-secondary text-truncate">@failure.ErrorMessage</div>
                             </div>
-                            <span class="small text-secondary flex-shrink-0">@(failure.FinishedAt?.ToLocalTime().ToString("MMM d, h:mm tt") ?? "")</span>
+                            <span class="small text-secondary flex-shrink-0">@(failure.FinishedAt?.ToLocalTime().ToString("dd-MM-yy HH:mm") ?? "")</span>
                         </a>
                     }
                 </div>

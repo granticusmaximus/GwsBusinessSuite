@@ -954,7 +954,7 @@ public partial class SentinelGptPage : ContentPage
         {
             var firstUserMessage = conversation.Messages.FirstOrDefault(m => m.Role == "user")?.Content ?? "New conversation";
             var title = firstUserMessage.Length > 48 ? firstUserMessage[..48] + "..." : firstUserMessage;
-            _history.Add(new ConversationSummary(title, conversation.UpdatedAt.ToLocalTime().ToString("MMM d, t"), path));
+            _history.Add(new ConversationSummary(title, conversation.UpdatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm"), path));
         }
     }
 

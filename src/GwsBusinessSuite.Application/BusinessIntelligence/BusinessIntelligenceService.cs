@@ -223,7 +223,7 @@ public sealed class BusinessIntelligenceService(IAppDbContext db, TimeProvider t
                     .GroupBy(item => DateTimeOffset.FromUnixTimeSeconds(item.OccurredAtUnixSeconds).UtcDateTime.Date)
                     .OrderByDescending(group => group.Key)
                     .Take(MaxDrillRows)
-                    .Select(group => new BiDrillRow(group.Key.ToString("ddd, MMM d"), "Daily traffic",
+                    .Select(group => new BiDrillRow(group.Key.ToString("dd-MM-yy"), "Daily traffic",
                         editor.Metric == BiMetrics.PageViews ? group.Count() : group.Select(item => item.VisitorKey).Distinct().Count(),
                         new DateTimeOffset(group.Key, TimeSpan.Zero)))
                     .ToList();

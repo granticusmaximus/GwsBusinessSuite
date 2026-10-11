@@ -55,7 +55,7 @@
                             @if (deal.ExpectedCloseDate is not null)
                             {
                                 <p class="text-secondary small mb-0">
-                                    Expected close: @deal.ExpectedCloseDate.Value.ToString("MMM d, yyyy")
+                                    Expected close: @deal.ExpectedCloseDate.Value.ToString("dd-MM-yy")
                                 </p>
                             }
                         </div>
@@ -82,7 +82,7 @@
                             @if (invoice.DueDate is not null)
                             {
                                 <p class="text-secondary small mb-2">
-                                    Due @invoice.DueDate.Value.ToLocalTime().ToString("MMM d, yyyy")
+                                    Due @invoice.DueDate.Value.ToLocalTime().ToString("dd-MM-yy")
                                 </p>
                             }
                             @if (!string.IsNullOrWhiteSpace(invoice.StripeHostedInvoiceUrl))

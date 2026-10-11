@@ -381,13 +381,13 @@ public static class WikiPropertyValues
         string? rowUpdatedBy) =>
         property.Type switch
         {
-            WikiDatabasePropertyTypes.CreatedTime => rowCreatedAt.ToLocalTime().ToString("MMM d, yyyy"),
-            WikiDatabasePropertyTypes.LastEditedTime => (rowUpdatedAt ?? rowCreatedAt).ToLocalTime().ToString("MMM d, yyyy"),
+            WikiDatabasePropertyTypes.CreatedTime => rowCreatedAt.ToLocalTime().ToString("dd-MM-yy"),
+            WikiDatabasePropertyTypes.LastEditedTime => (rowUpdatedAt ?? rowCreatedAt).ToLocalTime().ToString("dd-MM-yy"),
             WikiDatabasePropertyTypes.CreatedBy => rowCreatedBy ?? string.Empty,
             WikiDatabasePropertyTypes.LastEditedBy => rowUpdatedBy ?? rowCreatedBy ?? string.Empty,
             WikiDatabasePropertyTypes.Checkbox => GetCheckbox(values, property.Id) ? "✓" : string.Empty,
             WikiDatabasePropertyTypes.Number => GetNumber(values, property.Id)?.ToString() ?? string.Empty,
-            WikiDatabasePropertyTypes.Date => GetDate(values, property.Id)?.ToLocalTime().ToString("MMM d, yyyy") ?? string.Empty,
+            WikiDatabasePropertyTypes.Date => GetDate(values, property.Id)?.ToLocalTime().ToString("dd-MM-yy") ?? string.Empty,
             // Uploaded files show by name rather than as their stored "sentinel-file:..." reference.
             WikiDatabasePropertyTypes.Files =>
                 string.Join(", ", GetMultiSelect(values, property.Id).Select(value => WikiFileValues.Parse(value)?.FileName ?? value)),

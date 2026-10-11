@@ -168,7 +168,7 @@
                     <div class="trend-chart" role="img" aria-label="Daily visitors and page views">
                         @foreach (var point in Dashboard.Trend)
                         {
-                            <div class="trend-day" title="@($"{point.Date:MMM d}: {point.Visitors} visitors, {point.PageViews} views")">
+                            <div class="trend-day" title="@($"{point.Date:dd-MM-yy}: {point.Visitors} visitors, {point.PageViews} views")">
                                 <div class="bars">
                                     <span class="bar views" style="@BarHeight(point.PageViews)"></span>
                                     <span class="bar visitors" style="@BarHeight(point.Visitors)"></span>
@@ -638,8 +638,8 @@
     };
     private string CharacterCount(SocialAccountView account) =>
         account.Network == SocialNetworks.X ? $"{_variants[account.Id].Length}/280" : $"{_variants[account.Id].Length} characters";
-    private string QueueTime(SocialPostView post) => post.PublishedAt?.ToLocalTime().ToString("'Published' MMM d, h:mm tt")
-        ?? post.ScheduledFor?.ToLocalTime().ToString("'Scheduled' MMM d, h:mm tt")
+    private string QueueTime(SocialPostView post) => post.PublishedAt?.ToLocalTime().ToString("'Published' dd-MM-yy HH:mm")
+        ?? post.ScheduledFor?.ToLocalTime().ToString("'Scheduled' dd-MM-yy HH:mm")
         ?? "Saved draft";
     private string FormatDuration(TimeSpan duration) => duration.TotalMinutes >= 1
         ? $"{(int)duration.TotalMinutes}m {duration.Seconds}s"
@@ -653,7 +653,7 @@
     private static string AnnotationTitle(IReadOnlyCollection<AnalyticsAnnotationView> annotations) =>
         string.Join("\n", annotations.Select(item => item.Note));
     private static string AnnotationLabel(DateOnly date, IReadOnlyCollection<AnalyticsAnnotationView> annotations) =>
-        $"{annotations.Count} analytics annotation{(annotations.Count == 1 ? string.Empty : "s")} on {date:MMMM d}: {string.Join("; ", annotations.Select(item => item.Note))}";
+        $"{annotations.Count} analytics annotation{(annotations.Count == 1 ? string.Empty : "s")} on {date:dd-MM-yy}: {string.Join("; ", annotations.Select(item => item.Note))}";
     private string ExternalIdLabel => AccountNetwork switch
     {
         SocialNetworks.Facebook => "Facebook Page ID",

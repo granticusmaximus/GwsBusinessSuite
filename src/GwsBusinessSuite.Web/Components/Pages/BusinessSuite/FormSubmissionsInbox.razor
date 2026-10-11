@@ -73,7 +73,7 @@
                         <div class="d-flex justify-content-between align-items-start gap-2">
                             <div>
                                 <div class="fw-semibold">
-                                    @submission.CreatedAt.ToLocalTime().ToString("g")
+                                    @submission.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")
                                     @if (!submission.IsRead)
                                     {
                                         <span class="badge text-bg-primary ms-2">New</span>

@@ -166,7 +166,7 @@ public sealed partial class NewsWatchService(
     public static string ClipMarkdown(NewsItemDto item, string username, DateTimeOffset clippedAt)
     {
         var md = new StringBuilder();
-        md.AppendLine($"**{Escape(item.Source)}**{(item.PublishedAt is { } published ? $" · {published:yyyy-MM-dd}" : "")} · [Read the original]({item.Url})");
+        md.AppendLine($"**{Escape(item.Source)}**{(item.PublishedAt is { } published ? $" · {published:dd-MM-yy}" : "")} · [Read the original]({item.Url})");
         md.AppendLine();
         if (!string.IsNullOrWhiteSpace(item.OllamaSummary))
         {
@@ -174,7 +174,7 @@ public sealed partial class NewsWatchService(
             md.AppendLine();
         }
         if (!string.IsNullOrWhiteSpace(item.Description)) { md.AppendLine(Escape(item.Description)); md.AppendLine(); }
-        md.AppendLine($"Clipped from Media Watch ({Escape(item.TopicName)}) by {username} on {clippedAt:yyyy-MM-dd}.");
+        md.AppendLine($"Clipped from Media Watch ({Escape(item.TopicName)}) by {username} on {clippedAt:dd-MM-yy}.");
         return md.ToString();
     }
 

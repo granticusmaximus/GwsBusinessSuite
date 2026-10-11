@@ -1241,7 +1241,7 @@ else
     private void MarkSaved() => _lastSavedAt = DateTimeOffset.Now;
     private string SaveStateText => _busy
         ? "Saving…"
-        : _lastSavedAt is { } at ? $"Saved {at.ToLocalTime():h:mm tt}" : string.Empty;
+        : _lastSavedAt is { } at ? $"Saved {at.ToLocalTime():HH:mm}" : string.Empty;
 
     private void Show(string message, bool error = false) { _message = message; _messageIsError = error; }
     private void Fail(Exception ex, string message) { Logger.LogError(ex, "Workflow editor operation failed for {WorkflowId}.", WorkflowId); Show(message, true); }
@@ -1268,7 +1268,7 @@ else
     }
 
     private static string ConnectionClass(string output) => output == "true" ? "is-true" : output == "false" ? "is-false" : "";
-    private static string FormatDate(DateTimeOffset? value) => value?.ToLocalTime().ToString("MMM d, h:mm:ss tt") ?? "—";
+    private static string FormatDate(DateTimeOffset? value) => value?.ToLocalTime().ToString("dd-MM-yy HH:mm:ss") ?? "—";
     private static string Duration(DateTimeOffset? start, DateTimeOffset? end) => start is null || end is null ? "—" : $"{(end.Value - start.Value).TotalMilliseconds:N0} ms";
 
     public async ValueTask DisposeAsync()

@@ -927,7 +927,7 @@ public sealed class CmsBlockHtmlRendererTests
             """{"id":"w1","widgetType":"posts-grid","props":{}}"""), articles: articles);
 
         Assert.Contains("gws-posts-grid-date", html);
-        Assert.Contains("March 5, 2026", html);
+        Assert.Contains("05-03-26", html);
     }
 
     [Fact]

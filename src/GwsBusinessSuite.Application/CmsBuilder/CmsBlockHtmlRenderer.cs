@@ -2016,7 +2016,7 @@ public static class CmsBlockHtmlRenderer
 
     private static string PostDate(PublicArticleSummary article, bool showDate) =>
         showDate && article.PublishedAt.HasValue
-            ? $"""<span class="gws-posts-grid-date">{Html(article.PublishedAt.Value.ToString("MMMM d, yyyy"))}</span>"""
+            ? $"""<span class="gws-posts-grid-date">{Html(article.PublishedAt.Value.ToString("dd-MM-yy"))}</span>"""
             : "";
 
     // Recommendations for a SPECIFIC, admin-picked anchor article (sourceArticleSlug), not the

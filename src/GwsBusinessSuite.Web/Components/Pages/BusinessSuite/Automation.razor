@@ -422,5 +422,5 @@ else
         finally { _importing = false; }
     }
     private static string StatusClass(string status) => status == "Active" ? "text-bg-success" : status == "Inactive" ? "text-bg-secondary" : "text-bg-warning";
-    private static string FormatLastRun(DateTimeOffset? value) => value is null ? "Never run" : value.Value.ToLocalTime().ToString("MMM d, h:mm tt");
+    private static string FormatLastRun(DateTimeOffset? value) => value is null ? "Never run" : value.Value.ToLocalTime().ToString("dd-MM-yy HH:mm");
 }

@@ -106,7 +106,7 @@
                         <ul class="list-unstyled mb-0 mt-1">
                             @foreach (var a in DropletActions.Take(5))
                             {
-                                <li>@a.Type &mdash; @a.Status &mdash; @a.StartedAt.ToLocalTime().ToString("MMM d, h:mm tt")</li>
+                                <li>@a.Type &mdash; @a.Status &mdash; @a.StartedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</li>
                             }
                         </ul>
                     </div>

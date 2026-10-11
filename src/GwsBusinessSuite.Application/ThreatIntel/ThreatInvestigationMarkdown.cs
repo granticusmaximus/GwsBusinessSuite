@@ -9,7 +9,7 @@ public static class ThreatInvestigationMarkdown
     public static string Build(string query, string summary, DateTimeOffset createdAt, string createdBy, ThreatInvestigationSnapshot snapshot)
     {
         var md = new StringBuilder();
-        md.AppendLine($"Investigation of `{Defang(query)}` by {createdBy} on {createdAt:yyyy-MM-dd HH:mm} UTC.");
+        md.AppendLine($"Investigation of `{Defang(query)}` by {createdBy} on {createdAt:dd-MM-yy HH:mm} UTC.");
         md.AppendLine();
         md.AppendLine($"**Summary:** {summary}");
         md.AppendLine();
@@ -18,7 +18,7 @@ public static class ThreatInvestigationMarkdown
         {
             md.AppendLine("## Threat feed matches");
             foreach (var match in snapshot.Matches)
-                md.AppendLine($"- **{match.Feed}**: `{Defang(match.MatchedValue)}` - {match.Description}{(match.SeenAt is { } seen ? $" (seen {seen:yyyy-MM-dd})" : "")} - [report]({match.ReferenceUrl})");
+                md.AppendLine($"- **{match.Feed}**: `{Defang(match.MatchedValue)}` - {match.Description}{(match.SeenAt is { } seen ? $" (seen {seen:dd-MM-yy})" : "")} - [report]({match.ReferenceUrl})");
             md.AppendLine();
         }
 
@@ -28,8 +28,8 @@ public static class ThreatInvestigationMarkdown
             {
                 md.AppendLine("## Registration");
                 md.AppendLine($"- Registrar / org: {reg.Registrar ?? "Unknown"}");
-                if (reg.Registered is { } registered) md.AppendLine($"- Registered: {registered:yyyy-MM-dd}");
-                if (reg.Expires is { } expires) md.AppendLine($"- Expires: {expires:yyyy-MM-dd}");
+                if (reg.Registered is { } registered) md.AppendLine($"- Registered: {registered:dd-MM-yy}");
+                if (reg.Expires is { } expires) md.AppendLine($"- Expires: {expires:dd-MM-yy}");
                 if (reg.Nameservers.Count > 0) md.AppendLine($"- Nameservers: {string.Join(", ", reg.Nameservers)}");
                 md.AppendLine();
             }
@@ -46,7 +46,7 @@ public static class ThreatInvestigationMarkdown
                 md.AppendLine("## TLS certificate");
                 md.AppendLine($"- Subject: {tls.Subject}");
                 md.AppendLine($"- Issuer: {tls.Issuer}");
-                md.AppendLine($"- Valid: {tls.NotBefore:yyyy-MM-dd} to {tls.NotAfter:yyyy-MM-dd}");
+                md.AppendLine($"- Valid: {tls.NotBefore:dd-MM-yy} to {tls.NotAfter:dd-MM-yy}");
                 md.AppendLine();
             }
         }

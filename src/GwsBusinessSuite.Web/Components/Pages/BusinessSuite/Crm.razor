@@ -54,7 +54,7 @@
                 {
                     <li>
                         <a href="/admin/crm/contacts/@contact.Id">@contact.FullName</a>
-                        &mdash; due @contact.FollowUpDate?.ToLocalTime().ToString("MMM d, yyyy")
+                        &mdash; due @contact.FollowUpDate?.ToLocalTime().ToString("dd-MM-yy")
                     </li>
                 }
             </ul>
@@ -121,7 +121,7 @@ else
                                     <div class="d-flex justify-content-between align-items-start gap-2">
                                         <div>
                                             <div class="fw-semibold">@contact.FullName</div>
-                                            <div class="small text-secondary">trashed @contact.TrashedAt?.ToLocalTime().ToString("g")</div>
+                                            <div class="small text-secondary">trashed @contact.TrashedAt?.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
                                         </div>
                                         <div class="d-flex gap-1 flex-shrink-0">
                                             <button class="btn btn-xs btn-outline-primary" @onclick="() => RestoreContactAsync(contact.Id)" disabled="@IsBusy">Restore</button>

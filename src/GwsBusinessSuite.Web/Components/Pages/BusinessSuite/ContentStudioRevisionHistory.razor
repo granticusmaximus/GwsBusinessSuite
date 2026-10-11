@@ -17,7 +17,7 @@ else
             <div class="list-group-item d-flex flex-wrap align-items-start justify-content-between gap-3">
                 <div>
                     <div class="fw-semibold">Version @revision.VersionNumber · @FormatChangeType(revision.ChangeType)</div>
-                    <div class="small text-secondary">@revision.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm") by @revision.PerformedBy</div>
+                    <div class="small text-secondary">@revision.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm") by @revision.PerformedBy</div>
                     @if (!string.IsNullOrWhiteSpace(revision.Notes))
                     {
                         <div class="small mt-1">@revision.Notes</div>

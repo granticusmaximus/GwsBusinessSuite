@@ -55,7 +55,7 @@
                            @onclick="() => OpenAlertAsync(alert)" @onclick:preventDefault>
                             <div class="notif-bell-item-title">@alert.Title</div>
                             <div class="notif-bell-item-message">@alert.Message</div>
-                            <div class="notif-bell-item-time">@alert.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
+                            <div class="notif-bell-item-time">@alert.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
                         </a>
                         @if (!alert.IsRead)
                         {

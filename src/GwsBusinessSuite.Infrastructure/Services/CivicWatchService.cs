@@ -829,7 +829,7 @@ public sealed partial class CivicWatchService(
                 db.CivicMeetingDocuments.Add(new CivicMeetingDocument
                 {
                     Url = link.Url, MeetingDate = link.MeetingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), Kind = link.Kind,
-                    Title = $"County Commission {link.Kind.ToLowerInvariant()} - {link.MeetingDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}",
+                    Title = $"County Commission {link.Kind.ToLowerInvariant()} - {link.MeetingDate.ToString("dd-MM-yy", CultureInfo.InvariantCulture)}",
                     CreatedAt = now
                 });
             }

@@ -338,7 +338,7 @@ else
                                             <div class="d-flex align-items-center gap-2 text-secondary small flex-shrink-0">
                                                 @if (episode.PublishedAt.HasValue)
                                                 {
-                                                    <span>@episode.PublishedAt.Value.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                                    <span>@episode.PublishedAt.Value.ToLocalTime().ToString("dd-MM-yy")</span>
                                                 }
                                                 @if (episode.DurationSeconds.HasValue)
                                                 {

@@ -186,7 +186,7 @@ public sealed class GrowthReportService(
         DateTimeOffset to,
         string dashboardUrl)
     {
-        var period = $"{from:MMM d}–{to:MMM d, yyyy}";
+        var period = $"{from:dd-MM-yy}–{to:dd-MM-yy}";
         var subject = $"{schedule.Name}: Growth Studio report for {period}";
         var plain = new StringBuilder()
             .AppendLine(schedule.Name)
@@ -241,7 +241,7 @@ public sealed class GrowthReportService(
     {
         if (annotations.Count == 0) return string.Empty;
         var items = string.Join(string.Empty, annotations.Select(item =>
-            $"<li style=\"margin:6px 0\"><strong>{item.Date:MMM d}</strong> — {Html(item.Note)}</li>"));
+            $"<li style=\"margin:6px 0\"><strong>{item.Date:dd-MM-yy}</strong> — {Html(item.Note)}</li>"));
         return $"<h2 style=\"font-size:18px;margin:24px 0 8px\">Period annotations</h2><ul style=\"padding-left:20px\">{items}</ul>";
     }
 

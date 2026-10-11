@@ -212,7 +212,7 @@ public static class ArticleAlertEmailRenderer
     {
         var zone = ResolveZone(timeZoneId);
         var local = TimeZoneInfo.ConvertTime(publishedAt, zone);
-        return string.Create(CultureInfo.InvariantCulture, $"{local:MMMM d, yyyy} at {local:h:mm tt} {ZoneLabel(zone, local)}");
+        return string.Create(CultureInfo.InvariantCulture, $"{local:dd-MM-yy} at {local:HH:mm} {ZoneLabel(zone, local)}");
     }
 
     private static TimeZoneInfo ResolveZone(string? id)

@@ -3734,7 +3734,7 @@ else
             if (_layoutParseFailed) return string.Empty;
             var prefix = string.IsNullOrEmpty(_deletedNotice) ? string.Empty : _deletedNotice + " ";
             // The server runs on UTC, so convert with the browser's own offset (read once).
-            if (_lastSavedAt is { } savedAt) return $"{prefix}Draft saved {savedAt.ToOffset(_browserUtcOffset ?? TimeZoneInfo.Local.GetUtcOffset(savedAt)):h:mm tt}";
+            if (_lastSavedAt is { } savedAt) return $"{prefix}Draft saved {savedAt.ToOffset(_browserUtcOffset ?? TimeZoneInfo.Local.GetUtcOffset(savedAt)):HH:mm}";
             return _hasUnpublishedChanges ? "Unpublished draft" : string.Empty;
         }
     }

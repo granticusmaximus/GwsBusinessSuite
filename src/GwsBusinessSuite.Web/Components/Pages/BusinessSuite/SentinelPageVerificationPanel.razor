@@ -142,7 +142,7 @@
 
     private string BadgeTitle => State switch
     {
-        SentinelVerificationStates.Verified => $"Verified until {_view!.VerifiedUntil!.Value.ToLocalTime():MMM d, yyyy}",
+        SentinelVerificationStates.Verified => $"Verified until {_view!.VerifiedUntil!.Value.ToLocalTime():dd-MM-yy}",
         SentinelVerificationStates.Expired => "Verification expired - review this page",
         _ => "Verify this page"
     };
@@ -155,9 +155,9 @@
             return State switch
             {
                 SentinelVerificationStates.Verified =>
-                    $"Verified by {_view!.VerifiedBy} on {_view.VerifiedAt!.Value.ToLocalTime():MMM d, yyyy}, until {_view.VerifiedUntil!.Value.ToLocalTime():MMM d, yyyy}. {owner}",
+                    $"Verified by {_view!.VerifiedBy} on {_view.VerifiedAt!.Value.ToLocalTime():dd-MM-yy}, until {_view.VerifiedUntil!.Value.ToLocalTime():dd-MM-yy}. {owner}",
                 SentinelVerificationStates.Expired =>
-                    $"Verification by {_view!.VerifiedBy} expired on {_view.VerifiedUntil!.Value.ToLocalTime():MMM d, yyyy}. {owner}",
+                    $"Verification by {_view!.VerifiedBy} expired on {_view.VerifiedUntil!.Value.ToLocalTime():dd-MM-yy}. {owner}",
                 _ => $"Not verified. {owner}"
             };
         }

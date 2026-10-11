@@ -139,7 +139,7 @@
     <div class="col-xl-7">
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
-                <span class="fw-semibold">Week of @WeekStart.ToString("MMM d, yyyy") <span class="text-secondary small fw-normal">· @FormatMinutes(WeekEntries.Sum(e => e.Minutes))</span></span>
+                <span class="fw-semibold">Week of @WeekStart.ToString("dd-MM-yy") <span class="text-secondary small fw-normal">· @FormatMinutes(WeekEntries.Sum(e => e.Minutes))</span></span>
                 <div class="d-flex flex-wrap gap-1">
                     <button type="button" class="btn btn-sm @(ShowEveryone ? "btn-outline-secondary" : "btn-primary")" @onclick="() => SetEveryoneAsync(false)">Mine</button>
                     <button type="button" class="btn btn-sm @(ShowEveryone ? "btn-primary" : "btn-outline-secondary")" @onclick="() => SetEveryoneAsync(true)">Everyone</button>
@@ -156,7 +156,7 @@
                 @foreach (var day in WeekEntries.GroupBy(e => DateOnly.FromDateTime(e.StartedAt.ToLocalTime().DateTime)))
                 {
                     <li class="list-group-item bg-light small fw-semibold d-flex justify-content-between">
-                        <span>@day.Key.ToString("dddd, MMM d")</span><span>@FormatMinutes(day.Sum(e => e.Minutes))</span>
+                        <span>@day.Key.ToString("dd-MM-yy")</span><span>@FormatMinutes(day.Sum(e => e.Minutes))</span>
                     </li>
                     @foreach (var entry in day)
                     {
@@ -165,7 +165,7 @@
                                 <a href="/admin/crm/contacts/@entry.ContactId">@entry.ContactName</a>@EntryContext(entry)
                                 @if (!string.IsNullOrWhiteSpace(entry.Description)) { <div class="small">@entry.Description</div> }
                                 <div class="small text-secondary">
-                                    @entry.StartedAt.ToLocalTime().ToString("h:mm tt")@(entry.IsRunning ? " · running" : "")
+                                    @entry.StartedAt.ToLocalTime().ToString("HH:mm")@(entry.IsRunning ? " · running" : "")
                                     @(ShowEveryone ? $" · {entry.Username}" : "")
                                     · @(entry.Billable ? entry.InvoiceId is null ? $"unbilled {entry.AmountUsd:C2}" : $"billed {entry.AmountUsd:C2}" : "not billable")
                                 </div>

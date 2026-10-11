@@ -80,7 +80,7 @@
                     <summary>Recent SentinelGPT runs (@_runs.Count)</summary>
                     @foreach (var run in _runs.Take(8))
                     {
-                        <div><span>@run.Action</span><small>@run.Status · @run.CreatedAt.ToLocalTime().ToString("g")</small></div>
+                        <div><span>@run.Action</span><small>@run.Status · @run.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</small></div>
                     }
                 </details>
             }

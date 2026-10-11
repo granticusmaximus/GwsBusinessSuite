@@ -43,13 +43,13 @@
                 @foreach (var annotation in Annotations.OrderByDescending(item => item.Date))
                 {
                     <article class="annotation-definition">
-                        <time datetime="@annotation.Date.ToString("yyyy-MM-dd")">@annotation.Date.ToString("MMM d, yyyy")</time>
+                        <time datetime="@annotation.Date.ToString("yyyy-MM-dd")">@annotation.Date.ToString("dd-MM-yy")</time>
                         <p>@annotation.Note</p>
                         <div>
-                            <button title="Edit annotation" aria-label="@($"Edit annotation from {annotation.Date:MMM d, yyyy}")" @onclick="() => Edit(annotation)">
+                            <button title="Edit annotation" aria-label="@($"Edit annotation from {annotation.Date:dd-MM-yy}")" @onclick="() => Edit(annotation)">
                                 <i class="bi bi-pencil"></i>
                             </button>
-                            <button title="Delete annotation" aria-label="@($"Delete annotation from {annotation.Date:MMM d, yyyy}")" @onclick="() => DeleteAsync(annotation.Id)">
+                            <button title="Delete annotation" aria-label="@($"Delete annotation from {annotation.Date:dd-MM-yy}")" @onclick="() => DeleteAsync(annotation.Id)">
                                 <i class="bi bi-trash3"></i>
                             </button>
                         </div>

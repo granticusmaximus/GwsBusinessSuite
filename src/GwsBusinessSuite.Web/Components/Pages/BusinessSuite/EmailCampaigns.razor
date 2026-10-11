@@ -209,7 +209,7 @@ else
                                             <td><RelationshipChip ContactId="enrollment.ContactId" ContactName="@enrollment.ContactName" /></td>
                                             <td><span class="badge @EnrollmentBadgeClass(enrollment.Status)">@enrollment.Status</span></td>
                                             <td>@(enrollment.NextStepIndex + 1) / @SelectedCampaign.Steps.Count</td>
-                                            <td>@(enrollment.NextSendAt?.ToLocalTime().ToString("MMM d, h:mm tt") ?? "—")</td>
+                                            <td>@(enrollment.NextSendAt?.ToLocalTime().ToString("dd-MM-yy HH:mm") ?? "—")</td>
                                         </tr>
                                     }
                                 </tbody>

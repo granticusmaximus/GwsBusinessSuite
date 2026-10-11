@@ -72,7 +72,7 @@
                 @foreach (var item in Page!.Events)
                 {
                     <tr>
-                        <td class="text-nowrap"><strong>@item.OccurredAt.ToLocalTime().ToString("MMM d, h:mm:ss tt")</strong><br><small class="text-secondary">@item.Category</small></td>
+                        <td class="text-nowrap"><strong>@item.OccurredAt.ToLocalTime().ToString("dd-MM-yy HH:mm:ss")</strong><br><small class="text-secondary">@item.Category</small></td>
                         <td><strong>@item.Action</strong><br><small class="audit-correlation">@item.CorrelationId</small></td>
                         <td>@item.ActorUsername</td>
                         <td>@(item.TargetType ?? "—")<br><small class="text-secondary">@(item.TargetId ?? string.Empty)</small></td>

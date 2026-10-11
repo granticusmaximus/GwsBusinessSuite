@@ -66,7 +66,7 @@ public partial class CapturePage : ContentPage
             StatusLabel.Text = "There's no image on the clipboard - press Control-Shift-Command-4, drag over the area, then paste.";
             return;
         }
-        await ReadImageAsync(image, $"Capture - {DateTime.Now:MMM d, h:mm tt}");
+        await ReadImageAsync(image, $"Capture - {DateTime.Now:dd-MM-yy HH:mm}");
 #else
         await Task.CompletedTask;
 #endif
@@ -125,7 +125,7 @@ public partial class CapturePage : ContentPage
             StatusLabel.Text = "There's no text to save yet.";
             return;
         }
-        var title = string.IsNullOrWhiteSpace(TitleEntry.Text) ? $"Capture - {DateTime.Now:MMM d, h:mm tt}" : TitleEntry.Text.Trim();
+        var title = string.IsNullOrWhiteSpace(TitleEntry.Text) ? $"Capture - {DateTime.Now:dd-MM-yy HH:mm}" : TitleEntry.Text.Trim();
         var toDailyNote = DailyNoteCheckBox.IsChecked;
         var result = await _session.SaveQuickNoteAsync(title, text, toDailyNote);
         StatusLabel.Text = result.Error ?? (toDailyNote

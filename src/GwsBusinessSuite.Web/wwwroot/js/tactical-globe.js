@@ -858,10 +858,12 @@ window.tacticalGlobe = (function () {
         updateRadarBarState(entry);
     }
 
+    // GWS shows every date as dd-MM-yy and every time on a 24-hour clock (GwsDateFormat).
     function formatRadarTime(iso) {
         const date = new Date(iso);
         if (isNaN(date.getTime())) return '';
-        return date.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' }).toUpperCase();
+        const two = value => String(value).padStart(2, '0');
+        return `${two(date.getDate())}-${two(date.getMonth() + 1)}-${two(date.getFullYear() % 100)} ${two(date.getHours())}:${two(date.getMinutes())}`;
     }
 
     function renderRadarBar(entry) {

@@ -387,7 +387,7 @@
 
     private static string FormatDate(DateTimeOffset value)
     {
-        return value.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+        return value.ToLocalTime().ToString("dd-MM-yy HH:mm");
     }
 
     private static string GetDraftStatusBadgeClass(string status)

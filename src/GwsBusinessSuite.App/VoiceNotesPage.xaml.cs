@@ -211,5 +211,5 @@ public partial class VoiceNotesPage : ContentPage
         await Shell.Current.GoToAsync("//MainPage");
     }
 
-    private static string DefaultTitle() => $"Voice note - {DateTime.Now:MMM d, h:mm tt}";
+    private static string DefaultTitle() => $"Voice note - {DateTime.Now:dd-MM-yy HH:mm}";
 }

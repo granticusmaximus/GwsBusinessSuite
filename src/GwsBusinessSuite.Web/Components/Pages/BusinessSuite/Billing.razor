@@ -179,7 +179,7 @@ else
                                                 @invoice.TotalUsd.ToString("C2")
                                                 @if (invoice.DueDate is not null)
                                                 {
-                                                    <span> &middot; due @invoice.DueDate.Value.ToLocalTime().ToString("MMM d, yyyy")</span>
+                                                    <span> &middot; due @invoice.DueDate.Value.ToLocalTime().ToString("dd-MM-yy")</span>
                                                 }
                                             </span>
                                         </div>

@@ -40,7 +40,7 @@ else
                         <div>
                             <div class="fw-semibold">@recording.SessionTitle</div>
                             <div class="small text-muted">
-                                @recording.CreatedAt.ToLocalTime().ToString("g") &middot;
+                                @recording.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm") &middot;
                                 @FormatDuration(recording.DurationSeconds) &middot;
                                 @FormatSize(recording.FileSizeBytes)
                             </div>

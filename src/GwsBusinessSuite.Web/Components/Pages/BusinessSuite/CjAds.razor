@@ -867,7 +867,7 @@ advertiserId, StringComparison.OrdinalIgnoreCase)));
 
   private string FormatNextRotation() => NextRotationAt is null
     ? "Not scheduled"
-    : NextRotationAt.Value.ToLocalTime().ToString("MMM d, h:mm tt");
+    : NextRotationAt.Value.ToLocalTime().ToString("dd-MM-yy HH:mm");
 
   private void ClearSearch()
   {
@@ -882,7 +882,7 @@ advertiserId, StringComparison.OrdinalIgnoreCase)));
 
   private static string FormatPromotionEnd(DateTimeOffset? promotionEndsAt)
   {
-    return promotionEndsAt is null ? "-" : promotionEndsAt.Value.ToLocalTime().ToString("yyyy-MM-dd");
+    return promotionEndsAt is null ? "-" : promotionEndsAt.Value.ToLocalTime().ToString("dd-MM-yy");
   }
 
   private static string NormalizeRelationshipStatus(string status)

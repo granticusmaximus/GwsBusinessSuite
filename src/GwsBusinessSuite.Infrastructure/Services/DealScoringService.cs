@@ -112,8 +112,8 @@ public sealed class DealScoringService(IAppDbContext db, TimeProvider timeProvid
         if (deal.ExpectedCloseDate is { } expected)
         {
             factors.Add(expected >= now
-                ? new DealScoreFactor("Close date", 5, $"Expected to close {expected:MMM d, yyyy}.")
-                : new DealScoreFactor("Close date", -10, $"Expected close date ({expected:MMM d, yyyy}) has passed."));
+                ? new DealScoreFactor("Close date", 5, $"Expected to close {expected:dd-MM-yy}.")
+                : new DealScoreFactor("Close date", -10, $"Expected close date ({expected:dd-MM-yy}) has passed."));
         }
 
         var total = Math.Clamp(factors.Sum(factor => factor.Points), 0, 100);

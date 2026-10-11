@@ -23,7 +23,7 @@
                 <i class="bi bi-check-circle-fill text-success" style="font-size: 2.5rem;"></i>
                 <h2 class="h5 mt-3">You're booked!</h2>
                 <p class="text-secondary">
-                    @BookingType.Title &middot; @_confirmedBooking.StartsAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")
+                    @BookingType.Title &middot; @_confirmedBooking.StartsAt.ToLocalTime().ToString("dd-MM-yy HH:mm")
                 </p>
                 <p class="small text-secondary">A confirmation has been emailed to @_confirmedBooking.AttendeeEmail.</p>
             </div>
@@ -56,12 +56,12 @@
                 @foreach (var day in SlotsByDay)
                 {
                     <div class="mb-3">
-                        <div class="fw-semibold small mb-2">@day.Key.ToString("dddd, MMMM d")</div>
+                        <div class="fw-semibold small mb-2">@day.Key.ToString("dd-MM-yy")</div>
                         <div class="d-flex flex-wrap gap-2">
                             @foreach (var slot in day)
                             {
                                 <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => _selectedSlot = slot">
-                                    @slot.StartsAt.ToLocalTime().ToString("h:mm tt")
+                                    @slot.StartsAt.ToLocalTime().ToString("HH:mm")
                                 </button>
                             }
                         </div>
@@ -73,7 +73,7 @@
         {
             <div class="card border-0 shadow-sm" style="max-width: 32rem;">
                 <div class="card-body">
-                    <p class="fw-semibold">@_selectedSlot.StartsAt.ToLocalTime().ToString("dddd, MMMM d, h:mm tt")</p>
+                    <p class="fw-semibold">@_selectedSlot.StartsAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</p>
                     <div class="mb-2">
                         <input class="form-control form-control-sm" placeholder="Your name" @bind="_attendeeName" />
                     </div>

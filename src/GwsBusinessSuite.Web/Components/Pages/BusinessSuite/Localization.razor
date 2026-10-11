@@ -147,7 +147,7 @@ else
                                     <span class="text-secondary small">Manual</span>
                                 }
                             </td>
-                            <td class="small text-secondary">@localization.UpdatedAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</td>
+                            <td class="small text-secondary">@localization.UpdatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</td>
                             <td class="text-end text-nowrap">
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => BeginEditAsync(localization.Id)" disabled="@_isBusy">Edit</button>
                                 <button type="button" class="btn btn-sm @(localization.Status == ContentLocalizationStatuses.Published ? "btn-outline-warning" : "btn-outline-success")"

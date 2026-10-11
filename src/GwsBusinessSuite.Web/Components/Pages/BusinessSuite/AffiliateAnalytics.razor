@@ -98,7 +98,7 @@ else
                                     <tr>
                                         <td>@row.AdvertiserName</td>
                                         <td class="text-end">@row.ClickCount</td>
-                                        <td class="small text-secondary">@row.LastClickAt.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</td>
+                                        <td class="small text-secondary">@row.LastClickAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</td>
                                     </tr>
                                 }
                             </tbody>
@@ -195,7 +195,7 @@ else
                             {
                                 <li class="list-group-item">
                                     <div class="fw-semibold small">@click.AdvertiserName</div>
-                                    <div class="small text-secondary">@click.ArticleTitle &middot; @click.CreatedAt.ToLocalTime().ToString("MMM d, h:mm tt")</div>
+                                    <div class="small text-secondary">@click.ArticleTitle &middot; @click.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
                                 </li>
                             }
                         </ul>

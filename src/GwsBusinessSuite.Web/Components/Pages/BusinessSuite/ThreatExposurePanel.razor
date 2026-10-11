@@ -51,7 +51,7 @@
                                         <span class="fw-semibold">@finding.Title</span>
                                         @if (finding.ResolvedAt is { } resolved)
                                         {
-                                            <span class="badge bg-success-subtle text-success-emphasis ms-1">resolved @resolved.ToLocalTime().ToString("MMM d")</span>
+                                            <span class="badge bg-success-subtle text-success-emphasis ms-1">resolved @resolved.ToLocalTime().ToString("dd-MM-yy")</span>
                                         }
                                         else if (finding.AcknowledgedAt is not null)
                                         {
@@ -59,7 +59,7 @@
                                         }
                                     </div>
                                     <div class="d-flex gap-2 align-items-center flex-shrink-0">
-                                        <span class="small text-secondary text-nowrap">first seen @finding.FirstSeenAt.ToLocalTime().ToString("MMM d")</span>
+                                        <span class="small text-secondary text-nowrap">first seen @finding.FirstSeenAt.ToLocalTime().ToString("dd-MM-yy")</span>
                                         @if (finding.ResolvedAt is null && finding.AcknowledgedAt is null)
                                         {
                                             <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AcknowledgeAsync(finding.Id)">Acknowledge</button>
@@ -237,7 +237,7 @@
                             <select id="digest-hour" class="form-select form-select-sm w-auto" value="@_digestHour" @onchange="e => _digestHour = int.TryParse(e.Value?.ToString(), out var h) ? h : 7">
                                 @for (var hour = 0; hour < 24; hour++)
                                 {
-                                    <option value="@hour">@(new DateTime(2000, 1, 1, hour, 0, 0).ToString("h tt"))</option>
+                                    <option value="@hour">@(new DateTime(2000, 1, 1, hour, 0, 0).ToString("HH:00"))</option>
                                 }
                             </select>
                             <button type="submit" class="btn btn-sm btn-outline-primary">Save</button>
@@ -248,7 +248,7 @@
                         <p class="small text-secondary mt-2 mb-0">
                             Contains new findings and the day's newly exploited vulnerabilities; skipped when there's nothing new.
                             @if (!settings.CanSendEmail) { <span class="text-warning-emphasis">Email delivery isn't set up on this server yet (Settings &gt; Email).</span> }
-                            @if (settings.LastDigestSentAt is { } lastSent) { <span>Last sent @lastSent.ToLocalTime().ToString("MMM d, h:mm tt").</span> }
+                            @if (settings.LastDigestSentAt is { } lastSent) { <span>Last sent @lastSent.ToLocalTime().ToString("dd-MM-yy HH:mm").</span> }
                         </p>
                     </form>
                 }
@@ -443,7 +443,7 @@
         {
             await Monitor.SaveSettingsAsync(_digestEnabled, _digestRecipient, _digestHour);
             _settings = await Monitor.GetSettingsAsync();
-            Show(_digestEnabled ? $"Digest saved - sent daily at {new DateTime(2000, 1, 1, _digestHour, 0, 0):h tt} when there's something new." : "Digest turned off.");
+            Show(_digestEnabled ? $"Digest saved - sent daily at {new DateTime(2000, 1, 1, _digestHour, 0, 0):HH:00} when there's something new." : "Digest turned off.");
         }
         catch (ArgumentException ex) { Show(ex.Message, error: true); }
     }
@@ -473,7 +473,7 @@
         _messageIsError = error;
     }
 
-    private static string When(DateTimeOffset? value) => value?.ToLocalTime().ToString("MMM d, h:mm tt") ?? "never";
+    private static string When(DateTimeOffset? value) => value?.ToLocalTime().ToString("dd-MM-yy HH:mm") ?? "never";
 
     private static string SourceLabel(string source) => source switch
     {

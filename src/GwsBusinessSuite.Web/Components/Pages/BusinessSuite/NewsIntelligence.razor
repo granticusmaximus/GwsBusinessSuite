@@ -1058,7 +1058,7 @@
                         <div class="min-w-0">
                             <a href="@saved.Url" target="_blank" rel="noopener noreferrer" class="fw-semibold text-body">@saved.Title</a>
                             <div class="small text-secondary">
-                                @saved.Source@(string.IsNullOrWhiteSpace(saved.TopicName) ? "" : $" · {saved.TopicName}") · saved @saved.SavedAt.ToLocalTime().ToString("MMM d")
+                                @saved.Source@(string.IsNullOrWhiteSpace(saved.TopicName) ? "" : $" · {saved.TopicName}") · saved @saved.SavedAt.ToLocalTime().ToString("dd-MM-yy")
                             </div>
                             @if (!string.IsNullOrWhiteSpace(saved.Summary))
                             {
@@ -1107,17 +1107,17 @@
                                     <span class="small text-secondary">@topic.DailyCounts.Sum() articles</span>
                                 </figcaption>
                                 <div class="media-watch-trend" role="img"
-                                     aria-label="@($"{topic.Name}: {string.Join(", ", trends.Days.Zip(topic.DailyCounts, (d, c) => $"{d:MMM d} {c}"))}")">
+                                     aria-label="@($"{topic.Name}: {string.Join(", ", trends.Days.Zip(topic.DailyCounts, (d, c) => $"{d:dd-MM-yy} {c}"))}")">
                                     @for (var i = 0; i < topic.DailyCounts.Count; i++)
                                     {
                                         var count = topic.DailyCounts[i];
-                                        <div class="media-watch-trend-slot" title="@($"{trends.Days[i]:ddd MMM d}: {count} {Pluralize(count, "article")}")">
+                                        <div class="media-watch-trend-slot" title="@($"{trends.Days[i]:dd-MM-yy}: {count} {Pluralize(count, "article")}")">
                                             <div class="media-watch-trend-bar" style="height:@(count == 0 ? 0 : Math.Max(4, 100.0 * count / max).ToString("0.#", System.Globalization.CultureInfo.InvariantCulture))%; background:@topic.ColorHex"></div>
                                         </div>
                                     }
                                 </div>
                                 <div class="d-flex justify-content-between small text-secondary mt-1">
-                                    <span>@trends.Days[0].ToString("MMM d")</span><span>@trends.Days[^1].ToString("MMM d")</span>
+                                    <span>@trends.Days[0].ToString("dd-MM-yy")</span><span>@trends.Days[^1].ToString("dd-MM-yy")</span>
                                 </div>
                                 @if (topic.RisingTerms.Count > 0)
                                 {
@@ -1177,14 +1177,14 @@
                     <select class="form-select form-select-sm w-auto" aria-label="Hour" value="@_setDigestHour" @onchange="e => _setDigestHour = int.TryParse(e.Value?.ToString(), out var h) ? h : 7">
                         @for (var hour = 0; hour < 24; hour++)
                         {
-                            <option value="@hour">@(new DateTime(2000, 1, 1, hour, 0, 0).ToString("h tt"))</option>
+                            <option value="@hour">@(new DateTime(2000, 1, 1, hour, 0, 0).ToString("HH:00"))</option>
                         }
                     </select>
                 </div>
                 <p class="small text-secondary">
                     Up to 5 stories per active topic plus All News, grouped by story and ranked by how many outlets covered them. Skipped when nothing new arrived.
                     @if (_settings is { CanSendEmail: false }) { <span class="text-warning-emphasis">Email delivery isn't set up on this server yet (Settings &gt; Email).</span> }
-                    @if (_settings?.LastDigestSentAt is { } lastSent) { <span>Last sent @lastSent.ToLocalTime().ToString("MMM d, h:mm tt").</span> }
+                    @if (_settings?.LastDigestSentAt is { } lastSent) { <span>Last sent @lastSent.ToLocalTime().ToString("dd-MM-yy HH:mm").</span> }
                 </p>
                 <div class="d-flex gap-2">
                     <button type="button" class="btn btn-sm btn-primary" @onclick="SaveSettingsAsync">Save</button>

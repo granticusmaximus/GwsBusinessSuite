@@ -80,7 +80,7 @@
             <div class="sentinel-public-automation-summary">
                 <span class="badge @(_automationStatus.Status == "Active" ? "text-bg-success" : "text-bg-secondary")">@_automationStatus.Status</span>
                 <span class="text-secondary small ms-2">
-                    @(_automationStatus.LastExecutedAt is { } lastRun ? $"Last ran {lastRun.ToLocalTime():MMM d, h:mm tt}" : "Never run")
+                    @(_automationStatus.LastExecutedAt is { } lastRun ? $"Last ran {lastRun.ToLocalTime():dd-MM-yy HH:mm}" : "Never run")
                 </span>
             </div>
             <div class="sentinel-public-automation-runs">
@@ -98,7 +98,7 @@
                             {
                                 <tr>
                                     <td><span class="badge @(run.Status == "Succeeded" ? "text-bg-success" : run.Status == "Failed" ? "text-bg-danger" : "text-bg-secondary")">@run.Status</span></td>
-                                    <td>@(run.StartedAt?.ToLocalTime().ToString("MMM d, h:mm tt") ?? "—")</td>
+                                    <td>@(run.StartedAt?.ToLocalTime().ToString("dd-MM-yy HH:mm") ?? "—")</td>
                                     <td>@(run.StartedAt is { } started && run.FinishedAt is { } finished ? $"{(finished - started).TotalSeconds:0.#}s" : "—")</td>
                                 </tr>
                             }

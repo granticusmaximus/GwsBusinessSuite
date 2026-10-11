@@ -218,7 +218,7 @@ else
                     <select id="bi-report-hour" class="form-select form-select-sm" @bind="_reportHour" disabled="@_isBusy">
                         @for (var hour = 0; hour < 24; hour++)
                         {
-                            <option value="@hour">@(new DateTime(2000, 1, 1, hour, 0, 0).ToString("h tt"))</option>
+                            <option value="@hour">@(new DateTime(2000, 1, 1, hour, 0, 0).ToString("HH:00"))</option>
                         }
                     </select>
                 </div>
@@ -233,7 +233,7 @@ else
             </div>
             <div class="small text-secondary mt-2">
                 A summary of your own pinned charts: each total, its change vs the previous period, and goal status.
-                @(_report.LastSentAt is { } lastSent ? $"Last sent {lastSent.ToLocalTime():MMM d, h:mm tt}." : "")
+                @(_report.LastSentAt is { } lastSent ? $"Last sent {lastSent.ToLocalTime():dd-MM-yy HH:mm}." : "")
                 @if (!_report.EmailConfigured)
                 {
                     <span class="text-warning">Email delivery isn't set up on this server yet (Settings &gt; Email).</span>
@@ -272,7 +272,7 @@ else
                     <div class="bi-total">@FormatValue(widget.Chart.Total, widget.Chart.ValueFormat)</div>
                     <div class="small text-secondary mb-3">
                         @{ var change = ChangeText(widget.Chart); }
-                        <span class="@change.CssClass">@change.Text</span> vs previous period (@FormatValue(widget.Chart.PreviousTotal, widget.Chart.ValueFormat)) · data as of @widget.Chart.DataAsOf.ToLocalTime().ToString("h:mm tt")
+                        <span class="@change.CssClass">@change.Text</span> vs previous period (@FormatValue(widget.Chart.PreviousTotal, widget.Chart.ValueFormat)) · data as of @widget.Chart.DataAsOf.ToLocalTime().ToString("HH:mm")
                     </div>
                     @if (widget.GoalValue is { } goal)
                     {
@@ -332,7 +332,7 @@ else
                                         <tr>
                                             <td>@row.Title</td>
                                             <td class="text-secondary">@row.Detail</td>
-                                            <td class="text-secondary">@(row.When?.ToLocalTime().ToString("MMM d, yyyy") ?? "—")</td>
+                                            <td class="text-secondary">@(row.When?.ToLocalTime().ToString("dd-MM-yy") ?? "—")</td>
                                             <td class="text-end fw-semibold">@FormatValue(row.Value, drillWidget.Chart.ValueFormat)</td>
                                         </tr>
                                     }
@@ -812,7 +812,7 @@ else
     }
 
     private static string RangeLabel(BiChartResult chart) =>
-        $"{chart.From:MMM d, yyyy} – {chart.To.AddDays(-1):MMM d, yyyy}";
+        $"{chart.From:dd-MM-yy} – {chart.To.AddDays(-1):dd-MM-yy}";
 
     private static (string Text, string CssClass) ChangeText(BiChartResult chart)
     {

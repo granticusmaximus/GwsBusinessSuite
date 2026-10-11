@@ -24,7 +24,7 @@
                 From <a href="/admin/pages/edit/@SourcePage.Id">@SourcePage.Title</a>
                 @if (Submission is not null)
                 {
-                    <text> &middot; @Submission.CreatedAt.ToLocalTime().ToString("f")</text>
+                    <text> &middot; @Submission.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</text>
                 }
             </p>
         }

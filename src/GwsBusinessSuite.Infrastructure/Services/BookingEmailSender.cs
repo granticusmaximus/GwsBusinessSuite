@@ -38,7 +38,7 @@ public sealed class BookingEmailSender(
         CancellationToken cancellationToken = default)
     {
         var fullManageUrl = $"{options.PublicBaseUrl.TrimEnd('/')}{manageUrl}";
-        var when = startsAtUtc.ToString("dddd, MMMM d 'at' h:mm tt 'UTC'");
+        var when = startsAtUtc.ToString("dd-MM-yy HH:mm 'UTC'");
         await SendAsync(
             attendeeEmail,
             $"Confirmed: {bookingTypeTitle}",
@@ -52,7 +52,7 @@ public sealed class BookingEmailSender(
         string attendeeEmail, string attendeeName, string bookingTypeTitle, DateTimeOffset startsAtUtc,
         CancellationToken cancellationToken = default)
     {
-        var when = startsAtUtc.ToString("dddd, MMMM d 'at' h:mm tt 'UTC'");
+        var when = startsAtUtc.ToString("dd-MM-yy HH:mm 'UTC'");
         await SendAsync(
             attendeeEmail,
             $"Cancelled: {bookingTypeTitle}",

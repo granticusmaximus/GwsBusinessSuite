@@ -285,7 +285,7 @@ public static class Program
             var session = saved[i].Session;
             var preview = session.Messages.LastOrDefault(message => message.Role == "user")?.Content ?? "(no messages yet)";
             if (preview.Length > 60) preview = preview[..60] + "...";
-            Console.WriteLine($"  {i + 1,2}. {session.UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm}  {preview}");
+            Console.WriteLine($"  {i + 1,2}. {session.UpdatedAt.ToLocalTime():dd-MM-yy HH:mm}  {preview}");
         }
 
         Console.Write("\nResume which one? (number, blank to cancel): ");
@@ -299,7 +299,7 @@ public static class Program
 
         var (path, loaded) = saved[index - 1];
         agent.LoadConversation(loaded.Messages);
-        Console.WriteLine($"Resumed session from {loaded.UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm}.");
+        Console.WriteLine($"Resumed session from {loaded.UpdatedAt.ToLocalTime():dd-MM-yy HH:mm}.");
         if (!string.Equals(loaded.Model, currentModel, StringComparison.OrdinalIgnoreCase))
             Console.WriteLine($"Note: recorded with model '{loaded.Model}'; this session is using '{currentModel}'.");
         await Task.CompletedTask;

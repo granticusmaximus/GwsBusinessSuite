@@ -21,7 +21,7 @@
         <a class="small" href="/admin/email-campaigns"><i class="bi bi-arrow-left me-1"></i>Email Campaigns</a>
         <h1 class="mt-1"><i class="bi bi-bell-fill me-2 text-primary"></i>@(Campaign?.Name ?? "Article alerts")</h1>
         <p class="mb-0">@(Settings.IsWeeklyDigest
-            ? $"Emails confirmed subscribers a weekly digest every {Settings.DigestDay} at {new DateTime(2000, 1, 1, Math.Clamp(Settings.DigestHour, 0, 23), 0, 0):h tt}."
+            ? $"Emails confirmed subscribers a weekly digest every {Settings.DigestDay} at {new DateTime(2000, 1, 1, Math.Clamp(Settings.DigestHour, 0, 23), 0, 0):HH:00}."
             : $"Emails confirmed subscribers {(Settings.GraceMinutes == 0 ? "as soon as" : $"{Settings.GraceMinutes} minutes after")} a new article goes live.")</p>
     </div>
     @if (Campaign is not null)
@@ -219,7 +219,7 @@ else
                                 <label class="form-label small">At</label>
                                 <select class="form-select form-select-sm" value="@Settings.DigestHour"
                                         @onchange="SetDigestHour">
-                                    @for (var hour = 0; hour < 24; hour++) { var h = hour; <option value="@h">@(new DateTime(2000, 1, 1, h, 0, 0).ToString("h tt"))</option> }
+                                    @for (var hour = 0; hour < 24; hour++) { var h = hour; <option value="@h">@(new DateTime(2000, 1, 1, h, 0, 0).ToString("HH:00"))</option> }
                                 </select>
                             </div>
                         </div>
@@ -286,8 +286,8 @@ else
                                     <td><RelationshipChip ContactId="subscriber.ContactId" ContactName="@subscriber.Email" /></td>
                                     <td>@subscriber.FirstName</td>
                                     <td><span class="badge @SubscriberBadge(subscriber.Status)">@subscriber.Status</span></td>
-                                    <td class="small">@subscriber.SubscribedAt.ToLocalTime().ToString("MMM d, yyyy")</td>
-                                    <td class="small">@(subscriber.ConfirmedAt?.ToLocalTime().ToString("MMM d, yyyy") ?? "—")</td>
+                                    <td class="small">@subscriber.SubscribedAt.ToLocalTime().ToString("dd-MM-yy")</td>
+                                    <td class="small">@(subscriber.ConfirmedAt?.ToLocalTime().ToString("dd-MM-yy") ?? "—")</td>
                                     <td class="small text-secondary">@subscriber.SourcePath</td>
                                     <td class="text-end">
                                         @if (subscriber.Status == EmailCampaignSubscriptionStatuses.Confirmed)
@@ -325,7 +325,7 @@ else
                                 <tr>
                                     <td>@announcement.ArticleTitle</td>
                                     <td><span class="badge @AnnouncementBadge(announcement.Status)">@announcement.Status</span></td>
-                                    <td class="small">@announcement.DueAt.ToLocalTime().ToString("MMM d, h:mm tt")</td>
+                                    <td class="small">@announcement.DueAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</td>
                                     <td>@announcement.DeliveredCount / @announcement.RecipientCount</td>
                                     <td>@announcement.FailedCount</td>
                                     <td class="text-end">

@@ -52,7 +52,7 @@
             <div class="flex-grow-1 text-break">
                 <div class="small text-secondary">@ContentCalendarKinds.Label(selected.Kind) · @selected.Status</div>
                 <div class="fw-semibold"><a href="@selected.Link">@selected.Title</a></div>
-                <div class="small">@selected.At.ToLocalTime().ToString("dddd, MMM d, yyyy h:mm tt")</div>
+                <div class="small">@selected.At.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
             </div>
             @if (selected.CanReschedule)
             {
@@ -90,9 +90,9 @@ else
                 @foreach (var item in dayItems)
                 {
                     <button type="button" class="cc-item cc-@item.Kind @(item.Upcoming ? "" : "cc-past")" draggable="@(item.CanReschedule ? "true" : "false")"
-                            title="@($"{item.At.ToLocalTime():h:mm tt} · {item.Title} · {item.Status}")"
+                            title="@($"{item.At.ToLocalTime():HH:mm} · {item.Title} · {item.Status}")"
                             @ondragstart="() => Dragging = item" @onclick="() => Select(item)">
-                        <span class="cc-time">@item.At.ToLocalTime().ToString("h:mm")</span> @item.Title
+                        <span class="cc-time">@item.At.ToLocalTime().ToString("HH:mm")</span> @item.Title
                     </button>
                 }
             </div>
@@ -199,7 +199,7 @@ else
         try
         {
             await ContentCalendarService.RescheduleAsync(item.Kind, item.Id, newTime.ToUniversalTime(), await CurrentUserAccessor.GetCurrentUsernameAsync());
-            StatusMessage = $"Moved \"{item.Title}\" to {newTime.ToLocalTime():dddd, MMM d, h:mm tt}.";
+            StatusMessage = $"Moved \"{item.Title}\" to {newTime.ToLocalTime():dd-MM-yy HH:mm}.";
             Selected = null;
             await LoadAsync();
         }

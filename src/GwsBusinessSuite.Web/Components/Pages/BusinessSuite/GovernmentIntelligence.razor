@@ -348,7 +348,7 @@
                                 {
                                     <article>
                                         <div class="doc-head">
-                                            <span class="news-source">@doc.Kind · @doc.MeetingDate.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)</span>
+                                            <span class="news-source">@doc.Kind · @doc.MeetingDate.ToString("dd-MM-yy", CultureInfo.InvariantCulture)</span>
                                             <a href="@doc.Url" target="_blank" rel="noopener noreferrer">PDF <i class="bi bi-arrow-up-right"></i></a>
                                         </div>
                                         @if (!string.IsNullOrWhiteSpace(doc.AiSummary))
@@ -986,7 +986,7 @@
                 {
                     <div class="watch-row">
                         <a href="@bill.OfficialUrl" target="_blank" rel="noopener noreferrer">
-                            <span class="news-source">@bill.Label@(bill.LastChangedAt is { } changed ? $" · changed {changed.ToLocalTime():MMM d}" : string.Empty)</span>
+                            <span class="news-source">@bill.Label@(bill.LastChangedAt is { } changed ? $" · changed {changed.ToLocalTime():dd-MM-yy}" : string.Empty)</span>
                             <strong>@bill.Title</strong>
                             <small>@bill.LatestStatus@(string.IsNullOrWhiteSpace(bill.LatestStatusDate) ? string.Empty : $" ({bill.LatestStatusDate})")@(bill.LastError is null ? string.Empty : $" · {bill.LastError}")</small>
                         </a>
@@ -1055,7 +1055,7 @@
             : _federalRegister.Items.Where(d => !_openCommentOnly || d.IsOpenForComment(DateOnly.FromDateTime(DateTime.Now))).ToList();
 
     private static string FormatDateOnly(DateOnly? value) =>
-        value?.ToString("MMM d, yyyy", CultureInfo.InvariantCulture) ?? "Date unavailable";
+        value?.ToString("dd-MM-yy", CultureInfo.InvariantCulture) ?? "Date unavailable";
 
     private static string RegisterMeta(FederalRegisterDocument doc)
     {
@@ -1063,8 +1063,8 @@
         if (doc.CommentsCloseOn is { } close)
         {
             parts.Add(close >= DateOnly.FromDateTime(DateTime.Now)
-                ? $"Comments close {close.ToString("MMM d", CultureInfo.InvariantCulture)}"
-                : $"Comments closed {close.ToString("MMM d", CultureInfo.InvariantCulture)}");
+                ? $"Comments close {close.ToString("dd-MM-yy", CultureInfo.InvariantCulture)}"
+                : $"Comments closed {close.ToString("dd-MM-yy", CultureInfo.InvariantCulture)}");
         }
         if (!string.IsNullOrWhiteSpace(doc.Agencies)) parts.Add(doc.Agencies);
         return string.Join(" · ", parts);
@@ -1073,7 +1073,7 @@
     private static string GrantMeta(GrantOpportunity grant)
     {
         var parts = new List<string> { grant.Number };
-        if (grant.CloseDate is { } close) parts.Add($"Closes {close.ToString("MMM d, yyyy", CultureInfo.InvariantCulture)}");
+        if (grant.CloseDate is { } close) parts.Add($"Closes {close.ToString("dd-MM-yy", CultureInfo.InvariantCulture)}");
         else parts.Add("No close date posted");
         parts.Add($"\"{grant.MatchedKeyword}\"");
         return string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
@@ -1185,9 +1185,9 @@
     };
 
     private static string FormatTimestamp(DateTimeOffset? value) =>
-        value is null ? "Unavailable" : value.Value.ToString("MMM d, yyyy · h:mm tt", CultureInfo.InvariantCulture);
+        value is null ? "Unavailable" : value.Value.ToString("dd-MM-yy HH:mm", CultureInfo.InvariantCulture);
     private static string FormatDateOnly(DateTimeOffset? value) =>
-        value is null ? "Date unavailable" : value.Value.ToString("MMM d, yyyy", CultureInfo.InvariantCulture);
+        value is null ? "Date unavailable" : value.Value.ToString("dd-MM-yy", CultureInfo.InvariantCulture);
     private static string DateDay(DateOnly? value) => value?.Day.ToString("00", CultureInfo.InvariantCulture) ?? "—";
     private static string DateMonth(DateOnly? value) => value?.ToString("MMM", CultureInfo.InvariantCulture) ?? "TBD";
     // ── Local event filters ───────────────────────────────────────────────
@@ -1308,7 +1308,7 @@
 
     private string EventMeta(CivicEvent item)
     {
-        var when = item.StartAt?.ToString("h:mm tt", CultureInfo.InvariantCulture) ?? "Time unavailable";
+        var when = item.StartAt?.ToString("HH:mm", CultureInfo.InvariantCulture) ?? "Time unavailable";
         // Town first after the time: with several towns in one feed, "where" is the thing being
         // scanned for. Distance rides along with it so "is that worth the drive" is answerable
         // without opening the listing.

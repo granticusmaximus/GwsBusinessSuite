@@ -152,7 +152,7 @@
                                                         <code class="me-1">v@(revision.RevisionNumber)</code>@(string.IsNullOrWhiteSpace(revision.Label) ? "Saved" : revision.Label)
                                                     </div>
                                                     <div class="small text-secondary mt-1">
-                                                        @revision.AuthorName &middot; @revision.When.ToLocalTime().ToString("g")
+                                                        @revision.AuthorName &middot; @revision.When.ToLocalTime().ToString("dd-MM-yy HH:mm")
                                                     </div>
                                                 </div>
                                                 <div class="d-flex gap-1 flex-shrink-0">

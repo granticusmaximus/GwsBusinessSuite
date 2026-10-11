@@ -131,11 +131,11 @@
                                     @if (IsLockedOut(user))
                                     {
                                         <span class="badge text-bg-warning ms-1" title="Too many failed login attempts">
-                                            Locked until @user.LockoutEndAt!.Value.ToLocalTime().ToString("h:mm tt")
+                                            Locked until @user.LockoutEndAt!.Value.ToLocalTime().ToString("HH:mm")
                                         </span>
                                     }
                                 </td>
-                                <td class="small text-secondary">@user.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                                <td class="small text-secondary">@user.CreatedAt.ToLocalTime().ToString("dd-MM-yy")</td>
                                 <td class="text-end">
                                     <div class="d-flex justify-content-end gap-2 flex-wrap">
                                         @if (ResetPasswordForId == user.Id)

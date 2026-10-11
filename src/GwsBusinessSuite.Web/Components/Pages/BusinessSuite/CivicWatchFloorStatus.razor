@@ -25,8 +25,8 @@
     {
         <div class="floor-transcript">
             <div class="transcript-head">
-                <span><i class="bi bi-archive"></i> Congressional Record — @transcript.SessionDate.ToString("MMMM d, yyyy")</span>
-                <em>Saved @transcript.FetchedAt.ToString("MMM d, h:mm tt")</em>
+                <span><i class="bi bi-archive"></i> Congressional Record — @transcript.SessionDate.ToString("dd-MM-yy")</span>
+                <em>Saved @transcript.FetchedAt.ToString("dd-MM-yy HH:mm")</em>
             </div>
             <p>@transcript.Excerpt</p>
             <a href="@transcript.SourceUrl" target="_blank" rel="noopener noreferrer">Open official record (PDF) <i class="bi bi-arrow-up-right"></i></a>
@@ -53,7 +53,7 @@
                         @foreach (var entry in _archive)
                         {
                             <li>
-                                <span>@entry.SessionDate.ToString("MMM d, yyyy")</span>
+                                <span>@entry.SessionDate.ToString("dd-MM-yy")</span>
                                 <a href="@entry.SourceUrl" target="_blank" rel="noopener noreferrer">Official record <i class="bi bi-arrow-up-right"></i></a>
                             </li>
                         }

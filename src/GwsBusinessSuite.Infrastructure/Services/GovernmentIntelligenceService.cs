@@ -1335,7 +1335,7 @@ public sealed class GovernmentIntelligenceService(
     private static string FormatTimelineWhen(DateTimeOffset? value) =>
         value is null
             ? "Date unavailable"
-            : value.Value.ToString("MMMM dd, yyyy", CultureInfo.InvariantCulture);
+            : value.Value.ToString("dd-MM-yy", CultureInfo.InvariantCulture);
 
     private static IEnumerable<int> ParseSenateVoteNumbers(string xml)
     {

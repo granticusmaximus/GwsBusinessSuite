@@ -68,7 +68,7 @@ public sealed class ThreatIntelWorkspaceService(IAppDbContext dbContext, IWikiSe
 
         var snapshot = Deserialize(entity.ResultJson) ?? new ThreatInvestigationSnapshot(null, null, null, []);
         var markdown = ThreatInvestigationMarkdown.Build(entity.Query, entity.Summary, entity.CreatedAt, entity.CreatedBy, snapshot);
-        var title = $"Investigation: {ThreatInvestigationMarkdown.Defang(entity.Query)} ({entity.CreatedAt:yyyy-MM-dd})";
+        var title = $"Investigation: {ThreatInvestigationMarkdown.Defang(entity.Query)} ({entity.CreatedAt:dd-MM-yy})";
         var page = await wikiService.SavePageAsync(new WikiPageEditorModel
         {
             Title = Truncate(title, 200),

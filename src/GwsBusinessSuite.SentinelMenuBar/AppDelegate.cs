@@ -115,7 +115,7 @@ public class AppDelegate : NSApplicationDelegate
         }
         if (_lastChecked is { } checkedAt)
         {
-            menu.AddItem(new NSMenuItem($"Updated {checkedAt:h:mm tt}") { Enabled = false });
+            menu.AddItem(new NSMenuItem($"Updated {checkedAt:HH:mm}") { Enabled = false });
         }
         menu.AddItem(CreateItem("Refresh Now", () => _ = RefreshAsync(), "r"));
         menu.AddItem(NSMenuItem.SeparatorItem);

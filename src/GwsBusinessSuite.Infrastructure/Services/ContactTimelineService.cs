@@ -51,7 +51,7 @@ public sealed class ContactTimelineService(IAppDbContextFactory dbContextFactory
         {
             var total = invoice.LineItems.Sum(l => l.Quantity * l.UnitPriceUsd).ToString("C2", UsCurrencyCulture);
             entries.Add(new(invoice.CreatedAt, ContactTimelineKinds.Invoice, $"Invoice drafted: {invoice.Title}", total, "/admin/billing"));
-            if (invoice.SentAt is { } sent) entries.Add(new(sent, ContactTimelineKinds.Invoice, $"Invoice sent: {invoice.Title}", Join(total, invoice.DueDate is { } due ? $"due {due:MMM d, yyyy}" : null), "/admin/billing"));
+            if (invoice.SentAt is { } sent) entries.Add(new(sent, ContactTimelineKinds.Invoice, $"Invoice sent: {invoice.Title}", Join(total, invoice.DueDate is { } due ? $"due {due:dd-MM-yy}" : null), "/admin/billing"));
             if (invoice.PaidAt is { } paid) entries.Add(new(paid, ContactTimelineKinds.Invoice, $"Invoice paid: {invoice.Title}", total, "/admin/billing"));
             if (invoice.Status == InvoiceStatuses.Void) entries.Add(new(invoice.UpdatedAt ?? invoice.CreatedAt, ContactTimelineKinds.Invoice, $"Invoice voided: {invoice.Title}", total, "/admin/billing"));
         }
@@ -90,7 +90,7 @@ public sealed class ContactTimelineService(IAppDbContextFactory dbContextFactory
             foreach (var booking in bookings)
             {
                 var what = typeNames.GetValueOrDefault(booking.BookingTypeId) ?? "Meeting";
-                entries.Add(new(booking.CreatedAt, ContactTimelineKinds.Booking, $"Booked: {what}", $"for {booking.StartsAt.ToLocalTime():MMM d, h:mm tt}", "/admin/scheduling"));
+                entries.Add(new(booking.CreatedAt, ContactTimelineKinds.Booking, $"Booked: {what}", $"for {booking.StartsAt.ToLocalTime():dd-MM-yy HH:mm}", "/admin/scheduling"));
                 if (booking.CancelledAt is { } cancelled)
                 {
                     entries.Add(new(cancelled, ContactTimelineKinds.Booking, $"Cancelled: {what}", null, "/admin/scheduling"));

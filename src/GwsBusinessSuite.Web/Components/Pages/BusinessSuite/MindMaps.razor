@@ -144,5 +144,5 @@ else
         finally { _busy = false; }
     }
 
-    private static string FormatLastEdited(DateTimeOffset value) => value.ToLocalTime().ToString("MMM d, h:mm tt");
+    private static string FormatLastEdited(DateTimeOffset value) => value.ToLocalTime().ToString("dd-MM-yy HH:mm");
 }

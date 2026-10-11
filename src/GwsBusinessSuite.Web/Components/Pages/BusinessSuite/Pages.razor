@@ -81,7 +81,7 @@ else
                             <div class="d-flex justify-content-between align-items-start gap-2">
                                 <div>
                                     <div class="fw-semibold">@trashedPage.Title</div>
-                                    <div class="small text-secondary">/@trashedPage.Slug &middot; trashed @trashedPage.TrashedAt?.ToLocalTime().ToString("g")</div>
+                                    <div class="small text-secondary">/@trashedPage.Slug &middot; trashed @trashedPage.TrashedAt?.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
                                 </div>
                                 <div class="d-flex gap-1 flex-shrink-0 wp-row-actions">
                                     <button class="btn btn-xs btn-outline-primary" @onclick="() => RestoreTrashedPageAsync(trashedPage.Id)" disabled="@IsCmsBusy">Restore</button>
@@ -142,7 +142,7 @@ else
                                     @(depth > 0 ? "— " : "")@cmsPage.Title
                                     @if (IsScheduled(cmsPage))
                                     {
-                                        <span class="badge text-bg-info">Scheduled for @cmsPage.PublishedAt?.ToLocalTime().ToString("MMM d, yyyy h:mm tt")</span>
+                                        <span class="badge text-bg-info">Scheduled for @cmsPage.PublishedAt?.ToLocalTime().ToString("dd-MM-yy HH:mm")</span>
                                     }
                                     else if (cmsPage.Status != CmsPageStatuses.Published)
                                     {
