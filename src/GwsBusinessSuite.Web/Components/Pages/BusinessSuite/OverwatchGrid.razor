@@ -45,6 +45,7 @@
 <link rel="stylesheet" href="/tactical-globe.css" />
 <script src="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Cesium.js"></script>
 <script src="@Assets["js/tactical-globe.js"]"></script>
+<script src="@Assets["js/street-view.js"]"></script>
 
 <div class="tg-shell">
     <div class="tg-viewport" id="tg-viewport"></div>
@@ -185,17 +186,48 @@
     {
         <div class="tg-pick-banner" role="status">CLICK THE MAP WHERE YOU WANT TO LOOK AROUND <button type="button" @onclick="ToggleStreetViewPickAsync">CANCEL</button></div>
     }
-    @if (_streetView is not null || _streetBusy)
+    @* Overwatch's own street view (street-view.js renders the panorama into the canvas and places
+       the walk arrows). Covers the globe while open; BACK TO MAP or Esc returns. *@
+    @if (_streetScene is { } scene)
     {
-        <div class="tg-floating-panel tg-streetview-panel" aria-label="Street view">
+        <div class="tg-sv" id="tg-sv" role="dialog" aria-label="Street view">
+            <canvas class="tg-sv-canvas" tabindex="0" aria-label="360 degree street view. Drag or use the arrow keys to look around; scroll to zoom."></canvas>
+            <div class="tg-sv-arrows" aria-label="Walk"></div>
+            <div class="tg-sv-hud">
+                <button type="button" class="tg-pill" @onclick="CloseStreetViewAsync"><i class="bi bi-arrow-left" aria-hidden="true"></i> BACK TO MAP</button>
+                <div class="tg-sv-info">
+                    <span>@scene.Current.Latitude.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture), @scene.Current.Longitude.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture)</span>
+                    @if (scene.Current.CapturedAt is { } captured)
+                    {
+                        <span>CAPTURED @captured.ToLocalGwsDate()</span>
+                    }
+                    <span>@(scene.Links.Count == 0 ? "NO NEIGHBOURING PANORAMAS" : $"{scene.Links.Count} WAY{(scene.Links.Count == 1 ? "" : "S")} TO WALK")</span>
+                </div>
+            </div>
+            <div class="tg-sv-compass" aria-hidden="true"><div class="tg-sv-compass-needle"><span>N</span></div></div>
+            <div class="tg-sv-status" role="status" hidden></div>
+            <a class="tg-sv-credit" href="@($"https://www.mapillary.com/app/?pKey={scene.Current.Id}")" target="_blank" rel="noopener noreferrer">Imagery &copy; Mapillary contributors, CC BY-SA</a>
+        </div>
+    }
+    else if (_streetView is not null || _streetBusy)
+    {
+        <div class="tg-floating-panel tg-streetview-panel" aria-label="Street photos">
             <div class="tg-coverage-panel-header"><span>STREET VIEW</span><button type="button" class="tg-panel-close" aria-label="Close street view" @onclick="CloseStreetViewAsync">&times;</button></div>
             @if (_streetBusy)
             {
-                <div class="tg-favorites-empty" role="status">LOOKING FOR STREET PHOTOS...</div>
+                <div class="tg-favorites-empty" role="status">LOOKING FOR STREET VIEW HERE...</div>
             }
             else if (_streetView is { } view)
             {
                 <div class="tg-streetview-where">@view.Latitude.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture), @view.Longitude.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture)</div>
+                @if (!StreetLevelImagery.HasPanoramaSource)
+                {
+                    <div class="tg-favorites-empty">360° street view needs the Mapillary access token (CameraIntel:MapillaryAccessToken).</div>
+                }
+                else
+                {
+                    <div class="tg-favorites-empty">No 360° street view within 250 m of this spot.@(view.Images.Count > 0 ? " The nearest street photos:" : " There are no street photos here either - try a busier street.")</div>
+                }
                 @if (view.Images.Count > 0)
                 {
                     var image = view.Images[_streetIndex];
@@ -221,15 +253,6 @@
                         <a class="tg-link-btn" href="@image.ViewUrl" target="_blank" rel="noopener noreferrer">OPEN ON @image.Source.ToUpperInvariant()</a>
                     </div>
                 }
-                else
-                {
-                    <div class="tg-favorites-empty">No free street photos within 250 m of this spot. Google Street View usually has it:</div>
-                }
-                <div class="tg-route-row tg-streetview-google">
-                    <a class="tg-link-btn" href="@view.GoogleStreetViewUrl" target="_blank" rel="noopener noreferrer">
-                        <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>OPEN IN GOOGLE STREET VIEW
-                    </a>
-                </div>
             }
         </div>
     }
@@ -669,6 +692,11 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_streetSceneNeedsOpen && _streetScene is { } openScene)
+        {
+            _streetSceneNeedsOpen = false;
+            await JS.InvokeAsync<bool>("gwsStreetView.open", "tg-sv", _dotNetRef, StreetSceneForViewer(openScene));
+        }
         if (!firstRender) return;
 
         if (!_hasAnyProviderConfigured)
@@ -1447,6 +1475,10 @@
         await ShowStreetViewAsync(latitude, longitude);
     }
 
+    private StreetViewScene? _streetScene;
+    private bool _streetSceneNeedsOpen;
+
+    // Drop point -> the nearest 360° panorama (Overwatch's own viewer), or flat photos if there's none.
     private async Task ShowStreetViewAsync(double latitude, double longitude)
     {
         _layersOpen = _infoOpen = _helpOpen = false;
@@ -1457,12 +1489,20 @@
         await JS.InvokeVoidAsync("tacticalGlobe.setStreetViewMarker", "tg-viewport", latitude, longitude);
         try
         {
-            _streetView = await StreetLevelImagery.FindNearAsync(latitude, longitude);
+            if (await StreetLevelImagery.GetSceneAsync(latitude, longitude) is { } scene)
+            {
+                _streetScene = scene;
+                _streetSceneNeedsOpen = true;
+            }
+            else
+            {
+                _streetView = await StreetLevelImagery.FindNearAsync(latitude, longitude);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Logger.LogWarning(ex, "Street view lookup failed");
-            _streetView = new StreetViewResult(latitude, longitude, [], StreetLevelImageryService.GoogleStreetViewUrl(latitude, longitude));
+            _streetView = new StreetViewResult(latitude, longitude, []);
         }
         finally
         {
@@ -1471,10 +1511,40 @@
         StateHasChanged();
     }
 
-    private async Task CloseStreetViewAsync()
+    // street-view.js calls this when an arrow is clicked: the chosen neighbour becomes the scene.
+    [JSInvokable]
+    public async Task<object?> MoveStreetViewAsync(string panoramaId)
     {
+        if (_streetScene is not { } current) return null;
+        var next = await StreetLevelImagery.GetSceneAsync(current.Current.Latitude, current.Current.Longitude, panoramaId);
+        if (next is null) return null;
+        _streetScene = next;
+        await JS.InvokeVoidAsync("tacticalGlobe.setStreetViewMarker", "tg-viewport", next.Current.Latitude, next.Current.Longitude);
+        StateHasChanged();
+        return StreetSceneForViewer(next);
+    }
+
+    private static object StreetSceneForViewer(StreetViewScene scene) => new
+    {
+        current = new
+        {
+            id = scene.Current.Id,
+            latitude = scene.Current.Latitude,
+            longitude = scene.Current.Longitude,
+            compassAngle = scene.Current.CompassAngle
+        },
+        links = scene.Links.Select(link => new { id = link.Id, bearing = link.Bearing, distanceMeters = link.DistanceMeters }),
+        imageUrl = $"/admin/api/overwatch/streetview/{scene.Current.Id}"
+    };
+
+    [JSInvokable]
+    public async Task CloseStreetViewAsync()
+    {
+        if (_streetScene is not null) await JS.InvokeVoidAsync("gwsStreetView.close");
+        _streetScene = null;
         _streetView = null;
         await JS.InvokeVoidAsync("tacticalGlobe.clearStreetViewMarker", "tg-viewport");
+        StateHasChanged();
     }
 
     private string? _directionsMessage;

@@ -2809,6 +2809,21 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
 // page itself; the store only resolves exact frame file names, and the bytes are served only when
 // they really are a raster image (some cameras send PNG under the .jpg name), never as anything a
 // browser could execute.
+// Overwatch's own street view: one 360° panorama picture, fetched from Mapillary by the server so
+// the access token stays here. Same-origin, so the WebGL viewer can use it as a texture.
+app.MapGet("/admin/api/overwatch/streetview/{panoramaId}", async (
+    string panoramaId,
+    GwsBusinessSuite.Application.CameraIntel.StreetLevelImageryService streetView,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+{
+    if (panoramaId.Length is 0 or > 32 || !panoramaId.All(char.IsAsciiDigit)) return Results.NotFound();
+    var image = await streetView.GetPanoramaImageAsync(panoramaId, cancellationToken);
+    if (image is not { } found) return Results.NotFound();
+    context.Response.Headers.CacheControl = "private, max-age=86400";
+    return Results.File(found.Content, found.ContentType);
+}).RequireAuthorization("AdminOnly");
+
 app.MapGet("/admin/api/overwatch/timelapse/{cameraId}/{fileName}", async (
     string cameraId, string fileName, GwsBusinessSuite.Application.CameraIntel.CameraTimelapseStore store, CancellationToken cancellationToken) =>
 {

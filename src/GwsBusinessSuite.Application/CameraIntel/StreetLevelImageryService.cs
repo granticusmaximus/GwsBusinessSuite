@@ -17,16 +17,33 @@ public sealed record StreetImage(
     // The photo on its own site (Mapillary / KartaView), for attribution and a bigger viewer.
     string ViewUrl);
 
+// Flat street photos near a point: what street view falls back to where there's no 360° imagery.
 public sealed record StreetViewResult(
     double Latitude,
     double Longitude,
-    IReadOnlyList<StreetImage> Images,
-    string GoogleStreetViewUrl);
+    IReadOnlyList<StreetImage> Images);
 
-// Overwatch's "drop the person" street view. Google doesn't allow Street View imagery inside
-// another app without a paid Maps API key, so the in-app photos come from free sources -
-// Mapillary (needs the free CameraIntel:MapillaryAccessToken) and KartaView (no key) - and the
-// result always carries a standard Google Maps link that opens Street View at the same spot.
+// One 360° panorama (Mapillary, equirectangular). CompassAngle is the direction the middle of the
+// image faces, which the viewer needs to line the picture up with north.
+public sealed record StreetPanorama(
+    string Id,
+    double Latitude,
+    double Longitude,
+    double CompassAngle,
+    DateTimeOffset? CapturedAt,
+    double DistanceMeters);
+
+// A way to walk from the current panorama to a neighbouring one: the direction to head in
+// (degrees from north) and how far it is.
+public sealed record StreetPanoramaLink(string Id, double Bearing, double DistanceMeters);
+
+// Where you're standing in Overwatch's own street view, and where you can walk to.
+public sealed record StreetViewScene(StreetPanorama Current, IReadOnlyList<StreetPanoramaLink> Links);
+
+// Overwatch's own street view ("drop the person"). The viewer is Overwatch's (street-view.js); the
+// imagery is Mapillary's openly-licensed 360° panoramas (needs the free
+// CameraIntel:MapillaryAccessToken), fetched by the server so the token never reaches the browser.
+// Where there's no 360° imagery, flat photos from Mapillary or KartaView (no key) are offered.
 public sealed class StreetLevelImageryService(
     HttpClient httpClient,
     IOptions<CameraIntelOptions> options,
@@ -37,9 +54,133 @@ public sealed class StreetLevelImageryService(
     // Tried in order until something is found: close first, then a bit wider.
     private static readonly double[] SearchRadiiMeters = [60, 250];
 
-    public static string GoogleStreetViewUrl(double latitude, double longitude) =>
-        string.Create(CultureInfo.InvariantCulture,
-            $"https://www.google.com/maps/@?api=1&map_action=pano&viewpoint={latitude:0.######},{longitude:0.######}");
+    // Panoramas this close or closer are the same spot; this far or further aren't "next" any more.
+    private const double MinLinkMeters = 2;
+    private const double MaxLinkMeters = 40;
+    private static readonly double[] PanoramaSearchRadiiMeters = [60, 250];
+
+    public bool HasPanoramaSource => !string.IsNullOrWhiteSpace(options.Value.MapillaryAccessToken);
+
+    // The nearest 360° panorama to a point (or the one asked for), plus the neighbours you can
+    // walk to. Null when there's no panorama within 250 m (or no Mapillary token).
+    public async Task<StreetViewScene?> GetSceneAsync(double latitude, double longitude, string? panoramaId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!HasPanoramaSource) return null;
+        StreetPanorama? current = null;
+        foreach (var radius in PanoramaSearchRadiiMeters)
+        {
+            var found = await FindPanoramasAsync(latitude, longitude, radius, cancellationToken);
+            current = found.FirstOrDefault(p => p.Id == panoramaId) ?? (panoramaId is null ? found.FirstOrDefault() : null);
+            if (current is not null || panoramaId is null && found.Count > 0) break;
+        }
+        if (current is null) return null;
+
+        var neighbours = await FindPanoramasAsync(current.Latitude, current.Longitude, MaxLinkMeters + 10, cancellationToken);
+        return new StreetViewScene(current, BuildLinks(current, neighbours));
+    }
+
+    // One link per direction (45° sectors), the nearest panorama in each - like the arrows on the
+    // road in a street view app.
+    public static IReadOnlyList<StreetPanoramaLink> BuildLinks(StreetPanorama current, IEnumerable<StreetPanorama> candidates) =>
+        candidates
+            .Where(p => p.Id != current.Id)
+            .Select(p => new StreetPanoramaLink(p.Id,
+                Bearing(current.Latitude, current.Longitude, p.Latitude, p.Longitude),
+                DistanceMeters(current.Latitude, current.Longitude, p.Latitude, p.Longitude)))
+            .Where(link => link.DistanceMeters is >= MinLinkMeters and <= MaxLinkMeters)
+            .GroupBy(link => (int)Math.Round(link.Bearing / 45) % 8)
+            .Select(sector => sector.OrderBy(link => link.DistanceMeters).First())
+            .OrderBy(link => link.Bearing)
+            .ToList();
+
+    private async Task<IReadOnlyList<StreetPanorama>> FindPanoramasAsync(double lat, double lon, double radius, CancellationToken cancellationToken)
+    {
+        var (south, west, north, east) = Box(lat, lon, radius);
+        var url = string.Create(CultureInfo.InvariantCulture,
+            $"https://graph.mapillary.com/images?fields=id,geometry,computed_geometry,compass_angle,computed_compass_angle,captured_at,is_pano&is_pano=true&bbox={west},{south},{east},{north}&limit=100&access_token={Uri.EscapeDataString(options.Value.MapillaryAccessToken)}");
+        var json = await GetAsync(url, "Mapillary panoramas", TimeSpan.FromSeconds(12), cancellationToken);
+        return json is null ? [] : ParsePanoramas(json, lat, lon, radius);
+    }
+
+    // {"data":[{"id","geometry"|"computed_geometry":{"coordinates":[lon,lat]},"compass_angle"|"computed_compass_angle","captured_at"(ms),"is_pano"}]}
+    // Mapillary's computed (corrected) position and direction are preferred when present.
+    public static IReadOnlyList<StreetPanorama> ParsePanoramas(string json, double lat, double lon, double maxMeters)
+    {
+        var panoramas = new List<StreetPanorama>();
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array) return panoramas;
+            foreach (var item in data.EnumerateArray())
+            {
+                if (item.TryGetProperty("is_pano", out var isPano) && isPano.ValueKind == JsonValueKind.False) continue;
+                var id = String(item, "id");
+                var point = Coordinates(item, "computed_geometry") ?? Coordinates(item, "geometry");
+                if (id is null || !id.All(char.IsAsciiDigit) || point is not { } p) continue;
+                var distance = DistanceMeters(lat, lon, p.Lat, p.Lon);
+                if (distance > maxMeters) continue;
+                DateTimeOffset? captured = item.TryGetProperty("captured_at", out var at) && at.TryGetInt64(out var ms)
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : null;
+                panoramas.Add(new StreetPanorama(id, p.Lat, p.Lon,
+                    Number(item, "computed_compass_angle") ?? Number(item, "compass_angle") ?? 0, captured, distance));
+            }
+        }
+        catch (JsonException) { }
+        return panoramas.OrderBy(p => p.DistanceMeters).ToList();
+    }
+
+    // The panorama picture itself (Mapillary's 2048-wide version), for Overwatch's image endpoint.
+    // Null if the id is unknown or Mapillary can't be reached.
+    public async Task<(byte[] Content, string ContentType)?> GetPanoramaImageAsync(string panoramaId, CancellationToken cancellationToken = default)
+    {
+        if (!HasPanoramaSource || string.IsNullOrEmpty(panoramaId) || !panoramaId.All(char.IsAsciiDigit)) return null;
+        var json = await GetAsync(
+            $"https://graph.mapillary.com/{panoramaId}?fields=thumb_2048_url&access_token={Uri.EscapeDataString(options.Value.MapillaryAccessToken)}",
+            "Mapillary image", TimeSpan.FromSeconds(12), cancellationToken);
+        if (json is null) return null;
+        string? imageUrl;
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            imageUrl = String(doc.RootElement, "thumb_2048_url");
+        }
+        catch (JsonException) { return null; }
+        if (imageUrl is null || !imageUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return null;
+
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        try
+        {
+            using var response = await httpClient.GetAsync(imageUrl, timeout.Token);
+            if (!response.IsSuccessStatusCode) return null;
+            var contentType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+            if (!contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) return null;
+            return (await response.Content.ReadAsByteArrayAsync(timeout.Token), contentType);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Street view: couldn't download panorama {PanoramaId}", panoramaId);
+            return null;
+        }
+    }
+
+    public static double Bearing(double lat1, double lon1, double lat2, double lon2)
+    {
+        var phi1 = lat1 * Math.PI / 180;
+        var phi2 = lat2 * Math.PI / 180;
+        var dLon = (lon2 - lon1) * Math.PI / 180;
+        var y = Math.Sin(dLon) * Math.Cos(phi2);
+        var x = Math.Cos(phi1) * Math.Sin(phi2) - Math.Sin(phi1) * Math.Cos(phi2) * Math.Cos(dLon);
+        return (Math.Atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+
+    private static (double Lat, double Lon)? Coordinates(JsonElement item, string property) =>
+        item.TryGetProperty(property, out var geometry) && geometry.ValueKind == JsonValueKind.Object
+        && geometry.TryGetProperty("coordinates", out var coordinates) && coordinates.ValueKind == JsonValueKind.Array
+        && coordinates.GetArrayLength() >= 2
+            ? (coordinates[1].GetDouble(), coordinates[0].GetDouble())
+            : null;
 
     public async Task<StreetViewResult> FindNearAsync(double latitude, double longitude, CancellationToken cancellationToken = default)
     {
@@ -52,8 +193,7 @@ public sealed class StreetLevelImageryService(
         }
 
         return new StreetViewResult(latitude, longitude,
-            images.OrderBy(image => image.DistanceMeters).Take(MaxImages).ToList(),
-            GoogleStreetViewUrl(latitude, longitude));
+            images.OrderBy(image => image.DistanceMeters).Take(MaxImages).ToList());
     }
 
     private async Task<IReadOnlyList<StreetImage>> MapillaryAsync(double lat, double lon, double radius, CancellationToken cancellationToken)
