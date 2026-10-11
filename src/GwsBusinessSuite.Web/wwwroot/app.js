@@ -298,6 +298,7 @@
 			if (event.target.closest('[data-gws-command-close]')) closeCommand();
 			if (event.target.closest('[data-gws-theme-toggle]')) toggleTheme();
 			if (event.target.closest('[data-gws-focus-toggle]')) toggleFocusMode();
+			if (event.target.closest('[data-gws-print]')) window.print();
 		});
 
 		document.addEventListener('input', function (event) {

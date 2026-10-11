@@ -645,3 +645,17 @@
 .tg-condition-unknown { border-left: 3px solid #8a8a8a; }
 .tg-route-form select { min-width: 0; flex: 1 1 auto; }
 
+
+/* 2026-10 layout: keep the weather panel clear of the left side panel when it's open. */
+.tg-shell:has(.tg-side-panel:not(.is-collapsed)) .tg-weather-panel { left: calc(min(360px, 100% - 1.6rem) + 1.6rem); }
+@container gws-main (max-width: 720px) {
+    .tg-shell:has(.tg-side-panel:not(.is-collapsed)) .tg-weather-panel { left: 0.8rem; bottom: calc(55% + 0.8rem); }
+}
+/* With the side panel open, the radar bar centres in the space to its right. */
+.tg-shell:has(.tg-side-panel:not(.is-collapsed)) .tg-radar-bar {
+    left: calc((100% + min(360px, 100% - 1.6rem) + 0.8rem) / 2);
+    width: min(640px, calc(100% - min(360px, 100% - 1.6rem) - 5.5rem));
+}
+@container gws-main (max-width: 720px) {
+    .tg-shell:has(.tg-side-panel:not(.is-collapsed)) .tg-radar-bar { left: 50%; width: calc(100% - 2rem); bottom: calc(55% + 0.8rem); }
+}

@@ -367,6 +367,9 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<MapillaryImageryProvider>());
+        // Overwatch street view ("drop the person"): Mapillary/KartaView photos near a point.
+        // Full URLs, so no base address; each source has its own shorter timeout inside.
+        services.AddHttpClient<StreetLevelImageryService>(client => client.Timeout = TimeSpan.FromSeconds(20));
 
         // Nationwide/worldwide coverage expansion - every source below is genuinely free with no
         // API key or registration, confirmed directly against each live endpoint before being

@@ -110,6 +110,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
           <input type="text" id="tg-search-input" />
           <button type="button" id="tg-search-button">GO</button>
           <button type="button" id="tg-share-button">SHARE VIEW</button>
+          <button type="button" data-tg-streetview draggable="true" style="width:40px;height:40px">person</button>
           <span id="tg-search-status"></span>
         </body>
         </html>
@@ -197,6 +198,68 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
           }
         }
         """);
+
+    [Fact]
+    public async Task StreetView_DraggingThePersonOntoTheGlobe_ShouldReportWhereItLanded_AndMarkIt()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+        await page.EvaluateAsync("() => window.tacticalGlobe.enableStreetViewDrop('tg-viewport')");
+        await page.WaitForTimeoutAsync(500);
+
+        // The globe opens centred on 39.8, -98.5; dropping on the middle of the canvas lands near there.
+        await page.DragAndDropAsync("[data-tg-streetview]", "#tg-viewport", new() { TargetPosition = new() { X = 400, Y = 300 } });
+        await page.WaitForFunctionAsync("window.__invokedMethods.some(c => c.methodName === 'OnStreetViewDropped')",
+            null, new PageWaitForFunctionOptions { Timeout = 5000 });
+        var args = await page.EvaluateAsync<double[]>("window.__invokedMethods.find(c => c.methodName === 'OnStreetViewDropped').args");
+        args[0].Should().BeApproximately(39.8, 3);
+        args[1].Should().BeApproximately(-98.5, 3);
+
+        await page.EvaluateAsync("() => { window.tacticalGlobe.setStreetViewMarker('tg-viewport', 39.8, -98.5); window.tacticalGlobe.clearStreetViewMarker('tg-viewport'); }");
+        consoleErrors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task MapControls_ZoomAndHome_ShouldMoveTheCamera()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+        await page.WaitForTimeoutAsync(500);
+
+        await page.EvaluateAsync("() => window.tacticalGlobe.zoom('tg-viewport', true)");
+        await page.WaitForFunctionAsync("window.__invokedMethods.some(c => c.methodName === 'OnGlobeViewChanged')",
+            null, new PageWaitForFunctionOptions { Timeout = 5000 });
+        await page.EvaluateAsync("() => { window.tacticalGlobe.zoom('tg-viewport', false); window.tacticalGlobe.home('tg-viewport'); }");
+        consoleErrors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ShareText_ShouldUseTheShareSheetWhenThereIsOne_AndOtherwiseCopy()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+
+        var copied = await page.EvaluateAsync<string[]>("""
+            async () => {
+              Object.defineProperty(navigator, 'share', { value: undefined, configurable: true });
+              Object.defineProperty(navigator, 'clipboard', { value: { writeText: text => { window.__copied = text; return Promise.resolve(); } }, configurable: true });
+              const result = await window.tacticalGlobe.shareText('Directions', 'Turn left', 'https://example.test/r');
+              return [result, window.__copied];
+            }
+            """);
+        copied.Should().Equal("copied", "Turn left\n\nhttps://example.test/r");
+
+        var shared = await page.EvaluateAsync<string[]>("""
+            async () => {
+              Object.defineProperty(navigator, 'share', { value: data => { window.__shared = data.title + '|' + data.url; return Promise.resolve(); }, configurable: true });
+              const result = await window.tacticalGlobe.shareText('Directions', 'Turn left', 'https://example.test/r');
+              return [result, window.__shared];
+            }
+            """);
+        shared.Should().Equal("shared", "Directions|https://example.test/r");
+    }
 
     [Fact]
     public async Task Init_ShouldSucceed_AgainstTheRealPinnedCesiumBuildAndTheRealCsp()

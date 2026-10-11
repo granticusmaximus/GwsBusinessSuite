@@ -39,7 +39,9 @@ public sealed record RouteWatchResult(
     IReadOnlyList<RouteLeg>? Legs = null,
     IReadOnlyList<RouteStop>? Stops = null,
     IReadOnlyList<RouteSign>? Signs = null,
-    IReadOnlyList<RouteRoadWeather>? RoadWeather = null)
+    IReadOnlyList<RouteRoadWeather>? RoadWeather = null,
+    // Turn-by-turn directions (RouteDirections).
+    IReadOnlyList<RouteStep>? Steps = null)
 {
     public static RouteWatchResult Failed(string from, string to, string error) => new(from, to, 0, 0, [], [], [], [], error);
 }
@@ -88,11 +90,14 @@ public sealed class RouteWatchService(
         var resolved = points.Select(p => p!).ToList();
 
         (IReadOnlyList<RoutePoint> Path, double Meters, double Seconds, IReadOnlyList<(double Meters, double Seconds)> Legs)? route;
+        IReadOnlyList<RouteStep> steps;
         try
         {
             var coordinates = string.Join(';', resolved.Select(p => string.Create(CultureInfo.InvariantCulture, $"{p.Longitude},{p.Latitude}")));
-            var url = $"{OsrmRouteUrl}{coordinates}?overview=full&geometries=geojson";
-            route = ParseOsrmRoute(await httpClient.GetStringAsync(url, cancellationToken));
+            var url = $"{OsrmRouteUrl}{coordinates}?overview=full&geometries=geojson&steps=true";
+            var json = await httpClient.GetStringAsync(url, cancellationToken);
+            route = ParseOsrmRoute(json);
+            steps = RouteDirections.ParseSteps(json, names);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !cancellationToken.IsCancellationRequested)
         {
@@ -151,7 +156,7 @@ public sealed class RouteWatchService(
             .ToList();
 
         return new RouteWatchResult(from, to, miles, r.Seconds / 60, r.Path,
-            ThinAlongRoute(routeCameras, MaxCameras), routeIncidents, routeAlerts, null, legs, routeStops, routeSigns, routeRoadWeather);
+            ThinAlongRoute(routeCameras, MaxCameras), routeIncidents, routeAlerts, null, legs, routeStops, routeSigns, routeRoadWeather, steps);
     }
 
     // "32.46, -83.61" (from the map picker, or typed) is used as-is; anything else is geocoded.

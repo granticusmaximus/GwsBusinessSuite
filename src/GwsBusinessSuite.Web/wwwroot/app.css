@@ -4737,6 +4737,10 @@ audio.wiki-embed-media { max-width: 100%; }
     .sentinel-main > .card { width: calc(100% - 1rem); }
 }
 
+/* Overwatch fills the content area: trimmed padding here, height on .tg-shell (scoped CSS). */
+.gws-content:has(> .tg-shell) { padding: 0.75rem; }
+.gws-content-builder:has(> .tg-shell) { padding: 0; }
+
 /* SentinelGPT — conversation-first local workspace assistant */
 .gws-content:has(> .sentinel-gpt-shell) {
     flex: 0 0 calc(100dvh - var(--gws-admin-bar-height));
@@ -5396,4 +5400,21 @@ audio.wiki-embed-media { max-width: 100%; }
         margin-left: 0;
         border-radius: .375rem !important;
     }
+}
+
+/* Printable pages (PrintLayout), e.g. Overwatch directions. */
+.gws-print-page { max-width: 760px; margin: 0 auto; padding: 1.5rem 1rem 3rem; background: #fff; color: #111; min-height: 100vh; }
+.gws-print-actions { display: flex; gap: .5rem; margin-bottom: 1rem; }
+.gws-print-directions h1 { font-size: 1.5rem; margin-bottom: .25rem; }
+.gws-print-summary { color: #333; margin-bottom: .5rem; }
+.gws-print-legs { color: #333; padding-left: 1.2rem; }
+.gws-print-steps { padding-left: 1.6rem; margin: 1rem 0; }
+.gws-print-steps li { padding: .35rem 0; border-bottom: 1px solid #ddd; break-inside: avoid; }
+.gws-print-steps li.is-arrive { font-weight: 600; }
+.gws-print-distance { float: right; margin-left: 1rem; color: #555; white-space: nowrap; }
+.gws-print-warnings h2 { font-size: 1.1rem; margin-top: 1.25rem; }
+.gws-print-directions footer { margin-top: 1.5rem; font-size: .8rem; color: #666; }
+@media print {
+    .gws-print-actions { display: none; }
+    .gws-print-page { padding: 0; max-width: none; }
 }

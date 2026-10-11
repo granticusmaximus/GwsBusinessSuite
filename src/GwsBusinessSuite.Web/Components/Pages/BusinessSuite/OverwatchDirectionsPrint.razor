@@ -1,0 +1,100 @@
+@page "/admin/osint/directions"
+@layout GwsBusinessSuite.Web.Components.Layout.PrintLayout
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.RouteWatch
+@inject RouteWatchService RouteWatchService
+@inject TimeProvider Clock
+@inject ILogger<OverwatchDirectionsPrint> Logger
+
+@* Printable directions for an Overwatch route (opened from the DIRECTIONS tab's PRINT button).
+   Rendered on the server without interactivity, so it prints the same in any browser. *@
+<PageTitle>Directions@(_route is { Error: null } r ? $": {r.From} to {r.To}" : string.Empty)</PageTitle>
+
+<div class="gws-print-actions">
+    <button type="button" class="btn btn-primary btn-sm" data-gws-print><i class="bi bi-printer me-1" aria-hidden="true"></i>Print</button>
+    <a class="btn btn-outline-secondary btn-sm" href="@RouteDirectionsText.OverwatchLink(Stops ?? [])">Open in Overwatch</a>
+</div>
+
+@if (_route is null)
+{
+    <p>Enter at least a start and a destination in Overwatch's DIRECTIONS tab, then choose Print.</p>
+}
+else if (_route.Error is not null)
+{
+    <p class="text-danger">@_route.Error</p>
+}
+else
+{
+    <article class="gws-print-directions">
+        <header>
+            <h1>@_route.From to @_route.To</h1>
+            <p class="gws-print-summary">
+                <strong>@_route.DistanceMiles.ToString("N0") mi</strong>, about @RouteDirectionsText.FormatDuration(_route.DurationMinutes)
+                &middot; printed @_generatedAt.ToGwsDateTime()
+            </p>
+            @if (_route.Legs is { Count: > 1 } legs)
+            {
+                <ul class="gws-print-legs">
+                    @foreach (var leg in legs)
+                    {
+                        <li>@leg.From to @leg.To: @leg.DistanceMiles.ToString("N0") mi, @RouteDirectionsText.FormatDuration(leg.DurationMinutes)</li>
+                    }
+                </ul>
+            }
+        </header>
+
+        <ol class="gws-print-steps">
+            @foreach (var step in _route.Steps ?? [])
+            {
+                <li class="@(step.Kind == RouteStepKinds.Arrive ? "is-arrive" : string.Empty)">
+                    <span>@step.Instruction</span>
+                    @if (step.DistanceMiles > 0)
+                    {
+                        <span class="gws-print-distance">@RouteDirections.FormatDistance(step.DistanceMiles)</span>
+                    }
+                </li>
+            }
+        </ol>
+
+        @if (_warnings.Count > 0)
+        {
+            <section class="gws-print-warnings">
+                <h2>Along the way</h2>
+                <ul>
+                    @foreach (var warning in _warnings)
+                    {
+                        <li>@warning</li>
+                    }
+                </ul>
+            </section>
+        }
+        <footer>Routes from OpenStreetMap (OSRM). Conditions change - check again before you leave.</footer>
+    </article>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "stop")]
+    public string[]? Stops { get; set; }
+
+    private RouteWatchResult? _route;
+    private List<string> _warnings = [];
+    private DateTimeOffset _generatedAt;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _generatedAt = Clock.GetLocalNow();
+        var stops = (Stops ?? []).Where(stop => !string.IsNullOrWhiteSpace(stop)).ToList();
+        if (stops.Count < 2) return;
+        try
+        {
+            _route = await RouteWatchService.WatchTripAsync(stops);
+            _warnings = RouteDirectionsText.Warnings(_route).ToList();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Printable directions failed");
+            _route = RouteWatchResult.Failed(stops[0], stops[^1], "The route couldn't be worked out. Try again in a moment.");
+        }
+    }
+}

@@ -715,6 +715,97 @@ window.tacticalGlobe = (function () {
         entry.viewer.camera.flyTo(options);
     }
 
+    // Map control buttons: zoom in/out by half/double the camera height, and back to the
+    // whole-globe view the page opens on.
+    function zoom(containerId, zoomIn) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        const camera = entry.viewer.camera;
+        const height = camera.positionCartographic.height;
+        if (zoomIn) camera.zoomIn(height * 0.5);
+        else camera.zoomOut(Math.min(height, 20000000));
+    }
+
+    // Street view ("drop the person"): a marker where the person was dropped, and drag-and-drop
+    // of the person button ([data-tg-streetview]) onto the globe. A plain click on the button
+    // uses the same click-to-pick mode as route stops instead (handled by the page).
+    const STREET_VIEW_DRAG_TYPE = 'text/x-gws-streetview';
+
+    function setStreetViewMarker(containerId, lat, lon) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        clearStreetViewMarker(containerId);
+        entry.streetViewEntity = entry.viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(Number(lon), Number(lat)),
+            point: { pixelSize: 15, color: Cesium.Color.fromCssColorString('#ffd166'), outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY },
+            label: { text: 'STREET VIEW', font: 'bold 11px monospace', fillColor: Cesium.Color.fromCssColorString('#ffd166'),
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(0, -18), disableDepthTestDistance: Number.POSITIVE_INFINITY }
+        });
+    }
+
+    function clearStreetViewMarker(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry || !entry.streetViewEntity) return;
+        entry.viewer.entities.remove(entry.streetViewEntity);
+        entry.streetViewEntity = null;
+    }
+
+    function enableStreetViewDrop(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry || entry.streetViewDropEnabled) return;
+        entry.streetViewDropEnabled = true;
+        document.addEventListener('dragstart', function (event) {
+            const button = event.target.closest && event.target.closest('[data-tg-streetview]');
+            if (!button) return;
+            event.dataTransfer.setData(STREET_VIEW_DRAG_TYPE, '1');
+            event.dataTransfer.effectAllowed = 'copy';
+        });
+        const target = entry.viewer.container;
+        target.addEventListener('dragover', function (event) {
+            if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes(STREET_VIEW_DRAG_TYPE)) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+        });
+        target.addEventListener('drop', function (event) {
+            if (!event.dataTransfer || !Array.from(event.dataTransfer.types).includes(STREET_VIEW_DRAG_TYPE)) return;
+            event.preventDefault();
+            const rect = entry.viewer.scene.canvas.getBoundingClientRect();
+            const position = new Cesium.Cartesian2(event.clientX - rect.left, event.clientY - rect.top);
+            const cartesian = entry.viewer.camera.pickEllipsoid(position, entry.viewer.scene.globe.ellipsoid);
+            if (!cartesian) return;
+            const carto = Cesium.Cartographic.fromCartesian(cartesian);
+            entry.dotNetRef.invokeMethodAsync('OnStreetViewDropped',
+                Cesium.Math.toDegrees(carto.latitude), Cesium.Math.toDegrees(carto.longitude));
+        });
+    }
+
+    // Directions sharing: the system share sheet when there is one, otherwise the clipboard.
+    // Returns "shared", "copied", "cancelled" or "failed". title null = just copy.
+    async function shareText(title, text, url) {
+        if (title && navigator.share) {
+            try {
+                await navigator.share({ title: title, text: text, url: url || undefined });
+                return 'shared';
+            } catch (error) {
+                if (error && error.name === 'AbortError') return 'cancelled';
+            }
+        }
+        try {
+            await navigator.clipboard.writeText(url ? text + '\n\n' + url : text);
+            return 'copied';
+        } catch (error) {
+            return 'failed';
+        }
+    }
+
+    function home(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(-98.5, 39.8, 18000000), duration: 1.5 });
+    }
+
     function setRadarVisible(visibleOrContainerId, maybeVisible) {
         let containerId = 'tg-viewport';
         let visible = visibleOrContainerId;
@@ -2127,6 +2218,12 @@ window.tacticalGlobe = (function () {
     return {
         init: init,
         flyTo: flyTo,
+        zoom: zoom,
+        home: home,
+        shareText: shareText,
+        setStreetViewMarker: setStreetViewMarker,
+        clearStreetViewMarker: clearStreetViewMarker,
+        enableStreetViewDrop: enableStreetViewDrop,
         flyToBounds: flyToBounds,
         setCameraPins: setCameraPins,
         setSelectModeEnabled: setSelectModeEnabled,

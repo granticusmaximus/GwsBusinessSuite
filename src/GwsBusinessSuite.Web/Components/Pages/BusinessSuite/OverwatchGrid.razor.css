@@ -12,9 +12,11 @@
     font-family: "Share Tech Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
     border-radius: 10px;
     overflow: hidden;
-    height: calc(100vh - 220px);
-    height: calc(100dvh - 220px);
-    min-height: 520px;
+    /* Fills the content area below the admin bar (app.css trims .gws-content's padding on this
+       page); Fullscreen (gws-builder-mode) fills the whole window. */
+    height: calc(100vh - var(--gws-admin-bar-height, 52px) - 1.5rem);
+    height: calc(100dvh - var(--gws-admin-bar-height, 52px) - 1.5rem);
+    min-height: 480px;
     box-shadow: 0 0 0 1px rgba(125, 255, 176, 0.25), 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
@@ -48,30 +50,8 @@
     98% { opacity: 1; }
 }
 
-.tg-hud {
-    position: absolute;
-    inset: 0 0 auto 0;
-    z-index: 6;
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    padding: 0.85rem 1.1rem;
-    pointer-events: none;
-    text-shadow: 0 0 6px rgba(125, 255, 176, 0.65);
-    letter-spacing: 0.05em;
-}
 
-.tg-hud-title {
-    font-size: 0.95rem;
-    text-transform: uppercase;
-    font-weight: 700;
-}
 
-.tg-hud-sub {
-    font-size: .75rem;
-    opacity: 0.75;
-    margin-top: 0.2rem;
-}
 
 .tg-search {
     display: flex;
@@ -127,13 +107,6 @@
     opacity: 0.85;
 }
 
-.tg-hud-toggles {
-    display: flex;
-    gap: 0.4rem;
-    justify-content: flex-end;
-    margin-top: 0.4rem;
-    pointer-events: auto;
-}
 
 .tg-toggle {
     background: rgba(5, 8, 10, 0.7);
@@ -234,19 +207,6 @@
     to { width: 100%; }
 }
 
-.tg-attribution {
-    position: absolute;
-    inset: auto 0 0 0;
-    z-index: 6;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 0.4rem 0.9rem;
-    font-size: .75rem;
-    opacity: 0.7;
-    pointer-events: none;
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
-}
 
 .tg-empty-hint {
     position: absolute;
@@ -296,21 +256,6 @@
 /* Coverage index - rendered directly by OverwatchGrid.razor's own markup (not built by JS), so
    this stays a plain scoped rule, unaffected by the :global() bug described above. A plain
    static list, not draggable - there's only ever one and it needs no resizing. */
-.tg-coverage-panel {
-    position: absolute;
-    z-index: 6;
-    top: 6.4rem;
-    right: 1.1rem;
-    width: 260px;
-    max-height: 60%;
-    overflow-y: auto;
-    background: rgba(5, 8, 10, 0.85);
-    border: 1px solid rgba(125, 255, 176, 0.4);
-    color: #7dffb0;
-    font-family: "Share Tech Mono", ui-monospace, monospace;
-    font-size: .75rem;
-    pointer-events: auto;
-}
 
 .tg-coverage-panel-header {
     padding: 0.4rem 0.6rem;
@@ -350,10 +295,6 @@
 
 /* Favorites reuses .tg-coverage-panel's base look but sits on the opposite side, so both panels
    can be open at once without overlapping. */
-.tg-favorites-panel {
-    right: auto;
-    left: 1.1rem;
-}
 
 .tg-favorites-empty {
     padding: 0.6rem;
@@ -368,18 +309,9 @@
         min-height: 44px;
         font-size: max(1rem, 16px);
     }
-    .tg-hud-toggles { flex-wrap: wrap; }
 }
 
 /* Route watch shares the panel look; it sits on the left like favorites, below it. */
-.tg-route-panel {
-    right: auto;
-    left: 1.1rem;
-    width: 300px;
-    /* Below the location search / SHARE VIEW row so the panel never covers it. */
-    top: 10.5rem;
-    max-height: calc(100% - 11.5rem);
-}
 
 .tg-route-form {
     display: grid;
@@ -408,7 +340,7 @@
     line-height: 1.4;
 }
 
-.tg-route-panel .tg-coverage-item small {
+.tg-side-panel .tg-coverage-item small {
     display: block;
     opacity: 0.7;
     font-size: .7rem;
@@ -421,13 +353,6 @@
     .tg-route-form input, .tg-route-form button, .tg-coverage-item button { min-height: 44px; }
 }
 
-.tg-areas-panel {
-    right: auto;
-    left: 1.1rem;
-    width: 300px;
-    top: 10.5rem;
-    max-height: calc(100% - 11.5rem);
-}
 
 .tg-area-options {
     display: flex;
@@ -478,4 +403,303 @@
 
 @media (pointer: coarse) {
     .tg-route-stop button, .tg-route-row button { min-height: 44px; min-width: 44px; }
+}
+
+
+/* ---- Layout (2026-10 redesign): top bar, tabbed side panel, layers, map controls ---- */
+.gws-builder-mode .tg-shell {
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+}
+
+.tg-topbar {
+    position: absolute;
+    z-index: 8;
+    inset: 0 0 auto 0;
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.5rem 1rem;
+    padding: 0.7rem 0.8rem;
+    pointer-events: none;
+    background: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0));
+    text-shadow: 0 0 6px rgba(125, 255, 176, 0.5);
+    letter-spacing: 0.05em;
+}
+
+.tg-topbar-left,
+.tg-topbar-right {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.45rem;
+    min-width: 0;
+    pointer-events: auto;
+}
+
+.tg-topbar-left { flex: 1 1 22rem; }
+.tg-topbar-right { justify-content: flex-end; }
+.tg-topbar .tg-search { margin-top: 0; flex: 1 1 18rem; max-width: 30rem; }
+.tg-topbar .tg-search input { flex: 1 1 auto; width: auto; min-width: 0; min-height: 34px; }
+.tg-topbar .tg-search button { min-height: 34px; }
+.tg-topbar .tg-hud-status { max-width: 26rem; overflow-wrap: anywhere; }
+
+.tg-icon-btn,
+.tg-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    min-width: 34px;
+    min-height: 34px;
+    padding: 0 0.55rem;
+    background: rgba(5, 8, 10, 0.82);
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    color: #7dffb0;
+    font-family: inherit;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+}
+
+.tg-icon-btn:hover,
+.tg-pill:hover { background: rgba(125, 255, 176, 0.15); }
+
+.tg-icon-btn.is-active,
+.tg-pill.is-active {
+    background: rgba(125, 255, 176, 0.28);
+    box-shadow: 0 0 10px rgba(125, 255, 176, 0.45);
+}
+
+.tg-icon-btn:focus-visible,
+.tg-pill:focus-visible,
+.tg-tab:focus-visible { outline: 2px solid #7dffb0; outline-offset: 2px; }
+
+/* Side panel: one tabbed panel on the left (like Google Maps). */
+.tg-side-panel {
+    --tg-panel-width: 360px;
+    position: absolute;
+    z-index: 7;
+    top: 4.1rem;
+    bottom: 0.8rem;
+    left: 0.8rem;
+    width: min(var(--tg-panel-width), calc(100% - 1.6rem));
+    display: flex;
+    flex-direction: column;
+    background: rgba(5, 8, 10, 0.9);
+    border: 1px solid rgba(125, 255, 176, 0.4);
+    font-size: 0.75rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.tg-side-panel.is-collapsed { display: none; }
+
+.tg-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border-bottom: 1px solid rgba(125, 255, 176, 0.35);
+}
+
+.tg-tab {
+    min-height: 38px;
+    padding: 0.3rem 0.2rem;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: rgba(125, 255, 176, 0.75);
+    font-family: inherit;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+}
+
+.tg-tab:hover { color: #7dffb0; background: rgba(125, 255, 176, 0.08); }
+.tg-tab.is-active { color: #7dffb0; border-bottom-color: #7dffb0; background: rgba(125, 255, 176, 0.12); }
+
+.tg-tab-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+/* Layers, sources and shortcuts float under the top bar on the right. */
+.tg-floating-panel {
+    position: absolute;
+    z-index: 9;
+    top: 4.1rem;
+    right: 0.8rem;
+    width: min(340px, calc(100% - 1.6rem));
+    max-height: calc(100% - 9rem);
+    overflow-y: auto;
+    background: rgba(5, 8, 10, 0.94);
+    border: 1px solid rgba(125, 255, 176, 0.45);
+    font-size: 0.75rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.tg-floating-panel.is-hidden { display: none; }
+
+.tg-floating-panel .tg-coverage-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tg-panel-close {
+    background: none;
+    border: none;
+    color: #7dffb0;
+    font-size: 1.1rem;
+    line-height: 1;
+    min-width: 28px;
+    min-height: 28px;
+    cursor: pointer;
+}
+
+.tg-layer-group {
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid rgba(125, 255, 176, 0.18);
+}
+
+.tg-layer-group-title { opacity: 0.7; margin-bottom: 0.35rem; letter-spacing: 0.08em; }
+
+.tg-layer-buttons,
+.tg-layer-group .tg-hud-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    justify-content: flex-start;
+    margin-top: 0.35rem;
+}
+
+.tg-layer-buttons .tg-toggle { min-height: 32px; }
+
+.tg-info-text { margin: 0; padding: 0.5rem 0.6rem; line-height: 1.5; overflow-wrap: anywhere; }
+
+.tg-shortcuts {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.3rem 0.8rem;
+    margin: 0;
+    padding: 0.6rem;
+}
+
+.tg-shortcuts dt { font-weight: 700; }
+.tg-shortcuts dd { margin: 0; opacity: 0.85; }
+
+/* Map controls, bottom-right. */
+.tg-map-controls {
+    position: absolute;
+    z-index: 8;
+    right: 0.8rem;
+    bottom: 0.8rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.tg-map-controls .tg-icon-btn { min-width: 38px; min-height: 38px; font-size: 0.9rem; }
+.tg-map-controls .tg-toggle-focus { width: auto; height: auto; border-radius: 0; background: rgba(5, 8, 10, 0.82); color: #7dffb0; }
+.tg-map-controls .tg-toggle-focus:hover { background: rgba(125, 255, 176, 0.15); }
+
+.tg-route-actions { padding: 0.4rem 0.6rem; }
+
+.tg-empty-hint { top: 4.3rem; left: auto; right: 4rem; }
+
+/* Narrow content area: the side panel becomes a bottom sheet and the top bar stacks. */
+@container gws-main (max-width: 720px) {
+    .tg-side-panel {
+        top: auto;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        max-height: 55%;
+        border-left: none;
+        border-right: none;
+    }
+    .tg-map-controls { bottom: auto; top: 7.5rem; }
+    .tg-topbar .tg-hud-status { display: none; }
+    .tg-floating-panel { top: 7rem; max-height: calc(100% - 8rem); }
+}
+
+@media (pointer: coarse) {
+    .tg-icon-btn, .tg-pill, .tg-tab { min-height: 44px; min-width: 44px; }
+}
+
+/* Step-by-step directions in the DIRECTIONS tab. */
+.tg-directions > summary { cursor: pointer; list-style: none; }
+.tg-directions > summary::-webkit-details-marker { display: none; }
+.tg-directions-list { list-style: none; margin: 0; padding: 0; counter-reset: tg-step; }
+.tg-directions-list li { border-bottom: 1px solid rgba(125, 255, 176, 0.15); }
+.tg-direction-step {
+    display: grid;
+    grid-template-columns: 1.4rem 1fr auto;
+    align-items: start;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.45rem 0.6rem;
+    background: none;
+    border: none;
+    color: #7dffb0;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.tg-direction-step:hover,
+.tg-direction-step:focus-visible { background: rgba(125, 255, 176, 0.1); outline: none; }
+.tg-direction-step i { font-size: 1rem; line-height: 1.2; }
+.tg-direction-text { line-height: 1.4; }
+.tg-direction-step small { opacity: 0.75; white-space: nowrap; }
+
+.tg-route-actions { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.tg-link-btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 0.2rem 0.5rem;
+    border: 1px solid rgba(125, 255, 176, 0.5);
+    background: rgba(5, 8, 10, 0.9);
+    color: #7dffb0;
+    font-size: .75rem;
+    text-decoration: none;
+}
+.tg-link-btn:hover { background: rgba(125, 255, 176, 0.15); color: #7dffb0; }
+
+/* Street view panel and the "click the map" banner. */
+.tg-streetview-panel { width: min(420px, calc(100% - 1.6rem)); }
+.tg-streetview-where { padding: 0.35rem 0.6rem; opacity: 0.8; }
+.tg-streetview-figure { margin: 0; }
+.tg-streetview-figure img { display: block; width: 100%; max-height: 300px; object-fit: cover; background: #000; }
+.tg-streetview-figure figcaption { padding: 0.35rem 0.6rem; opacity: 0.85; }
+.tg-streetview-nav,
+.tg-streetview-google { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; padding: 0.4rem 0.6rem; }
+.tg-streetview-nav span { min-width: 3.5rem; text-align: center; }
+.tg-streetview-btn { cursor: grab; }
+.tg-pick-banner {
+    position: absolute;
+    z-index: 9;
+    top: 4.3rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.4rem 0.7rem;
+    background: rgba(5, 8, 10, 0.92);
+    border: 1px solid #ffd166;
+    color: #ffd166;
+    font-size: 0.75rem;
+    max-width: calc(100% - 1.6rem);
+}
+.tg-pick-banner button {
+    background: none;
+    border: 1px solid #ffd166;
+    color: #ffd166;
+    font: inherit;
+    padding: 0.15rem 0.45rem;
+    cursor: pointer;
 }

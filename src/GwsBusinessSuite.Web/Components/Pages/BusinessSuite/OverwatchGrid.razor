@@ -24,6 +24,7 @@
 @inject GwsBusinessSuite.Application.RoadWeather.RoadWeatherDirectoryService RoadWeatherDirectoryService
 @inject TrafficIncidentDirectoryService TrafficIncidentDirectoryService
 @inject IGeocodingService GeocodingService
+@inject StreetLevelImageryService StreetLevelImagery
 @inject ICameraFavoritesService CameraFavoritesService
 @inject ICameraSnapshotAnalysisService CameraSnapshotAnalysisService
 @inject IBusinessInfoService BusinessInfoService
@@ -36,34 +37,7 @@
 
 <PageTitle>Overwatch</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-globe2 me-2 text-primary"></i>Overwatch</h1>
-        <p class="mb-0">
-            Drag/zoom the globe to discover legitimate public traffic cameras and webcams in
-            view. Only publicly-provided feeds are ever surfaced here - see the attribution
-            footer for each source.
-        </p>
-    </div>
-</div>
 
-@if (!_hasAnyProviderConfigured && !_bannerDismissed)
-{
-    <div class="alert alert-info alert-dismissible d-flex gap-2 align-items-start" role="note">
-        <i class="bi bi-info-circle-fill mt-1" aria-hidden="true"></i>
-        <div>
-            No setup required: over 25 US states and several countries already have live camera
-            and/or incident coverage with zero registration - click <strong>COVERAGE</strong>
-            above for the full "fly there" list, or see <code>docs/OVERWATCH_USER_GUIDE.md</code>
-            for the complete source-by-source breakdown. Optional API keys exist only to add
-            Windy's global public webcams, Mapillary's worldwide street imagery, or raise
-            Datumfeed's anonymous rate limit - see
-            <code>CameraIntelOptions.cs</code> if you ever want any of those; nothing here
-            requires them.
-        </div>
-        <button type="button" class="btn-close" aria-label="Dismiss" @onclick="DismissBannerAsync"></button>
-    </div>
-}
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet" />
@@ -77,80 +51,72 @@
     <div class="tg-scanlines"></div>
     <div class="tg-vignette"></div>
 
-    <div class="tg-hud">
-        <div>
-            <div class="tg-hud-title">Overwatch // Camera + Weather Intelligence</div>
-            <div class="tg-hud-sub">Public sources only - never unsecured private cameras</div>
+    @* Top bar: panel toggle + search on the left, status and the Layers/info/help buttons on the
+       right (Google Maps-style). The search ids are wired up by tactical-globe.js. *@
+    <div class="tg-topbar">
+        <div class="tg-topbar-left">
+            <button type="button" class="tg-icon-btn" aria-label="@(_panelTab is null ? "Show the side panel" : "Hide the side panel")"
+                    aria-expanded="@(_panelTab is null ? "false" : "true")" title="Side panel" @onclick="ToggleSidePanelAsync">
+                <i class="bi bi-layout-sidebar-inset" aria-hidden="true"></i>
+            </button>
             <div class="tg-search">
-                <input type="text" id="tg-search-input" placeholder="JUMP TO CITY, ADDRESS, OR PLACE..." autocomplete="off" />
+                <input type="text" id="tg-search-input" placeholder="SEARCH A PLACE OR ADDRESS..." autocomplete="off" aria-label="Search a place or address" />
                 <button type="button" id="tg-search-button">GO</button>
-                <button type="button" id="tg-share-button" title="Copy a link to this exact view">SHARE VIEW</button>
-                <span id="tg-search-status" class="tg-search-status"></span>
+                <button type="button" class="tg-icon-btn" title="Directions" aria-label="Directions" @onclick='() => SelectPanelTabAsync("directions", keepOpen: true)'>
+                    <i class="bi bi-sign-turn-right" aria-hidden="true"></i>
+                </button>
             </div>
+            <span id="tg-search-status" class="tg-search-status" role="status"></span>
         </div>
-        <div class="tg-hud-status">
-            <div>
+        <div class="tg-topbar-right">
+            <div class="tg-hud-status">
                 CAMERAS IN VIEW: @_camerasInViewTotal
                 @if (_camerasInViewTotal > _visibleCameras.Count)
                 {
                     <span class="tg-hud-thinned" title="Wide views show an even spread of cameras. Zoom in to see every camera.">(SHOWING @_visibleCameras.Count - ZOOM IN FOR ALL)</span>
                 }
             </div>
-            <div class="tg-hud-toggles">
+            <button type="button" class="tg-pill @(_layersOpen ? "is-active" : "")" aria-expanded="@(_layersOpen ? "true" : "false")"
+                    aria-controls="tg-layers" @onclick="ToggleLayersPanel">
+                <i class="bi bi-layers" aria-hidden="true"></i> LAYERS@(ActiveLayerCount > 0 ? $" ({ActiveLayerCount})" : "")
+            </button>
+            <button type="button" class="tg-icon-btn @(_infoOpen ? "is-active" : "")" aria-label="Sources and credits" title="Sources and credits"
+                    aria-expanded="@(_infoOpen ? "true" : "false")" @onclick="ToggleInfoPanel"><i class="bi bi-info-lg" aria-hidden="true"></i></button>
+            <button type="button" class="tg-icon-btn @(_helpOpen ? "is-active" : "")" aria-label="Keyboard shortcuts" title="Keyboard shortcuts"
+                    aria-expanded="@(_helpOpen ? "true" : "false")" @onclick="ToggleHelpPanel"><i class="bi bi-question-lg" aria-hidden="true"></i></button>
+        </div>
+    </div>
+
+    @* Layers: always rendered (hidden when closed) so the keyboard shortcuts, which click these
+       buttons by data-tg-toggle, work with the panel closed. *@
+    <div class="tg-floating-panel tg-layers-panel @(_layersOpen ? "" : "is-hidden")" id="tg-layers" aria-label="Map layers">
+        <div class="tg-coverage-panel-header"><span>LAYERS</span><button type="button" class="tg-panel-close" aria-label="Close layers" @onclick="ToggleLayersPanel">&times;</button></div>
+        <div class="tg-layer-group">
+            <div class="tg-layer-group-title">WEATHER</div>
+            <div class="tg-layer-buttons">
                 <button type="button" data-tg-toggle="radar" class="tg-toggle @(_radarOn ? "tg-toggle-on" : "")" title="Radar: past hour and future radar (HRRR model), with play/scrub (R)" @onclick="ToggleRadarAsync">
                     RADAR [@(_radarOn ? "ON" : "OFF")]
                 </button>
                 <button type="button" data-tg-toggle="alerts" class="tg-toggle @(_alertsOn ? "tg-toggle-on" : "")" title="Toggle NWS severe weather alerts (A)" @onclick="ToggleAlertsAsync">
                     ALERTS [@(_alertsOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="roadtemps" class="tg-toggle @(_roadWeatherOn ? "tg-toggle-on" : "")"
+                        title="Road surface temperature and ice risk from roadside weather stations (Montana, South Dakota)" @onclick="ToggleRoadWeatherAsync">
+                    ROAD TEMPS [@(_roadWeatherOn ? "ON" : "OFF")]
+                </button>
+            </div>
+        </div>
+        <div class="tg-layer-group">
+            <div class="tg-layer-group-title">TRAFFIC</div>
+            <div class="tg-layer-buttons">
                 <button type="button" data-tg-toggle="incidents" class="tg-toggle @(_incidentsOn ? "tg-toggle-on" : "")" title="Toggle traffic accidents/roadwork/closures (I)" @onclick="ToggleIncidentsAsync">
                     INCIDENTS [@(_incidentsOn ? "ON" : "OFF")]
-                </button>
-                <button type="button" data-tg-toggle="route" class="tg-toggle @(_routeOpen ? "tg-toggle-on" : "")"
-                        title="Watch a drive: cameras, incidents and weather alerts along a route" @onclick="ToggleRoutePanelAsync">
-                    ROUTE
-                </button>
-                <button type="button" data-tg-toggle="areas" class="tg-toggle @(_areasOpen ? "tg-toggle-on" : "")"
-                        title="Get notified about new incidents, severe weather and hazards in areas you choose" @onclick="ToggleAreasPanelAsync">
-                    AREAS
-                </button>
-                <button type="button" data-tg-toggle="hazards" class="tg-toggle @(_hazardsOn ? "tg-toggle-on" : "")"
-                        title="Earthquakes (USGS), active wildfires (NIFC) and flooding river gauges (NOAA)" @onclick="ToggleHazardsAsync">
-                    HAZARDS [@(_hazardsOn ? "ON" : "OFF")]
                 </button>
                 <button type="button" data-tg-toggle="signs" class="tg-toggle @(_signsOn ? "tg-toggle-on" : "")"
                         title="What highway message signs say right now (Caltrans, Montana)" @onclick="ToggleSignsAsync">
                     SIGNS [@(_signsOn ? "ON" : "OFF")]
                 </button>
-                <button type="button" data-tg-toggle="roadtemps" class="tg-toggle @(_roadWeatherOn ? "tg-toggle-on" : "")"
-                        title="Road surface temperature and ice risk from roadside weather stations (Montana, South Dakota)" @onclick="ToggleRoadWeatherAsync">
-                    ROAD TEMPS [@(_roadWeatherOn ? "ON" : "OFF")]
-                </button>
-                <button type="button" data-tg-toggle="healthy" class="tg-toggle @(_hideUnhealthy ? "tg-toggle-on" : "")"
-                        title="Hide cameras found frozen, stale or offline (checked when opened, and every 10 minutes for favorites)" @onclick="ToggleHideUnhealthyAsync">
-                    HEALTHY ONLY [@(_hideUnhealthy ? "ON" : "OFF")]
-                </button>
-                <button type="button" data-tg-toggle="coverage" class="tg-toggle @(_coverageIndexOpen ? "tg-toggle-on" : "")" title="Show known camera coverage regions (C)" @onclick="ToggleCoverageIndex">
-                    COVERAGE
-                </button>
-                <button type="button" data-tg-toggle="select" class="tg-toggle @(_selectModeOn ? "tg-toggle-on" : "")" title="Select multiple cameras for the watch wall (S)" @onclick="ToggleSelectModeAsync">
-                    SELECT [@(_selectModeOn ? "ON" : "OFF")]
-                </button>
-                <button type="button" data-tg-toggle="favorites" class="tg-toggle @(_favoritesOpen ? "tg-toggle-on" : "")" title="Show your favorited cameras (F)" @onclick="ToggleFavoritesPanel">
-                    FAVORITES
-                </button>
-                @* Purely client-side (app.js's toggleFocusMode) - deliberately no @onclick/Blazor
-                   state, since hiding the admin bar/sidebar is a pure layout change with nothing
-                   for the server to track. See app.css/app.js for how this reuses
-                   MainLayout.razor's existing chromeless-mode classes. *@
-                <button type="button" data-gws-focus-toggle class="tg-toggle tg-toggle-focus" title="Fullscreen" aria-pressed="false">
-                    <i class="bi bi-arrows-fullscreen" aria-hidden="true"></i>
-                </button>
             </div>
-            @if (_hazardsOn && !string.IsNullOrWhiteSpace(_hazardSummary))
-            {
-                <div class="tg-hazard-summary">@_hazardSummary</div>
-            }
             @if (_incidentsOn && _lastIncidents.Count > 0)
             {
                 <div class="tg-hud-toggles tg-incident-filters" role="group" aria-label="Filter incidents by type">
@@ -168,297 +134,460 @@
                 </div>
             }
         </div>
+        <div class="tg-layer-group">
+            <div class="tg-layer-group-title">HAZARDS</div>
+            <div class="tg-layer-buttons">
+                <button type="button" data-tg-toggle="hazards" class="tg-toggle @(_hazardsOn ? "tg-toggle-on" : "")"
+                        title="Earthquakes (USGS), active wildfires (NIFC) and flooding river gauges (NOAA)" @onclick="ToggleHazardsAsync">
+                    HAZARDS [@(_hazardsOn ? "ON" : "OFF")]
+                </button>
+            </div>
+            @if (_hazardsOn && !string.IsNullOrWhiteSpace(_hazardSummary))
+            {
+                <div class="tg-hazard-summary">@_hazardSummary</div>
+            }
+        </div>
+        <div class="tg-layer-group">
+            <div class="tg-layer-group-title">CAMERAS</div>
+            <div class="tg-layer-buttons">
+                <button type="button" data-tg-toggle="healthy" class="tg-toggle @(_hideUnhealthy ? "tg-toggle-on" : "")"
+                        title="Hide cameras found frozen, stale or offline (checked when opened, and every 10 minutes for favorites)" @onclick="ToggleHideUnhealthyAsync">
+                    HEALTHY ONLY [@(_hideUnhealthy ? "ON" : "OFF")]
+                </button>
+                <button type="button" data-tg-toggle="select" class="tg-toggle @(_selectModeOn ? "tg-toggle-on" : "")" title="Select multiple cameras for the watch wall (S)" @onclick="ToggleSelectModeAsync">
+                    SELECT [@(_selectModeOn ? "ON" : "OFF")]
+                </button>
+            </div>
+        </div>
     </div>
 
-    @if (_areasOpen)
+    @if (_infoOpen)
     {
-        <div class="tg-coverage-panel tg-areas-panel" aria-label="Watched areas">
-            <div class="tg-coverage-panel-header">WATCHED AREAS</div>
-            <form class="tg-route-form" @onsubmit="AddAreaAsync" @onsubmit:preventDefault>
-                <input aria-label="Area name" placeholder="NAME FOR THE CURRENT VIEW" maxlength="80" value="@_areaName" @oninput="e => _areaName = e.Value?.ToString() ?? string.Empty" />
-                <div class="tg-area-options">
-                    <label><input type="checkbox" @bind="_areaIncidents" /> INCIDENTS</label>
-                    <label><input type="checkbox" @bind="_areaWeather" /> WEATHER</label>
-                    <label><input type="checkbox" @bind="_areaHazards" /> HAZARDS</label>
+        <div class="tg-floating-panel tg-info-panel" aria-label="Sources and credits">
+            <div class="tg-coverage-panel-header"><span>SOURCES</span><button type="button" class="tg-panel-close" aria-label="Close sources" @onclick="ToggleInfoPanel">&times;</button></div>
+            <p class="tg-info-text">Basemap: Esri, Maxar, Earthstar Geographics &middot; 25+ US state DOTs &middot; DriveBC &middot; Madrid Traffic &middot; Fintraffic &middot; NZTA &middot; QLD Traffic &middot; Windy &middot; Datumfeed &middot; Mapillary &middot; KartaView &middot; Overpass/OSM &middot; Wikimedia Commons &middot; NOAA/NWS &middot; Search: Photon/OSM, US Census Bureau &middot; full source list: COVERAGE panel / user guide</p>
+            <p class="tg-info-text">ADMIN // AUTHORIZED ACCESS ONLY. Public sources only - never unsecured private cameras.</p>
+        </div>
+    }
+    @if (_helpOpen)
+    {
+        <div class="tg-floating-panel tg-info-panel" aria-label="Keyboard shortcuts">
+            <div class="tg-coverage-panel-header"><span>SHORTCUTS</span><button type="button" class="tg-panel-close" aria-label="Close shortcuts" @onclick="ToggleHelpPanel">&times;</button></div>
+            <dl class="tg-shortcuts">
+                <dt>R</dt><dd>Radar</dd><dt>A</dt><dd>Weather alerts</dd><dt>I</dt><dd>Traffic incidents</dd>
+                <dt>C</dt><dd>Coverage (Explore)</dd><dt>F</dt><dd>Favorites (Saved)</dd><dt>S</dt><dd>Select cameras for the watch wall</dd>
+                <dt>Esc</dt><dd>Close a camera feed</dd>
+            </dl>
+        </div>
+    }
+
+    @if (_streetPicking)
+    {
+        <div class="tg-pick-banner" role="status">CLICK THE MAP WHERE YOU WANT TO LOOK AROUND <button type="button" @onclick="ToggleStreetViewPickAsync">CANCEL</button></div>
+    }
+    @if (_streetView is not null || _streetBusy)
+    {
+        <div class="tg-floating-panel tg-streetview-panel" aria-label="Street view">
+            <div class="tg-coverage-panel-header"><span>STREET VIEW</span><button type="button" class="tg-panel-close" aria-label="Close street view" @onclick="CloseStreetViewAsync">&times;</button></div>
+            @if (_streetBusy)
+            {
+                <div class="tg-favorites-empty" role="status">LOOKING FOR STREET PHOTOS...</div>
+            }
+            else if (_streetView is { } view)
+            {
+                <div class="tg-streetview-where">@view.Latitude.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture), @view.Longitude.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture)</div>
+                @if (view.Images.Count > 0)
+                {
+                    var image = view.Images[_streetIndex];
+                    <figure class="tg-streetview-figure">
+                        <img src="@image.ImageUrl" alt="@($"Street photo {_streetIndex + 1} of {view.Images.Count} from {image.Source}")" loading="lazy" />
+                        <figcaption>
+                            @image.Source
+                            @if (image.CapturedAt is { } captured)
+                            {
+                                <text> · @captured.ToLocalGwsDate()</text>
+                            }
+                            @if (StreetLevelImageryService.Facing(image.CompassAngle) is { } facing)
+                            {
+                                <text> · facing @facing</text>
+                            }
+                            <text> · @image.DistanceMeters.ToString("0") m away</text>
+                        </figcaption>
+                    </figure>
+                    <div class="tg-route-row tg-streetview-nav">
+                        <button type="button" aria-label="Previous photo" disabled="@(_streetIndex == 0)" @onclick="() => _streetIndex--">&lt; PREV</button>
+                        <span>@(_streetIndex + 1) / @view.Images.Count</span>
+                        <button type="button" aria-label="Next photo" disabled="@(_streetIndex >= view.Images.Count - 1)" @onclick="() => _streetIndex++">NEXT &gt;</button>
+                        <a class="tg-link-btn" href="@image.ViewUrl" target="_blank" rel="noopener noreferrer">OPEN ON @image.Source.ToUpperInvariant()</a>
+                    </div>
+                }
+                else
+                {
+                    <div class="tg-favorites-empty">No free street photos within 250 m of this spot. Google Street View usually has it:</div>
+                }
+                <div class="tg-route-row tg-streetview-google">
+                    <a class="tg-link-btn" href="@view.GoogleStreetViewUrl" target="_blank" rel="noopener noreferrer">
+                        <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>OPEN IN GOOGLE STREET VIEW
+                    </a>
                 </div>
-                <select aria-label="Minimum severity" value="@_areaSeverity" @onchange="e => _areaSeverity = e.Value?.ToString() ?? OverwatchAreaSeverityAny">
-                    <option value="major">MAJOR ONLY</option>
-                    <option value="moderate">MODERATE AND UP</option>
-                    <option value="any">ANYTHING</option>
-                </select>
-                <button type="submit" disabled="@(_areaBusy || string.IsNullOrWhiteSpace(_areaName))">WATCH THIS VIEW</button>
-            </form>
-            @if (!string.IsNullOrWhiteSpace(_areaMessage))
-            {
-                <div class="tg-favorites-empty" role="status">@_areaMessage</div>
-            }
-            @if (_areas.Count == 0)
-            {
-                <div class="tg-favorites-empty">Frame an area on the globe, name it, and Overwatch checks it every 10 minutes - new crashes, closures, severe weather and hazards show up in the notification bell, and the nearest cameras to a new crash or closure start recording (CAPTURES).</div>
-            }
-            else
-            {
-                <ul class="tg-coverage-list">
-                    @foreach (var area in _areas)
-                    {
-                        <li class="tg-coverage-item">
-                            <span>@area.Name
-                                <small>@AreaDescription(area)</small></span>
-                            <span class="tg-area-actions">
-                                <button type="button" @onclick="() => GoToAreaAsync(area)">GO</button>
-                                <button type="button" aria-label="@($"Stop watching {area.Name}")" @onclick="() => RemoveAreaAsync(area)">X</button>
-                            </span>
-                        </li>
-                    }
-                </ul>
-            }
-            @if (_captures.Count > 0)
-            {
-                <div class="tg-route-subheader">CAPTURES <small>(cameras recorded around new incidents)</small></div>
-                <ul class="tg-coverage-list">
-                    @foreach (var capture in _captures)
-                    {
-                        <li class="tg-coverage-item tg-capture-item">
-                            <span>@capture.Title
-                                <small>@capture.AreaName · @capture.StartedAt.ToLocalTime().ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture)@(capture.Until > DateTimeOffset.UtcNow ? " · RECORDING" : "")</small></span>
-                            <span class="tg-area-actions">
-                                @foreach (var camera in capture.Cameras)
-                                {
-                                    var frameCount = CaptureFrameCount(camera);
-                                    <button type="button" disabled="@(frameCount == 0)" title="@camera.Name (@camera.MilesAway.ToString("0.0") mi away)"
-                                            @onclick="() => OpenCaptureCameraAsync(capture, camera)">CAM @(capture.Cameras.IndexOf(camera) + 1) (@frameCount)</button>
-                                }
-                                <button type="button" aria-label="@($"Delete capture {capture.Title}")" @onclick="() => DeleteCapture(capture)">X</button>
-                            </span>
-                        </li>
-                    }
-                </ul>
             }
         </div>
     }
 
-    @if (_routeOpen)
-    {
-        <div class="tg-coverage-panel tg-route-panel" aria-label="Route watch">
-            <div class="tg-coverage-panel-header">ROUTE WATCH / TRIPS</div>
-            <form class="tg-route-form" @onsubmit="WatchRouteAsync" @onsubmit:preventDefault>
-                @for (var i = 0; i < _routeStops.Count; i++)
-                {
-                    var index = i;
-                    <div class="tg-route-stop">
-                        <input aria-label="@StopLabel(index)" placeholder="@StopPlaceholder(index)" value="@_routeStops[index]"
-                               @oninput="e => _routeStops[index] = e.Value?.ToString() ?? string.Empty" />
-                        <button type="button" title="Click the globe to set this stop" aria-label="@($"Pick {StopLabel(index)} on the map")"
-                                class="@(_pickingStop == index ? "is-on" : "")" @onclick="() => PickStopOnMapAsync(index)">@(_pickingStop == index ? "CLICK MAP" : "MAP")</button>
-                        @if (_routeStops.Count > 2)
-                        {
-                            <button type="button" aria-label="@($"Remove {StopLabel(index)}")" @onclick="() => RemoveStop(index)">X</button>
-                        }
-                    </div>
-                }
-                <label class="tg-route-depart">
-                    <span>LEAVE AT <small>(blank = now)</small></span>
-                    <input type="datetime-local" aria-label="Departure time" value="@_departureLocal" @onchange="OnDepartureChangedAsync" />
-                </label>
-                <div class="tg-route-row">
-                    <button type="button" disabled="@(_routeStops.Count >= GwsBusinessSuite.Application.RouteWatch.RouteWatchService.MaxStops)" @onclick="AddStop">+ STOP</button>
-                    <button type="submit" disabled="@(_routeBusy || _routeStops.Count(s => !string.IsNullOrWhiteSpace(s)) < 2)">
-                        @(_routeBusy ? "ROUTING..." : "WATCH ROUTE")
-                    </button>
-                </div>
-            </form>
-            <form class="tg-route-form" @onsubmit="SaveTripAsync" @onsubmit:preventDefault>
-                <div class="tg-route-row">
-                    <input aria-label="Trip name" placeholder="NAME THIS TRIP" maxlength="80" value="@_tripName" @oninput="e => _tripName = e.Value?.ToString() ?? string.Empty" />
-                    <button type="submit" disabled="@(string.IsNullOrWhiteSpace(_tripName) || _routeStops.Count(s => !string.IsNullOrWhiteSpace(s)) < 2)">SAVE TRIP</button>
-                </div>
-            </form>
-            @if (!string.IsNullOrWhiteSpace(_tripMessage))
+    @* Side panel: one tabbed panel instead of separate floating panels. On narrow screens it
+       becomes a bottom sheet (see OverwatchGrid.razor.css). *@
+    <aside class="tg-side-panel @(_panelTab is null ? "is-collapsed" : "")" aria-label="Overwatch panel">
+        <div class="tg-tabs" role="tablist">
+            <button type="button" role="tab" data-tg-toggle="coverage" class="tg-tab @(_panelTab == "explore" ? "is-active" : "")"
+                    aria-selected="@(_panelTab == "explore" ? "true" : "false")" title="Known camera coverage and where to go (C)" @onclick='() => SelectPanelTabAsync("explore")'>EXPLORE</button>
+            <button type="button" role="tab" data-tg-toggle="route" class="tg-tab @(_panelTab == "directions" ? "is-active" : "")"
+                    aria-selected="@(_panelTab == "directions" ? "true" : "false")" title="Plan a drive: directions, cameras, incidents and weather along the way" @onclick='() => SelectPanelTabAsync("directions")'>DIRECTIONS</button>
+            <button type="button" role="tab" data-tg-toggle="favorites" class="tg-tab @(_panelTab == "saved" ? "is-active" : "")"
+                    aria-selected="@(_panelTab == "saved" ? "true" : "false")" title="Favorite cameras and saved trips (F)" @onclick='() => SelectPanelTabAsync("saved")'>SAVED</button>
+            <button type="button" role="tab" data-tg-toggle="areas" class="tg-tab @(_panelTab == "areas" ? "is-active" : "")"
+                    aria-selected="@(_panelTab == "areas" ? "true" : "false")" title="Watched areas and incident captures" @onclick='() => SelectPanelTabAsync("areas")'>AREAS</button>
+        </div>
+        <div class="tg-tab-body" role="tabpanel">
+            @switch (_panelTab)
             {
-                <div class="tg-favorites-empty" role="status">@_tripMessage</div>
-            }
-            @if (_trips.Count > 0)
-            {
-                <div class="tg-route-subheader">SAVED TRIPS</div>
-                <ul class="tg-coverage-list">
-                    @foreach (var trip in _trips)
+                case "explore":
+                    @if (!_hasAnyProviderConfigured && !_bannerDismissed)
                     {
-                        <li class="tg-coverage-item">
-                            <span>@trip.Name<small>@string.Join(" > ", trip.Stops)</small></span>
-                            <span class="tg-area-actions">
-                                <button type="button" @onclick="() => PlotTripAsync(trip)">PLOT</button>
-                                <button type="button" aria-label="@($"Delete trip {trip.Name}")" @onclick="() => DeleteTripAsync(trip)">X</button>
-                            </span>
-                        </li>
+                        <div class="tg-favorites-empty tg-explore-note" role="note">
+                            No setup needed: 25+ US states and several countries have live cameras and incidents
+                            with no registration - pick a place below. Optional keys (Windy, Mapillary, Datumfeed) are
+                            described in docs/OVERWATCH_USER_GUIDE.md.
+                            <button type="button" class="tg-panel-close" aria-label="Dismiss" @onclick="DismissBannerAsync">&times;</button>
+                        </div>
                     }
-                </ul>
-            }
-            @if (_route is { } route)
-            {
-                @if (!string.IsNullOrWhiteSpace(route.Error))
-                {
-                    <div class="tg-favorites-empty" role="status">@route.Error</div>
-                }
-                else
-                {
-                    <div class="tg-route-summary" role="status">
-                        @route.DistanceMiles.ToString("N0") MI · @FormatDuration(route.DurationMinutes) ·
-                        @route.Incidents.Count INCIDENTS · @route.Cameras.Count CAMERAS · @route.Alerts.Count ALERTS
+                    <div class="tg-coverage-panel-header">
+                        <span>KNOWN COVERAGE</span>
+                        <button type="button" class="tg-coverage-map-toggle" aria-pressed="@(_coverageOnMap ? "true" : "false")" @onclick="ToggleCoverageOnMapAsync">
+                            @(_coverageOnMap ? "HIDE ON MAP" : "SHOW ON MAP")
+                        </button>
                     </div>
                     <ul class="tg-coverage-list">
-                        @if (route.Legs is { Count: > 1 } legs)
+                        @foreach (var region in CameraCoverageRegions.All)
                         {
-                            @for (var legIndex = 0; legIndex < legs.Count; legIndex++)
-                            {
-                                var leg = legs[legIndex];
-                                <li class="tg-coverage-item tg-route-leg">
-                                    <span>MI @leg.StartsAtMile.ToString("0") · LEG @(legIndex + 1)
-                                        <small>@leg.From > @leg.To · @leg.DistanceMiles.ToString("N0") mi · @FormatDuration(leg.DurationMinutes)</small></span>
-                                </li>
-                            }
-                        }
-                        @foreach (var stretch in _drivingLight)
-                        {
-                            <li class="tg-coverage-item @(stretch.Kind == GwsBusinessSuite.Application.RouteWatch.DrivingLightKind.Dark ? "tg-route-dark" : "tg-route-glare")">
-                                <span>MI @stretch.StartMile.ToString("0")-@stretch.EndMile.ToString("0") · @(stretch.Kind == GwsBusinessSuite.Application.RouteWatch.DrivingLightKind.Dark ? "DARK" : "SUN GLARE")
-                                    <small>@FormatClock(stretch.StartUtc)-@FormatClock(stretch.EndUtc) · @stretch.Heading@(stretch.Kind == GwsBusinessSuite.Application.RouteWatch.DrivingLightKind.SunGlare ? " · low sun ahead" : " · headlights")</small></span>
-                            </li>
-                        }
-                        @foreach (var alert in route.Alerts)
-                        {
-                            <li class="tg-coverage-item tg-route-alert"><span>ALERT · @alert.Event<small>@alert.AreaDescription</small></span></li>
-                        }
-                        @foreach (var item in route.RoadWeather ?? [])
-                        {
-                            <li class="tg-coverage-item @(item.Station.Risk == GwsBusinessSuite.Application.RoadWeather.RoadIceRisk.IceLikely ? "tg-route-ice" : "tg-route-cold")">
-                                <span>MI @item.MilesAlong.ToString("0") · @(item.Station.Risk == GwsBusinessSuite.Application.RoadWeather.RoadIceRisk.IceLikely ? "ICE LIKELY" : "NEAR FREEZING")
-                                    <small>@item.Station.Name - @item.Station.Reason</small></span>
-                            </li>
-                        }
-                        @foreach (var item in route.Signs ?? [])
-                        {
-                            <li class="tg-coverage-item tg-route-sign">
-                                <span>MI @item.MilesAlong.ToString("0") · SIGN@(item.Sign.Direction is { } signDirection ? " · " + signDirection.ToUpperInvariant() : "")
-                                    <small>@item.Sign.Text</small></span>
-                            </li>
-                        }
-                        @foreach (var item in route.Incidents)
-                        {
+                            var status = RegionStatus(region);
                             <li class="tg-coverage-item">
-                                <span>MI @item.MilesAlong.ToString("0") · @IncidentCategories.Label(item.Incident.Category).ToUpperInvariant()
-                                    <small>@item.Incident.RoadwayName - @item.Incident.Description</small></span>
-                            </li>
-                        }
-                        @foreach (var item in route.Cameras)
-                        {
-                            <li class="tg-coverage-item">
-                                <span>MI @item.MilesAlong.ToString("0") · CAMERA<small>@item.Camera.Name</small></span>
-                                <button type="button" @onclick="() => OpenRouteCameraAsync(item.Camera)">VIEW</button>
+                                <span>
+                                    @region.Name
+                                    <small class="tg-coverage-status @(status.Ok ? "is-ok" : "")">@status.Text</small>
+                                </span>
+                                <button type="button" @onclick="() => FlyToRegionAsync(region)">GO</button>
                             </li>
                         }
                     </ul>
-                    <div class="tg-route-subheader">ASK THE CAMERAS <small>(a vision model on this computer's Ollama reads each camera)</small></div>
-                    @if (_visionModels.Count == 0)
+                    break;
+                case "directions":
+                    <form class="tg-route-form" @onsubmit="WatchRouteAsync" @onsubmit:preventDefault>
+                        @for (var i = 0; i < _routeStops.Count; i++)
+                        {
+                            var index = i;
+                            <div class="tg-route-stop">
+                                <input aria-label="@StopLabel(index)" placeholder="@StopPlaceholder(index)" value="@_routeStops[index]"
+                                       @oninput="e => _routeStops[index] = e.Value?.ToString() ?? string.Empty" />
+                                <button type="button" title="Click the globe to set this stop" aria-label="@($"Pick {StopLabel(index)} on the map")"
+                                        class="@(_pickingStop == index ? "is-on" : "")" @onclick="() => PickStopOnMapAsync(index)">@(_pickingStop == index ? "CLICK MAP" : "MAP")</button>
+                                @if (_routeStops.Count > 2)
+                                {
+                                    <button type="button" aria-label="@($"Remove {StopLabel(index)}")" @onclick="() => RemoveStop(index)">X</button>
+                                }
+                            </div>
+                        }
+                        <label class="tg-route-depart">
+                            <span>LEAVE AT <small>(blank = now)</small></span>
+                            <input type="datetime-local" aria-label="Departure time" value="@_departureLocal" @onchange="OnDepartureChangedAsync" />
+                        </label>
+                        <div class="tg-route-row">
+                            <button type="button" disabled="@(_routeStops.Count >= GwsBusinessSuite.Application.RouteWatch.RouteWatchService.MaxStops)" @onclick="AddStop">+ STOP</button>
+                            <button type="submit" disabled="@(_routeBusy || _routeStops.Count(s => !string.IsNullOrWhiteSpace(s)) < 2)">
+                                @(_routeBusy ? "ROUTING..." : "WATCH ROUTE")
+                            </button>
+                        </div>
+                    </form>
+                    <form class="tg-route-form" @onsubmit="SaveTripAsync" @onsubmit:preventDefault>
+                        <div class="tg-route-row">
+                            <input aria-label="Trip name" placeholder="NAME THIS TRIP" maxlength="80" value="@_tripName" @oninput="e => _tripName = e.Value?.ToString() ?? string.Empty" />
+                            <button type="submit" disabled="@(string.IsNullOrWhiteSpace(_tripName) || _routeStops.Count(s => !string.IsNullOrWhiteSpace(s)) < 2)">SAVE TRIP</button>
+                        </div>
+                    </form>
+                    @if (!string.IsNullOrWhiteSpace(_tripMessage))
                     {
-                        <div class="tg-favorites-empty" role="status">@(_conditionError ?? "Looking for Ollama on this computer...")</div>
+                        <div class="tg-favorites-empty" role="status">@_tripMessage</div>
+                    }
+                    @if (_route is { } route)
+                    {
+                        @if (!string.IsNullOrWhiteSpace(route.Error))
+                        {
+                            <div class="tg-favorites-empty" role="status">@route.Error</div>
+                        }
+                        else
+                        {
+                            <div class="tg-route-summary" role="status">
+                                @route.DistanceMiles.ToString("N0") MI · @FormatDuration(route.DurationMinutes) ·
+                                @route.Incidents.Count INCIDENTS · @route.Cameras.Count CAMERAS · @route.Alerts.Count ALERTS
+                            </div>
+                            <div class="tg-route-row tg-route-actions">
+                                <a class="tg-link-btn" href="@GwsBusinessSuite.Application.RouteWatch.RouteDirectionsText.PrintLink(_routeStops)" target="_blank" rel="noopener"
+                                   title="Open a printable page of these directions">PRINT</a>
+                                <button type="button" title="Copy the directions as text" @onclick="() => CopyDirectionsAsync(route)">COPY</button>
+                                <button type="button" title="Share these directions" @onclick="() => ShareDirectionsAsync(route)">SHARE</button>
+                                <button type="button" @onclick="ClearRouteAsync">CLEAR ROUTE</button>
+                            </div>
+                            @if (!string.IsNullOrEmpty(_directionsMessage))
+                            {
+                                <div class="tg-favorites-empty" role="status">@_directionsMessage</div>
+                            }
+                            @if (route.Steps is { Count: > 0 } steps)
+                            {
+                                <details class="tg-directions" open>
+                                    <summary class="tg-route-subheader">STEP-BY-STEP DIRECTIONS (@steps.Count)</summary>
+                                    <ol class="tg-directions-list">
+                                        @foreach (var step in steps)
+                                        {
+                                            <li>
+                                                <button type="button" class="tg-direction-step" title="Show this on the map" @onclick="() => FlyToStepAsync(step)">
+                                                    <i class="bi @StepIcon(step.Kind)" aria-hidden="true"></i>
+                                                    <span class="tg-direction-text">@step.Instruction</span>
+                                                    @if (step.DistanceMiles > 0)
+                                                    {
+                                                        <small>@GwsBusinessSuite.Application.RouteWatch.RouteDirections.FormatDistance(step.DistanceMiles)</small>
+                                                    }
+                                                </button>
+                                            </li>
+                                        }
+                                    </ol>
+                                </details>
+                            }
+                            <ul class="tg-coverage-list">
+                                @if (route.Legs is { Count: > 1 } legs)
+                                {
+                                    @for (var legIndex = 0; legIndex < legs.Count; legIndex++)
+                                    {
+                                        var leg = legs[legIndex];
+                                        <li class="tg-coverage-item tg-route-leg">
+                                            <span>MI @leg.StartsAtMile.ToString("0") · LEG @(legIndex + 1)
+                                                <small>@leg.From > @leg.To · @leg.DistanceMiles.ToString("N0") mi · @FormatDuration(leg.DurationMinutes)</small></span>
+                                        </li>
+                                    }
+                                }
+                                @foreach (var stretch in _drivingLight)
+                                {
+                                    <li class="tg-coverage-item @(stretch.Kind == GwsBusinessSuite.Application.RouteWatch.DrivingLightKind.Dark ? "tg-route-dark" : "tg-route-glare")">
+                                        <span>MI @stretch.StartMile.ToString("0")-@stretch.EndMile.ToString("0") · @(stretch.Kind == GwsBusinessSuite.Application.RouteWatch.DrivingLightKind.Dark ? "DARK" : "SUN GLARE")
+                                            <small>@FormatClock(stretch.StartUtc)-@FormatClock(stretch.EndUtc) · @stretch.Heading@(stretch.Kind == GwsBusinessSuite.Application.RouteWatch.DrivingLightKind.SunGlare ? " · low sun ahead" : " · headlights")</small></span>
+                                    </li>
+                                }
+                                @foreach (var alert in route.Alerts)
+                                {
+                                    <li class="tg-coverage-item tg-route-alert"><span>ALERT · @alert.Event<small>@alert.AreaDescription</small></span></li>
+                                }
+                                @foreach (var item in route.RoadWeather ?? [])
+                                {
+                                    <li class="tg-coverage-item @(item.Station.Risk == GwsBusinessSuite.Application.RoadWeather.RoadIceRisk.IceLikely ? "tg-route-ice" : "tg-route-cold")">
+                                        <span>MI @item.MilesAlong.ToString("0") · @(item.Station.Risk == GwsBusinessSuite.Application.RoadWeather.RoadIceRisk.IceLikely ? "ICE LIKELY" : "NEAR FREEZING")
+                                            <small>@item.Station.Name - @item.Station.Reason</small></span>
+                                    </li>
+                                }
+                                @foreach (var item in route.Signs ?? [])
+                                {
+                                    <li class="tg-coverage-item tg-route-sign">
+                                        <span>MI @item.MilesAlong.ToString("0") · SIGN@(item.Sign.Direction is { } signDirection ? " · " + signDirection.ToUpperInvariant() : "")
+                                            <small>@item.Sign.Text</small></span>
+                                    </li>
+                                }
+                                @foreach (var item in route.Incidents)
+                                {
+                                    <li class="tg-coverage-item">
+                                        <span>MI @item.MilesAlong.ToString("0") · @IncidentCategories.Label(item.Incident.Category).ToUpperInvariant()
+                                            <small>@item.Incident.RoadwayName - @item.Incident.Description</small></span>
+                                    </li>
+                                }
+                                @foreach (var item in route.Cameras)
+                                {
+                                    <li class="tg-coverage-item">
+                                        <span>MI @item.MilesAlong.ToString("0") · CAMERA<small>@item.Camera.Name</small></span>
+                                        <button type="button" @onclick="() => OpenRouteCameraAsync(item.Camera)">VIEW</button>
+                                    </li>
+                                }
+                            </ul>
+                            <div class="tg-route-subheader">ASK THE CAMERAS <small>(a vision model on this computer's Ollama reads each camera)</small></div>
+                            @if (_visionModels.Count == 0)
+                            {
+                                <div class="tg-favorites-empty" role="status">@(_conditionError ?? "Looking for Ollama on this computer...")</div>
+                            }
+                            else
+                            {
+                                <form class="tg-route-form" @onsubmit="AskCamerasAsync" @onsubmit:preventDefault>
+                                    <div class="tg-route-row">
+                                        <select aria-label="Vision model" value="@_conditionModel" @onchange="e => _conditionModel = e.Value?.ToString() ?? string.Empty">
+                                            @foreach (var model in _visionModels)
+                                            {
+                                                <option value="@model">@model@(GwsBusinessSuite.Application.RouteWatch.CameraConditions.LooksVisionCapable(model) ? "" : " (may not see images)")</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div class="tg-route-row">
+                                        <input aria-label="Question for the cameras" placeholder="OPTIONAL QUESTION, E.G. IS IT SNOWING?" maxlength="200"
+                                               value="@_conditionQuestion" @oninput="e => _conditionQuestion = e.Value?.ToString() ?? string.Empty" />
+                                        <button type="submit" disabled="@(_conditionBusy || RouteConditionCameras(route).Count == 0)">
+                                            @(_conditionBusy ? $"READING {_conditionResults.Count}/{RouteConditionCameras(route).Count}" : $"CHECK {RouteConditionCameras(route).Count} CAMERAS")
+                                        </button>
+                                    </div>
+                                </form>
+                                @if (!string.IsNullOrWhiteSpace(_conditionError))
+                                {
+                                    <div class="tg-favorites-empty" role="status">@_conditionError</div>
+                                }
+                            }
+                            @if (_conditionResults.Count > 0)
+                            {
+                                <div class="tg-route-summary" role="status">@ConditionSummary()</div>
+                                <ul class="tg-coverage-list">
+                                    @foreach (var (camera, reading) in _conditionResults)
+                                    {
+                                        <li class="tg-coverage-item tg-condition-@reading.Level">
+                                            <span>MI @camera.MilesAlong.ToString("0") · @ConditionLabel(reading)
+                                                <small>@camera.Camera.Name@(string.IsNullOrWhiteSpace(reading.Answer) ? "" : " - " + reading.Answer)@(string.IsNullOrWhiteSpace(reading.Note) ? "" : " - " + reading.Note)</small></span>
+                                            <button type="button" @onclick="() => OpenRouteCameraAsync(camera.Camera)">VIEW</button>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        }
+                    }
+                    break;
+                case "saved":
+                    <div class="tg-coverage-panel-header">FAVORITE CAMERAS</div>
+                    @if (_favorites.Count == 0)
+                    {
+                        <div class="tg-favorites-empty">No favorited cameras yet - open a camera's feed and click its star to save it here.</div>
                     }
                     else
                     {
-                        <form class="tg-route-form" @onsubmit="AskCamerasAsync" @onsubmit:preventDefault>
-                            <div class="tg-route-row">
-                                <select aria-label="Vision model" value="@_conditionModel" @onchange="e => _conditionModel = e.Value?.ToString() ?? string.Empty">
-                                    @foreach (var model in _visionModels)
-                                    {
-                                        <option value="@model">@model@(GwsBusinessSuite.Application.RouteWatch.CameraConditions.LooksVisionCapable(model) ? "" : " (may not see images)")</option>
-                                    }
-                                </select>
-                            </div>
-                            <div class="tg-route-row">
-                                <input aria-label="Question for the cameras" placeholder="OPTIONAL QUESTION, E.G. IS IT SNOWING?" maxlength="200"
-                                       value="@_conditionQuestion" @oninput="e => _conditionQuestion = e.Value?.ToString() ?? string.Empty" />
-                                <button type="submit" disabled="@(_conditionBusy || RouteConditionCameras(route).Count == 0)">
-                                    @(_conditionBusy ? $"READING {_conditionResults.Count}/{RouteConditionCameras(route).Count}" : $"CHECK {RouteConditionCameras(route).Count} CAMERAS")
-                                </button>
-                            </div>
-                        </form>
-                        @if (!string.IsNullOrWhiteSpace(_conditionError))
-                        {
-                            <div class="tg-favorites-empty" role="status">@_conditionError</div>
-                        }
-                    }
-                    @if (_conditionResults.Count > 0)
-                    {
-                        <div class="tg-route-summary" role="status">@ConditionSummary()</div>
                         <ul class="tg-coverage-list">
-                            @foreach (var (camera, reading) in _conditionResults)
+                            @foreach (var favorite in _favorites)
                             {
-                                <li class="tg-coverage-item tg-condition-@reading.Level">
-                                    <span>MI @camera.MilesAlong.ToString("0") · @ConditionLabel(reading)
-                                        <small>@camera.Camera.Name@(string.IsNullOrWhiteSpace(reading.Answer) ? "" : " - " + reading.Answer)@(string.IsNullOrWhiteSpace(reading.Note) ? "" : " - " + reading.Note)</small></span>
-                                    <button type="button" @onclick="() => OpenRouteCameraAsync(camera.Camera)">VIEW</button>
+                                <li class="tg-coverage-item">
+                                    <span>@favorite.Name</span>
+                                    <span class="tg-area-actions">
+                                        @if (favorite.StreamKind == CameraStreamKind.Snapshot)
+                                        {
+                                            <button type="button" title="Play the frames saved for this camera (one every 10 minutes when the picture changed, up to 24 hours)"
+                                                    @onclick="() => OpenTimelapseAsync(favorite)">TIME-LAPSE</button>
+                                        }
+                                        <button type="button" @onclick="() => GoToFavoriteAsync(favorite)">GO</button>
+                                    </span>
                                 </li>
                             }
                         </ul>
                     }
-                }
-            }
-        </div>
-    }
-
-    @if (_coverageIndexOpen)
-    {
-        <div class="tg-coverage-panel">
-            <div class="tg-coverage-panel-header">
-                <span>KNOWN COVERAGE</span>
-                <button type="button" class="tg-coverage-map-toggle" aria-pressed="@(_coverageOnMap ? "true" : "false")" @onclick="ToggleCoverageOnMapAsync">
-                    @(_coverageOnMap ? "HIDE ON MAP" : "SHOW ON MAP")
-                </button>
-            </div>
-            <ul class="tg-coverage-list">
-                @foreach (var region in CameraCoverageRegions.All)
-                {
-                    var status = RegionStatus(region);
-                    <li class="tg-coverage-item">
-                        <span>
-                            @region.Name
-                            <small class="tg-coverage-status @(status.Ok ? "is-ok" : "")">@status.Text</small>
-                        </span>
-                        <button type="button" @onclick="() => FlyToRegionAsync(region)">GO</button>
-                    </li>
-                }
-            </ul>
-        </div>
-    }
-
-    @if (_favoritesOpen)
-    {
-        <div class="tg-coverage-panel tg-favorites-panel">
-            <div class="tg-coverage-panel-header">MY FAVORITES</div>
-            @if (_favorites.Count == 0)
-            {
-                <div class="tg-favorites-empty">No favorited cameras yet - open a camera's feed and click its star to save it here.</div>
-            }
-            else
-            {
-                <ul class="tg-coverage-list">
-                    @foreach (var favorite in _favorites)
+                    @if (_trips.Count == 0)
                     {
-                        <li class="tg-coverage-item">
-                            <span>@favorite.Name</span>
-                            <span class="tg-area-actions">
-                                @if (favorite.StreamKind == CameraStreamKind.Snapshot)
-                                {
-                                    <button type="button" title="Play the frames saved for this camera (one every 10 minutes when the picture changed, up to 24 hours)"
-                                            @onclick="() => OpenTimelapseAsync(favorite)">TIME-LAPSE</button>
-                                }
-                                <button type="button" @onclick="() => GoToFavoriteAsync(favorite)">GO</button>
-                            </span>
-                        </li>
+                        <div class="tg-route-subheader">SAVED TRIPS</div>
+                        <div class="tg-favorites-empty">No saved trips yet - plan a route under DIRECTIONS and save it.</div>
                     }
-                </ul>
+                    @if (_trips.Count > 0)
+                    {
+                        <div class="tg-route-subheader">SAVED TRIPS</div>
+                        <ul class="tg-coverage-list">
+                            @foreach (var trip in _trips)
+                            {
+                                <li class="tg-coverage-item">
+                                    <span>@trip.Name<small>@string.Join(" > ", trip.Stops)</small></span>
+                                    <span class="tg-area-actions">
+                                        <button type="button" @onclick="() => PlotTripAsync(trip)">PLOT</button>
+                                        <button type="button" aria-label="@($"Delete trip {trip.Name}")" @onclick="() => DeleteTripAsync(trip)">X</button>
+                                    </span>
+                                </li>
+                            }
+                        </ul>
+                    }
+                    break;
+                case "areas":
+                    <div class="tg-coverage-panel-header">WATCHED AREAS</div>
+                    <form class="tg-route-form" @onsubmit="AddAreaAsync" @onsubmit:preventDefault>
+                        <input aria-label="Area name" placeholder="NAME FOR THE CURRENT VIEW" maxlength="80" value="@_areaName" @oninput="e => _areaName = e.Value?.ToString() ?? string.Empty" />
+                        <div class="tg-area-options">
+                            <label><input type="checkbox" @bind="_areaIncidents" /> INCIDENTS</label>
+                            <label><input type="checkbox" @bind="_areaWeather" /> WEATHER</label>
+                            <label><input type="checkbox" @bind="_areaHazards" /> HAZARDS</label>
+                        </div>
+                        <select aria-label="Minimum severity" value="@_areaSeverity" @onchange="e => _areaSeverity = e.Value?.ToString() ?? OverwatchAreaSeverityAny">
+                            <option value="major">MAJOR ONLY</option>
+                            <option value="moderate">MODERATE AND UP</option>
+                            <option value="any">ANYTHING</option>
+                        </select>
+                        <button type="submit" disabled="@(_areaBusy || string.IsNullOrWhiteSpace(_areaName))">WATCH THIS VIEW</button>
+                    </form>
+                    @if (!string.IsNullOrWhiteSpace(_areaMessage))
+                    {
+                        <div class="tg-favorites-empty" role="status">@_areaMessage</div>
+                    }
+                    @if (_areas.Count == 0)
+                    {
+                        <div class="tg-favorites-empty">Frame an area on the globe, name it, and Overwatch checks it every 10 minutes - new crashes, closures, severe weather and hazards show up in the notification bell, and the nearest cameras to a new crash or closure start recording (CAPTURES).</div>
+                    }
+                    else
+                    {
+                        <ul class="tg-coverage-list">
+                            @foreach (var area in _areas)
+                            {
+                                <li class="tg-coverage-item">
+                                    <span>@area.Name
+                                        <small>@AreaDescription(area)</small></span>
+                                    <span class="tg-area-actions">
+                                        <button type="button" @onclick="() => GoToAreaAsync(area)">GO</button>
+                                        <button type="button" aria-label="@($"Stop watching {area.Name}")" @onclick="() => RemoveAreaAsync(area)">X</button>
+                                    </span>
+                                </li>
+                            }
+                        </ul>
+                    }
+                    @if (_captures.Count > 0)
+                    {
+                        <div class="tg-route-subheader">CAPTURES <small>(cameras recorded around new incidents)</small></div>
+                        <ul class="tg-coverage-list">
+                            @foreach (var capture in _captures)
+                            {
+                                <li class="tg-coverage-item tg-capture-item">
+                                    <span>@capture.Title
+                                        <small>@capture.AreaName · @capture.StartedAt.ToLocalTime().ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture)@(capture.Until > DateTimeOffset.UtcNow ? " · RECORDING" : "")</small></span>
+                                    <span class="tg-area-actions">
+                                        @foreach (var camera in capture.Cameras)
+                                        {
+                                            var frameCount = CaptureFrameCount(camera);
+                                            <button type="button" disabled="@(frameCount == 0)" title="@camera.Name (@camera.MilesAway.ToString("0.0") mi away)"
+                                                    @onclick="() => OpenCaptureCameraAsync(capture, camera)">CAM @(capture.Cameras.IndexOf(camera) + 1) (@frameCount)</button>
+                                        }
+                                        <button type="button" aria-label="@($"Delete capture {capture.Title}")" @onclick="() => DeleteCapture(capture)">X</button>
+                                    </span>
+                                </li>
+                            }
+                        </ul>
+                    }
+                    break;
             }
         </div>
-    }
+    </aside>
+
+    @* Map controls (bottom-right). *@
+    <div class="tg-map-controls" role="group" aria-label="Map controls">
+        <button type="button" class="tg-icon-btn" aria-label="Zoom in" title="Zoom in" @onclick="() => ZoomAsync(true)"><i class="bi bi-plus-lg" aria-hidden="true"></i></button>
+        <button type="button" class="tg-icon-btn" aria-label="Zoom out" title="Zoom out" @onclick="() => ZoomAsync(false)"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
+        <button type="button" class="tg-icon-btn" aria-label="Whole globe" title="Whole globe" @onclick="GoHomeAsync"><i class="bi bi-globe-americas" aria-hidden="true"></i></button>
+        <button type="button" class="tg-icon-btn tg-streetview-btn @(_streetPicking ? "is-active" : "")" data-tg-streetview draggable="true"
+                aria-label="Street view: click here, then click the map (or drag me onto the map)"
+                title="Street view: drag me onto the map, or click me and then click the map" aria-pressed="@(_streetPicking ? "true" : "false")"
+                @onclick="ToggleStreetViewPickAsync"><i class="bi bi-person-standing" aria-hidden="true"></i></button>
+        <button type="button" class="tg-icon-btn" id="tg-share-button" aria-label="Copy a link to this exact view" title="Copy a link to this exact view"><i class="bi bi-share" aria-hidden="true"></i></button>
+        @* Purely client-side (app.js toggleFocusMode): hides the admin bar and sidebar. *@
+        <button type="button" data-gws-focus-toggle class="tg-icon-btn tg-toggle-focus" title="Fullscreen" aria-label="Fullscreen" aria-pressed="false">
+            <i class="bi bi-arrows-fullscreen" aria-hidden="true"></i>
+        </button>
+    </div>
 
     @if (_hasAnyProviderConfigured && _hasSettledOnce && _visibleCameras.Count == 0 && !_emptyHintDismissed)
     {
@@ -471,10 +600,6 @@
         </div>
     }
 
-    <div class="tg-attribution">
-        <span>Basemap: Esri, Maxar, Earthstar Geographics &middot; 25+ US state DOTs &middot; DriveBC &middot; Madrid Traffic &middot; Fintraffic &middot; NZTA &middot; QLD Traffic &middot; Windy &middot; Datumfeed &middot; Mapillary &middot; KartaView &middot; Overpass/OSM &middot; Wikimedia Commons &middot; NOAA/NWS &middot; Search: Photon/OSM, US Census Bureau &middot; full source list: COVERAGE panel / user guide</span>
-        <span>ADMIN // AUTHORIZED ACCESS ONLY &middot; R: radar &middot; A: alerts &middot; I: incidents &middot; C: coverage &middot; S: select for watch wall &middot; F: favorites &middot; Esc: close feed</span>
-    </div>
 
     @if (_initError is null)
     {
@@ -503,6 +628,10 @@
     [SupplyParameterFromQuery(Name = "area")]
     public Guid? AreaId { get; set; }
 
+    // ?route=Macon, GA&route=Atlanta, GA - a shared or printed route reopens in DIRECTIONS.
+    [SupplyParameterFromQuery(Name = "route")]
+    public string[]? LinkedRouteStops { get; set; }
+
     private DotNetObjectReference<OverwatchGrid>? _dotNetRef;
     private List<CameraFeed> _visibleCameras = new();
     private bool _bootComplete;
@@ -519,9 +648,7 @@
     private string? _hazardSummary;
     private int _camerasInViewTotal;
     private bool _incidentsOn;
-    private bool _coverageIndexOpen;
     private bool _selectModeOn;
-    private bool _favoritesOpen;
     private string _username = "unknown";
     private List<CameraFeed> _favorites = new();
     private HashSet<string> _favoriteCameraIds = new();
@@ -574,9 +701,21 @@
         {
             await JS.InvokeVoidAsync("tacticalGlobe.flyToBounds", "tg-viewport",
                 linkedArea.Bounds.West, linkedArea.Bounds.South, linkedArea.Bounds.East, linkedArea.Bounds.North);
-            _areasOpen = true;
+            _panelTab = "areas";
             _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
             _captures = IncidentCaptureService.ListForUser(_username).ToList();
+            StateHasChanged();
+        }
+
+        await JS.InvokeVoidAsync("tacticalGlobe.enableStreetViewDrop", "tg-viewport");
+
+        if (LinkedRouteStops is { Length: >= 2 } linkedStops)
+        {
+            _routeStops.Clear();
+            _routeStops.AddRange(linkedStops.Where(stop => !string.IsNullOrWhiteSpace(stop)).Take(GwsBusinessSuite.Application.RouteWatch.RouteWatchService.MaxStops));
+            while (_routeStops.Count < 2) _routeStops.Add(string.Empty);
+            await SelectPanelTabAsync("directions", keepOpen: true);
+            await WatchRouteAsync();
             StateHasChanged();
         }
 
@@ -731,10 +870,6 @@
         return result.Message;
     }
 
-    private void ToggleFavoritesPanel()
-    {
-        _favoritesOpen = !_favoritesOpen;
-    }
 
     private async Task OpenTimelapseAsync(CameraFeed favorite)
     {
@@ -969,15 +1104,10 @@
 
     // Plain client-side UI state (which panel is open) - no JS/server round-trip needed to
     // toggle it, unlike RADAR/ALERTS/INCIDENTS which each drive a Cesium layer.
-    private void ToggleCoverageIndex()
-    {
-        _coverageIndexOpen = !_coverageIndexOpen;
-    }
 
     private bool _coverageOnMap;
 
     private const string OverwatchAreaSeverityAny = "any";
-    private bool _areasOpen;
     private bool _areaBusy;
     private string _areaName = string.Empty;
     private bool _areaIncidents = true;
@@ -987,16 +1117,6 @@
     private string? _areaMessage;
     private List<GwsBusinessSuite.Infrastructure.Services.OverwatchAreaView> _areas = new();
 
-    private async Task ToggleAreasPanelAsync()
-    {
-        _areasOpen = !_areasOpen;
-        _areaMessage = null;
-        if (_areasOpen)
-        {
-            _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
-            _captures = IncidentCaptureService.ListForUser(_username).ToList();
-        }
-    }
 
     private List<GwsBusinessSuite.Infrastructure.Services.IncidentCapture> _captures = new();
 
@@ -1061,7 +1181,6 @@
         return $"{string.Join(", ", what)} · {area.MinSeverity} · {checkedText}";
     }
 
-    private bool _routeOpen;
     private bool _routeBusy;
     private readonly List<string> _routeStops = [string.Empty, string.Empty];
     private int? _pickingStop;
@@ -1239,23 +1358,177 @@
     private string StopPlaceholder(int index) =>
         index == 0 ? "FROM (city, address or MAP)" : index == _routeStops.Count - 1 ? "TO (city, address or MAP)" : "STOP (city, address or MAP)";
 
-    private async Task ToggleRoutePanelAsync()
+    // Side panel (tabs: explore / directions / saved / areas). Clicking the open tab again, or
+    // the panel button, collapses it. keepOpen: the top bar's Directions button only ever opens.
+    private string? _panelTab = "explore";
+    private string _lastPanelTab = "explore";
+    private bool _layersOpen;
+    private bool _infoOpen;
+    private bool _helpOpen;
+
+    private int ActiveLayerCount =>
+        new[] { _radarOn, _alertsOn, _incidentsOn, _hazardsOn, _signsOn, _roadWeatherOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
+
+    private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {
-        _routeOpen = !_routeOpen;
-        if (_routeOpen)
+        if (_panelTab == tab && !keepOpen)
         {
-            _trips = (await OverwatchTripService.ListAsync(_username)).ToList();
+            _panelTab = null;
+            return;
         }
-        else
+        _panelTab = _lastPanelTab = tab;
+        switch (tab)
         {
-            await CancelPickAsync();
-            if (_route is not null)
-            {
-                _route = null;
-                _drivingLight = [];
-                await JS.InvokeVoidAsync("tacticalGlobe.clearRoute");
-            }
+            case "directions":
+            case "saved":
+                _trips = (await OverwatchTripService.ListAsync(_username)).ToList();
+                break;
+            case "areas":
+                _areaMessage = null;
+                _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
+                _captures = IncidentCaptureService.ListForUser(_username).ToList();
+                break;
         }
+    }
+
+    private Task ToggleSidePanelAsync() =>
+        _panelTab is null ? SelectPanelTabAsync(_lastPanelTab, keepOpen: true) : Task.FromResult(_panelTab = null);
+
+    private void ToggleLayersPanel()
+    {
+        _layersOpen = !_layersOpen;
+        if (_layersOpen) _infoOpen = _helpOpen = false;
+    }
+
+    private void ToggleInfoPanel()
+    {
+        _infoOpen = !_infoOpen;
+        if (_infoOpen) _layersOpen = _helpOpen = false;
+    }
+
+    private void ToggleHelpPanel()
+    {
+        _helpOpen = !_helpOpen;
+        if (_helpOpen) _layersOpen = _infoOpen = false;
+    }
+
+    private Task ZoomAsync(bool zoomIn) => JS.InvokeVoidAsync("tacticalGlobe.zoom", "tg-viewport", zoomIn).AsTask();
+
+    private Task GoHomeAsync() => JS.InvokeVoidAsync("tacticalGlobe.home", "tg-viewport").AsTask();
+
+    // Street view ("drop the person"): StreetLevelImageryService finds free street photos near
+    // the point; the panel always offers Google Street View at the same spot as well.
+    private bool _streetPicking;
+    private bool _streetBusy;
+    private StreetViewResult? _streetView;
+    private int _streetIndex;
+
+    private async Task ToggleStreetViewPickAsync()
+    {
+        if (_streetPicking)
+        {
+            _streetPicking = false;
+            await JS.InvokeVoidAsync("tacticalGlobe.cancelPickPoint", "tg-viewport");
+            return;
+        }
+        await CancelPickAsync();
+        _streetPicking = true;
+        await JS.InvokeVoidAsync("tacticalGlobe.startPickPoint", "tg-viewport");
+    }
+
+    [JSInvokable]
+    public async Task OnStreetViewDropped(double latitude, double longitude)
+    {
+        if (_streetPicking)
+        {
+            _streetPicking = false;
+            await JS.InvokeVoidAsync("tacticalGlobe.cancelPickPoint", "tg-viewport");
+        }
+        await ShowStreetViewAsync(latitude, longitude);
+    }
+
+    private async Task ShowStreetViewAsync(double latitude, double longitude)
+    {
+        _layersOpen = _infoOpen = _helpOpen = false;
+        _streetBusy = true;
+        _streetView = null;
+        _streetIndex = 0;
+        StateHasChanged();
+        await JS.InvokeVoidAsync("tacticalGlobe.setStreetViewMarker", "tg-viewport", latitude, longitude);
+        try
+        {
+            _streetView = await StreetLevelImagery.FindNearAsync(latitude, longitude);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Street view lookup failed");
+            _streetView = new StreetViewResult(latitude, longitude, [], StreetLevelImageryService.GoogleStreetViewUrl(latitude, longitude));
+        }
+        finally
+        {
+            _streetBusy = false;
+        }
+        StateHasChanged();
+    }
+
+    private async Task CloseStreetViewAsync()
+    {
+        _streetView = null;
+        await JS.InvokeVoidAsync("tacticalGlobe.clearStreetViewMarker", "tg-viewport");
+    }
+
+    private string? _directionsMessage;
+
+    private async Task CopyDirectionsAsync(GwsBusinessSuite.Application.RouteWatch.RouteWatchResult route)
+    {
+        var text = GwsBusinessSuite.Application.RouteWatch.RouteDirectionsText.Format(route, DateTimeOffset.Now)
+            + "\n\n" + Navigation.ToAbsoluteUri(GwsBusinessSuite.Application.RouteWatch.RouteDirectionsText.OverwatchLink(_routeStops));
+        _directionsMessage = await JS.InvokeAsync<string>("tacticalGlobe.shareText", null, text, null) == "copied"
+            ? "Directions copied."
+            : "Couldn't copy - your browser blocked it.";
+    }
+
+    // The device's share sheet where the browser has one (Safari, phones); otherwise copies.
+    private async Task ShareDirectionsAsync(GwsBusinessSuite.Application.RouteWatch.RouteWatchResult route)
+    {
+        var url = Navigation.ToAbsoluteUri(GwsBusinessSuite.Application.RouteWatch.RouteDirectionsText.OverwatchLink(_routeStops)).ToString();
+        var text = GwsBusinessSuite.Application.RouteWatch.RouteDirectionsText.Format(route, DateTimeOffset.Now);
+        var result = await JS.InvokeAsync<string>("tacticalGlobe.shareText", $"Directions: {route.From} to {route.To}", text, url);
+        _directionsMessage = result switch
+        {
+            "shared" => null,
+            "copied" => "Sharing isn't available in this browser - directions and link copied instead.",
+            "cancelled" => null,
+            _ => "Couldn't share - your browser blocked it."
+        };
+    }
+
+    private Task FlyToStepAsync(GwsBusinessSuite.Application.RouteWatch.RouteStep step) =>
+        JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", step.Latitude, step.Longitude, 1500, 1.5).AsTask();
+
+    private static string StepIcon(string kind) => kind switch
+    {
+        GwsBusinessSuite.Application.RouteWatch.RouteStepKinds.Depart => "bi-geo-alt",
+        GwsBusinessSuite.Application.RouteWatch.RouteStepKinds.Arrive => "bi-geo-alt-fill",
+        GwsBusinessSuite.Application.RouteWatch.RouteStepKinds.Left => "bi-arrow-90deg-left",
+        GwsBusinessSuite.Application.RouteWatch.RouteStepKinds.Right => "bi-arrow-90deg-right",
+        GwsBusinessSuite.Application.RouteWatch.RouteStepKinds.SlightLeft => "bi-arrow-up-left",
+        GwsBusinessSuite.Application.RouteWatch.RouteStepKinds.SlightRight => "bi-arrow-up-right",
+        GwsBusinessSuite.Application.RouteWatch.RouteStepKinds.UTurn => "bi-arrow-return-left",
+        GwsBusinessSuite.Application.RouteWatch.RouteStepKinds.Ramp or GwsBusinessSuite.Application.RouteWatch.RouteStepKinds.Exit => "bi-sign-turn-slight-right",
+        GwsBusinessSuite.Application.RouteWatch.RouteStepKinds.Fork => "bi-signpost-split",
+        GwsBusinessSuite.Application.RouteWatch.RouteStepKinds.Merge => "bi-sign-merge-right",
+        GwsBusinessSuite.Application.RouteWatch.RouteStepKinds.Roundabout => "bi-arrow-repeat",
+        _ => "bi-arrow-up"
+    };
+
+    // Leaving the Directions tab keeps the route on the map; this clears it.
+    private async Task ClearRouteAsync()
+    {
+        await CancelPickAsync();
+        _route = null;
+        _drivingLight = [];
+        await JS.InvokeVoidAsync("tacticalGlobe.clearRoute");
     }
 
     private void AddStop() => _routeStops.Insert(_routeStops.Count - 1, string.Empty);
@@ -1272,6 +1545,7 @@
             await CancelPickAsync();
             return;
         }
+        _streetPicking = false;
         _pickingStop = index;
         await JS.InvokeVoidAsync("tacticalGlobe.startPickPoint", "tg-viewport");
     }
@@ -1287,6 +1561,11 @@
     [JSInvokable]
     public Task OnMapPointPicked(double latitude, double longitude)
     {
+        if (_streetPicking)
+        {
+            _streetPicking = false;
+            return ShowStreetViewAsync(latitude, longitude);
+        }
         if (_pickingStop is { } index && index < _routeStops.Count)
         {
             _routeStops[index] = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{latitude:0.#####}, {longitude:0.#####}");
@@ -1347,6 +1626,7 @@
         _routeStops.AddRange(trip.Stops);
         while (_routeStops.Count < 2) _routeStops.Add(string.Empty);
         _tripName = trip.Name;
+        _panelTab = _lastPanelTab = "directions";
         await WatchRouteAsync();
     }
 
