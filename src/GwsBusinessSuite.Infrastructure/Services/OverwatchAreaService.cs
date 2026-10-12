@@ -15,7 +15,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 public sealed record OverwatchAreaView(Guid Id, string Name, BoundingBox Bounds, bool WatchIncidents, bool WatchWeather,
     bool WatchHazards, string MinSeverity, DateTimeOffset? LastCheckedAt);
 
-public sealed record OverwatchAreaAlertView(Guid Id, Guid AreaId, string Title, string Message, bool IsRead, DateTimeOffset CreatedAt);
+public sealed record OverwatchAreaAlertView(Guid Id, Guid AreaId, string Title, string Message, bool IsRead, DateTimeOffset CreatedAt, string? LinkUrl = null);
 
 // One thing worth telling someone about, with a stable key so it's only reported once.
 // Latitude/Longitude are set for incidents, which can start an incident capture.
@@ -105,7 +105,7 @@ public sealed class OverwatchAreaService(
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
         var rows = await db.OverwatchAreaAlerts.AsNoTracking().Where(a => a.Username == username).ToListAsync(ct);
         return rows.OrderByDescending(a => a.CreatedAt).Take(take)
-            .Select(a => new OverwatchAreaAlertView(a.Id, a.AreaId, a.Title, a.Message, a.ReadAt is not null, a.CreatedAt)).ToList();
+            .Select(a => new OverwatchAreaAlertView(a.Id, a.AreaId, a.Title, a.Message, a.ReadAt is not null, a.CreatedAt, a.LinkUrl)).ToList();
     }
 
     public async Task MarkAlertReadAsync(string username, Guid id, CancellationToken ct = default)

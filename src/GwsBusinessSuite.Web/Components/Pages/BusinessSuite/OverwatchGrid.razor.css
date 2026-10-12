@@ -787,3 +787,31 @@
     text-decoration: none;
 }
 .tg-sv-credit:hover { color: #fff; }
+
+/* "When should I leave?" chart: one bar per departure time, taller = worse. */
+.tg-depart-best { color: #c9ffe0; }
+.tg-depart-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 70px;
+    padding: 0.4rem 0.6rem 0;
+}
+.tg-depart-bar {
+    flex: 1 1 0;
+    height: 100%;
+    display: flex;
+    align-items: flex-end;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+}
+.tg-depart-bar span { display: block; width: 100%; height: var(--tg-bar); background: #4ade80; }
+.tg-depart-bar.is-fair span { background: #ffd166; }
+.tg-depart-bar.is-poor span { background: #ff6b6b; }
+.tg-depart-bar.is-chosen span { outline: 2px solid #fff; outline-offset: 1px; }
+.tg-depart-bar:focus-visible { outline: 2px solid #7dffb0; }
+.tg-depart-axis { display: flex; justify-content: space-between; padding: 0.15rem 0.6rem 0.3rem; opacity: 0.7; font-size: 0.68rem; }
+.tg-depart-detail { padding: 0.35rem 0.6rem; border-top: 1px solid rgba(125, 255, 176, 0.18); }
+.tg-depart-detail ul { margin: 0.3rem 0; padding-left: 1.1rem; }

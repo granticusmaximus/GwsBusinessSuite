@@ -120,7 +120,7 @@
     }
 
     private static BellAlert ToBellAlert(GwsBusinessSuite.Infrastructure.Services.OverwatchAreaAlertView alert) => new(
-        "overwatch", alert.Id, alert.Title, alert.Message, alert.IsRead, alert.CreatedAt, $"/admin/osint?area={alert.AreaId}");
+        "overwatch", alert.Id, alert.Title, alert.Message, alert.IsRead, alert.CreatedAt, alert.LinkUrl ?? $"/admin/osint?area={alert.AreaId}");
 
     private void HandleOverwatchAlert(string username, GwsBusinessSuite.Infrastructure.Services.OverwatchAreaAlertView alert)
     {

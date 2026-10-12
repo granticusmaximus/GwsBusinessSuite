@@ -4599,11 +4599,17 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<Guid>("AreaId")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("CameraId")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("CreatedBy")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LinkUrl")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Message")
@@ -4632,6 +4638,65 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasIndex("Username", "ReadAt");
 
                     b.ToTable("OverwatchAreaAlerts");
+                });
+
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.OverwatchCameraWatchState", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CameraId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CameraName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastAlertUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("LastCheckedUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastLevel")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastSummary")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<double>("Latitude")
+                        .HasColumnType("REAL");
+
+                    b.Property<double>("Longitude")
+                        .HasColumnType("REAL");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username", "CameraId")
+                        .IsUnique();
+
+                    b.ToTable("OverwatchCameraWatchStates");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.OverwatchTrip", b =>

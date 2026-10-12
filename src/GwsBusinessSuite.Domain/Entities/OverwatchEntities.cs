@@ -37,6 +37,25 @@ public sealed class OverwatchAreaAlert : AuditableEntity
     public required string Title { get; set; }
     public required string Message { get; set; }
     public DateTimeOffset? ReadAt { get; set; }
+    // Where the bell entry opens, when it isn't the area itself (camera-watch detections).
+    public string? LinkUrl { get; set; }
+    // The camera a camera-watch detection is about.
+    public string? CameraId { get; set; }
+}
+
+// Camera watch (CameraWatchService): the last reading the Mac app's local vision model made of
+// one watched camera, so a change to "bad" can raise one alert. Times are Unix seconds.
+public sealed class OverwatchCameraWatchState : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string CameraId { get; set; }
+    public required string CameraName { get; set; }
+    public double Latitude { get; set; }
+    public double Longitude { get; set; }
+    public required string LastLevel { get; set; }
+    public string LastSummary { get; set; } = string.Empty;
+    public long LastCheckedUnix { get; set; }
+    public long? LastAlertUnix { get; set; }
 }
 
 // A saved route-watch trip: an ordered list of stops (place names or "lat, lon"), re-plotted

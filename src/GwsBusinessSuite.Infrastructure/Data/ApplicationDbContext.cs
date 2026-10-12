@@ -76,6 +76,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelDiscussionReaction> SentinelDiscussionReactions => Set<SentinelDiscussionReaction>();
     public DbSet<SentinelNotification> SentinelNotifications => Set<SentinelNotification>();
     public DbSet<PageReminder> PageReminders => Set<PageReminder>();
+    public DbSet<OverwatchCameraWatchState> OverwatchCameraWatchStates => Set<OverwatchCameraWatchState>();
     public DbSet<SentinelWorkspaceMember> SentinelWorkspaceMembers => Set<SentinelWorkspaceMember>();
     public DbSet<SentinelResourcePermission> SentinelResourcePermissions => Set<SentinelResourcePermission>();
     public DbSet<SentinelPublicShare> SentinelPublicShares => Set<SentinelPublicShare>();
@@ -411,6 +412,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         // The minute sweep's "due and still waiting" query, and a page's reminder lookup.
         modelBuilder.Entity<PageReminder>().HasIndex(x => new { x.SentUnix, x.CancelledUnix, x.DueUnix });
         modelBuilder.Entity<PageReminder>().HasIndex(x => new { x.WikiPageId, x.WikiBlockId });
+        modelBuilder.Entity<OverwatchCameraWatchState>().HasIndex(x => new { x.Username, x.CameraId }).IsUnique();
         modelBuilder.Entity<SentinelWorkspaceMember>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<SentinelResourcePermission>()
             .HasIndex(x => new { x.TargetId, x.IsDatabase, x.Username })

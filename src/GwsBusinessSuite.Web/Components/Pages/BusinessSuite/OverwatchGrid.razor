@@ -25,6 +25,7 @@
 @inject TrafficIncidentDirectoryService TrafficIncidentDirectoryService
 @inject IGeocodingService GeocodingService
 @inject StreetLevelImageryService StreetLevelImagery
+@inject GwsBusinessSuite.Application.RouteWatch.DeparturePlannerService DeparturePlanner
 @inject ICameraFavoritesService CameraFavoritesService
 @inject ICameraSnapshotAnalysisService CameraSnapshotAnalysisService
 @inject IBusinessInfoService BusinessInfoService
@@ -362,6 +363,59 @@
                             @if (!string.IsNullOrEmpty(_directionsMessage))
                             {
                                 <div class="tg-favorites-empty" role="status">@_directionsMessage</div>
+                            }
+                            <div class="tg-route-subheader">WHEN SHOULD I LEAVE?</div>
+                            @if (_departurePlan is not { } plan)
+                            {
+                                <div class="tg-route-row tg-route-actions">
+                                    <button type="button" disabled="@_planBusy" @onclick="() => PlanDepartureAsync(route)">
+                                        @(_planBusy ? "CHECKING FORECASTS..." : $"CHECK THE NEXT {GwsBusinessSuite.Application.RouteWatch.DeparturePlanner.WindowHours} HOURS")
+                                    </button>
+                                </div>
+                            }
+                            else
+                            {
+                                var chosen = _chosenDeparture ?? plan.Best;
+                                var maxScore = Math.Max(1, plan.Options.Max(o => o.Score));
+                                @if (plan.Best is { } best)
+                                {
+                                    <div class="tg-route-summary tg-depart-best" role="status">
+                                        BEST: LEAVE @best.DepartUtc.ToLocalGwsTime() (ARRIVE @best.ArriveUtc.ToLocalGwsTime()) · @best.Reasons[0]
+                                    </div>
+                                }
+                                <div class="tg-depart-chart" role="list" aria-label="Departure times, every 30 minutes">
+                                    @foreach (var option in plan.Options)
+                                    {
+                                        <button type="button" role="listitem" class="tg-depart-bar is-@option.Rating @(option == chosen ? "is-chosen" : "")"
+                                                style="--tg-bar: @((int)Math.Round(15 + 85 * option.Score / maxScore))%"
+                                                title="@($"Leave {option.DepartUtc.ToLocalGwsTime()}: {option.Rating} - {string.Join("; ", option.Reasons)}")"
+                                                aria-label="@($"Leave {option.DepartUtc.ToLocalGwsTime()}, {option.Rating}")" @onclick="() => _chosenDeparture = option">
+                                            <span></span>
+                                        </button>
+                                    }
+                                </div>
+                                <div class="tg-depart-axis">
+                                    <span>@plan.Options[0].DepartUtc.ToLocalGwsTime()</span>
+                                    <span>@plan.Options[plan.Options.Count / 2].DepartUtc.ToLocalGwsTime()</span>
+                                    <span>@plan.Options[^1].DepartUtc.ToLocalGwsTime()</span>
+                                </div>
+                                @if (chosen is not null)
+                                {
+                                    <div class="tg-depart-detail">
+                                        <strong>LEAVE @chosen.DepartUtc.ToLocalGwsDateTime() · @chosen.Rating.ToUpperInvariant()</strong>
+                                        <ul>
+                                            @foreach (var reason in chosen.Reasons)
+                                            {
+                                                <li>@reason</li>
+                                            }
+                                        </ul>
+                                        <div class="tg-route-row">
+                                            <button type="button" @onclick="() => UseDepartureAsync(chosen)">USE THIS TIME</button>
+                                            <button type="button" @onclick="() => PlanDepartureAsync(route)" disabled="@_planBusy">REFRESH</button>
+                                        </div>
+                                    </div>
+                                }
+                                <div class="tg-favorites-empty">@plan.Note</div>
                             }
                             @if (route.Steps is { Count: > 0 } steps)
                             {
@@ -1547,6 +1601,37 @@
         StateHasChanged();
     }
 
+    // "When should I leave?" (DeparturePlanner) for the current route.
+    private GwsBusinessSuite.Application.RouteWatch.DeparturePlan? _departurePlan;
+    private GwsBusinessSuite.Application.RouteWatch.DepartureOption? _chosenDeparture;
+    private bool _planBusy;
+
+    private async Task PlanDepartureAsync(GwsBusinessSuite.Application.RouteWatch.RouteWatchResult route)
+    {
+        _planBusy = true;
+        try
+        {
+            _departurePlan = await DeparturePlanner.PlanAsync(route);
+            _chosenDeparture = null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Departure planning failed");
+            _directionsMessage = "Couldn't check the forecasts. Try again in a moment.";
+        }
+        finally
+        {
+            _planBusy = false;
+        }
+    }
+
+    // Puts the chosen time in LEAVE AT, which redraws sun glare/darkness for it.
+    private async Task UseDepartureAsync(GwsBusinessSuite.Application.RouteWatch.DepartureOption option)
+    {
+        _departureLocal = option.DepartUtc.ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+        await UpdateDrivingLightAsync();
+    }
+
     private string? _directionsMessage;
 
     private async Task CopyDirectionsAsync(GwsBusinessSuite.Application.RouteWatch.RouteWatchResult route)
@@ -1597,6 +1682,7 @@
     {
         await CancelPickAsync();
         _route = null;
+        _departurePlan = null;
         _drivingLight = [];
         await JS.InvokeVoidAsync("tacticalGlobe.clearRoute");
     }
@@ -1653,6 +1739,8 @@
         try
         {
             _route = await RouteWatchService.WatchTripAsync(stops);
+            _departurePlan = null;
+            _chosenDeparture = null;
             if (_route.Error is null)
             {
                 await JS.InvokeVoidAsync("tacticalGlobe.setRoute",

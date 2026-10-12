@@ -823,6 +823,11 @@ public static class DependencyInjection
             configuration["Overwatch:TimelapsePath"] ?? "/app/data/overwatch-timelapse",
             sp.GetRequiredService<ILogger<IncidentCaptureManifestStore>>()));
         services.AddScoped<IncidentCaptureService>();
+        // Camera watch: the Mac app's local vision model reads watched cameras; alerts go to the bell.
+        services.AddSingleton(sp => new CameraWatchFrameStore(
+            configuration["Overwatch:TimelapsePath"] ?? "/app/data/overwatch-timelapse",
+            sp.GetRequiredService<ILogger<CameraWatchFrameStore>>()));
+        services.AddScoped<CameraWatchService>();
         services.AddHostedService<IncidentCaptureBackgroundService>();
         services.AddScoped<OverwatchAreaService>();
         services.AddScoped<OverwatchTripService>();
@@ -836,6 +841,7 @@ public static class DependencyInjection
         services.AddScoped<TrafficIncidentDirectoryService>();
         services.AddScoped<CameraDirectoryService>();
         // Overwatch route watch: OSRM public router (key-less) + the camera/incident/alert directories.
+        services.AddScoped<GwsBusinessSuite.Application.RouteWatch.DeparturePlannerService>();
         services.AddHttpClient<GwsBusinessSuite.Application.RouteWatch.RouteWatchService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(20);

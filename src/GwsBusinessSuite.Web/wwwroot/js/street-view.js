@@ -144,6 +144,8 @@ window.gwsStreetView = (function () {
             view.arrows.appendChild(button);
             return { id: link.id, bearing: link.bearing, distanceMeters: link.distanceMeters, element: button };
         });
+        // Place them now, not on the next frame, so they never sit unplaced in the corner.
+        placeArrows();
     }
 
     function loadScene(scene, keepHeading) {
@@ -294,7 +296,7 @@ window.gwsStreetView = (function () {
         return {
             yaw: view.state.yaw, pitch: view.state.pitch, fov: view.state.fov,
             panoramaId: view.scene && view.scene.current.id, loadedId: view.loadedId || null,
-            links: view.links.map(link => ({ id: link.id, relative: Number(link.element.dataset.relative) }))
+            links: view.links.map(link => ({ id: link.id, relative: Math.round(relative(link.bearing - view.state.yaw)) }))
         };
     }
 
