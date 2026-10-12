@@ -282,6 +282,11 @@ public sealed class WikiService(
         {
             await ReanchorDiscussionsAsync(page.Id, previousBlocksJson, page.BlocksJson, cancellationToken);
         }
+        // Workspace tags (Sentinel item 21): #tags written in the text.
+        if (isNew || !string.Equals(previousBlocksJson, page.BlocksJson, StringComparison.Ordinal))
+        {
+            await SentinelInsightsService.SyncTextTagsAsync(dbContext, page.Id, page.BlocksJson, cancellationToken);
+        }
         // Inline, or queued for after the caller's transaction commits (see SavePageCoreAsync).
         async Task RunOrDefer(Func<Task> sideEffect)
         {

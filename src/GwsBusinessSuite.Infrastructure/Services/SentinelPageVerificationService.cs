@@ -104,6 +104,17 @@ public sealed class SentinelPageVerificationService(
             .OfType<SentinelNeedsReviewItem>()
             .ToList();
 
+        // Owned pages nobody has opened since they were created (page analytics, item 22).
+        var readCutoff = now.AddDays(-SentinelGaps.NeverReadAfterDays);
+        var listed = items.Select(item => item.PageId).ToHashSet();
+        var viewed = (await dbContext.PageViews.AsNoTracking().Select(view => view.WikiPageId).Distinct().ToListAsync(cancellationToken)).ToHashSet();
+        items.AddRange((await dbContext.WikiPages.AsNoTracking()
+                .Where(page => page.TrashedAt == null && page.NotionArchivedAt == null && page.SystemKey == null && page.OwnerUsername != null)
+                .Select(page => new { page.Id, page.Title, page.OwnerUsername, page.CreatedAt })
+                .ToListAsync(cancellationToken))
+            .Where(page => page.CreatedAt < readCutoff && !viewed.Contains(page.Id) && !listed.Contains(page.Id))
+            .Select(page => new SentinelNeedsReviewItem(page.Id, page.Title, SentinelNeedsReviewReasons.NeverRead, page.OwnerUsername, page.CreatedAt)));
+
         if (accessService is not null && items.Count > 0)
         {
             var accessible = await accessService.GetAccessibleTargetsAsync(

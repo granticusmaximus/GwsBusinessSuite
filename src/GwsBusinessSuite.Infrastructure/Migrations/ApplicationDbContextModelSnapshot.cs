@@ -5022,6 +5022,85 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("PageReminders");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.PageTag", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsManual")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Tag")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("WikiPageId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Tag");
+
+                    b.HasIndex("WikiPageId", "Tag", "IsManual")
+                        .IsUnique();
+
+                    b.ToTable("PageTags");
+                });
+
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.PageView", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ViewedUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("WikiPageId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WikiPageId", "ViewedUnix");
+
+                    b.HasIndex("Username", "WikiPageId", "ViewedUnix");
+
+                    b.ToTable("PageViews");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.PodcastEpisode", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6286,6 +6365,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("TEXT");
+
+                    b.Property<long?>("ResolvedUnix")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("SourceCount")
                         .HasColumnType("INTEGER");

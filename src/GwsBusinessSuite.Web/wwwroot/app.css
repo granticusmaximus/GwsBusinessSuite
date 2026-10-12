@@ -5586,3 +5586,12 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-ask-sources .btn-link:hover { text-decoration: underline; }
 .sentinel-ask-source-number { display: inline-block; min-width: 1.4rem; color: var(--gws-text-soft); }
 @media (pointer: coarse) { .sentinel-ask-cite { min-width: 2rem; height: 2rem; } }
+
+/* Sentinel tags (item 21), views (22) and the Insights panel (21-23). */
+.sentinel-page-tags { margin-top: -.5rem; }
+.sentinel-tag-chip { font-size: .8rem; background: none; }
+.sentinel-tag-add { font-size: .8rem; color: var(--gws-text-soft); }
+.sentinel-tag-input { width: 12rem; flex: 0 0 auto; }
+.sentinel-page-views { margin-left: auto; font-size: .75rem; color: var(--gws-text-soft); }
+.sentinel-insights .list-group-item { background: transparent; color: inherit; }
+.sentinel-gap { padding: .5rem 0; border-top: 1px solid var(--gws-panel-border); }

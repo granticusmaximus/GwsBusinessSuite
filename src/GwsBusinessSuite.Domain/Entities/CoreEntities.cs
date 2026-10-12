@@ -926,6 +926,24 @@ public static class SentinelAiRunStatuses
 // One question asked of the workspace ("Ask the workspace", Sentinel item 2), kept so questions
 // the workspace couldn't answer can be grouped into knowledge gaps (item 23). Unix seconds, as
 // SQLite can't order DateTimeOffset.
+// A tag on a page (Sentinel item 21): "#client/acme" written in the page's text (IsManual false,
+// re-synced on every save) or added in the page's tag field (IsManual true). Lowercase, nested
+// with "/".
+public sealed class PageTag : AuditableEntity
+{
+    public Guid WikiPageId { get; set; }
+    public required string Tag { get; set; }
+    public bool IsManual { get; set; }
+}
+
+// A page being opened (Sentinel item 22), at most one per user per page per half hour.
+public sealed class PageView : AuditableEntity
+{
+    public Guid WikiPageId { get; set; }
+    public required string Username { get; set; }
+    public long ViewedUnix { get; set; }
+}
+
 public sealed class SentinelQuestion : AuditableEntity
 {
     public required string Username { get; set; }
@@ -943,6 +961,8 @@ public sealed class SentinelQuestion : AuditableEntity
     public string AnsweredBy { get; set; } = string.Empty;
     public string Model { get; set; } = string.Empty;
     public long AskedUnix { get; set; }
+    // Set when someone writes the page for this knowledge gap (item 23), so it stops listing.
+    public long? ResolvedUnix { get; set; }
 }
 
 public sealed class SentinelAiRun : AuditableEntity

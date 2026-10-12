@@ -16,6 +16,8 @@ public static class SentinelNeedsReviewReasons
 {
     public const string Expired = "expired";
     public const string NeverVerified = "neverVerified";
+    // Owned, at least SentinelGaps.NeverReadAfterDays old, and nobody has opened it (item 22).
+    public const string NeverRead = "neverRead";
 }
 
 public sealed record SentinelPageVerificationView(

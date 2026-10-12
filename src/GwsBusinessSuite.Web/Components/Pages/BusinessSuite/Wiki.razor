@@ -18,6 +18,7 @@
 @inject IDailyNoteService DailyNoteService
 @inject ISentinelReminderService ReminderService
 @inject ISentinelPagePreviewService PagePreviewService
+@inject ISentinelInsightsService InsightsService
 @inject TimeProvider Clock
 @inject GwsBusinessSuite.Application.Automation.IAutomationWorkflowService AutomationWorkflowService
 @inject GwsBusinessSuite.Application.Automation.IAutomationExecutionService AutomationExecutionService
@@ -34,6 +35,10 @@
 <PageTitle>Sentinel</PageTitle>
 
 <div class="sentinel-workspace @(_focusMode ? "is-focus" : string.Empty)">
+@if (_insightsOpen)
+{
+    <SentinelInsightsPanel InitialTag="@_insightsTag" OnOpenPage="OpenAskedPageAsync" OnClose="() => _insightsOpen = false" />
+}
 @if (_askOpen)
 {
     <SentinelAskPanel OnOpenPage="OpenAskedPageAsync" OnOpenDatabase="OpenAskedDatabaseAsync" OnClose="() => _askOpen = false" />
@@ -129,6 +134,10 @@
         </div>
     </div>
     <div class="sentinel-workspace-actions">
+        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenInsightsForTag(null)"
+                title="Tags, most and never read pages, and questions the workspace couldn't answer">
+            <i class="bi bi-bar-chart-line me-1"></i>Insights
+        </button>
         <button type="button" class="btn btn-sm btn-outline-secondary sentinel-ask-toggle" @onclick="() => _askOpen = !_askOpen"
                 aria-expanded="@(_askOpen ? "true" : "false")" title="Ask a question; the answer cites the pages it comes from">
             <i class="bi bi-chat-square-quote me-1"></i>Ask
@@ -449,11 +458,11 @@
                             {
                                 var expired = item.Reason == SentinelNeedsReviewReasons.Expired;
                                 <button type="button" class="sentinel-nav-item" @onclick="() => OpenPageAsync(item.PageId)" disabled="@IsBusy"
-                                        title="@(expired ? $"Verification expired {item.Since.ToLocalTime():dd-MM-yy}" : $"Never verified; last edited {item.Since.ToLocalTime():dd-MM-yy}")">
+                                        title="@(expired ? $"Verification expired {item.Since.ToLocalTime():dd-MM-yy}" : item.Reason == SentinelNeedsReviewReasons.NeverRead ? $"Nobody has opened it since {item.Since.ToLocalTime():dd-MM-yy}" : $"Never verified; last edited {item.Since.ToLocalTime():dd-MM-yy}")">
                                     <i class="bi @(expired ? "bi-patch-exclamation-fill text-warning" : "bi-patch-question text-secondary")"></i>
                                     <span class="sentinel-my-work-text">
                                         <span class="text-truncate">@(string.IsNullOrWhiteSpace(item.Title) ? "Untitled" : item.Title)</span>
-                                        <small class="text-truncate text-secondary">@(expired ? "Verification expired" : "Never verified")@(item.OwnerUsername is { } owner ? $" · {owner}" : string.Empty)</small>
+                                        <small class="text-truncate text-secondary">@(expired ? "Verification expired" : item.Reason == SentinelNeedsReviewReasons.NeverRead ? "Never read" : "Never verified")@(item.OwnerUsername is { } owner ? $" · {owner}" : string.Empty)</small>
                                     </span>
                                 </button>
                             }
@@ -875,6 +884,10 @@
                     @if (SelectedPageId is { } aliasPageId)
                     {
                         <SentinelPageAliases WikiPageId="aliasPageId" OnChanged="aliases => OnAliasesChanged(aliasPageId, aliases)" />
+                    }
+                    @if (SelectedPageId is { } tagsPageId)
+                    {
+                        <SentinelPageTags WikiPageId="tagsPageId" OnTagClicked="OpenInsightsForTag" />
                     }
 
                     @if (_showIconPicker)
@@ -1791,6 +1804,16 @@
     [JSInvokable]
     public Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestions(string query) =>
         SentinelWorkspaceService.SearchMentionSuggestionsAsync(query, CurrentUsername);
+
+    // ---- Insights (Sentinel items 21-23): tags, most/never read, knowledge gaps.
+    private bool _insightsOpen;
+    private string? _insightsTag;
+
+    private void OpenInsightsForTag(string? tag)
+    {
+        _insightsTag = tag;
+        _insightsOpen = true;
+    }
 
     // ---- Ask the workspace (Sentinel item 2): the panel stays open while a source is opened, so
     // the answer can be read beside it.
@@ -3408,6 +3431,7 @@
             // imported Notion page appear unopenable.
             try
             {
+                await InsightsService.RecordViewAsync(page.Id, CurrentUsername);
                 await LoadHistoryAsync(page.Id);
                 Backlinks = (await SentinelWorkspaceService.GetBacklinksAsync(page.Id, CurrentUsername)).ToList();
                 await SentinelWorkspaceService.RecordOpenedAsync(CurrentUsername, page.Id, false);

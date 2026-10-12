@@ -22,11 +22,39 @@ public sealed class SentinelWorkspaceService(
     private const int MaxSearchCandidatesPerType = 500;
     private const int MaxScanPages = 2000;
 
+    // "#client" in the query (Sentinel item 21) limits results to pages tagged client (or a tag
+    // under it); a query of only tags lists those pages.
     public async Task<IReadOnlyList<SentinelSearchResult>> SearchAsync(
         string query,
         string username,
         int maxResults = 25,
         CancellationToken cancellationToken = default)
+    {
+        var (tags, remainder) = SentinelTags.SplitQuery(query ?? string.Empty);
+        if (tags.Count == 0) return await SearchCoreAsync(query ?? string.Empty, username, maxResults, cancellationToken);
+
+        var tagRows = await dbContext.PageTags.AsNoTracking().Select(t => new { t.WikiPageId, t.Tag }).ToListAsync(cancellationToken);
+        var tagged = tagRows.Where(r => tags.All(tag => tagRows.Any(o => o.WikiPageId == r.WikiPageId && SentinelTags.IsUnder(o.Tag, tag))))
+            .Select(r => r.WikiPageId).ToHashSet();
+        if (remainder.Length > 0)
+        {
+            return (await SearchCoreAsync(remainder, username, maxResults * 3, cancellationToken))
+                .Where(r => !r.IsDatabase && tagged.Contains(r.Id)).Take(maxResults).ToList();
+        }
+        var ids = tagged.ToList();
+        var pages = await dbContext.WikiPages.AsNoTracking().Where(p => ids.Contains(p.Id) && p.TrashedAt == null).ToListAsync(cancellationToken);
+        var visible = await GetAccessibleTargetsAsync(pages.Select(p => new SentinelAccessTarget(p.Id, IsDatabase: false)), username, SentinelAccessLevels.View, cancellationToken);
+        return pages.Where(p => visible.Contains(new SentinelAccessTarget(p.Id, IsDatabase: false)))
+            .OrderBy(p => p.Title, StringComparer.OrdinalIgnoreCase).Take(maxResults)
+            .Select(p => new SentinelSearchResult(p.Id, false, p.Title, string.Join(" ", tags.Select(t => "#" + t)), "Tag", 100, tags, p.CreatedBy, p.CreatedAt))
+            .ToList();
+    }
+
+    private async Task<IReadOnlyList<SentinelSearchResult>> SearchCoreAsync(
+        string query,
+        string username,
+        int maxResults,
+        CancellationToken cancellationToken)
     {
         var normalized = query.Trim();
         var terms = Tokenize(normalized);

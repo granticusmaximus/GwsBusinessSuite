@@ -1,0 +1,85 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@inject ISentinelInsightsService Insights
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@* Tags (item 21) and views (item 22) under the page title. *@
+<div class="sentinel-page-aliases sentinel-page-tags">
+    @foreach (var tag in _tags.TextTags)
+    {
+        <button type="button" class="sentinel-page-alias sentinel-tag-chip" title="Written in the page as #@tag" @onclick="() => OnTagClicked.InvokeAsync(tag)">#@tag</button>
+    }
+    @foreach (var tag in _tags.ManualTags.Where(t => !_tags.TextTags.Contains(t)))
+    {
+        <span class="sentinel-page-alias sentinel-tag-chip">
+            <button type="button" class="btn btn-link p-0 text-reset text-decoration-none" @onclick="() => OnTagClicked.InvokeAsync(tag)">#@tag</button>
+            <button type="button" class="btn btn-link p-0 ms-1 text-secondary text-decoration-none" aria-label="@($"Remove tag {tag}")" @onclick="() => RemoveAsync(tag)">&times;</button>
+        </span>
+    }
+    @if (_adding)
+    {
+        <textarea class="form-control form-control-sm sentinel-page-aliases-input sentinel-tag-input" rows="1" maxlength="80" placeholder="tag or client/acme"
+                  aria-label="New tag" @oninput="e => _draft = e.Value?.ToString() ?? string.Empty" @onkeydown="OnKeyDownAsync">@_draft</textarea>
+    }
+    else
+    {
+        <button type="button" class="btn btn-sm btn-link p-0 sentinel-tag-add" @onclick="() => { _adding = true; _message = null; }"><i class="bi bi-hash" aria-hidden="true"></i>Add tag</button>
+    }
+    @if (_stats is { Views: > 0 } stats)
+    {
+        <span class="sentinel-page-views">Viewed @stats.Views @(stats.Views == 1 ? "time" : "times") by @stats.Viewers @(stats.Viewers == 1 ? "person" : "people") in the last @stats.Days days</span>
+    }
+</div>
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="sentinel-page-aliases-message small" role="status">@_message</div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid WikiPageId { get; set; }
+    [Parameter] public EventCallback<string> OnTagClicked { get; set; }
+
+    private SentinelPageTagsView _tags = new([], []);
+    private SentinelPageViewStats? _stats;
+    private Guid _loadedFor;
+    private bool _adding;
+    private string _draft = string.Empty;
+    private string? _message;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == WikiPageId) return;
+        _loadedFor = WikiPageId;
+        _adding = false;
+        _message = null;
+        _tags = await Insights.GetPageTagsAsync(WikiPageId);
+        _stats = await Insights.GetViewStatsAsync(WikiPageId);
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") { _adding = false; return; }
+        if (e.Key != "Enter") return;
+        try
+        {
+            _tags = await Insights.AddManualTagAsync(WikiPageId, _draft, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            (_draft, _adding, _message) = (string.Empty, false, null);
+        }
+        catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException)
+        {
+            _message = ex.Message;
+        }
+    }
+
+    private async Task RemoveAsync(string tag)
+    {
+        try
+        {
+            _tags = await Insights.RemoveManualTagAsync(WikiPageId, tag, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _message = ex.Message;
+        }
+    }
+}
