@@ -17,6 +17,7 @@
 @inject ISentinelPageVerificationService PageVerificationService
 @inject IDailyNoteService DailyNoteService
 @inject ISentinelReminderService ReminderService
+@inject ISentinelPagePreviewService PagePreviewService
 @inject TimeProvider Clock
 @inject GwsBusinessSuite.Application.Automation.IAutomationWorkflowService AutomationWorkflowService
 @inject GwsBusinessSuite.Application.Automation.IAutomationExecutionService AutomationExecutionService
@@ -1734,6 +1735,24 @@
     [JSInvokable]
     public Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestions(string query) =>
         SentinelWorkspaceService.SearchMentionSuggestionsAsync(query, CurrentUsername);
+
+    // Hover previews (wikiLinks.js): null for a page that's gone or that this user can't view.
+    [JSInvokable]
+    public async Task<object?> GetWikiPagePreview(string pageId)
+    {
+        if (!Guid.TryParse(pageId, out var id)) return null;
+        var preview = await PagePreviewService.GetAsync(id, CurrentUsername);
+        return preview is null ? null : new
+        {
+            id = preview.Id,
+            title = preview.Title,
+            icon = preview.Icon,
+            verified = preview.Verified,
+            more = preview.MoreBlocks,
+            updated = preview.UpdatedAt.ToLocalGwsDateTime(),
+            lines = preview.Lines.Select(line => new { kind = line.Kind, text = line.Text, indent = line.Indent, @checked = line.Checked })
+        };
+    }
 
     [JSInvokable]
     public async Task NavigateToWikiPageId(string pageId)

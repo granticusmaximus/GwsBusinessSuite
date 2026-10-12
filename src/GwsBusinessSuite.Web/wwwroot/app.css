@@ -5418,3 +5418,38 @@ audio.wiki-embed-media { max-width: 100%; }
     .gws-print-actions { display: none; }
     .gws-print-page { padding: 0; max-width: none; }
 }
+
+/* Sentinel hover previews of page links (wikiLinks.js builds this element, so it lives here). */
+.gws-wiki-preview {
+    position: fixed;
+    z-index: 1080;
+    width: min(22rem, calc(100vw - 1rem));
+    max-height: min(20rem, calc(100vh - 1rem));
+    overflow: hidden;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: .5rem;
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .38);
+    font-size: .85rem;
+    line-height: 1.4;
+}
+.gws-wiki-preview-header { display: flex; align-items: center; gap: .4rem; padding: .55rem .7rem .35rem; }
+.gws-wiki-preview-title { flex: 1 1 auto; min-width: 0; font-weight: 600; color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+.gws-wiki-preview-title:hover { text-decoration: underline; }
+.gws-wiki-preview-verified { flex-shrink: 0; padding: 0 .35rem; border-radius: .25rem; background: rgba(34, 197, 94, .15); color: #16a34a; font-size: .7rem; }
+.gws-wiki-preview-body { padding: 0 .7rem .4rem; }
+.gws-wiki-preview-line { display: flex; gap: .35rem; margin: .15rem 0; overflow-wrap: anywhere; }
+.gws-wiki-preview-line.is-heading { font-weight: 600; margin-top: .3rem; }
+.gws-wiki-preview-line.is-quote { padding-left: .5rem; border-left: 2px solid var(--gws-panel-border); color: var(--gws-text-soft); }
+.gws-wiki-preview-line.is-callout { padding: .2rem .4rem; border-radius: .25rem; background: rgba(127, 127, 127, .12); }
+.gws-wiki-preview-line.is-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; }
+.gws-wiki-preview-line.is-media { color: var(--gws-text-soft); font-style: italic; }
+.gws-wiki-preview-marker { flex-shrink: 0; color: var(--gws-text-soft); }
+.gws-wiki-preview-divider { margin: .35rem 0; border: 0; border-top: 1px solid var(--gws-panel-border); }
+.gws-wiki-preview-empty { color: var(--gws-text-soft); font-style: italic; }
+.gws-wiki-preview-footer { padding: .35rem .7rem .5rem; border-top: 1px solid var(--gws-panel-border); color: var(--gws-text-soft); font-size: .72rem; }
+@media (prefers-reduced-motion: no-preference) {
+    .gws-wiki-preview { animation: gws-wiki-preview-in .12s ease-out; }
+}
+@keyframes gws-wiki-preview-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
