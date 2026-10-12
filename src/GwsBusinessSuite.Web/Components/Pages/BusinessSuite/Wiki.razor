@@ -34,6 +34,10 @@
 <PageTitle>Sentinel</PageTitle>
 
 <div class="sentinel-workspace @(_focusMode ? "is-focus" : string.Empty)">
+@if (_askOpen)
+{
+    <SentinelAskPanel OnOpenPage="OpenAskedPageAsync" OnOpenDatabase="OpenAskedDatabaseAsync" OnClose="() => _askOpen = false" />
+}
 @if (_focusMode)
 {
     @* Focus mode (Sentinel item 19): sidebars, header and toolbar are hidden; this is the way out
@@ -125,6 +129,10 @@
         </div>
     </div>
     <div class="sentinel-workspace-actions">
+        <button type="button" class="btn btn-sm btn-outline-secondary sentinel-ask-toggle" @onclick="() => _askOpen = !_askOpen"
+                aria-expanded="@(_askOpen ? "true" : "false")" title="Ask a question; the answer cites the pages it comes from">
+            <i class="bi bi-chat-square-quote me-1"></i>Ask
+        </button>
         <button type="button" class="btn btn-sm btn-outline-secondary sentinel-global-search"
                 @onclick="OpenCommandPaletteAsync" title="Search every Sentinel page, block, database, and row">
             <i class="bi bi-search me-1"></i>Quick find
@@ -1779,6 +1787,22 @@
     [JSInvokable]
     public Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestions(string query) =>
         SentinelWorkspaceService.SearchMentionSuggestionsAsync(query, CurrentUsername);
+
+    // ---- Ask the workspace (Sentinel item 2): the panel stays open while a source is opened, so
+    // the answer can be read beside it.
+    private bool _askOpen;
+
+    private async Task OpenAskedPageAsync(Guid pageId)
+    {
+        await OpenPageAsync(pageId);
+        StateHasChanged();
+    }
+
+    private async Task OpenAskedDatabaseAsync(Guid databaseId)
+    {
+        await OpenDatabaseAsync(databaseId);
+        StateHasChanged();
+    }
 
     // ---- Focus mode (Sentinel item 19): hides Sentinel's sidebars, header and toolbar, and the
     // admin bar and navigation through app.js's own focus toggle. Not remembered between visits.

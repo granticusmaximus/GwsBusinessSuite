@@ -80,6 +80,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<OverwatchIncidentSighting> OverwatchIncidentSightings => Set<OverwatchIncidentSighting>();
     public DbSet<OverwatchBriefingSubscription> OverwatchBriefingSubscriptions => Set<OverwatchBriefingSubscription>();
     public DbSet<OverwatchMapNote> OverwatchMapNotes => Set<OverwatchMapNote>();
+    public DbSet<SentinelQuestion> SentinelQuestions => Set<SentinelQuestion>();
     public DbSet<SentinelWorkspaceMember> SentinelWorkspaceMembers => Set<SentinelWorkspaceMember>();
     public DbSet<SentinelResourcePermission> SentinelResourcePermissions => Set<SentinelResourcePermission>();
     public DbSet<SentinelPublicShare> SentinelPublicShares => Set<SentinelPublicShare>();
@@ -421,6 +422,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<OverwatchBriefingSubscription>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<OverwatchBriefingSubscription>().Property(x => x.Email).HasMaxLength(254);
         modelBuilder.Entity<WikiPage>().Property(x => x.Aliases).HasMaxLength(1000);
+        modelBuilder.Entity<SentinelQuestion>().HasIndex(x => new { x.NotFound, x.AskedUnix });
+        modelBuilder.Entity<SentinelQuestion>().HasIndex(x => new { x.Username, x.AskedUnix });
+        modelBuilder.Entity<SentinelQuestion>().Property(x => x.Question).HasMaxLength(500);
+        modelBuilder.Entity<SentinelQuestion>().Property(x => x.Terms).HasMaxLength(300);
         modelBuilder.Entity<OverwatchMapNote>().HasIndex(x => x.Username);
         modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Title).HasMaxLength(80);
         modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Body).HasMaxLength(2000);

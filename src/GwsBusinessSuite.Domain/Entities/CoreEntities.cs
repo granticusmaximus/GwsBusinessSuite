@@ -923,6 +923,28 @@ public static class SentinelAiRunStatuses
     public const string Cancelled = "cancelled";
 }
 
+// One question asked of the workspace ("Ask the workspace", Sentinel item 2), kept so questions
+// the workspace couldn't answer can be grouped into knowledge gaps (item 23). Unix seconds, as
+// SQLite can't order DateTimeOffset.
+public sealed class SentinelQuestion : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string Question { get; set; }
+    // The key words searched for, space-separated - what knowledge-gap grouping compares.
+    public string Terms { get; set; } = string.Empty;
+    public bool NotFound { get; set; }
+    // Answered, but the model cited none of its sources.
+    public bool Uncited { get; set; }
+    public int SourceCount { get; set; }
+    public int TopScore { get; set; }
+    // [{ "id": "...", "isDatabase": false, "title": "...", "cited": true }]
+    public string SourcesJson { get; set; } = "[]";
+    // "local" (the asker's own Ollama) or "server".
+    public string AnsweredBy { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
+    public long AskedUnix { get; set; }
+}
+
 public sealed class SentinelAiRun : AuditableEntity
 {
     public Guid ConversationId { get; set; }

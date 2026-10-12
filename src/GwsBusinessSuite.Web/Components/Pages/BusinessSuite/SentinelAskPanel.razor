@@ -1,0 +1,246 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@implements IAsyncDisposable
+@inject ISentinelAskService AskService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
+@inject ILogger<SentinelAskPanel> Logger
+
+@* "Ask the workspace" (Sentinel item 2): the server finds the sources the asker can view; the
+   model on this computer (or the server's, when this computer has none) answers from them only,
+   citing [n]. *@
+<div class="sentinel-ask" role="dialog" aria-label="Ask the workspace">
+    <div class="sentinel-ask-header">
+        <strong><i class="bi bi-chat-square-quote me-1" aria-hidden="true"></i>Ask the workspace</strong>
+        <button type="button" class="btn-close btn-close-white" aria-label="Close" @onclick="CloseAsync"></button>
+    </div>
+    <div class="sentinel-ask-form">
+        <textarea class="form-control" rows="2" maxlength="@SentinelAsk.MaxQuestionLength" placeholder="e.g. What's our refund policy for annual plans?"
+                  aria-label="Your question" disabled="@_busy" @oninput="e => _question = e.Value?.ToString() ?? string.Empty"
+                  @onkeydown="OnKeyDownAsync">@_question</textarea>
+        <div class="sentinel-ask-actions">
+            <span class="sentinel-ask-engine">@EngineText</span>
+            @if (_localModels.Count > 1)
+            {
+                <select class="form-select form-select-sm" aria-label="Model on this computer" value="@_localModel"
+                        @onchange="e => _localModel = e.Value?.ToString() ?? string.Empty" disabled="@_busy">
+                    @foreach (var model in _localModels)
+                    {
+                        <option value="@model">@model</option>
+                    }
+                </select>
+            }
+            <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy || SentinelAsk.Normalize(_question).Length < 3)" @onclick="AskAsync">
+                @(_busy ? "Answering..." : "Ask")
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger py-1 px-2 small mb-2" role="alert">@_error</div>
+    }
+
+    @if (_context is { } context)
+    {
+        <div class="sentinel-ask-answer" aria-live="polite">
+            @if (_answer is { NotFound: true } notFound)
+            {
+                <p class="sentinel-ask-notfound"><i class="bi bi-search me-1" aria-hidden="true"></i>@notFound.Text</p>
+                <p class="small text-secondary mb-0">Try other words, or write the page that answers it - questions like this are kept so the gaps can be filled.</p>
+            }
+            else if (_answer is { } answer)
+            {
+                <p>
+                    @foreach (var part in SentinelAsk.SplitCitations(answer.Text))
+                    {
+                        if (part.Numbers is { } numbers)
+                        {
+                            @foreach (var number in numbers)
+                            {
+                                <button type="button" class="sentinel-ask-cite" title="@SourceTitle(context, number)" @onclick="() => OpenSourceAsync(context, number)">@number</button>
+                            }
+                        }
+                        else
+                        {
+                            @part.Text
+                        }
+                    }
+                </p>
+                @if (answer.Uncited)
+                {
+                    <p class="small text-warning mb-0">The model didn't point to a source for this answer. Check it against the sources below.</p>
+                }
+            }
+            else if (_busy)
+            {
+                <p class="text-secondary">@(_draft.Length > 0 ? _draft : context.HasSources ? $"Reading {context.Sources.Count} source{(context.Sources.Count == 1 ? "" : "s")}..." : "Searching...")</p>
+            }
+        </div>
+        @if (context.HasSources)
+        {
+            <ol class="sentinel-ask-sources">
+                @foreach (var source in context.Sources)
+                {
+                    <li class="@(_answer?.Cited.Contains(source.Number) == true ? "is-cited" : string.Empty)">
+                        <button type="button" class="btn btn-link p-0 text-start" @onclick="() => OpenSourceAsync(context, source.Number)">
+                            <span class="sentinel-ask-source-number">@source.Number</span>
+                            <i class="bi @(source.IsDatabase ? "bi-table" : "bi-file-earmark-text") me-1" aria-hidden="true"></i>@source.Title
+                        </button>
+                        @if (source.Verified)
+                        {
+                            <span class="badge text-bg-success ms-1">Verified</span>
+                        }
+                    </li>
+                }
+            </ol>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public EventCallback<Guid> OnOpenPage { get; set; }
+    [Parameter] public EventCallback<Guid> OnOpenDatabase { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private static readonly TimeSpan LocalTimeout = TimeSpan.FromMinutes(3);
+    private GwsBusinessSuite.Web.Services.BrowserLocalOllamaService? _local;
+    private List<string> _localModels = new();
+    private string _localModel = string.Empty;
+    private bool _probed;
+    private string _question = string.Empty;
+    private string _draft = string.Empty;
+    private string? _error;
+    private bool _busy;
+    private SentinelAskContext? _context;
+    private SentinelAskAnswer? _answer;
+    private CancellationTokenSource? _cts;
+
+    private string EngineText => !_probed ? "Checking for a model on this computer..."
+        : _localModels.Count == 1 ? $"Answers with {_localModel} on this computer"
+        : _localModels.Count > 1 ? "Answers on this computer with"
+        : "Answers with the server's model";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _local = new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            var status = await _local.ProbeAsync();
+            if (status.IsReachable)
+            {
+                _localModels = status.Models.Where(m => !m.Contains("embed", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
+                _localModel = _localModels.FirstOrDefault(m => m.StartsWith("gemma", StringComparison.OrdinalIgnoreCase)) ?? _localModels.FirstOrDefault() ?? string.Empty;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogDebug(ex, "No local Ollama for Ask the workspace");
+        }
+        _probed = true;
+        StateHasChanged();
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey && !_busy) await AskAsync();
+        else if (e.Key == "Escape") await CloseAsync();
+    }
+
+    private async Task AskAsync()
+    {
+        var question = SentinelAsk.Normalize(_question);
+        if (question.Length < 3 || _busy) return;
+        _cts?.Cancel();
+        var cts = _cts = new CancellationTokenSource();
+        _busy = true;
+        _error = null;
+        _answer = null;
+        _draft = string.Empty;
+        var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        try
+        {
+            _context = new SentinelAskContext(question, []);
+            StateHasChanged();
+            var context = _context = await AskService.PrepareAsync(question, username, cts.Token);
+            StateHasChanged();
+            string answeredBy, model;
+            if (!context.HasSources)
+            {
+                (_answer, answeredBy, model) = (SentinelAsk.NotFound(), "server", "none");
+            }
+            else if (_local is not null && !string.IsNullOrEmpty(_localModel))
+            {
+                (_answer, answeredBy, model) = (await AnswerLocallyAsync(context, cts.Token), "local", _localModel);
+            }
+            else
+            {
+                (_answer, answeredBy, model) = (await AskService.AnswerOnServerAsync(context, cts.Token), "server", await AskService.ServerModelAsync(cts.Token));
+            }
+            if (_cts == cts) await AskService.RecordAsync(context, _answer, username, answeredBy, model, CancellationToken.None);
+        }
+        catch (ArgumentException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            if (_cts == cts) _error = "That took too long. Try a shorter question, or again in a moment.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Ollama relay failures (and the server's light-mode refusals) are already worded for people.
+            _error = ex.Message;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Ask the workspace failed");
+            _error = "The answer couldn't be written just now. The sources below may still help.";
+        }
+        finally
+        {
+            if (_cts == cts) _busy = false;
+        }
+    }
+
+    private async Task<SentinelAskAnswer> AnswerLocallyAsync(SentinelAskContext context, CancellationToken ct)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(LocalTimeout);
+        var lastPaint = DateTime.UtcNow;
+        await foreach (var chunk in _local!.GenerateStreamAsync(_localModel, SentinelAsk.SystemPrompt, SentinelAsk.UserPrompt(context), timeout.Token))
+        {
+            _draft += chunk;
+            if (DateTime.UtcNow - lastPaint > TimeSpan.FromMilliseconds(250))
+            {
+                lastPaint = DateTime.UtcNow;
+                StateHasChanged();
+            }
+        }
+        return SentinelAsk.Clean(_draft, context);
+    }
+
+    private async Task OpenSourceAsync(SentinelAskContext context, int number)
+    {
+        if (context.Sources.FirstOrDefault(s => s.Number == number) is not { } source) return;
+        if (source.IsDatabase) await OnOpenDatabase.InvokeAsync(source.TargetId);
+        else await OnOpenPage.InvokeAsync(source.TargetId);
+    }
+
+    private static string SourceTitle(SentinelAskContext context, int number) =>
+        context.Sources.FirstOrDefault(s => s.Number == number)?.Title ?? string.Empty;
+
+    private async Task CloseAsync()
+    {
+        _cts?.Cancel();
+        await OnClose.InvokeAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts?.Cancel();
+        if (_local is not null) await _local.DisposeAsync();
+    }
+}

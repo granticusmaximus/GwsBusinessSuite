@@ -6255,6 +6255,75 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("SentinelPublicShares");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelQuestion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AnsweredBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("AskedUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("NotFound")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Question")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("SourceCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SourcesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Terms")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("TopScore")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("Uncited")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NotFound", "AskedUnix");
+
+                    b.HasIndex("Username", "AskedUnix");
+
+                    b.ToTable("SentinelQuestions");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelResourcePermission", b =>
                 {
                     b.Property<Guid>("Id")
