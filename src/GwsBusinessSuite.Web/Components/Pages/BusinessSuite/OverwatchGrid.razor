@@ -26,6 +26,7 @@
 @inject IGeocodingService GeocodingService
 @inject StreetLevelImageryService StreetLevelImagery
 @inject GwsBusinessSuite.Application.RouteWatch.DeparturePlannerService DeparturePlanner
+@inject GwsBusinessSuite.Infrastructure.Services.CameraWatchService CameraWatch
 @inject ICameraFavoritesService CameraFavoritesService
 @inject ICameraSnapshotAnalysisService CameraSnapshotAnalysisService
 @inject IBusinessInfoService BusinessInfoService
@@ -187,6 +188,24 @@
     {
         <div class="tg-pick-banner" role="status">CLICK THE MAP WHERE YOU WANT TO LOOK AROUND <button type="button" @onclick="ToggleStreetViewPickAsync">CANCEL</button></div>
     }
+    @if (_detection is { } detection)
+    {
+        <div class="tg-floating-panel tg-streetview-panel" aria-label="Camera watch detection">
+            <div class="tg-coverage-panel-header"><span>@detection.Title.ToUpperInvariant()</span><button type="button" class="tg-panel-close" aria-label="Close" @onclick="() => _detection = null">&times;</button></div>
+            <div class="tg-favorites-empty">@detection.Message · @detection.CreatedAt.ToLocalGwsDateTime()</div>
+            <div class="tg-detection-frames">
+                <figure><img src="@($"/admin/api/overwatch/detections/{detection.Id}/before")" alt="The camera before the change" /><figcaption>BEFORE</figcaption></figure>
+                <figure><img src="@($"/admin/api/overwatch/detections/{detection.Id}/after")" alt="The camera when it turned bad" /><figcaption>AFTER</figcaption></figure>
+            </div>
+            @if (_detectionCamera is { } watched)
+            {
+                <div class="tg-route-row tg-streetview-nav">
+                    <button type="button" @onclick="() => FlyToPointAsync(watched.Latitude, watched.Longitude)">GO TO CAMERA</button>
+                </div>
+            }
+        </div>
+    }
+
     @* Overwatch's own street view (street-view.js renders the panorama into the canvas and places
        the walk arrows). Covers the globe while open; BACK TO MAP or Esc returns. *@
     @if (_streetScene is { } scene)
@@ -584,6 +603,32 @@
                     }
                     break;
                 case "areas":
+                    <div class="tg-coverage-panel-header">CAMERA WATCH</div>
+                    @if (_cameraWatchStatus is { } watch)
+                    {
+                        <div class="tg-favorites-empty" role="status">
+                            @if (watch.LastCheckedAt is { } lastChecked)
+                            {
+                                <text>Your Mac's vision model last read the cameras at @lastChecked.ToLocalGwsDateTime() (@watch.CheckedLastHour in the last hour, @watch.Watched watched). You get a bell alert when one turns bad.</text>
+                            }
+                            else
+                            {
+                                <text>Not running yet. Open the GWS Mac app with Ollama and a vision model (e.g. gemma4): it reads your favorite cameras and the cameras in your watched areas (@watch.Watched now) every 10 minutes.</text>
+                            }
+                        </div>
+                        @if (watch.NeedAttention.Count > 0)
+                        {
+                            <ul class="tg-coverage-list">
+                                @foreach (var camera in watch.NeedAttention)
+                                {
+                                    <li class="tg-coverage-item tg-condition-@camera.LastLevel">
+                                        <span>@camera.CameraName<small>@camera.LastLevel.ToUpperInvariant() · @camera.LastSummary · @DateTimeOffset.FromUnixTimeSeconds(camera.LastCheckedUnix).ToLocalGwsTime()</small></span>
+                                        <button type="button" @onclick="() => FlyToPointAsync(camera.Latitude, camera.Longitude)">GO</button>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    }
                     <div class="tg-coverage-panel-header">WATCHED AREAS</div>
                     <form class="tg-route-form" @onsubmit="AddAreaAsync" @onsubmit:preventDefault>
                         <input aria-label="Area name" placeholder="NAME FOR THE CURRENT VIEW" maxlength="80" value="@_areaName" @oninput="e => _areaName = e.Value?.ToString() ?? string.Empty" />
@@ -705,6 +750,10 @@
     [SupplyParameterFromQuery(Name = "area")]
     public Guid? AreaId { get; set; }
 
+    // ?detection={alertId} - a camera-watch bell alert opens its before/after frames.
+    [SupplyParameterFromQuery(Name = "detection")]
+    public Guid? DetectionId { get; set; }
+
     // ?route=Macon, GA&route=Atlanta, GA - a shared or printed route reopens in DIRECTIONS.
     [SupplyParameterFromQuery(Name = "route")]
     public string[]? LinkedRouteStops { get; set; }
@@ -790,6 +839,14 @@
         }
 
         await JS.InvokeVoidAsync("tacticalGlobe.enableStreetViewDrop", "tg-viewport");
+
+        if (DetectionId is { } detectionId && await CameraWatch.GetDetectionAsync(_username, detectionId) is { } found)
+        {
+            _detection = found.Alert;
+            _detectionCamera = found.Camera;
+            if (found.Camera is { } camera) await FlyToPointAsync(camera.Latitude, camera.Longitude);
+            StateHasChanged();
+        }
 
         if (LinkedRouteStops is { Length: >= 2 } linkedStops)
         {
@@ -1467,6 +1524,7 @@
                 break;
             case "areas":
                 _areaMessage = null;
+                _cameraWatchStatus = await CameraWatch.GetStatusAsync(_username);
                 _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
                 _captures = IncidentCaptureService.ListForUser(_username).ToList();
                 break;
@@ -1631,6 +1689,14 @@
         _departureLocal = option.DepartUtc.ToLocalTime().ToString("yyyy-MM-dd'T'HH:mm", System.Globalization.CultureInfo.InvariantCulture);
         await UpdateDrivingLightAsync();
     }
+
+    // Camera watch (CameraWatchService): status for the AREAS tab, and a detection opened from the bell.
+    private GwsBusinessSuite.Infrastructure.Services.CameraWatchStatus? _cameraWatchStatus;
+    private GwsBusinessSuite.Domain.Entities.OverwatchAreaAlert? _detection;
+    private GwsBusinessSuite.Domain.Entities.OverwatchCameraWatchState? _detectionCamera;
+
+    private Task FlyToPointAsync(double latitude, double longitude) =>
+        JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", latitude, longitude, 4000, 1.5).AsTask();
 
     private string? _directionsMessage;
 

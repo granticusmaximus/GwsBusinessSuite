@@ -1141,6 +1141,83 @@ app.MapPost("/admin/api/native/quick-notes", async (
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");
 
+// Camera watch (CameraWatchService): the Mac app asks which cameras to watch, fetches each
+// snapshot through here (only cameras on the signed-in user's own list), reads it with its local
+// vision model and posts the model's answer back. Same session + X-GWS-Native rules as above.
+app.MapGet("/admin/api/native/overwatch/watch-list", async (
+    HttpContext httpContext,
+    GwsBusinessSuite.Infrastructure.Services.CameraWatchService cameraWatch,
+    CancellationToken cancellationToken) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    var username = httpContext.User.Identity?.Name ?? string.Empty;
+    var cameras = await cameraWatch.GetWatchListAsync(username, cancellationToken);
+    return Results.Json(new
+    {
+        intervalMinutes = GwsBusinessSuite.Infrastructure.Services.CameraWatchService.IntervalMinutes,
+        systemPrompt = GwsBusinessSuite.Application.RouteWatch.CameraConditions.SystemPrompt,
+        userPrompt = GwsBusinessSuite.Application.RouteWatch.CameraConditions.UserPrompt(null),
+        cameras = cameras.Select(camera => new { id = camera.Id, name = camera.Name })
+    });
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
+app.MapGet("/admin/api/native/overwatch/watch-snapshot", async (
+    string id,
+    HttpContext httpContext,
+    GwsBusinessSuite.Infrastructure.Services.CameraWatchService cameraWatch,
+    CancellationToken cancellationToken) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    var image = await cameraWatch.GetSnapshotAsync(httpContext.User.Identity?.Name ?? string.Empty, id, cancellationToken);
+    return image is { Length: > 0 } ? Results.File(image, "image/jpeg") : Results.NotFound();
+})
+    .RequireAuthorization("AdminOnly");
+
+app.MapPost("/admin/api/native/overwatch/watch-reading", async (
+    NativeCameraWatchReading request,
+    HttpContext httpContext,
+    GwsBusinessSuite.Infrastructure.Services.CameraWatchService cameraWatch,
+    CancellationToken cancellationToken) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    if (string.IsNullOrWhiteSpace(request.CameraId) || (request.ModelOutput?.Length ?? 0) > 4_000)
+        return Results.BadRequest(new { error = "Send a camera id and the model's answer." });
+    byte[]? frame = null;
+    if (!string.IsNullOrEmpty(request.ImageBase64))
+    {
+        if (request.ImageBase64.Length > 3_000_000) return Results.BadRequest(new { error = "The image is too large." });
+        try { frame = Convert.FromBase64String(request.ImageBase64); }
+        catch (FormatException) { return Results.BadRequest(new { error = "The image isn't valid base64." }); }
+    }
+    var result = await cameraWatch.RecordReadingAsync(httpContext.User.Identity?.Name ?? string.Empty, request.CameraId, request.ModelOutput, frame, cancellationToken);
+    return result is null
+        ? Results.NotFound(new { error = "That camera isn't on your watch list." })
+        : Results.Json(new { level = result.Level, summary = result.Summary, alerted = result.Alerted });
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
+// The before/after frames of a camera-watch detection (the owner's own alerts only).
+app.MapGet("/admin/api/overwatch/detections/{alertId:guid}/{which}", async (
+    Guid alertId,
+    string which,
+    HttpContext httpContext,
+    GwsBusinessSuite.Infrastructure.Services.CameraWatchService cameraWatch,
+    GwsBusinessSuite.Infrastructure.Services.CameraWatchFrameStore frames,
+    CancellationToken cancellationToken) =>
+{
+    if (await cameraWatch.GetDetectionAsync(httpContext.User.Identity?.Name ?? string.Empty, alertId, cancellationToken) is null)
+        return Results.NotFound();
+    var frame = frames.ReadAlertFrame(alertId, which);
+    return frame is null ? Results.NotFound() : Results.File(frame, "image/jpeg");
+})
+    .RequireAuthorization("AdminOnly");
+
 // The Mac app's screen capture: a contact read from captured text (e.g. an email signature).
 // Matched by email first, so capturing someone already in the CRM opens them instead of
 // duplicating them. Same session/header rules as quick-notes above.
@@ -4531,6 +4608,7 @@ record ArticleUpsertRequest(
 
 record MobileDeviceRegistrationRequest(string Platform, string PushToken, string? DeviceName);
 record NativeQuickNoteRequest(string? Title, string? Markdown, bool? DailyNote = null);
+record NativeCameraWatchReading(string? CameraId, string? ModelOutput, string? ImageBase64);
 record NativeContactRequest(string? FullName, string? Email, string? Company);
 record MobileApprovalResolutionRequest(bool Approved, string? Comment);
 

@@ -31,6 +31,63 @@ public sealed class NativeSessionClient(HttpClient httpClient)
             : new(null, null, error);
     }
 
+    // ---- Camera watch (the server's CameraWatchService) ----
+
+    public async Task<(JsonElement? Json, string? Error)> GetCameraWatchListAsync(CancellationToken cancellationToken = default) =>
+        await GetJsonAsync("/admin/api/native/overwatch/watch-list", cancellationToken);
+
+    public async Task<byte[]?> GetCameraWatchSnapshotAsync(string cameraId, CancellationToken cancellationToken = default)
+    {
+        using var request = await SessionRequestAsync(HttpMethod.Get, $"/admin/api/native/overwatch/watch-snapshot?id={Uri.EscapeDataString(cameraId)}");
+        if (request is null) return null;
+        try
+        {
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentType?.MediaType?.StartsWith("image/", StringComparison.Ordinal) != true) return null;
+            return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return null;
+        }
+    }
+
+    public async Task<string?> PostCameraWatchReadingAsync(string cameraId, string modelOutput, byte[] frame, CancellationToken cancellationToken = default)
+    {
+        var (_, error) = await PostAsync("/admin/api/native/overwatch/watch-reading",
+            new { cameraId, modelOutput, imageBase64 = Convert.ToBase64String(frame) }, cancellationToken);
+        return error;
+    }
+
+    private async Task<(JsonElement? Json, string? Error)> GetJsonAsync(string path, CancellationToken cancellationToken)
+    {
+        using var request = await SessionRequestAsync(HttpMethod.Get, path);
+        if (request is null) return (null, "Sign in on the Workspace tab first - this uses that session.");
+        try
+        {
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            if (response.Content.Headers.ContentType?.MediaType != "application/json")
+                return (null, "Your session has expired - sign in again on the Workspace tab.");
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            using var document = JsonDocument.Parse(body);
+            return response.IsSuccessStatusCode ? (document.RootElement.Clone(), null) : (null, $"The server said no (HTTP {(int)response.StatusCode}).");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            return (null, "Couldn't reach the server.");
+        }
+    }
+
+    private static async Task<HttpRequestMessage?> SessionRequestAsync(HttpMethod method, string path)
+    {
+        var cookieHeader = await GetSessionCookieHeaderAsync();
+        if (string.IsNullOrEmpty(cookieHeader)) return null;
+        var request = new HttpRequestMessage(method, AppEndpoints.BaseUrl + path);
+        request.Headers.Add("Cookie", cookieHeader);
+        request.Headers.Add("X-GWS-Native", "1");
+        return request;
+    }
+
     // POSTs JSON with the WebView's session; the parsed JSON on success, or a message to show.
     private async Task<(JsonElement? Json, string? Error)> PostAsync(string path, object payload, CancellationToken cancellationToken)
     {

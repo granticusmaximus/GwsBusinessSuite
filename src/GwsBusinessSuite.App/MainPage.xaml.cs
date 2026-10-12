@@ -34,11 +34,14 @@ public partial class MainPage : ContentPage
     private bool _startedLoading;
     private CancellationTokenSource? _navigationTimeoutCts;
 
-    public MainPage(DeviceSecretStore deviceSecretStore, NativeAppAuthService nativeAppAuthService)
+    private readonly CameraWatcher _cameraWatcher;
+
+    public MainPage(DeviceSecretStore deviceSecretStore, NativeAppAuthService nativeAppAuthService, CameraWatcher cameraWatcher)
     {
         InitializeComponent();
         _deviceSecretStore = deviceSecretStore;
         _nativeAppAuthService = nativeAppAuthService;
+        _cameraWatcher = cameraWatcher;
     }
 
     protected override async void OnAppearing()
@@ -73,6 +76,10 @@ public partial class MainPage : ContentPage
         {
             _startedLoading = true;
             await StartWorkspaceAsync();
+#if MACCATALYST
+            // Overwatch camera watch runs on this Mac's own Ollama, using the Workspace session.
+            _cameraWatcher.Start();
+#endif
         }
     }
 
