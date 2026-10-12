@@ -2596,22 +2596,8 @@ public sealed class WikiDatabaseService(
             throw new InvalidOperationException($"\"{property.Name}\" has no Ollama model configured yet.");
         }
 
-        var rowValues = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
-        // Same "[Property Name]" bracket-reference syntax WikiDatabaseComputation's formula
-        // engine resolves (by case-insensitive name lookup) - reused here so a workspace only
-        // has to learn one column-referencing convention across Formula and AI fields.
-        var resolvedPrompt = Regex.Replace(config.AiPromptTemplate, @"\[([^\[\]]+)\]", match =>
-        {
-            var referenced = database.Properties.FirstOrDefault(candidate =>
-                string.Equals(candidate.Name, match.Groups[1].Value, StringComparison.OrdinalIgnoreCase));
-            return referenced is null ? match.Value : WikiPropertyValues.GetDisplayText(referenced, rowValues, row.CreatedAt);
-        });
-
-        const string systemPrompt =
-            "You generate the value of a single database field from the given prompt and referenced " +
-            "row data. Respond with ONLY the field's value - no preamble, no markdown formatting, no " +
-            "surrounding quotes.";
-        var generated = (await ai.GenerateAsync(config.AiModel, systemPrompt, resolvedPrompt, cancellationToken)).Trim();
+        var resolvedPrompt = ResolveAiPrompt(database, row, config.AiPromptTemplate);
+        var generated = (await ai.GenerateAsync(config.AiModel, WikiAiFields.SystemPrompt, resolvedPrompt, cancellationToken)).Trim();
 
         var trackedRow = await dbContext.WikiDatabaseRows.FirstOrDefaultAsync(item => item.Id == rowId, cancellationToken)
             ?? throw new KeyNotFoundException("The database row no longer exists.");
@@ -2633,6 +2619,75 @@ public sealed class WikiDatabaseService(
 
         return await GetInlineDatabaseAsync(wikiDatabaseId, cancellationToken)
             ?? throw new KeyNotFoundException("The database no longer exists.");
+    }
+
+    // Same "[Property Name]" bracket-reference syntax WikiDatabaseComputation's formula engine
+    // resolves (by case-insensitive name lookup) - one column-referencing convention across
+    // Formula and AI fields.
+    private static string ResolveAiPrompt(WikiDatabase database, WikiDatabaseRow row, string template)
+    {
+        var rowValues = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+        return Regex.Replace(template, @"\[([^\[\]]+)\]", match =>
+        {
+            var referenced = database.Properties.FirstOrDefault(candidate =>
+                string.Equals(candidate.Name, match.Groups[1].Value, StringComparison.OrdinalIgnoreCase));
+            return referenced is null ? match.Value : WikiPropertyValues.GetDisplayText(referenced, rowValues, row.CreatedAt);
+        });
+    }
+
+    public async Task<WikiAiFieldJob> PrepareAiFieldJobAsync(Guid wikiDatabaseId, Guid propertyId, bool onlyEmpty, CancellationToken cancellationToken = default)
+    {
+        var database = await GetDatabaseAsync(wikiDatabaseId, cancellationToken)
+            ?? throw new KeyNotFoundException("The database no longer exists.");
+        var property = database.Properties.FirstOrDefault(item => item.Id == propertyId && item.Type == WikiDatabasePropertyTypes.AiField)
+            ?? throw new KeyNotFoundException("That AI field no longer exists.");
+        var config = WikiDatabasePropertyConfig.Parse(property);
+        if (string.IsNullOrWhiteSpace(config.AiPromptTemplate))
+            throw new InvalidOperationException($"\"{property.Name}\" has no prompt configured yet.");
+        var titleProperty = database.Properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.Title);
+        var rows = database.Rows
+            .Where(row => row.TrashedAt == null)
+            .Where(row => !onlyEmpty || string.IsNullOrWhiteSpace(WikiPropertyValues.GetDisplayText(property, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt)))
+            .OrderBy(row => row.SortOrder)
+            .Take(WikiAiFields.MaxRowsPerJob)
+            .Select(row => new WikiAiFieldJobRow(row.Id,
+                titleProperty is null ? "Row" : WikiPropertyValues.GetDisplayText(titleProperty, WikiPropertyValues.ParseObject(row.PropertyValuesJson), row.CreatedAt),
+                ResolveAiPrompt(database, row, config.AiPromptTemplate)))
+            .ToList();
+        return new WikiAiFieldJob(property.Name, config.AiModel ?? string.Empty, rows);
+    }
+
+    public async Task<string> GenerateAiFieldTextAsync(string model, string prompt, CancellationToken cancellationToken = default)
+    {
+        var ai = ollama ?? throw new InvalidOperationException("Ollama is not available to generate AI field values.");
+        if (string.IsNullOrWhiteSpace(model)) throw new InvalidOperationException("This AI field has no Ollama model configured yet.");
+        return (await ai.GenerateAsync(model, WikiAiFields.SystemPrompt, prompt, cancellationToken)).Trim();
+    }
+
+    public async Task<int> WriteAiFieldValuesAsync(Guid wikiDatabaseId, Guid propertyId, IReadOnlyDictionary<Guid, string> values, string performedBy, CancellationToken cancellationToken = default)
+    {
+        if (values.Count == 0) return 0;
+        var rowIds = values.Keys.ToList();
+        var rows = await dbContext.WikiDatabaseRows.Where(row => row.WikiDatabaseId == wikiDatabaseId && rowIds.Contains(row.Id)).ToListAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var row in rows)
+        {
+            var cells = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            WikiPropertyValues.SetText(cells, propertyId, values[row.Id].Trim());
+            row.PropertyValuesJson = WikiPropertyValues.Serialize(cells);
+            row.UpdatedAt = now;
+            row.UpdatedBy = performedBy;
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+        if (automationTriggerService is not null && performedBy != "automation-engine")
+        {
+            foreach (var row in rows)
+            {
+                var payload = JsonSerializer.Serialize(new { wikiDatabaseId, rowId = row.Id, isNew = false, values = WikiPropertyValues.ParseObject(row.PropertyValuesJson) });
+                await automationTriggerService.TriggerDatabaseRowChangedAsync(wikiDatabaseId, payload, cancellationToken);
+            }
+        }
+        return rows.Count;
     }
 
     public async Task MoveRowAsync(

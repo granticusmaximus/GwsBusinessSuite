@@ -5595,3 +5595,6 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-page-views { margin-left: auto; font-size: .75rem; color: var(--gws-text-soft); }
 .sentinel-insights .list-group-item { background: transparent; color: inherit; }
 .sentinel-gap { padding: .5rem 0; border-top: 1px solid var(--gws-panel-border); }
+.sentinel-cleanup { width: min(56rem, calc(100vw - 1.5rem)); }
+.sentinel-cleanup-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: .75rem; }
+.sentinel-cleanup-pane { max-height: 50vh; overflow-y: auto; padding: .5rem .65rem; border: 1px solid var(--gws-panel-border); border-radius: .4rem; font-size: .85rem; }

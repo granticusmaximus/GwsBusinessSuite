@@ -315,6 +315,9 @@ else
                             {
                                 var aiConfig = WikiDatabasePropertyConfig.Parse(property);
                                 <div class="col-12">
+                                    <SentinelAiColumnFill DatabaseId="WikiDatabaseId" PropertyId="property.Id" Disabled="@(IsBusy || !CanEdit)" OnSaved="ReloadAsync" />
+                                </div>
+                                <div class="col-12">
                                     <div class="row g-2">
                                         <div class="col-md-8">
                                             <label class="form-label small text-secondary mb-1">Prompt</label>

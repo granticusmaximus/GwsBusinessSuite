@@ -1,0 +1,183 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@implements IAsyncDisposable
+@inject IWikiDatabaseService WikiDatabaseService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
+@inject ILogger<SentinelAiColumnFill> Logger
+
+@* Fill a whole AI field column (Sentinel item 25). Runs while this page is open: on this
+   computer's Ollama when it has the field's model, otherwise the server's. *@
+<div class="sentinel-ai-fill mt-2">
+    @if (_job is null)
+    {
+        <div class="d-flex flex-wrap align-items-center gap-3">
+            <label class="form-check-label small"><input type="checkbox" class="form-check-input me-1" @bind="_onlyEmpty" disabled="@Disabled" />Only empty cells</label>
+            <label class="form-check-label small"><input type="checkbox" class="form-check-input me-1" @bind="_review" disabled="@Disabled" />Review before saving</label>
+            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@Disabled" @onclick="StartAsync"><i class="bi bi-stars me-1"></i>Fill column</button>
+        </div>
+    }
+    else
+    {
+        <div class="d-flex align-items-center gap-2 small">
+            <div class="progress flex-grow-1" role="progressbar" aria-valuenow="@_done" aria-valuemin="0" aria-valuemax="@_job.Rows.Count">
+                <div class="progress-bar" style="width:@(_job.Rows.Count == 0 ? 100 : _done * 100 / _job.Rows.Count)%"></div>
+            </div>
+            <span>@_done / @_job.Rows.Count @(_where)</span>
+            @if (_running)
+            {
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="Cancel">Cancel</button>
+            }
+            else
+            {
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="Reset">Close</button>
+            }
+        </div>
+        @if (_review && !_running && _results.Count > 0)
+        {
+            <div class="sentinel-ai-fill-review mt-2">
+                @foreach (var result in _results)
+                {
+                    <label class="d-flex gap-2 small py-1 border-bottom">
+                        <input type="checkbox" class="form-check-input mt-1" checked="@result.Keep" @onchange="e => result.Keep = e.Value is true" />
+                        <span><strong>@result.Title</strong><br />@result.Value</span>
+                    </label>
+                }
+                <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="SaveReviewedAsync">Save @_results.Count(r => r.Keep) values</button>
+            </div>
+        }
+    }
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <div class="small mt-1" role="status">@_message</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid DatabaseId { get; set; }
+    [Parameter, EditorRequired] public Guid PropertyId { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private const int SaveEvery = 10;
+    private sealed class Result(Guid rowId, string title, string value)
+    {
+        public Guid RowId { get; } = rowId;
+        public string Title { get; } = title;
+        public string Value { get; } = value;
+        public bool Keep { get; set; } = true;
+    }
+
+    private bool _onlyEmpty = true;
+    private bool _review;
+    private WikiAiFieldJob? _job;
+    private readonly List<Result> _results = new();
+    private int _done;
+    private bool _running;
+    private string _where = string.Empty;
+    private string? _message;
+    private CancellationTokenSource? _cts;
+    private GwsBusinessSuite.Web.Services.BrowserLocalOllamaService? _local;
+
+    private async Task StartAsync()
+    {
+        _message = null;
+        _results.Clear();
+        _done = 0;
+        try
+        {
+            _job = await WikiDatabaseService.PrepareAiFieldJobAsync(DatabaseId, PropertyId, _onlyEmpty);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException)
+        {
+            _message = ex.Message;
+            return;
+        }
+        if (_job.Rows.Count == 0)
+        {
+            _message = _onlyEmpty ? "Every cell in this column already has a value." : "This database has no rows.";
+            _job = null;
+            return;
+        }
+
+        var useLocal = false;
+        try
+        {
+            _local ??= new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            var status = await _local.ProbeAsync();
+            useLocal = status.IsReachable && status.Models.Any(m => string.Equals(m, _job.Model, StringComparison.OrdinalIgnoreCase) || m.StartsWith(_job.Model + ":", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogDebug(ex, "No local Ollama for the AI column fill");
+        }
+        _where = useLocal ? "on this computer" : "on the server";
+
+        var cts = _cts = new CancellationTokenSource();
+        _running = true;
+        var pending = new Dictionary<Guid, string>();
+        var user = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        try
+        {
+            foreach (var row in _job.Rows)
+            {
+                cts.Token.ThrowIfCancellationRequested();
+                var value = useLocal
+                    ? (await _local!.GenerateAsync(_job.Model, WikiAiFields.SystemPrompt, row.Prompt, cts.Token)).Trim()
+                    : await WikiDatabaseService.GenerateAiFieldTextAsync(_job.Model, row.Prompt, cts.Token);
+                if (_review) _results.Add(new Result(row.RowId, row.RowTitle, value));
+                else pending[row.RowId] = value;
+                _done++;
+                if (!_review && pending.Count >= SaveEvery) await FlushAsync(pending, user);
+                StateHasChanged();
+            }
+            if (!_review) await FlushAsync(pending, user);
+            _message = _review ? "Done. Untick anything you don't want, then save." : $"Filled {_done} rows.";
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            if (!_review) await FlushAsync(pending, user);
+            _message = _review ? $"Stopped after {_done} rows. You can still save what was written." : $"Stopped after {_done} rows; those are saved.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (!_review) await FlushAsync(pending, user);
+            _message = ex.Message;
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    private async Task FlushAsync(Dictionary<Guid, string> pending, string user)
+    {
+        if (pending.Count == 0) return;
+        await WikiDatabaseService.WriteAiFieldValuesAsync(DatabaseId, PropertyId, new Dictionary<Guid, string>(pending), user);
+        pending.Clear();
+        await OnSaved.InvokeAsync();
+    }
+
+    private async Task SaveReviewedAsync()
+    {
+        var keep = _results.Where(r => r.Keep).ToDictionary(r => r.RowId, r => r.Value);
+        var saved = await WikiDatabaseService.WriteAiFieldValuesAsync(DatabaseId, PropertyId, keep, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        _message = $"Saved {saved} values.";
+        _results.Clear();
+        await OnSaved.InvokeAsync();
+    }
+
+    private void Cancel() => _cts?.Cancel();
+
+    private void Reset()
+    {
+        _job = null;
+        _results.Clear();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts?.Cancel();
+        if (_local is not null) await _local.DisposeAsync();
+    }
+}

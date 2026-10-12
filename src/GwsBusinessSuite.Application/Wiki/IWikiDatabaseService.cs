@@ -67,6 +67,12 @@ public interface IWikiDatabaseService
     // Throws if Ollama is unavailable, the property isn't an AiField, or it has no
     // prompt/model configured yet.
     Task<WikiInlineDatabaseSnapshot> GenerateAiFieldValueAsync(Guid wikiDatabaseId, Guid rowId, Guid propertyId, string performedBy, CancellationToken cancellationToken = default);
+    // "Fill the whole column" (Sentinel item 25): each row's resolved prompt (only empty cells when
+    // onlyEmpty), then the generated values written in one go - so the model can run on the
+    // user's own computer and the results can be reviewed before anything is saved.
+    Task<WikiAiFieldJob> PrepareAiFieldJobAsync(Guid wikiDatabaseId, Guid propertyId, bool onlyEmpty, CancellationToken cancellationToken = default);
+    Task<string> GenerateAiFieldTextAsync(string model, string prompt, CancellationToken cancellationToken = default);
+    Task<int> WriteAiFieldValuesAsync(Guid wikiDatabaseId, Guid propertyId, IReadOnlyDictionary<Guid, string> values, string performedBy, CancellationToken cancellationToken = default);
 
     // Board-drag move: reassigns the row's groupByProperty value and renumbers SortOrder
     // among the rows now sharing that value (mirrors WikiService.ReorderPageAsync's

@@ -1,0 +1,146 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@implements IAsyncDisposable
+@inject ISentinelNoteCleanupService Cleanup
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
+@inject ILogger<SentinelCleanupPanel> Logger
+
+@* Clean up a messy note (Sentinel item 26): before/after, then Apply. *@
+<div class="sentinel-ask sentinel-cleanup" role="dialog" aria-label="Clean up this note">
+    <div class="sentinel-ask-header">
+        <strong><i class="bi bi-magic me-1" aria-hidden="true"></i>Clean up this note</strong>
+        <button type="button" class="btn-close btn-close-white" aria-label="Close" @onclick="CloseAsync"></button>
+    </div>
+    <p class="small text-secondary mb-2">Groups the page into headings, bullets and to-dos without adding anything. Nothing changes until you press Apply, and the current version stays in the page's history.</p>
+    @if (_busy)
+    {
+        <p class="text-secondary small">Tidying up @_where...</p>
+    }
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger py-1 px-2 small" role="alert">@_error</div>
+    }
+    @if (_result is { Blocks.Count: > 0 } result)
+    {
+        @if (result.Warning is { } warning)
+        {
+            <div class="alert alert-warning py-1 px-2 small">@warning</div>
+        }
+        <div class="sentinel-cleanup-compare">
+            <div><div class="small fw-semibold text-secondary mb-1">Before</div><div class="sentinel-cleanup-pane">@((MarkupString)_beforeHtml)</div></div>
+            <div><div class="small fw-semibold text-secondary mb-1">After</div><div class="sentinel-cleanup-pane">@((MarkupString)WikiBlockHtmlRenderer.RenderPage(result.Blocks))</div></div>
+        </div>
+        <div class="d-flex gap-2 justify-content-end mt-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="RunAsync">Try again</button>
+            <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="ApplyAsync">Apply</button>
+        </div>
+    }
+    else if (!_busy)
+    {
+        <button type="button" class="btn btn-sm btn-primary" @onclick="RunAsync">Clean up</button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid WikiPageId { get; set; }
+    [Parameter] public IReadOnlyList<WikiBlock> CurrentBlocks { get; set; } = [];
+    [Parameter] public EventCallback OnApplied { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private GwsBusinessSuite.Web.Services.BrowserLocalOllamaService? _local;
+    private SentinelCleanupResult? _result;
+    private string _beforeHtml = string.Empty;
+    private string _where = string.Empty;
+    private string? _error;
+    private bool _busy;
+    private CancellationTokenSource? _cts;
+
+    protected override void OnParametersSet() => _beforeHtml = WikiBlockHtmlRenderer.RenderPage(CurrentBlocks);
+
+    private async Task RunAsync()
+    {
+        _cts?.Cancel();
+        var cts = _cts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        (_busy, _error, _result) = (true, null, null);
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var markdown = await Cleanup.PrepareAsync(WikiPageId, username, cts.Token);
+            var model = await LocalModelAsync();
+            _where = model is null ? "on the server" : $"with {model} on this computer";
+            StateHasChanged();
+            var output = model is null
+                ? await Cleanup.RunOnServerAsync(markdown, cts.Token)
+                : await _local!.GenerateAsync(model, SentinelNoteCleanup.SystemPrompt, SentinelNoteCleanup.UserPrompt(markdown), cts.Token);
+            _result = SentinelNoteCleanup.Check(markdown, output);
+            if (_result.Blocks.Count == 0) _error = _result.Warning;
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            _error = "That took too long. Try again, or with a smaller page.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or KeyNotFoundException)
+        {
+            _error = ex.Message;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Note clean-up failed");
+            _error = "The clean-up couldn't run just now.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task<string?> LocalModelAsync()
+    {
+        try
+        {
+            _local ??= new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            var status = await _local.ProbeAsync();
+            if (!status.IsReachable) return null;
+            var models = status.Models.Where(m => !m.Contains("embed", StringComparison.OrdinalIgnoreCase)).ToList();
+            return models.FirstOrDefault(m => m.StartsWith("gemma", StringComparison.OrdinalIgnoreCase)) ?? models.FirstOrDefault();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogDebug(ex, "No local Ollama for note clean-up");
+            return null;
+        }
+    }
+
+    private async Task ApplyAsync()
+    {
+        if (_result is not { Blocks.Count: > 0 } result) return;
+        _busy = true;
+        try
+        {
+            await Cleanup.ApplyAsync(WikiPageId, result.Blocks, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await OnApplied.InvokeAsync();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Applying a note clean-up failed");
+            _error = ex is UnauthorizedAccessException ? ex.Message : "The page changed while this ran. Close, then try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        _cts?.Cancel();
+        await OnClose.InvokeAsync();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cts?.Cancel();
+        if (_local is not null) await _local.DisposeAsync();
+    }
+}

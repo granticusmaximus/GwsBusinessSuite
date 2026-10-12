@@ -1148,3 +1148,18 @@ public sealed record WikiInlineDatabaseSnapshot(
     public IReadOnlyList<WikiInlineDatabaseView> Views { get; init; } = [];
     public bool CanEdit { get; init; } = true;
 }
+
+// Sentinel item 25: one AI field filled across many rows.
+public sealed record WikiAiFieldJobRow(Guid RowId, string RowTitle, string Prompt);
+
+public sealed record WikiAiFieldJob(string PropertyName, string Model, IReadOnlyList<WikiAiFieldJobRow> Rows);
+
+public static class WikiAiFields
+{
+    public const string SystemPrompt =
+        "You generate the value of a single database field from the given prompt and referenced " +
+        "row data. Respond with ONLY the field's value - no preamble, no markdown formatting, no " +
+        "surrounding quotes.";
+
+    public const int MaxRowsPerJob = 500;
+}

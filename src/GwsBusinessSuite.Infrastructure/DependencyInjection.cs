@@ -1033,6 +1033,8 @@ public static class DependencyInjection
         services.AddScoped<ISentinelAskService, SentinelAskService>();
         services.AddScoped<ISentinelConnectionsService, SentinelConnectionsService>();
         services.AddScoped<ISentinelInsightsService, SentinelInsightsService>();
+        services.AddScoped<ISentinelNoteCleanupService, SentinelNoteCleanupService>();
+        services.AddScoped<ISentinelCaretakerService, SentinelCaretakerService>();
         services.AddHostedService<SentinelReminderBackgroundService>();
         services.AddHostedService<SentinelPageVerificationBackgroundService>();
         services.AddScoped<ISentinelAiService, SentinelAiService>();

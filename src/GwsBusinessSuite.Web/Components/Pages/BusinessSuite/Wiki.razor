@@ -35,6 +35,10 @@
 <PageTitle>Sentinel</PageTitle>
 
 <div class="sentinel-workspace @(_focusMode ? "is-focus" : string.Empty)">
+@if (_cleanupOpen && SelectedPageId is { } cleanupPageId)
+{
+    <SentinelCleanupPanel WikiPageId="cleanupPageId" CurrentBlocks="_cleanupBefore" OnApplied="CleanupAppliedAsync" OnClose="() => _cleanupOpen = false" />
+}
 @if (_insightsOpen)
 {
     <SentinelInsightsPanel InitialTag="@_insightsTag" OnOpenPage="OpenAskedPageAsync" OnClose="() => _insightsOpen = false" />
@@ -791,6 +795,10 @@
                                 <i class="bi bi-three-dots"></i>
                             </button>
                             <div class="dropdown-menu dropdown-menu-end sentinel-style-menu">
+                                <button type="button" class="dropdown-item d-flex align-items-center gap-2" @onclick="OpenCleanupAsync" disabled="@IsBusy">
+                                    <i class="bi bi-magic"></i>
+                                    <span>Clean up this note<small class="d-block text-secondary">Headings, bullets and to-dos, previewed first</small></span>
+                                </button>
                                 <button type="button" class="dropdown-item d-flex align-items-center gap-2" @onclick="SavePageAsync" disabled="@IsBusy">
                                     <i class="bi bi-clock-history"></i>
                                     <span>Save a version<small class="d-block text-secondary">Adds a restore point to page history</small></span>
@@ -1804,6 +1812,26 @@
     [JSInvokable]
     public Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestions(string query) =>
         SentinelWorkspaceService.SearchMentionSuggestionsAsync(query, CurrentUsername);
+
+    // ---- Clean up a messy note (Sentinel item 26): saves pending edits first so the model sees
+    // the page as it is, and reloads it after Apply.
+    private bool _cleanupOpen;
+    private IReadOnlyList<WikiBlock> _cleanupBefore = [];
+
+    private async Task OpenCleanupAsync()
+    {
+        await FlushAutosaveAsync();
+        if (SelectedPageId is not { } pageId || await WikiService.GetPageAsync(pageId) is not { } page) return;
+        _cleanupBefore = WikiBlockJson.ParseBlocks(page.BlocksJson);
+        _cleanupOpen = true;
+    }
+
+    private async Task CleanupAppliedAsync()
+    {
+        _cleanupOpen = false;
+        if (SelectedPageId is { } pageId) await OpenPageAsync(pageId, recordHistory: false);
+        StateHasChanged();
+    }
 
     // ---- Insights (Sentinel items 21-23): tags, most/never read, knowledge gaps.
     private bool _insightsOpen;
