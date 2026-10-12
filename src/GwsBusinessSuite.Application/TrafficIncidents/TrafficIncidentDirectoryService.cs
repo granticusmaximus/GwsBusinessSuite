@@ -8,13 +8,17 @@ namespace GwsBusinessSuite.Application.TrafficIncidents;
 public sealed class TrafficIncidentDirectoryService(
     IEnumerable<ITrafficIncidentProvider> providers,
     ILogger<TrafficIncidentDirectoryService> logger,
-    SourceStatusTracker? statusTracker = null)
+    SourceStatusTracker? statusTracker = null,
+    IIncidentHistoryRecorder? history = null)
 {
     public async Task<IReadOnlyList<TrafficIncident>> GetIncidentsInBoundingBoxAsync(BoundingBox bbox, CancellationToken cancellationToken = default)
     {
         var tasks = providers.Select(provider => FetchSafelyAsync(provider, bbox, cancellationToken));
         var results = await Task.WhenAll(tasks);
-        return results.SelectMany(incidents => incidents).Select(IncidentNormalizer.Normalize).ToList();
+        var incidents = results.SelectMany(incidents => incidents).Select(IncidentNormalizer.Normalize).ToList();
+        // Overwatch's time machine remembers what was seen (in memory; written out in the background).
+        history?.Record(incidents);
+        return incidents;
     }
 
     private async Task<IReadOnlyList<TrafficIncident>> FetchSafelyAsync(ITrafficIncidentProvider provider, BoundingBox bbox, CancellationToken cancellationToken)

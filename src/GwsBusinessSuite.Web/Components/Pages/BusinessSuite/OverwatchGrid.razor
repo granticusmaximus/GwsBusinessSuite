@@ -27,12 +27,19 @@
 @inject StreetLevelImageryService StreetLevelImagery
 @inject GwsBusinessSuite.Application.RouteWatch.DeparturePlannerService DeparturePlanner
 @inject GwsBusinessSuite.Infrastructure.Services.CameraWatchService CameraWatch
+@inject GwsBusinessSuite.Infrastructure.Services.TimeMachineService TimeMachine
+@inject GwsBusinessSuite.Infrastructure.Services.OverwatchBriefingService Briefings
+@inject GwsBusinessSuite.Infrastructure.Services.MapNoteService MapNotes
+@inject GwsBusinessSuite.Application.LiveLayers.AircraftService AircraftService
+@inject GwsBusinessSuite.Application.LiveLayers.AirQualityService AirQualityService
+@inject GwsBusinessSuite.Application.LiveLayers.PowerOutageService PowerOutageService
 @inject ICameraFavoritesService CameraFavoritesService
 @inject ICameraSnapshotAnalysisService CameraSnapshotAnalysisService
 @inject IBusinessInfoService BusinessInfoService
 @inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject Microsoft.Extensions.Options.IOptions<CameraIntelOptions> CameraIntelOptions
 @inject IJSRuntime JS
+@inject IConfiguration Configuration
 @inject NavigationManager Navigation
 @inject ILogger<OverwatchGrid> Logger
 @implements IAsyncDisposable
@@ -103,6 +110,17 @@
                 <button type="button" data-tg-toggle="alerts" class="tg-toggle @(_alertsOn ? "tg-toggle-on" : "")" title="Toggle NWS severe weather alerts (A)" @onclick="ToggleAlertsAsync">
                     ALERTS [@(_alertsOn ? "ON" : "OFF")]
                 </button>
+                @if (IonToken is not null)
+                {
+                    <button type="button" data-tg-toggle="threed" class="tg-toggle @(_threeDOn ? "tg-toggle-on" : "")"
+                            title="3D buildings and terrain (Cesium ion)" @onclick="ToggleThreeDAsync">
+                        3D CITIES [@(_threeDOn ? "ON" : "OFF")]
+                    </button>
+                    @if (_threeDError is not null)
+                    {
+                        <div class="tg-favorites-empty" role="status">@_threeDError</div>
+                    }
+                }
                 <button type="button" data-tg-toggle="roadtemps" class="tg-toggle @(_roadWeatherOn ? "tg-toggle-on" : "")"
                         title="Road surface temperature and ice risk from roadside weather stations (Montana, South Dakota)" @onclick="ToggleRoadWeatherAsync">
                     ROAD TEMPS [@(_roadWeatherOn ? "ON" : "OFF")]
@@ -144,10 +162,35 @@
                         title="Earthquakes (USGS), active wildfires (NIFC) and flooding river gauges (NOAA)" @onclick="ToggleHazardsAsync">
                     HAZARDS [@(_hazardsOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="outages" class="tg-toggle @(_outagesOn ? "tg-toggle-on" : "")"
+                        title="Power outages by county from utilities that report to the U.S. DOE's ODIN (60+ utilities in 26 states)" @onclick="ToggleOutagesAsync">
+                    POWER OUTAGES [@(_outagesOn ? "ON" : "OFF")]
+                </button>
             </div>
             @if (_hazardsOn && !string.IsNullOrWhiteSpace(_hazardSummary))
             {
                 <div class="tg-hazard-summary">@_hazardSummary</div>
+            }
+            @if (_outagesOn && !string.IsNullOrWhiteSpace(_outageSummary))
+            {
+                <div class="tg-hazard-summary">@_outageSummary</div>
+            }
+        </div>
+        <div class="tg-layer-group">
+            <div class="tg-layer-group-title">AIR</div>
+            <div class="tg-layer-buttons">
+                <button type="button" data-tg-toggle="aircraft" class="tg-toggle @(_aircraftOn ? "tg-toggle-on" : "")"
+                        title="Aircraft in flight (OpenSky Network), refreshed every minute" @onclick="ToggleAircraftAsync">
+                    AIRCRAFT [@(_aircraftOn ? "ON" : "OFF")]
+                </button>
+                <button type="button" data-tg-toggle="airquality" class="tg-toggle @(_airQualityOn ? "tg-toggle-on" : "")"
+                        title="Air quality index across the view (Open-Meteo, hourly model)" @onclick="ToggleAirQualityAsync">
+                    AIR QUALITY [@(_airQualityOn ? "ON" : "OFF")]
+                </button>
+            </div>
+            @if ((_aircraftOn || _airQualityOn) && !string.IsNullOrWhiteSpace(_airSummary))
+            {
+                <div class="tg-hazard-summary">@_airSummary</div>
             }
         </div>
         <div class="tg-layer-group">
@@ -188,6 +231,124 @@
     {
         <div class="tg-pick-banner" role="status">CLICK THE MAP WHERE YOU WANT TO LOOK AROUND <button type="button" @onclick="ToggleStreetViewPickAsync">CANCEL</button></div>
     }
+    @* Drive mode (DriveGuide): follows the planned route with this device's GPS. *@
+    @if (_drive is not null)
+    {
+        <div class="tg-drive" role="region" aria-label="Drive mode">
+            <div class="tg-drive-next" role="status" aria-live="polite">
+                @if (_driveState is not { } drive)
+                {
+                    <span>WAITING FOR GPS...</span>
+                }
+                else if (drive.Arrived)
+                {
+                    <span>ARRIVED: @(_route?.To.ToUpperInvariant())</span>
+                }
+                else if (drive.OffRoute)
+                {
+                    <span>OFF ROUTE · @drive.MilesOff.ToString("0.0") MI FROM IT</span>
+                    <button type="button" disabled="@_driveBusy" @onclick="ReplanFromHereAsync">REPLAN FROM HERE</button>
+                }
+                else if (drive.NextStep is { } next)
+                {
+                    <strong>@DriveDistance(drive.MilesToNextStep)</strong>
+                    <span>@next.Instruction</span>
+                }
+                else
+                {
+                    <strong>@DriveDistance(drive.MilesRemaining)</strong>
+                    <span>TO @(_route?.To.ToUpperInvariant())</span>
+                }
+            </div>
+            @if (_driveState is { Arrived: false } progress)
+            {
+                <div class="tg-drive-meta">
+                    @progress.MilesRemaining.ToString("0.0") MI LEFT · ARRIVE @DateTimeOffset.Now.AddMinutes(progress.MinutesRemaining).ToGwsTime()
+                    @if (_driveSpeedMph is { } mph)
+                    {
+                        <text> · @mph.ToString("0") MPH</text>
+                    }
+                </div>
+                @foreach (var closure in _driveClosures.Where(c => c.MilesAlong > progress.MilesAlong))
+                {
+                    <div class="tg-drive-warning">
+                        <span>NEW CLOSURE @((closure.MilesAlong - progress.MilesAlong).ToString("0.0")) MI AHEAD: @closure.Incident.RoadwayName</span>
+                        <button type="button" disabled="@_driveBusy" @onclick="() => RerouteAroundAsync(closure)">@(_driveBusy ? "ROUTING..." : "REROUTE")</button>
+                    </div>
+                }
+                @foreach (var incident in progress.IncidentsAhead.Where(i => !_driveClosures.Contains(i)).Take(2))
+                {
+                    <div class="tg-drive-ahead">@GwsBusinessSuite.Application.TrafficIncidents.IncidentCategories.SingularLabel(incident.Incident.Category).ToUpperInvariant() IN @((incident.MilesAlong - progress.MilesAlong).ToString("0.0")) MI · @incident.Incident.RoadwayName</div>
+                }
+                @if (progress.CamerasAhead.Count > 0)
+                {
+                    <div class="tg-drive-cameras">
+                        @foreach (var camera in progress.CamerasAhead)
+                        {
+                            <figure>
+                                <img src="@DriveCameraUrl(camera.Camera)" alt="@($"Camera ahead: {camera.Camera.Name}")" />
+                                <figcaption>@((camera.MilesAlong - progress.MilesAlong).ToString("0.0")) MI · @camera.Camera.Name</figcaption>
+                            </figure>
+                        }
+                    </div>
+                }
+            }
+            @if (!string.IsNullOrEmpty(_driveMessage))
+            {
+                <div class="tg-drive-ahead" role="status">@_driveMessage</div>
+            }
+            <div class="tg-drive-actions">
+                <button type="button" aria-pressed="@(_driveVoice ? "true" : "false")" @onclick="() => _driveVoice = !_driveVoice">@(_driveVoice ? "VOICE ON" : "VOICE OFF")</button>
+                <button type="button" @onclick="RecenterDriveAsync">RE-CENTRE</button>
+                <button type="button" @onclick="EndDriveAsync">END DRIVE</button>
+            </div>
+        </div>
+    }
+    @if (_timeMachineOn)
+    {
+        <div class="tg-time-machine" role="region" aria-label="Time machine">
+            <div class="tg-tm-row">
+                <button type="button" class="tg-pill" aria-label="@(_tmPlaying ? "Pause" : "Play forward to now")" @onclick="ToggleTimeMachinePlayAsync">
+                    <i class="bi @(_tmPlaying ? "bi-pause-fill" : "bi-play-fill")" aria-hidden="true"></i>
+                </button>
+                <input type="range" class="tg-tm-slider" min="0" max="@TimeMachineSteps" step="1" value="@(TimeMachineSteps - _tmMinutesAgo / 10)"
+                       aria-label="Time in the past 24 hours" @oninput="OnTimeMachineSliding" @onchange="OnTimeMachineChangedAsync" />
+                <button type="button" class="tg-pill" @onclick="ToggleTimeMachineAsync">LIVE</button>
+            </div>
+            <div class="tg-tm-label" role="status">
+                <strong>@TimeMachineAt.ToLocalGwsDateTime()</strong>
+                <span>@(_tmMinutesAgo == 0 ? "now" : $"{_tmMinutesAgo / 60} h {_tmMinutesAgo % 60:00} min ago")</span>
+                @if (_timeMachine is { } tm)
+                {
+                    <span>· RADAR · @tm.Incidents.Count INCIDENTS · @tm.Earthquakes.Count QUAKES · @tm.Cameras.Count CAMERAS</span>
+                    @if (tm.IncidentHistoryStartsAt is { } since && since > TimeMachineAt)
+                    {
+                        <span class="tg-tm-note">Incident history starts @since.ToLocalGwsDateTime()</span>
+                    }
+                }
+                @if (_tmBusy)
+                {
+                    <span>· LOADING...</span>
+                }
+            </div>
+        </div>
+        @if (_timeMachine is { Cameras.Count: > 0 } withCameras)
+        {
+            <div class="tg-floating-panel tg-tm-cameras" aria-label="Cameras at this time">
+                <div class="tg-coverage-panel-header"><span>CAMERAS AT @TimeMachineAt.ToLocalGwsTime()</span></div>
+                <div class="tg-tm-camera-grid">
+                    @foreach (var camera in withCameras.Cameras)
+                    {
+                        <figure>
+                            <img src="@camera.FrameUrl" alt="@($"{camera.Name} at {camera.CapturedAt.ToLocalGwsTime()}")" loading="lazy" />
+                            <figcaption>@camera.Name · @camera.CapturedAt.ToLocalGwsTime()</figcaption>
+                        </figure>
+                    }
+                </div>
+            </div>
+        }
+    }
+
     @if (_detection is { } detection)
     {
         <div class="tg-floating-panel tg-streetview-panel" aria-label="Camera watch detection">
@@ -202,6 +363,95 @@
                 <div class="tg-route-row tg-streetview-nav">
                     <button type="button" @onclick="() => FlyToPointAsync(watched.Latitude, watched.Longitude)">GO TO CAMERA</button>
                 </div>
+            }
+        </div>
+    }
+
+    @* Briefing: "Brief me" (facts from the server, written by the local model on this computer),
+       or a morning briefing opened from the bell. *@
+    @if (_briefFacts is not null || _morningBrief is not null)
+    {
+        <div class="tg-floating-panel tg-streetview-panel tg-briefing-panel" aria-label="Briefing">
+            <div class="tg-coverage-panel-header">
+                <span>@(_morningBrief is { } morningTitle ? morningTitle.Title.ToUpperInvariant() : $"BRIEFING: {_briefFacts!.Scope.ToUpperInvariant()}")</span>
+                <button type="button" class="tg-panel-close" aria-label="Close" @onclick="CloseBriefing">&times;</button>
+            </div>
+            @if (_morningBrief is { } morning)
+            {
+                <div class="tg-briefing-text">@morning.Message</div>
+                <div class="tg-favorites-empty">Sent @morning.CreatedAt.ToLocalGwsDateTime(). Press the briefing button on the map for an AI-written briefing of any view.</div>
+            }
+            else if (_briefFacts is { } facts)
+            {
+                <div class="tg-favorites-empty">As of @facts.At.ToLocalGwsDateTime() · written by the model on this computer from the numbered sources below</div>
+                @if (_briefModels.Count > 0)
+                {
+                    <div class="tg-route-row">
+                        <select aria-label="Local model" value="@_briefModel" @onchange="e => _briefModel = e.Value?.ToString() ?? string.Empty" disabled="@_briefBusy">
+                            @foreach (var model in _briefModels)
+                            {
+                                <option value="@model">@model</option>
+                            }
+                        </select>
+                        <button type="button" disabled="@_briefBusy" @onclick="WriteBriefingAsync">@(_briefBusy ? "WRITING..." : "REWRITE")</button>
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(_briefError))
+                {
+                    <div class="tg-favorites-empty" role="status">@_briefError</div>
+                }
+                @if (!_briefFailed)
+                {
+                    <div class="tg-briefing-text" role="status" aria-live="polite">@(_briefText?.Text ?? (_briefBusy ? _briefDraft + " ..." : GwsBusinessSuite.Application.Briefings.OverwatchBriefing.PlainText(facts)))</div>
+                }
+                @if (facts.Facts.Count > 0)
+                {
+                    <ol class="tg-coverage-list tg-briefing-sources">
+                        @foreach (var fact in facts.Facts)
+                        {
+                            <li class="tg-coverage-item @(_briefText?.Cited.Contains(fact.Number) == true ? "is-cited" : "")">
+                                <span>[@fact.Number] @fact.Text</span>
+                                @if (fact.Latitude is { } factLat && fact.Longitude is { } factLon)
+                                {
+                                    <button type="button" @onclick="() => FlyToPointAsync(factLat, factLon)">GO</button>
+                                }
+                            </li>
+                        }
+                    </ol>
+                }
+            }
+        </div>
+    }
+
+    @if (_openNote is { } openNote)
+    {
+        <div class="tg-floating-panel tg-streetview-panel" aria-label="Map note">
+            <div class="tg-coverage-panel-header">
+                <span><i class="tg-note-dot" style="background:@openNote.Color" aria-hidden="true"></i>@openNote.Title.ToUpperInvariant()</span>
+                <button type="button" class="tg-panel-close" aria-label="Close" @onclick="() => _openNote = null">&times;</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(openNote.Body))
+            {
+                <div class="tg-briefing-text">@openNote.Body</div>
+            }
+            <div class="tg-favorites-empty">
+                @(openNote.Kind == GwsBusinessSuite.Infrastructure.Services.MapNoteKinds.Area ? "Area" : "Pin") · updated @openNote.UpdatedAt.ToLocalGwsDateTime()@(openNote.Owner != _username ? $" · shared by {openNote.Owner}" : "")
+            </div>
+            <div class="tg-route-row tg-streetview-nav">
+                <button type="button" @onclick="() => FlyToNoteAsync(openNote)">GO</button>
+                @if (openNote.Owner == _username)
+                {
+                    <button type="button" @onclick="() => EditNoteAsync(openNote)">EDIT</button>
+                    <button type="button" title="Copy a link other signed-in admins can open" @onclick="() => ShareNoteAsync(openNote)">@(openNote.IsShared ? "COPY LINK" : "SHARE")</button>
+                    @if (openNote.IsShared)
+                    {
+                        <button type="button" title="Stop the link working" @onclick="() => UnshareNoteAsync(openNote)">UNSHARE</button>
+                    }
+                }
+            </div>
+            @if (!string.IsNullOrEmpty(_noteMessage))
+            {
+                <div class="tg-favorites-empty" role="status">@_noteMessage</div>
             }
         </div>
     }
@@ -377,6 +627,8 @@
                                    title="Open a printable page of these directions">PRINT</a>
                                 <button type="button" title="Copy the directions as text" @onclick="() => CopyDirectionsAsync(route)">COPY</button>
                                 <button type="button" title="Share these directions" @onclick="() => ShareDirectionsAsync(route)">SHARE</button>
+                                <button type="button" title="A short briefing on this drive, written by the model on this computer" @onclick="() => BriefRouteAsync(route)">BRIEF ME</button>
+                                <button type="button" title="Follow this route with your device's location" @onclick="() => StartDriveAsync(route)">DRIVE</button>
                                 <button type="button" @onclick="ClearRouteAsync">CLEAR ROUTE</button>
                             </div>
                             @if (!string.IsNullOrEmpty(_directionsMessage))
@@ -601,6 +853,77 @@
                             }
                         </ul>
                     }
+                    <div class="tg-route-subheader">MAP NOTES</div>
+                    @if (_noteDraft is { } draft)
+                    {
+                        <form class="tg-route-form" @onsubmit="SaveNoteAsync" @onsubmit:preventDefault>
+                            <div class="tg-favorites-empty" role="status">
+                                @if (draft.Kind == GwsBusinessSuite.Infrastructure.Services.MapNoteKinds.Pin)
+                                {
+                                    @(draft.Points.Count == 0 ? "Click the map where the pin goes." : "Pin placed. Click PLACE AGAIN to move it.")
+                                }
+                                else
+                                {
+                                    @($"Click the map to add each corner ({draft.Points.Count} so far, 3 or more needed).")
+                                }
+                            </div>
+                            <div class="tg-area-actions">
+                                @if (draft.Kind == GwsBusinessSuite.Infrastructure.Services.MapNoteKinds.Pin && draft.Points.Count > 0)
+                                {
+                                    <button type="button" @onclick="RestartNotePickAsync">PLACE AGAIN</button>
+                                }
+                                @if (draft.Kind == GwsBusinessSuite.Infrastructure.Services.MapNoteKinds.Area && draft.Points.Count > 0)
+                                {
+                                    <button type="button" @onclick="UndoNotePointAsync">UNDO CORNER</button>
+                                }
+                            </div>
+                            <input aria-label="Note title" placeholder="TITLE" maxlength="80" value="@draft.Title" @oninput="e => draft.Title = e.Value?.ToString() ?? string.Empty" />
+                            <textarea aria-label="Note" placeholder="NOTE (OPTIONAL)" maxlength="2000" rows="3" class="tg-note-body"
+                                      @oninput="e => draft.Body = e.Value?.ToString() ?? string.Empty">@draft.Body</textarea>
+                            <div class="tg-note-colors" role="radiogroup" aria-label="Colour">
+                                @foreach (var colour in GwsBusinessSuite.Infrastructure.Services.MapNoteService.Colors)
+                                {
+                                    <button type="button" role="radio" aria-checked="@(draft.Color == colour ? "true" : "false")" aria-label="@($"Colour {colour}")"
+                                            class="tg-note-swatch @(draft.Color == colour ? "is-on" : "")" style="background:@colour" @onclick="() => SetNoteColorAsync(colour)"></button>
+                                }
+                            </div>
+                            <div class="tg-area-actions">
+                                <button type="submit" disabled="@(string.IsNullOrWhiteSpace(draft.Title))">SAVE</button>
+                                <button type="button" @onclick="CancelNoteAsync">CANCEL</button>
+                            </div>
+                        </form>
+                    }
+                    else
+                    {
+                        <div class="tg-route-row tg-note-new">
+                            <button type="button" @onclick='() => StartNoteAsync(GwsBusinessSuite.Infrastructure.Services.MapNoteKinds.Pin)'>+ PIN</button>
+                            <button type="button" @onclick='() => StartNoteAsync(GwsBusinessSuite.Infrastructure.Services.MapNoteKinds.Area)'>+ AREA</button>
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(_noteMessage))
+                    {
+                        <div class="tg-favorites-empty" role="status">@_noteMessage</div>
+                    }
+                    @if (_notes.Count == 0 && _noteDraft is null)
+                    {
+                        <div class="tg-favorites-empty">Drop a pin or draw an area to mark something on the map: a staging spot, a camera blind spot, a road to avoid. Only you see your notes unless you share one.</div>
+                    }
+                    else if (_notes.Count > 0)
+                    {
+                        <ul class="tg-coverage-list">
+                            @foreach (var note in _notes)
+                            {
+                                <li class="tg-coverage-item">
+                                    <span><i class="tg-note-dot" style="background:@note.Color" aria-hidden="true"></i>@note.Title<small>@(note.Kind == GwsBusinessSuite.Infrastructure.Services.MapNoteKinds.Area ? "AREA" : "PIN")@(note.IsShared ? " · SHARED" : "") · @note.UpdatedAt.ToLocalGwsDateTime()</small></span>
+                                    <span class="tg-area-actions">
+                                        <button type="button" @onclick="() => OpenNoteAsync(note)">GO</button>
+                                        <button type="button" @onclick="() => EditNoteAsync(note)">EDIT</button>
+                                        <button type="button" aria-label="@($"Delete note {note.Title}")" @onclick="() => DeleteNoteAsync(note)">X</button>
+                                    </span>
+                                </li>
+                            }
+                        </ul>
+                    }
                     break;
                 case "areas":
                     <div class="tg-coverage-panel-header">CAMERA WATCH</div>
@@ -662,12 +985,29 @@
                                         <small>@AreaDescription(area)</small></span>
                                     <span class="tg-area-actions">
                                         <button type="button" @onclick="() => GoToAreaAsync(area)">GO</button>
+                                        <button type="button" aria-label="@($"Brief me on {area.Name}")" @onclick="() => BriefAreaAsync(area)">BRIEF</button>
                                         <button type="button" aria-label="@($"Stop watching {area.Name}")" @onclick="() => RemoveAreaAsync(area)">X</button>
                                     </span>
                                 </li>
                             }
                         </ul>
                     }
+                    <div class="tg-coverage-panel-header">MORNING BRIEFING</div>
+                    <form class="tg-route-form" @onsubmit="SaveMorningBriefingAsync" @onsubmit:preventDefault>
+                        <div class="tg-area-options">
+                            <label><input type="checkbox" @bind="_morningEnabled" /> EVERY DAY AT</label>
+                            <select aria-label="Hour to send the morning briefing" value="@_morningHour" @onchange="e => _morningHour = int.TryParse(e.Value?.ToString(), out var hour) ? hour : 7">
+                                @for (var hour = 0; hour < 24; hour++)
+                                {
+                                    <option value="@hour">@hour.ToString("00"):00</option>
+                                }
+                            </select>
+                        </div>
+                        <input type="email" aria-label="Email the briefing to (optional)" placeholder="ALSO EMAIL TO (OPTIONAL)" maxlength="254"
+                               value="@_morningEmail" @oninput="e => _morningEmail = e.Value?.ToString() ?? string.Empty" />
+                        <button type="submit" disabled="@_morningBusy">SAVE</button>
+                    </form>
+                    <div class="tg-favorites-empty" role="status">@(_morningMessage ?? "A plain summary of each watched area and your 5 most recent saved trips, to the bell (and email" + (Briefings.CanEmail() ? "" : " once SMTP is set up in Settings") + ").")</div>
                     @if (_captures.Count > 0)
                     {
                         <div class="tg-route-subheader">CAPTURES <small>(cameras recorded around new incidents)</small></div>
@@ -684,6 +1024,8 @@
                                             <button type="button" disabled="@(frameCount == 0)" title="@camera.Name (@camera.MilesAway.ToString("0.0") mi away)"
                                                     @onclick="() => OpenCaptureCameraAsync(capture, camera)">CAM @(capture.Cameras.IndexOf(camera) + 1) (@frameCount)</button>
                                         }
+                                        <a class="tg-link-btn" href="@($"/admin/api/overwatch/incident-report?capture={capture.Id}")" target="_blank" rel="noopener"
+                                           title="A PDF of this capture: details, map, weather and the recorded frames">REPORT</a>
                                         <button type="button" aria-label="@($"Delete capture {capture.Title}")" @onclick="() => DeleteCapture(capture)">X</button>
                                     </span>
                                 </li>
@@ -700,6 +1042,10 @@
         <button type="button" class="tg-icon-btn" aria-label="Zoom in" title="Zoom in" @onclick="() => ZoomAsync(true)"><i class="bi bi-plus-lg" aria-hidden="true"></i></button>
         <button type="button" class="tg-icon-btn" aria-label="Zoom out" title="Zoom out" @onclick="() => ZoomAsync(false)"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
         <button type="button" class="tg-icon-btn" aria-label="Whole globe" title="Whole globe" @onclick="GoHomeAsync"><i class="bi bi-globe-americas" aria-hidden="true"></i></button>
+        <button type="button" class="tg-icon-btn @(_timeMachineOn ? "is-active" : "")" aria-label="Time machine: see the past 24 hours" title="Time machine: see the past 24 hours"
+                aria-pressed="@(_timeMachineOn ? "true" : "false")" @onclick="ToggleTimeMachineAsync"><i class="bi bi-clock-history" aria-hidden="true"></i></button>
+        <button type="button" class="tg-icon-btn @(_briefFacts is not null ? "is-active" : "")" aria-label="Brief me on this view" title="Brief me on this view"
+                @onclick="BriefViewAsync"><i class="bi bi-card-text" aria-hidden="true"></i></button>
         <button type="button" class="tg-icon-btn tg-streetview-btn @(_streetPicking ? "is-active" : "")" data-tg-streetview draggable="true"
                 aria-label="Street view: click here, then click the map (or drag me onto the map)"
                 title="Street view: drag me onto the map, or click me and then click the map" aria-pressed="@(_streetPicking ? "true" : "false")"
@@ -713,11 +1059,24 @@
 
     @if (_hasAnyProviderConfigured && _hasSettledOnce && _visibleCameras.Count == 0 && !_emptyHintDismissed)
     {
-        <div class="tg-empty-hint">
-            <span>
-                NO KNOWN CAMERA COVERAGE IN THIS AREA &mdash; try Washington State (WSDOT) or zoom
-                out for broader Windy webcam coverage.
-            </span>
+        var suggestions = GwsBusinessSuite.Application.CameraIntel.CoverageGapHelper.Nearest(_lastBbox, CameraCoverageRegions.All);
+        <div class="tg-empty-hint" role="status">
+            <div class="tg-empty-hint-body">
+                <span>NO CAMERAS IN THIS VIEW@(_incidentsOn && _lastIncidents.Count == 0 ? " AND NO INCIDENTS LISTED" : "").
+                    @(suggestions.Count > 0 ? "Nearest areas with camera coverage:" : "Zoom out for scattered webcams.")</span>
+                @if (suggestions.Count > 0)
+                {
+                    <ul class="tg-gap-list">
+                        @foreach (var suggestion in suggestions)
+                        {
+                            <li>
+                                <span>@suggestion.Region.Name <small>@suggestion.Miles.ToString("N0") mi @suggestion.Direction</small></span>
+                                <button type="button" @onclick="() => FlyToRegionAsync(suggestion.Region)">GO</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
             <button type="button" class="tg-empty-hint-close" aria-label="Dismiss" @onclick="() => _emptyHintDismissed = true">&times;</button>
         </div>
     }
@@ -753,6 +1112,17 @@
     // ?detection={alertId} - a camera-watch bell alert opens its before/after frames.
     [SupplyParameterFromQuery(Name = "detection")]
     public Guid? DetectionId { get; set; }
+
+    // ?note={id}&key={shareKey} - a shared map note (the owner needs no key).
+    [SupplyParameterFromQuery(Name = "note")]
+    public Guid? NoteId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "key")]
+    public string? NoteKey { get; set; }
+
+    // ?briefing={alertId} - a morning briefing opened from the bell.
+    [SupplyParameterFromQuery(Name = "briefing")]
+    public Guid? BriefingId { get; set; }
 
     // ?route=Macon, GA&route=Atlanta, GA - a shared or printed route reopens in DIRECTIONS.
     [SupplyParameterFromQuery(Name = "route")]
@@ -818,7 +1188,7 @@
             // circuit, which is why the reported symptom was "nothing on the page responds
             // anymore," not just "the globe didn't load." Catching it here keeps a future JS
             // regression contained to this one page instead of freezing the whole app.
-            await JS.InvokeVoidAsync("tacticalGlobe.init", "tg-viewport", _dotNetRef);
+            await JS.InvokeVoidAsync("tacticalGlobe.init", "tg-viewport", _dotNetRef, new { ionToken = IonToken });
         }
         catch (JSException ex)
         {
@@ -826,6 +1196,18 @@
             _initError = "The globe failed to start. Check the browser console for details, or try reloading.";
             StateHasChanged();
             return;
+        }
+
+        if (IonToken is not null)
+        {
+            try
+            {
+                await SetThreeDAsync(true);
+            }
+            catch (JSException ex)
+            {
+                Logger.LogWarning(ex, "Overwatch 3D cities failed to start");
+            }
         }
 
         if (AreaId is { } areaId && await OverwatchAreaService.GetAreaAsync(_username, areaId) is { } linkedArea)
@@ -845,6 +1227,28 @@
             _detection = found.Alert;
             _detectionCamera = found.Camera;
             if (found.Camera is { } camera) await FlyToPointAsync(camera.Latitude, camera.Longitude);
+            StateHasChanged();
+        }
+
+        _notes = (await MapNotes.ListAsync(_username)).ToList();
+        if (NoteId is { } noteId)
+        {
+            if (await MapNotes.OpenAsync(_username, noteId, NoteKey) is { } linkedNote)
+            {
+                if (linkedNote.Owner != _username) _sharedNote = linkedNote;
+                await OpenNoteAsync(linkedNote);
+            }
+            else
+            {
+                _noteMessage = "That map note link doesn't work any more.";
+                _panelTab = _lastPanelTab = "saved";
+            }
+        }
+        await PushNotesAsync();
+
+        if (BriefingId is { } briefingId && await Briefings.GetMorningAlertAsync(_username, briefingId) is { } morning)
+        {
+            _morningBrief = morning;
             StateHasChanged();
         }
 
@@ -1045,80 +1449,97 @@
 
     public sealed record SharedCameraDto(string Id, string Name, double Lat, double Lon, string StreamUrl, string StreamKind, string SourceName, string SourceAttributionUrl);
 
-    private static readonly Task<IReadOnlyList<WeatherAlert>> NoAlerts = Task.FromResult<IReadOnlyList<WeatherAlert>>([]);
-    private static readonly Task<IReadOnlyList<TrafficIncident>> NoIncidents = Task.FromResult<IReadOnlyList<TrafficIncident>>([]);
-
     // Raised by tactical-globe.js's camera.moveEnd handler once the view settles after a
     // drag/zoom (see initGlobe) - degrees, matching Cesium's own Rectangle-to-degrees output.
-    //
-    // Perf note: cameras/alerts/incidents/weather are 4 independent external lookups - none
-    // needs another's result to start - but this used to await them one at a time (camera fetch,
-    // then a JS round trip, then alerts, then incidents, then weather), so every pan/zoom paid
-    // roughly the SUM of every enabled layer's latency instead of just the slowest one. That
-    // chain got materially worse as this session's Overwatch coverage expansion grew the camera/
-    // incident provider count well past what it was when this handler was first written (each
-    // directory service already fans out across its own providers in parallel - see
-    // CameraDirectoryService/TrafficIncidentDirectoryService - the serialization was only ever
-    // at this level). Fanning all 4 out together and awaiting them as a group cuts the
-    // steady-state per-settle latency to roughly the slowest single one.
+    // Every layer is an independent external lookup, so they all start together (each directory
+    // service also fans out across its own providers in parallel).
+    // Perf (2026-10-12, Overwatch standout item 11): every layer used to be awaited together and
+    // only then drawn, so the camera pins - the core of the page - waited for the slowest optional
+    // layer on every pan (ODIN and the hazard feeds allow up to 25 s). Each layer now draws as
+    // soon as its own data arrives, and a view generation stops a slow answer for an old view
+    // from overwriting a newer one. Layers slower than SlowLayer are logged with their time.
+    private static readonly TimeSpan SlowLayer = TimeSpan.FromSeconds(4);
+    private int _viewGeneration;
+
     [JSInvokable]
     public async Task OnGlobeViewChanged(double north, double south, double east, double west)
     {
         _lastBbox = new BoundingBox(north, south, east, west);
         _hasSettledOnce = true;
+        var generation = ++_viewGeneration;
+        if (_timeMachineOn && !_tmPlaying) _ = InvokeAsync(async () => { await LoadTimeMachineAsync(); StateHasChanged(); });
 
         var centerLatitude = (north + south) / 2.0;
         var centerLongitude = (east + west) / 2.0;
+        bool Current() => generation == _viewGeneration;
 
-        var camerasTask = CameraDirectoryService.GetCamerasForViewAsync(_lastBbox,
-            include: _hideUnhealthy ? c => !IsKnownUnhealthy(c.Id) : null);
-        var alertsTask = _alertsOn ? NwsAlertsService.GetActiveAlertsAsync(_lastBbox) : NoAlerts;
-        var incidentsTask = _incidentsOn ? TrafficIncidentDirectoryService.GetIncidentsInBoundingBoxAsync(_lastBbox) : NoIncidents;
-        var weatherTask = NwsForecastService.GetSnapshotAsync(centerLatitude, centerLongitude);
-        var hazardsTask = _hazardsOn ? PushHazardsAsync() : Task.CompletedTask;
-        var radarTask = _radarOn ? PushRadarAsync(centerLatitude, centerLongitude) : Task.CompletedTask;
-        var signsTask = _signsOn ? PushSignsAsync() : Task.CompletedTask;
-        var roadWeatherTask = _roadWeatherOn ? PushRoadWeatherAsync() : Task.CompletedTask;
-        await Task.WhenAll(camerasTask, alertsTask, incidentsTask, weatherTask, hazardsTask, radarTask, signsTask, roadWeatherTask);
+        await Task.WhenAll(
+            TimedAsync("cameras", async () =>
+            {
+                var result = await CameraDirectoryService.GetCamerasForViewAsync(_lastBbox,
+                    include: _hideUnhealthy ? c => !IsKnownUnhealthy(c.Id) : null);
+                if (!Current()) return;
+                _visibleCameras = result.Cameras.ToList();
+                _camerasInViewTotal = result.TotalInView;
+                // Reset the dismiss so a future empty area shows the hint again - this isn't a
+                // one-time app-level notice like the provider-setup banner, it's per-location
+                // information that should reappear whenever it becomes true again.
+                if (_visibleCameras.Count > 0) _emptyHintDismissed = false;
+                StateHasChanged();
+                await JS.InvokeVoidAsync("tacticalGlobe.setCameraPins", _visibleCameras.Select(ToPinPayload).ToList());
+            }),
+            _alertsOn ? TimedAsync("alerts", async () =>
+            {
+                var alerts = await NwsAlertsService.GetActiveAlertsAsync(_lastBbox);
+                if (Current() && _alertsOn) await ApplyAlertsAsync(alerts);
+            }) : Task.CompletedTask,
+            _incidentsOn ? TimedAsync("incidents", async () =>
+            {
+                var incidents = await TrafficIncidentDirectoryService.GetIncidentsInBoundingBoxAsync(_lastBbox);
+                if (Current() && _incidentsOn) await ApplyIncidentsAsync(incidents);
+            }) : Task.CompletedTask,
+            // Weather-on-zoom: always kept current for wherever the view is centered, not gated
+            // behind a toggle - matches cameras/pins being always-on rather than opt-in.
+            TimedAsync("weather", async () =>
+            {
+                var weather = await NwsForecastService.GetSnapshotAsync(centerLatitude, centerLongitude);
+                if (!Current()) return;
+                await JS.InvokeVoidAsync("tacticalGlobe.setWeatherSnapshot", weather is null ? null : new
+                {
+                    currentTemperatureFahrenheit = weather.CurrentTemperatureFahrenheit,
+                    currentConditions = weather.CurrentConditions,
+                    forecastTemperatureFahrenheit = weather.ForecastTemperatureFahrenheit,
+                    shortForecast = weather.ShortForecast,
+                    detailedForecast = weather.DetailedForecast,
+                    windSpeed = weather.WindSpeed,
+                    windDirection = weather.WindDirection,
+                    chanceOfPrecipitationPercent = weather.ChanceOfPrecipitationPercent
+                });
+            }),
+            _hazardsOn ? TimedAsync("hazards", PushHazardsAsync) : Task.CompletedTask,
+            _radarOn ? TimedAsync("radar", () => PushRadarAsync(centerLatitude, centerLongitude)) : Task.CompletedTask,
+            _signsOn ? TimedAsync("signs", PushSignsAsync) : Task.CompletedTask,
+            _roadWeatherOn ? TimedAsync("road temps", PushRoadWeatherAsync) : Task.CompletedTask,
+            _aircraftOn || _airQualityOn ? TimedAsync("air", PushAirLayersAsync) : Task.CompletedTask,
+            _outagesOn ? TimedAsync("power outages", PushOutagesAsync) : Task.CompletedTask);
+        if (Current()) StateHasChanged();
+    }
 
-        _visibleCameras = camerasTask.Result.Cameras.ToList();
-        _camerasInViewTotal = camerasTask.Result.TotalInView;
-        // Reset the dismiss so a future empty area shows the hint again - this isn't a
-        // one-time app-level notice like the provider-setup banner, it's per-location
-        // information that should reappear whenever it becomes true again.
-        if (_visibleCameras.Count > 0)
+    // Runs one layer's load-and-draw; logs it when slow, and keeps one layer's failure from
+    // stopping the others (they all run side by side).
+    private async Task TimedAsync(string layer, Func<Task> load)
+    {
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
         {
-            _emptyHintDismissed = false;
+            await load();
         }
-        StateHasChanged();
-
-        var pins = _visibleCameras.Select(ToPinPayload).ToList();
-        await JS.InvokeVoidAsync("tacticalGlobe.setCameraPins", pins);
-
-        if (_alertsOn)
+        catch (Exception ex) when (ex is not OperationCanceledException and not JSDisconnectedException)
         {
-            await ApplyAlertsAsync(alertsTask.Result);
+            Logger.LogWarning(ex, "Overwatch layer {Layer} failed", layer);
         }
-
-        if (_incidentsOn)
-        {
-            await ApplyIncidentsAsync(incidentsTask.Result);
-        }
-
-        // Weather-on-zoom: always kept current for wherever the view is centered, not gated
-        // behind a toggle - matches cameras/pins being always-on rather than opt-in.
-        var weather = weatherTask.Result;
-        await JS.InvokeVoidAsync("tacticalGlobe.setWeatherSnapshot", weather is null ? null : new
-        {
-            currentTemperatureFahrenheit = weather.CurrentTemperatureFahrenheit,
-            currentConditions = weather.CurrentConditions,
-            forecastTemperatureFahrenheit = weather.ForecastTemperatureFahrenheit,
-            shortForecast = weather.ShortForecast,
-            detailedForecast = weather.DetailedForecast,
-            windSpeed = weather.WindSpeed,
-            windDirection = weather.WindDirection,
-            chanceOfPrecipitationPercent = weather.ChanceOfPrecipitationPercent
-        });
+        var elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started);
+        if (elapsed > SlowLayer) Logger.LogInformation("Overwatch layer {Layer} took {Seconds:0.0} s", layer, elapsed.TotalSeconds);
     }
 
     // Bound to both the RADAR button and tactical-globe.js's "R" keydown shortcut (which
@@ -1506,7 +1927,7 @@
     private bool _helpOpen;
 
     private int ActiveLayerCount =>
-        new[] { _radarOn, _alertsOn, _incidentsOn, _hazardsOn, _signsOn, _roadWeatherOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
+        new[] { _radarOn, _alertsOn, _incidentsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _outagesOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
 
     private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {
@@ -1525,6 +1946,8 @@
             case "areas":
                 _areaMessage = null;
                 _cameraWatchStatus = await CameraWatch.GetStatusAsync(_username);
+                var morningSettings = await Briefings.GetSettingsAsync(_username);
+                (_morningEnabled, _morningHour, _morningEmail, _morningMessage) = (morningSettings.Enabled, morningSettings.Hour, morningSettings.Email, null);
                 _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
                 _captures = IncidentCaptureService.ListForUser(_username).ToList();
                 break;
@@ -1599,9 +2022,20 @@
         _streetIndex = 0;
         StateHasChanged();
         await JS.InvokeVoidAsync("tacticalGlobe.setStreetViewMarker", "tg-viewport", latitude, longitude);
+        // The globe flies down to the street while the panorama is looked up.
+        var flight = JS.InvokeVoidAsync("tacticalGlobe.flyToStreetLevel", "tg-viewport", latitude, longitude, 0).AsTask();
         try
         {
-            if (await StreetLevelImagery.GetSceneAsync(latitude, longitude) is { } scene)
+            var found = await StreetLevelImagery.GetSceneAsync(latitude, longitude);
+            try
+            {
+                await flight;
+            }
+            catch (JSException)
+            {
+                // Only the transition failed; the panorama still opens.
+            }
+            if (found is { } scene)
             {
                 _streetScene = scene;
                 _streetSceneNeedsOpen = true;
@@ -1695,6 +2129,634 @@
     private GwsBusinessSuite.Domain.Entities.OverwatchAreaAlert? _detection;
     private GwsBusinessSuite.Domain.Entities.OverwatchCameraWatchState? _detectionCamera;
 
+    // ---- Time machine (TimeMachineService): the past 24 hours, 10 minutes at a time ----
+    private const int TimeMachineSteps = 144;
+    private bool _timeMachineOn;
+    private int _tmMinutesAgo = 60;
+    private bool _tmBusy;
+    private bool _tmPlaying;
+    private CancellationTokenSource? _tmPlay;
+    private DateTimeOffset _tmNow = DateTimeOffset.UtcNow;
+    private GwsBusinessSuite.Infrastructure.Services.TimeMachineSnapshot? _timeMachine;
+    private (bool Radar, bool Incidents, bool Hazards) _tmSavedLayers;
+
+    private DateTimeOffset TimeMachineAt => _tmNow.AddMinutes(-_tmMinutesAgo);
+
+    private async Task ToggleTimeMachineAsync()
+    {
+        if (!_timeMachineOn)
+        {
+            // Live layers off while looking at the past, so the two never mix; restored on LIVE.
+            _tmSavedLayers = (_radarOn, _incidentsOn, _hazardsOn);
+            if (_radarOn) await ToggleRadarAsync();
+            if (_incidentsOn) await ToggleIncidentsAsync();
+            if (_hazardsOn) await ToggleHazardsAsync();
+            _timeMachineOn = true;
+            _tmNow = DateTimeOffset.UtcNow;
+            _tmMinutesAgo = 60;
+            await LoadTimeMachineAsync();
+            return;
+        }
+        StopTimeMachinePlay();
+        _timeMachineOn = false;
+        _timeMachine = null;
+        await JS.InvokeVoidAsync("tacticalGlobe.clearTimeMachine", "tg-viewport");
+        if (_tmSavedLayers.Radar && !_radarOn) await ToggleRadarAsync();
+        if (_tmSavedLayers.Incidents && !_incidentsOn) await ToggleIncidentsAsync();
+        if (_tmSavedLayers.Hazards && !_hazardsOn) await ToggleHazardsAsync();
+    }
+
+    private void OnTimeMachineSliding(ChangeEventArgs args)
+    {
+        if (int.TryParse(args.Value?.ToString(), out var step)) _tmMinutesAgo = (TimeMachineSteps - Math.Clamp(step, 0, TimeMachineSteps)) * 10;
+    }
+
+    private async Task OnTimeMachineChangedAsync(ChangeEventArgs args)
+    {
+        OnTimeMachineSliding(args);
+        StopTimeMachinePlay();
+        await LoadTimeMachineAsync();
+    }
+
+    private async Task LoadTimeMachineAsync()
+    {
+        if (!_timeMachineOn) return;
+        _tmBusy = true;
+        try
+        {
+            var snapshot = await TimeMachine.GetAsync(_username, _lastBbox, TimeMachineAt);
+            _timeMachine = snapshot;
+            await JS.InvokeVoidAsync("tacticalGlobe.setTimeMachine", "tg-viewport", new
+            {
+                radarTileUrl = snapshot.RadarTileUrl,
+                incidents = snapshot.Incidents.Select(i => new
+                {
+                    lat = i.Latitude, lon = i.Longitude, category = i.Category,
+                    title = $"{GwsBusinessSuite.Application.TrafficIncidents.IncidentCategories.Label(i.Category)}: {i.RoadwayName}"
+                }),
+                earthquakes = snapshot.Earthquakes.Select(q => new { lat = q.Latitude, lon = q.Longitude, title = q.Title })
+            });
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Time machine failed to load");
+        }
+        finally
+        {
+            _tmBusy = false;
+        }
+    }
+
+    // ---- Briefings (OverwatchBriefingService): the server gathers numbered facts, and the model
+    // on this computer's Ollama writes them up citing [n]. Without Ollama the plain summary shows. ----
+    private static readonly TimeSpan BriefingTimeout = TimeSpan.FromMinutes(2);
+    private GwsBusinessSuite.Application.Briefings.BriefingFacts? _briefFacts;
+    private GwsBusinessSuite.Application.Briefings.BriefingText? _briefText;
+    private GwsBusinessSuite.Domain.Entities.OverwatchAreaAlert? _morningBrief;
+    private List<string> _briefModels = new();
+    private string _briefModel = string.Empty;
+    private string _briefDraft = string.Empty;
+    private string? _briefError;
+    private bool _briefBusy;
+    private bool _briefFailed;
+    private CancellationTokenSource? _briefCts;
+    private bool _morningEnabled;
+    private int _morningHour = 7;
+    private string _morningEmail = string.Empty;
+    private string? _morningMessage;
+    private bool _morningBusy;
+
+    private Task BriefViewAsync() =>
+        BriefAsync(() => Briefings.GetViewFactsAsync(_username, "this view", _lastBbox));
+
+    private Task BriefAreaAsync(GwsBusinessSuite.Infrastructure.Services.OverwatchAreaView area) =>
+        BriefAsync(async () =>
+        {
+            await GoToAreaAsync(area);
+            return await Briefings.GetViewFactsAsync(_username, area.Name, area.Bounds);
+        });
+
+    private Task BriefRouteAsync(GwsBusinessSuite.Application.RouteWatch.RouteWatchResult route) =>
+        BriefAsync(() => Briefings.GetRouteFactsAsync(_username, $"{route.From} to {route.To}", route));
+
+    private async Task BriefAsync(Func<Task<GwsBusinessSuite.Application.Briefings.BriefingFacts>> gather)
+    {
+        CloseBriefing();
+        _briefBusy = true;
+        _briefError = null;
+        try
+        {
+            _briefFacts = await gather();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Briefing facts failed");
+            _briefBusy = false;
+            _briefFacts = new("this view", DateTimeOffset.UtcNow, []);
+            _briefFailed = true;
+            _briefError = "Couldn't gather what's happening here just now. Try again in a minute.";
+            return;
+        }
+        StateHasChanged();
+        await LoadBriefModelsAsync();
+        if (_briefModels.Count == 0)
+        {
+            _briefBusy = false;
+            return;
+        }
+        await WriteBriefingAsync();
+    }
+
+    private async Task LoadBriefModelsAsync()
+    {
+        if (_briefModels.Count > 0) return;
+        try
+        {
+            _localModels ??= new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            var status = await _localModels.ProbeAsync();
+            if (!status.IsReachable)
+            {
+                _briefError = (status.Error ?? "Ollama isn't reachable on this computer.") + " Showing the plain summary instead.";
+                return;
+            }
+            // Embedding models can't write text.
+            _briefModels = status.Models.Where(m => !m.Contains("embed", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
+            _briefModel = _briefModels.FirstOrDefault(m => m.StartsWith("gemma", StringComparison.OrdinalIgnoreCase)) ?? _briefModels.FirstOrDefault() ?? string.Empty;
+            if (_briefModels.Count == 0) _briefError = "No models are installed in this computer's Ollama. Showing the plain summary instead.";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Couldn't list local Ollama models for a briefing");
+            _briefError = "Couldn't reach Ollama on this computer. Showing the plain summary instead.";
+        }
+    }
+
+    private async Task WriteBriefingAsync()
+    {
+        if (_briefFacts is not { } facts || _localModels is null || string.IsNullOrWhiteSpace(_briefModel)) return;
+        _briefCts?.Cancel();
+        var cts = _briefCts = new CancellationTokenSource(BriefingTimeout);
+        _briefBusy = true;
+        _briefError = null;
+        _briefText = null;
+        _briefDraft = string.Empty;
+        var lastPaint = DateTime.UtcNow;
+        try
+        {
+            await foreach (var chunk in _localModels.GenerateStreamAsync(_briefModel,
+                               GwsBusinessSuite.Application.Briefings.OverwatchBriefing.SystemPrompt,
+                               GwsBusinessSuite.Application.Briefings.OverwatchBriefing.UserPrompt(facts), cts.Token))
+            {
+                _briefDraft += chunk;
+                if (DateTime.UtcNow - lastPaint > TimeSpan.FromMilliseconds(250))
+                {
+                    lastPaint = DateTime.UtcNow;
+                    StateHasChanged();
+                }
+            }
+            if (_briefCts == cts) _briefText = GwsBusinessSuite.Application.Briefings.OverwatchBriefing.Clean(_briefDraft, facts);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            if (_briefCts == cts && _briefFacts is not null) _briefError = "The model took too long. Showing the plain summary instead.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The relay's own failures are already worded for the person reading them.
+            _briefError = ex.Message;
+        }
+        finally
+        {
+            if (_briefCts == cts) _briefBusy = false;
+        }
+    }
+
+    private void CloseBriefing()
+    {
+        _briefCts?.Cancel();
+        _briefCts = null;
+        _briefFacts = null;
+        _briefText = null;
+        _briefDraft = string.Empty;
+        _briefError = null;
+        _briefBusy = false;
+        _briefFailed = false;
+        _morningBrief = null;
+    }
+
+    private async Task SaveMorningBriefingAsync()
+    {
+        _morningBusy = true;
+        try
+        {
+            await Briefings.SaveSettingsAsync(_username, _morningEnabled, _morningHour, _morningEmail);
+            _morningMessage = _morningEnabled
+                ? $"Saved. Your briefing comes daily at {_morningHour:00}:00{(_morningEmail.Trim().Length > 0 ? (Briefings.CanEmail() ? " by bell and email" : " to the bell (email once SMTP is set up)") : " to the bell")}."
+                : "Saved. The morning briefing is off.";
+        }
+        catch (ArgumentException ex)
+        {
+            _morningMessage = ex.Message;
+        }
+        finally
+        {
+            _morningBusy = false;
+        }
+    }
+
+    // ---- Drive mode: DriveGuide does the route maths; tactical-globe.js watches the GPS and speaks. ----
+    private static readonly TimeSpan DriveIncidentCheck = TimeSpan.FromMinutes(5);
+    private GwsBusinessSuite.Application.RouteWatch.DriveGuide? _drive;
+    private GwsBusinessSuite.Application.RouteWatch.DriveState? _driveState;
+    private readonly List<GwsBusinessSuite.Application.RouteWatch.RouteIncident> _driveClosures = new();
+    private (double Latitude, double Longitude)? _driveHere;
+    private double? _driveSpeedMph;
+    private bool _driveVoice = true;
+    private bool _driveBusy;
+    private string? _driveMessage;
+    private long _driveCameraTick;
+    private CancellationTokenSource? _driveCts;
+
+    private async Task StartDriveAsync(GwsBusinessSuite.Application.RouteWatch.RouteWatchResult route)
+    {
+        await EndDriveAsync();
+        _drive = new GwsBusinessSuite.Application.RouteWatch.DriveGuide(route);
+        _driveMessage = null;
+        var started = await JS.InvokeAsync<string>("tacticalGlobe.startDrive", "tg-viewport");
+        if (started != "started")
+        {
+            _drive = null;
+            _directionsMessage = "Drive mode needs this device's location, which this browser doesn't offer.";
+            return;
+        }
+        var cts = _driveCts = new CancellationTokenSource();
+        _ = WatchDriveIncidentsAsync(cts.Token);
+    }
+
+    [JSInvokable]
+    public Task OnDrivePosition(double latitude, double longitude, double? accuracyMeters, double? speedMetersPerSecond) =>
+        InvokeAsync(async () =>
+        {
+            if (_drive is not { } guide) return;
+            _driveHere = (latitude, longitude);
+            _driveSpeedMph = speedMetersPerSecond is { } mps && mps >= 0 ? mps * 2.23694 : null;
+            _driveCameraTick = DateTimeOffset.UtcNow.ToUnixTimeSeconds() / 30;
+            var update = guide.Update(new GwsBusinessSuite.Application.RouteWatch.DriveFix(latitude, longitude, accuracyMeters, speedMetersPerSecond));
+            _driveState = update.State;
+            if (_driveMessage is not null && _driveMessage.StartsWith("Location", StringComparison.Ordinal)) _driveMessage = null;
+            foreach (var line in update.Announcements) await SpeakAsync(line);
+            StateHasChanged();
+        });
+
+    [JSInvokable]
+    public Task OnDriveError(string message) =>
+        InvokeAsync(() =>
+        {
+            _driveMessage = message;
+            StateHasChanged();
+        });
+
+    // Every few minutes: closures that appeared on the road ahead since the route was planned.
+    private async Task WatchDriveIncidentsAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(DriveIncidentCheck, ct);
+                if (_drive is not { } guide) return;
+                IReadOnlyList<TrafficIncident> fresh;
+                try
+                {
+                    fresh = await TrafficIncidentDirectoryService.GetIncidentsInBoundingBoxAsync(guide.RemainingBounds(), ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    Logger.LogWarning(ex, "Drive mode incident check failed");
+                    continue;
+                }
+                await InvokeAsync(async () =>
+                {
+                    if (!ReferenceEquals(_drive, guide)) return;
+                    var added = guide.AddFreshIncidents(fresh);
+                    _driveClosures.AddRange(added);
+                    foreach (var closure in added)
+                    {
+                        await SpeakAsync($"New closure reported {GwsBusinessSuite.Application.RouteWatch.DriveGuide.MilesText(closure.MilesAlong - (_driveState?.MilesAlong ?? 0))} ahead on {closure.Incident.RoadwayName}. Press reroute to go around it.");
+                    }
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task RerouteAroundAsync(GwsBusinessSuite.Application.RouteWatch.RouteIncident closure)
+    {
+        if (_drive is not { } guide || _driveHere is not { } here) return;
+        var ahead = guide.StopsAhead();
+        if (ahead.Count == 0) return;
+        _driveBusy = true;
+        try
+        {
+            var via = await RouteWatchService.FindDetourViaAsync(new(here.Latitude, here.Longitude), new(ahead[0].Latitude, ahead[0].Longitude),
+                new(closure.Incident.Latitude, closure.Incident.Longitude));
+            if (via is null)
+            {
+                _driveMessage = "The router found no way around that closure. Check the cameras near it, or replan later.";
+                return;
+            }
+            await ReplanDriveAsync([Coordinates(here.Latitude, here.Longitude), Coordinates(via.Latitude, via.Longitude), .. ahead.Select(s => s.Label)],
+                "New route around the closure.");
+        }
+        finally
+        {
+            _driveBusy = false;
+        }
+    }
+
+    private async Task ReplanFromHereAsync()
+    {
+        if (_drive is not { } guide || _driveHere is not { } here) return;
+        _driveBusy = true;
+        try
+        {
+            await ReplanDriveAsync([Coordinates(here.Latitude, here.Longitude), .. guide.StopsAhead().Select(s => s.Label)], "Route updated from here.");
+        }
+        finally
+        {
+            _driveBusy = false;
+        }
+    }
+
+    private async Task ReplanDriveAsync(IReadOnlyList<string> stops, string spoken)
+    {
+        _routeStops.Clear();
+        _routeStops.AddRange(stops);
+        await WatchRouteAsync();
+        if (_route is { Error: null } route)
+        {
+            _drive = new GwsBusinessSuite.Application.RouteWatch.DriveGuide(route);
+            _driveState = null;
+            _driveClosures.Clear();
+            _driveMessage = null;
+            await SpeakAsync(spoken);
+            if (_driveHere is { } here) await OnDrivePosition(here.Latitude, here.Longitude, null, null);
+        }
+        else
+        {
+            _driveMessage = _route?.Error ?? "Couldn't replan just now.";
+        }
+    }
+
+    private async Task RecenterDriveAsync()
+    {
+        await JS.InvokeVoidAsync("tacticalGlobe.setDriveFollow", "tg-viewport", true);
+        if (_driveHere is { } here) await FlyToPointAsync(here.Latitude, here.Longitude);
+    }
+
+    private async Task EndDriveAsync()
+    {
+        _driveCts?.Cancel();
+        _driveCts = null;
+        if (_drive is not null) await JS.InvokeVoidAsync("tacticalGlobe.stopDrive", "tg-viewport");
+        _drive = null;
+        _driveState = null;
+        _driveClosures.Clear();
+        _driveHere = null;
+        _driveSpeedMph = null;
+        _driveMessage = null;
+    }
+
+    private async Task SpeakAsync(string text)
+    {
+        if (_driveVoice) await JS.InvokeAsync<bool>("tacticalGlobe.speak", text);
+    }
+
+    private static string Coordinates(double latitude, double longitude) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{latitude:0.#####}, {longitude:0.#####}");
+
+    private static string DriveDistance(double miles) =>
+        miles < 0.2 ? $"{Math.Max(0, miles * 5280):0} FT" : $"{miles:0.0} MI";
+
+    // Still-image cameras refresh about every 30 seconds while driving.
+    private string DriveCameraUrl(CameraFeed camera) =>
+        camera.StreamUrl + (camera.StreamUrl.Contains('?') ? "&" : "?") + "_t=" + _driveCameraTick;
+
+    // ---- Map notes (MapNoteService): pins and drawn areas, drawn on the globe by setMapNotes. ----
+    private sealed class NoteDraft
+    {
+        public Guid? Id { get; init; }
+        public required string Kind { get; init; }
+        public string Title { get; set; } = string.Empty;
+        public string Body { get; set; } = string.Empty;
+        public string Color { get; set; } = GwsBusinessSuite.Infrastructure.Services.MapNoteService.Colors[0];
+        public List<GwsBusinessSuite.Infrastructure.Services.MapNotePoint> Points { get; init; } = new();
+        public bool Picking { get; set; }
+    }
+
+    private List<GwsBusinessSuite.Infrastructure.Services.MapNoteView> _notes = new();
+    private GwsBusinessSuite.Infrastructure.Services.MapNoteView? _openNote;
+    // A note someone else shared with this user via a link: shown on the map while this page is open.
+    private GwsBusinessSuite.Infrastructure.Services.MapNoteView? _sharedNote;
+    private NoteDraft? _noteDraft;
+    private string? _noteMessage;
+
+    private async Task PushNotesAsync()
+    {
+        var shown = _notes.Where(n => _noteDraft?.Id != n.Id).ToList();
+        if (_sharedNote is { } shared && shown.All(n => n.Id != shared.Id)) shown.Add(shared);
+        await JS.InvokeVoidAsync("tacticalGlobe.setMapNotes", "tg-viewport",
+            shown.Select(n => new { id = n.Id, kind = n.Kind, title = n.Title, color = n.Color, points = n.Points.Select(p => new[] { p.Latitude, p.Longitude }) }),
+            _noteDraft is { } draft ? new { points = draft.Points.Select(p => new[] { p.Latitude, p.Longitude }), color = draft.Color } : null);
+    }
+
+    private async Task StartNoteAsync(string kind)
+    {
+        await CancelPickAsync();
+        _noteMessage = null;
+        _noteDraft = new NoteDraft { Kind = kind, Picking = true };
+        await JS.InvokeVoidAsync("tacticalGlobe.startPickPoint", "tg-viewport");
+    }
+
+    private async Task AddNotePointAsync(NoteDraft draft, double latitude, double longitude)
+    {
+        if (draft.Kind == GwsBusinessSuite.Infrastructure.Services.MapNoteKinds.Pin)
+        {
+            draft.Points.Clear();
+            draft.Points.Add(new(latitude, longitude));
+            draft.Picking = false;
+        }
+        else if (draft.Points.Count < GwsBusinessSuite.Infrastructure.Services.MapNoteService.MaxAreaPoints)
+        {
+            draft.Points.Add(new(latitude, longitude));
+            // Keep listening for the next corner until SAVE or CANCEL.
+            await JS.InvokeVoidAsync("tacticalGlobe.startPickPoint", "tg-viewport");
+        }
+        await PushNotesAsync();
+        StateHasChanged();
+    }
+
+    private async Task RestartNotePickAsync()
+    {
+        if (_noteDraft is not { } draft) return;
+        draft.Picking = true;
+        await JS.InvokeVoidAsync("tacticalGlobe.startPickPoint", "tg-viewport");
+    }
+
+    private async Task UndoNotePointAsync()
+    {
+        if (_noteDraft is not { Points.Count: > 0 } draft) return;
+        draft.Points.RemoveAt(draft.Points.Count - 1);
+        await PushNotesAsync();
+    }
+
+    private async Task SetNoteColorAsync(string colour)
+    {
+        if (_noteDraft is not { } draft) return;
+        draft.Color = colour;
+        await PushNotesAsync();
+    }
+
+    private async Task SaveNoteAsync()
+    {
+        if (_noteDraft is not { } draft) return;
+        try
+        {
+            var saved = await MapNotes.SaveAsync(_username, draft.Id, draft.Kind, draft.Title, draft.Body, draft.Color, draft.Points);
+            await JS.InvokeVoidAsync("tacticalGlobe.cancelPickPoint", "tg-viewport");
+            _noteDraft = null;
+            _notes = (await MapNotes.ListAsync(_username)).ToList();
+            _noteMessage = $"Saved \"{saved.Title}\".";
+            if (_openNote?.Id == saved.Id) _openNote = saved;
+            await PushNotesAsync();
+        }
+        catch (ArgumentException ex)
+        {
+            _noteMessage = ex.Message;
+        }
+    }
+
+    private async Task CancelNoteAsync()
+    {
+        _noteDraft = null;
+        _noteMessage = null;
+        await JS.InvokeVoidAsync("tacticalGlobe.cancelPickPoint", "tg-viewport");
+        await PushNotesAsync();
+    }
+
+    private async Task EditNoteAsync(GwsBusinessSuite.Infrastructure.Services.MapNoteView note)
+    {
+        await CancelPickAsync();
+        _openNote = null;
+        _noteMessage = null;
+        _noteDraft = new NoteDraft
+        {
+            Id = note.Id, Kind = note.Kind, Title = note.Title, Body = note.Body, Color = note.Color, Points = note.Points.ToList()
+        };
+        _panelTab = _lastPanelTab = "saved";
+        await PushNotesAsync();
+    }
+
+    private async Task DeleteNoteAsync(GwsBusinessSuite.Infrastructure.Services.MapNoteView note)
+    {
+        await MapNotes.DeleteAsync(_username, note.Id);
+        _notes = (await MapNotes.ListAsync(_username)).ToList();
+        if (_openNote?.Id == note.Id) _openNote = null;
+        _noteMessage = $"Deleted \"{note.Title}\".";
+        await PushNotesAsync();
+    }
+
+    private async Task OpenNoteAsync(GwsBusinessSuite.Infrastructure.Services.MapNoteView note)
+    {
+        _noteMessage = null;
+        _openNote = note;
+        await FlyToNoteAsync(note);
+    }
+
+    private async Task FlyToNoteAsync(GwsBusinessSuite.Infrastructure.Services.MapNoteView note)
+    {
+        if (note.Points.Count == 0) return;
+        if (note.Points.Count == 1)
+        {
+            await FlyToPointAsync(note.Points[0].Latitude, note.Points[0].Longitude);
+            return;
+        }
+        var pad = 0.005;
+        await JS.InvokeVoidAsync("tacticalGlobe.flyToBounds", "tg-viewport",
+            note.Points.Min(p => p.Longitude) - pad, note.Points.Min(p => p.Latitude) - pad,
+            note.Points.Max(p => p.Longitude) + pad, note.Points.Max(p => p.Latitude) + pad);
+    }
+
+    [JSInvokable]
+    public Task OnMapNoteClicked(string id) =>
+        InvokeAsync(() =>
+        {
+            if (!Guid.TryParse(id, out var noteId)) return;
+            _openNote = _notes.FirstOrDefault(n => n.Id == noteId) ?? (_sharedNote?.Id == noteId ? _sharedNote : null);
+            _noteMessage = null;
+            StateHasChanged();
+        });
+
+    private async Task ShareNoteAsync(GwsBusinessSuite.Infrastructure.Services.MapNoteView note)
+    {
+        var key = await MapNotes.ShareAsync(_username, note.Id);
+        if (key is null) return;
+        var link = Navigation.ToAbsoluteUri(GwsBusinessSuite.Infrastructure.Services.MapNoteService.ShareLink(note.Id, key)).ToString();
+        var result = await JS.InvokeAsync<string>("tacticalGlobe.shareText", (string?)null, link, (string?)null);
+        _notes = (await MapNotes.ListAsync(_username)).ToList();
+        _openNote = _notes.FirstOrDefault(n => n.Id == note.Id);
+        _noteMessage = result == "copied"
+            ? "Link copied. Any signed-in admin with it can open this note (read-only)."
+            : $"Copy this link: {link}";
+    }
+
+    private async Task UnshareNoteAsync(GwsBusinessSuite.Infrastructure.Services.MapNoteView note)
+    {
+        await MapNotes.UnshareAsync(_username, note.Id);
+        _notes = (await MapNotes.ListAsync(_username)).ToList();
+        _openNote = _notes.FirstOrDefault(n => n.Id == note.Id);
+        _noteMessage = "Unshared. The old link no longer opens it.";
+    }
+
+    // Play: steps forward 10 minutes every 2 seconds until it reaches now.
+    private async Task ToggleTimeMachinePlayAsync()
+    {
+        if (_tmPlaying)
+        {
+            StopTimeMachinePlay();
+            return;
+        }
+        if (_tmMinutesAgo == 0) _tmMinutesAgo = 24 * 60;
+        _tmPlaying = true;
+        var play = _tmPlay = new CancellationTokenSource();
+        try
+        {
+            while (!play.IsCancellationRequested && _tmMinutesAgo > 0)
+            {
+                await LoadTimeMachineAsync();
+                StateHasChanged();
+                await Task.Delay(TimeSpan.FromSeconds(2), play.Token);
+                _tmMinutesAgo = Math.Max(0, _tmMinutesAgo - 10);
+            }
+            if (!play.IsCancellationRequested) await LoadTimeMachineAsync();
+        }
+        catch (TaskCanceledException) { }
+        finally
+        {
+            if (_tmPlay == play) { _tmPlaying = false; _tmPlay = null; }
+            StateHasChanged();
+        }
+    }
+
+    private void StopTimeMachinePlay()
+    {
+        _tmPlay?.Cancel();
+        _tmPlay = null;
+        _tmPlaying = false;
+    }
+
     private Task FlyToPointAsync(double latitude, double longitude) =>
         JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", latitude, longitude, 4000, 1.5).AsTask();
 
@@ -1783,6 +2845,7 @@
     [JSInvokable]
     public Task OnMapPointPicked(double latitude, double longitude)
     {
+        if (_noteDraft is { Picking: true } draft && !_streetPicking && _pickingStop is null) return AddNotePointAsync(draft, latitude, longitude);
         if (_streetPicking)
         {
             _streetPicking = false;
@@ -1867,6 +2930,25 @@
     private static string FormatDuration(double minutes) =>
         minutes >= 60 ? $"{(int)(minutes / 60)} H {(int)(minutes % 60)} MIN" : $"{(int)minutes} MIN";
 
+    // ---- 3D cities: Cesium ion terrain + OSM buildings, when the server has a scoped ion token
+    // (Overwatch:CesiumIonToken). The token reaches the browser, so it must be the narrow one
+    // the guide describes: assets:read on those two assets, limited to this site's URL. ----
+    private string? IonToken => Configuration["Overwatch:CesiumIonToken"] is { Length: > 0 } token ? token.Trim() : null;
+    private bool _threeDOn;
+    private string? _threeDError;
+
+    private async Task SetThreeDAsync(bool on)
+    {
+        var status = await JS.InvokeAsync<string>("tacticalGlobe.setThreeD", "tg-viewport", on);
+        _threeDOn = status == "on";
+        _threeDError = status.StartsWith("failed", StringComparison.Ordinal)
+            ? "3D cities couldn't load (check the Cesium ion token and its allowed URLs). The flat globe is still working."
+            : null;
+        if (_threeDError is not null) Logger.LogWarning("Overwatch 3D cities failed to load: {Status}", status);
+    }
+
+    private Task ToggleThreeDAsync() => SetThreeDAsync(!_threeDOn);
+
     private async Task ToggleRoadWeatherAsync()
     {
         _roadWeatherOn = !_roadWeatherOn;
@@ -1944,6 +3026,149 @@
             Logger.LogWarning(ex, "Message signs failed to load");
         }
     }
+
+    // ---- Air layers: OpenSky aircraft (refreshed every minute while on) and Open-Meteo air quality. ----
+    private bool _aircraftOn;
+    private bool _airQualityOn;
+    private string? _airSummary;
+    private string? _aircraftSummary;
+    private string? _airQualitySummary;
+    private CancellationTokenSource? _aircraftCts;
+
+    private async Task ToggleAircraftAsync()
+    {
+        _aircraftOn = !_aircraftOn;
+        _aircraftCts?.Cancel();
+        _aircraftCts = null;
+        if (!_aircraftOn)
+        {
+            _aircraftSummary = null;
+            UpdateAirSummary();
+            await JS.InvokeVoidAsync("tacticalGlobe.setAircraft", "tg-viewport", Array.Empty<object>());
+            return;
+        }
+        await PushAircraftAsync();
+        var cts = _aircraftCts = new CancellationTokenSource();
+        _ = RefreshAircraftAsync(cts.Token);
+    }
+
+    private async Task RefreshAircraftAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                await InvokeAsync(async () =>
+                {
+                    if (!_aircraftOn || ct.IsCancellationRequested) return;
+                    await PushAircraftAsync();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task ToggleAirQualityAsync()
+    {
+        _airQualityOn = !_airQualityOn;
+        if (_airQualityOn)
+        {
+            await PushAirQualityAsync();
+            return;
+        }
+        _airQualitySummary = null;
+        UpdateAirSummary();
+        await JS.InvokeVoidAsync("tacticalGlobe.setAirQuality", "tg-viewport", Array.Empty<object>());
+    }
+
+    private Task PushAirLayersAsync() => Task.WhenAll(
+        _aircraftOn ? PushAircraftAsync() : Task.CompletedTask,
+        _airQualityOn ? PushAirQualityAsync() : Task.CompletedTask);
+
+    private async Task PushAircraftAsync()
+    {
+        try
+        {
+            var result = await AircraftService.GetAsync(_lastBbox);
+            await JS.InvokeVoidAsync("tacticalGlobe.setAircraft", "tg-viewport", result.Aircraft.Select(a => new
+            {
+                id = a.Icao24, callsign = a.Callsign, lat = a.Latitude, lon = a.Longitude,
+                altitudeFeet = a.AltitudeFeet, speedKnots = a.SpeedKnots, heading = a.HeadingDegrees
+            }));
+            _aircraftSummary = result.Note ?? $"AIRCRAFT {result.Aircraft.Count} (updated {DateTimeOffset.Now.ToGwsTime()})";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch aircraft layer failed");
+            _aircraftSummary = "Aircraft couldn't be shown just now.";
+        }
+        UpdateAirSummary();
+    }
+
+    private async Task PushAirQualityAsync()
+    {
+        try
+        {
+            var result = await AirQualityService.GetAsync(_lastBbox);
+            await JS.InvokeVoidAsync("tacticalGlobe.setAirQuality", "tg-viewport", result.Readings.Select(r => new
+            {
+                lat = r.Latitude, lon = r.Longitude, aqi = r.UsAqi, category = r.Category
+            }));
+            _airQualitySummary = result.Note ?? (result.Readings.Count == 0
+                ? "No air quality readings here."
+                : $"AIR QUALITY: worst AQI {result.Readings.Max(r => r.UsAqi)} ({result.Readings.MaxBy(r => r.UsAqi)!.Category.ToLowerInvariant()})");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch air quality layer failed");
+            _airQualitySummary = "Air quality couldn't be shown just now.";
+        }
+        UpdateAirSummary();
+    }
+
+    // ---- Power outages (ODIN, county level) ----
+    private bool _outagesOn;
+    private string? _outageSummary;
+
+    private async Task ToggleOutagesAsync()
+    {
+        _outagesOn = !_outagesOn;
+        if (_outagesOn)
+        {
+            await PushOutagesAsync();
+            return;
+        }
+        _outageSummary = null;
+        await JS.InvokeVoidAsync("tacticalGlobe.setPowerOutages", "tg-viewport", Array.Empty<object>());
+    }
+
+    private async Task PushOutagesAsync()
+    {
+        try
+        {
+            var result = await PowerOutageService.GetAsync(_lastBbox);
+            var inView = result.Areas.Where(a => _lastBbox.Contains(a.Latitude, a.Longitude)).ToList();
+            await JS.InvokeVoidAsync("tacticalGlobe.setPowerOutages", "tg-viewport", result.Areas.Select(a => new
+            {
+                name = a.Name.ToUpperInvariant(), customersOut = a.CustomersOut, lat = a.Latitude, lon = a.Longitude,
+                rings = a.Rings.Select(r => r.SelectMany(p => new[] { p.Longitude, p.Latitude }))
+            }));
+            _outageSummary = result.Note ?? (inView.Count == 0
+                ? "No outages reported here by utilities that publish to ODIN (many utilities don't)."
+                : $"{inView.Sum(a => a.CustomersOut):N0} CUSTOMERS OUT · worst: " +
+                  string.Join(", ", inView.Take(3).Select(a => $"{a.Name} {a.CustomersOut:N0}")));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch power outage layer failed");
+            _outageSummary = "Power outage data couldn't be shown just now.";
+        }
+    }
+
+    private void UpdateAirSummary() =>
+        _airSummary = string.Join(" · ", new[] { _aircraftSummary, _airQualitySummary }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
     private async Task ToggleHazardsAsync()
     {
@@ -2094,6 +3319,9 @@
 
     public async ValueTask DisposeAsync()
     {
+        _briefCts?.Cancel();
+        _driveCts?.Cancel();
+        _aircraftCts?.Cancel();
         // The prerendered instance never initializes the browser viewport.
         if (_dotNetRef is null) return;
         try

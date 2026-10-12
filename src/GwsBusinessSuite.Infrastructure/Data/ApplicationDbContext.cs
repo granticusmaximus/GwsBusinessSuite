@@ -77,6 +77,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelNotification> SentinelNotifications => Set<SentinelNotification>();
     public DbSet<PageReminder> PageReminders => Set<PageReminder>();
     public DbSet<OverwatchCameraWatchState> OverwatchCameraWatchStates => Set<OverwatchCameraWatchState>();
+    public DbSet<OverwatchIncidentSighting> OverwatchIncidentSightings => Set<OverwatchIncidentSighting>();
+    public DbSet<OverwatchBriefingSubscription> OverwatchBriefingSubscriptions => Set<OverwatchBriefingSubscription>();
+    public DbSet<OverwatchMapNote> OverwatchMapNotes => Set<OverwatchMapNote>();
     public DbSet<SentinelWorkspaceMember> SentinelWorkspaceMembers => Set<SentinelWorkspaceMember>();
     public DbSet<SentinelResourcePermission> SentinelResourcePermissions => Set<SentinelResourcePermission>();
     public DbSet<SentinelPublicShare> SentinelPublicShares => Set<SentinelPublicShare>();
@@ -413,6 +416,15 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<PageReminder>().HasIndex(x => new { x.SentUnix, x.CancelledUnix, x.DueUnix });
         modelBuilder.Entity<PageReminder>().HasIndex(x => new { x.WikiPageId, x.WikiBlockId });
         modelBuilder.Entity<OverwatchCameraWatchState>().HasIndex(x => new { x.Username, x.CameraId }).IsUnique();
+        modelBuilder.Entity<OverwatchIncidentSighting>().HasIndex(x => x.Key).IsUnique();
+        modelBuilder.Entity<OverwatchIncidentSighting>().HasIndex(x => new { x.LastSeenUnix, x.FirstSeenUnix });
+        modelBuilder.Entity<OverwatchBriefingSubscription>().HasIndex(x => x.Username).IsUnique();
+        modelBuilder.Entity<OverwatchBriefingSubscription>().Property(x => x.Email).HasMaxLength(254);
+        modelBuilder.Entity<OverwatchMapNote>().HasIndex(x => x.Username);
+        modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Title).HasMaxLength(80);
+        modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Body).HasMaxLength(2000);
+        modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Color).HasMaxLength(9);
+        modelBuilder.Entity<OverwatchMapNote>().Property(x => x.ShareKey).HasMaxLength(64);
         modelBuilder.Entity<SentinelWorkspaceMember>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<SentinelResourcePermission>()
             .HasIndex(x => new { x.TargetId, x.IsDatabase, x.Username })

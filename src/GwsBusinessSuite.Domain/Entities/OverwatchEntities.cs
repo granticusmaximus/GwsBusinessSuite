@@ -66,3 +66,48 @@ public sealed class OverwatchTrip : AuditableEntity
     public required string Name { get; set; }
     public string StopsJson { get; set; } = "[]";
 }
+
+// Overwatch time machine: one traffic incident (crash, closure or hazard) and the span it was
+// seen in, from incident lookups Overwatch made (IncidentHistoryRecorder). Unix seconds so the
+// "active at time T" query runs in SQLite. Kept for 48 hours.
+public sealed class OverwatchIncidentSighting : AuditableEntity
+{
+    public required string Key { get; set; }
+    public required string Category { get; set; }
+    public string SeverityLevel { get; set; } = string.Empty;
+    public string RoadwayName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public string SourceName { get; set; } = string.Empty;
+    public double Latitude { get; set; }
+    public double Longitude { get; set; }
+    public long FirstSeenUnix { get; set; }
+    public long LastSeenUnix { get; set; }
+}
+
+// Overwatch morning briefing (OverwatchBriefingService): one opt-in per user. Sent once a day at
+// Hour (server local time) to the bell, and to Email too when it's set and SMTP is configured.
+public sealed class OverwatchBriefingSubscription : AuditableEntity
+{
+    public required string Username { get; set; }
+    public bool Enabled { get; set; } = true;
+    public int Hour { get; set; } = 7;
+    public string Email { get; set; } = string.Empty;
+    // yyyy-MM-dd (server local) of the last briefing sent, so a restart never sends twice.
+    public string LastSentDate { get; set; } = string.Empty;
+}
+
+// Overwatch map notes (MapNoteService): a pin or a drawn area with a title and note, saved per
+// user. ShareKey is set only once the owner shares it; the link carries it, so other signed-in
+// admins can open that one note read-only without seeing the rest.
+public sealed class OverwatchMapNote : AuditableEntity
+{
+    public required string Username { get; set; }
+    // "pin" or "area" - see MapNoteKinds.
+    public required string Kind { get; set; }
+    public required string Title { get; set; }
+    public string Body { get; set; } = string.Empty;
+    public string Color { get; set; } = "#ffd166";
+    // [[lat, lon], ...]: one point for a pin, 3 or more for an area.
+    public string PointsJson { get; set; } = "[]";
+    public string? ShareKey { get; set; }
+}

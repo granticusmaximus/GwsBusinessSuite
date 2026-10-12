@@ -678,3 +678,16 @@
 .tg-sv-arrow svg { width: 100%; height: 100%; fill: currentColor; }
 .tg-sv-arrow:hover,
 .tg-sv-arrow:focus-visible { background: rgba(125, 255, 176, 0.55); outline: none; }
+
+/* Incident panel: REPORT (PDF) link (the panel is built by tactical-globe.js, so this lives here). */
+.tg-incident-report {
+    display: inline-block;
+    margin-top: 0.5rem;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid rgba(125, 255, 176, 0.6);
+    color: #7dffb0;
+    text-decoration: none;
+    letter-spacing: 0.05em;
+}
+.tg-incident-report:hover { background: rgba(125, 255, 176, 0.15); }
+@media (pointer: coarse) { .tg-incident-report { min-height: 44px; line-height: 2rem; } }

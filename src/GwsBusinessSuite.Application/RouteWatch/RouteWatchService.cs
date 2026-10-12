@@ -159,6 +159,52 @@ public sealed class RouteWatchService(
             ThinAlongRoute(routeCameras, MaxCameras), routeIncidents, routeAlerts, null, legs, routeStops, routeSigns, routeRoadWeather, steps);
     }
 
+    // Drive mode's way around a closure. OSRM doesn't take "avoid this point", but for a single
+    // from/to pair it returns alternative routes; the first that stays clear of the closure gives
+    // a via point (its point farthest from the closure-bound route) that the trip is replotted
+    // through. Null when no alternative avoids it.
+    public async Task<RoutePoint?> FindDetourViaAsync(RoutePoint from, RoutePoint to, RoutePoint avoid, CancellationToken cancellationToken = default)
+    {
+        var url = string.Create(CultureInfo.InvariantCulture,
+            $"{OsrmRouteUrl}{from.Longitude},{from.Latitude};{to.Longitude},{to.Latitude}?overview=full&geometries=geojson&alternatives=3");
+        try
+        {
+            return PickDetourVia(ParseOsrmAlternatives(await httpClient.GetStringAsync(url, cancellationToken)), avoid);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(ex, "Route watch: OSRM detour lookup failed");
+            return null;
+        }
+    }
+
+    public const double DetourClearanceMiles = 0.5;
+
+    // routes[0] is OSRM's own best route (the one through the closure, usually); alternatives follow.
+    public static RoutePoint? PickDetourVia(IReadOnlyList<IReadOnlyList<RoutePoint>> routes, RoutePoint avoid)
+    {
+        if (routes.Count == 0) return null;
+        var main = new RouteIndex(routes[0]);
+        foreach (var path in routes)
+        {
+            if (path.Count < 2) continue;
+            var index = new RouteIndex(path);
+            if (index.Locate(avoid.Latitude, avoid.Longitude).MilesOff < DetourClearanceMiles) continue;
+            return path.MaxBy(p => main.Locate(p.Latitude, p.Longitude).MilesOff);
+        }
+        return null;
+    }
+
+    public static IReadOnlyList<IReadOnlyList<RoutePoint>> ParseOsrmAlternatives(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("code", out var code) || code.GetString() != "Ok") return [];
+        return doc.RootElement.GetProperty("routes").EnumerateArray()
+            .Select(route => (IReadOnlyList<RoutePoint>)route.GetProperty("geometry").GetProperty("coordinates").EnumerateArray()
+                .Select(c => new RoutePoint(c[1].GetDouble(), c[0].GetDouble())).ToList())
+            .ToList();
+    }
+
     // "32.46, -83.61" (from the map picker, or typed) is used as-is; anything else is geocoded.
     private async Task<GeocodeResult?> ResolveAsync(string text, CancellationToken ct) =>
         TryParseCoordinates(text) ?? await geocoding.GeocodeAsync(text, ct);
@@ -241,11 +287,17 @@ public sealed class RouteWatchService(
 
         public double TotalMiles => _cumulativeMiles[^1];
 
-        public (double MilesAlong, double MilesOff) Locate(double lat, double lon)
+        public (double MilesAlong, double MilesOff) Locate(double lat, double lon) =>
+            Locate(lat, lon, double.MinValue, double.MaxValue);
+
+        // Only segments overlapping [fromMiles, toMiles] - drive mode searches near where the
+        // driver was, so a road that loops back past itself doesn't jump them miles ahead.
+        public (double MilesAlong, double MilesOff) Locate(double lat, double lon, double fromMiles, double toMiles)
         {
             var best = (Along: 0d, Off: double.MaxValue);
             for (var i = 1; i < _path.Count; i++)
             {
+                if (_cumulativeMiles[i] < fromMiles || _cumulativeMiles[i - 1] > toMiles) continue;
                 var a = _path[i - 1];
                 var b = _path[i];
                 var cos = Math.Cos((a.Latitude + b.Latitude) / 2 * Math.PI / 180);

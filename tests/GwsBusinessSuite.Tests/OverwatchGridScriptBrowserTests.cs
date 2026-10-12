@@ -235,6 +235,230 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         consoleErrors.Should().BeEmpty();
     }
 
+    // Performance guard (Overwatch standout item 11): a busy view with every layer on - 1,500
+    // camera pins, 400 aircraft, 20 air quality points, 60 outage counties and 50 map notes - must
+    // draw quickly against the real Cesium build, and a small pan (most pins unchanged) must be
+    // much cheaper than the first draw. Bounds are generous so a loaded CI machine still passes;
+    // the timings are printed for comparison.
+    // Average time between 10 animation frames, in ms.
+    private const string FrameTimeScript = """
+        () => new Promise(resolve => {
+            const start = performance.now();
+            let frames = 0;
+            const tick = () => { frames++; if (frames === 10) resolve((performance.now() - start) / 10); else requestAnimationFrame(tick); };
+            requestAnimationFrame(tick);
+        })
+        """;
+
+    [Fact]
+    public async Task ManyLayers_ShouldDrawABusyViewQuickly()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+        await page.WaitForTimeoutAsync(1500);
+        var emptyFrame = await page.EvaluateAsync<double>(FrameTimeScript);
+
+        var timingsJson = await page.EvaluateAsync<string>("""
+            () => {
+                const g = window.tacticalGlobe;
+                const pins = [];
+                for (let i = 0; i < 1500; i++) {
+                    pins.push({ id: 'cam-' + i, name: 'Camera ' + i, lat: 33 + (i % 50) * 0.02, lon: -85 + Math.floor(i / 50) * 0.02,
+                        streamUrl: 'https://cams.example/' + i + '.jpg', streamKind: 'Snapshot', sourceName: 'GDOT', sourceAttributionUrl: '', isFavorite: false, health: 'Unknown' });
+                }
+                const time = (fn) => { const t = performance.now(); fn(); return performance.now() - t; };
+                const result = {};
+                result.cameras = time(() => g.setCameraPins(pins));
+                const panned = pins.slice(50).concat(pins.slice(0, 50).map(p => Object.assign({}, p, { id: p.id + '-new' })));
+                result.camerasPan = time(() => g.setCameraPins(panned));
+                const planes = [];
+                for (let i = 0; i < 400; i++) planes.push({ id: 'p' + i, callsign: 'DAL' + i, lat: 33 + Math.random(), lon: -85 + Math.random(), altitudeFeet: 30000, speedKnots: 450, heading: i % 360 });
+                result.aircraft = time(() => g.setAircraft('tg-viewport', planes));
+                result.aircraftRefresh = time(() => g.setAircraft('tg-viewport', planes));
+                const aqi = [];
+                for (let i = 0; i < 20; i++) aqi.push({ lat: 33 + i * 0.05, lon: -84, aqi: i * 15, category: 'x' });
+                result.airQuality = time(() => g.setAirQuality('tg-viewport', aqi));
+                const counties = [];
+                for (let i = 0; i < 60; i++) {
+                    const ring = [];
+                    for (let k = 0; k < 400; k++) { const a = k / 400 * Math.PI * 2; ring.push(-84 + (i % 10) * 0.3 + Math.cos(a) * 0.1, 33 + Math.floor(i / 10) * 0.3 + Math.sin(a) * 0.1); }
+                    counties.push({ name: 'COUNTY ' + i, customersOut: i * 100, lat: 33, lon: -84, rings: [ring] });
+                }
+                result.outages = time(() => g.setPowerOutages('tg-viewport', counties));
+                const notes = [];
+                for (let i = 0; i < 50; i++) notes.push({ id: 'n' + i, kind: i % 2 ? 'pin' : 'area', title: 'Note ' + i, color: '#ffd166',
+                    points: i % 2 ? [[33 + i * 0.01, -84]] : [[33, -84 + i * 0.01], [33.05, -84 + i * 0.01], [33.02, -83.97 + i * 0.01]] });
+                result.notes = time(() => g.setMapNotes('tg-viewport', notes, null));
+                return JSON.stringify(result);
+            }
+            """);
+        var timings = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, double>>(timingsJson)!;
+        await page.WaitForTimeoutAsync(500);
+        var frame = await page.EvaluateAsync<double>(FrameTimeScript);
+
+        Console.WriteLine("Overwatch draw timings (ms): " + string.Join(", ", timings.Select(t => $"{t.Key} {t.Value:0}")) + $", frame empty {emptyFrame:0} busy {frame:0}");
+        timings["cameras"].Should().BeLessThan(3000);
+        timings["camerasPan"].Should().BeLessThan(timings["cameras"], "a pan only touches the pins that changed");
+        timings["aircraftRefresh"].Should().BeLessThan(2000);
+        timings["outages"].Should().BeLessThan(3000);
+        consoleErrors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AirLayers_ShouldDrawAndClearAircraftAndAirQuality()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        var error = await page.EvaluateAsync<string?>("""
+            () => {
+                try {
+                    window.tacticalGlobe.setAircraft('tg-viewport', [
+                        { id: 'ad9db8', callsign: 'DAL3173', lat: 33.6, lon: -84.15, altitudeFeet: 14475, speedKnots: 374, heading: 45 },
+                        { id: 'a00002', callsign: '', lat: 33.7, lon: -84.3, altitudeFeet: null, speedKnots: null, heading: null }
+                    ]);
+                    window.tacticalGlobe.setAirQuality('tg-viewport', [
+                        { lat: 33.8, lon: -84.4, aqi: 31, category: 'Good' }, { lat: 34.2, lon: -84.2, aqi: 412, category: 'Hazardous' }
+                    ]);
+                    window.tacticalGlobe.setPowerOutages('tg-viewport', [
+                        { name: 'MACON COUNTY', customersOut: 2076, lat: 35.1, lon: -83.4, rings: [[-83.7, 35.0, -83.1, 35.0, -83.1, 35.3], [-83.0, 35.1, -82.9, 35.1, -82.9, 35.2]] },
+                        { name: 'BAD', customersOut: 5, lat: 0, lon: 0, rings: [[1, 2]] }
+                    ]);
+                    window.tacticalGlobe.setAircraft('tg-viewport', []);
+                    window.tacticalGlobe.setAirQuality('tg-viewport', []);
+                    window.tacticalGlobe.setPowerOutages('tg-viewport', []);
+                    return null;
+                } catch (e) { return String(e && e.stack || e); }
+            }
+            """);
+        await page.WaitForTimeoutAsync(500);
+
+        error.Should().BeNull();
+        consoleErrors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task MapNotes_ShouldDrawPinsAreasAndADraft_AndReportClicksOnThem()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        // The globe opens centred on 39.8, -98.5: a pin there sits in the middle of the canvas.
+        await page.EvaluateAsync("""
+            () => window.tacticalGlobe.setMapNotes('tg-viewport', [
+                { id: 'pin-1', kind: 'pin', title: 'Staging', color: '#ff4d4d', points: [[39.8, -98.5]] },
+                { id: 'area-1', kind: 'area', title: 'Blind spot', color: '#7dffb0', points: [[30, -110], [31, -110], [30.5, -109]] }
+            ], { points: [[35, -100], [36, -100]], color: '#ffd166' })
+            """);
+        await page.WaitForTimeoutAsync(800);
+        await page.Mouse.ClickAsync(400, 300);
+        await page.WaitForFunctionAsync("window.__invokedMethods.some(c => c.methodName === 'OnMapNoteClicked')",
+            null, new PageWaitForFunctionOptions { Timeout = 5000 });
+        (await page.EvaluateAsync<string>("window.__invokedMethods.find(c => c.methodName === 'OnMapNoteClicked').args[0]")).Should().Be("pin-1");
+
+        await page.EvaluateAsync("() => window.tacticalGlobe.setMapNotes('tg-viewport', [], null)");
+        consoleErrors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ThreeD_WithoutAToken_ShouldStayOff_AndTheStreetLevelFlightShouldFinish()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setThreeD('tg-viewport', true)")).Should().Be("no-token");
+        var flight = await page.EvaluateAsync<double>("""
+            async () => {
+                const started = performance.now();
+                await window.tacticalGlobe.flyToStreetLevel('tg-viewport', 33.75, -84.39, 90);
+                return performance.now() - started;
+            }
+            """);
+        flight.Should().BeLessThan(8000, "street view waits for this flight, so it must always finish");
+        consoleErrors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ThreeD_WithAnUnusableToken_ShouldFailQuietly_AndKeepTheFlatGlobe()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await page.RouteAsync("https://api.cesium.com/**", route => route.FulfillAsync(new() { Status = 401, ContentType = "application/json", Body = """{"code":"InvalidCredentials"}""" }));
+        var error = await page.EvaluateAsync<string?>("""
+            async () => {
+                try {
+                    await window.tacticalGlobe.init('tg-viewport', { invokeMethodAsync: () => Promise.resolve() }, { ionToken: 'not-a-real-token' });
+                    return null;
+                } catch (e) { return String(e); }
+            }
+            """);
+        error.Should().BeNull();
+
+        var status = await page.EvaluateAsync<string>("() => window.tacticalGlobe.setThreeD('tg-viewport', true)");
+
+        status.Should().StartWith("failed");
+        (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setThreeD('tg-viewport', false)")).Should().Be("off");
+    }
+
+    [Fact]
+    public async Task DriveMode_ShouldReportGpsFixesToThePage_UntilStopped()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await page.Context.GrantPermissionsAsync(["geolocation"], new() { Origin = "http://localhost" });
+        await page.Context.SetGeolocationAsync(new() { Latitude = 33.75f, Longitude = -84.39f, Accuracy = 12 });
+        (await InitAsync(page)).Should().BeNull();
+
+        (await page.EvaluateAsync<string>("() => window.tacticalGlobe.startDrive('tg-viewport')")).Should().Be("started");
+        await page.WaitForFunctionAsync("window.__invokedMethods.some(c => c.methodName === 'OnDrivePosition')",
+            null, new PageWaitForFunctionOptions { Timeout = 10000 });
+        var args = await page.EvaluateAsync<double[]>("window.__invokedMethods.find(c => c.methodName === 'OnDrivePosition').args.slice(0, 3)");
+        args[0].Should().BeApproximately(33.75, 0.001);
+        args[1].Should().BeApproximately(-84.39, 0.001);
+        args[2].Should().BeApproximately(12, 0.5);
+
+        await page.EvaluateAsync("() => { window.tacticalGlobe.setDriveFollow('tg-viewport', false); window.tacticalGlobe.stopDrive('tg-viewport'); window.tacticalGlobe.stopDrive('tg-viewport'); }");
+        var before = await page.EvaluateAsync<int>("window.__invokedMethods.filter(c => c.methodName === 'OnDrivePosition').length");
+        await page.Context.SetGeolocationAsync(new() { Latitude = 33.80f, Longitude = -84.39f, Accuracy = 12 });
+        await page.WaitForTimeoutAsync(2500);
+        (await page.EvaluateAsync<int>("window.__invokedMethods.filter(c => c.methodName === 'OnDrivePosition').length")).Should().Be(before, "stopping clears the GPS watch");
+        consoleErrors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TimeMachine_SetReplaceAndClear_ShouldNotThrowAgainstTheRealCesiumBuild()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        // A data: tile keeps the radar layer offline; set twice to exercise the replace path.
+        var error = await page.EvaluateAsync<string?>("""
+            () => {
+                try {
+                    const snapshot = {
+                        radarTileUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+                        incidents: [{ lat: 33.75, lon: -84.39, category: 'crash', title: 'Crash - I 75' }],
+                        earthquakes: [{ lat: 36.1, lon: -97.5, title: 'M 3.1 earthquake' }]
+                    };
+                    window.tacticalGlobe.setTimeMachine('tg-viewport', snapshot);
+                    window.tacticalGlobe.setTimeMachine('tg-viewport', { ...snapshot, radarTileUrl: null });
+                    window.tacticalGlobe.clearTimeMachine('tg-viewport');
+                    window.tacticalGlobe.clearTimeMachine('tg-viewport');
+                    return null;
+                } catch (e) { return String(e && e.stack || e); }
+            }
+            """);
+        await page.WaitForTimeoutAsync(500);
+
+        error.Should().BeNull();
+        consoleErrors.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task ShareText_ShouldUseTheShareSheetWhenThereIsOne_AndOtherwiseCopy()
     {

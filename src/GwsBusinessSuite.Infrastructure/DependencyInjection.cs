@@ -828,10 +828,42 @@ public static class DependencyInjection
             configuration["Overwatch:TimelapsePath"] ?? "/app/data/overwatch-timelapse",
             sp.GetRequiredService<ILogger<CameraWatchFrameStore>>()));
         services.AddScoped<CameraWatchService>();
+        // Overwatch time machine: incident history (buffered, flushed every minute) + the snapshot service.
+        services.AddSingleton<IncidentHistoryRecorder>();
+        services.AddSingleton<GwsBusinessSuite.Application.TrafficIncidents.IIncidentHistoryRecorder>(sp => sp.GetRequiredService<IncidentHistoryRecorder>());
+        services.AddHostedService<IncidentHistoryFlushService>();
+        services.AddScoped<TimeMachineService>();
         services.AddHostedService<IncidentCaptureBackgroundService>();
         services.AddScoped<OverwatchAreaService>();
         services.AddScoped<OverwatchTripService>();
         services.AddHostedService<OverwatchAreaBackgroundService>();
+        // Overwatch briefings: facts for "Brief me" (written by the local model) + the daily morning briefing.
+        services.AddScoped<OverwatchBriefingService>();
+        services.AddHostedService<OverwatchBriefingBackgroundService>();
+        services.AddScoped<MapNoteService>();
+        // Overwatch incident report PDF (QuestPDF); its own client fetches Esri's key-less static map export.
+        services.AddHttpClient<IncidentReportService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        });
+        // Overwatch live layers, both key-less: OpenSky aircraft and Open-Meteo air quality.
+        services.AddHttpClient<GwsBusinessSuite.Application.LiveLayers.AircraftService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        });
+        services.AddHttpClient<GwsBusinessSuite.Application.LiveLayers.AirQualityService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        });
+        // Power outages: DOE/ORNL ODIN's anonymous county-level map API (key-less).
+        services.AddHttpClient<GwsBusinessSuite.Application.LiveLayers.PowerOutageService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(25);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        });
         // Overwatch hazard layers (USGS quakes, WFIGS fires, NOAA river gauges) - key-less.
         services.AddHttpClient<GwsBusinessSuite.Application.Hazards.HazardLayerService>(client =>
         {

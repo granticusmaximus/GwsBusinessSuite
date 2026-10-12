@@ -73,7 +73,7 @@ window.tacticalGlobe = (function () {
     const pinBillboardImage = createPinBillboardImage('#05080a', 2);
     const pinBillboardImageSelected = createPinBillboardImage('#ffe066', 4);
 
-    async function init(containerId, dotNetRef) {
+    async function init(containerId, dotNetRef, options) {
         const container = document.getElementById(containerId);
         if (!container || viewers.has(containerId)) return;
 
@@ -106,10 +106,11 @@ window.tacticalGlobe = (function () {
         baseLayer.saturation = 0.4;
 
         // Every default Cesium widget is disabled - this page builds its own retro-terminal
-        // chrome around the bare 3D viewport instead (see OverwatchGrid.razor.css). No Ion
-        // access token is configured or needed: no terrain (Viewer's own token-free
-        // EllipsoidTerrainProvider default is left alone) and the explicit baseLayer above means
-        // Cesium never falls back to an Ion-backed default imagery layer.
+        // chrome around the bare 3D viewport instead (see OverwatchGrid.razor.css). The globe
+        // starts token-free: the explicit baseLayer above means Cesium never falls back to an
+        // Ion-backed default imagery layer, and terrain stays the flat ellipsoid until
+        // setThreeD switches on Cesium ion terrain + OSM buildings (only when the server has an
+        // ion token - options.ionToken).
         const viewer = new Cesium.Viewer(container, {
             baseLayer: baseLayer,
             baseLayerPicker: false,
@@ -308,12 +309,16 @@ window.tacticalGlobe = (function () {
                 openSignPanel(entity._tacticalGlobeSign);
             } else if (entity && entity._tacticalGlobeRoadWeather) {
                 openRoadWeatherPanel(entity._tacticalGlobeRoadWeather);
+            } else if (entity && entity._tacticalGlobeNote) {
+                const noteEntry = viewers.get(containerId);
+                if (noteEntry) noteEntry.dotNetRef.invokeMethodAsync('OnMapNoteClicked', entity._tacticalGlobeNote);
             }
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
         viewers.set(containerId, {
             containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities,
-            hazardDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null
+            hazardDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
+            ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null
         });
 
         // Fire once for the initial view so cameras appear without requiring a drag/zoom first.
@@ -779,6 +784,338 @@ window.tacticalGlobe = (function () {
             entry.dotNetRef.invokeMethodAsync('OnStreetViewDropped',
                 Cesium.Math.toDegrees(carto.latitude), Cesium.Math.toDegrees(carto.longitude));
         });
+    }
+
+    // Time machine: the past view drawn on its own layers - an archived radar mosaic, plus the
+    // incidents and earthquakes that were active then - so the live layers (which the page
+    // switches off meanwhile) never mix with history.
+    const TIME_MACHINE_COLOURS = { crash: '#ff4d4d', closure: '#ff9f1c', hazard: '#ffd166', earthquake: '#c77dff' };
+
+    function setTimeMachine(containerId, snapshot) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry || !snapshot) return;
+        clearTimeMachine(containerId);
+        const tm = entry.timeMachine = { layer: null, entities: [] };
+        if (snapshot.radarTileUrl) {
+            tm.layer = entry.viewer.imageryLayers.addImageryProvider(new Cesium.UrlTemplateImageryProvider({
+                url: snapshot.radarTileUrl,
+                maximumLevel: 10,
+                credit: 'Radar: NOAA NEXRAD via Iowa Environmental Mesonet'
+            }));
+            tm.layer.alpha = 0.7;
+        }
+        const add = (item, colour, size) => tm.entities.push(entry.viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(Number(item.lon), Number(item.lat)),
+            name: item.title,
+            point: { pixelSize: size, color: Cesium.Color.fromCssColorString(colour).withAlpha(0.9),
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+            label: { text: item.title, font: '11px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -14),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 60000), disableDepthTestDistance: Number.POSITIVE_INFINITY }
+        }));
+        (snapshot.incidents || []).forEach(item => add(item, TIME_MACHINE_COLOURS[item.category] || '#ffffff', 10));
+        (snapshot.earthquakes || []).forEach(item => add(item, TIME_MACHINE_COLOURS.earthquake, 12));
+    }
+
+    function clearTimeMachine(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry || !entry.timeMachine) return;
+        if (entry.timeMachine.layer) entry.viewer.imageryLayers.remove(entry.timeMachine.layer, true);
+        entry.timeMachine.entities.forEach(entity => entry.viewer.entities.remove(entity));
+        entry.timeMachine = null;
+    }
+
+    // Live aircraft (OpenSky): a small plane arrow turned to its heading, with callsign and
+    // altitude shown when zoomed in. aircraft: [{ id, callsign, lat, lon, altitudeFeet, speedKnots, heading }].
+    const aircraftIcon = (function () {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+        ctx.translate(16, 16);
+        ctx.beginPath();
+        ctx.moveTo(0, -14); ctx.lineTo(4, -2); ctx.lineTo(14, 4); ctx.lineTo(14, 7); ctx.lineTo(3, 4);
+        ctx.lineTo(2, 11); ctx.lineTo(6, 14); ctx.lineTo(-6, 14); ctx.lineTo(-2, 11); ctx.lineTo(-3, 4);
+        ctx.lineTo(-14, 7); ctx.lineTo(-14, 4); ctx.lineTo(-4, -2); ctx.closePath();
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#05080a';
+        ctx.stroke();
+        return canvas.toDataURL();
+    })();
+
+    // Drawn as a BillboardCollection + LabelCollection rather than entities. Labels are the real
+    // cost (400 of them measured +50 ms/frame in software rendering, even when hidden by
+    // distance), so they're only built when the camera is close enough to read them; the page
+    // redraws aircraft on every view change, so they appear as you zoom in.
+    function setAircraft(containerId, aircraft) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        if (!entry.aircraftPrimitives) {
+            entry.aircraftPrimitives = {
+                billboards: entry.viewer.scene.primitives.add(new Cesium.BillboardCollection()),
+                labels: entry.viewer.scene.primitives.add(new Cesium.LabelCollection())
+            };
+        }
+        const billboards = entry.aircraftPrimitives.billboards;
+        const labels = entry.aircraftPrimitives.labels;
+        billboards.removeAll();
+        labels.removeAll();
+        const colour = Cesium.Color.fromCssColorString('#00e5ff');
+        const nearOnly = new Cesium.DistanceDisplayCondition(0, 120000);
+        const withLabels = entry.viewer.camera.positionCartographic.height < 150000;
+        (aircraft || []).forEach(function (plane) {
+            const position = Cesium.Cartesian3.fromDegrees(Number(plane.lon), Number(plane.lat));
+            const altitude = Number.isFinite(plane.altitudeFeet) ? Math.round(plane.altitudeFeet / 100) * 100 : null;
+            billboards.add({
+                position: position, image: aircraftIcon, width: 20, height: 20, color: colour,
+                rotation: -Cesium.Math.toRadians(Number(plane.heading) || 0), alignedAxis: Cesium.Cartesian3.ZERO,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            });
+            if (!withLabels) return;
+            labels.add({
+                position: position,
+                text: (plane.callsign || plane.id) + (altitude !== null ? '  ' + altitude.toLocaleString('en-US') + ' FT' : ''),
+                font: '10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16),
+                distanceDisplayCondition: nearOnly, disableDepthTestDistance: Number.POSITIVE_INFINITY
+            });
+        });
+    }
+
+    // Air quality (Open-Meteo): a dot per sample point coloured by U.S. AQI band, with its value.
+    // readings: [{ lat, lon, aqi, category }].
+    const AQI_COLOURS = [[50, '#00e400'], [100, '#ffff00'], [150, '#ff7e00'], [200, '#ff0000'], [300, '#8f3f97'], [Infinity, '#7e0023']];
+
+    function setAirQuality(containerId, readings) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        (entry.airQualityEntities || []).forEach(function (entity) { entry.viewer.entities.remove(entity); });
+        entry.airQualityEntities = (readings || []).map(function (reading) {
+            const aqi = Number(reading.aqi);
+            const colour = Cesium.Color.fromCssColorString(AQI_COLOURS.find(function (band) { return aqi <= band[0]; })[1]);
+            return entry.viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(Number(reading.lon), Number(reading.lat)),
+                point: { pixelSize: 22, color: colour.withAlpha(0.55), outlineColor: colour, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                label: {
+                    text: 'AQI ' + aqi, font: 'bold 10px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -20), disableDepthTestDistance: Number.POSITIVE_INFINITY
+                }
+            });
+        });
+    }
+
+    // Power outages (ODIN): each county (or state) with customers out, shaded by how many, with
+    // the count at its centre. areas: [{ name, customersOut, lat, lon, rings: [[lon, lat, lon, lat, ...], ...] }].
+    function outageColour(count) {
+        return count >= 10000 ? '#b00020' : count >= 1000 ? '#ff4d4d' : count >= 100 ? '#ff9f1c' : '#ffd166';
+    }
+
+    function setPowerOutages(containerId, areas) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        (entry.outageEntities || []).forEach(function (entity) { entry.viewer.entities.remove(entity); });
+        const added = entry.outageEntities = [];
+        (areas || []).forEach(function (area) {
+            const colour = Cesium.Color.fromCssColorString(outageColour(Number(area.customersOut)));
+            (area.rings || []).forEach(function (ring) {
+                if (!ring || ring.length < 6) return;
+                const positions = Cesium.Cartesian3.fromDegreesArray(ring.map(Number));
+                added.push(entry.viewer.entities.add({
+                    // height: 0 keeps this a plain polygon; without it Cesium drapes it on the
+                    // ground as a classification primitive, which measured ~4x slower per frame.
+                    polygon: { hierarchy: positions, height: 0, material: colour.withAlpha(0.22) },
+                    polyline: { positions: positions.concat([positions[0]]), width: 1.5, material: colour.withAlpha(0.85) }
+                }));
+            });
+            added.push(entry.viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(Number(area.lon), Number(area.lat)),
+                label: {
+                    text: area.name + '\n' + Number(area.customersOut).toLocaleString('en-US') + ' OUT',
+                    font: 'bold 10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE, horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1500000), disableDepthTestDistance: Number.POSITIVE_INFINITY
+                }
+            }));
+        });
+    }
+
+    // Map notes: pins and drawn areas, each clickable (OnMapNoteClicked). draft is the area being
+    // drawn ({ points: [[lat, lon], ...], color }), shown as a dashed outline with its corners.
+    function setMapNotes(containerId, notes, draft) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        (entry.noteEntities || []).forEach(function (entity) { entry.viewer.entities.remove(entity); });
+        const added = entry.noteEntities = [];
+        const label = function (text, colour) {
+            return { text: text, font: 'bold 11px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16),
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 400000), disableDepthTestDistance: Number.POSITIVE_INFINITY };
+        };
+        (notes || []).forEach(function (note) {
+            const points = (note.points || []).filter(function (p) { return p && p.length === 2; });
+            if (points.length === 0) return;
+            const colour = Cesium.Color.fromCssColorString(note.color || '#ffd166');
+            if (note.kind === 'area' && points.length >= 3) {
+                const ring = Cesium.Cartesian3.fromDegreesArray(points.flatMap(function (p) { return [Number(p[1]), Number(p[0])]; }));
+                const area = entry.viewer.entities.add({
+                    polygon: { hierarchy: ring, height: 0, material: colour.withAlpha(0.18) },
+                    polyline: { positions: ring.concat([ring[0]]), width: 2, material: colour, clampToGround: false }
+                });
+                area._tacticalGlobeNote = note.id;
+                added.push(area);
+                const centre = Cesium.BoundingSphere.fromPoints(ring).center;
+                const tag = entry.viewer.entities.add({ position: centre, label: label(note.title, colour) });
+                tag._tacticalGlobeNote = note.id;
+                added.push(tag);
+                return;
+            }
+            const pin = entry.viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(Number(points[0][1]), Number(points[0][0])),
+                point: { pixelSize: 13, color: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                label: label(note.title, colour)
+            });
+            pin._tacticalGlobeNote = note.id;
+            added.push(pin);
+        });
+        if (draft && draft.points && draft.points.length > 0) {
+            const colour = Cesium.Color.fromCssColorString(draft.color || '#ffd166');
+            const positions = Cesium.Cartesian3.fromDegreesArray(draft.points.flatMap(function (p) { return [Number(p[1]), Number(p[0])]; }));
+            positions.forEach(function (position) {
+                added.push(entry.viewer.entities.add({ position: position,
+                    point: { pixelSize: 9, color: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY } }));
+            });
+            if (positions.length >= 2) {
+                added.push(entry.viewer.entities.add({ polyline: {
+                    positions: positions.length >= 3 ? positions.concat([positions[0]]) : positions,
+                    width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: colour }) } }));
+            }
+        }
+    }
+
+    // 3D cities: Cesium World Terrain (ion asset 1) and Cesium OSM Buildings (ion asset 96188),
+    // streamed with the server's scoped ion token. Loaded on first use and kept, so switching
+    // off and on again doesn't re-download. Returns 'on', 'off', 'no-token' or 'failed: ...'.
+    const ION_TERRAIN_ASSET = 1;
+    const ION_OSM_BUILDINGS_ASSET = 96188;
+
+    async function setThreeD(containerId, on) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return 'failed: no globe';
+        if (!entry.ionToken) return 'no-token';
+        const viewer = entry.viewer;
+        try {
+            if (!on) {
+                viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+                if (entry.threeD) entry.threeD.buildings.show = false;
+                return 'off';
+            }
+            if (!entry.threeD) {
+                Cesium.Ion.defaultAccessToken = entry.ionToken;
+                const terrain = await Cesium.CesiumTerrainProvider.fromIonAssetId(ION_TERRAIN_ASSET);
+                const buildings = await Cesium.Cesium3DTileset.fromIonAssetId(ION_OSM_BUILDINGS_ASSET);
+                // Pale green-grey blocks fit the tactical look and keep camera pins readable.
+                buildings.style = new Cesium.Cesium3DTileStyle({ color: "color('#b9cbbf', 0.9)" });
+                viewer.scene.primitives.add(buildings);
+                entry.threeD = { terrain: terrain, buildings: buildings };
+            }
+            viewer.terrainProvider = entry.threeD.terrain;
+            entry.threeD.buildings.show = true;
+            return 'on';
+        } catch (error) {
+            viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+            return 'failed: ' + (error && error.message ? error.message : String(error));
+        }
+    }
+
+    // Street view's way in: flies the globe down to just above the street, facing the way the
+    // panorama will open, while the panorama loads. Resolves when the flight ends (or at once
+    // for people who prefer reduced motion).
+    function flyToStreetLevel(containerId, lat, lon, headingDegrees) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return Promise.resolve();
+        const viewer = entry.viewer;
+        const heading = Cesium.Math.toRadians(Number(headingDegrees) || 0);
+        const ground = viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(Number(lon), Number(lat))) || 0;
+        // Stand ~180 m back from the spot, ~120 m up, looking toward it.
+        const back = 180 / 111320;
+        const fromLat = Number(lat) - Math.cos(heading) * back;
+        const fromLon = Number(lon) - Math.sin(heading) * back / Math.max(0.2, Math.cos(Cesium.Math.toRadians(Number(lat))));
+        const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        return new Promise(function (resolve) {
+            viewer.camera.flyTo({
+                destination: Cesium.Cartesian3.fromDegrees(fromLon, fromLat, ground + 120),
+                orientation: { heading: heading, pitch: Cesium.Math.toRadians(-28), roll: 0 },
+                duration: reduced ? 0 : 1.8,
+                complete: resolve,
+                cancel: resolve
+            });
+        });
+    }
+
+    // Drive mode: watches the device's GPS and reports each fix (at most every 2 s) to
+    // OnDrivePosition; the page does the route maths. The globe follows the driver from above
+    // unless they pan it, and a marker shows where they are. Spoken prompts use the browser's own
+    // speech synthesis.
+    function startDrive(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return 'unavailable';
+        stopDrive(containerId);
+        if (!navigator.geolocation) return 'unsupported';
+        const drive = entry.drive = { watchId: null, last: 0, follow: true, marker: null, pending: null };
+        drive.marker = entry.viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(0, 0),
+            show: false,
+            point: { pixelSize: 16, color: Cesium.Color.fromCssColorString('#4dabff'), outlineColor: Cesium.Color.WHITE, outlineWidth: 3,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY }
+        });
+        const report = function (position) {
+            const c = position.coords;
+            drive.marker.position = Cesium.Cartesian3.fromDegrees(c.longitude, c.latitude);
+            drive.marker.show = true;
+            if (drive.follow) {
+                entry.viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(c.longitude, c.latitude, 2500), duration: 1.2 });
+            }
+            const now = Date.now();
+            if (now - drive.last < 2000) return;
+            drive.last = now;
+            entry.dotNetRef.invokeMethodAsync('OnDrivePosition', c.latitude, c.longitude,
+                Number.isFinite(c.accuracy) ? c.accuracy : null, Number.isFinite(c.speed) ? c.speed : null);
+        };
+        const failed = function (error) {
+            const message = error && error.code === 1
+                ? 'Location access was blocked. Allow location for this site in the browser, then press DRIVE again.'
+                : 'Location is unavailable on this device right now.';
+            entry.dotNetRef.invokeMethodAsync('OnDriveError', message);
+        };
+        drive.watchId = navigator.geolocation.watchPosition(report, failed, { enableHighAccuracy: true, maximumAge: 2000, timeout: 20000 });
+        // A drag on the globe stops following until RE-CENTRE.
+        drive.stopFollow = function () { drive.follow = false; };
+        entry.viewer.canvas.addEventListener('pointerdown', drive.stopFollow);
+        return 'started';
+    }
+
+    function setDriveFollow(containerId, follow) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry && entry.drive) entry.drive.follow = !!follow;
+    }
+
+    function stopDrive(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry || !entry.drive) return;
+        if (entry.drive.watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(entry.drive.watchId);
+        if (entry.drive.marker) entry.viewer.entities.remove(entry.drive.marker);
+        entry.viewer.canvas.removeEventListener('pointerdown', entry.drive.stopFollow);
+        entry.drive = null;
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+    }
+
+    function speak(text) {
+        if (!window.speechSynthesis || !text) return false;
+        const utterance = new SpeechSynthesisUtterance(String(text));
+        utterance.rate = 1.0;
+        window.speechSynthesis.speak(utterance);
+        return true;
     }
 
     // Directions sharing: the system share sheet when there is one, otherwise the clipboard.
@@ -1643,11 +1980,19 @@ window.tacticalGlobe = (function () {
             incidentFactsHtml(incident) +
             '<div>' + escapeHtml(incident.description) + '</div>' +
             '<div class="tg-stream-panel-meta">SOURCE: ' + escapeHtml(incident.sourceName) + '</div>' +
+            (incident.id && incident.sourceName
+                ? '<a class="tg-incident-report" target="_blank" rel="noopener" href="' + escapeHtml(incidentReportUrl(incident)) + '">REPORT (PDF)</a>'
+                : '') +
             '</div>';
 
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
         if (!openAsModal(panel, closeIncidentPanel)) return;
         incidentPanel = panel;
+    }
+
+    function incidentReportUrl(incident) {
+        return '/admin/api/overwatch/incident-report?source=' + encodeURIComponent(incident.sourceName) +
+            '&id=' + encodeURIComponent(incident.id) + '&lat=' + encodeURIComponent(incident.lat) + '&lon=' + encodeURIComponent(incident.lon);
     }
 
     function closeIncidentPanel() {
@@ -2184,6 +2529,7 @@ window.tacticalGlobe = (function () {
         closeWatchWall();
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
+        stopDrive(containerId);
         entry.clickHandler.destroy();
         stopRadarPlayback(entry.radar);
         if (entry.radar.bar) entry.radar.bar.remove();
@@ -2221,6 +2567,18 @@ window.tacticalGlobe = (function () {
         zoom: zoom,
         home: home,
         shareText: shareText,
+        setTimeMachine: setTimeMachine,
+        startDrive: startDrive,
+        setMapNotes: setMapNotes,
+        setAircraft: setAircraft,
+        setAirQuality: setAirQuality,
+        setPowerOutages: setPowerOutages,
+        setThreeD: setThreeD,
+        flyToStreetLevel: flyToStreetLevel,
+        stopDrive: stopDrive,
+        setDriveFollow: setDriveFollow,
+        speak: speak,
+        clearTimeMachine: clearTimeMachine,
         setStreetViewMarker: setStreetViewMarker,
         clearStreetViewMarker: clearStreetViewMarker,
         enableStreetViewDrop: enableStreetViewDrop,

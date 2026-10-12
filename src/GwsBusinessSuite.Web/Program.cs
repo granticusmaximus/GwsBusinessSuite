@@ -600,7 +600,9 @@ app.Use(async (context, next) =>
         headers["X-Content-Type-Options"] = "nosniff";
         headers["X-Frame-Options"] = "SAMEORIGIN";
         headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-        headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(), payment=()";
+        // geolocation=(self): Overwatch drive mode follows the device's GPS. Same origin only;
+        // the browser still asks the person before sharing a location.
+        headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(self), payment=()";
         // CesiumJS (Overwatch, /admin/osint) genuinely requires 'unsafe-eval' and
         // 'wasm-unsafe-eval' to function - confirmed via real browser console errors, not
         // assumed: Cesium.js itself calls eval()/new Function() internally (unrelated to the
@@ -658,7 +660,9 @@ app.Use(async (context, next) =>
             // fixed here. localhost:11434 / 127.0.0.1:11434: Content Studio relays draft and
             // revision generation to the Ollama on the user's own machine (local-ollama.js), so
             // the server never runs the heavy model in light server-AI mode.
-            "connect-src 'self' wss: ws: http://localhost:11434 http://127.0.0.1:11434 https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://mesonet.agron.iastate.edu"
+            // api.cesium.com / assets(.ion).cesium.com: Overwatch 3D cities (Cesium ion terrain
+            // and OSM buildings), only requested when Overwatch:CesiumIonToken is set.
+            "connect-src 'self' wss: ws: http://localhost:11434 http://127.0.0.1:11434 https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://mesonet.agron.iastate.edu https://api.cesium.com https://assets.ion.cesium.com https://assets.cesium.com"
                 + (allowTurnstile ? " https://www.qksrv.net;" : ";"),
             "media-src 'self' blob: https:;",
             // A real incident: script-src trusting cdn.jsdelivr.net does NOT cover Worker
@@ -1203,6 +1207,38 @@ app.MapPost("/admin/api/native/overwatch/watch-reading", async (
     .RequireRateLimiting("admin-mutation");
 
 // The before/after frames of a camera-watch detection (the owner's own alerts only).
+// Overwatch incident report PDF: ?source=&id=&lat=&lon= for an incident on the map, or
+// ?capture={id} for one of the user's incident captures.
+app.MapGet("/admin/api/overwatch/incident-report", async (
+    string? source,
+    string? id,
+    double? lat,
+    double? lon,
+    Guid? capture,
+    HttpContext httpContext,
+    GwsBusinessSuite.Infrastructure.Services.IncidentReportService reports,
+    CancellationToken cancellationToken) =>
+{
+    var username = httpContext.User.Identity?.Name ?? string.Empty;
+    GwsBusinessSuite.Infrastructure.Services.IncidentReportData? data;
+    if (capture is { } captureId)
+    {
+        data = await reports.ForCaptureAsync(username, captureId, cancellationToken);
+    }
+    else if (!string.IsNullOrWhiteSpace(source) && !string.IsNullOrWhiteSpace(id) && lat is >= -90 and <= 90 && lon is >= -180 and <= 180)
+    {
+        data = await reports.ForIncidentAsync(username, source, id, lat.Value, lon.Value, cancellationToken);
+    }
+    else
+    {
+        return Results.BadRequest("Say which incident or capture to report on.");
+    }
+    if (data is null) return Results.NotFound("That incident isn't listed any more and Overwatch has no history of it.");
+    var pdf = GwsBusinessSuite.Infrastructure.Services.IncidentReportService.Render(data);
+    return Results.File(pdf, "application/pdf", GwsBusinessSuite.Infrastructure.Services.IncidentReportService.FileName(data));
+})
+    .RequireAuthorization("AdminOnly");
+
 app.MapGet("/admin/api/overwatch/detections/{alertId:guid}/{which}", async (
     Guid alertId,
     string which,

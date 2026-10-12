@@ -63,6 +63,10 @@ services:
       # Mapillary's worldwide street-level imagery - free but requires this self-registered
       # token (mapillary.com/developer); KartaView needs no key at all, so it has no entry here.
       CameraIntel__MapillaryAccessToken: ${CAMERA_INTEL_MAPILLARY_ACCESS_TOKEN:-}
+      # Overwatch 3D cities: a scoped Cesium ion token (assets:read on World Terrain + OSM
+      # Buildings only, allowed URL https://admin.gwsapp.net). It reaches the browser, so never
+      # the account's default token. Blank keeps the flat globe.
+      Overwatch__CesiumIonToken: ${OVERWATCH_CESIUM_ION_TOKEN:-}
       # Threat Intelligence page's optional keys (see ThreatIntelOptions.cs for signup links) -
       # RDAP and the defend.network feed need no key at all; only OTX pulses and Focsec's IP
       # reputation classification go blank until their own free key is added.
