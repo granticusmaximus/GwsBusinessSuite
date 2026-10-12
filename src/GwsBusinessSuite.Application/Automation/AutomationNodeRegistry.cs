@@ -46,6 +46,9 @@ public sealed partial class AutomationNodeRegistry(
         new("wiki.appendBlock", 1, "Sentinel: Append Block", "Appends one paragraph block to an existing Sentinel page. text supports {{ $json.path }} expressions. Requires this workflow's owner to have Edit access to the target page. Like Add Database Row, never re-triggers a Sentinel Page Changed workflow.", "Actions", "bi-file-earmark-text", false, ["main"], "{\"wikiPageId\":\"\",\"text\":\"{{ $json.text }}\"}", IsIdempotent: false),
         new("wiki.updatePage", 1, "Sentinel: Update Page", "Replaces an existing Sentinel page's entire body with new content. blocksJson is the page's complete new block array (the same shape wiki.createPage accepts) and replaces everything currently on the page - use wiki.appendBlock instead if you only want to add to what's already there. title is optional; leave it blank to keep the page's current title. Requires this workflow's owner to have Edit access to the target page. Never re-triggers a Sentinel Page Changed workflow.", "Actions", "bi-file-earmark-arrow-up", false, ["main"], "{\"wikiPageId\":\"\",\"title\":\"\",\"blocksJson\":\"[]\"}", IsIdempotent: false),
         new("wiki.findPages", 1, "Sentinel: Find Pages", "Searches Sentinel pages and databases by keyword and meaning (the same hybrid keyword + semantic search behind the top Quick Find bar and SentinelGPT's own search tool). query supports {{ $json.path }} expressions. Results are limited to what this workflow's owner can already view - read-only, has no side effects.", "Data", "bi-search", false, ["main"], "{\"query\":\"{{ $json.query }}\",\"limit\":10}"),
+        new("wiki.recentChanges", 1, "Sentinel: Recent Changes", "Lists the Sentinel pages changed in the last `days` days (1-90) that this workflow's owner can view, newest first. Outputs pages, a one-line summary, and blocksJson ready for Sentinel: Create Page. Read-only - also usable as an AI Agent tool.", "Data", "bi-clock-history", false, ["main"], "{\"days\":7}"),
+        new("wiki.stalePages", 1, "Sentinel: Stale Pages", "Lists owned Sentinel pages not edited in `days` days that this workflow's owner can view. With nudgeOwners true, sends each page owner one Sentinel bell notification about their stale pages (at most once per `days` window). Outputs pages, summary and nudged.", "Data", "bi-hourglass-split", false, ["main"], "{\"days\":180,\"nudgeOwners\":false}", IsIdempotent: false),
+        new("wiki.orphanPages", 1, "Sentinel: Orphan Pages", "Lists top-level Sentinel pages that no page links to (up to `limit`, max 50) that this workflow's owner can view, each with up to three related pages to link it from. Outputs pages, summary and blocksJson (a to-do list) for Sentinel: Create Page. Read-only - also usable as an AI Agent tool.", "Data", "bi-diagram-3", false, ["main"], "{\"limit\":20}"),
         new("automation.subWorkflow", 1, "Execute Workflow", "Runs another published workflow to completion and returns its output. The child must not pause on a Wait or Approval node. workflowId is the id shown in the target workflow's URL.", "Flow", "bi-diagram-3", false, ["main"], "{\"workflowId\":\"\"}", IsIdempotent: false),
         new("core.notify", 1, "Notify", "Sends an email to a person. to/subject/message support {{ $json.path }} expressions. For webhook-style alerts, use HTTP Request instead - this node is specifically for email.", "Actions", "bi-envelope-fill", false, ["main"], "{\"to\":\"\",\"subject\":\"GWS Automation Notification\",\"message\":\"{{ $json }}\"}", IsIdempotent: false),
         new("crm.setDealStage", 1, "CRM: Set Deal Stage", "Moves a CRM deal to a new pipeline stage. dealId and stage support {{ $json.path }} expressions.", "Actions", "bi-graph-up-arrow", false, ["main"], "{\"dealId\":\"{{ $json.dealId }}\",\"stage\":\"\"}", IsIdempotent: false),
@@ -226,6 +229,7 @@ public sealed partial class AutomationNodeRegistry(
             "wiki.appendBlock" => await ExecuteWikiAppendBlockAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "wiki.updatePage" => await ExecuteWikiUpdatePageAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "wiki.findPages" => await ExecuteWikiFindPagesAsync(node, input, workflowOwnerUsername, nodeOutputsByName, cancellationToken),
+            "wiki.recentChanges" or "wiki.stalePages" or "wiki.orphanPages" => await ExecuteCaretakerAsync(node, input, workflowOwnerUsername, cancellationToken),
             "automation.subWorkflow" => await ExecuteSubWorkflowAsync(node, input, subWorkflowChain, cancellationToken),
             "core.notify" => await ExecuteNotifyAsync(node, input, nodeOutputsByName, cancellationToken),
             "crm.setDealStage" => await ExecuteCrmSetDealStageAsync(node, input, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
@@ -735,6 +739,51 @@ public sealed partial class AutomationNodeRegistry(
             title = result.Title,
             preview = result.Preview
         }));
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    // Caretaker nodes (Sentinel item 27), all limited to what the workflow's owner can view.
+    private async Task<AutomationNodeRunResult> ExecuteCaretakerAsync(
+        AutomationNodeSnapshot node, JsonElement input, string? workflowOwnerUsername, CancellationToken cancellationToken)
+    {
+        var caretaker = serviceProvider?.GetService(typeof(ISentinelCaretakerService)) as ISentinelCaretakerService
+            ?? throw new InvalidOperationException("Sentinel caretaker tools are not available to the automation engine.");
+        if (string.IsNullOrWhiteSpace(workflowOwnerUsername))
+            throw new InvalidOperationException($"{node.Name} could not determine the workflow's owner to check page access.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var output = RequireObject(input, node.Name).DeepClone().AsObject();
+        switch (node.TypeKey)
+        {
+            case "wiki.recentChanges":
+            {
+                var days = Math.Clamp(parameters["days"]?.GetValue<int>() ?? 7, 1, 90);
+                var pages = await caretaker.RecentChangesAsync(workflowOwnerUsername, days, cancellationToken);
+                output["pages"] = JsonSerializer.SerializeToNode(pages.Select(p => new { id = p.Id, title = p.Title, updatedBy = p.UpdatedBy, updatedAt = p.UpdatedAt }));
+                output["summary"] = $"{pages.Count} page{(pages.Count == 1 ? "" : "s")} changed in the last {days} days: {string.Join(", ", pages.Take(10).Select(p => p.Title))}";
+                output["blocksJson"] = WikiBlockJson.Serialize(SentinelCaretaker.ChangesBlocks(pages, days));
+                output["weekOf"] = DateTimeOffset.UtcNow.ToLocalTime().ToString("dd-MM-yy", System.Globalization.CultureInfo.InvariantCulture);
+                break;
+            }
+            case "wiki.stalePages":
+            {
+                var days = Math.Clamp(parameters["days"]?.GetValue<int>() ?? 180, 7, 3650);
+                var pages = await caretaker.StalePagesAsync(workflowOwnerUsername, days, cancellationToken);
+                var nudged = parameters["nudgeOwners"]?.GetValue<bool>() == true ? await caretaker.NudgeOwnersAsync(pages, days, cancellationToken) : 0;
+                output["pages"] = JsonSerializer.SerializeToNode(pages.Select(p => new { id = p.Id, title = p.Title, owner = p.Owner, lastEdited = p.LastEdited }));
+                output["summary"] = $"{pages.Count} owned page{(pages.Count == 1 ? "" : "s")} not edited in {days} days.";
+                output["nudged"] = nudged;
+                break;
+            }
+            default:
+            {
+                var limit = Math.Clamp(parameters["limit"]?.GetValue<int>() ?? 20, 1, 50);
+                var pages = await caretaker.OrphanPagesAsync(workflowOwnerUsername, limit, cancellationToken);
+                output["pages"] = JsonSerializer.SerializeToNode(pages.Select(p => new { id = p.Id, title = p.Title, linkFrom = p.LinkFrom.Select(l => new { id = l.Id, title = l.Title }) }));
+                output["summary"] = $"{pages.Count} page{(pages.Count == 1 ? " has" : "s have")} no links pointing to them.";
+                output["blocksJson"] = WikiBlockJson.Serialize(SentinelCaretaker.OrphanBlocks(pages));
+                break;
+            }
+        }
         return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }
 

@@ -44,6 +44,26 @@ public partial class VoiceNotesPage : ContentPage
         MacToolbarActions.SyncSelectedTab?.Invoke("VoiceNotesPage");
 #endif
         if (ModelPicker.ItemsSource is null) await LoadModelsAsync();
+        await LoadMeetingTargetsAsync();
+    }
+
+    // Meeting notes (Sentinel item 28): first entry means "not linked".
+    private static readonly MeetingTarget NoLink = new(string.Empty, Guid.Empty, "Not linked", string.Empty);
+
+    private async Task LoadMeetingTargetsAsync()
+    {
+        var selected = LinkPicker.SelectedItem as MeetingTarget;
+        var targets = new List<MeetingTarget> { NoLink };
+        try
+        {
+            targets.AddRange(await _session.GetMeetingTargetsAsync());
+        }
+        catch (Exception)
+        {
+            // Not signed in yet or offline: the note can still be saved unlinked.
+        }
+        LinkPicker.ItemsSource = targets;
+        LinkPicker.SelectedItem = targets.FirstOrDefault(t => t.Id == selected?.Id) ?? NoLink;
     }
 
     private async Task LoadModelsAsync()
@@ -188,7 +208,10 @@ public partial class VoiceNotesPage : ContentPage
         SaveStatusLabel.Text = "Saving...";
         try
         {
-            var result = await _session.SaveQuickNoteAsync(title, markdown, DailyNoteCheckBox.IsChecked);
+            var link = LinkPicker.SelectedItem as MeetingTarget;
+            var result = await _session.SaveQuickNoteAsync(title, markdown, DailyNoteCheckBox.IsChecked,
+                contactId: link?.Kind == "contact" ? link.Id : null,
+                bookingId: link?.Kind == "booking" ? link.Id : null);
             if (result.Error is not null)
             {
                 SaveStatusLabel.Text = result.Error;

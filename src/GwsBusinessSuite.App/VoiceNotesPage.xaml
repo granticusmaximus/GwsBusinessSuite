@@ -50,6 +50,7 @@
                     CornerRadius="8" Clicked="OnSaveClicked" />
             <Button x:Name="OpenSavedButton" Text="Open in Workspace" BackgroundColor="#292524" TextColor="#E7E5E4"
                     CornerRadius="8" IsVisible="False" Clicked="OnOpenSavedClicked" />
+            <Picker x:Name="LinkPicker" Title="Link to a meeting or contact" TextColor="#FAFAF9" VerticalOptions="Center" WidthRequest="260" />
             <HorizontalStackLayout Spacing="4" VerticalOptions="Center">
                 <CheckBox x:Name="DailyNoteCheckBox" Color="#2563EB" VerticalOptions="Center" />
                 <Label Text="Add to today's daily note" TextColor="#E7E5E4" FontSize="12" VerticalOptions="Center" />

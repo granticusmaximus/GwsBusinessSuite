@@ -56,6 +56,15 @@ public sealed class ContactTimelineService(IAppDbContextFactory dbContextFactory
             if (invoice.Status == InvoiceStatuses.Void) entries.Add(new(invoice.UpdatedAt ?? invoice.CreatedAt, ContactTimelineKinds.Invoice, $"Invoice voided: {invoice.Title}", total, "/admin/billing"));
         }
 
+        // Meeting notes saved against this contact, or against one of their bookings (item 28).
+        var bookingIds = await db.Bookings.AsNoTracking().Where(b => b.ContactId == contactId).Select(b => b.Id).ToListAsync(cancellationToken);
+        foreach (var notePage in await db.WikiPages.AsNoTracking()
+                     .Where(p => p.TrashedAt == null && (p.LinkedContactId == contactId || (p.LinkedBookingId != null && bookingIds.Contains(p.LinkedBookingId.Value))))
+                     .Select(p => new { p.Id, p.Title, p.CreatedAt, p.CreatedBy }).ToListAsync(cancellationToken))
+        {
+            entries.Add(new(notePage.CreatedAt, ContactTimelineKinds.Note, $"Meeting notes: {notePage.Title}", Who(notePage.CreatedBy), $"/admin/sentinel?page={notePage.Id}"));
+        }
+
         var tickets = await db.SupportTickets.AsNoTracking().Where(t => t.ContactId == contactId).ToListAsync(cancellationToken);
         var ticketSubjects = tickets.ToDictionary(t => t.Id, t => t.Subject);
         foreach (var ticket in tickets)

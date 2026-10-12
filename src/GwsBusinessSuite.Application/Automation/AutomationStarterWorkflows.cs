@@ -24,8 +24,53 @@ public static class AutomationStarterWorkflows
             WebhookRelayGraph()),
         new("local-events-scrape", "bi-calendar-range",
             "Every 6 hours, fetches a public events page and pulls out its listings - change the URL to add any venue, chamber or city calendar to your local watch. Add a Database Row node to keep them.",
-            LocalEventsScrapeGraph())
+            LocalEventsScrapeGraph()),
+        // Caretaker agents (Sentinel item 27).
+        new("sentinel-what-changed", "bi-clock-history",
+            "Every Monday at 8am, writes a Sentinel page listing every page changed in the past week, linked.",
+            WhatChangedGraph()),
+        new("sentinel-stale-nudges", "bi-hourglass-split",
+            "Every Monday at 9am, sends each page owner a Sentinel bell nudge about their pages nobody has edited in six months.",
+            StaleNudgesGraph()),
+        new("sentinel-orphan-pages", "bi-diagram-3",
+            "On the 1st of each month, writes a Sentinel page listing pages nothing links to, each with related pages to link it from.",
+            OrphanPagesGraph())
     ];
+
+    private static AutomationWorkflowGraphPackage WhatChangedGraph()
+    {
+        var trigger = NewNode("Mondays 8am", "core.scheduleTrigger", 120, 160, "{\"intervalMinutes\":60,\"cronExpression\":\"0 8 * * 1\"}");
+        var changes = NewNode("Pages changed this week", "wiki.recentChanges", 420, 160, "{\"days\":7}");
+        var page = NewNode("Write the digest page", "wiki.createPage", 720, 160, "{\"title\":\"What changed - week of {{ $json.weekOf }}\",\"parentWikiPageId\":\"\",\"blocksJson\":\"{{ $json.blocksJson }}\"}");
+        return new AutomationWorkflowGraphPackage(
+            "Sentinel: weekly what changed",
+            "Writes a Sentinel page every Monday listing the pages changed in the past week. Set a parent page to keep the digests together.",
+            [trigger, changes, page],
+            [Connect(trigger, "main", changes, "main"), Connect(changes, "main", page, "main")]);
+    }
+
+    private static AutomationWorkflowGraphPackage StaleNudgesGraph()
+    {
+        var trigger = NewNode("Mondays 9am", "core.scheduleTrigger", 120, 160, "{\"intervalMinutes\":60,\"cronExpression\":\"0 9 * * 1\"}");
+        var stale = NewNode("Nudge owners of stale pages", "wiki.stalePages", 420, 160, "{\"days\":180,\"nudgeOwners\":true}");
+        return new AutomationWorkflowGraphPackage(
+            "Sentinel: stale page nudges",
+            "Each Monday, owners of pages untouched for six months get one bell notification asking whether they're still right (at most once per six months each).",
+            [trigger, stale],
+            [Connect(trigger, "main", stale, "main")]);
+    }
+
+    private static AutomationWorkflowGraphPackage OrphanPagesGraph()
+    {
+        var trigger = NewNode("1st of the month", "core.scheduleTrigger", 120, 160, "{\"intervalMinutes\":60,\"cronExpression\":\"0 9 1 * *\"}");
+        var orphans = NewNode("Find orphan pages", "wiki.orphanPages", 420, 160, "{\"limit\":20}");
+        var page = NewNode("Write the to-do page", "wiki.createPage", 720, 160, "{\"title\":\"Pages to link up\",\"parentWikiPageId\":\"\",\"blocksJson\":\"{{ $json.blocksJson }}\"}");
+        return new AutomationWorkflowGraphPackage(
+            "Sentinel: orphan pages",
+            "Monthly to-do page of pages nothing links to, with related pages to link each from.",
+            [trigger, orphans, page],
+            [Connect(trigger, "main", orphans, "main"), Connect(orphans, "main", page, "main")]);
+    }
 
     public static AutomationStarterWorkflow? Find(string key) =>
         All.FirstOrDefault(item => string.Equals(item.Key, key, StringComparison.OrdinalIgnoreCase));

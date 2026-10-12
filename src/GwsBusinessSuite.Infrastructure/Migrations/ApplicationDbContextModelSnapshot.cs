@@ -8387,6 +8387,12 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<bool>("IsFullWidth")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid?>("LinkedBookingId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("LinkedContactId")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Markdown")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -8446,6 +8452,10 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("LinkedBookingId");
+
+                    b.HasIndex("LinkedContactId");
 
                     b.HasIndex("NotionExportId")
                         .IsUnique();

@@ -424,6 +424,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<OverwatchBriefingSubscription>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<OverwatchBriefingSubscription>().Property(x => x.Email).HasMaxLength(254);
         modelBuilder.Entity<WikiPage>().Property(x => x.Aliases).HasMaxLength(1000);
+        modelBuilder.Entity<WikiPage>().HasIndex(x => x.LinkedContactId);
+        modelBuilder.Entity<WikiPage>().HasIndex(x => x.LinkedBookingId);
         modelBuilder.Entity<SentinelQuestion>().HasIndex(x => new { x.NotFound, x.AskedUnix });
         modelBuilder.Entity<PageTag>().HasIndex(x => new { x.WikiPageId, x.Tag, x.IsManual }).IsUnique();
         modelBuilder.Entity<PageTag>().HasIndex(x => x.Tag);

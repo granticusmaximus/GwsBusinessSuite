@@ -1146,6 +1146,7 @@ app.MapPost("/admin/api/native/quick-notes", async (
     HttpContext httpContext,
     GwsBusinessSuite.Application.Wiki.IQuickNoteService quickNotes,
     GwsBusinessSuite.Application.Wiki.IDailyNoteService dailyNotes,
+    GwsBusinessSuite.Application.Wiki.ISentinelMeetingNotesService meetingNotes,
     CancellationToken cancellationToken) =>
 {
     if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
@@ -1155,14 +1156,36 @@ app.MapPost("/admin/api/native/quick-notes", async (
     if (title.Length is 0 or > 200) return Results.BadRequest(new { error = "Give the note a title (up to 200 characters)." });
     if (markdown.Length > 200_000) return Results.BadRequest(new { error = "The note is too long to save as one page." });
     var performedBy = httpContext.User.Identity?.Name ?? "mac-app";
-    // DailyNote: add it as a section of today's daily note rather than a page of its own.
-    var page = request.DailyNote == true
+    // DailyNote: add it as a section of today's daily note rather than a page of its own. A note
+    // linked to a contact or booking (meeting notes, Sentinel item 28) is always its own page, so
+    // the link means that note and nothing else.
+    var linked = request.ContactId is not null || request.BookingId is not null;
+    var page = request.DailyNote == true && !linked
         ? await dailyNotes.AppendAsync(DateOnly.FromDateTime(DateTime.Now), title, markdown, performedBy, cancellationToken)
         : await quickNotes.AddQuickNoteAsync(title, markdown, performedBy, cancellationToken);
+    if (linked)
+    {
+        try { await meetingNotes.LinkAsync(page.Id, request.ContactId, request.BookingId, cancellationToken); }
+        catch (ArgumentException ex) { return Results.BadRequest(new { error = $"Saved, but not linked: {ex.Message}" }); }
+    }
     return Results.Json(new { id = page.Id, url = $"/admin/sentinel?page={page.Id}" });
 })
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");
+
+// Meeting notes (Sentinel item 28): the bookings and contacts a Mac note can be linked to.
+app.MapGet("/admin/api/native/meeting-targets", async (
+    string? q,
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelMeetingNotesService meetingNotes,
+    CancellationToken cancellationToken) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    var targets = await meetingNotes.ListTargetsAsync(q, cancellationToken);
+    return Results.Json(targets.Select(t => new { kind = t.Kind, id = t.Id, label = t.Label, detail = t.Detail }));
+})
+    .RequireAuthorization("AdminOnly");
 
 // Camera watch (CameraWatchService): the Mac app asks which cameras to watch, fetches each
 // snapshot through here (only cameras on the signed-in user's own list), reads it with its local
@@ -4662,7 +4685,7 @@ record ArticleUpsertRequest(
     string BodyMarkdown);
 
 record MobileDeviceRegistrationRequest(string Platform, string PushToken, string? DeviceName);
-record NativeQuickNoteRequest(string? Title, string? Markdown, bool? DailyNote = null);
+record NativeQuickNoteRequest(string? Title, string? Markdown, bool? DailyNote = null, Guid? ContactId = null, Guid? BookingId = null);
 record NativeCameraWatchReading(string? CameraId, string? ModelOutput, string? ImageBase64);
 record NativeContactRequest(string? FullName, string? Email, string? Company);
 record MobileApprovalResolutionRequest(bool Approved, string? Comment);

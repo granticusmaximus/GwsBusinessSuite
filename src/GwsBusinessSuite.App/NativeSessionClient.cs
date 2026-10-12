@@ -17,10 +17,25 @@ public sealed record ContactCreateResult(string? Url, string? FullName, string? 
 public sealed class NativeSessionClient(HttpClient httpClient)
 {
     // toDailyNote adds it to today's daily note instead of making a Quick Notes page.
-    public async Task<QuickNoteSaveResult> SaveQuickNoteAsync(string title, string markdown, bool toDailyNote = false, CancellationToken cancellationToken = default)
+    // contactId/bookingId link the note to a CRM contact or calendar booking (meeting notes); a
+    // linked note is always its own page, never added to the daily note.
+    public async Task<QuickNoteSaveResult> SaveQuickNoteAsync(string title, string markdown, bool toDailyNote = false,
+        Guid? contactId = null, Guid? bookingId = null, CancellationToken cancellationToken = default)
     {
-        var (json, error) = await PostAsync("/admin/api/native/quick-notes", new { title, markdown, dailyNote = toDailyNote }, cancellationToken);
+        var (json, error) = await PostAsync("/admin/api/native/quick-notes", new { title, markdown, dailyNote = toDailyNote, contactId, bookingId }, cancellationToken);
         return json is { } body ? new(AppEndpoints.BaseUrl + body.GetProperty("url").GetString(), null) : new(null, error);
+    }
+
+    // Bookings around today and recent contacts a meeting note can be linked to.
+    public async Task<IReadOnlyList<MeetingTarget>> GetMeetingTargetsAsync(CancellationToken cancellationToken = default)
+    {
+        var (json, _) = await GetJsonAsync("/admin/api/native/meeting-targets", cancellationToken);
+        if (json is not { ValueKind: JsonValueKind.Array } list) return [];
+        return list.EnumerateArray().Select(item => new MeetingTarget(
+            item.GetProperty("kind").GetString() ?? string.Empty,
+            item.GetProperty("id").GetGuid(),
+            item.GetProperty("label").GetString() ?? string.Empty,
+            item.GetProperty("detail").GetString() ?? string.Empty)).ToList();
     }
 
     public async Task<ContactCreateResult> CreateContactAsync(string fullName, string email, string company, CancellationToken cancellationToken = default)
@@ -137,4 +152,9 @@ public sealed class NativeSessionClient(HttpClient httpClient)
         return null;
 #endif
     }
+}
+
+public sealed record MeetingTarget(string Kind, Guid Id, string Label, string Detail)
+{
+    public override string ToString() => string.IsNullOrWhiteSpace(Detail) ? Label : $"{Label} \u00b7 {Detail}";
 }

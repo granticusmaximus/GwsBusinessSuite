@@ -632,6 +632,10 @@ public sealed class WikiPage : AuditableEntity
     // "Also known as" names, one per line (WikiPageAliases): [[links]], link autocomplete and
     // search match them as well as the title.
     public string Aliases { get; set; } = string.Empty;
+    // Meeting notes (Sentinel item 28): the CRM contact and/or calendar booking a note is about.
+    // A note linked to a booking also gets the booking's contact. Shown in the contact's History.
+    public Guid? LinkedContactId { get; set; }
+    public Guid? LinkedBookingId { get; set; }
     public int SortOrder { get; set; }
     public Guid? ParentWikiPageId { get; set; }
     // Null for pages authored directly in this app. Set on the page's first Notion sync and
