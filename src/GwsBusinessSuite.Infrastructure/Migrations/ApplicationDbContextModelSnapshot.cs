@@ -8202,6 +8202,11 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Aliases")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("BlocksJson")
                         .IsRequired()
                         .HasColumnType("TEXT");

@@ -29,25 +29,52 @@ public static class WikiMarkdownHelper
             return markdown ?? string.Empty;
         }
 
+        // A title wins; otherwise the one page with that alias (WikiPageAliases.Resolve).
         return WikiLinkPattern.Replace(markdown, match =>
         {
             var title = match.Groups[1].Value.Trim();
-            var target = pages.FirstOrDefault(p => string.Equals(p.Title, title, StringComparison.OrdinalIgnoreCase));
+            var target = WikiPageAliases.Resolve(title, pages);
             return target is null
                 ? $"*{title}* _(wiki page not found)_"
                 : $"[{title}](wikilink:{target.Id})";
         });
     }
 
+    // Titles and aliases both match. Best first: exact title, exact alias, title starting with the
+    // query, alias starting with it, then anything containing it. A suggestion found through an
+    // alias carries it, so the menu can say "also known as" and the link can read as typed.
     public static IReadOnlyList<WikiLinkSuggestion> SearchLinkSuggestions(string query, IReadOnlyList<WikiPage> pages, int maxResults = 8)
     {
-        var candidates = string.IsNullOrWhiteSpace(query)
-            ? pages
-            : pages.Where(p => p.Title.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return pages.Select(p => new WikiLinkSuggestion(p.Id, p.Title, p.Icon)).Take(maxResults).ToList();
+        }
 
-        return candidates
-            .Select(p => new WikiLinkSuggestion(p.Id, p.Title, p.Icon))
-            .Take(maxResults)
-            .ToList();
+        query = query.Trim();
+        var ranked = new List<(int Rank, int Order, WikiLinkSuggestion Suggestion)>();
+        for (var order = 0; order < pages.Count; order++)
+        {
+            var page = pages[order];
+            var titleRank = Rank(page.Title, query, exact: 0, prefix: 2, contains: 4);
+            var bestAlias = WikiPageAliases.Parse(page.Aliases)
+                .Select(alias => (Alias: alias, Rank: Rank(alias, query, exact: 1, prefix: 3, contains: 5)))
+                .Where(match => match.Rank >= 0)
+                .OrderBy(match => match.Rank)
+                .FirstOrDefault();
+            if (titleRank < 0 && bestAlias.Alias is null) continue;
+            var useAlias = bestAlias.Alias is not null && (titleRank < 0 || bestAlias.Rank < titleRank);
+            ranked.Add(useAlias
+                ? (bestAlias.Rank, order, new WikiLinkSuggestion(page.Id, page.Title, page.Icon, bestAlias.Alias))
+                : (titleRank, order, new WikiLinkSuggestion(page.Id, page.Title, page.Icon)));
+        }
+        return ranked.OrderBy(item => item.Rank).ThenBy(item => item.Order).Select(item => item.Suggestion).Take(maxResults).ToList();
+    }
+
+    private static int Rank(string? text, string query, int exact, int prefix, int contains)
+    {
+        text = (text ?? string.Empty).Trim();
+        if (text.Equals(query, StringComparison.OrdinalIgnoreCase)) return exact;
+        if (text.StartsWith(query, StringComparison.OrdinalIgnoreCase)) return prefix;
+        return text.Contains(query, StringComparison.OrdinalIgnoreCase) ? contains : -1;
     }
 }

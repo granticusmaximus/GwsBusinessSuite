@@ -1596,6 +1596,69 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         await Expect(content).ToHaveTextAsync("/");
     }
 
+    // Sentinel item 15 (page aliases): a [[name]] typed out in full links to the page it names
+    // (ResolveWikiLinkText), reading as typed; an alias match in the menu says so and links with
+    // the alias; an unknown name stays as plain text.
+    [Fact]
+    public async Task WikiLinks_ShouldResolveTypedNamesAndAliases()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<div id="editor" class="wiki-block-editor"></div>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = await File.ReadAllTextAsync(scriptPath);
+        moduleSource = moduleSource.Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+
+        var grantId = Guid.NewGuid();
+        await page.EvaluateAsync(
+            """
+            id => window.sentinelBlockEditor.initialize(
+                document.querySelector('#editor'),
+                {
+                    invokeMethodAsync: (method, text) => {
+                        if (method === 'ResolveWikiLinkText') {
+                            return Promise.resolve(text.toLowerCase() === 'gw' ? { id, title: 'Grant Watson' } : null);
+                        }
+                        if (method === 'SearchWikiLinkSuggestions') {
+                            return Promise.resolve(text.toLowerCase().startsWith('g') ? [{ id, title: 'Grant Watson', alias: 'GW' }] : []);
+                        }
+                        return Promise.resolve([]);
+                    }
+                },
+                '[]')
+            """,
+            grantId.ToString());
+
+        var content = page.Locator(".wiki-block-content");
+        await content.ClickAsync();
+        await content.PressSequentiallyAsync("Ask [[GW]]");
+        await Expect(content.Locator($"a[href='wikilink:{grantId}']")).ToHaveTextAsync("GW");
+        var typed = (await EditorBlocksAsync(page)).Single();
+        typed.RichText.Should().Contain(span => span.Text == "GW" && span.Link == $"wikilink:{grantId}");
+        typed.PlainText.Should().NotContain("[[");
+
+        await content.FillAsync("[[gr");
+        var linkMenu = page.GetByRole(AriaRole.Listbox, new() { Name = "Link to a Sentinel page" });
+        await Expect(linkMenu.GetByRole(AriaRole.Option)).ToContainTextAsync("Also known as GW");
+        await content.PressAsync("Enter");
+        (await EditorBlocksAsync(page)).Single().RichText.Should().ContainSingle(span => span.Text == "GW" && span.Link == $"wikilink:{grantId}");
+
+        await content.FillAsync("See [[Nobody]]");
+        await page.WaitForTimeoutAsync(200);
+        await Expect(content.Locator("a")).ToHaveCountAsync(0);
+        await Expect(content).ToHaveTextAsync("See [[Nobody]]");
+    }
+
     [Theory]
     [InlineData("# ", WikiBlockTypes.Heading1)]
     [InlineData("## ", WikiBlockTypes.Heading2)]

@@ -420,6 +420,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<OverwatchIncidentSighting>().HasIndex(x => new { x.LastSeenUnix, x.FirstSeenUnix });
         modelBuilder.Entity<OverwatchBriefingSubscription>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<OverwatchBriefingSubscription>().Property(x => x.Email).HasMaxLength(254);
+        modelBuilder.Entity<WikiPage>().Property(x => x.Aliases).HasMaxLength(1000);
         modelBuilder.Entity<OverwatchMapNote>().HasIndex(x => x.Username);
         modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Title).HasMaxLength(80);
         modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Body).HasMaxLength(2000);

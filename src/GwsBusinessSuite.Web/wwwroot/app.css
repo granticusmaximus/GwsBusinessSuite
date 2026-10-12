@@ -5453,3 +5453,17 @@ audio.wiki-embed-media { max-width: 100%; }
     .gws-wiki-preview { animation: gws-wiki-preview-in .12s ease-out; }
 }
 @keyframes gws-wiki-preview-in { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+
+/* Sentinel page aliases ("Also known as") under the page title. */
+.sentinel-page-aliases { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .45rem; margin: -.25rem 0 .75rem; font-size: .85rem; color: var(--gws-text-soft); }
+.sentinel-page-aliases.is-editing { flex-wrap: nowrap; }
+.sentinel-page-aliases.is-editing .form-control { flex: 1 1 auto; min-width: 0; }
+.sentinel-page-aliases-label { white-space: nowrap; }
+.sentinel-page-alias { padding: 0 .4rem; border: 1px solid var(--gws-panel-border); border-radius: .75rem; color: var(--gws-text-strong); }
+.sentinel-page-aliases.is-empty { opacity: .65; }
+.sentinel-page-aliases.is-empty:hover, .sentinel-page-aliases.is-empty:focus-within { opacity: 1; }
+.sentinel-page-aliases-message { margin: -.4rem 0 .75rem; color: var(--gws-text-soft); }
+@container gws-main (max-width: 720px) {
+    .sentinel-page-aliases.is-editing { flex-wrap: wrap; }
+}
+.sentinel-page-aliases-input { resize: none; overflow: hidden; white-space: nowrap; min-height: 0; }

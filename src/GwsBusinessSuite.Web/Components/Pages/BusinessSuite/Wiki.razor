@@ -827,6 +827,10 @@
                         <textarea @key="TitleElementKey" @ref="_titleInput" class="sentinel-title-input" rows="1" placeholder="Untitled"
                                   aria-label="Page title" @oninput="OnTitleInput"></textarea>
                     </div>
+                    @if (SelectedPageId is { } aliasPageId)
+                    {
+                        <SentinelPageAliases WikiPageId="aliasPageId" OnChanged="aliases => OnAliasesChanged(aliasPageId, aliases)" />
+                    }
 
                     @if (_showIconPicker)
                     {
@@ -1735,6 +1739,19 @@
     [JSInvokable]
     public Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestions(string query) =>
         SentinelWorkspaceService.SearchMentionSuggestionsAsync(query, CurrentUsername);
+
+    // Keeps the in-memory page list (which link suggestions and [[link]] resolution read) in step
+    // with an alias edit, without reloading the tree.
+    private void OnAliasesChanged(Guid pageId, IReadOnlyList<string> aliases)
+    {
+        if (WikiPages.FirstOrDefault(page => page.Id == pageId) is { } page) page.Aliases = WikiPageAliases.Serialize(aliases);
+    }
+
+    // A [[name]] typed out in full (wiki-block-editor.js): the page it means - titled that, or the
+    // only page with that alias - or null, in which case the text stays as typed.
+    [JSInvokable]
+    public Task<WikiLinkSuggestion?> ResolveWikiLinkText(string text) =>
+        Task.FromResult(WikiPageAliases.Resolve(text, WikiPages) is { } page ? new WikiLinkSuggestion(page.Id, page.Title, page.Icon) : null);
 
     // Hover previews (wikiLinks.js): null for a page that's gone or that this user can't view.
     [JSInvokable]

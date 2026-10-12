@@ -45,6 +45,7 @@ public sealed class SentinelWorkspaceService(
             var loweredTerm = term.ToLower();
             pageQuery = pageQuery.Where(page =>
                 page.Title.ToLower().Contains(loweredTerm)
+                || page.Aliases.ToLower().Contains(loweredTerm)
                 || page.BlocksJson.ToLower().Contains(loweredTerm));
             databaseQuery = databaseQuery.Where(database =>
                 database.Title.ToLower().Contains(loweredTerm)
@@ -78,7 +79,11 @@ public sealed class SentinelWorkspaceService(
         {
             var blocks = WikiBlockJson.ParseBlocks(page.BlocksJson);
             var content = string.Join('\n', blocks.Select(SearchableBlockText));
-            var score = Score(page.Title, content, normalized, terms);
+            // An alias counts like the title: the best of the two is the page's score.
+            var score = WikiPageAliases.Parse(page.Aliases)
+                .Select(alias => Score(alias, content, normalized, terms))
+                .Append(Score(page.Title, content, normalized, terms))
+                .Max();
             if (score > 0)
             {
                 results.Add(new SentinelSearchResult(
@@ -340,7 +345,8 @@ public sealed class SentinelWorkspaceService(
         }
 
         var expectedLink = $"wikilink:{targetPageId}";
-        var legacyLink = $"[[{target.Title}]]";
+        // Legacy Markdown blocks link by name: the title or any of the page's aliases.
+        var legacyLinks = WikiPageAliases.Parse(target.Aliases).Prepend(target.Title).Select(name => $"[[{name}]]").ToList();
         var backlinks = new List<SentinelBacklink>();
         var pages = await dbContext.WikiPages.AsNoTracking().Take(MaxScanPages).ToListAsync(cancellationToken);
         var accessibleTargets = await GetAccessibleTargetsAsync(
@@ -358,8 +364,8 @@ public sealed class SentinelWorkspaceService(
                 var hasStructuredLink = block.RichText.Any(span =>
                     string.Equals(span.Link, expectedLink, StringComparison.OrdinalIgnoreCase));
                 var hasLegacyLink = block.Type == WikiBlockTypes.Markdown
-                    && block.Props.GetValueOrDefault("content", string.Empty)
-                        .Contains(legacyLink, StringComparison.OrdinalIgnoreCase);
+                    && legacyLinks.Any(link => block.Props.GetValueOrDefault("content", string.Empty)
+                        .Contains(link, StringComparison.OrdinalIgnoreCase));
 
                 if (!hasStructuredLink && !hasLegacyLink)
                 {

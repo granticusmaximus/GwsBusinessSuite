@@ -2918,6 +2918,18 @@ function checkWikiLinkTrigger(state, content) {
     if (!range) return;
 
     const textBeforeCaret = textBefore(content, range);
+    // A [[name]] typed out in full becomes a link when it names exactly one page (by title, or
+    // by alias - Sentinel item 15); otherwise it stays as typed.
+    const closed = textBeforeCaret.match(/\[\[([^[\]]+)\]\]$/);
+    if (closed) {
+        const typed = closed[1].trim();
+        if (!typed) return;
+        state.dotNetRef.invokeMethodAsync('ResolveWikiLinkText', typed).then(page => {
+            if (requestId !== state.wikiLinkRequestId || !page) return;
+            replaceTypedWikiLink(state, content, closed[0], page.id, typed);
+        }).catch(() => { /* circuit may be gone */ });
+        return;
+    }
     const match = textBeforeCaret.match(/\[\[([^[\]]*)$/);
     if (!match) return;
 
@@ -2936,8 +2948,9 @@ function checkWikiLinkTrigger(state, content) {
             items: suggestions,
             icon: () => '📄',
             label: suggestion => suggestion.title,
-            description: () => 'Sentinel page',
-            commit: suggestion => insertWikiLink(state, content, query, suggestion.id, suggestion.title)
+            // Found through an alias: say so, and link with the alias as written.
+            description: suggestion => suggestion.alias ? `Also known as ${suggestion.alias}` : 'Sentinel page',
+            commit: suggestion => insertWikiLink(state, content, query, suggestion.id, suggestion.alias || suggestion.title)
         });
     }).catch(() => { /* circuit may be gone */ });
 }
@@ -2959,6 +2972,34 @@ function insertWikiLink(state, content, query, pageId, title) {
     deleteRange.insertNode(anchor);
     anchor.after(document.createTextNode(' '));
     placeCaretAtTextOffset(content, content.textContent.length);
+    scheduleNotify(state);
+}
+
+// Swaps the just-typed "[[name]]" before the caret for a link to pageId reading "name".
+function replaceTypedWikiLink(state, content, typedText, pageId, label) {
+    const range = getCaretRange(content);
+    if (!range) return;
+    const textBeforeCaret = textBefore(content, range);
+    if (!textBeforeCaret.endsWith(typedText)) return; // the text changed while we waited
+    const start = textBeforeCaret.length - typedText.length;
+    const deleteRange = document.createRange();
+    const position = resolveTextOffset(content, start);
+    deleteRange.setStart(position.node, position.offset);
+    deleteRange.setEnd(range.endContainer, range.endOffset);
+    deleteRange.deleteContents();
+
+    const anchor = document.createElement('a');
+    anchor.href = `wikilink:${pageId}`;
+    anchor.textContent = label;
+    deleteRange.insertNode(anchor);
+    const after = document.createTextNode('\u00a0');
+    anchor.after(after);
+    const caret = document.createRange();
+    caret.setStart(after, 1);
+    caret.collapse(true);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(caret);
     scheduleNotify(state);
 }
 

@@ -1,0 +1,123 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject ISentinelPageAliasService AliasService
+@inject ISentinelAccessService AccessService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<SentinelPageAliases> Logger
+
+@* "Also known as" (Sentinel item 15): a line under the page title. [[links]], link autocomplete
+   and search match these names as well as the title. *@
+@if (_editing)
+{
+    @* Not a <form>: this sits inside the page's EditForm, and a nested form would submit that. *@
+    <div class="sentinel-page-aliases is-editing" role="group" aria-label="Edit aliases">
+        <label class="sentinel-page-aliases-label" for="sentinel-aliases-input">Also known as</label>
+        @* A one-line textarea, not an input: Enter in an input would submit the surrounding page
+           form. Enter here saves (the stray newline is just another separator). *@
+        <textarea id="sentinel-aliases-input" class="form-control form-control-sm sentinel-page-aliases-input" rows="1"
+                  placeholder="Other names, separated by commas" maxlength="700" disabled="@_busy"
+                  @oninput="e => _draft = e.Value?.ToString() ?? string.Empty" @onkeydown="OnKeyDownAsync">@_draft</textarea>
+        <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="SaveAsync">Save</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="Cancel">Cancel</button>
+    </div>
+}
+else if (_aliases.Count > 0)
+{
+    <div class="sentinel-page-aliases">
+        <span class="sentinel-page-aliases-label">Also known as</span>
+        @foreach (var alias in _aliases)
+        {
+            <span class="sentinel-page-alias">@alias</span>
+        }
+        @if (_canEdit)
+        {
+            <button type="button" class="btn btn-sm btn-link p-0" @onclick="StartEditing" aria-label="Edit aliases">Edit</button>
+        }
+    </div>
+}
+else if (_canEdit)
+{
+    <div class="sentinel-page-aliases is-empty">
+        <button type="button" class="btn btn-sm btn-link p-0" @onclick="StartEditing">
+            <i class="bi bi-tags me-1" aria-hidden="true"></i>Add another name (alias)
+        </button>
+    </div>
+}
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="sentinel-page-aliases-message small" role="status">@_message</div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid WikiPageId { get; set; }
+    // Raised after a save with the stored aliases, so the page's own link suggestions update.
+    [Parameter] public EventCallback<IReadOnlyList<string>> OnChanged { get; set; }
+
+    private IReadOnlyList<string> _aliases = [];
+    private string _draft = string.Empty;
+    private string? _message;
+    private bool _editing;
+    private bool _busy;
+    private bool _canEdit;
+    private Guid _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == WikiPageId) return;
+        _loadedFor = WikiPageId;
+        _editing = false;
+        _message = null;
+        _aliases = await AliasService.GetAsync(WikiPageId);
+        var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        _canEdit = await AccessService.CanAccessAsync(WikiPageId, isDatabase: false, username, SentinelAccessLevels.Edit);
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey) await SaveAsync();
+        else if (e.Key == "Escape") Cancel();
+    }
+
+    private void StartEditing()
+    {
+        _draft = string.Join(", ", _aliases);
+        _message = null;
+        _editing = true;
+    }
+
+    private void Cancel()
+    {
+        _editing = false;
+        _message = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var result = await AliasService.SetAsync(WikiPageId, WikiPageAliases.SplitInput(_draft), username);
+            _aliases = result.Aliases;
+            _editing = false;
+            _message = result.SharedWith.Count == 0
+                ? null
+                : $"Also used by another page: {string.Join(", ", result.SharedWith)}. A typed [[link]] with that name goes to the page titled it, or stays unlinked.";
+            await OnChanged.InvokeAsync(_aliases);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or KeyNotFoundException)
+        {
+            _message = ex.Message;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogError(ex, "Saving aliases for Sentinel page {PageId} failed", WikiPageId);
+            _message = "The aliases couldn't be saved. Try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

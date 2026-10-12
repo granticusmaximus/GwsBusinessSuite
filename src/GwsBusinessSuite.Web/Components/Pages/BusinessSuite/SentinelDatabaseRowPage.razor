@@ -414,6 +414,10 @@
             await ListAccessibleWikiPagesAsync(),
             maxResults: int.MaxValue);
 
+    [JSInvokable]
+    public async Task<WikiLinkSuggestion?> ResolveWikiLinkText(string text) =>
+        WikiPageAliases.Resolve(text, await ListAccessibleWikiPagesAsync()) is { } page ? new WikiLinkSuggestion(page.Id, page.Title, page.Icon) : null;
+
     private async Task<IReadOnlyList<WikiPage>> ListAccessibleWikiPagesAsync()
     {
         var pages = await WikiService.ListPagesAsync();

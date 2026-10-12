@@ -629,6 +629,9 @@ public sealed class WikiPage : AuditableEntity
     public long ContentVersion { get; set; } = 1;
     public string? Icon { get; set; }
     public string? CoverImageUrl { get; set; }
+    // "Also known as" names, one per line (WikiPageAliases): [[links]], link autocomplete and
+    // search match them as well as the title.
+    public string Aliases { get; set; } = string.Empty;
     public int SortOrder { get; set; }
     public Guid? ParentWikiPageId { get; set; }
     // Null for pages authored directly in this app. Set on the page's first Notion sync and
