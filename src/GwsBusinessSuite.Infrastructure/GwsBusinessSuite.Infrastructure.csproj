@@ -8,6 +8,7 @@
   <ItemGroup>
     <PackageReference Include="CodeHollow.FeedReader" Version="1.2.6" />
     <PackageReference Include="Docker.DotNet" Version="3.125.15" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.12" />
     <!-- IPasswordHasher<T>/PasswordHasher<T> only - not the full ASP.NET Core Identity
          stack - needed by UserManagementService without pulling in the web SDK's shared

@@ -1017,6 +1017,25 @@ app.MapGet("/admin/sentinel/pages/{wikiPageId:guid}/export.md", async (
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");
 
+// PDF and Word exports (Sentinel item 20): the page, plus its sub-pages with ?subpages=true.
+// The service applies the same View check as opening the page (and skips sub-pages the user
+// can't see), on top of AdminOnly.
+foreach (var (extension, format) in new[] { ("pdf", SentinelExportFormat.Pdf), ("docx", SentinelExportFormat.Docx) })
+{
+    app.MapGet($"/admin/sentinel/pages/{{wikiPageId:guid}}/export.{extension}", async (
+        Guid wikiPageId,
+        bool? subpages,
+        HttpContext httpContext,
+        ISentinelPageExportService exports,
+        CancellationToken cancellationToken) =>
+    {
+        var file = await exports.ExportAsync(wikiPageId, httpContext.User.Identity?.Name ?? string.Empty, format, subpages == true, cancellationToken);
+        return file is null ? Results.NotFound() : Results.File(file.Content, file.ContentType, file.FileName);
+    })
+        .RequireAuthorization("AdminOnly")
+        .RequireRateLimiting("public-read");
+}
+
 app.MapGet("/admin/sentinel/databases/{wikiDatabaseId:guid}/export.csv", async (
     Guid wikiDatabaseId,
     IWikiDatabaseService wikiDatabaseService,

@@ -735,10 +735,35 @@
                                 disabled="@IsBusy" title="Duplicate page" aria-label="Duplicate page">
                             <i class="bi bi-copy"></i>
                         </button>
-                        <a class="btn btn-sm sentinel-tool-btn" href="@($"admin/sentinel/pages/{selectedPageId}/export.md")"
-                           title="Export as Markdown" aria-label="Export as Markdown" download>
-                            <i class="bi bi-download"></i>
-                        </a>
+                        <div class="dropdown">
+                            <button type="button" class="btn btn-sm sentinel-tool-btn" data-bs-toggle="dropdown"
+                                    aria-expanded="false" title="Export" aria-label="Export this page">
+                                <i class="bi bi-download"></i>
+                            </button>
+                            <div class="dropdown-menu dropdown-menu-end sentinel-style-menu">
+                                <div class="sentinel-style-menu-heading">Export this page</div>
+                                <a class="dropdown-item d-flex align-items-center gap-2" href="@($"admin/sentinel/pages/{selectedPageId}/export.pdf")" download>
+                                    <i class="bi bi-filetype-pdf"></i>PDF
+                                </a>
+                                <a class="dropdown-item d-flex align-items-center gap-2" href="@($"admin/sentinel/pages/{selectedPageId}/export.docx")" download>
+                                    <i class="bi bi-file-earmark-word"></i>Word (.docx)
+                                </a>
+                                <a class="dropdown-item d-flex align-items-center gap-2" href="@($"admin/sentinel/pages/{selectedPageId}/export.md")" download>
+                                    <i class="bi bi-markdown"></i>Markdown
+                                </a>
+                                @if (WikiPages.Any(page => page.ParentWikiPageId == selectedPageId && page.TrashedAt == null))
+                                {
+                                    <div class="dropdown-divider"></div>
+                                    <div class="sentinel-style-menu-heading">With its sub-pages</div>
+                                    <a class="dropdown-item d-flex align-items-center gap-2" href="@($"admin/sentinel/pages/{selectedPageId}/export.pdf?subpages=true")" download>
+                                        <i class="bi bi-filetype-pdf"></i>PDF
+                                    </a>
+                                    <a class="dropdown-item d-flex align-items-center gap-2" href="@($"admin/sentinel/pages/{selectedPageId}/export.docx?subpages=true")" download>
+                                        <i class="bi bi-file-earmark-word"></i>Word (.docx)
+                                    </a>
+                                }
+                            </div>
+                        </div>
                         <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-tool-btn-danger" @onclick="DeleteSelectedPageAsync"
                                 disabled="@IsBusy" title="Move to Trash" aria-label="Move to Trash">
                             <i class="bi bi-trash3"></i>
