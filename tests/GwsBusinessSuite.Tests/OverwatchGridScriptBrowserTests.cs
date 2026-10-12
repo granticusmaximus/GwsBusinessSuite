@@ -368,6 +368,17 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     {
         var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
         await using var pageScope = page;
+        // The flight ends at street level, where the globe asks Esri for close-zoom imagery and
+        // road-label tiles. Esri sometimes answers one without its CORS header, which Chrome logs
+        // as a console error - a pre-push run failed on exactly that. Those tiles are served here
+        // as a blank image instead, so this test checks the script, not Esri's servers.
+        await page.RouteAsync("https://server.arcgisonline.com/**/tile/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "image/png",
+            Headers = new Dictionary<string, string> { ["Access-Control-Allow-Origin"] = "*" },
+            BodyBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+        }));
         (await InitAsync(page)).Should().BeNull();
 
         (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setThreeD('tg-viewport', true)")).Should().Be("no-token");
