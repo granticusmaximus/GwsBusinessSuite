@@ -2,7 +2,7 @@
 // cms-builder-bridge.js's handleKeydown (registered on window, so it runs after this one,
 // which is on document). They're only ever mounted on different pages today (Wiki vs. Canvas
 // Studio) so there's no live collision, and their key combos don't currently overlap (this
-// one: Cmd/Ctrl+Shift+F, Cmd/Ctrl+Shift+D, Cmd/Ctrl+\, Escape) - but if the two features are ever mounted
+// one: Cmd/Ctrl+Shift+F, Cmd/Ctrl+Shift+D, Cmd/Ctrl+Shift+., Cmd/Ctrl+\, Escape) - but if the two features are ever mounted
 // together, re-check both for overlapping bindings before assuming they'll coexist cleanly.
 let shortcutHandler = null;
 let searchInput = null;
@@ -26,6 +26,14 @@ export function initialize(input) {
             return;
         }
 
+        // Focus mode (the toolbar's focus button). event.code, because Shift turns "." into ">"
+        // on most layouts.
+        if ((event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey && event.code === 'Period') {
+            event.preventDefault();
+            document.querySelector('.sentinel-focus-toggle')?.click();
+            return;
+        }
+
         if ((event.metaKey || event.ctrlKey) && event.key === '\\') {
             event.preventDefault();
             document.querySelector('.sentinel-sidebar-shortcut')?.click();
@@ -33,6 +41,13 @@ export function initialize(input) {
         }
 
         if (event.key === 'Escape') {
+            // Leave focus mode, unless Escape is closing a menu, popover or dialog first.
+            const exitFocus = document.querySelector('.sentinel-focus-exit');
+            const somethingOpen = document.querySelector('.wiki-editor-suggestion-menu, .dropdown-menu.show, [role="dialog"], .gws-wiki-preview');
+            if (exitFocus && !somethingOpen && !event.defaultPrevented) {
+                exitFocus.click();
+                return;
+            }
             const mobileBrowser = document.querySelector('.sentinel-local-sidebar.is-mobile-open');
             if (mobileBrowser && window.matchMedia('(max-width: 991.98px)').matches) {
                 document.querySelector('.sentinel-mobile-nav-toggle')?.click();

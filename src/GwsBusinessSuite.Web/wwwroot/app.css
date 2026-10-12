@@ -5488,3 +5488,53 @@ audio.wiki-embed-media { max-width: 100%; }
 .wiki-diagram-preview:empty::before { content: attr(data-placeholder); color: var(--gws-text-soft); font-style: italic; }
 .wiki-diagram > pre { margin: 0; text-align: left; }
 .wiki-mermaid-error { color: #f87171; font-size: .85rem; text-align: left; white-space: pre-wrap; }
+
+/* Sentinel focus mode (item 19): only the page. app.js's focus toggle hides the admin chrome. */
+.sentinel-workspace.is-focus .sentinel-workspace-header,
+.sentinel-workspace.is-focus .sentinel-local-sidebar,
+.sentinel-workspace.is-focus .sentinel-context-sidebar,
+.sentinel-workspace.is-focus .sentinel-document-toolbar,
+.sentinel-workspace.is-focus .sentinel-editor-hint,
+.sentinel-workspace.is-focus .sentinel-ai-panel,
+.sentinel-workspace.is-focus .sentinel-page-affordances { display: none !important; }
+.sentinel-workspace.is-focus .sentinel-layout {
+    grid-template-columns: minmax(0, 1fr) !important;
+    min-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+.sentinel-workspace.is-focus .sentinel-document-canvas:not(.is-full-width) { max-width: 46rem; margin-inline: auto; }
+.sentinel-focus-exit {
+    position: fixed;
+    z-index: 1050;
+    top: .75rem;
+    right: .75rem;
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .35rem .7rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: 999px;
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-soft);
+    font-size: .8rem;
+    opacity: .55;
+    transition: opacity .15s ease;
+}
+.sentinel-focus-exit:hover, .sentinel-focus-exit:focus-visible { opacity: 1; color: var(--gws-text-strong); }
+@media (pointer: coarse) { .sentinel-focus-exit { min-height: 44px; opacity: 1; } }
+
+/* Reading stats status bar under the page. */
+.sentinel-reading-stats {
+    position: sticky;
+    bottom: 0;
+    margin-top: 1.5rem;
+    padding: .35rem 0;
+    border-top: 1px solid var(--gws-panel-border);
+    background: var(--sentinel-canvas, var(--gws-panel-bg));
+    color: var(--gws-text-soft);
+    font-size: .75rem;
+    font-variant-numeric: tabular-nums;
+}
+.sentinel-reading-stats:empty { display: none; }

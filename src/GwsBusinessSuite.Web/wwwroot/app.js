@@ -411,6 +411,9 @@
 	// Quick Note uses browser-local pointer movement instead of sending each mousemove over
 	// the Blazor Server circuit. Pointer capture keeps the drag continuous outside the header,
 	// while the body class prevents accidental text selection on the dashboard underneath.
+	// Sentinel's focus mode (Wiki.razor) hides the admin chrome through the same toggle.
+	window.gwsFocusMode = { set: setFocusMode, isOn: isFocusModeOn };
+
 	var quickNoteCleanups = {};
 	window.gwsQuickNote = {
 		init: function (elementId) {

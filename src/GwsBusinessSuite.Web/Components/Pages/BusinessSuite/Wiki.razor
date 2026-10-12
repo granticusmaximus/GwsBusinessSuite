@@ -33,7 +33,15 @@
 
 <PageTitle>Sentinel</PageTitle>
 
-<div class="sentinel-workspace">
+<div class="sentinel-workspace @(_focusMode ? "is-focus" : string.Empty)">
+@if (_focusMode)
+{
+    @* Focus mode (Sentinel item 19): sidebars, header and toolbar are hidden; this is the way out
+       (Esc and Cmd/Ctrl+Shift+. too - sentinel-workspace.js). *@
+    <button type="button" class="sentinel-focus-exit" @onclick="ToggleFocusModeAsync" title="Exit focus mode (Esc)">
+        <i class="bi bi-fullscreen-exit" aria-hidden="true"></i><span>Exit focus</span>
+    </button>
+}
 @if (_paletteOpen)
 {
     <div class="sentinel-command-palette-backdrop" @onclick="CloseCommandPalette">
@@ -713,6 +721,10 @@
                         <SentinelPresence WikiPageId="selectedPageId" />
                         <SentinelSharePanel TargetId="selectedPageId" TargetName="@(Editor.Title ?? "page")" />
                         <SentinelPageVerificationPanel WikiPageId="selectedPageId" />
+                        <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-focus-toggle" @onclick="ToggleFocusModeAsync"
+                                title="Focus mode: just the page (Cmd/Ctrl+Shift+.)" aria-label="Focus mode" aria-pressed="@(_focusMode ? "true" : "false")">
+                            <i class="bi bi-fullscreen" aria-hidden="true"></i>
+                        </button>
                         <button type="button" class="btn btn-sm sentinel-tool-btn @(IsFavorite(selectedPageId, false) ? "is-active" : string.Empty)"
                                 @onclick="() => ToggleFavoriteAsync(selectedPageId, false)"
                                 title="@(IsFavorite(selectedPageId, false) ? "Remove from favorites" : "Add to favorites")"
@@ -914,6 +926,9 @@
                     </div>
                     <SentinelAiPanel @key="SelectedPageId" WikiPageId="SelectedPageId" OnInsert="InsertAiOutputAsync" />
                     <div class="wiki-block-editor" @ref="_blockEditorContainer"></div>
+                    @* Words, characters, reading time and selection - filled in live by
+                       wiki-block-editor.js (attachReadingStats); Blazor never renders its text. *@
+                    <div class="sentinel-reading-stats" data-wiki-reading-stats aria-label="Page statistics"></div>
 
                 </div>
             </EditForm>
@@ -1739,6 +1754,28 @@
     [JSInvokable]
     public Task<IReadOnlyList<SentinelMentionSuggestion>> SearchMentionSuggestions(string query) =>
         SentinelWorkspaceService.SearchMentionSuggestionsAsync(query, CurrentUsername);
+
+    // ---- Focus mode (Sentinel item 19): hides Sentinel's sidebars, header and toolbar, and the
+    // admin bar and navigation through app.js's own focus toggle. Not remembered between visits.
+    private bool _focusMode;
+
+    private async Task ToggleFocusModeAsync()
+    {
+        _focusMode = !_focusMode;
+        await SetShellFocusAsync(_focusMode);
+    }
+
+    private async Task SetShellFocusAsync(bool on)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gwsFocusMode.set", on);
+        }
+        catch (JSException ex)
+        {
+            Logger.LogDebug(ex, "The admin shell's focus toggle isn't available");
+        }
+    }
 
     // Keeps the in-memory page list (which link suggestions and [[link]] resolution read) in step
     // with an alias edit, without reloading the tree.
@@ -4216,6 +4253,13 @@
         catch (JSDisconnectedException)
         {
             // The circuit is already gone; whatever OnBlocksChanged last synced is what ships.
+        }
+
+        // Leaving Sentinel in focus mode shouldn't leave the rest of the admin without its chrome.
+        if (_focusMode)
+        {
+            try { await JS.InvokeVoidAsync("gwsFocusMode.set", false); }
+            catch (Exception ex) when (ex is JSDisconnectedException or JSException) { }
         }
 
         CursorTracker.Moved -= HandleCursorsMoved;

@@ -177,6 +177,73 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
     container.addEventListener('focusin', state.focusInHandler = event => {
         reportCursor(state, event.target.closest('.wiki-block-content'));
     });
+    attachReadingStats(state);
+}
+
+// ---- Reading stats (Sentinel item 19) ----
+// Words, characters and reading time for the page, plus the current selection, written into the
+// page's status bar ([data-wiki-reading-stats], which Blazor renders empty and never fills). Kept
+// live by a debounced MutationObserver (typing, pasting, adding or removing blocks) and the
+// document's selectionchange. Code, diagram and equation source isn't prose, so it's left out.
+const READING_WORDS_PER_MINUTE = 230;
+const NON_PROSE_BLOCKS = new Set(['code', 'diagram', 'equation']);
+const wordSegmenter = typeof Intl !== 'undefined' && Intl.Segmenter ? new Intl.Segmenter(undefined, { granularity: 'word' }) : null;
+
+export function readingStats(text) {
+    const value = String(text || '');
+    let words = 0;
+    if (wordSegmenter) {
+        for (const segment of wordSegmenter.segment(value)) if (segment.isWordLike) words++;
+    } else {
+        words = (value.match(/\S+/g) || []).length;
+    }
+    // Characters as people count them: emoji and accented letters are one each.
+    const characters = Array.from(value.replace(/\s+/g, ' ').trim()).length;
+    return { words, characters, minutes: words === 0 ? 0 : Math.max(1, Math.round(words / READING_WORDS_PER_MINUTE)) };
+}
+
+function pageProseText(container) {
+    return [...container.querySelectorAll('.wiki-block')]
+        .filter(block => !NON_PROSE_BLOCKS.has(block.dataset.blockType))
+        .map(block => [...block.querySelectorAll(':scope > .wiki-block-body > .wiki-block-content')].map(el => el.textContent).join(' '))
+        .filter(Boolean)
+        .join('\n');
+}
+
+function formatCount(count, one, many) {
+    return `${count.toLocaleString('en-US')} ${count === 1 ? one : many}`;
+}
+
+function attachReadingStats(state) {
+    // Looked up on every update: Blazor may re-create the element when the page changes.
+    const findTarget = () => state.container.closest('.sentinel-workspace')?.querySelector('[data-wiki-reading-stats]');
+    if (!findTarget()) return;
+    const update = () => {
+        state.readingStatsTimer = null;
+        const target = findTarget();
+        if (!target) return;
+        const page = readingStats(pageProseText(state.container));
+        const parts = [
+            formatCount(page.words, 'word', 'words'),
+            formatCount(page.characters, 'character', 'characters'),
+            page.minutes === 0 ? 'nothing to read yet' : page.words < READING_WORDS_PER_MINUTE / 2 ? 'under 1 min read' : `${page.minutes} min read`
+        ];
+        const selection = window.getSelection();
+        if (selection && !selection.isCollapsed && selection.rangeCount > 0
+            && state.container.contains(selection.getRangeAt(0).commonAncestorContainer)) {
+            const selected = readingStats(selection.toString());
+            if (selected.characters > 0) parts.push(`selected: ${formatCount(selected.words, 'word', 'words')}, ${formatCount(selected.characters, 'character', 'characters')}`);
+        }
+        target.textContent = parts.join(' · ');
+    };
+    const schedule = () => {
+        if (state.readingStatsTimer) return;
+        state.readingStatsTimer = setTimeout(update, 200);
+    };
+    state.readingStatsObserver = new MutationObserver(schedule);
+    state.readingStatsObserver.observe(state.container, { childList: true, subtree: true, characterData: true });
+    document.addEventListener('selectionchange', state.readingStatsSelectionHandler = schedule);
+    update();
 }
 
 export function setBlocks(container, blocksJson, historyKey = null) {
@@ -455,6 +522,9 @@ export function dispose(container) {
     if (state.offlineHandler) window.removeEventListener('offline', state.offlineHandler);
     if (state.onlineHandler) window.removeEventListener('online', state.onlineHandler);
     state.offlineBanner?.remove();
+    state.readingStatsObserver?.disconnect();
+    if (state.readingStatsSelectionHandler) document.removeEventListener('selectionchange', state.readingStatsSelectionHandler);
+    if (state.readingStatsTimer) clearTimeout(state.readingStatsTimer);
     states.delete(container);
 }
 
