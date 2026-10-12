@@ -48,13 +48,16 @@ public static class WikiBlockTypes
     // pipeline unchanged, so pre-existing pages keep their content verbatim rather than
     // losing it when BlocksJson supersedes the Markdown column.
     public const string Markdown = "markdown";
+    // Mermaid source (flowcharts, sequence diagrams, ...) in the block's text, drawn in the
+    // browser by the vendored Mermaid (wikiRichContentHydrate.js's wikiMermaid). Sentinel item 17.
+    public const string Diagram = "diagram";
 
     public static readonly IReadOnlyList<string> All =
     [
         Paragraph, Heading1, Heading2, Heading3, BulletedListItem, NumberedListItem,
         ToDo, Toggle, Quote, Callout, Code, Divider, Image, Embed, Video, Audio, File, Pdf,
         PageLink, LinkedDatabase, InlineDatabase,
-        Table, Equation, Breadcrumb, TableOfContents, Button, SyncedBlock, Columns, Tab, Markdown
+        Table, Equation, Diagram, Breadcrumb, TableOfContents, Button, SyncedBlock, Columns, Tab, Markdown
     ];
 
     public static bool IsListItem(string type) => type is BulletedListItem or NumberedListItem;

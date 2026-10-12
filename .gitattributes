@@ -1,0 +1,3 @@
+# Third-party files vendored as published (minified bundles can carry trailing whitespace);
+# keep git diff --check (scripts/verify-release.sh, the pre-push hook) focused on our own code.
+src/GwsBusinessSuite.Web/wwwroot/lib/** -whitespace

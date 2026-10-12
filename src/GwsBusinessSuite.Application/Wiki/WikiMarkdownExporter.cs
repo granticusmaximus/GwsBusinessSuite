@@ -103,6 +103,10 @@ public static class WikiMarkdownExporter
             case WikiBlockTypes.Equation:
                 markdown.Append("$$\n").Append(block.PlainText).Append("\n$$\n\n");
                 break;
+            case WikiBlockTypes.Diagram:
+                // GitHub, Obsidian and most Markdown tools draw a mermaid fence as a diagram.
+                markdown.Append("```mermaid\n").Append(block.PlainText).Append("\n```\n\n");
+                break;
             case WikiBlockTypes.Button:
                 if (WikiBlockHtmlRenderer.GetSafeLink(block.Props.GetValueOrDefault("url")) is { } buttonUrl)
                 {

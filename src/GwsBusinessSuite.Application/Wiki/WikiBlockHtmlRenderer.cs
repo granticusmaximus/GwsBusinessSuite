@@ -133,6 +133,7 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.InlineDatabase => RenderLinkedDatabase(block, indentStyle, isInline: true),
             WikiBlockTypes.Table => RenderTable(block, indentStyle),
             WikiBlockTypes.Equation => RenderEquation(block, indentStyle),
+            WikiBlockTypes.Diagram => RenderDiagram(block, indentStyle),
             WikiBlockTypes.Breadcrumb => $"<nav class=\"wiki-breadcrumb\"{indentStyle} aria-label=\"Breadcrumb\">{content}</nav>",
             WikiBlockTypes.TableOfContents => $"<nav class=\"wiki-table-of-contents\"{indentStyle}>Table of contents</nav>",
             // A workflow button only works inside Sentinel (it needs an Admin session), so
@@ -414,6 +415,11 @@ public static class WikiBlockHtmlRenderer
         var languageClass = string.IsNullOrWhiteSpace(language) ? string.Empty : $" language-{WebUtility.HtmlEncode(language)}";
         return $"<pre class=\"wiki-code\" data-language=\"{WebUtility.HtmlEncode(language)}\"{indentStyle}><code class=\"wiki-code-hydrate{languageClass}\">{WebUtility.HtmlEncode(block.PlainText)}</code></pre>";
     }
+
+    // The source shows as a code block until the browser draws it (and stays, readable, where
+    // scripts don't run); wikiRichContentHydrate.js replaces it with the drawn SVG.
+    private static string RenderDiagram(WikiBlock block, string indentStyle) =>
+        $"<div class=\"wiki-diagram wiki-mermaid-target\" data-mermaid=\"{WebUtility.HtmlEncode(block.PlainText)}\"{indentStyle}><pre class=\"wiki-code\"><code>{WebUtility.HtmlEncode(block.PlainText)}</code></pre></div>";
 
     private static string RenderEquation(WikiBlock block, string indentStyle) =>
         $"<div class=\"wiki-equation wiki-katex-target\" data-latex=\"{WebUtility.HtmlEncode(block.PlainText)}\"{indentStyle}>{WebUtility.HtmlEncode(block.PlainText)}</div>";

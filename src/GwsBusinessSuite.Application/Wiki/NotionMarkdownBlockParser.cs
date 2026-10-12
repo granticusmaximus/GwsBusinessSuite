@@ -105,11 +105,14 @@ public static partial class NotionMarkdownBlockParser
                 {
                     code.Add(lines[index]);
                 }
-                blocks.Add(NewBlock(
-                    WikiBlockTypes.Code,
-                    indent,
-                    [new WikiRichTextSpan(string.Join("\n", code))],
-                    new Dictionary<string, string> { ["language"] = language }));
+                // A mermaid fence is a diagram, so an exported diagram imports back as one.
+                blocks.Add(language.Equals("mermaid", StringComparison.OrdinalIgnoreCase)
+                    ? NewBlock(WikiBlockTypes.Diagram, indent, [new WikiRichTextSpan(string.Join("\n", code))], new Dictionary<string, string>())
+                    : NewBlock(
+                        WikiBlockTypes.Code,
+                        indent,
+                        [new WikiRichTextSpan(string.Join("\n", code))],
+                        new Dictionary<string, string> { ["language"] = language }));
                 continue;
             }
 

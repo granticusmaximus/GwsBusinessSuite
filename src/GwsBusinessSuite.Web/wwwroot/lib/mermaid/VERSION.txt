@@ -1,0 +1,2 @@
+mermaid 12.1.0 (MIT) - dist/mermaid.min.js from the npm tarball, sha512 integrity checked against the registry on 2026-10-12.
+Loaded on demand by js/wikiRichContentHydrate.js (wikiMermaid) only when a page has a diagram block.

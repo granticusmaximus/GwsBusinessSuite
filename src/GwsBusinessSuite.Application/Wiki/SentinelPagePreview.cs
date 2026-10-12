@@ -66,6 +66,7 @@ public static partial class SentinelPagePreviewBuilder
             WikiBlockTypes.File or WikiBlockTypes.Pdf => new("media", "File" + Caption(block)),
             WikiBlockTypes.Embed => new("media", "Link" + Caption(block)),
             WikiBlockTypes.Table => new("media", "Table"),
+            WikiBlockTypes.Diagram => new("media", "Diagram"),
             WikiBlockTypes.LinkedDatabase or WikiBlockTypes.InlineDatabase => new("media", "Database" + Caption(block)),
             WikiBlockTypes.PageLink => new("media", "Page: " + Clean(block.Props.GetValueOrDefault("pageTitle") ?? text)),
             WikiBlockTypes.Markdown => FirstMarkdownLine(text),

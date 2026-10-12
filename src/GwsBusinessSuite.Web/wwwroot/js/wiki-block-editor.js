@@ -53,6 +53,7 @@ const BLOCK_TYPES = [
     { type: 'tab', label: 'Tabs', icon: '▤', group: 'Layout sections', description: 'Organize content into switchable tabs.', keywords: 'tabbed container panes' },
     { type: 'table_of_contents', label: 'Table of contents', icon: '☷', group: 'Advanced & inline blocks', description: 'Auto-generates a list of jump links using your page headings.', keywords: 'outline headings' },
     { type: 'equation', label: 'Block equation', icon: '∑', group: 'Advanced & inline blocks', description: 'Centers standard LaTeX scientific formulas.', keywords: 'math formula latex' },
+    { type: 'diagram', label: 'Diagram', icon: '◇', group: 'Advanced & inline blocks', description: 'Flowcharts, sequence diagrams and more, written in Mermaid.', keywords: 'mermaid flowchart sequence chart graph gantt' },
     { type: 'synced_block', label: 'Synced block', icon: '↻', group: 'Advanced & inline blocks', description: 'Edits here update every duplicated copy of this block.', keywords: 'reusable' },
     { type: 'button', label: 'Button', icon: '▣', group: 'Advanced & inline blocks', description: 'Opens a link or runs an Automation workflow when clicked.', keywords: 'action link automation workflow' },
     { type: '__mention_person', label: 'Mention a person', icon: '@', group: 'Advanced & inline blocks', description: 'Inline flag for a coworker.', keywords: 'mention person user' },
@@ -709,7 +710,7 @@ function createBlockBody(block, state) {
 
     const content = createContentEditable(block, state);
     body.appendChild(content);
-    if (block.type === 'equation' || block.type === 'code') {
+    if (block.type === 'equation' || block.type === 'code' || block.type === 'diagram') {
         attachRichPreview(body, content, block);
     }
     if (block.type === 'button') {
@@ -853,14 +854,23 @@ function safeButtonUrl(value) {
 // every keystroke.
 function attachRichPreview(body, content, block) {
     const preview = document.createElement('div');
-    preview.className = block.type === 'equation' ? 'wiki-equation-preview' : 'wiki-code-preview';
-    if (block.type === 'equation') preview.dataset.placeholder = placeholderFor('equation');
+    preview.className = block.type === 'equation' ? 'wiki-equation-preview'
+        : block.type === 'diagram' ? 'wiki-diagram-preview' : 'wiki-code-preview';
+    if (block.type === 'equation' || block.type === 'diagram') preview.dataset.placeholder = placeholderFor(block.type);
     body.classList.add('wiki-has-rich-preview');
     body.appendChild(preview);
 
+    // Diagrams redraw after a short pause in typing: Mermaid is slower than KaTeX/highlight.js.
+    let diagramTimer = null;
     const render = () => {
-        const text = content.textContent || '';
+        // The same text the block saves: a Shift+Enter line break is a <br>, which textContent
+        // would drop - and Mermaid (and multi-line code) needs those newlines.
+        const text = richTextFromNode(content).map(span => span.text).join('');
         if (block.type === 'equation') renderKatexInto(preview, text);
+        else if (block.type === 'diagram') {
+            clearTimeout(diagramTimer);
+            diagramTimer = setTimeout(() => renderDiagramInto(preview, text), preview.childElementCount ? 400 : 0);
+        }
         else renderHighlightInto(preview, text, block.props && block.props.language);
     };
     preview.addEventListener('mousedown', event => {
@@ -871,6 +881,16 @@ function attachRichPreview(body, content, block) {
     content.addEventListener('blur', () => body.classList.remove('is-editing-rich'));
     content.addEventListener('input', render);
     render();
+}
+
+// Mermaid lives in wikiRichContentHydrate.js (window.wikiMermaid), shared with read-only views;
+// without it the source shows as text.
+function renderDiagramInto(el, source) {
+    if (!window.wikiMermaid) {
+        el.textContent = source;
+        return;
+    }
+    window.wikiMermaid.renderInto(el, source);
 }
 
 function renderKatexInto(el, latex) {
@@ -2282,7 +2302,10 @@ function createContentEditable(block, state) {
     content.addEventListener('paste', event => {
         event.preventDefault();
         const text = (event.clipboardData || window.clipboardData).getData('text/plain');
-        if (looksLikeMarkdown(text)) {
+        // Code, diagram and equation blocks take pasted text as it is: Mermaid or code that
+        // happens to look like Markdown mustn't be split into other blocks.
+        const pastedIntoType = content.closest('.wiki-block')?.dataset.blockType;
+        if (looksLikeMarkdown(text) && !['code', 'diagram', 'equation'].includes(pastedIntoType)) {
             pasteMarkdownAsBlocks(state, content, text);
             return;
         }
@@ -2349,6 +2372,7 @@ function placeholderFor(type) {
         case 'code': return 'Code';
         case 'table': return 'Header 1 | Header 2\nCell 1 | Cell 2';
         case 'equation': return 'Type an equation';
+        case 'diagram': return 'Mermaid, e.g. graph TD; A-->B  (Shift+Enter for a new line)';
         case 'button': return 'Button label';
         case 'synced_block': return 'Synced content';
         case 'columns': return 'Column one ||| Column two';
@@ -2890,7 +2914,7 @@ function checkMarkdownShortcut(state, content) {
     const blockEl = content.closest('.wiki-block');
     // Typing "```" inside an already-a-code-block should just be three literal backticks, not
     // another conversion.
-    if (!blockEl || blockEl.dataset.blockType === 'code') return;
+    if (!blockEl || ['code', 'diagram', 'equation'].includes(blockEl.dataset.blockType)) return;
 
     const text = content.textContent;
     const shortcut = MARKDOWN_SHORTCUTS.find(item => item.pattern.test(text));
@@ -4045,6 +4069,11 @@ function serializeBlock(blockEl) {
                     .join(' ||| ')
             }]
         : contentEl ? richTextFromNode(contentEl) : [];
+    // Browsers keep leading/repeated spaces in an editable area as non-breaking spaces; in code,
+    // diagram and equation source those are meant as plain spaces (indentation, Mermaid syntax).
+    if (type === 'code' || type === 'diagram' || type === 'equation') {
+        richText.forEach(span => { if (span.text) span.text = span.text.replace(/\u00a0/g, ' '); });
+    }
     return {
         id: blockEl.dataset.blockId,
         type,
