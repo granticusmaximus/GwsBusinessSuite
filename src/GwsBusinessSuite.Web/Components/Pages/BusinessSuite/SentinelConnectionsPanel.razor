@@ -1,0 +1,121 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@inject ISentinelConnectionsService Connections
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<SentinelConnectionsPanel> Logger
+
+@* Related notes + unlinked mentions (Sentinel item 3). *@
+<div class="card border-0 shadow-sm mt-4 sentinel-support-panel">
+    <div class="card-header bg-white border-bottom py-3">
+        <div class="fw-semibold"><i class="bi bi-bezier2 me-1"></i>Connections</div>
+        <div class="small text-secondary">Pages about similar things, and pages that name this one without linking to it.</div>
+    </div>
+    <div class="card-body p-0">
+        <div class="px-3 pt-3 small fw-semibold text-secondary">Related pages</div>
+        @if (_related.Count == 0)
+        {
+            <div class="px-3 pb-2 pt-1 text-secondary small">@(_loading ? "Looking..." : "Nothing closely related yet.")</div>
+        }
+        else
+        {
+            <div class="list-group list-group-flush">
+                @foreach (var related in _related)
+                {
+                    <button type="button" class="list-group-item list-group-item-action text-start" @onclick="() => OnOpenPage.InvokeAsync(related.Id)">
+                        <div class="fw-semibold small">@(related.Icon is { Length: > 0 } icon ? $"{icon} " : "")@related.Title</div>
+                        <div class="small text-secondary text-truncate mt-1">@related.Preview</div>
+                    </button>
+                }
+            </div>
+        }
+        <div class="px-3 pt-3 small fw-semibold text-secondary">Unlinked mentions</div>
+        @if (_mentions.Count == 0)
+        {
+            <div class="px-3 pb-3 pt-1 text-secondary small">@(_loading ? "Looking..." : "No other page names this one without linking it.")</div>
+        }
+        else
+        {
+            <div class="list-group list-group-flush">
+                @foreach (var mention in _mentions)
+                {
+                    <div class="list-group-item d-flex align-items-start gap-2">
+                        <button type="button" class="btn btn-link p-0 text-start flex-grow-1 text-decoration-none" @onclick="() => OnOpenPage.InvokeAsync(mention.PageId)">
+                            <div class="fw-semibold small">@mention.PageTitle</div>
+                            <div class="small text-secondary mt-1">@mention.Snippet</div>
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-primary flex-shrink-0" disabled="@_busy"
+                                title="@($"Make \"{mention.Name}\" on that page a link to this one")" @onclick="() => LinkAsync(mention)">Link it</button>
+                    </div>
+                }
+            </div>
+        }
+        @if (!string.IsNullOrEmpty(_message))
+        {
+            <div class="px-3 pb-3 small" role="status">@_message</div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid WikiPageId { get; set; }
+    [Parameter] public EventCallback<Guid> OnOpenPage { get; set; }
+
+    private IReadOnlyList<SentinelRelatedPage> _related = [];
+    private List<SentinelUnlinkedMention> _mentions = new();
+    private Guid _loadedFor;
+    private bool _loading;
+    private bool _busy;
+    private string? _message;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == WikiPageId) return;
+        _loadedFor = WikiPageId;
+        _related = [];
+        _mentions = new();
+        _message = null;
+        _loading = true;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var pageId = WikiPageId;
+            var related = await Connections.GetRelatedAsync(pageId, username);
+            var mentions = await Connections.GetUnlinkedMentionsAsync(pageId, username);
+            if (pageId != WikiPageId) return;
+            (_related, _mentions) = (related, mentions.ToList());
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Loading connections for page {PageId} failed", WikiPageId);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LinkAsync(SentinelUnlinkedMention mention)
+    {
+        _busy = true;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var linked = await Connections.LinkMentionAsync(mention.PageId, mention.BlockId, WikiPageId, username);
+            _mentions.Remove(mention);
+            _message = linked ? $"Linked on \"{mention.PageTitle}\"." : "That line has changed since; nothing to link there now.";
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _message = ex.Message;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Linking a mention failed");
+            _message = "The link couldn't be added. That page may be open and changing; try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

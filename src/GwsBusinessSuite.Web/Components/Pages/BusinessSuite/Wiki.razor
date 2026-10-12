@@ -1026,6 +1026,10 @@
                     }
                 </div>
             </div>
+            @if (SelectedPageId is { } connectionsPageId)
+            {
+                <SentinelConnectionsPanel WikiPageId="connectionsPageId" OnOpenPage="OpenAskedPageAsync" />
+            }
 
             <div class="card border-0 shadow-sm mt-4 sentinel-support-panel">
                 <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">

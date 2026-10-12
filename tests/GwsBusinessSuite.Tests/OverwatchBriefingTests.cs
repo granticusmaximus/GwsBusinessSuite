@@ -99,7 +99,7 @@ public sealed class OverwatchBriefingTests : IAsyncDisposable
         (await service.GetMorningAlertAsync("grant", alert.Id)).Should().NotBeNull();
         (await service.GetMorningAlertAsync("someone-else", alert.Id)).Should().BeNull();
         _mail.Sent.Should().ContainSingle().Which.Subject.Should().Be("Overwatch: Morning briefing 12-10-26");
-        ((TextPart)_mail.Sent[0].Body).Text.Should().Contain("NORTH\n1 crash or closure.").And.Contain("  - Crash on I 75 (major)");
+        ((TextPart?)_mail.Sent[0].Body)!.Text.Should().Contain("NORTH\n1 crash or closure.").And.Contain("  - Crash on I 75 (major)");
     }
 
     [Fact]
