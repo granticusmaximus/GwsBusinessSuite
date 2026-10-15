@@ -35,15 +35,17 @@ public sealed class SentinelPhase2CloseoutTests
         var database = await service.CreateDatabaseAsync("Tasks", null, "grant");
         var title = database.Properties.Single(p => p.Type == WikiDatabasePropertyTypes.Title);
         var summary = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor { Name = "Summary", Type = WikiDatabasePropertyTypes.AiField, AiPromptTemplate = "Summarize [Name]", AiModel = "gemma4" }, "grant");
-        async Task<WikiDatabaseRow> Row(string name, string? done)
+        async Task<WikiDatabaseRow> Row(string name)
         {
             var values = new System.Text.Json.Nodes.JsonObject();
             WikiPropertyValues.SetText(values, title.Id, name);
-            if (done is not null) WikiPropertyValues.SetText(values, summary.Id, done);
             return await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor { Values = values.ToDictionary(kv => kv.Key, kv => kv.Value) }, "grant");
         }
-        var empty = await Row("Ship it", null);
-        await Row("Already done", "kept");
+        var empty = await Row("Ship it");
+        var done = await Row("Already done");
+        // SaveRowAsync drops client-submitted values for computed columns (AiField included),
+        // so an already-filled row has to be filled through the real write path.
+        await service.WriteAiFieldValuesAsync(database.Id, summary.Id, new Dictionary<Guid, string> { [done.Id] = "kept" }, "grant");
 
         var job = await service.PrepareAiFieldJobAsync(database.Id, summary.Id, onlyEmpty: true);
         job.Model.Should().Be("gemma4");
@@ -111,7 +113,7 @@ public sealed class SentinelPhase2CloseoutTests
         var contact = new Contact { FullName = "Sam Client", Email = "sam@example.com", CreatedBy = "grant" };
         db.Contacts.Add(contact);
         await db.SaveChangesAsync();
-        var bookingType = new BookingType { Name = "Intro", Slug = "intro", CreatedBy = "grant" };
+        var bookingType = new BookingType { Title = "Intro", Slug = "intro", CreatedBy = "grant" };
         db.BookingTypes.Add(bookingType);
         var booking = new Booking { BookingTypeId = bookingType.Id, ContactId = contact.Id, StartsAt = DateTimeOffset.UtcNow.AddHours(2), EndsAt = DateTimeOffset.UtcNow.AddHours(3),
             AttendeeName = "Sam Client", AttendeeEmail = "sam@example.com", ManageTokenHash = "x", CreatedBy = "grant" };
