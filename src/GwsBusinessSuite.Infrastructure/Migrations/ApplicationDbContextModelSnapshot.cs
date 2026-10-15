@@ -6169,6 +6169,54 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("SentinelNotifications");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelPageSuggestion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("BaseContentVersion")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ChangesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Note")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("WikiPageId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WikiPageId", "Status");
+
+                    b.ToTable("PageSuggestions");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelPageTemplate", b =>
                 {
                     b.Property<Guid>("Id")

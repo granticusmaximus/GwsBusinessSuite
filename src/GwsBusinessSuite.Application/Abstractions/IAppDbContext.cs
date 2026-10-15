@@ -57,6 +57,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SentinelDiscussionComment> SentinelDiscussionComments { get; }
     DbSet<SentinelDiscussionReaction> SentinelDiscussionReactions { get; }
     DbSet<SentinelNotification> SentinelNotifications { get; }
+    DbSet<SentinelPageSuggestion> PageSuggestions { get; }
     DbSet<PageReminder> PageReminders { get; }
     DbSet<OverwatchCameraWatchState> OverwatchCameraWatchStates { get; }
     DbSet<OverwatchIncidentSighting> OverwatchIncidentSightings { get; }

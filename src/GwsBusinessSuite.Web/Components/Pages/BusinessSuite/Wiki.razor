@@ -32,6 +32,7 @@
 @inject NavigationManager Navigator
 @inject ILogger<Wiki> Logger
 @inject ISentinelLiveBlockService LiveBlockService
+@inject ISentinelSuggestionService SuggestionService
 
 <PageTitle>Sentinel</PageTitle>
 
@@ -743,6 +744,13 @@
                         <SentinelPresence WikiPageId="selectedPageId" />
                         <SentinelSharePanel TargetId="selectedPageId" TargetName="@(Editor.Title ?? "page")" />
                         <SentinelPageVerificationPanel WikiPageId="selectedPageId" />
+                        <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-tool-btn-label @(_suggesting ? "is-active" : "")"
+                                @onclick="ToggleSuggestingAsync" disabled="@IsBusy" aria-pressed="@(_suggesting ? "true" : "false")"
+                                title="Suggest: your edits become suggestions for someone with edit access to accept">
+                            <i class="bi bi-chat-square-quote" aria-hidden="true"></i><span>Suggest</span>
+                        </button>
+                        <SentinelSuggestionsPanel @ref="_suggestionsPanel" WikiPageId="selectedPageId" CanReview="_canEditPage"
+                                                  OnPageChanged="ReloadAfterSuggestionAsync" OnMarksChanged="SetSuggestionMarksAsync" />
                         <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-focus-toggle" @onclick="ToggleFocusModeAsync"
                                 title="Focus mode: just the page (Cmd/Ctrl+Shift+.)" aria-label="Focus mode" aria-pressed="@(_focusMode ? "true" : "false")">
                             <i class="bi bi-fullscreen" aria-hidden="true"></i>
@@ -830,10 +838,29 @@
                         </div>
                     }
                     <span class="sentinel-editing-state">
-                        @(!string.IsNullOrEmpty(_autosaveStatus) ? _autosaveStatus : SelectedPageId.HasValue ? "Saved" : "New page")
+                        @(_suggesting ? "Suggesting - not saved to the page" : !string.IsNullOrEmpty(_autosaveStatus) ? _autosaveStatus : SelectedPageId.HasValue ? "Saved" : "New page")
                     </span>
                 </div>
             </div>
+            @if (SelectedPageId.HasValue && _suggesting)
+            {
+                <div class="sentinel-suggest-banner" role="status">
+                    <i class="bi bi-chat-square-quote" aria-hidden="true"></i>
+                    <span>You're suggesting. Edit the page as usual; nothing changes until someone with edit access accepts it.</span>
+                    <input class="form-control form-control-sm" placeholder="Note for the reviewer (optional)" aria-label="Note for the reviewer"
+                           @bind="_suggestionNote" @bind:event="oninput" maxlength="@SentinelSuggestions.MaxNoteLength" />
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@IsBusy" @onclick="SubmitSuggestionAsync">Submit suggestion</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@IsBusy" @onclick="DiscardSuggestionAsync">Discard</button>
+                </div>
+            }
+            else if (SelectedPageId.HasValue && !_canEditPage)
+            {
+                <div class="sentinel-suggest-banner is-hint" role="status">
+                    <i class="bi bi-lock" aria-hidden="true"></i>
+                    <span>You can't edit this page directly, so changes you type here aren't saved. Turn on Suggest to propose them.</span>
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@IsBusy" @onclick="ToggleSuggestingAsync">Suggest edits</button>
+                </div>
+            }
             <EditForm Model="Editor" OnValidSubmit="SavePageAsync" class="sentinel-inline-document-form">
                 @if (!string.IsNullOrWhiteSpace(Editor.CoverImageUrl))
                 {
@@ -2182,6 +2209,7 @@
         // Debounced background saves should stay out of the way of another operation, but an
         // explicit navigation flush must never discard the link block just inserted by /page.
         if (IsBusy && !allowWhileBusy) return;
+        if (_suggesting) return;
         if (Editor.WikiPageId is { } existingPageId
             && !await CanAccessPageOrDatabaseAsync(existingPageId, isDatabase: false, SentinelAccessLevels.Edit))
         {
@@ -2490,6 +2518,99 @@
         }
     }
 
+    // ---- Suggested edits (Sentinel item 24) ----
+    // In Suggest mode autosave and "Save a version" stand down; the edits stay in the editor
+    // until Submit suggestion compares them with the copy taken when the mode began.
+    private bool _suggesting;
+    private bool _canEditPage = true;
+    private string? _suggestionBaseline;
+    private string _suggestionNote = string.Empty;
+    private IReadOnlyList<Guid> _suggestionMarks = [];
+    private SentinelSuggestionsPanel? _suggestionsPanel;
+
+    private async Task ToggleSuggestingAsync()
+    {
+        if (_suggesting)
+        {
+            await DiscardSuggestionAsync();
+            return;
+        }
+        // Whatever is already typed is saved first (when it can be), so the suggestion holds
+        // only what's typed from now on.
+        if (_canEditPage) await FlushAutosaveAsync();
+        DiscardPendingAutosave();
+        _suggestionBaseline = await CaptureEditorBlocksAsync();
+        _suggesting = true;
+        await SetEditorSuggestingAsync(true);
+    }
+
+    // Leaving Suggest mode: no autosave may pick up the suggested edits on the way out, and
+    // the editor drops its local draft so the reload shows the page as stored.
+    private async Task EndSuggestingAsync()
+    {
+        DiscardPendingAutosave();
+        await SetEditorSuggestingAsync(false);
+    }
+
+    private async Task SetEditorSuggestingAsync(bool suggesting)
+    {
+        if (!_blockEditorInitialized || _blockEditorModule is null) return;
+        try { await _blockEditorModule.InvokeVoidAsync("setSuggesting", _blockEditorContainer, suggesting); }
+        catch (JSDisconnectedException) { /* circuit gone */ }
+    }
+
+    private async Task SubmitSuggestionAsync()
+    {
+        if (SelectedPageId is not { } pageId || _suggestionBaseline is null) return;
+        IsBusy = true;
+        ErrorMessage = string.Empty;
+        try
+        {
+            var edited = await CaptureEditorBlocksAsync();
+            var suggestion = await SuggestionService.SubmitAsync(pageId, _suggestionBaseline, edited, _suggestionNote, CurrentUsername);
+            if (suggestion is null)
+            {
+                StatusMessage = "Nothing to suggest yet: the page is the same as when you started.";
+                return;
+            }
+            StatusMessage = suggestion.Changes.Count == 1 ? "Suggestion sent (1 change)." : $"Suggestion sent ({suggestion.Changes.Count} changes).";
+            IsBusy = false;
+            await EndSuggestingAsync();
+            await OpenPageAsync(pageId, recordHistory: false);
+            if (_suggestionsPanel is not null) await _suggestionsPanel.ReloadAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or KeyNotFoundException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task DiscardSuggestionAsync()
+    {
+        if (SelectedPageId is not { } pageId) return;
+        await EndSuggestingAsync();
+        await OpenPageAsync(pageId, recordHistory: false);
+    }
+
+    private async Task ReloadAfterSuggestionAsync()
+    {
+        if (SelectedPageId is { } pageId && !_suggesting) await OpenPageAsync(pageId, recordHistory: false);
+    }
+
+    private async Task SetSuggestionMarksAsync(IReadOnlyList<Guid> blockIds)
+    {
+        _suggestionMarks = blockIds;
+        if (_blockEditorInitialized && _blockEditorModule is not null)
+        {
+            try { await _blockEditorModule.InvokeVoidAsync("setSuggestionMarks", _blockEditorContainer, _suggestionMarks); }
+            catch (JSDisconnectedException) { /* circuit gone */ }
+        }
+    }
+
     private async Task UpdateDiscussionCountsAsync(IReadOnlyDictionary<Guid, int> counts)
     {
         _blockDiscussionCounts = counts;
@@ -2706,6 +2827,8 @@
             await _blockEditorModule.InvokeVoidAsync("setDiscussionCounts", _blockEditorContainer, _blockDiscussionCounts);
             await _blockEditorModule.InvokeVoidAsync("setDiscussionHighlights", _blockEditorContainer, _blockDiscussionHighlights);
             await _blockEditorModule.InvokeVoidAsync("setRemoteCursors", _blockEditorContainer, BuildRemoteCursorPayload());
+            await _blockEditorModule.InvokeVoidAsync("setSuggestionMarks", _blockEditorContainer, _suggestionMarks);
+            if (_suggesting) await _blockEditorModule.InvokeVoidAsync("setSuggesting", _blockEditorContainer, true);
             _blockEditorInitialized = true;
             _blockEditorSyncedGeneration = _editorGeneration;
         }
@@ -2720,6 +2843,8 @@
                 BlockEditorHistoryKey());
             await blockEditorModule.InvokeVoidAsync("setDiscussionCounts", _blockEditorContainer, _blockDiscussionCounts);
             await blockEditorModule.InvokeVoidAsync("setDiscussionHighlights", _blockEditorContainer, _blockDiscussionHighlights);
+            await blockEditorModule.InvokeVoidAsync("setSuggestionMarks", _blockEditorContainer, _suggestionMarks);
+            if (_suggesting) await blockEditorModule.InvokeVoidAsync("setSuggesting", _blockEditorContainer, true);
             // The editor element can be replaced when the conditional page-context rail enters
             // the render tree. Reinitializing, rather than assuming the old WeakMap state still
             // owns this ElementReference, guarantees a loaded page renders its persisted blocks.
@@ -3449,6 +3574,11 @@
             }
 
             PushCurrentLocationToBackStack(recordHistory, newPageId: page.Id, newDatabaseId: null);
+            // Suggest mode belongs to one visit to one page; leaving (or reloading) ends it.
+            _suggesting = false;
+            _suggestionBaseline = null;
+            _suggestionNote = string.Empty;
+            _canEditPage = await CanAccessPageOrDatabaseAsync(page.Id, isDatabase: false, SentinelAccessLevels.Edit);
             _mobileWorkspaceNavOpen = false;
             SearchQuery = string.Empty;
             WorkspaceSearchResults = new();
@@ -3548,6 +3678,8 @@
 
     private async Task SavePageAsync()
     {
+        // Suggest mode never writes the page; the banner's Submit suggestion does that job.
+        if (_suggesting) return;
         // An explicit save is about to write the freshest possible snapshot and rebuild
         // Editor from the result - any autosave debounce still pending against the current
         // (about to be replaced) Editor is now moot.

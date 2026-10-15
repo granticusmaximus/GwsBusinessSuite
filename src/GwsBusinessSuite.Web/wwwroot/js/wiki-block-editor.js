@@ -289,6 +289,32 @@ export function setBlocks(container, blocksJson, historyKey = null) {
     persistHistory(state);
 }
 
+// Suggested edits (Sentinel item 24): while on, edits aren't kept as a local draft; turning it
+// off drops any draft so the page reloads as stored.
+export function setSuggesting(container, suggesting) {
+    const state = states.get(container);
+    if (!state) return;
+    state.suggesting = Boolean(suggesting);
+    clearPersistedDraft(state);
+}
+
+// Blocks with a pending suggested change get a margin mark (has-suggestion).
+export function setSuggestionMarks(container, blockIds) {
+    const state = states.get(container);
+    if (!state) return;
+    state.suggestionMarks = new Set((blockIds || []).map(id => String(id).toLowerCase()));
+    for (const blockEl of container.querySelectorAll(':scope > .wiki-block')) {
+        applySuggestionMark(blockEl, state);
+    }
+}
+
+function applySuggestionMark(blockEl, state) {
+    const marked = state.suggestionMarks?.has((blockEl.dataset.blockId || '').toLowerCase()) === true;
+    blockEl.classList.toggle('has-suggestion', marked);
+    if (marked) blockEl.title = 'This block has a suggested edit - see Suggested edits in the toolbar';
+    else if (blockEl.title.startsWith('This block has a suggested edit')) blockEl.removeAttribute('title');
+}
+
 export function setHistoryKey(container, historyKey) {
     const state = states.get(container);
     if (!state) return;
@@ -661,6 +687,7 @@ function createBlockElement(block, state) {
     el.appendChild(gutter);
     el.appendChild(createBlockBody(block, state));
     applyDiscussionCount(el, state);
+    applySuggestionMark(el, state);
     return el;
 }
 
@@ -4187,7 +4214,9 @@ function readPersistedDraft(state) {
 
 function persistDraft(state, snapshot) {
     const key = draftStorageKey(state);
-    if (!key || state.baseSnapshot === undefined) return;
+    // Suggest mode edits are a suggestion, not the page: kept as a draft they would be
+    // "recovered" into the page on the next load and autosaved straight onto it.
+    if (!key || state.baseSnapshot === undefined || state.suggesting) return;
     if (snapshot === state.baseSnapshot) {
         clearPersistedDraft(state);
         return;

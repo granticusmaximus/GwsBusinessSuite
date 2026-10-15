@@ -4011,6 +4011,26 @@ audio.wiki-embed-media { max-width: 100%; }
 .wiki-button-settings { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .35rem; }
 .wiki-button-settings > select { width: auto; max-width: 16rem; }
 .wiki-button-settings > input { flex: 1 1 12rem; min-width: 0; }
+/* Suggested edits (Wiki.razor banner, SentinelSuggestionsPanel, editor margin marks). */
+.sentinel-suggest-banner { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .5rem 0 0; padding: .5rem .75rem; border-radius: .5rem; background: rgba(168, 85, 247, .12); border: 1px solid rgba(168, 85, 247, .35); font-size: .85rem; }
+.sentinel-suggest-banner.is-hint { background: transparent; border-style: dashed; }
+.sentinel-suggest-banner > span { flex: 1 1 16rem; }
+.sentinel-suggest-banner > .form-control { flex: 1 1 14rem; width: auto; }
+.wiki-block.has-suggestion > .wiki-block-body { box-shadow: inset 3px 0 0 #a855f7; padding-left: .4rem; }
+.sentinel-suggestions-popover { max-height: 70vh; overflow-y: auto; }
+.sentinel-suggestion { border-top: 1px solid var(--sentinel-border, #292524); padding: .6rem 0; display: grid; gap: .4rem; }
+.sentinel-suggestion > header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .4rem; font-size: .85rem; }
+.sentinel-suggestion-note { margin: 0; font-size: .85rem; font-style: italic; }
+.sentinel-suggestion-change { border-radius: .4rem; padding: .4rem .5rem; background: rgba(127, 127, 127, .08); display: grid; gap: .25rem; }
+.sentinel-suggestion-change.is-accepted, .sentinel-suggestion-change.is-rejected { opacity: .6; }
+.sentinel-suggestion-change-head { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; font-size: .8rem; }
+.sentinel-suggestion-kind { font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: .7rem; }
+.sentinel-suggestion-kind.is-insert { color: #22c55e; }
+.sentinel-suggestion-kind.is-delete { color: #f87171; }
+.sentinel-suggestion-kind.is-replace { color: #c084fc; }
+.sentinel-suggestion-diff { font-size: .875rem; overflow-wrap: anywhere; white-space: pre-wrap; }
+.sentinel-suggestion-diff ins { background: rgba(34, 197, 94, .2); text-decoration: none; }
+.sentinel-suggestion-diff del { background: rgba(248, 113, 113, .2); }
 /* Public form settings above a Form view (SentinelPublicFormSettings.razor). */
 .sentinel-form-settings { margin-bottom: 1rem; border: 1px solid var(--sentinel-border, #292524); border-radius: .5rem; padding: .5rem .75rem; }
 .sentinel-form-settings > summary { cursor: pointer; font-weight: 600; font-size: .9rem; }

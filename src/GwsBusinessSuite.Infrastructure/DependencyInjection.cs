@@ -1039,6 +1039,7 @@ public static class DependencyInjection
         services.AddScoped<ISentinelLiveBlockService, SentinelLiveBlockService>();
         services.AddScoped<ISentinelPublishedSiteService, SentinelPublishedSiteService>();
         services.AddScoped<ISentinelPublicFormService, SentinelPublicFormService>();
+        services.AddScoped<ISentinelSuggestionService, SentinelSuggestionService>();
         services.AddHostedService<SentinelReminderBackgroundService>();
         services.AddHostedService<SentinelPageVerificationBackgroundService>();
         services.AddScoped<ISentinelAiService, SentinelAiService>();

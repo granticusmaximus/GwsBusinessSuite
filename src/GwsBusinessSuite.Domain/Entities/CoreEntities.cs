@@ -813,6 +813,22 @@ public sealed class SentinelDiscussionReaction : AuditableEntity
     public SentinelDiscussionComment? Comment { get; set; }
 }
 
+// Suggested edits to a Sentinel page (item 24): one row per submitted suggestion, holding its
+// block-level changes (insert / replace / delete) and each change's own status, so a reviewer
+// can accept some and reject others. See SentinelSuggestions.
+public sealed class SentinelPageSuggestion : AuditableEntity
+{
+    public Guid WikiPageId { get; set; }
+    public string Note { get; set; } = string.Empty;
+    public string ChangesJson { get; set; } = "[]";
+    // open (some changes pending) / closed (every change accepted or rejected) / withdrawn.
+    public string Status { get; set; } = "open";
+    // The page's ContentVersion the suggestion was made against.
+    public long BaseContentVersion { get; set; }
+    // Unix seconds - SQLite can't order by DateTimeOffset.
+    public long CreatedAtUnix { get; set; }
+}
+
 public sealed class SentinelNotification : AuditableEntity
 {
     public required string Username { get; set; }
