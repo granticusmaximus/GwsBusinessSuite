@@ -5,6 +5,7 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
+@inject ISentinelPublishedSiteService PublishedSiteService
 @inject GwsBusinessSuite.Application.Community.ICommunityDirectoryService CommunityDirectory
 
 <div class="sentinel-share-panel">
@@ -80,6 +81,28 @@
                     <input class="form-check-input" type="checkbox" @bind="_allowSearchIndexing" />
                     <span class="form-check-label">Allow search engines to index this page</span>
                 </label>
+                @if (!IsDatabase)
+                {
+                    <label class="form-check mt-1 small">
+                        <input class="form-check-input" type="checkbox" checked="@_includeSubpages" @onchange="SetIncludeSubpagesAsync" />
+                        <span class="form-check-label">Publish with its sub-pages as a site (sidebar and search)</span>
+                    </label>
+                    @if (_includeSubpages)
+                    {
+                        <input type="text" class="form-control form-control-sm mt-1" @bind="_siteTitle" maxlength="@SentinelPublishedSite.MaxSiteTitleLength"
+                               placeholder="Site title (optional, defaults to the page title)" aria-label="Site title" />
+                        @if (_sitePreview is { } preview)
+                        {
+                            <div class="small text-secondary mt-1">
+                                Publishes @(preview.Pages.Count == 1 ? "1 page" : $"{preview.Pages.Count} pages").
+                                @if (preview.HiddenTitles.Count > 0)
+                                {
+                                    <span>Left out because they have their own sharing: @string.Join(", ", preview.HiddenTitles.Take(5))@(preview.HiddenTitles.Count > 5 ? $" and {preview.HiddenTitles.Count - 5} more" : "").</span>
+                                }
+                            </div>
+                        }
+                    }
+                }
             </div>
             @if (!string.IsNullOrWhiteSpace(_newPublicUrl))
             {
@@ -92,7 +115,7 @@
             @foreach (var share in _snapshot.Shares.Where(item => !item.IsRevoked))
             {
                 <div class="sentinel-share-entry mt-2">
-                    <span><i class="bi bi-globe2 me-2"></i>Public link @if (share.RequiresPassword) { <i class="bi bi-lock-fill ms-1" title="Password protected"></i> }</span>
+                    <span><i class="bi @(share.IncludeSubpages ? "bi-diagram-3" : "bi-globe2") me-2"></i>@(share.IncludeSubpages ? $"Site: {share.SiteTitle ?? TargetName}" : "Public link") @if (share.RequiresPassword) { <i class="bi bi-lock-fill ms-1" title="Password protected"></i> }</span>
                     <small>@(share.ExpiresAt?.ToLocalTime().ToString("dd-MM-yy HH:mm") ?? "No expiry")</small>
                     <button type="button" @onclick="() => RevokeShareAsync(share.Id)"><i class="bi bi-slash-circle"></i></button>
                 </div>
@@ -121,6 +144,18 @@
     private DateTime? _shareExpiresAt;
     private string _sharePassword = string.Empty;
     private bool _allowSearchIndexing;
+    private bool _includeSubpages;
+    private string _siteTitle = string.Empty;
+    private SentinelPublishedSite.Site? _sitePreview;
+
+    // Shows what a site share would publish before the link is created.
+    private async Task SetIncludeSubpagesAsync(ChangeEventArgs e)
+    {
+        _includeSubpages = e.Value is true || string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        _sitePreview = _includeSubpages
+            ? await PublishedSiteService.GetSiteAsync(new SentinelShareView(Guid.Empty, TargetId, false, null, null, false, false, IncludeSubpages: true))
+            : null;
+    }
 
     private IReadOnlyList<GwsBusinessSuite.Application.Community.DepartmentView> _departments = [];
     private string _departmentId = string.Empty;
@@ -177,10 +212,13 @@
         var expiresAt = _shareExpiresAt is { } parsed ? new DateTimeOffset(parsed) : (DateTimeOffset?)null;
         var password = string.IsNullOrWhiteSpace(_sharePassword) ? null : _sharePassword;
         var share = await AccessService.CreatePublicShareAsync(TargetId, IsDatabase, expiresAt, _allowSearchIndexing, password,
-            await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await CurrentUserAccessor.GetCurrentUsernameAsync(), includeSubpages: _includeSubpages && !IsDatabase, siteTitle: _siteTitle);
         _newPublicUrl = Navigation.ToAbsoluteUri($"/sentinel/share/{share.PublicToken}").ToString();
         _shareExpiresAt = null;
         _sharePassword = string.Empty;
+        _includeSubpages = false;
+        _siteTitle = string.Empty;
+        _sitePreview = null;
         await LoadAsync();
     }
 

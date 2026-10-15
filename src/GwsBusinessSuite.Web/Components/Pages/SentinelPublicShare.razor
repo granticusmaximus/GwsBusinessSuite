@@ -1,15 +1,28 @@
 @page "/sentinel/share/{Token}"
+@page "/sentinel/share/{Token}/{PageId:guid}"
 @attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@layout GwsBusinessSuite.Web.Components.Layout.PublicShareLayout
 @using GwsBusinessSuite.Application.Automation
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
+@using Microsoft.AspNetCore.DataProtection
 @inject ISentinelAccessService AccessService
 @inject IWikiService WikiService
 @inject IWikiDatabaseService WikiDatabaseService
 @inject IAutomationWorkflowService AutomationWorkflowService
-@inject IJSRuntime JS
+@inject ISentinelPublishedSiteService PublishedSiteService
+@inject IDataProtectionProvider DataProtection
 
+@* A static page (no interactive render mode): it works without a live connection, links are
+   ordinary links, the password form posts to SentinelShareEndpoints, and site search is a GET
+   form. Code/equation/diagram blocks are drawn by js/sentinelPublicShare.js. *@
 <PageTitle>@(_title ?? "Shared Sentinel page")</PageTitle>
+<HeadContent>
+    @if (_share?.AllowSearchIndexing != true)
+    {
+        <meta name="robots" content="noindex,nofollow" />
+    }
+</HeadContent>
 
 <main class="sentinel-public-share">
     @if (_loading)
@@ -25,27 +38,71 @@
         <div class="sentinel-public-share-error">
             <h1>Password required</h1>
             <p>This link is protected. Enter the password to view it.</p>
-            <div class="input-group" style="max-width: 20rem; margin: 0 auto;">
-                <input type="password" class="form-control" @bind="_password" @bind:event="oninput" @onkeydown="OnPasswordKeyDownAsync" placeholder="Password" autofocus />
-                <button type="button" class="btn btn-primary" @onclick="SubmitPasswordAsync" disabled="@_verifying">Unlock</button>
-            </div>
-            @if (_passwordError)
+            <form method="post" action="@($"sentinel/share/{Token}/unlock")" class="input-group" style="max-width: 20rem; margin: 0 auto;">
+                <AntiforgeryToken />
+                @if (PageId is { } requestedPage)
+                {
+                    <input type="hidden" name="page" value="@requestedPage" />
+                }
+                <input type="password" name="password" class="form-control" placeholder="Password" aria-label="Password" required autofocus />
+                <button type="submit" class="btn btn-primary">Unlock</button>
+            </form>
+            @if (Unlock == "wrong")
             {
-                <p class="text-danger mt-2">Incorrect password.</p>
+                <p class="text-danger mt-2">Incorrect password, or too many attempts. Wait a moment and try again.</p>
+            }
+            else if (Unlock == "expired")
+            {
+                <p class="text-danger mt-2">The form expired. Enter the password again.</p>
             }
         </div>
     }
-    else if (_page is not null)
+    else if (_notInSite)
     {
-        @if (!string.IsNullOrWhiteSpace(_page.CoverImageUrl))
-        {
-            <img class="sentinel-public-cover" src="@_page.CoverImageUrl" alt="" />
-        }
-        <article>
-            <div class="sentinel-public-brand">SENTINEL</div>
-            <h1><span>@_page.Icon</span> @_page.Title</h1>
-            <div class="sentinel-public-content">@((MarkupString)WikiBlockHtmlRenderer.RenderPage(WikiBlockJson.ParseBlocks(_page.BlocksJson)))</div>
-        </article>
+        <div class="sentinel-public-share-error"><h1>Page not found</h1><p>That page isn't part of this shared site.</p>
+            @if (_site is not null) { <p><a href="@SentinelPublishedSite.PageUrl(Token, _site.RootId, _site.RootId)">Go to @_site.Title</a></p> }
+        </div>
+    }
+    else if (_page is not null && _site is { Pages.Count: > 1 } site)
+    {
+        <div class="sentinel-public-site">
+            <nav class="sentinel-public-site-nav" aria-label="@site.Title">
+                <a class="sentinel-public-site-title" href="@SentinelPublishedSite.PageUrl(Token, site.RootId, site.RootId)">@site.Title</a>
+                <form method="get" action="@SentinelPublishedSite.PageUrl(Token, site.RootId, _page.Id).TrimStart('/')" class="sentinel-public-site-search" role="search">
+                    <input type="search" name="q" value="@Query" class="form-control form-control-sm" placeholder="Search this site" aria-label="Search this site" minlength="2" />
+                </form>
+                <ul class="sentinel-public-site-tree">
+                    @foreach (var item in site.Pages)
+                    {
+                        <li style="--depth:@item.Depth">
+                            <a href="@SentinelPublishedSite.PageUrl(Token, site.RootId, item.Id)" aria-current="@(item.Id == _page.Id ? "page" : null)">
+                                @if (!string.IsNullOrWhiteSpace(item.Icon)) { <span aria-hidden="true">@item.Icon </span> }@item.Title
+                            </a>
+                        </li>
+                    }
+                </ul>
+            </nav>
+            <div class="sentinel-public-site-main">
+                @if (_results is not null)
+                {
+                    <section class="sentinel-public-site-results" aria-label="Search results">
+                        <h2>@(_results.Count == 0 ? $"Nothing in this site matches “{Query}”" : $"Results for “{Query}”")</h2>
+                        @foreach (var result in _results)
+                        {
+                            <a href="@SentinelPublishedSite.PageUrl(Token, site.RootId, result.Id)">
+                                <strong>@result.Title</strong>
+                                @if (result.Snippet.Length > 0) { <span>@result.Snippet</span> }
+                            </a>
+                        }
+                    </section>
+                }
+                @PageArticle(_page, site)
+            </div>
+        </div>
+    }
+    else if (_page is not null && _site is not null)
+    {
+        @PageArticle(_page, _site)
     }
     else if (_database is not null)
     {
@@ -112,6 +169,13 @@
 
 @code {
     [Parameter] public string Token { get; set; } = string.Empty;
+    [Parameter] public Guid? PageId { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] public string? Query { get; set; }
+    [SupplyParameterFromQuery(Name = "unlock")] public string? Unlock { get; set; }
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+    private SentinelPublishedSite.Site? _site;
+    private IReadOnlyList<SentinelPublishedSite.SearchResult>? _results;
+    private bool _notInSite;
     private SentinelShareView? _share;
     private WikiPage? _page;
     private WikiDatabase? _database;
@@ -119,16 +183,14 @@
     private bool _loading = true;
     private string? _title;
     private bool _unlocked;
-    private string _password = string.Empty;
-    private bool _passwordError;
-    private bool _verifying;
 
-    protected override async Task OnParametersSetAsync()
+    protected override async Task OnInitializedAsync()
     {
         _share = await AccessService.ResolvePublicShareAsync(Token);
-        if (_share is not null && !_share.RequiresPassword)
+        if (_share is not null)
         {
-            await LoadTargetAsync();
+            _unlocked = !_share.RequiresPassword || SentinelShareUnlock.IsUnlocked(HttpContext, DataProtection, _share.Id);
+            if (_unlocked) await LoadTargetAsync();
         }
         _loading = false;
     }
@@ -138,44 +200,36 @@
         if (_share is null) return;
         if (_share.IsAutomationWorkflow) _automationStatus = await AutomationWorkflowService.GetPublicStatusAsync(_share.TargetId);
         else if (_share.IsDatabase) _database = await WikiDatabaseService.GetDatabaseAsync(_share.TargetId);
-        else _page = await WikiService.GetPageAsync(_share.TargetId);
-        _title = _automationStatus?.Name ?? _database?.Title ?? _page?.Title;
-        await AccessService.RecordShareViewAsync(_share.Id);
-    }
-
-    private async Task SubmitPasswordAsync()
-    {
-        if (_share is null || string.IsNullOrEmpty(_password)) return;
-        _verifying = true;
-        _passwordError = false;
-        var correct = await AccessService.VerifySharePasswordAsync(_share.Id, _password);
-        _verifying = false;
-        if (correct)
-        {
-            _unlocked = true;
-            _password = string.Empty;
-            await LoadTargetAsync();
-        }
         else
         {
-            _passwordError = true;
+            _site = await PublishedSiteService.GetSiteAsync(_share);
+            if (_site is null) return;
+            var pageId = PageId ?? _site.RootId;
+            if (!_site.Contains(pageId))
+            {
+                _notInSite = true;
+                return;
+            }
+            _page = await WikiService.GetPageAsync(pageId);
+            if (_page is not null && !string.IsNullOrWhiteSpace(Query) && _site.Pages.Count > 1)
+                _results = await PublishedSiteService.SearchAsync(_site, Query);
         }
+        _title = _automationStatus?.Name ?? _database?.Title
+            ?? (_page is null ? null : _site is { Pages.Count: > 1 } && _page.Id != _site.RootId ? $"{_page.Title} · {_site.Title}" : _site?.Title ?? _page.Title);
+        if (_automationStatus is not null || _database is not null || _page is not null)
+            await AccessService.RecordShareViewAsync(_share.Id);
     }
 
-    private async Task OnPasswordKeyDownAsync(KeyboardEventArgs e)
+    private RenderFragment PageArticle(WikiPage shown, SentinelPublishedSite.Site site) => __builder =>
     {
-        if (e.Key == "Enter") await SubmitPasswordAsync();
-    }
-
-    // This is a read-only view (no live block editor), so equation/code blocks need the same
-    // KaTeX/highlight.js pass the editor applies itself in wiki-block-editor.js's
-    // attachRichPreview - wikiRichContentHydrate.js is the shared implementation both use.
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (_page is not null)
+        @if (!string.IsNullOrWhiteSpace(shown.CoverImageUrl))
         {
-            try { await JS.InvokeVoidAsync("wikiRichContentHydrate", ".sentinel-public-content"); }
-            catch (JSDisconnectedException) { /* circuit gone */ }
+            <img class="sentinel-public-cover" src="@shown.CoverImageUrl" alt="" />
         }
-    }
+        <article>
+            <div class="sentinel-public-brand">SENTINEL</div>
+            <h1><span>@shown.Icon</span> @shown.Title</h1>
+            <div class="sentinel-public-content">@((MarkupString)SentinelPublishedSite.RewriteLinks(WikiBlockHtmlRenderer.RenderPage(WikiBlockJson.ParseBlocks(shown.BlocksJson)), site, Token))</div>
+        </article>
+    };
 }

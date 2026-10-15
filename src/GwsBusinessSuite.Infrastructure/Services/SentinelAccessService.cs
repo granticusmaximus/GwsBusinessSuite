@@ -36,7 +36,8 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
             .Where(item => item.TargetId == targetId && item.IsDatabase == isDatabase)
             .Select(item => new SentinelShareView(
                 item.Id, item.TargetId, item.IsDatabase, null, item.ExpiresAt, item.AllowSearchIndexing,
-                item.RevokedAt != null, item.PasswordHash != null, item.ViewCount, item.LastAccessedAt, item.IsAutomationWorkflow))
+                item.RevokedAt != null, item.PasswordHash != null, item.ViewCount, item.LastAccessedAt, item.IsAutomationWorkflow,
+                item.IncludeSubpages, item.SiteTitle))
             .ToListAsync(cancellationToken);
         // SQLite stores DateTimeOffset as TEXT and cannot translate ORDER BY for it. Keep the
         // bounded resource-share query server-side, then order the already-materialized rows
@@ -89,8 +90,12 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
 
     public async Task<SentinelShareView> CreatePublicShareAsync(
         Guid targetId, bool isDatabase, DateTimeOffset? expiresAt, bool allowSearchIndexing, string? password, string performedBy,
-        bool isAutomationWorkflow = false, CancellationToken cancellationToken = default)
+        bool isAutomationWorkflow = false, CancellationToken cancellationToken = default,
+        bool includeSubpages = false, string? siteTitle = null)
     {
+        // A site is a page-tree feature; databases and automation status pages are single views.
+        includeSubpages = includeSubpages && !isDatabase && !isAutomationWorkflow;
+        siteTitle = includeSubpages && !string.IsNullOrWhiteSpace(siteTitle) ? siteTitle.Trim()[..Math.Min(siteTitle.Trim().Length, SentinelPublishedSite.MaxSiteTitleLength)] : null;
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
         var hasPassword = !string.IsNullOrWhiteSpace(password);
         string? passwordSalt = null;
@@ -105,6 +110,8 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
             TargetId = targetId,
             IsDatabase = isDatabase,
             IsAutomationWorkflow = isAutomationWorkflow,
+            IncludeSubpages = includeSubpages,
+            SiteTitle = siteTitle,
             TokenHash = HashToken(token),
             ExpiresAt = expiresAt,
             AllowSearchIndexing = allowSearchIndexing,
@@ -115,7 +122,8 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         };
         await dbContext.SentinelPublicShares.AddAsync(entity, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
-        return new SentinelShareView(entity.Id, targetId, isDatabase, token, expiresAt, allowSearchIndexing, false, hasPassword, IsAutomationWorkflow: isAutomationWorkflow);
+        return new SentinelShareView(entity.Id, targetId, isDatabase, token, expiresAt, allowSearchIndexing, false, hasPassword,
+            IsAutomationWorkflow: isAutomationWorkflow, IncludeSubpages: includeSubpages, SiteTitle: siteTitle);
     }
 
     public async Task RevokePublicShareAsync(Guid shareId, string performedBy, CancellationToken cancellationToken = default)
@@ -135,7 +143,8 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         var item = await dbContext.SentinelPublicShares.AsNoTracking()
             .FirstOrDefaultAsync(item => item.TokenHash == hash && item.RevokedAt == null, cancellationToken);
         if (item is null || item.ExpiresAt is { } expiresAt && expiresAt <= DateTimeOffset.UtcNow) return null;
-        return new SentinelShareView(item.Id, item.TargetId, item.IsDatabase, null, item.ExpiresAt, item.AllowSearchIndexing, false, item.PasswordHash != null, IsAutomationWorkflow: item.IsAutomationWorkflow);
+        return new SentinelShareView(item.Id, item.TargetId, item.IsDatabase, null, item.ExpiresAt, item.AllowSearchIndexing, false, item.PasswordHash != null, IsAutomationWorkflow: item.IsAutomationWorkflow,
+            IncludeSubpages: item.IncludeSubpages, SiteTitle: item.SiteTitle);
     }
 
     public async Task<bool> VerifySharePasswordAsync(Guid shareId, string password, CancellationToken cancellationToken = default)

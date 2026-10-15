@@ -2157,6 +2157,7 @@ app.MapPost("/campaigns/unsubscribe/{token}", async (string token, GwsBusinessSu
 
 // "Email signup" widget + article-alert emails: subscribe / confirm / unsubscribe.
 ArticleAlertEndpoints.Map(app);
+SentinelShareEndpoints.Map(app);
 
 // Handles "form" widget submissions (see CmsBlockHtmlRenderer's "form" case). Fixed URL
 // per site rather than per page — the submitted page's (possibly nested) full path travels

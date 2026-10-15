@@ -1485,6 +1485,28 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     color: #292524; --bs-table-color: #292524; --bs-table-hover-color: #292524; --bs-table-bg: white;
 }
 .sentinel-public-automation-runs th { color: #78716c; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+/* Published site (a page shared with its sub-pages): sidebar + page. Wraps to a stacked layout
+   on narrow screens through flex-wrap, so no extra breakpoint is needed. */
+.sentinel-public-site { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0 2rem; width: min(78rem, 100%); margin: 0 auto; padding: 0 1rem; }
+.sentinel-public-site-nav { flex: 1 1 15rem; max-width: 100%; padding: 2.5rem 0 1rem; display: grid; gap: .75rem; align-content: start; }
+/* Stacked above the page on narrow screens it must scroll away; it only stays in view once it
+   sits beside the page, which is always true from this width. */
+@media (min-width: 1024px) {
+    .sentinel-public-site-nav { position: sticky; top: 0; max-height: 100vh; overflow-y: auto; }
+}
+.sentinel-public-site-main { flex: 999 1 30rem; min-width: 0; }
+.sentinel-public-site-main article { width: 100%; padding-top: 2.5rem; }
+.sentinel-public-site-title { font-weight: 700; font-size: 1.05rem; color: #1c1917; text-decoration: none; }
+.sentinel-public-site-search .form-control { background: white; color: #292524; border-color: #d6d3d1; }
+.sentinel-public-site-tree { list-style: none; margin: 0; padding: 0; display: grid; gap: .1rem; }
+.sentinel-public-site-tree a { display: block; padding: .3rem .5rem .3rem calc(.5rem + var(--depth, 0) * .9rem); border-radius: .375rem; color: #57534e; text-decoration: none; font-size: .9rem; overflow-wrap: anywhere; }
+.sentinel-public-site-tree a:hover, .sentinel-public-site-tree a:focus-visible { background: #f0eeeb; color: #1c1917; }
+.sentinel-public-site-tree a[aria-current="page"] { background: #e7e5e4; color: #1c1917; font-weight: 600; }
+.sentinel-public-site-results { display: grid; gap: .5rem; padding-top: 2.5rem; }
+.sentinel-public-site-results h2 { font-size: 1rem; color: #57534e; margin: 0; }
+.sentinel-public-site-results a { display: grid; gap: .15rem; padding: .7rem .9rem; border: 1px solid #e7e5e4; border-radius: .5rem; background: white; color: #292524; text-decoration: none; }
+.sentinel-public-site-results a span { color: #78716c; font-size: .85rem; }
+.sentinel-public-unlinked { text-decoration: underline dotted #a8a29e; }
 .sentinel-public-share-error { display: grid; place-content: center; min-height: 100vh; min-height: 100dvh; text-align: center; }
 /* Collapsed (the default, and how a page spends nearly all of its time) is a small, low-chrome
    invocation point - Notion's own AI entry point is a text trigger (Cmd+J / a slash command),

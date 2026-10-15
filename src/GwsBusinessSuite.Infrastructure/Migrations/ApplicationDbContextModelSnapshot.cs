@@ -6287,6 +6287,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<int>("FailedPasswordAttempts")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("IncludeSubpages")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("IsAutomationWorkflow")
                         .HasColumnType("INTEGER");
 
@@ -6306,6 +6309,10 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SiteTitle")
+                        .HasMaxLength(120)
                         .HasColumnType("TEXT");
 
                     b.Property<Guid>("TargetId")

@@ -878,6 +878,10 @@ public sealed class SentinelPublicShare : AuditableEntity
     // read-only automation status/report page (Part 4.10), reusing this same token/password/
     // expiry/revoke infrastructure rather than building a parallel share mechanism.
     public bool IsAutomationWorkflow { get; set; }
+    // Page shares only: publish the page's sub-pages too, as a small site with a sidebar and
+    // search (Sentinel item 30, SentinelPublishedSite). SiteTitle names the site; null = page title.
+    public bool IncludeSubpages { get; set; }
+    public string? SiteTitle { get; set; }
     public required string TokenHash { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
     public bool AllowSearchIndexing { get; set; }

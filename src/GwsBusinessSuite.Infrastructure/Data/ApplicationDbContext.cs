@@ -446,6 +446,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             .HasIndex(x => new { x.TargetId, x.IsDatabase, x.Username })
             .IsUnique();
         modelBuilder.Entity<SentinelPublicShare>().HasIndex(x => x.TokenHash).IsUnique();
+        modelBuilder.Entity<SentinelPublicShare>().Property(x => x.SiteTitle).HasMaxLength(GwsBusinessSuite.Application.Wiki.SentinelPublishedSite.MaxSiteTitleLength);
         modelBuilder.Entity<SentinelPublicShare>().HasIndex(x => new { x.TargetId, x.IsDatabase, x.RevokedAt });
         modelBuilder.Entity<ClientPortalLoginToken>().HasIndex(x => x.TokenHash).IsUnique();
         modelBuilder.Entity<ClientPortalLoginToken>().HasIndex(x => new { x.ContactId, x.ExpiresAt });
