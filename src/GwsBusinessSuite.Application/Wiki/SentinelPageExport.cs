@@ -98,6 +98,7 @@ public static partial class SentinelExportFlattener
                 if (rows.Count > 0) yield return new ExportTable(rows, header);
                 break;
             case WikiBlockTypes.Video: yield return Note("Video", block); break;
+            case WikiBlockTypes.Business: yield return new ExportNote($"{SentinelLiveBlockKinds.Describe(block)} - open the page in Sentinel for the current data"); break;
             case WikiBlockTypes.Audio: yield return Note("Audio", block); break;
             case WikiBlockTypes.File: yield return Note("File", block); break;
             case WikiBlockTypes.Pdf: yield return Note("PDF", block); break;

@@ -31,6 +31,7 @@
 @inject IJSRuntime JS
 @inject NavigationManager Navigator
 @inject ILogger<Wiki> Logger
+@inject ISentinelLiveBlockService LiveBlockService
 
 <PageTitle>Sentinel</PageTitle>
 
@@ -1712,6 +1713,31 @@
     }
 
     public sealed record ButtonWorkflowOption(string Id, string Name);
+
+    // Live business blocks (wiki-block-editor.js createLiveBlockBody). CRM, Support, BI, the
+    // content calendar and time tracking are Admin-only areas, so only Admins get data back.
+    [JSInvokable]
+    public async Task<IReadOnlyList<SentinelLiveTarget>> SearchLiveBlockTargets(string kind, string query)
+    {
+        if (!await IsAdminNowAsync()) return [];
+        return await LiveBlockService.SearchAsync(kind, query, CurrentUsername);
+    }
+
+    [JSInvokable]
+    public async Task<SentinelLiveCard> GetLiveBlock(string kind, string recordId)
+    {
+        if (!await IsAdminNowAsync())
+            return SentinelLiveCard.Unavailable(kind, "Only Admins can see live business data.");
+        try
+        {
+            return await LiveBlockService.GetCardAsync(kind, recordId, CurrentUsername);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Live block {Kind} {RecordId} failed to load", kind, recordId);
+            return SentinelLiveCard.Unavailable(kind, "This live block couldn't be loaded right now.");
+        }
+    }
 
     // Date chip reminders (wiki-block-editor.js openDateReminderPanel). The owner is always the
     // signed-in user; SentinelReminderService checks access to the page.

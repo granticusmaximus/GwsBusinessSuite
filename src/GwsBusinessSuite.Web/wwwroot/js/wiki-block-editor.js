@@ -57,12 +57,19 @@ const BLOCK_TYPES = [
     { type: 'synced_block', label: 'Synced block', icon: '↻', group: 'Advanced & inline blocks', description: 'Edits here update every duplicated copy of this block.', keywords: 'reusable' },
     { type: 'button', label: 'Button', icon: '▣', group: 'Advanced & inline blocks', description: 'Opens a link or runs an Automation workflow when clicked.', keywords: 'action link automation workflow' },
     { type: '__mention_person', label: 'Mention a person', icon: '@', group: 'Advanced & inline blocks', description: 'Inline flag for a coworker.', keywords: 'mention person user' },
-    { type: 'breadcrumb', label: 'Breadcrumb', icon: '›', group: 'Advanced & inline blocks', description: 'Show this page’s location.', keywords: 'navigation path' }
+    { type: 'breadcrumb', label: 'Breadcrumb', icon: '›', group: 'Advanced & inline blocks', description: 'Show this page’s location.', keywords: 'navigation path' },
+    { type: '__live_contact', label: 'CRM contact', icon: '👤', group: 'Live business', description: 'A live card for a contact: status, open deals and tickets.', keywords: 'live crm contact customer client person' },
+    { type: '__live_deal', label: 'Deal', icon: '💼', group: 'Live business', description: 'A live card for a deal: stage, value and close date.', keywords: 'live crm deal pipeline opportunity' },
+    { type: '__live_ticket', label: 'Support ticket', icon: '🎫', group: 'Live business', description: 'A live card for a ticket: status, priority and replies.', keywords: 'live support ticket helpdesk' },
+    { type: '__live_chart', label: 'BI chart', icon: '📊', group: 'Live business', description: 'A chart from your Business Intelligence dashboard.', keywords: 'live bi chart report metric dashboard analytics' },
+    { type: '__live_calendar', label: 'Content calendar (week)', icon: '🗓', group: 'Live business', description: 'What is scheduled to publish this week.', keywords: 'live content calendar schedule week posts' },
+    { type: '__live_time', label: 'Time tracking (week)', icon: '⏱', group: 'Live business', description: 'Hours logged this week, by contact.', keywords: 'live time tracking hours timesheet week' }
 ];
 // Pseudo block types handled by their own commit branch in commitBlockPickerItem rather than
 // convertBlockType - they don't change the current block's type, they navigate away to a newly
 // created page/database (__create_*), open a second search menu in place (__link_to_page,
-// __mention_person), or splice in reusable content (dynamic __template_<id> entries added to
+// __mention_person), turn the block into a live business block with its kind preset (__live_*),
+// or splice in reusable content (dynamic __template_<id> entries added to
 // the menu at open time from GetSuggestedBlockTemplates).
 const CREATE_MENU_TYPES = new Set(['__create_page', '__create_database']);
 const COLUMN_LAYOUT_TYPES = new Set(['__columns_2', '__columns_3', '__columns_sidebar_left', '__columns_sidebar_right']);
@@ -723,6 +730,11 @@ function createBlockBody(block, state) {
         return body;
     }
 
+    if (block.type === 'business') {
+        body.appendChild(createLiveBlockBody(block, state));
+        return body;
+    }
+
     if (block.type === 'to_do') {
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
@@ -787,6 +799,218 @@ function createBlockBody(block, state) {
         body.appendChild(createButtonSettings(block, state));
     }
     return body;
+}
+
+// ---- Live business block ----
+// Shows a CRM contact/deal, support ticket, BI chart, this week's content calendar or time
+// totals. props: kind, recordId, recordLabel - the data itself is never saved into the page; the
+// Wiki component (SearchLiveBlockTargets / GetLiveBlock) reads it fresh, Admins only. The card
+// re-reads every 30 s while it is on screen and the tab is visible, so changes made elsewhere
+// show up without a reload.
+const LIVE_REFRESH_MS = 30000;
+const LIVE_KINDS_WITH_RECORD = new Set(['contact', 'deal', 'ticket', 'chart']);
+const LIVE_KIND_NAMES = { contact: 'CRM contact', deal: 'Deal', ticket: 'Support ticket', chart: 'BI chart', calendar: 'Content calendar', time: 'Time tracking' };
+
+function createLiveBlockBody(block, state) {
+    const props = block.props || {};
+    const kind = props.kind || '';
+    let recordId = props.recordId || '';
+    let recordLabel = props.recordLabel || '';
+    const wrapper = document.createElement('div');
+    wrapper.className = 'wiki-live-block';
+    wrapper.contentEditable = 'false';
+    wrapper.dataset.liveKind = kind;
+    let timer = null;
+    let generation = 0;
+
+    const store = () => {
+        const el = wrapper.closest('.wiki-block');
+        if (!el) return;
+        let stored = {};
+        try { stored = JSON.parse(el.dataset.propsJson || '{}'); } catch { stored = {}; }
+        stored.kind = kind;
+        stored.recordId = recordId;
+        stored.recordLabel = recordLabel;
+        el.dataset.propsJson = JSON.stringify(stored);
+        notifyChanged(state);
+    };
+
+    const stopTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
+
+    const text = (tag, className, value) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        node.textContent = value;
+        return node;
+    };
+
+    const renderPicker = () => {
+        stopTimer();
+        wrapper.replaceChildren();
+        const header = text('div', 'wiki-live-header', `${LIVE_KIND_NAMES[kind] || 'Live block'}: choose what to show`);
+        const search = document.createElement('input');
+        search.type = 'search';
+        search.className = 'form-control form-control-sm wiki-live-search';
+        search.placeholder = 'Search…';
+        search.setAttribute('aria-label', `Search for a ${(LIVE_KIND_NAMES[kind] || 'record').toLowerCase()}`);
+        const results = document.createElement('div');
+        results.className = 'wiki-live-results';
+        results.setAttribute('role', 'listbox');
+        let debounce = null;
+        const load = () => {
+            const mine = ++generation;
+            state.dotNetRef.invokeMethodAsync('SearchLiveBlockTargets', kind, search.value).then(items => {
+                if (mine !== generation) return;
+                results.replaceChildren();
+                if (!items.length) {
+                    results.appendChild(text('div', 'wiki-live-empty', search.value ? 'Nothing matches.' : 'Nothing to show, or only Admins can use live blocks.'));
+                    return;
+                }
+                for (const item of items) {
+                    const option = document.createElement('button');
+                    option.type = 'button';
+                    option.className = 'wiki-live-option';
+                    option.setAttribute('role', 'option');
+                    option.append(text('span', 'wiki-live-option-label', item.label), text('span', 'wiki-live-option-detail', item.detail || ''));
+                    option.addEventListener('click', () => {
+                        recordId = item.id;
+                        recordLabel = item.label;
+                        store();
+                        renderCard();
+                    });
+                    results.appendChild(option);
+                }
+            }).catch(() => {
+                results.replaceChildren(text('div', 'wiki-live-empty', 'Live blocks are not available here.'));
+            });
+        };
+        search.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(load, 250); });
+        // Enter inside the page's form must not submit it.
+        search.addEventListener('keydown', event => { if (event.key === 'Enter') event.preventDefault(); });
+        wrapper.append(header, search, results);
+        load();
+    };
+
+    const drawCard = card => {
+        wrapper.replaceChildren();
+        const header = document.createElement('div');
+        header.className = 'wiki-live-header';
+        const kindLabel = text('span', 'wiki-live-kind', `Live ${LIVE_KIND_NAMES[kind] || ''}`.trim());
+        const asOf = text('span', 'wiki-live-asof', card.asOf ? `Updated ${card.asOf}` : '');
+        const actions = document.createElement('span');
+        actions.className = 'wiki-live-actions';
+        const refresh = document.createElement('button');
+        refresh.type = 'button';
+        refresh.className = 'wiki-live-action';
+        refresh.title = 'Refresh now';
+        refresh.setAttribute('aria-label', 'Refresh now');
+        refresh.textContent = '↻';
+        refresh.addEventListener('click', () => fetchCard());
+        actions.appendChild(refresh);
+        if (LIVE_KINDS_WITH_RECORD.has(kind)) {
+            const change = document.createElement('button');
+            change.type = 'button';
+            change.className = 'wiki-live-action';
+            change.textContent = 'Change';
+            change.addEventListener('click', renderPicker);
+            actions.appendChild(change);
+        }
+        header.append(kindLabel, asOf, actions);
+        wrapper.appendChild(header);
+
+        if (card.error) {
+            wrapper.appendChild(text('div', 'wiki-live-error', card.error));
+            return;
+        }
+        const title = card.link ? document.createElement('a') : document.createElement('div');
+        title.className = 'wiki-live-title';
+        title.textContent = card.title;
+        if (card.link) title.href = card.link;
+        wrapper.appendChild(title);
+        if (card.subtitle) wrapper.appendChild(text('div', 'wiki-live-subtitle', card.subtitle));
+        if (card.fields.length) {
+            const fields = document.createElement('dl');
+            fields.className = 'wiki-live-fields';
+            for (const field of card.fields) {
+                const item = document.createElement('div');
+                item.append(text('dt', '', field.label), text('dd', '', field.value));
+                fields.appendChild(item);
+            }
+            wrapper.appendChild(fields);
+        }
+        if (card.bars.length) {
+            const bars = document.createElement('div');
+            bars.className = 'wiki-live-bars';
+            for (const bar of card.bars) {
+                const row = document.createElement('div');
+                row.className = 'wiki-live-bar';
+                const track = document.createElement('span');
+                track.className = 'wiki-live-bar-track';
+                const fill = document.createElement('span');
+                fill.className = 'wiki-live-bar-fill';
+                fill.style.width = `${Math.max(2, Math.round(bar.share * 100))}%`;
+                track.appendChild(fill);
+                row.append(text('span', 'wiki-live-bar-label', bar.label), track, text('span', 'wiki-live-bar-value', bar.value));
+                bars.appendChild(row);
+            }
+            wrapper.appendChild(bars);
+        }
+        if (card.rows.length) {
+            const list = document.createElement('ul');
+            list.className = 'wiki-live-rows';
+            for (const row of card.rows) {
+                const item = document.createElement('li');
+                const line = row.link ? document.createElement('a') : document.createElement('span');
+                line.textContent = row.text;
+                if (row.link) line.href = row.link;
+                item.append(text('span', 'wiki-live-row-day', row.day), line);
+                if (row.status) item.appendChild(text('span', 'wiki-live-row-status', row.status));
+                list.appendChild(item);
+            }
+            wrapper.appendChild(list);
+        }
+    };
+
+    const fetchCard = () => {
+        const mine = ++generation;
+        return state.dotNetRef.invokeMethodAsync('GetLiveBlock', kind, recordId).then(card => {
+            if (mine !== generation) return;
+            drawCard(card);
+            // A record the editor picked keeps its label current for previews and exports.
+            if (!card.error && LIVE_KINDS_WITH_RECORD.has(kind) && card.title && card.title !== recordLabel) {
+                recordLabel = card.title;
+                store();
+            }
+        }).catch(() => {
+            if (mine !== generation) return;
+            wrapper.replaceChildren(text('div', 'wiki-live-error', 'Live blocks are not available here.'));
+            stopTimer();
+        });
+    };
+
+    const renderCard = () => {
+        wrapper.replaceChildren(text('div', 'wiki-live-loading', 'Loading live data…'));
+        fetchCard();
+        stopTimer();
+        let attached = wrapper.isConnected;
+        timer = setInterval(() => {
+            // Stops once the block has left the page (deleted, page switched), not before it
+            // is first attached.
+            if (!wrapper.isConnected) { if (attached) stopTimer(); return; }
+            attached = true;
+            if (document.visibilityState === 'visible') fetchCard();
+        }, LIVE_REFRESH_MS);
+    };
+
+    if (!LIVE_KIND_NAMES[kind]) {
+        wrapper.appendChild(text('div', 'wiki-live-error', 'This kind of live block is not supported.'));
+    } else if (LIVE_KINDS_WITH_RECORD.has(kind) && !recordId) {
+        // Built before it is in the page; the first search runs once it is attached.
+        queueMicrotask(renderPicker);
+    } else {
+        queueMicrotask(renderCard);
+    }
+    return wrapper;
 }
 
 // ---- Button block ----
@@ -2757,12 +2981,28 @@ function commitBlockPickerItem(state, blockEl, item) {
         if (content) openMentionPersonPicker(state, content);
         return;
     }
+    if (item.type.startsWith('__live_')) {
+        convertToLiveBlock(state, blockEl, item.type.slice('__live_'.length));
+        return;
+    }
     if (item.type.startsWith('__template_')) {
         const templateId = item.type.slice('__template_'.length);
         state.dotNetRef.invokeMethodAsync('InsertBlockTemplateById', templateId).catch(() => { /* circuit may be gone */ });
         return;
     }
     convertBlockType(state, blockEl, item.type);
+}
+
+function convertToLiveBlock(state, blockEl, kind) {
+    const block = serializeBlock(blockEl);
+    block.type = 'business';
+    block.richText = [];
+    block.props = { kind, recordId: '', recordLabel: '' };
+    const created = createBlockElement(block, state);
+    blockEl.replaceWith(created);
+    refreshBlockPresentation(state.container);
+    created.querySelector('.wiki-live-search')?.focus();
+    notifyChanged(state);
 }
 
 function convertToColumnLayout(state, blockEl, layoutType) {

@@ -134,6 +134,9 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Table => RenderTable(block, indentStyle),
             WikiBlockTypes.Equation => RenderEquation(block, indentStyle),
             WikiBlockTypes.Diagram => RenderDiagram(block, indentStyle),
+            // Live business data is Admin-only and never stored in the page, so a public share
+            // (or any other static render) leaves the block out entirely.
+            WikiBlockTypes.Business => string.Empty,
             WikiBlockTypes.Breadcrumb => $"<nav class=\"wiki-breadcrumb\"{indentStyle} aria-label=\"Breadcrumb\">{content}</nav>",
             WikiBlockTypes.TableOfContents => $"<nav class=\"wiki-table-of-contents\"{indentStyle}>Table of contents</nav>",
             // A workflow button only works inside Sentinel (it needs an Admin session), so
@@ -398,6 +401,7 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.LinkedDatabase => block.Props.GetValueOrDefault("databaseTitle", "[linked database]"),
             WikiBlockTypes.InlineDatabase => block.Props.GetValueOrDefault("databaseTitle", "[inline database]"),
             WikiBlockTypes.Tab => PlainTextTabs(block),
+            WikiBlockTypes.Business => SentinelLiveBlockKinds.Describe(block),
             _ => block.PlainText
         };
         text = text.Replace('\n', ' ').Trim();

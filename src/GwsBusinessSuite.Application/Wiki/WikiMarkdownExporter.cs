@@ -113,6 +113,9 @@ public static class WikiMarkdownExporter
                     markdown.Append('[').Append(text.Length == 0 ? "Button" : text).Append("](").Append(buttonUrl).Append(")\n\n");
                 }
                 break;
+            case WikiBlockTypes.Business:
+                markdown.Append("*[").Append(SentinelLiveBlockKinds.Describe(block)).Append("]*\n\n");
+                break;
             case WikiBlockTypes.LinkedDatabase:
             case WikiBlockTypes.InlineDatabase:
                 markdown.Append("*[Database: ").Append(block.Props.GetValueOrDefault("databaseTitle", "Untitled")).Append("]*\n\n");

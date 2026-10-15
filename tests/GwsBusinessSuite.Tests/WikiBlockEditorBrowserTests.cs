@@ -193,7 +193,7 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         await page.Locator(".wiki-block-add").Last.ClickAsync(new LocatorClickOptions { Force = true });
 
         await Expect(page.Locator(".wiki-editor-menu-group")).ToHaveTextAsync(
-            ["Suggested", "Basic blocks", "Media", "Database inline / full page", "Layout sections", "Advanced & inline blocks"]);
+            ["Suggested", "Basic blocks", "Media", "Database inline / full page", "Layout sections", "Advanced & inline blocks", "Live business"]);
         await Expect(page.Locator(".wiki-editor-menu-label:text-is(\"Meeting notes\")")).ToBeVisibleAsync();
         await Expect(page.Locator(".wiki-editor-menu-label:text-is(\"Page\")")).ToBeVisibleAsync();
         await Expect(page.Locator(".wiki-editor-menu-label:text-is(\"New database\")")).ToBeVisibleAsync();

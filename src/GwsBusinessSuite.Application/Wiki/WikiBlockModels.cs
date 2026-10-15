@@ -51,13 +51,15 @@ public static class WikiBlockTypes
     // Mermaid source (flowcharts, sequence diagrams, ...) in the block's text, drawn in the
     // browser by the vendored Mermaid (wikiRichContentHydrate.js's wikiMermaid). Sentinel item 17.
     public const string Diagram = "diagram";
+    // Live business data (SentinelLiveBlocks): kind + record id in props, the data never stored.
+    public const string Business = "business";
 
     public static readonly IReadOnlyList<string> All =
     [
         Paragraph, Heading1, Heading2, Heading3, BulletedListItem, NumberedListItem,
         ToDo, Toggle, Quote, Callout, Code, Divider, Image, Embed, Video, Audio, File, Pdf,
         PageLink, LinkedDatabase, InlineDatabase,
-        Table, Equation, Diagram, Breadcrumb, TableOfContents, Button, SyncedBlock, Columns, Tab, Markdown
+        Table, Equation, Diagram, Business, Breadcrumb, TableOfContents, Button, SyncedBlock, Columns, Tab, Markdown
     ];
 
     public static bool IsListItem(string type) => type is BulletedListItem or NumberedListItem;
