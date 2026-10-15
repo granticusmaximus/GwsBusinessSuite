@@ -178,6 +178,10 @@ else if (View.Type == WikiDatabaseViewTypes.Chart)
 }
 else if (View.Type == WikiDatabaseViewTypes.Form)
 {
+    @if (CanEdit)
+    {
+        <SentinelPublicFormSettings Database="Database" View="View" OnSaved="OnChanged" />
+    }
     <EditForm Model="_formValues" OnValidSubmit="SubmitFormAsync" class="sentinel-db-form">
         <h5>New @Database.Title entry</h5>
         @foreach (var property in Database.Properties.OrderBy(property => property.SortOrder)

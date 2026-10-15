@@ -1,0 +1,243 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject IWikiDatabaseService WikiDatabaseService
+@inject ISentinelAccessService AccessService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+@* Public form settings for a Form view (Sentinel item 32): which questions are asked, which are
+   required, when a question appears, the thank-you message, and the public link itself. *@
+<details class="sentinel-form-settings">
+    <summary><i class="bi bi-globe2 me-1" aria-hidden="true"></i>Public form @(_shares.Count > 0 ? "· shared" : "")</summary>
+    <div class="sentinel-form-settings-body">
+        <div class="row g-2">
+            <div class="col-12 col-md-6">
+                <label class="form-label small mb-1" for="@($"form-title-{View.Id}")">Form title</label>
+                <input id="@($"form-title-{View.Id}")" class="form-control form-control-sm" @bind="_title" @bind:event="oninput" placeholder="@Database.Title" maxlength="120" />
+            </div>
+            <div class="col-12 col-md-6">
+                <label class="form-label small mb-1" for="@($"form-thanks-{View.Id}")">Thank-you message</label>
+                <input id="@($"form-thanks-{View.Id}")" class="form-control form-control-sm" @bind="_thankYou" @bind:event="oninput" placeholder="Thanks, your response has been sent." maxlength="500" />
+            </div>
+            <div class="col-12">
+                <label class="form-label small mb-1" for="@($"form-description-{View.Id}")">Description</label>
+                <textarea id="@($"form-description-{View.Id}")" class="form-control form-control-sm" rows="2" @bind="_description" @bind:event="oninput" maxlength="1000"></textarea>
+            </div>
+        </div>
+
+        <table class="table table-sm sentinel-form-questions mt-2">
+            <thead><tr><th>Question</th><th>Ask</th><th>Required</th><th>Show only if</th></tr></thead>
+            <tbody>
+                @foreach (var question in _eligible)
+                {
+                    var id = question.Id.ToString();
+                    var requiredEverywhere = WikiDatabasePropertyConfig.Parse(question).IsRequired;
+                    var condition = _conditions.GetValueOrDefault(id);
+                    <tr>
+                        <td>@question.Name</td>
+                        <td><input type="checkbox" class="form-check-input" aria-label="@($"Ask {question.Name}")" checked="@(!_hidden.Contains(id))" @onchange="e => Toggle(_hidden, id, e.Value is not true)" /></td>
+                        <td>
+                            <input type="checkbox" class="form-check-input" aria-label="@($"{question.Name} is required")"
+                                   checked="@(requiredEverywhere || _required.Contains(id))" disabled="@requiredEverywhere"
+                                   title="@(requiredEverywhere ? "Required everywhere (property setting)" : null)"
+                                   @onchange="e => Toggle(_required, id, e.Value is true)" />
+                        </td>
+                        <td>
+                            <div class="sentinel-form-condition">
+                                <select class="form-select form-select-sm" aria-label="@($"Show {question.Name} only if")" value="@(condition?.WhenPropertyId ?? "")"
+                                        @onchange="e => SetConditionTrigger(id, e.Value?.ToString())">
+                                    <option value="">Always</option>
+                                    @foreach (var other in _eligible.Where(other => other.Id != question.Id))
+                                    {
+                                        <option value="@other.Id">@other.Name</option>
+                                    }
+                                </select>
+                                @if (condition is not null)
+                                {
+                                    var trigger = _eligible.FirstOrDefault(other => other.Id.ToString() == condition.WhenPropertyId);
+                                    <select class="form-select form-select-sm" aria-label="Condition" value="@condition.Operator"
+                                            @onchange="e => _conditions[id] = condition with { Operator = e.Value?.ToString() ?? WikiDatabaseFormOperators.Is }">
+                                        @foreach (var (value, label) in OperatorsFor(trigger))
+                                        {
+                                            <option value="@value">@label</option>
+                                        }
+                                    </select>
+                                    @if (WikiDatabaseFormOperators.NeedsValue(condition.Operator))
+                                    {
+                                        IReadOnlyList<WikiDatabasePropertyOption> options = trigger is null ? [] : WikiDatabasePropertyConfig.GetOptions(trigger);
+                                        if (options.Count > 0)
+                                        {
+                                            <select class="form-select form-select-sm" aria-label="Value" value="@(condition.Value ?? "")"
+                                                    @onchange="e => _conditions[id] = condition with { Value = e.Value?.ToString() }">
+                                                <option value="">Choose…</option>
+                                                @foreach (var option in options)
+                                                {
+                                                    <option value="@option.Id">@option.Label</option>
+                                                }
+                                            </select>
+                                        }
+                                        else
+                                        {
+                                            <input class="form-control form-control-sm" aria-label="Value" value="@condition.Value"
+                                                   @onchange="e => _conditions[id] = condition with { Value = e.Value?.ToString() }" />
+                                        }
+                                    }
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (_skippedTypes.Count > 0)
+        {
+            <p class="small text-secondary mb-2">Not asked on a public form: @string.Join(", ", _skippedTypes) (people, relations, files and calculated properties).</p>
+        }
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="SaveAsync">Save form settings</button>
+            @if (!string.IsNullOrEmpty(_message)) { <span class="small text-secondary" role="status">@_message</span> }
+        </div>
+
+        <hr />
+        <strong class="small d-block">Public link</strong>
+        <span class="small text-secondary">Anyone with the link can fill in the form. Each response becomes a new row. They can't see the database.</span>
+        <div class="d-flex flex-wrap align-items-end gap-2 mt-1">
+            <div>
+                <label class="form-label small mb-1" for="@($"form-expiry-{View.Id}")">Expires (optional)</label>
+                <input id="@($"form-expiry-{View.Id}")" type="datetime-local" class="form-control form-control-sm" @bind="_expiresAt" />
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-warning" disabled="@_busy" @onclick="ShareAsync">Share publicly</button>
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_newUrl))
+        {
+            <div class="input-group input-group-sm mt-2">
+                <input class="form-control" value="@_newUrl" readonly aria-label="Public form link" />
+                <button type="button" class="btn btn-outline-secondary" @onclick="CopyAsync">Copy</button>
+            </div>
+            <div class="small text-warning mt-1">Copy this link now. The secret token is not stored in plaintext.</div>
+        }
+        @foreach (var share in _shares)
+        {
+            <div class="sentinel-share-entry mt-2">
+                <span><i class="bi bi-ui-checks me-2" aria-hidden="true"></i>Public form link</span>
+                <small>@(share.ExpiresAt?.ToLocalTime().ToString("dd-MM-yy HH:mm") ?? "No expiry") · @(share.ViewCount == 1 ? "1 response" : $"{share.ViewCount} responses")</small>
+                <button type="button" title="Stop sharing" aria-label="Stop sharing this form" @onclick="() => RevokeAsync(share.Id)"><i class="bi bi-slash-circle"></i></button>
+            </div>
+        }
+    </div>
+</details>
+
+@code {
+    [Parameter, EditorRequired] public WikiDatabase Database { get; set; } = default!;
+    [Parameter, EditorRequired] public WikiDatabaseView View { get; set; } = default!;
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private bool _busy;
+    private string? _message;
+    private string _title = string.Empty;
+    private string _description = string.Empty;
+    private string _thankYou = string.Empty;
+    private HashSet<string> _hidden = [];
+    private HashSet<string> _required = [];
+    private Dictionary<string, WikiDatabaseFormCondition> _conditions = [];
+    private IReadOnlyList<WikiDatabaseProperty> _eligible = [];
+    private IReadOnlyList<string> _skippedTypes = [];
+    private IReadOnlyList<SentinelShareView> _shares = [];
+    private DateTime? _expiresAt;
+    private string? _newUrl;
+    private Guid _loadedFor;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == View.Id) return;
+        _loadedFor = View.Id;
+        var settings = WikiDatabaseViewConfigJson.Parse(View.ConfigJson).FormSettings ?? new WikiDatabaseFormSettings();
+        _title = settings.Title ?? string.Empty;
+        _description = settings.Description ?? string.Empty;
+        _thankYou = settings.ThankYouMessage ?? string.Empty;
+        _hidden = (settings.HiddenPropertyIds ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _required = (settings.RequiredPropertyIds ?? []).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _conditions = (settings.Conditions ?? []).ToDictionary(condition => condition.PropertyId, StringComparer.OrdinalIgnoreCase);
+        _eligible = SentinelPublicForm.Questions(Database, new WikiDatabaseFormSettings());
+        _skippedTypes = Database.Properties.Where(property => !SentinelPublicForm.AnswerableTypes.Contains(property.Type))
+            .Select(property => property.Name).ToList();
+        await LoadSharesAsync();
+    }
+
+    private async Task LoadSharesAsync() =>
+        _shares = (await AccessService.GetAccessAsync(Database.Id, true)).Shares
+            .Where(share => share.FormViewId == View.Id && !share.IsRevoked).ToList();
+
+    private static void Toggle(HashSet<string> set, string id, bool add)
+    {
+        if (add) set.Add(id); else set.Remove(id);
+    }
+
+    private void SetConditionTrigger(string id, string? whenId)
+    {
+        if (string.IsNullOrEmpty(whenId)) _conditions.Remove(id);
+        else _conditions[id] = new WikiDatabaseFormCondition(id, whenId, OperatorsFor(_eligible.FirstOrDefault(p => p.Id.ToString() == whenId))[0].Value);
+    }
+
+    private static IReadOnlyList<(string Value, string Label)> OperatorsFor(WikiDatabaseProperty? trigger) =>
+        trigger?.Type == WikiDatabasePropertyTypes.Checkbox
+            ? WikiDatabaseFormOperators.All.Where(item => item.Value is WikiDatabaseFormOperators.IsChecked or WikiDatabaseFormOperators.IsNotChecked).ToList()
+            : WikiDatabaseFormOperators.All.Where(item => item.Value is not (WikiDatabaseFormOperators.IsChecked or WikiDatabaseFormOperators.IsNotChecked)).ToList();
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _message = null;
+        try
+        {
+            var settings = new WikiDatabaseFormSettings(
+                NullIfBlank(_title), NullIfBlank(_description), NullIfBlank(_thankYou),
+                _hidden.ToList(), _required.ToList(),
+                _conditions.Values.Where(condition => !WikiDatabaseFormOperators.NeedsValue(condition.Operator) || !string.IsNullOrWhiteSpace(condition.Value)).ToList());
+            var config = WikiDatabaseViewConfigJson.Parse(View.ConfigJson) with { FormSettings = settings };
+            var saved = await WikiDatabaseService.SaveViewAsync(Database.Id, View.Id, View.Name, View.Type, config,
+                await CurrentUserAccessor.GetCurrentUsernameAsync());
+            View.ConfigJson = saved.ConfigJson;
+            _message = "Saved.";
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException)
+        {
+            _message = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ShareAsync()
+    {
+        _busy = true;
+        try
+        {
+            var expiresAt = _expiresAt is { } parsed ? new DateTimeOffset(parsed) : (DateTimeOffset?)null;
+            var share = await AccessService.CreatePublicShareAsync(Database.Id, true, expiresAt, false, null,
+                await CurrentUserAccessor.GetCurrentUsernameAsync(), formViewId: View.Id);
+            _newUrl = Navigation.ToAbsoluteUri($"/sentinel/form/{share.PublicToken}").ToString();
+            _expiresAt = null;
+            await LoadSharesAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RevokeAsync(Guid shareId)
+    {
+        await AccessService.RevokePublicShareAsync(shareId, await CurrentUserAccessor.GetCurrentUsernameAsync());
+        await LoadSharesAsync();
+    }
+
+    private async Task CopyAsync() => await JS.InvokeVoidAsync("navigator.clipboard.writeText", _newUrl);
+
+    private static string? NullIfBlank(string value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+}

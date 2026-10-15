@@ -134,7 +134,10 @@ public sealed record WikiDatabaseViewConfig(
     // property picker doesn't need special-case logic to prevent grouping a board by itself
     // twice. Schemaless like every other view option here - stored in WikiDatabaseView.ConfigJson,
     // not a database column, so adding it needed no migration.
-    string? SecondaryGroupByPropertyId = null)
+    string? SecondaryGroupByPropertyId = null,
+    // Form view only: questions, conditions, required answers and the thank-you message for the
+    // view's form, including when it's shared publicly (SentinelPublicForms).
+    WikiDatabaseFormSettings? FormSettings = null)
 {
     public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null, [], [], new Dictionary<string, string>(), null, null, null, null);
 }
@@ -231,7 +234,8 @@ public static class WikiDatabaseViewConfigJson
                     parsed.FilterGroup,
                     parsed.DependencyPropertyId,
                     parsed.ChartType,
-                    parsed.SecondaryGroupByPropertyId);
+                    parsed.SecondaryGroupByPropertyId,
+                    parsed.FormSettings);
         }
         catch (JsonException) { return WikiDatabaseViewConfig.Empty; }
     }

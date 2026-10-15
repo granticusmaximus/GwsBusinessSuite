@@ -6287,6 +6287,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<int>("FailedPasswordAttempts")
                         .HasColumnType("INTEGER");
 
+                    b.Property<Guid?>("FormViewId")
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("IncludeSubpages")
                         .HasColumnType("INTEGER");
 

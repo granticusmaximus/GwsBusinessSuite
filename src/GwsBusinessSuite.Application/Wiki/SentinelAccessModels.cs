@@ -35,7 +35,8 @@ public sealed record SentinelShareView(
     DateTimeOffset? LastAccessedAt = null,
     bool IsAutomationWorkflow = false,
     bool IncludeSubpages = false,
-    string? SiteTitle = null);
+    string? SiteTitle = null,
+    Guid? FormViewId = null);
 
 public sealed record SentinelAccessSnapshot(
     IReadOnlyList<SentinelPermissionView> Permissions,
@@ -54,7 +55,7 @@ public interface ISentinelAccessService
     Task<SentinelShareView> CreatePublicShareAsync(
         Guid targetId, bool isDatabase, DateTimeOffset? expiresAt, bool allowSearchIndexing, string? password, string performedBy,
         bool isAutomationWorkflow = false, CancellationToken cancellationToken = default,
-        bool includeSubpages = false, string? siteTitle = null);
+        bool includeSubpages = false, string? siteTitle = null, Guid? formViewId = null);
     Task RevokePublicShareAsync(Guid shareId, string performedBy, CancellationToken cancellationToken = default);
     Task<SentinelShareView?> ResolvePublicShareAsync(string token, CancellationToken cancellationToken = default);
     // Separate from ResolvePublicShareAsync so a caller can show/gate a password prompt

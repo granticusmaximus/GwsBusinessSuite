@@ -882,6 +882,9 @@ public sealed class SentinelPublicShare : AuditableEntity
     // search (Sentinel item 30, SentinelPublishedSite). SiteTitle names the site; null = page title.
     public bool IncludeSubpages { get; set; }
     public string? SiteTitle { get; set; }
+    // Database shares only: a public form (Sentinel item 32) for this Form view. Such a link
+    // only ever opens the form at /sentinel/form/{token}, never the database's rows.
+    public Guid? FormViewId { get; set; }
     public required string TokenHash { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
     public bool AllowSearchIndexing { get; set; }

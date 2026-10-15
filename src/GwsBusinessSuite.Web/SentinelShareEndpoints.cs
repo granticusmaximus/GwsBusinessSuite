@@ -1,6 +1,7 @@
 using GwsBusinessSuite.Application.Wiki;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.DataProtection;
+using GwsBusinessSuite.Web.Services;
 
 namespace GwsBusinessSuite.Web;
 
@@ -14,6 +15,45 @@ public static class SentinelShareEndpoints
     {
         app.MapPost("/sentinel/share/{token}/unlock", UnlockAsync)
             .AllowAnonymous().RequireRateLimiting("login");
+        app.MapPost("/sentinel/form/{token}/submit", SubmitFormAsync)
+            .AllowAnonymous().RequireRateLimiting("public-write");
+    }
+
+    // A public form (SentinelPublicForm.razor) response becomes a row. Antiforgery, a honeypot
+    // field and Turnstile (when configured) come first; SentinelPublicFormService then checks the
+    // answers themselves.
+    private static async Task<IResult> SubmitFormAsync(
+        string token,
+        HttpContext httpContext,
+        IAntiforgery antiforgery,
+        TurnstileService turnstile,
+        ISentinelPublicFormService forms)
+    {
+        var back = $"/sentinel/form/{token}";
+        try
+        {
+            await antiforgery.ValidateRequestAsync(httpContext);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return Results.LocalRedirect(back + "?error=expired");
+        }
+        var form = await httpContext.Request.ReadFormAsync();
+        // Only a bot fills in the field people can't see; it's told it worked.
+        if (!string.IsNullOrEmpty(form["website"])) return Results.LocalRedirect(back + "?sent=true");
+        if (turnstile.IsConfigured)
+        {
+            var verification = await turnstile.VerifyAsync(form[TurnstileService.ResponseField].ToString(), httpContext.Request.Host.Host,
+                httpContext.Connection.RemoteIpAddress?.ToString(), httpContext.RequestAborted, TurnstileService.FormAction);
+            if (verification != TurnstileResult.Verified) return Results.LocalRedirect(back + "?error=verification");
+        }
+        var answers = form
+            .Where(field => Guid.TryParse(field.Key, out _))
+            .ToDictionary(field => field.Key, field => (IReadOnlyList<string>)field.Value.Select(value => value ?? string.Empty).ToList());
+        var result = await forms.SubmitAsync(token, answers, httpContext.RequestAborted);
+        if (result.Saved) return Results.LocalRedirect(back + "?sent=true");
+        var message = string.Join(" ", result.Errors);
+        return Results.LocalRedirect(back + "?error=" + Uri.EscapeDataString(message.Length > 500 ? message[..500] : message));
     }
 
     private static async Task<IResult> UnlockAsync(

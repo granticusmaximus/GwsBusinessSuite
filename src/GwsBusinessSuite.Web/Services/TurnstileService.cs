@@ -34,6 +34,8 @@ public sealed class TurnstileService(
     public const string Action = "contact";
     // The email-signup widget's action - a token minted for one form can't be replayed on the other.
     public const string SubscribeAction = "subscribe";
+    // Public Sentinel forms (SentinelPublicForm.razor).
+    public const string FormAction = "sentinel-form";
     public const string ResponseField = "cf-turnstile-response";
 
     public bool IsConfigured =>

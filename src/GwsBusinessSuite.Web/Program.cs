@@ -615,7 +615,8 @@ app.Use(async (context, next) =>
         var scriptSrc = isOverwatchGrid
             ? "script-src 'self' https://cdn.jsdelivr.net 'unsafe-eval' 'wasm-unsafe-eval';"
             : "script-src 'self' https://cdn.jsdelivr.net;";
-        var allowTurnstile = IsPublicHost(context) || context.Request.Path.StartsWithSegments("/cms");
+        var allowTurnstile = IsPublicHost(context) || context.Request.Path.StartsWithSegments("/cms")
+            || context.Request.Path.StartsWithSegments("/sentinel/form");
         // Public pages also carry CJ's affiliate deep-link script (PublicSiteHtmlRenderer
         // .CjDeepLinkScript, allowed by Grant 2026-10-05): it loads from anrdoezrs.net, which
         // 302s to yceml.net (CSP checks both), and POSTs page impressions to qksrv.net. Admin

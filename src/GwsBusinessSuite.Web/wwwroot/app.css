@@ -1507,6 +1507,17 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-public-site-results a { display: grid; gap: .15rem; padding: .7rem .9rem; border: 1px solid #e7e5e4; border-radius: .5rem; background: white; color: #292524; text-decoration: none; }
 .sentinel-public-site-results a span { color: #78716c; font-size: .85rem; }
 .sentinel-public-unlinked { text-decoration: underline dotted #a8a29e; }
+/* Public forms (SentinelPublicForm.razor). */
+.sentinel-public-share article.sentinel-public-form { width: min(40rem, calc(100% - 2rem)); padding: 3rem 0; }
+.sentinel-public-form h1 { margin-bottom: 1rem; font-size: clamp(1.75rem, 4vw, 2.5rem); }
+.sentinel-public-form-description, .sentinel-public-form-thanks { color: #57534e; font-size: 1.05rem; white-space: pre-line; }
+.sentinel-public-form-fields { display: grid; gap: 1.1rem; margin-top: 1.5rem; }
+.sentinel-public-form-question .form-label, .sentinel-public-form-question legend { font-weight: 600; font-size: .95rem; color: #292524; margin-bottom: .35rem; }
+.sentinel-public-form-question legend { float: none; }
+.sentinel-public-form-question .form-control, .sentinel-public-form-question .form-select { background-color: white; color: #292524; border-color: #d6d3d1; }
+.sentinel-public-form-question .form-check-label { color: #292524; }
+.sentinel-public-form-fields > .btn { justify-self: start; }
+.sentinel-public-form-trap { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
 .sentinel-public-share-error { display: grid; place-content: center; min-height: 100vh; min-height: 100dvh; text-align: center; }
 /* Collapsed (the default, and how a page spends nearly all of its time) is a small, low-chrome
    invocation point - Notion's own AI entry point is a text trigger (Cmd+J / a slash command),
@@ -4000,6 +4011,14 @@ audio.wiki-embed-media { max-width: 100%; }
 .wiki-button-settings { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .35rem; }
 .wiki-button-settings > select { width: auto; max-width: 16rem; }
 .wiki-button-settings > input { flex: 1 1 12rem; min-width: 0; }
+/* Public form settings above a Form view (SentinelPublicFormSettings.razor). */
+.sentinel-form-settings { margin-bottom: 1rem; border: 1px solid var(--sentinel-border, #292524); border-radius: .5rem; padding: .5rem .75rem; }
+.sentinel-form-settings > summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+.sentinel-form-settings-body { margin-top: .75rem; }
+.sentinel-form-questions { font-size: .85rem; }
+.sentinel-form-questions td { vertical-align: middle; }
+.sentinel-form-condition { display: flex; flex-wrap: wrap; gap: .3rem; min-width: 12rem; }
+.sentinel-form-condition .form-select, .sentinel-form-condition .form-control { width: auto; max-width: 11rem; }
 .wiki-button-settings .wiki-button-status { color: var(--gws-text-muted, #6b7280); }
 
 /* Live business blocks (wiki-block-editor.js createLiveBlockBody). Built by JS, so not scoped CSS. */

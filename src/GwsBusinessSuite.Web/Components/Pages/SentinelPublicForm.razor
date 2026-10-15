@@ -1,0 +1,139 @@
+@page "/sentinel/form/{Token}"
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@layout GwsBusinessSuite.Web.Components.Layout.PublicShareLayout
+@using System.Text.Json
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Web.Services
+@inject ISentinelPublicFormService FormService
+@inject TurnstileService Turnstile
+
+@* A public form from a database (Sentinel item 32). Static page: it posts to
+   SentinelShareEndpoints' /sentinel/form/{token}/submit, which checks everything again.
+   js/sentinelPublicForm.js shows/hides conditional questions and keeps answers if a submission
+   comes back with an error. *@
+<PageTitle>@(_form?.Title ?? "Form")</PageTitle>
+<HeadContent>
+    <meta name="robots" content="noindex,nofollow" />
+</HeadContent>
+
+<main class="sentinel-public-share">
+    @if (_form is null)
+    {
+        <div class="sentinel-public-share-error"><h1>Form unavailable</h1><p>This form link is invalid, expired, or no longer shared.</p></div>
+    }
+    else if (Sent)
+    {
+        <article class="sentinel-public-form">
+            <div class="sentinel-public-brand">@(_form.Title.ToUpperInvariant())</div>
+            <h1>Thank you</h1>
+            <p class="sentinel-public-form-thanks">@(string.IsNullOrWhiteSpace(_form.Settings.ThankYouMessage) ? "Your response has been sent." : _form.Settings.ThankYouMessage)</p>
+            <p><a href="@($"sentinel/form/{Token}")">Send another response</a></p>
+        </article>
+    }
+    else
+    {
+        var questions = _form.Questions;
+        <article class="sentinel-public-form">
+            <h1>@_form.Title</h1>
+            @if (!string.IsNullOrWhiteSpace(_form.Settings.Description))
+            {
+                <p class="sentinel-public-form-description">@_form.Settings.Description</p>
+            }
+            @if (!string.IsNullOrWhiteSpace(Error))
+            {
+                <div class="alert alert-danger" role="alert">@ErrorText</div>
+            }
+            <form method="post" action="@($"sentinel/form/{Token}/submit")" class="sentinel-public-form-fields" data-form-token="@Token">
+                <AntiforgeryToken />
+                @foreach (var question in questions)
+                {
+                    var id = question.Id.ToString();
+                    var required = GwsBusinessSuite.Application.Wiki.SentinelPublicForm.IsRequired(question, _form.Settings);
+                    var condition = GwsBusinessSuite.Application.Wiki.SentinelPublicForm.ConditionFor(question, _form.Settings);
+                    <div class="sentinel-public-form-question" data-question="@id"
+                         data-condition="@(condition is null ? null : JsonSerializer.Serialize(new { when = condition.WhenPropertyId, op = condition.Operator, value = condition.Value ?? "" }))">
+                        @if (question.Type == WikiDatabasePropertyTypes.Checkbox)
+                        {
+                            <label class="form-check">
+                                <input class="form-check-input" type="checkbox" name="@id" value="true" />
+                                <span class="form-check-label">@question.Name</span>
+                            </label>
+                        }
+                        else if (question.Type == WikiDatabasePropertyTypes.MultiSelect)
+                        {
+                            <fieldset>
+                                <legend>@question.Name@(required ? " *" : "")</legend>
+                                @foreach (var option in WikiDatabasePropertyConfig.GetOptions(question))
+                                {
+                                    <label class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="@id" value="@option.Id" />
+                                        <span class="form-check-label">@option.Label</span>
+                                    </label>
+                                }
+                            </fieldset>
+                        }
+                        else
+                        {
+                            <label class="form-label" for="@($"q-{id}")">@question.Name@(required ? " *" : "")</label>
+                            @if (question.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status)
+                            {
+                                <select id="@($"q-{id}")" name="@id" class="form-select" required="@required">
+                                    <option value="">Choose…</option>
+                                    @foreach (var option in WikiDatabasePropertyConfig.GetOptions(question))
+                                    {
+                                        <option value="@option.Id">@option.Label</option>
+                                    }
+                                </select>
+                            }
+                            else if (question.Type == WikiDatabasePropertyTypes.Text)
+                            {
+                                <textarea id="@($"q-{id}")" name="@id" class="form-control" rows="3" maxlength="@GwsBusinessSuite.Application.Wiki.SentinelPublicForm.MaxAnswerLength" required="@required"></textarea>
+                            }
+                            else
+                            {
+                                <input id="@($"q-{id}")" name="@id" class="form-control" type="@InputType(question)" required="@required"
+                                       step="@(question.Type == WikiDatabasePropertyTypes.Number ? "any" : null)" maxlength="@(question.Type is WikiDatabasePropertyTypes.Number or WikiDatabasePropertyTypes.Date ? null : GwsBusinessSuite.Application.Wiki.SentinelPublicForm.MaxAnswerLength)" />
+                            }
+                        }
+                    </div>
+                }
+                @* A field people never see; bots that fill everything in are quietly dropped. *@
+                <div class="sentinel-public-form-trap" aria-hidden="true">
+                    <label>Leave this empty <input type="text" name="website" tabindex="-1" autocomplete="off" /></label>
+                </div>
+                @if (Turnstile.SiteKey is { } siteKey)
+                {
+                    <div class="sentinel-public-form-turnstile" data-sitekey="@siteKey" data-action="@TurnstileService.FormAction"></div>
+                }
+                <button type="submit" class="btn btn-primary">Send</button>
+            </form>
+        </article>
+    }
+</main>
+
+@code {
+    [Parameter] public string Token { get; set; } = string.Empty;
+    [SupplyParameterFromQuery(Name = "sent")] public bool Sent { get; set; }
+    [SupplyParameterFromQuery(Name = "error")] public string? Error { get; set; }
+    private SentinelPublicFormView? _form;
+
+    private string ErrorText => Error switch
+    {
+        "verification" => "We couldn't confirm you're not a robot. Please try again.",
+        "expired" => "The form expired. Please send it again.",
+        _ => Error!.Length > 500 ? Error[..500] : Error
+    };
+
+    protected override async Task OnInitializedAsync() => _form = await FormService.GetAsync(Token);
+
+    private static string InputType(WikiDatabaseProperty question) => question.Type switch
+    {
+        WikiDatabasePropertyTypes.Number => "number",
+        WikiDatabasePropertyTypes.Date => "date",
+        WikiDatabasePropertyTypes.Url => "url",
+        WikiDatabasePropertyTypes.Email => "email",
+        WikiDatabasePropertyTypes.Phone => "tel",
+        _ => "text"
+    };
+}
