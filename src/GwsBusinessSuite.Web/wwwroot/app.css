@@ -4011,6 +4011,17 @@ audio.wiki-embed-media { max-width: 100%; }
 .wiki-button-settings { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .35rem; }
 .wiki-button-settings > select { width: auto; max-width: 16rem; }
 .wiki-button-settings > input { flex: 1 1 12rem; min-width: 0; }
+/* Side-by-side panes (SentinelSidePane.razor): the main page and a second page share the main
+   column, wrapping to one above the other when there isn't room for both. */
+.sentinel-main.has-side-pane { display: flex; flex-wrap: wrap; align-items: stretch; }
+.sentinel-main.has-side-pane > .sentinel-document, .sentinel-main.has-side-pane > :not(.sentinel-side-pane) { flex: 1 1 22rem; min-width: 0; }
+.sentinel-side-pane { flex: 1 1 22rem; min-width: 0; border-left: 1px solid var(--sentinel-border); display: flex; flex-direction: column; }
+.sentinel-side-pane-header { position: sticky; top: 0; z-index: 7; display: flex; align-items: center; gap: .4rem; min-height: 3.65rem; padding: .55rem .9rem; border-bottom: 1px solid var(--sentinel-border); background: var(--sentinel-canvas-translucent); }
+.sentinel-side-pane-icon { font-size: 1.1rem; }
+.sentinel-side-pane-title { flex: 1 1 auto; min-width: 0; border: 0; background: transparent; color: var(--gws-text-strong); font-weight: 600; font-size: 1rem; text-overflow: ellipsis; }
+.sentinel-side-pane-title:focus { outline: 1px solid var(--sentinel-border-strong); border-radius: .25rem; }
+.sentinel-side-pane-status { color: var(--sentinel-muted); white-space: nowrap; }
+.sentinel-side-pane-body { padding: 1rem 1.25rem 3rem; }
 /* Suggested edits (Wiki.razor banner, SentinelSuggestionsPanel, editor margin marks). */
 .sentinel-suggest-banner { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .5rem 0 0; padding: .5rem .75rem; border-radius: .5rem; background: rgba(168, 85, 247, .12); border: 1px solid rgba(168, 85, 247, .35); font-size: .85rem; }
 .sentinel-suggest-banner.is-hint { background: transparent; border-style: dashed; }

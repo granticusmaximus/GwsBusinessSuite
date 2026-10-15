@@ -89,7 +89,9 @@ public sealed class WikiDiagramBrowserTests(PlaywrightBrowserFixture fixture)
         await content.PressAsync("Shift+Enter");
         await content.PressSequentiallyAsync("  Draft --> Review --> Publish");
         await Expect(page.Locator(".wiki-diagram-preview svg")).ToBeVisibleAsync(new() { Timeout = 20000 });
-        (await page.Locator(".wiki-diagram-preview").TextContentAsync()).Should().Contain("Publish");
+        // The preview redraws (debounced) as the source is typed, so the first drawing can be of
+        // a partial source - wait for the one with the last node rather than reading once.
+        await Expect(page.Locator(".wiki-diagram-preview")).ToContainTextAsync("Publish", new() { Timeout = 20000 });
 
         var blocks = WikiBlockJson.ParseBlocks(await page.EvaluateAsync<string>("() => window.sentinelBlockEditor.getBlocksJson(document.querySelector('#editor'))"));
         var diagram = blocks.Should().ContainSingle().Subject;

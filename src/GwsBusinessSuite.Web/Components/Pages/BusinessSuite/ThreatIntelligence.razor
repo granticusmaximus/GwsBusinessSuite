@@ -463,7 +463,7 @@ else
                                     <span class="text-secondary small text-nowrap">
                                         @if (_epss.TryGetValue(entry.CveId, out var epssScore))
                                         {
-                                            <span class="badge bg-light text-dark border me-1" title="FIRST EPSS: probability of exploitation in the next 30 days">EPSS @epssScore.ToString("P1")</span>
+                                            <span class="badge bg-light text-dark border me-1" title="FIRST EPSS: probability of exploitation in the next 30 days">EPSS @($"{epssScore * 100:0.0}%")</span>
                                         }
                                         added @entry.DateAdded.ToString("dd-MM-yy")
                                     </span>
@@ -1075,7 +1075,7 @@ else
             @if (cveDetail.EpssScore is { } epss)
             {
                 <span class="badge bg-light text-dark border" title="Probability of exploitation activity in the next 30 days (FIRST EPSS)">
-                    EPSS @epss.ToString("P1") (@((cveDetail.EpssPercentile ?? 0).ToString("P0")) percentile)
+                    EPSS @($"{epss * 100:0.0}%") (@($"{(cveDetail.EpssPercentile ?? 0) * 100:0}%") percentile)
                 </span>
             }
             @if (cveDetail.KnownExploited is { } kevEntry)

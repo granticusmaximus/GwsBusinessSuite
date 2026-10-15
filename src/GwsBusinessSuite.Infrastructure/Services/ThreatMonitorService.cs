@@ -414,7 +414,7 @@ public sealed class ThreatMonitorService(
                 var epss = await vulnerabilities.GetEpssScoresAsync(serious.Select(c => c.CveId), ct);
                 foreach (var cve in serious)
                 {
-                    var epssText = epss.TryGetValue(cve.CveId, out var score) ? $" EPSS {score:P1}." : "";
+                    var epssText = epss.TryGetValue(cve.CveId, out var score) ? $" EPSS {score * 100:0.0}%." : "";
                     await AddEventAsync($"{prefix}:nvd:{cve.CveId}",
                         cve.CvssScore >= 9.0 ? ThreatFindingSeverities.High : ThreatFindingSeverities.Medium,
                         // Severity is capped at high: a keyword match isn't proof the version you run is affected.

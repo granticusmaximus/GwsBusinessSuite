@@ -606,7 +606,8 @@
                                 {
                                     <span class="wiki-tree-spacer"></span>
                                 }
-                                <button type="button" class="wiki-tree-label" @onclick="() => OpenNodeAsync(node)" disabled="@IsBusy">
+                                <button type="button" class="wiki-tree-label" @onclick="e => OnTreeLabelClickAsync(node, e)" disabled="@IsBusy"
+                                        title="@(node.IsDatabase ? null : "Shift-click to open to the side")">
                                     <span class="wiki-tree-icon">@(string.IsNullOrWhiteSpace(node.Icon) ? (node.IsDatabase ? "🗄️" : "📄") : node.Icon)</span>
                                     <span class="wiki-tree-title">@NodeTitle(node)</span>
                                     @if (node.IsNotionSynced)
@@ -639,6 +640,12 @@
                                                 <button type="button" class="dropdown-item" @onclick="() => DuplicateNodeAsync(node)">
                                                     <i class="bi bi-copy me-2"></i>Duplicate
                                                 </button>
+                                                @if (!node.IsDatabase)
+                                                {
+                                                    <button type="button" class="dropdown-item" @onclick="() => OpenToTheSide(node.Id)">
+                                                        <i class="bi bi-layout-split me-2"></i>Open to the side
+                                                    </button>
+                                                }
                                                 <button type="button" class="dropdown-item text-danger" @onclick="() => DeleteNodeAsync(node)">
                                                     <i class="bi bi-trash me-2"></i>Move to Trash
                                                 </button>
@@ -665,7 +672,7 @@
                            OnWorkspaceImported="HandleWorkspaceImportedAsync" />
     </aside>
 
-    <main class="sentinel-main">
+    <main class="sentinel-main @(_sidePageId is null ? "" : "has-side-pane")">
         @if (SelectedDatabaseId is { } openDatabaseId)
         {
             <WikiDatabaseEditor WikiDatabaseId="openDatabaseId"
@@ -1015,6 +1022,11 @@
                 </div>
             </EditForm>
         </div>
+        }
+        @if (_sidePageId is { } sidePageId)
+        {
+            <SentinelSidePane @ref="_sidePane" WikiPageId="sidePageId" OnClose="() => _sidePageId = null"
+                              OnOpenInMain="OpenSidePaneInMainAsync" OnNavigate="OpenToTheSide" />
         }
         </main>
 
@@ -3557,6 +3569,12 @@
         // UI instead of navigating straight past it.
         await FlushAutosaveAsync();
         if (PageConflict is not null) return;
+        // The same page never stays open in both panes.
+        if (_sidePageId == wikiPageId)
+        {
+            if (_sidePane is not null) await _sidePane.FlushAsync();
+            _sidePageId = null;
+        }
 
         try
         {
@@ -4396,6 +4414,46 @@
             .Where(n => n.Title.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase))
             .OrderBy(n => n.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    // ---- Side-by-side panes (Sentinel item 16) ----
+    private Guid? _sidePageId;
+    private SentinelSidePane? _sidePane;
+
+    private Task OnTreeLabelClickAsync(WikiTreeNode node, MouseEventArgs e)
+    {
+        if (e.ShiftKey && !node.IsDatabase)
+        {
+            OpenToTheSide(node.Id);
+            return Task.CompletedTask;
+        }
+        return OpenNodeAsync(node);
+    }
+
+    private void OpenToTheSide(Guid pageId)
+    {
+        _openRowMenuNodeId = null;
+        if (pageId == SelectedPageId)
+        {
+            StatusMessage = "That page is already open here. Open a different page to the side.";
+            return;
+        }
+        _sidePageId = pageId;
+    }
+
+    // Shift-click on a [[link]] in the main editor (wiki-block-editor.js navigateToWikiLink).
+    [JSInvokable]
+    public async Task OpenWikiPageToTheSide(string pageId)
+    {
+        if (!Guid.TryParse(pageId, out var id)) return;
+        OpenToTheSide(id);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OpenSidePaneInMainAsync(Guid pageId)
+    {
+        _sidePageId = null;
+        await OpenPageAsync(pageId, recordHistory: true);
     }
 
     private async Task OpenNodeAsync(WikiTreeNode node)

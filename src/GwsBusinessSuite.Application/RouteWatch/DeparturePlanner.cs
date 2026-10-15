@@ -106,7 +106,7 @@ public static class DeparturePlanner
             if (weight > worstWeight && weight >= 0.3)
             {
                 worstWeight = weight;
-                var kind = winter ? "snow/ice risk" : storms ? "thunderstorms" : ContainsAny(text, "fog") && chance < 0.3 ? "fog" : $"{chance:P0} chance of rain";
+                var kind = winter ? "snow/ice risk" : storms ? "thunderstorms" : ContainsAny(text, "fog") && chance < 0.3 ? "fog" : $"{chance * 100:0}% chance of rain";
                 worstWeather = $"{Capitalise(kind)} near mile {point.Mile:0} around {when.ToLocalTime().ToGwsTime()} ({text.Trim()})";
             }
         }

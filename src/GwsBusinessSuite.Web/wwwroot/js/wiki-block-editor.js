@@ -153,7 +153,7 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
             && performance.now() - state.lastWikiLinkPointerNavigation.at < 1000) {
             return;
         }
-        navigateToWikiLink(state, anchor);
+        navigateToWikiLink(state, anchor, event);
     });
     container.addEventListener('mouseup', state.selectionHandler = () => {
         showInlineToolbar(state);
@@ -3858,7 +3858,7 @@ function onHandlePointerDown(state, event) {
             href: wikiLink.getAttribute('href'),
             at: performance.now()
         };
-        navigateToWikiLink(state, wikiLink);
+        navigateToWikiLink(state, wikiLink, event);
         return;
     }
 
@@ -4033,10 +4033,18 @@ function wikiLinkAnchorFromEvent(event) {
         : null;
 }
 
-function navigateToWikiLink(state, anchor) {
+// Shift-click opens the page in the side pane (Sentinel item 16) where the host offers one;
+// a host without OpenWikiPageToTheSide just opens it as usual.
+function navigateToWikiLink(state, anchor, event) {
     const href = anchor.getAttribute('href') || '';
     const pageId = href.substring('wikilink:'.length);
-    if (pageId) state.dotNetRef.invokeMethodAsync('NavigateToWikiPageId', pageId);
+    if (!pageId) return;
+    if (event?.shiftKey) {
+        state.dotNetRef.invokeMethodAsync('OpenWikiPageToTheSide', pageId)
+            .catch(() => state.dotNetRef.invokeMethodAsync('NavigateToWikiPageId', pageId));
+        return;
+    }
+    state.dotNetRef.invokeMethodAsync('NavigateToWikiPageId', pageId);
 }
 
 function onHandlePointerMove(state, event) {

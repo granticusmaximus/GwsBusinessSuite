@@ -62,8 +62,8 @@ public static partial class SentinelNoteCleanup
         var blocks = NotionMarkdownBlockParser.Parse(text);
         if (newWords > MaxNewWordShare)
             return new SentinelCleanupResult([], newWords, dropped,
-                $"The model added content that isn't in the note ({newWords:P0} new words), so this result was refused. Try again or use a different model.");
-        var warning = dropped > WarnDroppedWordShare ? $"About {dropped:P0} of the original words are missing from the result. Check nothing important was dropped." : null;
+                $"The model added content that isn't in the note ({newWords * 100:0}% new words), so this result was refused. Try again or use a different model.");
+        var warning = dropped > WarnDroppedWordShare ? $"About {dropped * 100:0}% of the original words are missing from the result. Check nothing important was dropped." : null;
         return new SentinelCleanupResult(blocks, newWords, dropped, warning);
     }
 

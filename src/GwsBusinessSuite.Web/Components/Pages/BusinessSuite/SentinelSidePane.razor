@@ -1,0 +1,305 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@implements IAsyncDisposable
+@inject IWikiService WikiService
+@inject ISentinelAccessService SentinelAccessService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
+@inject ILogger<SentinelSidePane> Logger
+
+@* A second page open beside the main one (Sentinel item 16): its own block editor instance and
+   its own debounced autosave, the same shape SentinelDatabaseRowPage uses for a row's body.
+   Saves carry the page's ContentVersion and the copy they started from, so an edit made to the
+   same page elsewhere is merged by WikiService rather than overwritten. *@
+<section class="sentinel-side-pane" aria-label="@($"Side pane: {_title}")">
+    <header class="sentinel-side-pane-header">
+        <span class="sentinel-side-pane-icon" aria-hidden="true">@(string.IsNullOrWhiteSpace(_page?.Icon) ? "📄" : _page!.Icon)</span>
+        <input class="sentinel-side-pane-title" value="@_title" aria-label="Page title" readonly="@(!_canEdit)"
+               @oninput="e => { _title = e.Value?.ToString() ?? string.Empty; ScheduleAutosave(); }" />
+        <span class="sentinel-side-pane-status small" role="status">@_status</span>
+        <button type="button" class="btn btn-sm sentinel-tool-btn" title="Open this page in the main pane" aria-label="Open in the main pane" @onclick="OpenInMainAsync">
+            <i class="bi bi-box-arrow-in-left" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="btn btn-sm sentinel-tool-btn" title="Close the side pane" aria-label="Close the side pane" @onclick="CloseAsync">
+            <i class="bi bi-x-lg" aria-hidden="true"></i>
+        </button>
+    </header>
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-warning py-1 px-2 small m-2" role="alert">
+            @_error
+            @if (_conflict) { <button type="button" class="btn btn-sm btn-link p-0 ms-1" @onclick="ReloadAsync">Reload</button> }
+        </div>
+    }
+    @if (!_canEdit && _page is not null)
+    {
+        <p class="small text-secondary px-3 mb-0">View only: you can't edit this page, so changes here aren't saved.</p>
+    }
+    <div class="sentinel-side-pane-body">
+        <div class="wiki-block-editor" @ref="_editorContainer"></div>
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public Guid WikiPageId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    // Open this page in the main pane (the side pane closes).
+    [Parameter] public EventCallback<Guid> OnOpenInMain { get; set; }
+    // A [[link]] clicked in the pane: the caller shows that page in the pane.
+    [Parameter] public EventCallback<Guid> OnNavigate { get; set; }
+
+    private ElementReference _editorContainer;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<SentinelSidePane>? _dotNetRef;
+    private bool _initialized;
+    private WikiPage? _page;
+    private Guid _loadedFor;
+    private Guid _renderedFor;
+    private string _title = string.Empty;
+    private string _blocksJson = "[]";
+    private string _baseBlocksJson = "[]";
+    private long _version;
+    private bool _canEdit;
+    private bool _conflict;
+    private string _status = string.Empty;
+    private string? _error;
+    private CancellationTokenSource? _autosaveCts;
+    private Task? _pendingSave;
+    // One save at a time: a flush can land while a debounced save is already writing.
+    private readonly SemaphoreSlim _saveLock = new(1, 1);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == WikiPageId) return;
+        await FlushAsync();
+        _loadedFor = WikiPageId;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        _conflict = false;
+        var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        if (!await SentinelAccessService.CanAccessAsync(WikiPageId, false, username, SentinelAccessLevels.View))
+        {
+            _page = null;
+            _error = "You don't have access to this page.";
+            _blocksJson = "[]";
+            return;
+        }
+        _page = await WikiService.GetPageAsync(WikiPageId);
+        if (_page is null || _page.TrashedAt is not null)
+        {
+            _error = "This page no longer exists.";
+            _blocksJson = "[]";
+            return;
+        }
+        _canEdit = await SentinelAccessService.CanAccessAsync(WikiPageId, false, username, SentinelAccessLevels.Edit);
+        _title = _page.Title;
+        _blocksJson = _page.BlocksJson;
+        _baseBlocksJson = _page.BlocksJson;
+        _version = _page.ContentVersion;
+        _status = _canEdit ? "Saved" : string.Empty;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_initialized)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=13");
+            await _module.InvokeVoidAsync("initialize", _editorContainer, _dotNetRef, _blocksJson);
+            _initialized = true;
+            _renderedFor = _loadedFor;
+        }
+        else if (_renderedFor != _loadedFor && _module is not null)
+        {
+            _renderedFor = _loadedFor;
+            await _module.InvokeVoidAsync("setBlocks", _editorContainer, _blocksJson);
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _autosaveCts?.Cancel();
+        await LoadAsync();
+        if (_initialized && _module is not null) await _module.InvokeVoidAsync("setBlocks", _editorContainer, _blocksJson);
+    }
+
+    [JSInvokable]
+    public Task OnBlocksChanged(string blocksJson)
+    {
+        _blocksJson = blocksJson;
+        ScheduleAutosave();
+        return Task.CompletedTask;
+    }
+
+    private void ScheduleAutosave()
+    {
+        if (!_canEdit || _page is null || _conflict) return;
+        _autosaveCts?.Cancel();
+        _autosaveCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _autosaveCts = cts;
+        _status = "Editing…";
+        _pendingSave = SaveAfterDelayAsync(cts.Token);
+    }
+
+    private async Task SaveAfterDelayAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1.5), cancellationToken);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        await SaveNowAsync();
+    }
+
+    private async Task SaveNowAsync()
+    {
+        await _saveLock.WaitAsync();
+        try
+        {
+            await SaveCoreAsync();
+        }
+        finally
+        {
+            _saveLock.Release();
+        }
+    }
+
+    private async Task SaveCoreAsync()
+    {
+        if (_page is null || !_canEdit || _conflict) return;
+        var title = string.IsNullOrWhiteSpace(_title) ? _page.Title : _title.Trim();
+        if (title == _page.Title && _blocksJson == _baseBlocksJson) { _status = "Saved"; return; }
+        try
+        {
+            var saved = await WikiService.SavePageAsync(new WikiPageEditorModel
+            {
+                WikiPageId = _page.Id,
+                ExpectedContentVersion = _version,
+                Title = title,
+                Slug = _page.Slug,
+                BlocksJson = _blocksJson,
+                BaseBlocksJson = _baseBlocksJson,
+                Icon = _page.Icon,
+                CoverImageUrl = _page.CoverImageUrl,
+                ParentWikiPageId = _page.ParentWikiPageId,
+                IsFullWidth = _page.IsFullWidth,
+                FontStyle = _page.FontStyle
+            }, await CurrentUserAccessor.GetCurrentUsernameAsync(), createRevisionCheckpoint: false);
+            var mergedOtherEdits = saved.BlocksJson != _blocksJson;
+            _page = saved;
+            _version = saved.ContentVersion;
+            _baseBlocksJson = saved.BlocksJson;
+            _status = "Saved";
+            // Someone else's edit to the same page was merged in: show the page as saved.
+            if (mergedOtherEdits && _module is not null)
+            {
+                _blocksJson = saved.BlocksJson;
+                await _module.InvokeVoidAsync("setBlocks", _editorContainer, _blocksJson);
+            }
+        }
+        catch (WikiPageConcurrencyException)
+        {
+            _conflict = true;
+            _status = string.Empty;
+            _error = "This page was changed elsewhere in a way that can't be merged. Your last edits here weren't saved.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException)
+        {
+            Logger.LogWarning(ex, "Side pane autosave failed for Sentinel page {PageId}.", _page.Id);
+            _status = "Autosave failed";
+            _error = ex.Message;
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone; the save itself already happened.
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // Saves anything still waiting, straight away - before the pane closes or shows another page.
+    public async Task FlushAsync()
+    {
+        if (_autosaveCts is null || _autosaveCts.IsCancellationRequested) return;
+        _autosaveCts.Cancel();
+        if (_initialized && _module is not null)
+        {
+            try { _blocksJson = await _module.InvokeAsync<string>("getBlocksJson", _editorContainer); }
+            catch (JSDisconnectedException) { }
+        }
+        await SaveNowAsync();
+    }
+
+    private async Task CloseAsync()
+    {
+        await FlushAsync();
+        await OnClose.InvokeAsync();
+    }
+
+    private async Task OpenInMainAsync()
+    {
+        await FlushAsync();
+        await OnOpenInMain.InvokeAsync(WikiPageId);
+    }
+
+    // [[links]] clicked inside the pane open in the pane.
+    [JSInvokable]
+    public async Task NavigateToWikiPageId(string pageId)
+    {
+        if (!Guid.TryParse(pageId, out var id) || id == WikiPageId) return;
+        await FlushAsync();
+        await OnNavigate.InvokeAsync(id);
+    }
+
+    [JSInvokable]
+    public async Task<IReadOnlyList<WikiLinkSuggestion>> SearchWikiLinkSuggestions(string query) =>
+        WikiMarkdownHelper.SearchLinkSuggestions(query, await ListAccessibleWikiPagesAsync());
+
+    [JSInvokable]
+    public async Task<IReadOnlyList<WikiLinkSuggestion>> ListAllWikiLinkSuggestions() =>
+        WikiMarkdownHelper.SearchLinkSuggestions(string.Empty, await ListAccessibleWikiPagesAsync(), maxResults: int.MaxValue);
+
+    [JSInvokable]
+    public async Task<WikiLinkSuggestion?> ResolveWikiLinkText(string text) =>
+        WikiPageAliases.Resolve(text, await ListAccessibleWikiPagesAsync()) is { } page ? new WikiLinkSuggestion(page.Id, page.Title, page.Icon) : null;
+
+    private async Task<IReadOnlyList<WikiPage>> ListAccessibleWikiPagesAsync()
+    {
+        var pages = await WikiService.ListPagesAsync();
+        var accessible = await SentinelAccessService.GetAccessibleTargetsAsync(
+            pages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false)).ToList(),
+            await CurrentUserAccessor.GetCurrentUsernameAsync(),
+            SentinelAccessLevels.View);
+        return pages.Where(page => accessible.Contains(new SentinelAccessTarget(page.Id, IsDatabase: false))).ToList();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await FlushAsync(); }
+        catch (Exception ex) when (ex is JSDisconnectedException or ObjectDisposedException or InvalidOperationException)
+        {
+            Logger.LogDebug(ex, "Side pane flush on dispose skipped.");
+        }
+        _autosaveCts?.Dispose();
+        _saveLock.Dispose();
+        if (_initialized && _module is not null)
+        {
+            try { await _module.InvokeVoidAsync("dispose", _editorContainer); }
+            catch (JSDisconnectedException) { }
+        }
+        if (_module is not null)
+        {
+            try { await _module.DisposeAsync(); }
+            catch (JSDisconnectedException) { }
+        }
+        _dotNetRef?.Dispose();
+    }
+}

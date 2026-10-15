@@ -75,7 +75,7 @@ public static class ThreatInvestigationMarkdown
         {
             md.AppendLine($"## {cve.CveId}");
             if (cve.CvssScore is { } score) md.AppendLine($"- CVSS {cve.CvssVersion} {score:0.0} {cve.CvssSeverity}");
-            if (cve.EpssScore is { } epss) md.AppendLine($"- EPSS {epss:P1}");
+            if (cve.EpssScore is { } epss) md.AppendLine($"- EPSS {epss * 100:0.0}%");
             md.AppendLine($"- Known exploited (CISA KEV): {(cve.KnownExploited is null ? "no" : "yes")}");
             if (!string.IsNullOrWhiteSpace(cve.Description)) { md.AppendLine(); md.AppendLine(cve.Description); }
             md.AppendLine();

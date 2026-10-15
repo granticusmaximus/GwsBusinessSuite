@@ -803,7 +803,7 @@ placement.SlotToken);
 
     private static string FormatCtr(double value)
     {
-        return value.ToString("P1");
+        return $"{value * 100:0.0}%";
     }
 
     private static string GetTrendChipClass(double delta)
