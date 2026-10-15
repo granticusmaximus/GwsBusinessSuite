@@ -397,7 +397,7 @@ else
                                             </div>
                                             <div>
                                                 <strong>Numbers</strong>
-                                                <code>+ - * / % ^</code> <code>round</code> <code>abs</code> <code>ceil</code> <code>floor</code> <code>min</code> <code>max</code> <code>pow</code>
+                                                <code>+ - * / % ^</code> <code>round</code> <code>abs</code> <code>ceil</code> <code>floor</code> <code>min</code> <code>max</code> <code>pow</code> <code>sum</code>
                                             </div>
                                             <div>
                                                 <strong>Text</strong>
@@ -405,12 +405,22 @@ else
                                             </div>
                                             <div>
                                                 <strong>Dates</strong>
-                                                <code>now</code> <code>today</code> <code>dateAdd</code> <code>dateBetween</code> <code>formatDate</code>
+                                                <code>now</code> <code>today</code> <code>dateAdd</code> <code>dateSubtract</code> <code>dateBetween</code> <code>formatDate</code> <code>parseDate</code> <code>year</code> <code>month</code> <code>date</code> <code>day</code> <code>week</code> <code>hour</code> <code>minute</code>
+                                            </div>
+                                            <div>
+                                                <strong>Lists</strong>
+                                                <code>map</code> <code>filter</code> <code>find</code> <code>some</code> <code>every</code> <code>first</code> <code>last</code> <code>at</code> <code>slice</code> <code>sort</code> <code>unique</code> <code>includes</code> <code>join</code> (use <code>current</code> and <code>index</code> inside)
+                                            </div>
+                                            <div>
+                                                <strong>Names and relations</strong>
+                                                <code>let</code> <code>lets</code> <code>prop</code> and <code>value.function()</code> chaining
                                             </div>
                                         </div>
                                         <div class="sentinel-formula-example">
                                             <code>if([Done], "Complete", upper([Status]))</code>
                                             <code>dateBetween([Due], today(), "days")</code>
+                                            <code>prop("Client").prop("Email")</code>
+                                            <code>[Tags].filter(current != "Done").length()</code>
                                         </div>
                                     </details>
                                 </div>
