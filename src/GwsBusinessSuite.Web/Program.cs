@@ -369,6 +369,19 @@ builder.Services.AddRateLimiter(options =>
     // struggles, so "login"'s 5-per-15-minutes budget is far too tight for real conversational
     // use. Still bounded (this reaches production Ollama), just sized for a real chat session
     // rather than an occasional login attempt.
+    // Web clipper calls (Sentinel item 8): a person clipping by hand, so a generous per-IP cap
+    // that still stops a leaked token from flooding the workspace.
+    options.AddPolicy("sentinel-clip", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                Window               = TimeSpan.FromMinutes(1),
+                PermitLimit          = 30,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit           = 0,
+            }));
+
     options.AddPolicy("native-fallback-chat", context =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -1173,6 +1186,53 @@ app.MapPost("/admin/api/native/quick-notes", async (
 })
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");
+
+// Web clipper (Sentinel item 8): the Chrome/Edge/Safari extension authenticates with a per-user
+// clip token (Authorization: Bearer gwsclip_...), never the browser's cookie, and the token can
+// only create clips. The extension calls from its own origin with host permission, so no CORS.
+static async Task<string?> ClipUserAsync(HttpContext httpContext, GwsBusinessSuite.Application.Wiki.ISentinelWebClipService clips, CancellationToken cancellationToken)
+{
+    var header = httpContext.Request.Headers.Authorization.ToString();
+    return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+        ? await clips.ResolveTokenAsync(header["Bearer ".Length..].Trim(), cancellationToken)
+        : null;
+}
+
+app.MapGet("/api/sentinel/clip/whoami", async (
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelWebClipService clips,
+    CancellationToken cancellationToken) =>
+{
+    var username = await ClipUserAsync(httpContext, clips, cancellationToken);
+    return username is null
+        ? Results.Json(new { error = "That clip token isn't valid. Create a new one in Sentinel > Web clipper." }, statusCode: StatusCodes.Status401Unauthorized)
+        : Results.Json(new { username });
+})
+    .AllowAnonymous()
+    .RequireRateLimiting("sentinel-clip");
+
+app.MapPost("/api/sentinel/clip", async (
+    GwsBusinessSuite.Application.Wiki.SentinelClipRequest request,
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelWebClipService clips,
+    CancellationToken cancellationToken) =>
+{
+    var username = await ClipUserAsync(httpContext, clips, cancellationToken);
+    if (username is null)
+        return Results.Json(new { error = "That clip token isn't valid. Create a new one in Sentinel > Web clipper." }, statusCode: StatusCodes.Status401Unauthorized);
+    try
+    {
+        var result = await clips.ClipAsync(username, request, cancellationToken);
+        var origin = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}";
+        return Results.Json(new { id = result.PageId, title = result.Title, target = result.Target, url = $"{origin}/admin/sentinel?page={result.PageId}" });
+    }
+    catch (GwsBusinessSuite.Application.Wiki.SentinelClipException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+    .AllowAnonymous()
+    .RequireRateLimiting("sentinel-clip");
 
 // Meeting notes (Sentinel item 28): the bookings and contacts a Mac note can be linked to.
 app.MapGet("/admin/api/native/meeting-targets", async (

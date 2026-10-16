@@ -45,6 +45,10 @@
 {
     <SentinelInsightsPanel InitialTag="@_insightsTag" OnOpenPage="OpenAskedPageAsync" OnClose="() => _insightsOpen = false" />
 }
+@if (_clipperOpen)
+{
+    <SentinelWebClipperPanel OnClose="() => _clipperOpen = false" />
+}
 @if (_askOpen)
 {
     <SentinelAskPanel OnOpenPage="OpenAskedPageAsync" OnOpenDatabase="OpenAskedDatabaseAsync" OnClose="() => _askOpen = false" />
@@ -143,6 +147,10 @@
         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenInsightsForTag(null)"
                 title="Tags, most and never read pages, and questions the workspace couldn't answer">
             <i class="bi bi-bar-chart-line me-1"></i>Insights
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary sentinel-clipper-toggle" @onclick="() => _clipperOpen = !_clipperOpen"
+                aria-expanded="@(_clipperOpen ? "true" : "false")" title="Clip web pages into Sentinel from Chrome, Edge or Safari">
+            <i class="bi bi-scissors me-1"></i>Web clipper
         </button>
         <button type="button" class="btn btn-sm btn-outline-secondary sentinel-ask-toggle" @onclick="() => _askOpen = !_askOpen"
                 aria-expanded="@(_askOpen ? "true" : "false")" title="Ask a question; the answer cites the pages it comes from">
@@ -1904,6 +1912,8 @@
 
     // ---- Insights (Sentinel items 21-23): tags, most/never read, knowledge gaps.
     private bool _insightsOpen;
+    // Web clipper tokens (Sentinel item 8).
+    private bool _clipperOpen;
     private string? _insightsTag;
 
     private void OpenInsightsForTag(string? tag)

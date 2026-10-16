@@ -1014,6 +1014,7 @@ public static class DependencyInjection
         services.AddScoped<IWikiService, WikiService>();
         services.AddScoped<IQuickNoteService, QuickNoteService>();
         services.AddScoped<IDailyNoteService, DailyNoteService>();
+        services.AddScoped<ISentinelWebClipService, SentinelWebClipService>();
         services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();
         services.AddScoped<IWikiDatabaseRecurrenceService, WikiDatabaseRecurrenceService>();
         services.AddScoped<ISentinelTemplateService, SentinelTemplateService>();

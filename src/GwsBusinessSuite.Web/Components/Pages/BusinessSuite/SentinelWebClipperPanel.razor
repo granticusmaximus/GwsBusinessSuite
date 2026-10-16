@@ -1,0 +1,111 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@inject ISentinelWebClipService Clips
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject ILogger<SentinelWebClipperPanel> Logger
+
+@* Web clipper tokens (item 8). A token is shown once, when it's created. *@
+<div class="sentinel-ask sentinel-web-clipper" role="dialog" aria-label="Web clipper">
+    <div class="sentinel-ask-header">
+        <strong><i class="bi bi-scissors me-1" aria-hidden="true"></i>Web clipper</strong>
+        <button type="button" class="btn-close btn-close-white" aria-label="Close" @onclick="() => OnClose.InvokeAsync()"></button>
+    </div>
+    <p class="small text-secondary mb-2">
+        Save articles, selections and links from Chrome, Edge or Safari into Sentinel. In the extension's
+        settings, enter this server and a clip token. A token can only add clips, nothing else.
+    </p>
+    <label class="form-label small mb-1" for="clipper-server">Server</label>
+    <input id="clipper-server" class="form-control form-control-sm mb-3" readonly value="@ServerUrl" />
+
+    @if (_created is { } created)
+    {
+        <div class="alert alert-success small py-2" role="status">
+            Copy this token now, it won't be shown again:
+            <input class="form-control form-control-sm mt-1 font-monospace clipper-new-token" readonly value="@created.Token" />
+        </div>
+    }
+    @if (_error is not null)
+    {
+        <div class="alert alert-danger small py-2" role="alert">@_error</div>
+    }
+
+    <div class="input-group input-group-sm mb-3">
+        <input class="form-control" placeholder="Token name, e.g. Chrome on my Mac" maxlength="80"
+               @bind="_name" @bind:event="oninput" aria-label="Token name" />
+        <button type="button" class="btn btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_name))" @onclick="CreateAsync">Create token</button>
+    </div>
+
+    @if (_tokens.Count == 0)
+    {
+        <p class="small text-secondary mb-0">No clip tokens yet.</p>
+    }
+    else
+    {
+        <ul class="list-unstyled mb-0">
+            @foreach (var token in _tokens)
+            {
+                <li class="d-flex align-items-center gap-2 py-1 border-bottom">
+                    <div class="flex-grow-1 small">
+                        <div class="fw-semibold">@token.Name</div>
+                        <div class="text-secondary">
+                            <span class="font-monospace">@token.Prefix…</span> · created @token.CreatedAt.ToLocalTime().ToGwsDate()
+                            · @(token.LastUsedAtUnix is { } used ? "last used " + DateTimeOffset.FromUnixTimeSeconds(used).ToLocalTime().ToGwsDateTime() : "never used")
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_busy" @onclick="() => RevokeAsync(token.Id)">Revoke</button>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private IReadOnlyList<SentinelClipTokenView> _tokens = [];
+    private SentinelClipTokenCreated? _created;
+    private string _name = string.Empty;
+    private string? _error;
+    private bool _busy;
+
+    private string ServerUrl => Navigation.BaseUri.TrimEnd('/');
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync() =>
+        _tokens = await Clips.ListTokensAsync(await CurrentUserAccessor.GetCurrentUsernameAsync());
+
+    private async Task CreateAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            _created = await Clips.CreateTokenAsync(await CurrentUserAccessor.GetCurrentUsernameAsync(), _name);
+            _name = string.Empty;
+            await LoadAsync();
+        }
+        catch (SentinelClipException ex) { _error = ex.Message; }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Creating a clip token failed");
+            _error = "The token couldn't be created.";
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task RevokeAsync(Guid id)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Clips.RevokeTokenAsync(id, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            if (_created?.View.Id == id) _created = null;
+            await LoadAsync();
+        }
+        catch (SentinelClipException ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

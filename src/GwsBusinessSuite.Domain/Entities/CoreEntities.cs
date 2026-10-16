@@ -829,6 +829,19 @@ public sealed class SentinelPageSuggestion : AuditableEntity
     public long CreatedAtUnix { get; set; }
 }
 
+// Web clipper token (Sentinel item 8): lets that user's browser extension save clips into
+// Sentinel and nothing else. Only the SHA-256 hash is stored; the token is shown once.
+public sealed class SentinelClipToken : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string Name { get; set; }
+    // First characters of the token, shown so the user can tell tokens apart.
+    public required string Prefix { get; set; }
+    public required string TokenHash { get; set; }
+    public long? LastUsedAtUnix { get; set; }
+    public long? RevokedAtUnix { get; set; }
+}
+
 public sealed class SentinelNotification : AuditableEntity
 {
     public required string Username { get; set; }

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Clip to Sentinel</title>
+  <link rel="stylesheet" href="clipper.css">
+</head>
+<body class="popup">
+  <header>
+    <img src="icons/icon-32.png" alt="" width="20" height="20">
+    <strong>Clip to Sentinel</strong>
+    <a href="#" id="open-settings" class="settings-link">Settings</a>
+  </header>
+
+  <section id="setup" hidden>
+    <p>Connect the clipper to Sentinel first.</p>
+    <button type="button" id="setup-button">Open settings</button>
+  </section>
+
+  <form id="clip" hidden>
+    <fieldset class="modes">
+      <legend>Clip</legend>
+      <label><input type="radio" name="mode" value="article" checked> Article</label>
+      <label><input type="radio" name="mode" value="selection"> Selection</label>
+      <label><input type="radio" name="mode" value="link"> Link</label>
+    </fieldset>
+    <label for="title">Title</label>
+    <input id="title" maxlength="200">
+    <label for="target">Save to</label>
+    <select id="target">
+      <option value="page">A new page in Web Clips</option>
+      <option value="today">Today's daily note</option>
+    </select>
+    <label for="note">Note (optional)</label>
+    <textarea id="note" rows="3" maxlength="4000"></textarea>
+    <label for="tags">Tags (optional)</label>
+    <input id="tags" placeholder="research, client/acme">
+    <button type="submit" id="clip-button">Clip</button>
+  </form>
+
+  <p id="status" role="status"></p>
+  <script src="common.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

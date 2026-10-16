@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Sentinel Web Clipper settings</title>
+  <link rel="stylesheet" href="clipper.css">
+</head>
+<body class="options">
+  <h1>Sentinel Web Clipper</h1>
+  <p class="muted">In Sentinel, open <strong>Web clipper</strong> (top of the workspace), create a token and paste it here with the server address shown there.</p>
+  <form id="settings">
+    <label for="server">Server</label>
+    <input id="server" type="url" placeholder="https://admin.gwsapp.net" required autocomplete="url">
+    <label for="token">Clip token</label>
+    <input id="token" type="password" placeholder="gwsclip_..." required autocomplete="off">
+    <button type="submit">Save and test</button>
+  </form>
+  <p id="status" role="status"></p>
+  <script src="common.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>
