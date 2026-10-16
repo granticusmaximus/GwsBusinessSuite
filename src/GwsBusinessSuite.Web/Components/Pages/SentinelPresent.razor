@@ -1,0 +1,83 @@
+@page "/admin/sentinel/present/{PageId:guid}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Policy = "ContentAccess")]
+@layout GwsBusinessSuite.Web.Components.Layout.PublicShareLayout
+@using System.Text.RegularExpressions
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject IWikiService WikiService
+@inject ISentinelAccessService AccessService
+
+@* Presentation mode (Sentinel item 18). A static page: every slide is rendered here and
+   js/sentinelPresent.js shows one at a time (keys, clicks, swipes, full screen, the speaker view)
+   and exits back to the page. Without the script it reads as one long page. *@
+<PageTitle>@(_page is null ? "Presentation" : $"{_page.Title} · Presentation")</PageTitle>
+<HeadContent><meta name="robots" content="noindex,nofollow" /></HeadContent>
+
+@if (_page is null)
+{
+    <main class="sentinel-public-share">
+        <div class="sentinel-public-share-error">
+            <h1>Can't present this page</h1>
+            <p>It doesn't exist any more, or you don't have access to it.</p>
+            <p><a href="admin/sentinel">Back to Sentinel</a></p>
+        </div>
+    </main>
+}
+else
+{
+    <main class="sentinel-present" data-present-exit="@ExitUrl" data-present-key="@_page.Id" aria-label="@($"Presentation: {_page.Title}")">
+        @foreach (var slide in _slides)
+        {
+            <section class="sentinel-slide @(slide.IsTitleSlide ? "is-title" : "")" data-slide="@slide.Number"
+                     aria-roledescription="slide" aria-label="@($"Slide {slide.Number} of {_slides.Count}")" hidden="@(slide.Number != 1)">
+                @if (slide.IsTitleSlide)
+                {
+                    <div class="sentinel-slide-title">
+                        @if (!string.IsNullOrWhiteSpace(_page.Icon)) { <span class="sentinel-slide-icon" aria-hidden="true">@_page.Icon</span> }
+                        <h1>@_page.Title</h1>
+                    </div>
+                }
+                <div class="sentinel-slide-body sentinel-public-content">@((MarkupString)Render(slide))</div>
+            </section>
+        }
+        <nav class="sentinel-present-controls" aria-label="Presentation controls">
+            <button type="button" data-present="prev" aria-label="Previous slide" title="Previous (←)"><i class="bi bi-chevron-left" aria-hidden="true"></i></button>
+            <span class="sentinel-present-counter" aria-live="polite">1 / @_slides.Count</span>
+            <button type="button" data-present="next" aria-label="Next slide" title="Next (→ or Space)"><i class="bi bi-chevron-right" aria-hidden="true"></i></button>
+            <button type="button" data-present="fullscreen" aria-label="Full screen" title="Full screen (F)"><i class="bi bi-arrows-fullscreen" aria-hidden="true"></i></button>
+            <button type="button" data-present="speaker" aria-label="Speaker view" title="Speaker view in a new window (S)"><i class="bi bi-person-video3" aria-hidden="true"></i></button>
+            <a href="@ExitUrl" data-present="exit" aria-label="Exit presentation" title="Exit (Esc)"><i class="bi bi-x-lg" aria-hidden="true"></i></a>
+        </nav>
+        <aside class="sentinel-present-speaker" hidden>
+            <div class="sentinel-present-speaker-bar">
+                <strong class="sentinel-present-speaker-counter"></strong>
+                <span class="sentinel-present-speaker-timer" title="Time since the speaker view opened">00:00</span>
+            </div>
+            <div class="sentinel-present-speaker-next"><span>Next</span><div class="sentinel-present-speaker-next-slide"></div></div>
+        </aside>
+    </main>
+}
+
+@code {
+    [Parameter] public Guid PageId { get; set; }
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+
+    private WikiPage? _page;
+    private IReadOnlyList<SentinelSlide> _slides = [];
+
+    private string ExitUrl => $"/admin/sentinel?page={PageId}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var username = HttpContext?.User.Identity?.Name;
+        if (string.IsNullOrEmpty(username) || !await AccessService.CanAccessAsync(PageId, false, username, SentinelAccessLevels.View)) return;
+        var page = await WikiService.GetPageAsync(PageId);
+        if (page is null || page.TrashedAt is not null) return;
+        _page = page;
+        _slides = SentinelPresentation.Split(WikiBlockJson.ParseBlocks(page.BlocksJson));
+    }
+
+    // [[links]] open the linked page in Sentinel (leaving the presentation).
+    private static string Render(SentinelSlide slide) =>
+        Regex.Replace(WikiBlockHtmlRenderer.RenderPage(slide.Blocks), "href=\"wikilink:([0-9a-fA-F-]{36})\"", "href=\"/admin/sentinel?page=$1\"");
+}

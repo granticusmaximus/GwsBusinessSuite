@@ -758,6 +758,10 @@
                         </button>
                         <SentinelSuggestionsPanel @ref="_suggestionsPanel" WikiPageId="selectedPageId" CanReview="_canEditPage"
                                                   OnPageChanged="ReloadAfterSuggestionAsync" OnMarksChanged="SetSuggestionMarksAsync" />
+                        <button type="button" class="btn btn-sm sentinel-tool-btn" @onclick="PresentAsync" disabled="@IsBusy"
+                                title="Present: show this page as slides (a new slide at each Heading 1, Heading 2 or divider)" aria-label="Present this page">
+                            <i class="bi bi-easel" aria-hidden="true"></i>
+                        </button>
                         <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-focus-toggle" @onclick="ToggleFocusModeAsync"
                                 title="Focus mode: just the page (Cmd/Ctrl+Shift+.)" aria-label="Focus mode" aria-pressed="@(_focusMode ? "true" : "false")">
                             <i class="bi bi-fullscreen" aria-hidden="true"></i>
@@ -4414,6 +4418,15 @@
             .Where(n => n.Title.Contains(SearchQuery, StringComparison.OrdinalIgnoreCase))
             .OrderBy(n => n.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    // Presentation mode (Sentinel item 18): save what's typed, then show the saved page as slides.
+    private async Task PresentAsync()
+    {
+        if (SelectedPageId is not { } pageId) return;
+        if (!_suggesting) await FlushAutosaveAsync();
+        if (PageConflict is not null) return;
+        Navigator.NavigateTo($"/admin/sentinel/present/{pageId}", forceLoad: true);
     }
 
     // ---- Side-by-side panes (Sentinel item 16) ----
