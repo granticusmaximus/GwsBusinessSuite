@@ -1126,8 +1126,9 @@ public sealed class WikiDatabaseService(
         var name = WikiFileValues.CleanFileName(fileName);
         var file = new SentinelImportedFile
         {
-            // Not from a Notion import: records which property the upload belongs to instead.
-            NotionBlockId = $"files-property:{propertyId}",
+            // Not from a Notion import: records which property the upload belongs to instead. The
+            // column is unique, so each upload gets its own suffix (80 characters exactly).
+            NotionBlockId = $"files-property:{propertyId:N}:{Guid.NewGuid():N}",
             FileName = name,
             ContentType = WikiFileValues.ContentTypeFor(name),
             Content = content,

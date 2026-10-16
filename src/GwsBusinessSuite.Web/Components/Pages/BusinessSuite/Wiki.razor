@@ -45,6 +45,10 @@
 {
     <SentinelInsightsPanel InitialTag="@_insightsTag" OnOpenPage="OpenAskedPageAsync" OnClose="() => _insightsOpen = false" />
 }
+@if (_emailInOpen && _isAdmin)
+{
+    <SentinelEmailInPanel OnOpenPage="OpenAskedPageAsync" OnClose="() => _emailInOpen = false" />
+}
 @if (_clipperOpen)
 {
     <SentinelWebClipperPanel OnClose="() => _clipperOpen = false" />
@@ -152,6 +156,13 @@
                 aria-expanded="@(_clipperOpen ? "true" : "false")" title="Clip web pages into Sentinel from Chrome, Edge or Safari">
             <i class="bi bi-scissors me-1"></i>Web clipper
         </button>
+        @if (_isAdmin)
+        {
+            <button type="button" class="btn btn-sm btn-outline-secondary sentinel-email-in-toggle" @onclick="() => _emailInOpen = !_emailInOpen"
+                    aria-expanded="@(_emailInOpen ? "true" : "false")" title="Turn emails sent to a mailbox into Sentinel pages">
+                <i class="bi bi-envelope-arrow-down me-1"></i>Email in
+            </button>
+        }
         <button type="button" class="btn btn-sm btn-outline-secondary sentinel-ask-toggle" @onclick="() => _askOpen = !_askOpen"
                 aria-expanded="@(_askOpen ? "true" : "false")" title="Ask a question; the answer cites the pages it comes from">
             <i class="bi bi-chat-square-quote me-1"></i>Ask
@@ -1914,6 +1925,8 @@
     private bool _insightsOpen;
     // Web clipper tokens (Sentinel item 8).
     private bool _clipperOpen;
+    // Email into Sentinel (item 29), admins only.
+    private bool _emailInOpen;
     private string? _insightsTag;
 
     private void OpenInsightsForTag(string? tag)

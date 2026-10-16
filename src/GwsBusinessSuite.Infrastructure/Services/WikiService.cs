@@ -238,6 +238,8 @@ public sealed class WikiService(
 
         page.Title = editor.Title.Trim();
         page.Slug = uniqueSlug;
+        // Whiteboards are cleaned, size-checked and given their searchable text on every save.
+        if (!string.IsNullOrWhiteSpace(editor.BlocksJson)) editor.BlocksJson = SentinelCanvas.NormalizeBlocksJson(editor.BlocksJson);
         page.BlocksJson = string.IsNullOrWhiteSpace(editor.BlocksJson) ? "[]" : editor.BlocksJson;
         page.Icon = string.IsNullOrWhiteSpace(editor.Icon) ? null : editor.Icon.Trim();
         page.CoverImageUrl = string.IsNullOrWhiteSpace(editor.CoverImageUrl) ? null : editor.CoverImageUrl.Trim();

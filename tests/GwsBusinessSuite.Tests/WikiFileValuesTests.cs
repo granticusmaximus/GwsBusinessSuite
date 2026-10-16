@@ -77,6 +77,21 @@ public sealed class WikiFileValuesTests
     }
 
     [Fact]
+    public async Task StorePropertyFileAsync_ShouldStoreSeveralFilesForTheSameProperty()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Contracts", null, "grant");
+        var files = await service.SavePropertyAsync(database.Id,
+            new WikiDatabasePropertyEditor { Name = "Attachments", Type = WikiDatabasePropertyTypes.Files }, "grant");
+
+        await service.StorePropertyFileAsync(database.Id, files.Id, "one.pdf", [1]);
+        await service.StorePropertyFileAsync(database.Id, files.Id, "two.pdf", [2]);
+
+        (await db.SentinelImportedFiles.CountAsync()).Should().Be(2);
+    }
+
+    [Fact]
     public async Task StorePropertyFileAsync_ShouldRefuseAPropertyThatIsNotAFilesProperty()
     {
         await using var db = await CreateDbAsync();

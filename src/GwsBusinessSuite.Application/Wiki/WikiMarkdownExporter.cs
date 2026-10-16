@@ -103,6 +103,13 @@ public static class WikiMarkdownExporter
             case WikiBlockTypes.Equation:
                 markdown.Append("$$\n").Append(block.PlainText).Append("\n$$\n\n");
                 break;
+            case WikiBlockTypes.Canvas:
+                // The board itself has no Markdown form: its words, one bullet per item.
+                markdown.Append("**Whiteboard**\n\n");
+                foreach (var line in block.PlainText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    markdown.Append("- ").Append(line).Append('\n');
+                markdown.Append('\n');
+                break;
             case WikiBlockTypes.Diagram:
                 // GitHub, Obsidian and most Markdown tools draw a mermaid fence as a diagram.
                 markdown.Append("```mermaid\n").Append(block.PlainText).Append("\n```\n\n");

@@ -77,6 +77,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelNotification> SentinelNotifications => Set<SentinelNotification>();
     public DbSet<SentinelPageSuggestion> PageSuggestions => Set<SentinelPageSuggestion>();
     public DbSet<SentinelClipToken> SentinelClipTokens => Set<SentinelClipToken>();
+    public DbSet<SentinelMailboxSettings> SentinelMailboxSettings => Set<SentinelMailboxSettings>();
+    public DbSet<SentinelInboundEmail> SentinelInboundEmails => Set<SentinelInboundEmail>();
     public DbSet<PageReminder> PageReminders => Set<PageReminder>();
     public DbSet<OverwatchCameraWatchState> OverwatchCameraWatchStates => Set<OverwatchCameraWatchState>();
     public DbSet<OverwatchIncidentSighting> OverwatchIncidentSightings => Set<OverwatchIncidentSighting>();
@@ -422,6 +424,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelClipToken>().HasIndex(x => x.TokenHash).IsUnique();
         modelBuilder.Entity<SentinelClipToken>().HasIndex(x => x.Username);
         modelBuilder.Entity<SentinelClipToken>().Property(x => x.Name).HasMaxLength(80);
+        modelBuilder.Entity<SentinelInboundEmail>().HasIndex(x => x.MessageId).IsUnique();
+        modelBuilder.Entity<SentinelInboundEmail>().HasIndex(x => x.ProcessedAtUnix);
         // The minute sweep's "due and still waiting" query, and a page's reminder lookup.
         modelBuilder.Entity<PageReminder>().HasIndex(x => new { x.SentUnix, x.CancelledUnix, x.DueUnix });
         modelBuilder.Entity<PageReminder>().HasIndex(x => new { x.WikiPageId, x.WikiBlockId });

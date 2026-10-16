@@ -53,13 +53,16 @@ public static class WikiBlockTypes
     public const string Diagram = "diagram";
     // Live business data (SentinelLiveBlocks): kind + record id in props, the data never stored.
     public const string Business = "business";
+    // Whiteboard (Sentinel item 10): the board in props["doc"], drawn by sentinel-canvas.js; the
+    // rich text is the board's words, rebuilt on save (SentinelCanvas).
+    public const string Canvas = "canvas";
 
     public static readonly IReadOnlyList<string> All =
     [
         Paragraph, Heading1, Heading2, Heading3, BulletedListItem, NumberedListItem,
         ToDo, Toggle, Quote, Callout, Code, Divider, Image, Embed, Video, Audio, File, Pdf,
         PageLink, LinkedDatabase, InlineDatabase,
-        Table, Equation, Diagram, Business, Breadcrumb, TableOfContents, Button, SyncedBlock, Columns, Tab, Markdown
+        Table, Equation, Diagram, Business, Canvas, Breadcrumb, TableOfContents, Button, SyncedBlock, Columns, Tab, Markdown
     ];
 
     public static bool IsListItem(string type) => type is BulletedListItem or NumberedListItem;

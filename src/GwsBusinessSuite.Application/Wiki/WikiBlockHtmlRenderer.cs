@@ -134,6 +134,7 @@ public static class WikiBlockHtmlRenderer
             WikiBlockTypes.Table => RenderTable(block, indentStyle),
             WikiBlockTypes.Equation => RenderEquation(block, indentStyle),
             WikiBlockTypes.Diagram => RenderDiagram(block, indentStyle),
+            WikiBlockTypes.Canvas => RenderCanvas(block, indentStyle),
             // Live business data is Admin-only and never stored in the page, so a public share
             // (or any other static render) leaves the block out entirely.
             WikiBlockTypes.Business => string.Empty,
@@ -424,6 +425,19 @@ public static class WikiBlockHtmlRenderer
     // scripts don't run); wikiRichContentHydrate.js replaces it with the drawn SVG.
     private static string RenderDiagram(WikiBlock block, string indentStyle) =>
         $"<div class=\"wiki-diagram wiki-mermaid-target\" data-mermaid=\"{WebUtility.HtmlEncode(block.PlainText)}\"{indentStyle}><pre class=\"wiki-code\"><code>{WebUtility.HtmlEncode(block.PlainText)}</code></pre></div>";
+
+    // Whiteboard (item 10): drawn read-only by wikiRichContentHydrate.js from data-canvas-doc.
+    // Static renders reach people who may not see the linked pages, so cards lose their stored
+    // titles; the text list below is the no-script fallback (card titles left out the same way).
+    private static string RenderCanvas(WikiBlock block, string indentStyle)
+    {
+        string doc;
+        try { doc = SentinelCanvas.WithoutCardTitles(SentinelCanvas.NormalizeDoc(block.Props.GetValueOrDefault("doc"))); }
+        catch (Exception) { return string.Empty; }
+        var lines = SentinelCanvas.RichText(doc).Where(span => span.Text != "\n" && span.Link is null)
+            .Select(span => $"<li>{WebUtility.HtmlEncode(span.Text)}</li>");
+        return $"<div class=\"wiki-canvas-static\" data-canvas-doc=\"{WebUtility.HtmlEncode(doc)}\"{indentStyle}><ul class=\"wiki-canvas-fallback\">{string.Concat(lines)}</ul></div>";
+    }
 
     private static string RenderEquation(WikiBlock block, string indentStyle) =>
         $"<div class=\"wiki-equation wiki-katex-target\" data-latex=\"{WebUtility.HtmlEncode(block.PlainText)}\"{indentStyle}>{WebUtility.HtmlEncode(block.PlainText)}</div>";

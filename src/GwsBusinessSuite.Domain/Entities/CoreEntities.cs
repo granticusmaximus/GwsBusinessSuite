@@ -842,6 +842,39 @@ public sealed class SentinelClipToken : AuditableEntity
     public long? RevokedAtUnix { get; set; }
 }
 
+// Email into Sentinel (item 29): the one mailbox Sentinel polls over IMAP. The password (an app
+// password) is stored protected with ISecretProtector, never in plain text.
+public sealed class SentinelMailboxSettings : AuditableEntity
+{
+    public bool Enabled { get; set; }
+    public string Host { get; set; } = "imap.gmail.com";
+    public int Port { get; set; } = 993;
+    public string Username { get; set; } = string.Empty;
+    public string PasswordProtected { get; set; } = string.Empty;
+    public string Folder { get; set; } = "INBOX";
+    // The receiving server's name in Authentication-Results; only its verdict is trusted.
+    public string AuthServId { get; set; } = "mx.google.com";
+    public long? LastPollUnix { get; set; }
+    public long? LastSuccessUnix { get; set; }
+    public string? LastError { get; set; }
+}
+
+// One row per message the poller has handled, imported or not - the log admins see, and how a
+// message is never imported twice.
+public sealed class SentinelInboundEmail : AuditableEntity
+{
+    public required string MessageId { get; set; }
+    public string FromAddress { get; set; } = string.Empty;
+    public string Subject { get; set; } = string.Empty;
+    // imported / rejected / failed
+    public required string Status { get; set; }
+    public string? Reason { get; set; }
+    public string? Username { get; set; }
+    public Guid? WikiPageId { get; set; }
+    public int AttachmentCount { get; set; }
+    public long ProcessedAtUnix { get; set; }
+}
+
 public sealed class SentinelNotification : AuditableEntity
 {
     public required string Username { get; set; }

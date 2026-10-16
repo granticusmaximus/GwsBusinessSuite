@@ -1,0 +1,179 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@inject ISentinelEmailInService EmailIn
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject ILogger<SentinelEmailInPanel> Logger
+
+@* Email into Sentinel (item 29), admins only. *@
+<div class="sentinel-ask sentinel-email-in" role="dialog" aria-label="Email in">
+    <div class="sentinel-ask-header">
+        <strong><i class="bi bi-envelope-arrow-down me-1" aria-hidden="true"></i>Email in</strong>
+        <button type="button" class="btn-close btn-close-white" aria-label="Close" @onclick="() => OnClose.InvokeAsync()"></button>
+    </div>
+    <p class="small text-secondary mb-2">
+        Sentinel checks this mailbox every two minutes. A message from a user (the email on their member
+        profile) becomes a page under <strong>Inbox</strong>, with its attachments. <code>#tags</code> in the
+        subject are added to the page. Mail that its server can't confirm came from that sender is refused.
+    </p>
+
+    @if (_loading)
+    {
+        <p class="small text-secondary">Loading...</p>
+    }
+    else
+    {
+        <div class="form-check form-switch mb-2">
+            <input class="form-check-input" type="checkbox" id="email-in-enabled" @bind="_enabled" />
+            <label class="form-check-label small" for="email-in-enabled">Check the mailbox for new mail</label>
+        </div>
+        <div class="row g-2 mb-2">
+            <div class="col-8">
+                <label class="form-label small mb-1" for="email-in-host">IMAP server</label>
+                <input id="email-in-host" class="form-control form-control-sm" @bind="_host" @bind:event="oninput" />
+            </div>
+            <div class="col-4">
+                <label class="form-label small mb-1" for="email-in-port">Port</label>
+                <input id="email-in-port" type="number" class="form-control form-control-sm" @bind="_port" @bind:event="oninput" />
+            </div>
+        </div>
+        <label class="form-label small mb-1" for="email-in-user">Mailbox address</label>
+        <input id="email-in-user" class="form-control form-control-sm mb-2" placeholder="sentinel@gwsapp.net" @bind="_username" @bind:event="oninput" />
+        <label class="form-label small mb-1" for="email-in-password">App password</label>
+        <input id="email-in-password" type="password" class="form-control form-control-sm mb-1" autocomplete="new-password"
+               placeholder="@(_hasPassword ? "Saved - leave empty to keep it" : "16-character app password")" @bind="_password" @bind:event="oninput" />
+        <div class="form-text mb-2">For Google Workspace: turn on 2-Step Verification for the mailbox, then create an app password in its Google Account.</div>
+        <div class="row g-2 mb-2">
+            <div class="col-6">
+                <label class="form-label small mb-1" for="email-in-folder">Folder</label>
+                <input id="email-in-folder" class="form-control form-control-sm" @bind="_folder" @bind:event="oninput" />
+            </div>
+            <div class="col-6">
+                <label class="form-label small mb-1" for="email-in-authserv">Trusted receiving server</label>
+                <input id="email-in-authserv" class="form-control form-control-sm" @bind="_authServId" @bind:event="oninput" />
+            </div>
+        </div>
+        <div class="d-flex gap-2 mb-2">
+            <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="SaveAsync">Save</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || !_hasPassword)" @onclick="TestAsync">Test connection</button>
+        </div>
+        @if (_message is not null)
+        {
+            <div class="alert @(_messageIsError ? "alert-danger" : "alert-success") small py-2" role="status">@_message</div>
+        }
+        @if (_settings is { } settings)
+        {
+            <p class="small text-secondary mb-2">
+                Last checked: @(settings.LastPollUnix is { } polled ? Format(polled) : "never")
+                @if (settings.LastError is { } lastError)
+                {
+                    <br /><span class="text-danger">Last error: @lastError</span>
+                }
+            </p>
+        }
+
+        <div class="fw-semibold small mb-1">Recent messages</div>
+        @if (_recent.Count == 0)
+        {
+            <p class="small text-secondary mb-0">Nothing received yet.</p>
+        }
+        else
+        {
+            <ul class="list-unstyled mb-0 small">
+                @foreach (var item in _recent)
+                {
+                    <li class="py-1 border-bottom">
+                        <span class="badge @(item.Status == SentinelEmailIn.Statuses.Imported ? "text-bg-success" : item.Status == SentinelEmailIn.Statuses.Failed ? "text-bg-danger" : "text-bg-secondary")">@item.Status</span>
+                        @if (item.WikiPageId is { } pageId)
+                        {
+                            <button type="button" class="btn btn-link btn-sm p-0 align-baseline" @onclick="() => OnOpenPage.InvokeAsync(pageId)">@(string.IsNullOrWhiteSpace(item.Subject) ? "(no subject)" : item.Subject)</button>
+                        }
+                        else
+                        {
+                            <span>@(string.IsNullOrWhiteSpace(item.Subject) ? "(no subject)" : item.Subject)</span>
+                        }
+                        <div class="text-secondary">@item.FromAddress · @Format(item.ProcessedAtUnix)@(item.AttachmentCount > 0 ? $" · {item.AttachmentCount} attachment(s)" : "")</div>
+                        @if (item.Reason is { } reason)
+                        {
+                            <div class="text-secondary">@reason</div>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<Guid> OnOpenPage { get; set; }
+
+    private SentinelMailboxView? _settings;
+    private IReadOnlyList<SentinelInboundEmailView> _recent = [];
+    private bool _loading = true;
+    private bool _busy;
+    private bool _enabled;
+    private string _host = string.Empty;
+    private int _port = 993;
+    private string _username = string.Empty;
+    private string _password = string.Empty;
+    private string _folder = "INBOX";
+    private string _authServId = "mx.google.com";
+    private bool _hasPassword;
+    private string? _message;
+    private bool _messageIsError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Apply(await EmailIn.GetSettingsAsync());
+        _recent = await EmailIn.ListRecentAsync(25);
+        _loading = false;
+    }
+
+    private void Apply(SentinelMailboxView settings)
+    {
+        _settings = settings;
+        _enabled = settings.Enabled;
+        _host = settings.Host;
+        _port = settings.Port;
+        _username = settings.Username;
+        _folder = settings.Folder;
+        _authServId = settings.AuthServId;
+        _hasPassword = settings.HasPassword;
+        _password = string.Empty;
+    }
+
+    private async Task SaveAsync() => await RunAsync(async username =>
+    {
+        Apply(await EmailIn.SaveSettingsAsync(
+            new SentinelMailboxUpdate(_enabled, _host, _port, _username, string.IsNullOrEmpty(_password) ? null : _password, _folder, _authServId),
+            username));
+        return "Saved.";
+    });
+
+    private async Task TestAsync() => await RunAsync(username => EmailIn.TestConnectionAsync(username));
+
+    private async Task RunAsync(Func<string, Task<string>> action)
+    {
+        _busy = true;
+        _message = null;
+        try
+        {
+            _message = await action(await CurrentUserAccessor.GetCurrentUsernameAsync());
+            _messageIsError = false;
+        }
+        catch (SentinelEmailInException ex)
+        {
+            _message = ex.Message;
+            _messageIsError = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Email-in settings action failed");
+            _message = "That didn't work - see the server log.";
+            _messageIsError = true;
+        }
+        finally { _busy = false; }
+    }
+
+    private static string Format(long unix) => DateTimeOffset.FromUnixTimeSeconds(unix).ToLocalTime().ToGwsDateTime();
+}

@@ -88,6 +88,12 @@ public static partial class SentinelExportFlattener
                 break;
             case WikiBlockTypes.Equation: yield return new ExportParagraph(Plain(block.PlainText), "code", "Equation (LaTeX)", level); break;
             case WikiBlockTypes.Diagram: yield return new ExportParagraph(Plain(block.PlainText), "code", "Diagram (Mermaid)", level); break;
+            case WikiBlockTypes.Canvas:
+                // A whiteboard exports as its words, one bullet per item, under a note.
+                yield return new ExportNote("Whiteboard - open the page in Sentinel to see the board.");
+                foreach (var line in block.PlainText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    yield return new ExportListItem("•", Plain(line), level);
+                break;
             case WikiBlockTypes.Divider: yield return new ExportDivider(); break;
             case WikiBlockTypes.Image:
                 var imageUrl = block.Props.GetValueOrDefault("url") ?? string.Empty;
