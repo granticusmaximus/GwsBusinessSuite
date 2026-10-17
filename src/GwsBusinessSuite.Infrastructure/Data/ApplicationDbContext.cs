@@ -82,6 +82,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelPageType> SentinelPageTypes => Set<SentinelPageType>();
     public DbSet<SentinelPageTypeAssignment> SentinelPageTypeAssignments => Set<SentinelPageTypeAssignment>();
     public DbSet<SentinelOfflinePage> SentinelOfflinePages => Set<SentinelOfflinePage>();
+    public DbSet<SentinelUnlockGrant> SentinelUnlockGrants => Set<SentinelUnlockGrant>();
+    public DbSet<SentinelLockPin> SentinelLockPins => Set<SentinelLockPin>();
+    public DbSet<SentinelPasskey> SentinelPasskeys => Set<SentinelPasskey>();
+    public DbSet<SentinelDeviceKey> SentinelDeviceKeys => Set<SentinelDeviceKey>();
     public DbSet<PageReminder> PageReminders => Set<PageReminder>();
     public DbSet<OverwatchCameraWatchState> OverwatchCameraWatchStates => Set<OverwatchCameraWatchState>();
     public DbSet<OverwatchIncidentSighting> OverwatchIncidentSightings => Set<OverwatchIncidentSighting>();
@@ -434,6 +438,11 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelPageTypeAssignment>().HasIndex(x => new { x.WikiPageId, x.PageTypeId }).IsUnique();
         modelBuilder.Entity<SentinelPageTypeAssignment>().HasIndex(x => x.PageTypeId);
         modelBuilder.Entity<SentinelOfflinePage>().HasIndex(x => new { x.Username, x.WikiPageId }).IsUnique();
+        modelBuilder.Entity<SentinelUnlockGrant>().HasIndex(x => new { x.Username, x.SessionId });
+        modelBuilder.Entity<SentinelLockPin>().HasIndex(x => x.Username).IsUnique();
+        modelBuilder.Entity<SentinelPasskey>().HasIndex(x => x.CredentialId).IsUnique();
+        modelBuilder.Entity<SentinelPasskey>().HasIndex(x => x.Username);
+        modelBuilder.Entity<SentinelDeviceKey>().HasIndex(x => x.Username);
         // The minute sweep's "due and still waiting" query, and a page's reminder lookup.
         modelBuilder.Entity<PageReminder>().HasIndex(x => new { x.SentUnix, x.CancelledUnix, x.DueUnix });
         modelBuilder.Entity<PageReminder>().HasIndex(x => new { x.WikiPageId, x.WikiBlockId });

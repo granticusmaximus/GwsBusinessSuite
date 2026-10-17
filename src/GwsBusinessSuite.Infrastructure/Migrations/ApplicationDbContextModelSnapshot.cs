@@ -5943,6 +5943,57 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("SentinelDatabaseTemplates");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelDeviceKey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastUsedAtUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("PublicKeySpki")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<long?>("RevokedAtUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Storage")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username");
+
+                    b.ToTable("SentinelDeviceKeys");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelDiscussion", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6179,6 +6230,50 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasIndex("ProcessedAtUnix");
 
                     b.ToTable("SentinelInboundEmails");
+                });
+
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelLockPin", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("FailedCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("FailureWindowStartUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("LockedUntilUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PinHash")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username")
+                        .IsUnique();
+
+                    b.ToTable("SentinelLockPins");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelMailboxSettings", b =>
@@ -6564,6 +6659,63 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("SentinelPageTypeAssignments");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelPasskey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("AaGuid")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CredentialId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastUsedAtUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("PublicKey")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<uint>("SignCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CredentialId")
+                        .IsUnique();
+
+                    b.HasIndex("Username");
+
+                    b.ToTable("SentinelPasskeys");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelPresenceLease", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6829,6 +6981,50 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.HasIndex("Username", "CreatedAt");
 
                     b.ToTable("SentinelSavedSearches");
+                });
+
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelUnlockGrant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("CreatedAtUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("ExpiresAtUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username", "SessionId");
+
+                    b.ToTable("SentinelUnlockGrants");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelWorkspaceMember", b =>
@@ -8743,6 +8939,15 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<Guid?>("LinkedContactId")
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("LockedAtUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LockedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LockedContentProtected")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Markdown")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -8831,6 +9036,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.Property<string>("BlocksJson")
                         .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ContentProtected")
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("CreatedAt")

@@ -32,11 +32,15 @@
             @if (_conflict) { <button type="button" class="btn btn-sm btn-link p-0 ms-1" @onclick="ReloadAsync">Reload</button> }
         </div>
     }
-    @if (!_canEdit && _page is not null)
+    @if (_page?.LockedBy is not null)
+    {
+        <p class="small text-secondary px-3 mb-0"><i class="bi bi-lock-fill me-1" aria-hidden="true"></i>This page is locked - open it in the main editor to unlock it.</p>
+    }
+    else if (!_canEdit && _page is not null)
     {
         <p class="small text-secondary px-3 mb-0">View only: you can't edit this page, so changes here aren't saved.</p>
     }
-    <div class="sentinel-side-pane-body">
+    <div class="sentinel-side-pane-body" hidden="@(_page?.LockedBy is not null)">
         <div class="wiki-block-editor" @ref="_editorContainer"></div>
     </div>
 </section>
@@ -96,7 +100,8 @@
             _blocksJson = "[]";
             return;
         }
-        _canEdit = await SentinelAccessService.CanAccessAsync(WikiPageId, false, username, SentinelAccessLevels.Edit);
+        // Page lock: the side pane never shows or saves a locked page (no unlock here).
+        _canEdit = _page.LockedBy is null && await SentinelAccessService.CanAccessAsync(WikiPageId, false, username, SentinelAccessLevels.Edit);
         _title = _page.Title;
         _blocksJson = _page.BlocksJson;
         _baseBlocksJson = _page.BlocksJson;

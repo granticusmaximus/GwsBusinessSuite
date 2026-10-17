@@ -78,6 +78,15 @@ const MEDIA_TYPES = new Set(['image', 'embed', 'video', 'audio', 'pdf', 'file'])
 const TEXTLESS_TYPES = new Set(['divider', 'page_link', 'linked_database', 'inline_database', 'breadcrumb', 'table_of_contents', ...MEDIA_TYPES]);
 const RICH_TEXT_COLORS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'];
 
+// Page lock: drops this browser's stored draft and undo history for a page (its key as passed to
+// initialize), so a locked page's text doesn't stay readable in local/session storage.
+export function forgetStoredCopies(historyKey) {
+    const key = normalizeHistoryKey(historyKey);
+    if (!key) return;
+    try { localStorage.removeItem(`${DRAFT_STORAGE_PREFIX}${key}`); } catch { /* storage may be unavailable */ }
+    try { sessionStorage.removeItem(`${HISTORY_STORAGE_PREFIX}${key}`); } catch { /* storage may be unavailable */ }
+}
+
 export function initialize(container, dotNetRef, initialBlocksJson, historyKey = null) {
     dispose(container);
     const state = {

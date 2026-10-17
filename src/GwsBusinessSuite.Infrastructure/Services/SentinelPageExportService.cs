@@ -74,7 +74,10 @@ public sealed partial class SentinelPageExportService(
         var ids = order.Select(o => o.Id).ToList();
         var rows = (await dbContext.WikiPages.AsNoTracking().Where(p => ids.Contains(p.Id)).ToListAsync(cancellationToken)).ToDictionary(p => p.Id);
         var pages = order.Where(o => rows.ContainsKey(o.Id))
-            .Select(o => new SentinelExportPage(o.Id, Title(rows[o.Id]), rows[o.Id].Icon, o.Depth, WikiBlockJson.ParseBlocks(rows[o.Id].BlocksJson)))
+            .Select(o => new SentinelExportPage(o.Id, Title(rows[o.Id]), rows[o.Id].Icon, o.Depth, rows[o.Id].LockedBy is null
+                ? WikiBlockJson.ParseBlocks(rows[o.Id].BlocksJson)
+                // Page lock: exports never include a locked page's content.
+                : [new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [new WikiRichTextSpan("🔒 This page is locked - remove the lock to export it.")], new Dictionary<string, string>())]))
             .ToList();
 
         var imageUrls = pages.SelectMany(p => SentinelExportFlattener.Flatten(p.Blocks)).OfType<ExportImageRef>().Select(i => i.Url).Distinct().Take(MaxImages);

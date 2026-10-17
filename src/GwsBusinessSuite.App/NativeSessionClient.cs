@@ -69,6 +69,31 @@ public sealed class NativeSessionClient(HttpClient httpClient)
             : new(null, null, error);
     }
 
+    // ---- Page lock: Touch ID in the Mac app (server's SentinelDeviceKeyService) ----
+
+    public async Task<(Guid? KeyId, string? Username, string? Error)> RegisterTouchIdKeyAsync(string name, byte[] publicKeySpki, string storage, CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await PostAsync("/admin/api/native/lock-device",
+            new { name, publicKey = Convert.ToBase64String(publicKeySpki), storage }, cancellationToken);
+        return json is { } body ? (body.GetProperty("id").GetGuid(), body.GetProperty("username").GetString(), null) : (null, null, error);
+    }
+
+    public async Task<(string? Challenge, string? Error)> GetLockChallengeAsync(Guid keyId, CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await PostAsync("/admin/api/native/lock-challenge", new { keyId }, cancellationToken);
+        return json is { } body ? (body.GetProperty("challenge").GetString(), null) : (null, error);
+    }
+
+    public async Task<string?> UnlockWithTouchIdAsync(Guid keyId, byte[] signature, CancellationToken cancellationToken = default)
+    {
+        var (_, error) = await PostAsync("/admin/api/native/lock-unlock", new { keyId, signature = Convert.ToBase64String(signature) }, cancellationToken);
+        return error;
+    }
+
+    // The app was hidden: this session's locked pages lock again.
+    public async Task LockSessionAsync(CancellationToken cancellationToken = default) =>
+        await PostAsync("/admin/api/native/lock-session", new { }, cancellationToken);
+
     // ---- Camera watch (the server's CameraWatchService) ----
 
     public async Task<(JsonElement? Json, string? Error)> GetCameraWatchListAsync(CancellationToken cancellationToken = default) =>

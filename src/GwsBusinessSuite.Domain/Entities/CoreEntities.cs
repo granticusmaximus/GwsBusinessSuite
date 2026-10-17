@@ -675,6 +675,13 @@ public sealed class WikiPage : AuditableEntity
     public long? VerifiedAtUnix { get; set; }
     public long? VerifiedUntilUnix { get; set; }
     public long? VerificationLapseNotifiedUnix { get; set; }
+    // Page lock (Sentinel page-lock plan): while locked, BlocksJson is "[]" and Markdown empty, and
+    // the real content lives only in LockedContentProtected (ASP.NET Data Protection), readable
+    // through ISentinelPageLockService by the person who locked it after Touch ID / passkey / PIN.
+    // Any reader that doesn't go through the lock service therefore sees an empty page.
+    public string? LockedBy { get; set; }
+    public long? LockedAtUnix { get; set; }
+    public string? LockedContentProtected { get; set; }
     public ICollection<WikiPageRevision> Revisions { get; set; } = new List<WikiPageRevision>();
 }
 
@@ -688,6 +695,8 @@ public sealed class WikiPageRevision : AuditableEntity
     public string Title { get; set; } = string.Empty;
     public string Slug { get; set; } = string.Empty;
     public string BlocksJson { get; set; } = "[]";
+    // Set (and BlocksJson "[]") while the page is locked - see WikiPage.LockedContentProtected.
+    public string? ContentProtected { get; set; }
     public string Label { get; set; } = string.Empty;
     public WikiPage? WikiPage { get; set; }
 }
@@ -900,6 +909,55 @@ public sealed class SentinelOfflinePage : AuditableEntity
 {
     public required string Username { get; set; }
     public Guid WikiPageId { get; set; }
+}
+
+// An unlock of a person's locked pages for one sign-in session (the "sid" claim), for 15 minutes.
+public sealed class SentinelUnlockGrant : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string SessionId { get; set; }
+    // pin / passkey / device
+    public required string Method { get; set; }
+    public long CreatedAtUnix { get; set; }
+    public long ExpiresAtUnix { get; set; }
+}
+
+// A person's page-lock PIN (hashed) and its attempt limit.
+public sealed class SentinelLockPin : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string PinHash { get; set; }
+    public int FailedCount { get; set; }
+    public long? FailureWindowStartUnix { get; set; }
+    public long? LockedUntilUnix { get; set; }
+}
+
+// A WebAuthn passkey (Touch ID on a Mac in Safari/Chrome, an iPhone, ...) registered for unlocking.
+public sealed class SentinelPasskey : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string Name { get; set; }
+    // base64url credential id.
+    public required string CredentialId { get; set; }
+    public required byte[] PublicKey { get; set; }
+    public uint SignCount { get; set; }
+    public Guid AaGuid { get; set; }
+    public long CreatedAtUnix { get; set; }
+    public long? LastUsedAtUnix { get; set; }
+}
+
+// A Mac app's Touch ID key: P-256 public key (SubjectPublicKeyInfo); the private key stays on the
+// Mac (Secure Enclave when available, else a key file only released after Touch ID).
+public sealed class SentinelDeviceKey : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string Name { get; set; }
+    public required byte[] PublicKeySpki { get; set; }
+    // secure-enclave / file
+    public required string Storage { get; set; }
+    public long CreatedAtUnix { get; set; }
+    public long? LastUsedAtUnix { get; set; }
+    public long? RevokedAtUnix { get; set; }
 }
 
 public sealed class SentinelNotification : AuditableEntity

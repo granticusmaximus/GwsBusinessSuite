@@ -30,6 +30,9 @@ public sealed class WikiPageEditorModel
     public bool IsFullWidth { get; set; }
 
     public string? FontStyle { get; set; }
+    // The editor's sign-in session ("sid" claim, set server-side). Saving a locked page needs a
+    // live unlock for the person saving in this session (see SentinelPageLock).
+    public string? LockSessionId { get; set; }
 }
 
 public sealed record WikiPageConflictSnapshot(

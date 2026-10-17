@@ -241,6 +241,11 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
                 {
                     page.BlocksJson = blocksJson;
                 }
+                else if (page.LockedBy is not null)
+                {
+                    // Page lock: a re-import never overwrites a locked page.
+                    warnings.Add($"\"{page.Title}\" is locked in Sentinel, so it wasn't updated from the import.");
+                }
                 else
                 {
                     if (!string.Equals(page.Title, document.Title, StringComparison.Ordinal)

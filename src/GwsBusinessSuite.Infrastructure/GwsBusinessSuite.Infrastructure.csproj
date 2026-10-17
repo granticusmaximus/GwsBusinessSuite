@@ -9,6 +9,7 @@
     <PackageReference Include="CodeHollow.FeedReader" Version="1.2.6" />
     <PackageReference Include="Docker.DotNet" Version="3.125.15" />
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+    <PackageReference Include="Fido2" Version="4.3.1" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="10.0.13" />
     <!-- Pinned past GHSA-2fmv-rv2c-59x7 / GHSA-846f-f764-76mx (fixed in 10.0.13): MailKit/MimeKit
          still ask for 10.0.0, and in projects on the ASP.NET shared framework the DataProtection

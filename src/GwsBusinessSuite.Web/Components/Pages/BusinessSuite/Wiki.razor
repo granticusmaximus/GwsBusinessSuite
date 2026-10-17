@@ -36,10 +36,11 @@
 @inject ISentinelLiveBlockService LiveBlockService
 @inject ISentinelSuggestionService SuggestionService
 @inject ISentinelOfflineService OfflineService
+@inject ISentinelPageLockService PageLockService
 
 <PageTitle>Sentinel</PageTitle>
 
-<div class="sentinel-workspace @(_focusMode ? "is-focus" : string.Empty) @(IsCanvasPage ? "is-canvas-page" : string.Empty)">
+<div class="sentinel-workspace @(_focusMode ? "is-focus" : string.Empty) @(IsCanvasPage ? "is-canvas-page" : string.Empty) @(IsLockScreen ? "is-page-locked" : string.Empty)">
 @if (_cleanupOpen && SelectedPageId is { } cleanupPageId)
 {
     <SentinelCleanupPanel WikiPageId="cleanupPageId" CurrentBlocks="_cleanupBefore" OnApplied="CleanupAppliedAsync" OnClose="() => _cleanupOpen = false" />
@@ -51,6 +52,10 @@
 @if (_emailInOpen && _isAdmin)
 {
     <SentinelEmailInPanel OnOpenPage="OpenAskedPageAsync" OnClose="() => _emailInOpen = false" />
+}
+@if (_lockSettingsOpen)
+{
+    <SentinelLockSettingsPanel OnClose="() => _lockSettingsOpen = false" OnLockedAll="AfterLockAllAsync" TouchIdSettings="TouchIdSettings" SessionId="@_sessionId" />
 }
 @if (_typesOpen)
 {
@@ -847,6 +852,17 @@
                                 <i class="bi bi-three-dots"></i>
                             </button>
                             <div class="dropdown-menu dropdown-menu-end sentinel-style-menu">
+                                @if (_lockStatus is null && _canEditPage)
+                                {
+                                    <button type="button" class="dropdown-item d-flex align-items-center gap-2" @onclick="LockSelectedPageAsync" disabled="@IsBusy">
+                                        <i class="bi bi-lock"></i>
+                                        <span>Lock page<small class="d-block text-secondary">Only you can open it, with Touch ID or your PIN</small></span>
+                                    </button>
+                                }
+                                <button type="button" class="dropdown-item d-flex align-items-center gap-2" @onclick="() => _lockSettingsOpen = true">
+                                    <i class="bi bi-shield-lock"></i>
+                                    <span>Page lock settings<small class="d-block text-secondary">PIN, Touch ID, lock everything now</small></span>
+                                </button>
                                 <button type="button" class="dropdown-item d-flex align-items-center gap-2" @onclick="ToggleKeepOfflineAsync" disabled="@IsBusy"
                                         aria-pressed="@(_keptOffline ? "true" : "false")">
                                     <i class="bi @(_keptOffline ? "bi-cloud-check-fill" : "bi-cloud-download")"></i>
@@ -1058,6 +1074,20 @@
                         <i class="bi bi-command"></i>
                         <span><code>/</code> commands · <code>[[</code> page links · <code>@@</code> mentions · Tab to indent</span>
                     </div>
+                    @if (IsLockScreen && SelectedPageId is { } lockedPageId)
+                    {
+                        <SentinelPageLockScreen WikiPageId="lockedPageId" Status="_lockStatus!" Methods="_lockMethods" SessionId="@_sessionId" IsAdmin="_isAdmin"
+                                                UnlockOptions="TouchIdUnlockOptions" OnUnlocked="OnPagesUnlockedAsync" OnLockRemoved="ReopenSelectedPageAsync" />
+                    }
+                    else if (_lockStatus is { IsLocked: true, IsUnlocked: true, UnlockExpiresAtUnix: { } unlockedUntil })
+                    {
+                        <div class="sentinel-unlocked-bar" role="status">
+                            <i class="bi bi-unlock" aria-hidden="true"></i>
+                            <span>Unlocked until @DateTimeOffset.FromUnixTimeSeconds(unlockedUntil).ToLocalTime().ToGwsTime()</span>
+                            <button type="button" class="btn btn-sm btn-link p-0" @onclick="LockAllNowAsync">Lock now</button>
+                            <button type="button" class="btn btn-sm btn-link p-0 text-secondary" @onclick="RemoveLockAsync">Remove lock</button>
+                        </div>
+                    }
                     <SentinelAiPanel @key="SelectedPageId" WikiPageId="SelectedPageId" OnInsert="InsertAiOutputAsync" />
                     <div class="wiki-block-editor" @ref="_blockEditorContainer"></div>
                     @* Words, characters, reading time and selection - filled in live by
@@ -1978,6 +2008,141 @@
         }
     }
 
+    // ---- Page lock (.claude/plans/sentinel-page-lock-2026-10.md) ------------------------------
+    private string? _sessionId;
+    private SentinelLockStatus? _lockStatus;
+    private SentinelUnlockMethodsView _lockMethods = new(false, 0, 0);
+    private bool _lockSettingsOpen;
+    // True while the editor shows the empty stand-in for a locked page (see OnBlocksChanged).
+    private bool _editorHoldsLockedPlaceholder;
+    // Touch ID: browser passkeys (phase 2) and the Mac app (phase 3).
+    private RenderFragment TouchIdUnlockOptions => @<SentinelPasskeyControls Mode="unlock" SessionId="@_sessionId" OnUnlocked="OnPagesUnlockedAsync" />;
+    private RenderFragment TouchIdSettings => @<SentinelPasskeyControls Mode="settings" SessionId="@_sessionId" />;
+
+    private bool IsLockScreen => SelectedDatabaseId is null && _lockStatus is { IsLocked: true, IsUnlocked: false };
+
+    private async Task ReopenSelectedPageAsync()
+    {
+        if (SelectedPageId is { } pageId) await OpenPageAsync(pageId, recordHistory: false);
+    }
+
+    // After an unlock: reopen the page, which saves any changes typed before the unlock ran out
+    // (the flush in OpenPageAsync now succeeds) and loads the real content.
+    private Task OnPagesUnlockedAsync() => ReopenSelectedPageAsync();
+
+    // Before a lock action: save what the editor holds right now, including keystrokes it hasn't
+    // reported yet (it reports on a short debounce), so nothing typed is left out of the lock.
+    private async Task SaveEditorNowAsync()
+    {
+        if (!_editorHoldsLockedPlaceholder && _blockEditorInitialized && _blockEditorModule is not null && Editor.WikiPageId is not null)
+        {
+            try
+            {
+                var current = await _blockEditorModule.InvokeAsync<string>("getBlocksJson", _blockEditorContainer);
+                if (!string.Equals(current, Editor.BaseBlocksJson, StringComparison.Ordinal))
+                {
+                    Editor.BlocksJson = current;
+                    _hasUnsavedAutosaveChanges = true;
+                }
+            }
+            catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException) { /* save what we have */ }
+        }
+        await FlushAutosaveAsync();
+    }
+
+    private async Task LockSelectedPageAsync()
+    {
+        if (SelectedPageId is not { } pageId) return;
+        await SaveEditorNowAsync();
+        var methods = await PageLockService.GetMethodsAsync(CurrentUsername);
+        if (!methods.Any)
+        {
+            ErrorMessage = "Set up a PIN or Touch ID first - then lock the page.";
+            _lockSettingsOpen = true;
+            return;
+        }
+        try
+        {
+            var count = await PageLockService.LockAsync(pageId, CurrentUsername);
+            // This browser's stored draft/undo copies of the page go too.
+            if (_blockEditorModule is not null)
+            {
+                try { await _blockEditorModule.InvokeVoidAsync("forgetStoredCopies", pageId.ToString("N")); }
+                catch (JSException) { /* best effort */ }
+            }
+            await ReopenSelectedPageAsync();
+            StatusMessage = count > 1 ? $"Locked this page and {count - 1} sub-page(s)." : "Page locked.";
+        }
+        catch (SentinelLockException ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    private async Task RemoveLockAsync()
+    {
+        if (SelectedPageId is not { } pageId) return;
+        await SaveEditorNowAsync();
+        try
+        {
+            await PageLockService.RemoveLockAsync(pageId, CurrentUsername, _sessionId);
+            await ReopenSelectedPageAsync();
+            StatusMessage = "Lock removed - the page is stored normally again.";
+        }
+        catch (SentinelLockException ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    private async Task LockAllNowAsync()
+    {
+        await SaveEditorNowAsync();
+        await PageLockService.LockAllNowAsync(CurrentUsername);
+        await AfterLockAllAsync();
+    }
+
+    private async Task AfterLockAllAsync()
+    {
+        if (_lockStatus is { IsLocked: true }) await ReopenSelectedPageAsync();
+        StatusMessage = "All your locked pages are locked again.";
+    }
+
+    // When the 15-minute unlock runs out while a locked page is open, show the lock screen. The
+    // editor is emptied too, unless it holds changes not yet saved (kept hidden until the next
+    // unlock saves them).
+    private async Task WatchUnlockExpiryAsync()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(_disposeCts.Token))
+            {
+                // Asked every tick while unlocked, not only at the expiry time: a lock made elsewhere
+                // (Lock all now in another tab, the Mac app being hidden) applies here too.
+                if (_lockStatus is not { IsUnlocked: true }) continue;
+                await InvokeAsync(async () =>
+                {
+                    if (Editor.WikiPageId is not { } pageId) return;
+                    _lockStatus = await PageLockService.GetStatusAsync(pageId, CurrentUsername, _sessionId);
+                    if (_lockStatus is { IsUnlocked: true }) return;
+                    if (_lockStatus is { IsUnlocked: false } && !_hasUnsavedAutosaveChanges)
+                    {
+                        Editor.BlocksJson = "[]";
+                        Editor.BaseBlocksJson = "[]";
+                        _editorHoldsLockedPlaceholder = true;
+                        _editorGeneration++;
+                    }
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The page is closing.
+        }
+    }
+
     private void OpenTypesPanel(Guid? typeId)
     {
         _typesInitial = typeId;
@@ -2219,6 +2384,9 @@
     [JSInvokable]
     public async Task OnBlocksChanged(string blocksJson)
     {
+        // The empty stand-in for a locked page (it normalizes itself on load) - saving it after
+        // an unlock would overwrite the page's real content.
+        if (_editorHoldsLockedPlaceholder) return;
         Editor.BlocksJson = blocksJson;
         ScheduleAutosave();
         await InvokeAsync(StateHasChanged);
@@ -2227,6 +2395,7 @@
     [JSInvokable]
     public async Task OnDraftRecovered(string blocksJson)
     {
+        if (_editorHoldsLockedPlaceholder) return;
         Editor.BlocksJson = blocksJson;
         StatusMessage = "Recovered an unsaved local draft from this browser.";
         await InvokeAsync(StateHasChanged);
@@ -2307,6 +2476,11 @@
         // explicit navigation flush must never discard the link block just inserted by /page.
         if (IsBusy && !allowWhileBusy) return;
         if (_suggesting) return;
+        if (_editorHoldsLockedPlaceholder)
+        {
+            _hasUnsavedAutosaveChanges = false;
+            return;
+        }
         if (Editor.WikiPageId is { } existingPageId
             && !await CanAccessPageOrDatabaseAsync(existingPageId, isDatabase: false, SentinelAccessLevels.Edit))
         {
@@ -2342,6 +2516,7 @@
             // when someone else saved in between (see the reconcile step below).
             var sentBlocksJson = Editor.BlocksJson;
             var expectedVersion = Editor.ExpectedContentVersion;
+            Editor.LockSessionId = _sessionId;
             var saved = await WikiService.SavePageAsync(Editor, user, createRevisionCheckpoint: false, cancellationToken: cancellationToken);
             if (cancellationToken.IsCancellationRequested) return;
             // The server merged another save into this one (the version moved by more than one):
@@ -2396,6 +2571,15 @@
             Logger.LogWarning(ex, "Sentinel page {WikiPageId} had a concurrent edit conflict during autosave.", Editor.WikiPageId);
             PageConflict = ex.Conflict;
             _autosaveStatus = string.Empty;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (SentinelPageLockedException)
+        {
+            // The unlock ran out mid-edit: the changes stay in the (now hidden) editor and are
+            // saved after the next unlock.
+            _autosaveStatus = "Locked again - unlock to save your changes";
+            if (Editor.WikiPageId is { } lockedPageId)
+                _lockStatus = await PageLockService.GetStatusAsync(lockedPageId, CurrentUsername, _sessionId);
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
@@ -2757,7 +2941,9 @@
         {
             var authState = await AuthState;
             _isAdmin = authState.User.IsInRole(AppRoles.Admin);
+            _sessionId = authState.User.FindFirst(SentinelPageLock.SessionClaim)?.Value;
         }
+        _ = WatchUnlockExpiryAsync();
         CursorTracker.Moved += HandleCursorsMoved;
         CollaborationNotifier.ContentSaved += HandleContentSaved;
         await LoadTreeAsync(selectFirstPage: false);
@@ -2860,6 +3046,12 @@
         {
             var page = await WikiService.GetPageAsync(change.WikiPageId);
             if (page is null || page.TrashedAt is not null || Editor.WikiPageId != page.Id || page.ContentVersion <= Editor.ExpectedContentVersion) return;
+            if (page.LockedBy is not null)
+            {
+                // A locked page's live changes only reach its owner's other unlocked sessions.
+                if (await PageLockService.ReadBlocksAsync(page.Id, CurrentUsername, _sessionId) is not { } lockedBlocks) return;
+                page.BlocksJson = lockedBlocks;
+            }
             var local = await CaptureEditorBlocksAsync();
             var plan = SentinelLiveEditing.PlanRemoteApply(Editor.BaseBlocksJson ?? "[]", local, page.BlocksJson);
             // The same block changed here and there: leave it for the next save to report as a
@@ -3087,8 +3279,10 @@
 
     private Task<string> CurrentUserNameAsync() => CurrentUserAccessor.GetCurrentUsernameAsync();
 
+    // A locked page gets a key the editor can't store under, so its text never goes to this
+    // browser's local draft/undo storage.
     private string BlockEditorHistoryKey() =>
-        Editor.WikiPageId?.ToString("N") ?? "new-page";
+        _lockStatus is { IsLocked: true } ? "locked!" : Editor.WikiPageId?.ToString("N") ?? "new-page";
 
     private async Task LoadWorkspaceNavigationAsync()
     {
@@ -3826,6 +4020,16 @@
                 StatusMessage = "The selected Sentinel page no longer exists.";
                 return;
             }
+            // Page lock: the real content only comes from the lock service, for its owner with a
+            // live unlock; otherwise the lock screen shows and the editor holds nothing.
+            _lockStatus = page.LockedBy is null ? null : await PageLockService.GetStatusAsync(page.Id, CurrentUsername, _sessionId);
+            if (_lockStatus is { IsUnlocked: true } && await PageLockService.ReadBlocksAsync(page.Id, CurrentUsername, _sessionId) is { } unlockedBlocks)
+            {
+                page.BlocksJson = unlockedBlocks;
+            }
+            if (_lockStatus is not null) _lockMethods = await PageLockService.GetMethodsAsync(CurrentUsername);
+            // On the lock screen the editor holds nothing real: nothing it reports may be saved.
+            _editorHoldsLockedPlaceholder = _lockStatus is { IsLocked: true, IsUnlocked: false };
 
             PushCurrentLocationToBackStack(recordHistory, newPageId: page.Id, newDatabaseId: null);
             // Suggest mode belongs to one visit to one page; leaving (or reloading) ends it.
@@ -3964,6 +4168,7 @@
             // a toolbar action, so capture synchronously before writing the server snapshot.
             await CaptureEditorBlocksAsync();
             var user = await CurrentUserNameAsync();
+            Editor.LockSessionId = _sessionId;
             var saved = await WikiService.SavePageAsync(Editor, user);
             PublishLiveSave(saved, user);
             SelectedPageId = saved.Id;

@@ -1,0 +1,96 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@inject ISentinelPageLockService PageLocks
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@* Page lock settings: the PIN, and (later phases) Touch ID passkeys and Mac app keys. *@
+<div class="sentinel-ask sentinel-lock-settings" role="dialog" aria-label="Page lock settings">
+    <div class="sentinel-ask-header">
+        <strong><i class="bi bi-lock me-1" aria-hidden="true"></i>Page lock</strong>
+        <button type="button" class="btn-close btn-close-white" aria-label="Close" @onclick="() => OnClose.InvokeAsync()"></button>
+    </div>
+    <p class="small text-secondary mb-2">
+        Lock a page from its ⋯ menu. A locked page is stored encrypted, and only you can open it - with Touch ID or your PIN.
+        One unlock opens all your locked pages for 15 minutes.
+    </p>
+
+    <div class="fw-semibold small mb-1">PIN @(_methods.HasPin ? "(set)" : "(not set)")</div>
+    <div class="sentinel-lock-pin-form mb-2">
+        @if (_methods.HasPin)
+        {
+            <input type="password" inputmode="numeric" autocomplete="off" maxlength="8" class="form-control form-control-sm"
+                   placeholder="Current PIN" aria-label="Current PIN" @bind="_currentPin" @bind:event="oninput" />
+        }
+        <input type="password" inputmode="numeric" autocomplete="off" maxlength="8" class="form-control form-control-sm"
+               placeholder="New PIN (6-8 digits)" aria-label="New PIN" @bind="_newPin" @bind:event="oninput" />
+        <input type="password" inputmode="numeric" autocomplete="off" maxlength="8" class="form-control form-control-sm"
+               placeholder="New PIN again" aria-label="Repeat new PIN" @bind="_repeatPin" @bind:event="oninput" />
+        <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy || _newPin.Length < 6)" @onclick="SavePinAsync">@(_methods.HasPin ? "Change PIN" : "Set PIN")</button>
+    </div>
+
+    @if (TouchIdSettings is not null)
+    {
+        @TouchIdSettings
+    }
+
+    <button type="button" class="btn btn-sm btn-outline-secondary mt-2" @onclick="LockAllAsync">
+        <i class="bi bi-lock-fill me-1" aria-hidden="true"></i>Lock all now
+    </button>
+    @if (_message is not null)
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success") small py-2 mt-2 mb-0" role="status">@_message</div>
+    }
+</div>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnLockedAll { get; set; }
+    // Touch ID sections (passkeys, Mac app), supplied by the page.
+    [Parameter] public RenderFragment? TouchIdSettings { get; set; }
+    [Parameter] public int Generation { get; set; }
+    [Parameter] public string? SessionId { get; set; }
+
+    private SentinelUnlockMethodsView _methods = new(false, 0, 0);
+    private string _currentPin = string.Empty;
+    private string _newPin = string.Empty;
+    private string _repeatPin = string.Empty;
+    private string? _message;
+    private bool _isError;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync() =>
+        _methods = await PageLocks.GetMethodsAsync(await CurrentUserAccessor.GetCurrentUsernameAsync());
+
+    private async Task SavePinAsync()
+    {
+        _message = null;
+        if (_newPin != _repeatPin)
+        {
+            (_message, _isError) = ("The two new PINs don't match.", true);
+            return;
+        }
+        _busy = true;
+        try
+        {
+            await PageLocks.SetPinAsync(await CurrentUserAccessor.GetCurrentUsernameAsync(), SessionId, _methods.HasPin ? _currentPin : null, _newPin);
+            (_message, _isError) = (_methods.HasPin ? "PIN changed." : "PIN set - you can lock pages now.", false);
+            _currentPin = _newPin = _repeatPin = string.Empty;
+            _methods = await PageLocks.GetMethodsAsync(await CurrentUserAccessor.GetCurrentUsernameAsync());
+        }
+        catch (SentinelLockException ex)
+        {
+            (_message, _isError) = (ex.Message, true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task LockAllAsync()
+    {
+        await PageLocks.LockAllNowAsync(await CurrentUserAccessor.GetCurrentUsernameAsync());
+        (_message, _isError) = ("All your locked pages are locked again.", false);
+        await OnLockedAll.InvokeAsync();
+    }
+}

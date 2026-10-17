@@ -249,7 +249,7 @@
     {
         var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         _role = authenticationState.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
-        IsNativeApp = authenticationState.User.HasClaim("amr", "device-secret");
+        IsNativeApp = authenticationState.User.HasClaim(claim => claim.Type == "amr" && claim.Value is "device-secret" or "device-key");
 
         var summary = await SummaryService.GetAsync(includeAdminMetrics: IsAdmin);
         _pendingDrafts = summary.PendingDrafts;

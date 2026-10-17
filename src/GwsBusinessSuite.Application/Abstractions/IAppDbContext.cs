@@ -64,6 +64,10 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SentinelPageType> SentinelPageTypes { get; }
     DbSet<SentinelPageTypeAssignment> SentinelPageTypeAssignments { get; }
     DbSet<SentinelOfflinePage> SentinelOfflinePages { get; }
+    DbSet<SentinelUnlockGrant> SentinelUnlockGrants { get; }
+    DbSet<SentinelLockPin> SentinelLockPins { get; }
+    DbSet<SentinelPasskey> SentinelPasskeys { get; }
+    DbSet<SentinelDeviceKey> SentinelDeviceKeys { get; }
     DbSet<PageReminder> PageReminders { get; }
     DbSet<OverwatchCameraWatchState> OverwatchCameraWatchStates { get; }
     DbSet<OverwatchIncidentSighting> OverwatchIncidentSightings { get; }

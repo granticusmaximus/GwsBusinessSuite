@@ -24,7 +24,10 @@ public sealed class WikiService(
     IAutomationTriggerService? automationTriggerService = null,
     // Optional, resolved by DI in production - Workstream E (community activity feed). Same
     // "checkpoint saves only, not every silent autosave tick" gating as securityAudit above.
-    Application.Community.IActivityFeedService? activityFeedService = null) : IWikiService
+    Application.Community.IActivityFeedService? activityFeedService = null,
+    // Optional, resolved by DI in production - page lock encryption (SentinelPageLock). Without
+    // it a locked page can't be saved at all.
+    ISentinelPageLockCrypto? lockCrypto = null) : IWikiService
 {
     // Was a flat 20-revision cap (hard-deleted anything past it); replaced in Phase 4.4 with a
     // time-tiered policy closer to Notion's own page history - see TrimOldRevisionsAsync.
@@ -200,7 +203,13 @@ public sealed class WikiService(
                 // be able to silently keep editing a trashed page - restore it first.
                 throw new InvalidOperationException("This Sentinel page has been moved to Trash. Restore it before saving changes.");
             }
-            previousBlocksJson = page.BlocksJson;
+            // A locked page: only its owner, with a live unlock in this sign-in session, may save
+            // it, and its real content is the encrypted copy (BlocksJson is "[]" while locked).
+            if (page.LockedBy is not null)
+            {
+                await RequireUnlockedAsync(page, performedBy, editor.LockSessionId, cancellationToken);
+            }
+            previousBlocksJson = CurrentBlocks(page);
             if (page.ContentVersion != editor.ExpectedContentVersion)
             {
                 var metadataStillCurrent = string.Equals(editor.Title.Trim(), page.Title, StringComparison.Ordinal)
@@ -209,7 +218,7 @@ public sealed class WikiService(
                     && string.Equals(editor.CoverImageUrl?.Trim(), page.CoverImageUrl, StringComparison.Ordinal);
                 var merge = editor.BaseBlocksJson is null || !metadataStillCurrent
                     ? new WikiBlockMergeResult(false, editor.BlocksJson, [])
-                    : WikiBlockMerge.ThreeWayMerge(editor.BaseBlocksJson, editor.BlocksJson, page.BlocksJson);
+                    : WikiBlockMerge.ThreeWayMerge(editor.BaseBlocksJson, editor.BlocksJson, previousBlocksJson);
                 if (!merge.IsSuccess)
                 {
                     throw CreateConcurrencyException(page, editor.ExpectedContentVersion);
@@ -240,7 +249,17 @@ public sealed class WikiService(
         page.Slug = uniqueSlug;
         // Whiteboards are cleaned, size-checked and given their searchable text on every save.
         if (!string.IsNullOrWhiteSpace(editor.BlocksJson)) editor.BlocksJson = SentinelCanvas.NormalizeBlocksJson(editor.BlocksJson);
-        page.BlocksJson = string.IsNullOrWhiteSpace(editor.BlocksJson) ? "[]" : editor.BlocksJson;
+        var contentBlocks = string.IsNullOrWhiteSpace(editor.BlocksJson) ? "[]" : editor.BlocksJson;
+        if (page.LockedBy is not null)
+        {
+            // Never stored readable while locked (SentinelPageLock).
+            page.LockedContentProtected = lockCrypto!.Protect(SentinelPageLock.Pack(contentBlocks, string.Empty));
+            page.BlocksJson = "[]";
+        }
+        else
+        {
+            page.BlocksJson = contentBlocks;
+        }
         page.Icon = string.IsNullOrWhiteSpace(editor.Icon) ? null : editor.Icon.Trim();
         page.CoverImageUrl = string.IsNullOrWhiteSpace(editor.CoverImageUrl) ? null : editor.CoverImageUrl.Trim();
         page.IsFullWidth = editor.IsFullWidth;
@@ -285,15 +304,17 @@ public sealed class WikiService(
             if (dbContext is DbContext efContext) efContext.Entry(page).State = EntityState.Detached;
             throw;
         }
-        await PropagateSyncedBlocksAsync(previousBlocksJson, page.BlocksJson, performedBy, cancellationToken);
-        if (!isNew && !string.Equals(previousBlocksJson, page.BlocksJson, StringComparison.Ordinal))
+        var isLocked = page.LockedBy is not null;
+        await PropagateSyncedBlocksAsync(previousBlocksJson, contentBlocks, performedBy, cancellationToken);
+        if (!isNew && !string.Equals(previousBlocksJson, contentBlocks, StringComparison.Ordinal))
         {
-            await ReanchorDiscussionsAsync(page.Id, previousBlocksJson, page.BlocksJson, cancellationToken);
+            await ReanchorDiscussionsAsync(page.Id, previousBlocksJson, contentBlocks, cancellationToken);
         }
-        // Workspace tags (Sentinel item 21): #tags written in the text.
-        if (isNew || !string.Equals(previousBlocksJson, page.BlocksJson, StringComparison.Ordinal))
+        // Workspace tags (Sentinel item 21): #tags written in the text - not for a locked page,
+        // whose words stay out of everything that's readable without the unlock.
+        if (!isLocked && (isNew || !string.Equals(previousBlocksJson, contentBlocks, StringComparison.Ordinal)))
         {
-            await SentinelInsightsService.SyncTextTagsAsync(dbContext, page.Id, page.BlocksJson, cancellationToken);
+            await SentinelInsightsService.SyncTextTagsAsync(dbContext, page.Id, contentBlocks, cancellationToken);
         }
         // Inline, or queued for after the caller's transaction commits (see SavePageCoreAsync).
         async Task RunOrDefer(Func<Task> sideEffect)
@@ -333,21 +354,23 @@ public sealed class WikiService(
         // genuine content change is worth notifying about - a metadata-only save (icon, cover,
         // title) moves nothing an automation's downstream logic could act on differently, same
         // reasoning as the property-only guard on the database version of this trigger.
-        var contentChanged = isNew || !string.Equals(previousBlocksJson, page.BlocksJson, StringComparison.Ordinal);
-        if (contentChanged && automationTriggerService is not null && performedBy != "automation-engine")
+        var contentChanged = isNew || !string.Equals(previousBlocksJson, contentBlocks, StringComparison.Ordinal);
+        // A locked page's content never goes to automations.
+        if (contentChanged && !isLocked && automationTriggerService is not null && performedBy != "automation-engine")
         {
             var triggerPayload = JsonSerializer.Serialize(new
             {
                 wikiPageId = page.Id,
                 title = page.Title,
                 isNew,
-                blocksJson = page.BlocksJson
+                blocksJson = contentBlocks
             });
             var triggerPageId = page.Id;
             await RunOrDefer(() => automationTriggerService.TriggerWikiPageChangedAsync(triggerPageId, triggerPayload, cancellationToken));
         }
 
-        return page;
+        // The caller (the unlocked editor) gets the real content back, not the stored "[]".
+        return isLocked ? WithBlocks(page, contentBlocks) : page;
     }
 
     private async Task ReanchorDiscussionsAsync(
@@ -432,6 +455,8 @@ public sealed class WikiService(
             .ToListAsync(cancellationToken);
         var source = pages.FirstOrDefault(page => page.Id == wikiPageId)
             ?? throw new InvalidOperationException("The Sentinel page no longer exists.");
+        if (source.LockedBy is not null)
+            throw new SentinelPageLockedException("A locked page can't be duplicated - remove its lock first.");
         var childrenByParent = pages
             .Where(page => page.ParentWikiPageId.HasValue)
             .GroupBy(page => page.ParentWikiPageId!.Value)
@@ -695,7 +720,8 @@ public sealed class WikiService(
 
         var from = revisions.FirstOrDefault(revision => revision.Id == fromRevisionId);
         var to = revisions.FirstOrDefault(revision => revision.Id == toRevisionId);
-        if (from is null || to is null)
+        // A locked page's history is encrypted: no comparison is shown while it's locked.
+        if (from is null || to is null || from.ContentProtected is not null || to.ContentProtected is not null)
         {
             return null;
         }
@@ -710,6 +736,8 @@ public sealed class WikiService(
         var revision = await dbContext.WikiPageRevisions.AsNoTracking()
             .FirstOrDefaultAsync(item => item.Id == revisionId && item.WikiPageId == wikiPageId, cancellationToken)
             ?? throw new InvalidOperationException("That revision no longer exists.");
+        if (page.LockedBy is not null)
+            throw new SentinelPageLockedException("To restore an older version of a locked page, remove its lock first.");
 
         return await SavePageAsync(new WikiPageEditorModel
         {
@@ -767,7 +795,8 @@ public sealed class WikiService(
 
         if (childrenByParent.TryGetValue(source.Id, out var children))
         {
-            foreach (var child in children)
+            // Locked sub-pages aren't copied (their content is only readable by their owner).
+            foreach (var child in children.Where(child => child.LockedBy is null))
             {
                 await DuplicateBranchAsync(
                     child,
@@ -785,15 +814,48 @@ public sealed class WikiService(
         return duplicate;
     }
 
-    private static WikiPageConcurrencyException CreateConcurrencyException(WikiPage page, long expectedVersion) =>
+    private WikiPageConcurrencyException CreateConcurrencyException(WikiPage page, long expectedVersion) =>
         new(new WikiPageConflictSnapshot(
             page.Id,
             expectedVersion,
             page.ContentVersion,
             page.Title,
-            page.BlocksJson,
+            CurrentBlocks(page),
             page.UpdatedAt,
             page.UpdatedBy));
+
+    // ---- Page lock (SentinelPageLock) ----
+
+    // The page's real blocks: decrypted for a locked page (callers have checked the unlock).
+    private string CurrentBlocks(WikiPage page)
+    {
+        if (page.LockedBy is null || page.LockedContentProtected is null) return page.BlocksJson;
+        if (lockCrypto is null) throw new SentinelPageLockedException("This page is locked.");
+        return SentinelPageLock.Unpack(lockCrypto.Unprotect(page.LockedContentProtected)).BlocksJson;
+    }
+
+    private async Task RequireUnlockedAsync(WikiPage page, string performedBy, string? sessionId, CancellationToken cancellationToken)
+    {
+        if (lockCrypto is null || !string.Equals(page.LockedBy, performedBy, StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(sessionId))
+            throw new SentinelPageLockedException("This page is locked - unlock it to save changes.");
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var unlocked = await dbContext.SentinelUnlockGrants.AnyAsync(grant =>
+            grant.Username == performedBy && grant.SessionId == sessionId && grant.ExpiresAtUnix > now, cancellationToken);
+        if (!unlocked) throw new SentinelPageLockedException("This page locked again - unlock it to save your changes.");
+    }
+
+    // A detached copy carrying the given blocks (the tracked entity keeps what's stored).
+    private static WikiPage WithBlocks(WikiPage page, string blocksJson) => new()
+    {
+        Id = page.Id, Title = page.Title, Slug = page.Slug, Markdown = string.Empty, BlocksJson = blocksJson,
+        ContentVersion = page.ContentVersion, Icon = page.Icon, CoverImageUrl = page.CoverImageUrl, Aliases = page.Aliases,
+        LinkedContactId = page.LinkedContactId, LinkedBookingId = page.LinkedBookingId, SortOrder = page.SortOrder,
+        ParentWikiPageId = page.ParentWikiPageId, TrashedAt = page.TrashedAt, SystemKey = page.SystemKey,
+        IsFullWidth = page.IsFullWidth, FontStyle = page.FontStyle, OwnerUsername = page.OwnerUsername,
+        VerifiedBy = page.VerifiedBy, VerifiedAtUnix = page.VerifiedAtUnix, VerifiedUntilUnix = page.VerifiedUntilUnix,
+        LockedBy = page.LockedBy, LockedAtUnix = page.LockedAtUnix, CreatedAt = page.CreatedAt, CreatedBy = page.CreatedBy,
+        UpdatedAt = page.UpdatedAt, UpdatedBy = page.UpdatedBy
+    };
 
     private async Task CreateRevisionAsync(WikiPage page, string performedBy, CancellationToken cancellationToken)
     {
@@ -811,6 +873,8 @@ public sealed class WikiService(
             Title = page.Title,
             Slug = page.Slug,
             BlocksJson = page.BlocksJson,
+            // A locked page's version history is kept encrypted too (BlocksJson is "[]").
+            ContentProtected = page.LockedBy is null ? null : page.LockedContentProtected,
             CreatedBy = performedBy
         }, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);

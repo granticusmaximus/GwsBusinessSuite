@@ -1,0 +1,115 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@inject ISentinelPageLockService PageLocks
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject IHttpContextAccessor HttpContextAccessor
+
+@* Page lock: shown instead of a locked page's content. It sits inside the page's EditForm, so the
+   PIN field names a form that doesn't exist (form="sentinel-no-form") and Enter is handled here. *@
+<div class="sentinel-lock-screen" role="region" aria-label="Locked page">
+    <div class="sentinel-lock-icon" aria-hidden="true"><i class="bi bi-lock-fill"></i></div>
+    @if (Status.IsOwner)
+    {
+        <h2>This page is locked</h2>
+        <p class="text-secondary">Unlock to read and edit it. One unlock opens all your locked pages for 15 minutes.</p>
+        @if (UnlockOptions is not null)
+        {
+            @UnlockOptions
+        }
+        @if (Methods.HasPin)
+        {
+            <div class="sentinel-lock-pin">
+                <input form="sentinel-no-form" type="password" inputmode="numeric" autocomplete="off" maxlength="8"
+                       class="form-control" placeholder="PIN" aria-label="PIN" @bind="_pin" @bind:event="oninput" @onkeydown="OnPinKeyAsync" />
+                <button type="button" class="btn btn-primary" disabled="@(_busy || _pin.Length < 6)" @onclick="UnlockWithPinAsync">Unlock</button>
+            </div>
+        }
+    }
+    else
+    {
+        <h2>Locked by @Status.LockedBy</h2>
+        <p class="text-secondary">Only @Status.LockedBy can open this page.</p>
+        @if (IsAdmin)
+        {
+            @if (_confirmRemove)
+            {
+                <p class="small">Removing the lock lets anyone with access read the page again. @Status.LockedBy will be told, and it's recorded in the security log.</p>
+                <div class="d-flex gap-2 justify-content-center">
+                    <button type="button" class="btn btn-danger btn-sm" disabled="@_busy" @onclick="AdminRemoveAsync">Remove the lock</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => _confirmRemove = false">Cancel</button>
+                </div>
+            }
+            else
+            {
+                <button type="button" class="btn btn-outline-danger btn-sm" @onclick="() => _confirmRemove = true">Remove lock (admin)</button>
+            }
+        }
+    }
+    @if (_message is not null)
+    {
+        <div class="alert alert-danger small py-2 mt-3 mb-0" role="alert">@_message</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid WikiPageId { get; set; }
+    [Parameter, EditorRequired] public SentinelLockStatus Status { get; set; } = default!;
+    [Parameter, EditorRequired] public SentinelUnlockMethodsView Methods { get; set; } = default!;
+    [Parameter] public string? SessionId { get; set; }
+    [Parameter] public bool IsAdmin { get; set; }
+    // Touch ID buttons (passkey / Mac app), supplied by the page.
+    [Parameter] public RenderFragment? UnlockOptions { get; set; }
+    [Parameter] public EventCallback OnUnlocked { get; set; }
+    [Parameter] public EventCallback OnLockRemoved { get; set; }
+
+    private string _pin = string.Empty;
+    private string? _message;
+    private bool _busy;
+    private bool _confirmRemove;
+
+    private async Task OnPinKeyAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && _pin.Length >= 6) await UnlockWithPinAsync();
+    }
+
+    private async Task UnlockWithPinAsync()
+    {
+        _busy = true;
+        _message = null;
+        try
+        {
+            var ip = HttpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+            await PageLocks.UnlockWithPinAsync(await CurrentUserAccessor.GetCurrentUsernameAsync(), SessionId, _pin, ip);
+            _pin = string.Empty;
+            await OnUnlocked.InvokeAsync();
+        }
+        catch (SentinelLockException ex)
+        {
+            _message = ex.Message;
+            _pin = string.Empty;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task AdminRemoveAsync()
+    {
+        _busy = true;
+        _message = null;
+        try
+        {
+            await PageLocks.AdminRemoveLockAsync(WikiPageId, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await OnLockRemoved.InvokeAsync();
+        }
+        catch (SentinelLockException ex)
+        {
+            _message = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

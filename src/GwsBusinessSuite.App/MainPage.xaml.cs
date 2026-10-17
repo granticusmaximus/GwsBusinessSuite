@@ -36,12 +36,18 @@ public partial class MainPage : ContentPage
 
     private readonly CameraWatcher _cameraWatcher;
 
-    public MainPage(DeviceSecretStore deviceSecretStore, NativeAppAuthService nativeAppAuthService, CameraWatcher cameraWatcher)
+    private readonly TouchIdKeyStore _touchIdKeys;
+    private readonly TouchIdLockService _touchIdLock;
+
+    public MainPage(DeviceSecretStore deviceSecretStore, NativeAppAuthService nativeAppAuthService, CameraWatcher cameraWatcher,
+        TouchIdKeyStore touchIdKeys, TouchIdLockService touchIdLock)
     {
         InitializeComponent();
         _deviceSecretStore = deviceSecretStore;
         _nativeAppAuthService = nativeAppAuthService;
         _cameraWatcher = cameraWatcher;
+        _touchIdKeys = touchIdKeys;
+        _touchIdLock = touchIdLock;
     }
 
     protected override async void OnAppearing()
@@ -87,6 +93,19 @@ public partial class MainPage : ContentPage
     {
 #if MACCATALYST
         await ClearStaleWebViewCacheAsync();
+
+        // Sign in with Touch ID when this Mac has a key; any failure or cancel falls through to
+        // the device-secret / browser sign-in below.
+        if (_touchIdLock.IsSetUp)
+        {
+            var touchId = await _nativeAppAuthService.TouchIdLoginAsync(_touchIdKeys);
+            if (touchId.Succeeded)
+            {
+                await NativeCookieInjector.InjectCookiesAsync(touchId.SetCookieHeaders, AppEndpoints.BaseUrl);
+                WorkspaceView.Source = AppEndpoints.StartUrl;
+                return;
+            }
+        }
 
         var deviceSecret = await _deviceSecretStore.GetAsync();
         if (!string.IsNullOrWhiteSpace(deviceSecret) && await TryDeviceLoginAsync(deviceSecret))
@@ -209,6 +228,13 @@ public partial class MainPage : ContentPage
     private void OnWorkspaceNavigating(object? sender, WebNavigatingEventArgs args)
     {
         DebugLog($"OnWorkspaceNavigating url={args.Url}");
+        // Page lock: the web page asks the app for Touch ID with gws-native://unlock or ://enroll.
+        if (Uri.TryCreate(args.Url, UriKind.Absolute, out var nativeUri) && nativeUri.Scheme == "gws-native")
+        {
+            args.Cancel = true;
+            _ = HandleNativeRequestAsync(nativeUri.Host);
+            return;
+        }
         LoadingOverlay.IsVisible = true;
         if (!Uri.TryCreate(args.Url, UriKind.Absolute, out var uri) || AppEndpoints.IsTrusted(uri))
         {
@@ -220,6 +246,27 @@ public partial class MainPage : ContentPage
         args.Cancel = true;
         LoadingOverlay.IsVisible = false;
         _ = Launcher.Default.OpenAsync(uri);
+    }
+
+    // Does the Touch ID step, then tells the page (a "gws-native" DOM event). The page doesn't
+    // trust the event: it asks the server whether the unlock or the new key is really there.
+    private async Task HandleNativeRequestAsync(string action)
+    {
+        var (ok, message) = action switch
+        {
+            "unlock" => await _touchIdLock.UnlockAsync(),
+            "enroll" => await _touchIdLock.EnrollAsync(),
+            _ => (false, "Unknown request.")
+        };
+        var detail = System.Text.Json.JsonSerializer.Serialize(new { action, ok, message });
+        try
+        {
+            await WorkspaceView.EvaluateJavaScriptAsync($"window.dispatchEvent(new CustomEvent('gws-native', {{ detail: {detail} }}))");
+        }
+        catch (Exception ex)
+        {
+            DebugLog($"HandleNativeRequestAsync: couldn't notify the page: {ex.Message}");
+        }
     }
 
     private void OnWorkspaceNavigated(object? sender, WebNavigatedEventArgs args)

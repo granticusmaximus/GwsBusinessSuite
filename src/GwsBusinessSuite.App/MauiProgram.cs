@@ -71,6 +71,9 @@ public static class MauiProgram
 		builder.Services.AddSingleton(services => new QuickNoteOutbox(
 			Path.Combine(FileSystem.Current.AppDataDirectory, "quick-note-outbox.json"), services.GetRequiredService<NativeSessionClient>()));
 		builder.Services.AddSingleton<OfflineSyncService>();
+		// Page lock / sign in with Touch ID.
+		builder.Services.AddSingleton(_ => new TouchIdKeyStore(Path.Combine(FileSystem.Current.AppDataDirectory, "touchid")));
+		builder.Services.AddSingleton<TouchIdLockService>();
 		builder.Services.AddTransient<OfflinePage>();
 
 #if ANDROID

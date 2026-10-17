@@ -40,7 +40,8 @@ public sealed class SentinelOfflineService(IAppDbContext db, ISentinelAccessServ
         var visible = await accessService.GetAccessibleTargetsAsync(
             pageIds.Select(id => new SentinelAccessTarget(id, false)).ToList(), username, SentinelAccessLevels.View, cancellationToken);
         var pages = await db.WikiPages.AsNoTracking()
-            .Where(page => pageIds.Contains(page.Id) && page.TrashedAt == null)
+            // Locked pages are never copied to a device.
+            .Where(page => pageIds.Contains(page.Id) && page.TrashedAt == null && page.LockedBy == null)
             .ToListAsync(cancellationToken);
         // Linked [[pages]] resolve against every page title, like the editor's read-only render.
         var allPages = await db.WikiPages.AsNoTracking().Where(page => page.TrashedAt == null)

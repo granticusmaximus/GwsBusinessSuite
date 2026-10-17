@@ -1046,6 +1046,10 @@ public static class DependencyInjection
         services.AddScoped<ISentinelEmailInService, SentinelEmailInService>();
         services.AddScoped<ISentinelPageTypeService, SentinelPageTypeService>();
         services.AddScoped<ISentinelOfflineService, SentinelOfflineService>();
+        services.AddSingleton<ISentinelPageLockCrypto, DataProtectionPageLockCrypto>();
+        services.AddScoped<ISentinelPageLockService, SentinelPageLockService>();
+        services.AddScoped<ISentinelPasskeyService, SentinelPasskeyService>();
+        services.AddScoped<ISentinelDeviceKeyService, SentinelDeviceKeyService>();
         services.AddHostedService<SentinelEmailInBackgroundService>();
         services.AddScoped<ISentinelAiService, SentinelAiService>();
         services.AddScoped<ISentinelWritingAssistant, SentinelWritingAssistantService>();

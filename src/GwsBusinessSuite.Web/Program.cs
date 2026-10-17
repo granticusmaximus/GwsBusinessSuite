@@ -227,7 +227,7 @@ builder.Services.AddAuthorization(options =>
     options.AddPolicy("NativeContentStudioAccess", policy =>
         policy.RequireAuthenticatedUser()
             .RequireRole(AppRoles.Admin, AppRoles.Author, AppRoles.Contributor)
-            .RequireClaim("amr", "device-secret"));
+            .RequireClaim("amr", "device-secret", "device-key"));
 
     options.AddPolicy("ContributorAccess", policy =>
         policy.RequireAuthenticatedUser().RequireRole(AppRoles.Admin, AppRoles.Contributor));
@@ -615,7 +615,8 @@ app.Use(async (context, next) =>
         headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
         // geolocation=(self): Overwatch drive mode follows the device's GPS. Same origin only;
         // the browser still asks the person before sharing a location.
-        headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(self), payment=()";
+        // publickey-credentials-*: Sentinel page lock's Touch ID passkeys (sentinel-passkey.js).
+        headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(self), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self)";
         // CesiumJS (Overwatch, /admin/osint) genuinely requires 'unsafe-eval' and
         // 'wasm-unsafe-eval' to function - confirmed via real browser console errors, not
         // assumed: Cesium.js itself calls eval()/new Function() internally (unrelated to the
@@ -1174,9 +1175,17 @@ app.MapPost("/admin/api/native/quick-notes", async (
     // linked to a contact or booking (meeting notes, Sentinel item 28) is always its own page, so
     // the link means that note and nothing else.
     var linked = request.ContactId is not null || request.BookingId is not null;
-    var page = request.DailyNote == true && !linked
-        ? await dailyNotes.AppendAsync(DateOnly.FromDateTime(DateTime.Now), title, markdown, performedBy, cancellationToken)
-        : await quickNotes.AddQuickNoteAsync(title, markdown, performedBy, cancellationToken);
+    WikiPage page;
+    try
+    {
+        page = request.DailyNote == true && !linked
+            ? await dailyNotes.AppendAsync(DateOnly.FromDateTime(DateTime.Now), title, markdown, performedBy, cancellationToken)
+            : await quickNotes.AddQuickNoteAsync(title, markdown, performedBy, cancellationToken);
+    }
+    catch (GwsBusinessSuite.Application.Wiki.SentinelPageLockedException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
     if (linked)
     {
         try { await meetingNotes.LinkAsync(page.Id, request.ContactId, request.BookingId, cancellationToken); }
@@ -1226,7 +1235,7 @@ app.MapPost("/api/sentinel/clip", async (
         var origin = $"{httpContext.Request.Scheme}://{httpContext.Request.Host}";
         return Results.Json(new { id = result.PageId, title = result.Title, target = result.Target, url = $"{origin}/admin/sentinel?page={result.PageId}" });
     }
-    catch (GwsBusinessSuite.Application.Wiki.SentinelClipException ex)
+    catch (Exception ex) when (ex is GwsBusinessSuite.Application.Wiki.SentinelClipException or GwsBusinessSuite.Application.Wiki.SentinelPageLockedException)
     {
         return Results.BadRequest(new { error = ex.Message });
     }
@@ -1249,6 +1258,90 @@ app.MapGet("/admin/api/native/offline-pages", async (
     return Results.Json(copies.Select(copy => new { id = copy.Id, title = copy.Title, icon = copy.Icon, updatedAtUnix = copy.UpdatedAtUnix, html = copy.Html }));
 })
     .RequireAuthorization("ContentAccess");
+
+// Page lock phase 3: Touch ID in the Mac app (SentinelDeviceKeys). Cookie session + the
+// X-GWS-Native header (a cross-site page can't send custom headers without CORS, which isn't
+// allowed). The unlock lands in this sign-in session (the "sid" claim) - the same one the app's
+// web view uses, since the app sends that web view's cookies.
+static string? NativeLockSession(HttpContext httpContext) =>
+    httpContext.User.FindFirst(GwsBusinessSuite.Application.Wiki.SentinelPageLock.SessionClaim)?.Value;
+
+static bool IsNativeCall(HttpContext httpContext) =>
+    httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) && marker == "1";
+
+app.MapPost("/admin/api/native/lock-device", async (
+    NativeLockDeviceRequest request,
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelDeviceKeyService deviceKeys,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsNativeCall(httpContext)) return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    try
+    {
+        var view = await deviceKeys.RegisterAsync(httpContext.User.Identity!.Name!, NativeLockSession(httpContext),
+            request.Name ?? "Mac", request.PublicKey ?? string.Empty, request.Storage ?? string.Empty, cancellationToken);
+        return Results.Json(new { id = view.Id, name = view.Name, storage = view.Storage, username = httpContext.User.Identity!.Name });
+    }
+    catch (GwsBusinessSuite.Application.Wiki.SentinelLockException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+    .RequireAuthorization("ContentAccess")
+    .RequireRateLimiting("admin-mutation");
+
+app.MapPost("/admin/api/native/lock-challenge", async (
+    NativeLockChallengeRequest request,
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelDeviceKeyService deviceKeys,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsNativeCall(httpContext)) return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    try
+    {
+        var challenge = await deviceKeys.CreateChallengeAsync(httpContext.User.Identity!.Name!, NativeLockSession(httpContext), request.KeyId, cancellationToken);
+        return Results.Json(new { challenge });
+    }
+    catch (GwsBusinessSuite.Application.Wiki.SentinelLockException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+    .RequireAuthorization("ContentAccess")
+    .RequireRateLimiting("admin-mutation");
+
+app.MapPost("/admin/api/native/lock-unlock", async (
+    NativeLockUnlockRequest request,
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelDeviceKeyService deviceKeys,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsNativeCall(httpContext)) return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    try
+    {
+        var expires = await deviceKeys.UnlockAsync(httpContext.User.Identity!.Name!, NativeLockSession(httpContext), request.KeyId, request.Signature ?? string.Empty, cancellationToken);
+        return Results.Json(new { expiresAtUnix = expires });
+    }
+    catch (GwsBusinessSuite.Application.Wiki.SentinelLockException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+    .RequireAuthorization("ContentAccess")
+    .RequireRateLimiting("admin-mutation");
+
+// The Mac app was hidden: lock this session's pages again.
+app.MapPost("/admin/api/native/lock-session", async (
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelPageLockService pageLocks,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsNativeCall(httpContext)) return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    await pageLocks.LockSessionNowAsync(httpContext.User.Identity!.Name!, NativeLockSession(httpContext), cancellationToken);
+    return Results.Json(new { locked = true });
+})
+    .RequireAuthorization("ContentAccess")
+    .RequireRateLimiting("admin-mutation");
 
 // Meeting notes (Sentinel item 28): the bookings and contacts a Mac note can be linked to.
 app.MapGet("/admin/api/native/meeting-targets", async (
@@ -1516,6 +1609,87 @@ app.MapPost("/auth/login", async (
 // fails closed. Every successful use is logged at High severity under its own distinct action
 // ("DeviceSecretLogin", not "PasswordLogin"/"MfaChallenge") so an MFA-bypassed login is always
 // individually visible in Security Audit.
+// Sign in with Touch ID (page-lock plan, added 2026-10-17). A user-verified key - the Mac app's
+// Touch ID key, or a passkey in the browser - is possession plus biometric, so it replaces password
+// + MFA. Both also unlock the person's locked Sentinel pages for this new session, since Touch ID
+// was just given. Unknown keys and failures look the same to the caller; every attempt is audited.
+async Task<IResult> CompleteTouchIdSignInAsync(HttpContext httpContext, string? username, string method, string amr,
+    IUserManagementService users, ISecurityAuditService audit,
+    GwsBusinessSuite.Application.Wiki.ISentinelPageLockService pageLocks, object successBody)
+{
+    var now = DateTimeOffset.UtcNow;
+    var user = username is null ? null : (await users.ListUsersAsync()).FirstOrDefault(item =>
+        string.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase) && item.IsActive
+        && (item.LockoutEndAt is null || item.LockoutEndAt <= now));
+    if (user is null)
+    {
+        await audit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "TouchIdSignIn", SecurityAuditOutcomes.Failed,
+            SecurityAuditSeverities.High, "AppUser", username ?? "unknown",
+            new Dictionary<string, string?> { ["method"] = method },
+            httpContext.Connection.RemoteIpAddress?.ToString(), username));
+        return Results.Json(new { error = "Touch ID sign-in didn't work - use your password instead." }, statusCode: StatusCodes.Status401Unauthorized);
+    }
+    var sessionId = await SignInPortalAsync(httpContext, user, amr);
+    await pageLocks.GrantAsync(user.Username, sessionId, method);
+    await audit.RecordAsync(new SecurityAuditInput(
+        SecurityAuditCategories.Authentication, "TouchIdSignIn", SecurityAuditOutcomes.Succeeded,
+        SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
+        new Dictionary<string, string?> { ["method"] = method },
+        httpContext.Connection.RemoteIpAddress?.ToString(), user.Username));
+    return Results.Json(successBody);
+}
+
+app.MapPost("/auth/touchid/challenge", async (TouchIdChallengeRequest request,
+    GwsBusinessSuite.Application.Wiki.ISentinelDeviceKeyService deviceKeys) =>
+    Results.Json(new { challenge = await deviceKeys.CreateSignInChallengeAsync(request.KeyId) }))
+    .AllowAnonymous().RequireRateLimiting("public-read");
+
+app.MapPost("/auth/touchid/login", async (TouchIdLoginRequest request, HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelDeviceKeyService deviceKeys, IUserManagementService users,
+    ISecurityAuditService audit, GwsBusinessSuite.Application.Wiki.ISentinelPageLockService pageLocks) =>
+{
+    var username = await deviceKeys.CompleteSignInAsync(request.KeyId, request.Signature ?? string.Empty);
+    // device-key: a Mac app session, like device-secret (Content Studio etc.).
+    return await CompleteTouchIdSignInAsync(httpContext, username, "device", "device-key", users, audit, pageLocks, new { ok = true });
+})
+    .AllowAnonymous().RequireRateLimiting("login");
+
+app.MapPost("/auth/passkey/options", async (HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelPasskeyService passkeys) =>
+{
+    try
+    {
+        var (ceremonyId, options) = await passkeys.BeginSignInAsync($"{httpContext.Request.Scheme}://{httpContext.Request.Host}");
+        return Results.Json(new { ceremonyId, options });
+    }
+    catch (GwsBusinessSuite.Application.Wiki.SentinelLockException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+    .AllowAnonymous().RequireRateLimiting("public-read");
+
+app.MapPost("/auth/passkey/login", async (PasskeyLoginRequest request, HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelPasskeyService passkeys, IUserManagementService users,
+    ISecurityAuditService audit, GwsBusinessSuite.Application.Wiki.ISentinelPageLockService pageLocks) =>
+{
+    string? username;
+    try
+    {
+        username = await passkeys.CompleteSignInAsync(request.CeremonyId ?? string.Empty,
+            $"{httpContext.Request.Scheme}://{httpContext.Request.Host}", request.Assertion ?? string.Empty);
+    }
+    catch (GwsBusinessSuite.Application.Wiki.SentinelLockException)
+    {
+        username = null;
+    }
+    var returnUrl = request.ReturnUrl is { Length: > 0 } candidate && candidate.StartsWith('/') && !candidate.StartsWith("//", StringComparison.Ordinal)
+        && !candidate.StartsWith("/\\", StringComparison.Ordinal) ? candidate : "/admin";
+    return await CompleteTouchIdSignInAsync(httpContext, username, "passkey", "passkey", users, audit, pageLocks, new { redirect = returnUrl });
+})
+    .AllowAnonymous().RequireRateLimiting("login");
+
 app.MapPost("/auth/device-login", async (
     HttpContext httpContext,
     IConfiguration configuration,
@@ -4662,20 +4836,25 @@ static string GetPendingReturnUrl(AuthenticateResult result)
         result.Principal?.FindFirstValue(MfaAuthenticationDefaults.ReturnUrlClaim));
 }
 
-static async Task SignInPortalAsync(HttpContext httpContext, UserView user, string amr = "mfa")
+static async Task<string> SignInPortalAsync(HttpContext httpContext, UserView user, string amr = "mfa")
 {
+    var sessionId = Guid.NewGuid().ToString("N");
     var claims = new List<Claim>
     {
         new(ClaimTypes.Name, user.Username),
         new(ClaimTypes.Role, user.Role),
         new("UserId", user.Id.ToString()),
-        new("amr", amr)
+        new("amr", amr),
+        // One id per sign-in: Sentinel page unlocks belong to it (SentinelPageLock), so an unlock
+        // in this browser or Mac app session doesn't open locked pages anywhere else.
+        new(GwsBusinessSuite.Application.Wiki.SentinelPageLock.SessionClaim, sessionId)
     };
     var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
     await httpContext.SignInAsync(
         CookieAuthenticationDefaults.AuthenticationScheme,
         new ClaimsPrincipal(identity),
         new AuthenticationProperties { IsPersistent = false });
+    return sessionId;
 }
 
 static IResult MfaHtmlPage(
@@ -4763,6 +4942,12 @@ record ArticleUpsertRequest(
     string BodyMarkdown);
 
 record MobileDeviceRegistrationRequest(string Platform, string PushToken, string? DeviceName);
+record TouchIdChallengeRequest(Guid KeyId);
+record TouchIdLoginRequest(Guid KeyId, string? Signature);
+record PasskeyLoginRequest(string? CeremonyId, string? Assertion, string? ReturnUrl);
+record NativeLockDeviceRequest(string? Name, string? PublicKey, string? Storage);
+record NativeLockChallengeRequest(Guid KeyId);
+record NativeLockUnlockRequest(Guid KeyId, string? Signature);
 record NativeQuickNoteRequest(string? Title, string? Markdown, bool? DailyNote = null, Guid? ContactId = null, Guid? BookingId = null);
 record NativeCameraWatchReading(string? CameraId, string? ModelOutput, string? ImageBase64);
 record NativeContactRequest(string? FullName, string? Email, string? Company);

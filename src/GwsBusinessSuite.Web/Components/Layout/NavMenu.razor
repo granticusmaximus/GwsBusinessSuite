@@ -354,7 +354,7 @@
     {
         var state = await AuthProvider.GetAuthenticationStateAsync();
         _role = state.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
-        IsNativeApp = state.User.HasClaim("amr", "device-secret");
+        IsNativeApp = state.User.HasClaim(claim => claim.Type == "amr" && claim.Value is "device-secret" or "device-key");
         if (state.User.Identity?.IsAuthenticated != true) return;
 
         // Nav visibility is a display preference, so a settings failure must never take the whole

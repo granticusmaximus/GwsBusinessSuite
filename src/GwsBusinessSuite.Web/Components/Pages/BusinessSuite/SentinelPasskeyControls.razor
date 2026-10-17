@@ -1,0 +1,252 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@implements IAsyncDisposable
+@inject ISentinelPasskeyService Passkeys
+@inject ISentinelDeviceKeyService DeviceKeys
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+@* Page lock phase 2: Touch ID passkeys in the browser - the unlock button (Mode="unlock") or the
+   list and "Add" in Page lock settings (Mode="settings"). *@
+@if (Mode == "unlock")
+{
+    @if (_embedded && _deviceKeys.Count > 0)
+    {
+        @* The Mac app handles gws-native:// itself (MainPage.OnWorkspaceNavigating). *@
+        <div class="sentinel-lock-touchid">
+            <a class="btn btn-primary" href="gws-native://unlock"><i class="bi bi-fingerprint me-1" aria-hidden="true"></i>Unlock with Touch ID</a>
+        </div>
+    }
+    else if (_embedded)
+    {
+        <p class="small text-secondary mt-2 mb-0">To use Touch ID in this app, set it up in Page lock settings (⋯ menu).</p>
+    }
+    else if (_available && _keys.Count > 0)
+    {
+        <div class="sentinel-lock-touchid">
+            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="UnlockAsync">
+                <i class="bi bi-fingerprint me-1" aria-hidden="true"></i>Unlock with Touch ID
+            </button>
+        </div>
+    }
+}
+else
+{
+    @if (_embedded)
+    {
+        <div class="fw-semibold small mb-1 mt-2">Touch ID in the Mac app</div>
+        <a class="btn btn-sm btn-primary mb-2" href="gws-native://enroll"><i class="bi bi-fingerprint me-1" aria-hidden="true"></i>Set up Touch ID for this Mac</a>
+    }
+    @if (_deviceKeys.Count > 0)
+    {
+        <ul class="list-unstyled small mb-1">
+            @foreach (var key in _deviceKeys)
+            {
+                <li class="d-flex align-items-center gap-2 py-1 border-bottom">
+                    <span class="flex-grow-1">
+                        <i class="bi bi-laptop me-1" aria-hidden="true"></i>@key.Name
+                        <span class="text-secondary">· @(key.Storage == SentinelDeviceKeys.SecureEnclave ? "Secure Enclave" : "key file") · @(key.LastUsedAtUnix is { } used ? "last used " + DateTimeOffset.FromUnixTimeSeconds(used).ToLocalTime().ToGwsDateTime() : "not used yet")</span>
+                    </span>
+                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RevokeDeviceAsync(key.Id)">Remove</button>
+                </li>
+            }
+        </ul>
+    }
+    <div class="fw-semibold small mb-1 mt-2">Touch ID passkeys (this browser)</div>
+    @if (!_checked)
+    {
+        <p class="small text-secondary mb-1">Checking for Touch ID...</p>
+    }
+    else if (!_available)
+    {
+        <p class="small text-secondary mb-1">This browser can't use Touch ID passkeys here. Use Safari or Chrome on the Mac (in the Mac app, use its Touch ID option).</p>
+    }
+    else
+    {
+        <div class="d-flex gap-2 mb-2">
+            <input class="form-control form-control-sm" maxlength="60" placeholder="Name, e.g. MacBook Touch ID" aria-label="Passkey name"
+                   @bind="_name" @bind:event="oninput" />
+            <button type="button" class="btn btn-sm btn-primary text-nowrap" disabled="@_busy" @onclick="AddAsync">
+                <i class="bi bi-fingerprint me-1" aria-hidden="true"></i>Add
+            </button>
+        </div>
+    }
+    @if (_keys.Count > 0)
+    {
+        <ul class="list-unstyled small mb-1">
+            @foreach (var key in _keys)
+            {
+                <li class="d-flex align-items-center gap-2 py-1 border-bottom">
+                    <span class="flex-grow-1">
+                        <i class="bi bi-fingerprint me-1" aria-hidden="true"></i>@key.Name
+                        <span class="text-secondary">· @(key.LastUsedAtUnix is { } used ? "last used " + DateTimeOffset.FromUnixTimeSeconds(used).ToLocalTime().ToGwsDateTime() : "not used yet")</span>
+                    </span>
+                    <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RemoveAsync(key.Id)">Remove</button>
+                </li>
+            }
+        </ul>
+    }
+}
+@if (_message is not null)
+{
+    <div class="alert @(_isError ? "alert-danger" : "alert-success") small py-2 mt-2 mb-0" role="status">@_message</div>
+}
+
+@code {
+    [Parameter] public string Mode { get; set; } = "settings";
+    [Parameter] public string? SessionId { get; set; }
+    [Parameter] public EventCallback OnUnlocked { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _nativeListener;
+    private DotNetObjectReference<SentinelPasskeyControls>? _selfRef;
+    private IReadOnlyList<SentinelDeviceKeyView> _deviceKeys = [];
+    private bool _embedded;
+    private IReadOnlyList<SentinelPasskeyView> _keys = [];
+    private bool _available;
+    private bool _checked;
+    private bool _busy;
+    private string _name = "MacBook Touch ID";
+    private string? _message;
+    private bool _isError;
+
+    private string Origin => new Uri(Navigation.BaseUri).GetLeftPart(UriPartial.Authority);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        _keys = await Passkeys.ListAsync(username);
+        _deviceKeys = await DeviceKeys.ListAsync(username);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-passkey.js?v=2");
+            _embedded = await _module.InvokeAsync<bool>("isEmbeddedWebKit");
+            // Passkeys can't work inside the Mac app's web view; its own Touch ID does instead.
+            _available = !_embedded && await _module.InvokeAsync<bool>("isAvailable");
+            if (_embedded)
+            {
+                _selfRef = DotNetObjectReference.Create(this);
+                _nativeListener = await _module.InvokeAsync<IJSObjectReference>("listenForNative", _selfRef);
+            }
+        }
+        catch (JSException)
+        {
+            _available = false;
+        }
+        _checked = true;
+        StateHasChanged();
+    }
+
+    private async Task UnlockAsync()
+    {
+        await RunAsync(async username =>
+        {
+            var options = await Passkeys.BeginUnlockAsync(username, SessionId, Origin);
+            var assertion = await _module!.InvokeAsync<string>("get", options);
+            await Passkeys.CompleteUnlockAsync(username, SessionId, Origin, assertion);
+            await OnUnlocked.InvokeAsync();
+            return null;
+        });
+    }
+
+    private async Task AddAsync()
+    {
+        await RunAsync(async username =>
+        {
+            var options = await Passkeys.BeginRegistrationAsync(username, SessionId, Origin);
+            var attestation = await _module!.InvokeAsync<string>("create", options);
+            await Passkeys.CompleteRegistrationAsync(username, Origin, _name, attestation);
+            _keys = await Passkeys.ListAsync(username);
+            await OnChanged.InvokeAsync();
+            return "Touch ID passkey added.";
+        });
+    }
+
+    // The Mac app finished its Touch ID step. The server is asked again (OnUnlocked reopens the
+    // page, which re-checks the unlock) - the event itself proves nothing.
+    [JSInvokable]
+    public async Task OnNativeResult(string json)
+    {
+        using var result = System.Text.Json.JsonDocument.Parse(json);
+        var root = result.RootElement;
+        var action = root.TryGetProperty("action", out var a) ? a.GetString() : null;
+        var ok = root.TryGetProperty("ok", out var o) && o.ValueKind == System.Text.Json.JsonValueKind.True;
+        var message = root.TryGetProperty("message", out var m) ? m.GetString() : null;
+        if (action == "enroll" || action == "unlock")
+            _deviceKeys = await DeviceKeys.ListAsync(await CurrentUserAccessor.GetCurrentUsernameAsync());
+        (_message, _isError) = (message ?? (ok ? "Done." : "Touch ID didn't work."), !ok);
+        if (ok && action == "unlock") await OnUnlocked.InvokeAsync();
+        if (ok && action == "enroll") await OnChanged.InvokeAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RevokeDeviceAsync(Guid id)
+    {
+        await RunAsync(async username =>
+        {
+            await DeviceKeys.RevokeAsync(id, username);
+            _deviceKeys = await DeviceKeys.ListAsync(username);
+            await OnChanged.InvokeAsync();
+            return "That Mac can't unlock with Touch ID any more.";
+        });
+    }
+
+    private async Task RemoveAsync(Guid id)
+    {
+        await RunAsync(async username =>
+        {
+            await Passkeys.RemoveAsync(id, username);
+            _keys = await Passkeys.ListAsync(username);
+            await OnChanged.InvokeAsync();
+            return "Passkey removed.";
+        });
+    }
+
+    private async Task RunAsync(Func<string, Task<string?>> action)
+    {
+        _busy = true;
+        _message = null;
+        try
+        {
+            var done = await action(await CurrentUserAccessor.GetCurrentUsernameAsync());
+            if (done is not null) (_message, _isError) = (done, false);
+        }
+        catch (SentinelLockException ex)
+        {
+            (_message, _isError) = (ex.Message, true);
+        }
+        catch (JSException ex)
+        {
+            // NotAllowedError: the Touch ID sheet was cancelled or timed out.
+            (_message, _isError) = (ex.Message.Contains("NotAllowedError", StringComparison.Ordinal) || ex.Message.Contains("not allowed", StringComparison.OrdinalIgnoreCase)
+                ? "Touch ID was cancelled."
+                : $"Touch ID didn't work here: {ex.Message.Split('\n')[0]}", true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_nativeListener is not null)
+            {
+                await _nativeListener.InvokeVoidAsync("dispose");
+                await _nativeListener.DisposeAsync();
+            }
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { /* the circuit is gone */ }
+        _selfRef?.Dispose();
+    }
+}

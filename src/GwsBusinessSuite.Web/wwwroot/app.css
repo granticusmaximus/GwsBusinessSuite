@@ -5798,3 +5798,17 @@ a.wiki-live-title:hover { text-decoration: underline; }
 .sentinel-types-filter { grid-template-columns: minmax(0, 1fr) minmax(0, 8rem) minmax(0, 1fr) auto; }
 .sentinel-types-options { grid-column: 1 / -1; }
 .sentinel-types-table { max-height: 55vh; overflow: auto; }
+
+/* Page lock. While the lock screen shows, nothing of the page's content is visible. */
+.sentinel-workspace.is-page-locked .wiki-block-editor, .sentinel-workspace.is-page-locked .sentinel-ai-panel,
+.sentinel-workspace.is-page-locked .sentinel-editor-hint, .sentinel-workspace.is-page-locked .sentinel-reading-stats,
+.sentinel-workspace.is-page-locked .sentinel-page-properties, .sentinel-workspace.is-page-locked .sentinel-page-types,
+.sentinel-workspace.is-page-locked .sentinel-page-aliases, .sentinel-workspace.is-page-locked .sentinel-context-sidebar { display: none !important; }
+.sentinel-lock-screen { max-width: 26rem; margin: 2rem auto; padding: 1.5rem; text-align: center; border: 1px solid var(--sentinel-border, rgba(214, 211, 209, .12)); border-radius: .75rem; background: var(--sentinel-canvas-raised, #25211f); }
+.sentinel-lock-screen h2 { font-size: 1.25rem; margin-bottom: .35rem; }
+.sentinel-lock-icon { font-size: 2rem; color: var(--bs-primary, #f59e0b); margin-bottom: .5rem; }
+.sentinel-lock-pin { display: flex; gap: .5rem; justify-content: center; margin-top: .75rem; }
+.sentinel-lock-pin input { max-width: 10rem; letter-spacing: .3em; text-align: center; }
+.sentinel-lock-touchid { display: grid; gap: .5rem; justify-items: center; margin-top: .75rem; }
+.sentinel-unlocked-bar { display: flex; align-items: center; gap: .6rem; margin: 0 0 .75rem; padding: .35rem .7rem; border-radius: .5rem; font-size: .85rem; background: rgba(245, 158, 11, .08); border: 1px solid rgba(245, 158, 11, .25); }
+.sentinel-lock-pin-form { display: grid; gap: .35rem; max-width: 16rem; }

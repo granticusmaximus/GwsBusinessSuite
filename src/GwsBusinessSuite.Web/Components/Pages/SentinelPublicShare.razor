@@ -231,7 +231,15 @@
         <article>
             <div class="sentinel-public-brand">SENTINEL</div>
             <h1><span>@shown.Icon</span> @shown.Title</h1>
-            <div class="sentinel-public-content">@((MarkupString)SentinelPublishedSite.RewriteLinks(WikiBlockHtmlRenderer.RenderPage(WikiBlockJson.ParseBlocks(shown.BlocksJson)), site, Token))</div>
+            @if (shown.LockedBy is not null)
+            {
+                @* Page lock: a locked page's content is never shared. *@
+                <p class="sentinel-public-content">🔒 This page is locked by its owner.</p>
+            }
+            else
+            {
+                <div class="sentinel-public-content">@((MarkupString)SentinelPublishedSite.RewriteLinks(WikiBlockHtmlRenderer.RenderPage(WikiBlockJson.ParseBlocks(shown.BlocksJson)), site, Token))</div>
+            }
         </article>
     };
 }

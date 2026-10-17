@@ -52,6 +52,8 @@ public sealed class DailyNoteService(IAppDbContext db, IWikiService wikiService,
         CancellationToken cancellationToken = default)
     {
         var page = await OpenOrCreateAsync(date, performedBy, cancellationToken);
+        if (page.LockedBy is not null)
+            throw new SentinelPageLockedException("Today's daily note is locked, so nothing can be added to it - unlock it in Sentinel, or save to a new page.");
         var blocks = WikiBlockJson.ParseBlocks(page.BlocksJson).ToList();
         var heading = $"{timeProvider.GetLocalNow():HH:mm} {(string.IsNullOrWhiteSpace(title) ? "Note" : title.Trim())}";
         blocks.Add(new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Heading3, 0, [new WikiRichTextSpan(heading)], new Dictionary<string, string>()));

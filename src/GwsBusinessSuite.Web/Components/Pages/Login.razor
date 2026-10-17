@@ -56,6 +56,16 @@
             <button type="submit" class="btn btn-primary w-100 gws-login-submit">Sign In</button>
         </form>
 
+        @* Sign in with Touch ID (passkey) - shown by sentinel-passkey-login.js only where this
+           browser can use Touch ID / Face ID. *@
+        <div class="gws-login-passkey mt-3" id="gws-login-passkey" data-return-url="@ResolvedReturnUrl" hidden>
+            <div class="gws-login-divider small text-secondary text-center mb-2">or</div>
+            <button type="button" class="btn btn-outline-secondary w-100" id="gws-login-passkey-button">
+                <i class="bi bi-fingerprint me-1" aria-hidden="true"></i>Sign in with Touch ID
+            </button>
+            <div class="small text-danger mt-2" id="gws-login-passkey-error" role="alert"></div>
+        </div>
+
         <p class="text-secondary small mt-3 mb-0 gws-login-note">
             <i class="bi bi-shield-lock"></i> This area is restricted to administrators.
         </p>
@@ -63,6 +73,7 @@
 </div>
 
 <script src="js/login-tab-focus.js"></script>
+<script type="module" src="js/sentinel-passkey-login.js?v=1"></script>
 
 @code {
     [SupplyParameterFromQuery(Name = "error")]
