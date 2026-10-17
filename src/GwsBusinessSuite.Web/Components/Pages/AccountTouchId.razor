@@ -1,0 +1,41 @@
+@page "/admin/account/touch-id"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContentAccess")]
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Web.Components.Pages.BusinessSuite
+
+<PageTitle>Touch ID &amp; page lock</PageTitle>
+
+@* One clear place (account menu) for Touch ID sign-in and page-lock setup - the same controls as
+   Sentinel's Page lock settings panel. *@
+<div class="gws-account-touchid">
+    <h1 class="h3 mb-1"><i class="bi bi-fingerprint me-2" aria-hidden="true"></i>Touch ID &amp; page lock</h1>
+    <p class="text-secondary mb-3">
+        Sign in with your fingerprint instead of your password and authenticator code, and open locked Sentinel pages.
+    </p>
+    <ol class="small text-secondary mb-3">
+        <li><strong>In the Mac app:</strong> click <strong>Set up Touch ID for this Mac</strong> below (or the app menu: GWS Business Suite → Set Up Touch ID…).
+            Next time the app opens, it signs you in with Touch ID - that's also what turns on Mac-only tools like Content Studio.</li>
+        <li><strong>In Safari or Chrome:</strong> click <strong>Add</strong> under Touch ID passkeys. The sign-in page then shows <strong>Sign in with Touch ID</strong>.</li>
+        <li><strong>A PIN</strong> is the backup for locked pages when Touch ID isn't available.</li>
+    </ol>
+    @if (string.IsNullOrEmpty(_sessionId))
+    {
+        <div class="alert alert-warning small">This sign-in started before Touch ID was added. Sign out and sign in again to set it up.</div>
+    }
+    <SentinelLockSettingsPanel SessionId="@_sessionId" TouchIdSettings="TouchIdSettings" ShowClose="false" />
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private string? _sessionId;
+
+    private RenderFragment TouchIdSettings => @<SentinelPasskeyControls Mode="settings" SessionId="@_sessionId" />;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is not null)
+            _sessionId = (await AuthState).User.FindFirst(SentinelPageLock.SessionClaim)?.Value;
+    }
+}

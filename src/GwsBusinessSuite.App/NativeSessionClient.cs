@@ -90,6 +90,13 @@ public sealed class NativeSessionClient(HttpClient httpClient)
         return error;
     }
 
+    // Confirms it's the owner (their page-lock PIN) before another way to unlock is added.
+    public async Task<string?> UnlockWithPinAsync(string pin, CancellationToken cancellationToken = default)
+    {
+        var (_, error) = await PostAsync("/admin/api/native/lock-unlock-pin", new { pin }, cancellationToken);
+        return error;
+    }
+
     // The app was hidden: this session's locked pages lock again.
     public async Task LockSessionAsync(CancellationToken cancellationToken = default) =>
         await PostAsync("/admin/api/native/lock-session", new { }, cancellationToken);

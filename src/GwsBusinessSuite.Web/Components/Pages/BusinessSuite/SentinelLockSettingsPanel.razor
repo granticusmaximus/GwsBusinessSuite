@@ -7,7 +7,10 @@
 <div class="sentinel-ask sentinel-lock-settings" role="dialog" aria-label="Page lock settings">
     <div class="sentinel-ask-header">
         <strong><i class="bi bi-lock me-1" aria-hidden="true"></i>Page lock</strong>
-        <button type="button" class="btn-close btn-close-white" aria-label="Close" @onclick="() => OnClose.InvokeAsync()"></button>
+        @if (ShowClose)
+        {
+            <button type="button" class="btn-close btn-close-white" aria-label="Close" @onclick="() => OnClose.InvokeAsync()"></button>
+        }
     </div>
     <p class="small text-secondary mb-2">
         Lock a page from its ⋯ menu. A locked page is stored encrypted, and only you can open it - with Touch ID or your PIN.
@@ -49,6 +52,7 @@
     [Parameter] public RenderFragment? TouchIdSettings { get; set; }
     [Parameter] public int Generation { get; set; }
     [Parameter] public string? SessionId { get; set; }
+    [Parameter] public bool ShowClose { get; set; } = true;
 
     private SentinelUnlockMethodsView _methods = new(false, 0, 0);
     private string _currentPin = string.Empty;

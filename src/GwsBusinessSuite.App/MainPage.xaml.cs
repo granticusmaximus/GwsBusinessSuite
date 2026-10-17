@@ -38,10 +38,12 @@ public partial class MainPage : ContentPage
 
     private readonly TouchIdKeyStore _touchIdKeys;
     private readonly TouchIdLockService _touchIdLock;
+    private readonly NativeSessionClient _session;
 
     public MainPage(DeviceSecretStore deviceSecretStore, NativeAppAuthService nativeAppAuthService, CameraWatcher cameraWatcher,
-        TouchIdKeyStore touchIdKeys, TouchIdLockService touchIdLock)
+        TouchIdKeyStore touchIdKeys, TouchIdLockService touchIdLock, NativeSessionClient session)
     {
+        _session = session;
         InitializeComponent();
         _deviceSecretStore = deviceSecretStore;
         _nativeAppAuthService = nativeAppAuthService;
@@ -67,6 +69,7 @@ public partial class MainPage : ContentPage
         // tab is showing instead of silently reloading a WebView the user can no longer see.
         MacToolbarActions.Reload = () => OnReloadClicked(this, EventArgs.Empty);
         MacToolbarActions.ConfigureDeviceLogin = () => OnConfigureDeviceLoginClicked(this, EventArgs.Empty);
+        MacToolbarActions.SetUpTouchId = () => _ = SetUpTouchIdAsync();
         MacToolbarActions.SyncSelectedTab?.Invoke("MainPage");
 #endif
 
@@ -164,8 +167,18 @@ public partial class MainPage : ContentPage
     }
 #endif
 
+    // The toolbar's sign-in button: Touch ID first (the recommended way), the device secret as before.
     private async void OnConfigureDeviceLoginClicked(object? sender, EventArgs e)
     {
+        var choice = await DisplayActionSheetAsync("Sign-in for this Mac", "Cancel", null,
+            _touchIdLock.IsSetUp ? "Set Up Touch ID Again" : "Set Up Touch ID (recommended)", "Device Secret…");
+        if (choice is null || choice == "Cancel") return;
+        if (choice.StartsWith("Set Up Touch ID", StringComparison.Ordinal))
+        {
+            await SetUpTouchIdAsync();
+            return;
+        }
+
         var secret = await DisplayPromptAsync(
             "Device Login",
             "Enter the device secret configured on the server (NATIVE_APP_DEVICE_SECRET). Leave blank and confirm to remove a previously saved secret.");
@@ -269,6 +282,69 @@ public partial class MainPage : ContentPage
         }
     }
 
+    // Set Up Touch ID: creates this Mac's key (Touch ID asked), registers it with Sentinel - after
+    // the page-lock PIN when one exists - and then offers to sign in with it straight away, which
+    // gives the session the Mac-app sign-in that Content Studio needs.
+    private async Task SetUpTouchIdAsync()
+    {
+#if MACCATALYST
+        var (ok, message) = await _touchIdLock.EnrollAsync();
+        if (!ok && message.StartsWith("Unlock first", StringComparison.Ordinal))
+        {
+            var pin = await DisplayPromptAsync("Set Up Touch ID",
+                "You already have a page-lock PIN. Enter it to confirm it's you.", accept: "Continue", cancel: "Cancel",
+                maxLength: 8, keyboard: Keyboard.Numeric);
+            if (string.IsNullOrWhiteSpace(pin)) return;
+            if (await _session.UnlockWithPinAsync(pin.Trim()) is { } pinError)
+            {
+                await DisplayAlertAsync("Set Up Touch ID", pinError, "OK");
+                return;
+            }
+            (ok, message) = await _touchIdLock.EnrollAsync();
+        }
+        if (!ok)
+        {
+            await DisplayAlertAsync("Set Up Touch ID", message.Contains("Sign in", StringComparison.OrdinalIgnoreCase) || message.Contains("session", StringComparison.OrdinalIgnoreCase)
+                ? $"{message}\n\nSign in on the Workspace tab first, then choose Set Up Touch ID again."
+                : message, "OK");
+            return;
+        }
+        Preferences.Default.Set(TouchIdOfferedKey, true);
+        var signInNow = await DisplayAlertAsync("Touch ID Is Set Up",
+            $"{message} From now on the app signs you in with Touch ID when it opens. Sign in with Touch ID now? That also turns on Mac-only tools like Content Studio.",
+            "Sign In Now", "Later");
+        if (!signInNow) return;
+        var result = await _nativeAppAuthService.TouchIdLoginAsync(_touchIdKeys);
+        if (!result.Succeeded)
+        {
+            await DisplayAlertAsync("Sign In with Touch ID", result.ErrorMessage ?? "Touch ID sign-in didn't work.", "OK");
+            return;
+        }
+        await NativeCookieInjector.InjectCookiesAsync(result.SetCookieHeaders, AppEndpoints.BaseUrl);
+        WorkspaceView.Source = AppEndpoints.StartUrl;
+#else
+        await DisplayAlertAsync("Set Up Touch ID", "Touch ID is available in the Mac app.", "OK");
+#endif
+    }
+
+    // Offered once, after the first ordinary sign-in on a Mac without Touch ID set up.
+    private const string TouchIdOfferedKey = "touchid-setup-offered";
+
+    private async Task OfferTouchIdOnceAsync(string url)
+    {
+#if MACCATALYST
+        if (_touchIdLock.IsSetUp || Preferences.Default.Get(TouchIdOfferedKey, false)) return;
+        if (!url.Contains("/admin", StringComparison.OrdinalIgnoreCase) || url.Contains("/login", StringComparison.OrdinalIgnoreCase)) return;
+        Preferences.Default.Set(TouchIdOfferedKey, true);
+        var setUp = await DisplayAlertAsync("Sign In with Touch ID?",
+            "Set up Touch ID and the app signs you in with your fingerprint next time - no password or code. It also turns on Mac-only tools like Content Studio. You can do it later from the app menu: GWS Business Suite > Set Up Touch ID.",
+            "Set Up Touch ID", "Not Now");
+        if (setUp) await SetUpTouchIdAsync();
+#else
+        await Task.CompletedTask;
+#endif
+    }
+
     private void OnWorkspaceNavigated(object? sender, WebNavigatedEventArgs args)
     {
         DebugLog($"OnWorkspaceNavigated url={args.Url} result={args.Result}");
@@ -277,6 +353,7 @@ public partial class MainPage : ContentPage
         if (args.Result == WebNavigationResult.Success)
         {
             StatusOverlay.IsVisible = false;
+            _ = OfferTouchIdOnceAsync(args.Url);
             return;
         }
 

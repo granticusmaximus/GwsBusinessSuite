@@ -5812,3 +5812,7 @@ a.wiki-live-title:hover { text-decoration: underline; }
 .sentinel-lock-touchid { display: grid; gap: .5rem; justify-items: center; margin-top: .75rem; }
 .sentinel-unlocked-bar { display: flex; align-items: center; gap: .6rem; margin: 0 0 .75rem; padding: .35rem .7rem; border-radius: .5rem; font-size: .85rem; background: rgba(245, 158, 11, .08); border: 1px solid rgba(245, 158, 11, .25); }
 .sentinel-lock-pin-form { display: grid; gap: .35rem; max-width: 16rem; }
+
+/* Account > Touch ID & page lock: the settings panel shown in the page instead of floating. */
+.gws-account-touchid { max-width: 44rem; padding: 1.5rem 1rem; }
+.gws-account-touchid .sentinel-ask { position: static; width: auto; max-height: none; box-shadow: none; }

@@ -25,6 +25,9 @@ internal static class MacToolbarActions
     // also when the reload item should be unavailable - there is no WebView to reload.
     public static Action? Reload { get; set; }
     public static Action? ConfigureDeviceLogin { get; set; }
+    // "Set Up Touch ID..." (app menu, toolbar, first-sign-in offer). Set by MainPage and kept while
+    // other tabs show - the menu switches to the Workspace tab first.
+    public static Action? SetUpTouchId { get; set; }
 
     // Raised by a tab button; AppShell owns the actual navigation.
     public static Action<string>? SelectTab { get; set; }

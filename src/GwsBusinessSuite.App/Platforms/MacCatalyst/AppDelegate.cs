@@ -15,10 +15,18 @@ public class AppDelegate : MauiUIApplicationDelegate
 		base.BuildMenu(builder);
 		if (builder.System != UIMenuSystem.MainSystem) return;
 		var checkForUpdates = UICommand.Create("Check for Updates…", null, new Selector("gwsCheckForUpdates:"), null);
+		var setUpTouchId = UICommand.Create("Set Up Touch ID…", null, new Selector("gwsSetUpTouchId:"), null);
 		builder.InsertSiblingMenuAfter(
-			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [checkForUpdates]),
+			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [checkForUpdates, setUpTouchId]),
 			UIMenuIdentifier.About.GetConstant()!);
 	}
+
+	[Export("gwsSetUpTouchId:")]
+	public void SetUpTouchId(NSObject sender) => MainThread.BeginInvokeOnMainThread(() =>
+	{
+		MacToolbarActions.SelectTab?.Invoke("MainPage");
+		MacToolbarActions.SetUpTouchId?.Invoke();
+	});
 
 	[Export("gwsCheckForUpdates:")]
 	public void CheckForUpdates(NSObject sender) => MainThread.BeginInvokeOnMainThread(async () => await CheckForUpdatesAsync());

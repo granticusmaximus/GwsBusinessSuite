@@ -1330,6 +1330,29 @@ app.MapPost("/admin/api/native/lock-unlock", async (
     .RequireAuthorization("ContentAccess")
     .RequireRateLimiting("admin-mutation");
 
+// The Mac app's "Set Up Touch ID..." when a PIN already exists: the PIN confirms it's the owner
+// (an unlock in this session) before another way to unlock can be added.
+app.MapPost("/admin/api/native/lock-unlock-pin", async (
+    NativeLockPinRequest request,
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelPageLockService pageLocks,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsNativeCall(httpContext)) return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    try
+    {
+        var expires = await pageLocks.UnlockWithPinAsync(httpContext.User.Identity!.Name!, NativeLockSession(httpContext),
+            request.Pin ?? string.Empty, httpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
+        return Results.Json(new { expiresAtUnix = expires });
+    }
+    catch (GwsBusinessSuite.Application.Wiki.SentinelLockException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+    .RequireAuthorization("ContentAccess")
+    .RequireRateLimiting("login");
+
 // The Mac app was hidden: lock this session's pages again.
 app.MapPost("/admin/api/native/lock-session", async (
     HttpContext httpContext,
@@ -4945,6 +4968,7 @@ record MobileDeviceRegistrationRequest(string Platform, string PushToken, string
 record TouchIdChallengeRequest(Guid KeyId);
 record TouchIdLoginRequest(Guid KeyId, string? Signature);
 record PasskeyLoginRequest(string? CeremonyId, string? Assertion, string? ReturnUrl);
+record NativeLockPinRequest(string? Pin);
 record NativeLockDeviceRequest(string? Name, string? PublicKey, string? Storage);
 record NativeLockChallengeRequest(Guid KeyId);
 record NativeLockUnlockRequest(Guid KeyId, string? Signature);
