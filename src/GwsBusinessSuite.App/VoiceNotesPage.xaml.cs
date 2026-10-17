@@ -16,6 +16,7 @@ public partial class VoiceNotesPage : ContentPage
 
     private readonly OllamaClient _ollama;
     private readonly NativeSessionClient _session;
+    private readonly QuickNoteOutbox _outbox;
 #if MACCATALYST
     private readonly OnDeviceSpeechTranscriber _transcriber = new();
     // Recording (and so its elapsed-time clock) only exists on the Mac.
@@ -24,11 +25,12 @@ public partial class VoiceNotesPage : ContentPage
 #endif
     private string? _savedUrl;
 
-    public VoiceNotesPage(OllamaClient ollama, NativeSessionClient session)
+    public VoiceNotesPage(OllamaClient ollama, NativeSessionClient session, QuickNoteOutbox outbox)
     {
         InitializeComponent();
         _ollama = ollama;
         _session = session;
+        _outbox = outbox;
         TitleEntry.Text = DefaultTitle();
 #if !MACCATALYST
         RecordButton.IsEnabled = false;
@@ -209,12 +211,17 @@ public partial class VoiceNotesPage : ContentPage
         try
         {
             var link = LinkPicker.SelectedItem as MeetingTarget;
-            var result = await _session.SaveQuickNoteAsync(title, markdown, DailyNoteCheckBox.IsChecked,
+            var result = await _outbox.SaveOrQueueAsync(title, markdown, DailyNoteCheckBox.IsChecked,
                 contactId: link?.Kind == "contact" ? link.Id : null,
                 bookingId: link?.Kind == "booking" ? link.Id : null);
             if (result.Error is not null)
             {
                 SaveStatusLabel.Text = result.Error;
+                return;
+            }
+            if (result.Queued)
+            {
+                SaveStatusLabel.Text = $"Couldn't reach Sentinel - \"{title}\" is kept on this Mac and sent automatically when you're back online (see the Offline tab).";
                 return;
             }
             _savedUrl = result.Url;

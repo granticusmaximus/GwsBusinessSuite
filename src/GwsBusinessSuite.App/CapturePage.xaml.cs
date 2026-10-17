@@ -20,12 +20,14 @@ public partial class CapturePage : ContentPage
 
     private readonly OllamaClient _ollama;
     private readonly NativeSessionClient _session;
+    private readonly QuickNoteOutbox _outbox;
 
-    public CapturePage(OllamaClient ollama, NativeSessionClient session)
+    public CapturePage(OllamaClient ollama, NativeSessionClient session, QuickNoteOutbox outbox)
     {
         InitializeComponent();
         _ollama = ollama;
         _session = session;
+        _outbox = outbox;
 #if !MACCATALYST
         StatusLabel.Text = "Screen capture to text runs in the Mac app.";
 #endif
@@ -127,8 +129,10 @@ public partial class CapturePage : ContentPage
         }
         var title = string.IsNullOrWhiteSpace(TitleEntry.Text) ? $"Capture - {DateTime.Now:dd-MM-yy HH:mm}" : TitleEntry.Text.Trim();
         var toDailyNote = DailyNoteCheckBox.IsChecked;
-        var result = await _session.SaveQuickNoteAsync(title, text, toDailyNote);
-        StatusLabel.Text = result.Error ?? (toDailyNote
+        var result = await _outbox.SaveOrQueueAsync(title, text, toDailyNote);
+        StatusLabel.Text = result.Error ?? (result.Queued
+            ? $"Couldn't reach Sentinel - \"{title}\" is kept on this Mac and sent automatically when you're back online (see the Offline tab)."
+            : toDailyNote
             ? $"Added \"{title}\" to today's daily note."
             : $"Saved to Sentinel under Quick Notes as \"{title}\".");
     }

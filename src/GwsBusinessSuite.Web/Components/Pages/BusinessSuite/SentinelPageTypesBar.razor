@@ -1,0 +1,142 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@inject ISentinelPageTypeService PageTypes
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@* Typed pages (item 11): the page's types and their fields, under the title. It sits inside the
+   page's EditForm, so every input names a form that doesn't exist (form="sentinel-no-form"):
+   Enter in a field then does nothing instead of submitting the page. *@
+<div class="sentinel-page-types">
+    @foreach (var assignment in _assignments)
+    {
+        <section class="sentinel-page-type" aria-label="@($"{assignment.Name} fields")">
+            <div class="sentinel-page-type-head">
+                <button type="button" class="btn btn-link p-0 text-reset text-decoration-none fw-semibold" title="Show every @assignment.Name"
+                        @onclick="() => OnOpenType.InvokeAsync(assignment.TypeId)">@assignment.Icon @assignment.Name</button>
+                @if (CanEdit)
+                {
+                    <button type="button" class="btn btn-link p-0 ms-1 text-secondary text-decoration-none" aria-label="@($"Remove type {assignment.Name}")"
+                            title="Remove this type from the page" @onclick="() => UnassignAsync(assignment.TypeId)">&times;</button>
+                }
+            </div>
+            @if (assignment.Fields.Count == 0)
+            {
+                <div class="small text-secondary">This type has no fields yet.</div>
+            }
+            <div class="sentinel-page-type-fields">
+                @foreach (var field in assignment.Fields)
+                {
+                    var value = assignment.Values.GetValueOrDefault(field.Id);
+                    var inputId = $"type-{assignment.TypeId:N}-{field.Id}";
+                    <label class="sentinel-page-type-label" for="@inputId">@field.Name</label>
+                    @switch (field.Kind)
+                    {
+                        case SentinelPageTypes.Kinds.Checkbox:
+                            <input id="@inputId" form="sentinel-no-form" type="checkbox" class="form-check-input" checked="@(value == "true")" disabled="@(!CanEdit)"
+                                   @onchange="e => SetCheckboxAsync(assignment, field, e)" />
+                            break;
+                        case SentinelPageTypes.Kinds.Select:
+                            <select id="@inputId" form="sentinel-no-form" class="form-select form-select-sm" disabled="@(!CanEdit)"
+                                    @onchange="e => SetAsync(assignment, field, e.Value?.ToString())">
+                                <option value="" selected="@(value is null)">-</option>
+                                @foreach (var option in field.Options)
+                                {
+                                    <option value="@option" selected="@(value == option)">@option</option>
+                                }
+                            </select>
+                            break;
+                        default:
+                            <input id="@inputId" form="sentinel-no-form" class="form-control form-control-sm" readonly="@(!CanEdit)"
+                                   type="@(field.Kind switch { SentinelPageTypes.Kinds.Number => "number", SentinelPageTypes.Kinds.Date => "date", SentinelPageTypes.Kinds.Url => "url", _ => "text" })"
+                                   value="@value" placeholder="@SentinelPageTypes.Kinds.Label(field.Kind)"
+                                   @onchange="e => SetAsync(assignment, field, e.Value?.ToString())" />
+                            break;
+                    }
+                }
+            </div>
+        </section>
+    }
+    @if (CanEdit)
+    {
+        <div class="sentinel-page-types-add">
+            <select @key="_addKey" form="sentinel-no-form" class="form-select form-select-sm" aria-label="Give this page a type" @onchange="AssignAsync">
+                <option value="" selected>+ Add a type…</option>
+                @foreach (var type in _types.Where(t => _assignments.All(a => a.TypeId != t.Id)))
+                {
+                    <option value="@type.Id">@type.Icon @type.Name</option>
+                }
+                <option value="__manage">Manage types…</option>
+            </select>
+        </div>
+    }
+</div>
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="sentinel-page-aliases-message small" role="status">@_message</div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Guid WikiPageId { get; set; }
+    [Parameter] public bool CanEdit { get; set; }
+    [Parameter] public EventCallback<Guid?> OnOpenType { get; set; }
+    // Bumped by the parent when types change elsewhere (the Types panel), to reload.
+    [Parameter] public int Generation { get; set; }
+
+    private IReadOnlyList<SentinelPageTypeAssignmentView> _assignments = [];
+    private IReadOnlyList<SentinelPageTypeView> _types = [];
+    private (Guid Page, int Generation) _loadedFor;
+    private string? _message;
+    // Re-created after each pick so the menu goes back to "+ Add a type…".
+    private int _addKey;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == (WikiPageId, Generation)) return;
+        _loadedFor = (WikiPageId, Generation);
+        _message = null;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        _assignments = await PageTypes.GetForPageAsync(WikiPageId, username);
+        _types = await PageTypes.ListTypesAsync(username);
+    }
+
+    private async Task AssignAsync(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString();
+        _addKey++;
+        if (value == "__manage")
+        {
+            await OnOpenType.InvokeAsync(null);
+            await LoadAsync();
+            return;
+        }
+        if (!Guid.TryParse(value, out var typeId)) return;
+        await RunAsync(username => PageTypes.AssignAsync(WikiPageId, typeId, username));
+    }
+
+    private Task UnassignAsync(Guid typeId) => RunAsync(username => PageTypes.UnassignAsync(WikiPageId, typeId, username));
+
+    private Task SetAsync(SentinelPageTypeAssignmentView assignment, SentinelTypeField field, string? value) =>
+        RunAsync(username => PageTypes.SetValueAsync(WikiPageId, assignment.TypeId, field.Id, value, username));
+
+    private Task SetCheckboxAsync(SentinelPageTypeAssignmentView assignment, SentinelTypeField field, ChangeEventArgs e) =>
+        SetAsync(assignment, field, e.Value is true ? "true" : null);
+
+    private async Task RunAsync(Func<string, Task> action)
+    {
+        _message = null;
+        try
+        {
+            await action(await CurrentUserAccessor.GetCurrentUsernameAsync());
+        }
+        catch (ArgumentException ex)
+        {
+            _message = ex.Message;
+        }
+        await LoadAsync();
+    }
+}

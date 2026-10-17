@@ -66,6 +66,12 @@ public static class MauiProgram
 		builder.Services.AddSingleton<CameraWatcher>();
 		builder.Services.AddTransient<VoiceNotesPage>();
 		builder.Services.AddTransient<CapturePage>();
+		// Offline reading + Quick Note outbox (Sentinel item 12).
+		builder.Services.AddSingleton(_ => new OfflineStore(Path.Combine(FileSystem.Current.AppDataDirectory, "offline")));
+		builder.Services.AddSingleton(services => new QuickNoteOutbox(
+			Path.Combine(FileSystem.Current.AppDataDirectory, "quick-note-outbox.json"), services.GetRequiredService<NativeSessionClient>()));
+		builder.Services.AddSingleton<OfflineSyncService>();
+		builder.Services.AddTransient<OfflinePage>();
 
 #if ANDROID
 		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(

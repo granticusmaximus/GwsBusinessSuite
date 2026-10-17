@@ -173,7 +173,7 @@ public sealed class WikiService(
     // duplicate. The caller runs the queue after committing.
     private async Task<WikiPage> SavePageCoreAsync(
         WikiPageEditorModel editor, string performedBy, bool createRevisionCheckpoint,
-        List<Func<Task>>? deferredSideEffects, CancellationToken cancellationToken)
+        List<Func<Task>>? deferredSideEffects, CancellationToken cancellationToken, bool isRetry = false)
     {
         ArgumentNullException.ThrowIfNull(editor);
 
@@ -269,6 +269,12 @@ public sealed class WikiService(
         catch (DbUpdateConcurrencyException)
         {
             await ReloadAsync(page, cancellationToken);
+            // Another save landed between this one's read and its write (two editors saving
+            // within the same moment - live co-editing makes that common). Go round once more:
+            // the version now differs, so the block merge above gets its chance instead of an
+            // immediate conflict.
+            if (!isRetry && editor.BaseBlocksJson is not null)
+                return await SavePageCoreAsync(editor, performedBy, createRevisionCheckpoint, deferredSideEffects, cancellationToken, isRetry: true);
             throw CreateConcurrencyException(page, editor.ExpectedContentVersion);
         }
         catch (DbUpdateException) when (isNew)

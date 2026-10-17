@@ -33,6 +33,10 @@
             Title="Capture"
             ContentTemplate="{DataTemplate local:CapturePage}"
             Route="CapturePage" />
+        <ShellContent
+            Title="Offline"
+            ContentTemplate="{DataTemplate local:OfflinePage}"
+            Route="OfflinePage" />
     </TabBar>
 
 </Shell>

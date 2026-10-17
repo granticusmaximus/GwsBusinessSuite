@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:GwsBusinessSuite.App"
+             x:Class="GwsBusinessSuite.App.OfflinePage"
+             BackgroundColor="#141210"
+             Shell.NavBarIsVisible="False">
+
+    <Grid RowDefinitions="Auto,*" ColumnDefinitions="300,*">
+
+        <Grid Grid.Row="0" Grid.ColumnSpan="2" Padding="16,12" ColumnDefinitions="*,Auto" ColumnSpacing="10" BackgroundColor="#1C1917">
+            <VerticalStackLayout Grid.Column="0" Spacing="2" VerticalOptions="Center">
+                <Label Text="Offline pages" TextColor="#FAFAF9" FontAttributes="Bold" FontSize="16" />
+                <Label x:Name="StatusLabel" TextColor="#A8A29E" FontSize="12"
+                       Text="Pages you mark 'Keep offline in the Mac app' (page menu ⋯ in Sentinel) are copied here to read without a connection." />
+            </VerticalStackLayout>
+            <Button Grid.Column="1" x:Name="SyncButton" Text="Sync now" BackgroundColor="#F59E0B" TextColor="#1C1917" FontAttributes="Bold"
+                    CornerRadius="8" Clicked="OnSyncClicked" VerticalOptions="Center" />
+        </Grid>
+
+        <Grid Grid.Row="1" Grid.Column="0" RowDefinitions="*,Auto,Auto" Padding="12,10" RowSpacing="8">
+            <CollectionView x:Name="PagesList" SelectionMode="Single" SelectionChanged="OnPageSelected"
+                            EmptyView="No pages kept offline yet.">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="local:OfflinePageEntry">
+                        <VerticalStackLayout Padding="8,6" Spacing="1">
+                            <Label Text="{Binding Display}" TextColor="#FAFAF9" FontSize="14" LineBreakMode="TailTruncation" />
+                            <Label Text="{Binding Updated}" TextColor="#78716C" FontSize="11" />
+                        </VerticalStackLayout>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+            <Label Grid.Row="1" x:Name="OutboxLabel" TextColor="#E7E5E4" FontSize="12" />
+            <CollectionView Grid.Row="2" x:Name="OutboxList" SelectionMode="None" MaximumHeightRequest="180">
+                <CollectionView.ItemTemplate>
+                    <DataTemplate x:DataType="local:QueuedQuickNote">
+                        <Grid ColumnDefinitions="*,Auto" Padding="4,2" ColumnSpacing="6">
+                            <Label Text="{Binding Display}" TextColor="#A8A29E" FontSize="11" LineBreakMode="WordWrap" />
+                            <Button Grid.Column="1" Text="Remove" FontSize="11" Padding="6,0" HeightRequest="26" BackgroundColor="#292524" TextColor="#E7E5E4"
+                                    CornerRadius="6" Clicked="OnRemoveQueuedClicked" CommandParameter="{Binding Id}" />
+                        </Grid>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </Grid>
+
+        <Border Grid.Row="1" Grid.Column="1" Stroke="#292524" BackgroundColor="#141210" Margin="0,10,12,12">
+            <WebView x:Name="PageView" />
+        </Border>
+    </Grid>
+</ContentPage>

@@ -1,0 +1,333 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Wiki
+@inject ISentinelPageTypeService PageTypes
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@* Typed pages (item 11): the workspace's page types - create and edit them, and list every page
+   of a type with its fields as columns, filtered and sorted. *@
+<div class="sentinel-ask sentinel-types-panel" role="dialog" aria-label="Page types">
+    <div class="sentinel-ask-header">
+        <strong><i class="bi bi-tags me-1" aria-hidden="true"></i>Page types</strong>
+        <button type="button" class="btn-close btn-close-white" aria-label="Close" @onclick="() => OnClose.InvokeAsync()"></button>
+    </div>
+
+    @if (_editing is not null)
+    {
+        <div class="sentinel-types-editor">
+            <div class="row g-2 mb-2">
+                <div class="col-3">
+                    <label class="form-label small mb-1" for="type-icon">Icon</label>
+                    <input id="type-icon" class="form-control form-control-sm" maxlength="16" @bind="_editing.Icon" @bind:event="oninput" />
+                </div>
+                <div class="col-9">
+                    <label class="form-label small mb-1" for="type-name">Name</label>
+                    <input id="type-name" class="form-control form-control-sm" maxlength="60" placeholder="Person, Meeting, Client…" @bind="_editing.Name" @bind:event="oninput" />
+                </div>
+            </div>
+            <label class="form-label small mb-1" for="type-description">Description</label>
+            <input id="type-description" class="form-control form-control-sm mb-2" maxlength="300" @bind="_editing.Description" @bind:event="oninput" />
+            <div class="fw-semibold small mb-1">Fields</div>
+            @foreach (var field in _editing.Fields)
+            {
+                <div class="sentinel-types-field-row mb-1">
+                    <input class="form-control form-control-sm" aria-label="Field name" maxlength="40" @bind="field.Name" @bind:event="oninput" />
+                    <select class="form-select form-select-sm" aria-label="Field kind" @bind="field.Kind">
+                        @foreach (var kind in SentinelPageTypes.Kinds.All)
+                        {
+                            <option value="@kind">@SentinelPageTypes.Kinds.Label(kind)</option>
+                        }
+                    </select>
+                    <button type="button" class="btn btn-sm btn-outline-danger" aria-label="@($"Remove field {field.Name}")" @onclick="() => _editing.Fields.Remove(field)">&times;</button>
+                    @if (field.Kind == SentinelPageTypes.Kinds.Select)
+                    {
+                        <input class="form-control form-control-sm sentinel-types-options" aria-label="Options" placeholder="Options, separated by commas"
+                               @bind="field.Options" @bind:event="oninput" />
+                    }
+                </div>
+            }
+            <button type="button" class="btn btn-sm btn-link px-0" @onclick="AddField"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add field</button>
+            <div class="d-flex gap-2 mt-2">
+                <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_editing.Name))" @onclick="SaveTypeAsync">Save type</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => { _editing = null; _message = null; }">Cancel</button>
+                @if (_editing.Id is { } editingId)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-danger ms-auto" disabled="@_busy" @onclick="() => DeleteTypeAsync(editingId)">Delete type</button>
+                }
+            </div>
+        </div>
+    }
+    else if (_selected is { } selected)
+    {
+        <button type="button" class="btn btn-link btn-sm p-0 mb-2" @onclick="() => { _selected = null; _message = null; }"><i class="bi bi-arrow-left me-1" aria-hidden="true"></i>All types</button>
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <strong>@selected.Icon @selected.Name</strong>
+            <span class="badge text-bg-secondary">@_rows.Count</span>
+            @if (selected.CanEdit)
+            {
+                <button type="button" class="btn btn-sm btn-link ms-auto p-0" @onclick="() => Edit(selected)">Edit type</button>
+            }
+        </div>
+        @if (!string.IsNullOrWhiteSpace(selected.Description))
+        {
+            <p class="small text-secondary mb-2">@selected.Description</p>
+        }
+
+        @foreach (var filter in _filters)
+        {
+            var field = selected.Fields.FirstOrDefault(f => f.Id == filter.FieldId);
+            <div class="sentinel-types-filter mb-1">
+                <select class="form-select form-select-sm" aria-label="Filter field" @bind="filter.FieldId" @bind:after="RunQueryAsync">
+                    @foreach (var option in selected.Fields)
+                    {
+                        <option value="@option.Id">@option.Name</option>
+                    }
+                </select>
+                <select class="form-select form-select-sm" aria-label="Condition" @bind="filter.Operator" @bind:after="RunQueryAsync">
+                    @foreach (var (key, label) in SentinelPageTypes.Operators.For(field?.Kind ?? SentinelPageTypes.Kinds.Text))
+                    {
+                        <option value="@key">@label</option>
+                    }
+                </select>
+                @if (filter.Operator is not (SentinelPageTypes.Operators.Empty or SentinelPageTypes.Operators.NotEmpty))
+                {
+                    @if (field?.Kind == SentinelPageTypes.Kinds.Select)
+                    {
+                        <select class="form-select form-select-sm" aria-label="Value" @bind="filter.Value" @bind:after="RunQueryAsync">
+                            <option value="">-</option>
+                            @foreach (var option in field.Options)
+                            {
+                                <option value="@option">@option</option>
+                            }
+                        </select>
+                    }
+                    else if (field?.Kind == SentinelPageTypes.Kinds.Checkbox)
+                    {
+                        <select class="form-select form-select-sm" aria-label="Value" @bind="filter.Value" @bind:after="RunQueryAsync">
+                            <option value="true">checked</option>
+                            <option value="false">not checked</option>
+                        </select>
+                    }
+                    else
+                    {
+                        <input class="form-control form-control-sm" aria-label="Value"
+                               type="@(field?.Kind switch { SentinelPageTypes.Kinds.Number => "number", SentinelPageTypes.Kinds.Date => "date", _ => "text" })"
+                               @bind="filter.Value" @bind:event="oninput" @bind:after="RunQueryAsync" />
+                    }
+                }
+                <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Remove filter" @onclick="() => RemoveFilterAsync(filter)">&times;</button>
+            </div>
+        }
+        @if (selected.Fields.Count > 0)
+        {
+            <button type="button" class="btn btn-sm btn-link px-0 mb-2" @onclick="AddFilterAsync"><i class="bi bi-funnel me-1" aria-hidden="true"></i>Add filter</button>
+        }
+
+        <div class="table-responsive sentinel-types-table">
+            <table class="table table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th><button type="button" class="btn btn-link btn-sm p-0 text-reset fw-semibold" @onclick="() => SortAsync(null)">Page@(SortMark(null))</button></th>
+                        @foreach (var field in selected.Fields)
+                        {
+                            <th><button type="button" class="btn btn-link btn-sm p-0 text-reset fw-semibold" @onclick="() => SortAsync(field.Id)">@field.Name@(SortMark(field.Id))</button></th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in _rows)
+                    {
+                        <tr>
+                            <td><button type="button" class="btn btn-link btn-sm p-0 text-start" @onclick="() => OnOpenPage.InvokeAsync(row.PageId)">@(row.Icon ?? "📄") @row.Title</button></td>
+                            @foreach (var field in selected.Fields)
+                            {
+                                var value = row.Values.GetValueOrDefault(field.Id);
+                                <td>
+                                    @* Link values are stored only as absolute http(s)/mailto addresses (NormalizeValue). *@
+                                    @if (field.Kind == SentinelPageTypes.Kinds.Url && value is not null)
+                                    {
+                                        <a href="@value" target="_blank" rel="noopener noreferrer">@value</a>
+                                    }
+                                    else
+                                    {
+                                        @SentinelPageTypes.Display(field, value)
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (_rows.Count == 0)
+            {
+                <p class="small text-secondary mt-2 mb-0">@(_filters.Count > 0 ? "No pages match these filters." : $"No pages you can see have this type yet. Give a page the type from under its title.")</p>
+            }
+        </div>
+    }
+    else
+    {
+        <p class="small text-secondary mb-2">
+            Give pages a type - like Person, Meeting or Client - and they gain that type's fields. Each type lists its pages
+            with those fields, so you can filter and sort across the whole workspace.
+        </p>
+        <button type="button" class="btn btn-sm btn-primary mb-2" @onclick="() => Edit(null)"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New type</button>
+        @if (_types.Count == 0)
+        {
+            <p class="small text-secondary mb-0">No types yet.</p>
+        }
+        <ul class="list-unstyled mb-0">
+            @foreach (var type in _types)
+            {
+                <li class="d-flex align-items-center gap-2 py-1 border-bottom">
+                    <button type="button" class="btn btn-link btn-sm p-0 text-start flex-grow-1" @onclick="() => SelectAsync(type)">@type.Icon @type.Name</button>
+                    <span class="small text-secondary">@type.PageCount @(type.PageCount == 1 ? "page" : "pages") · @type.Fields.Count @(type.Fields.Count == 1 ? "field" : "fields")</span>
+                </li>
+            }
+        </ul>
+    }
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <div class="alert alert-danger small py-2 mt-2" role="alert">@_message</div>
+    }
+</div>
+
+@code {
+    [Parameter] public Guid? InitialTypeId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<Guid> OnOpenPage { get; set; }
+    // Raised after a type is saved or deleted, so pages showing types can reload.
+    [Parameter] public EventCallback OnTypesChanged { get; set; }
+
+    private IReadOnlyList<SentinelPageTypeView> _types = [];
+    private SentinelPageTypeView? _selected;
+    private IReadOnlyList<SentinelTypedPageRow> _rows = [];
+    private readonly List<FilterModel> _filters = [];
+    private string? _sortFieldId;
+    private bool _descending;
+    private TypeModel? _editing;
+    private bool _busy;
+    private string? _message;
+    private Guid? _openedInitial;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _types = await PageTypes.ListTypesAsync(await CurrentUserAccessor.GetCurrentUsernameAsync());
+        if (InitialTypeId is { } initial && _openedInitial != initial && _types.FirstOrDefault(t => t.Id == initial) is { } type)
+        {
+            _openedInitial = initial;
+            await SelectAsync(type);
+        }
+    }
+
+    private async Task SelectAsync(SentinelPageTypeView type)
+    {
+        _selected = type;
+        _filters.Clear();
+        _sortFieldId = null;
+        _descending = false;
+        _message = null;
+        await RunQueryAsync();
+    }
+
+    private async Task RunQueryAsync()
+    {
+        if (_selected is null) return;
+        var filters = _filters.Select(f => new SentinelTypeFilter(f.FieldId, f.Operator, f.Value)).ToList();
+        _rows = await PageTypes.QueryAsync(_selected.Id, await CurrentUserAccessor.GetCurrentUsernameAsync(), filters, _sortFieldId, _descending);
+    }
+
+    private async Task AddFilterAsync()
+    {
+        var field = _selected!.Fields[0];
+        _filters.Add(new FilterModel { FieldId = field.Id, Operator = SentinelPageTypes.Operators.For(field.Kind)[0].Key, Value = field.Kind == SentinelPageTypes.Kinds.Checkbox ? "true" : null });
+        await RunQueryAsync();
+    }
+
+    private async Task RemoveFilterAsync(FilterModel filter)
+    {
+        _filters.Remove(filter);
+        await RunQueryAsync();
+    }
+
+    private async Task SortAsync(string? fieldId)
+    {
+        _descending = _sortFieldId == fieldId && !_descending;
+        _sortFieldId = fieldId;
+        await RunQueryAsync();
+    }
+
+    private string SortMark(string? fieldId) => _sortFieldId == fieldId ? (_descending ? " ↓" : " ↑") : string.Empty;
+
+    private void Edit(SentinelPageTypeView? type)
+    {
+        _message = null;
+        _editing = type is null
+            ? new TypeModel { Icon = "🏷️" }
+            : new TypeModel
+            {
+                Id = type.Id, Name = type.Name, Icon = type.Icon, Description = type.Description,
+                Fields = type.Fields.Select(f => new FieldModel { Id = f.Id, Name = f.Name, Kind = f.Kind, Options = string.Join(", ", f.Options) }).ToList()
+            };
+    }
+
+    private void AddField() => _editing!.Fields.Add(new FieldModel { Name = $"Field {_editing.Fields.Count + 1}" });
+
+    private async Task SaveTypeAsync()
+    {
+        if (_editing is null) return;
+        _busy = true;
+        _message = null;
+        try
+        {
+            var saved = await PageTypes.SaveTypeAsync(new SentinelPageTypeEditor(_editing.Id, _editing.Name, _editing.Icon, _editing.Description,
+                _editing.Fields.Select(f => new SentinelTypeField(f.Id ?? string.Empty, f.Name, f.Kind,
+                    (f.Options ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))).ToList()),
+                await CurrentUserAccessor.GetCurrentUsernameAsync());
+            _editing = null;
+            _types = await PageTypes.ListTypesAsync(await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await OnTypesChanged.InvokeAsync();
+            await SelectAsync(_types.First(t => t.Id == saved.Id));
+        }
+        catch (ArgumentException ex) { _message = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteTypeAsync(Guid id)
+    {
+        _busy = true;
+        _message = null;
+        try
+        {
+            await PageTypes.DeleteTypeAsync(id, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            _editing = null;
+            _selected = null;
+            _types = await PageTypes.ListTypesAsync(await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await OnTypesChanged.InvokeAsync();
+        }
+        catch (ArgumentException ex) { _message = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private sealed class TypeModel
+    {
+        public Guid? Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Icon { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public List<FieldModel> Fields { get; set; } = [];
+    }
+
+    private sealed class FieldModel
+    {
+        public string? Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string Kind { get; set; } = SentinelPageTypes.Kinds.Text;
+        public string? Options { get; set; }
+    }
+
+    private sealed class FilterModel
+    {
+        public string FieldId { get; set; } = string.Empty;
+        public string Operator { get; set; } = SentinelPageTypes.Operators.Contains;
+        public string? Value { get; set; }
+    }
+}

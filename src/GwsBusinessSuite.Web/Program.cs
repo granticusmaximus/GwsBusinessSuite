@@ -1234,6 +1234,22 @@ app.MapPost("/api/sentinel/clip", async (
     .AllowAnonymous()
     .RequireRateLimiting("sentinel-clip");
 
+// Offline reading (Sentinel item 12): read-only copies of the pages this person keeps offline,
+// for the Mac app to store and show when the server can't be reached.
+app.MapGet("/admin/api/native/offline-pages", async (
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelOfflineService offline,
+    CancellationToken cancellationToken) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    var username = httpContext.User.Identity?.Name;
+    if (string.IsNullOrEmpty(username)) return Results.Unauthorized();
+    var copies = await offline.GetCopiesAsync(username, cancellationToken);
+    return Results.Json(copies.Select(copy => new { id = copy.Id, title = copy.Title, icon = copy.Icon, updatedAtUnix = copy.UpdatedAtUnix, html = copy.Html }));
+})
+    .RequireAuthorization("ContentAccess");
+
 // Meeting notes (Sentinel item 28): the bookings and contacts a Mac note can be linked to.
 app.MapGet("/admin/api/native/meeting-targets", async (
     string? q,

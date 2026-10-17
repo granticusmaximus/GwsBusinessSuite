@@ -28,11 +28,14 @@
 @inject ISentinelAiService SentinelAiService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject SentinelCursorTracker CursorTracker
+@inject SentinelCollaborationNotifier CollaborationNotifier
+@inject IConfiguration Configuration
 @inject IJSRuntime JS
 @inject NavigationManager Navigator
 @inject ILogger<Wiki> Logger
 @inject ISentinelLiveBlockService LiveBlockService
 @inject ISentinelSuggestionService SuggestionService
+@inject ISentinelOfflineService OfflineService
 
 <PageTitle>Sentinel</PageTitle>
 
@@ -48,6 +51,11 @@
 @if (_emailInOpen && _isAdmin)
 {
     <SentinelEmailInPanel OnOpenPage="OpenAskedPageAsync" OnClose="() => _emailInOpen = false" />
+}
+@if (_typesOpen)
+{
+    <SentinelTypesPanel InitialTypeId="_typesInitial" OnOpenPage="OpenAskedPageAsync" OnClose="() => _typesOpen = false"
+                        OnTypesChanged="() => _typesGeneration++" />
 }
 @if (_clipperOpen)
 {
@@ -151,6 +159,10 @@
         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenInsightsForTag(null)"
                 title="Tags, most and never read pages, and questions the workspace couldn't answer">
             <i class="bi bi-bar-chart-line me-1"></i>Insights
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary sentinel-types-toggle" @onclick="() => OpenTypesPanel(null)"
+                title="Page types: give pages fields, and list and filter every page of a type">
+            <i class="bi bi-tags me-1"></i>Types
         </button>
         <button type="button" class="btn btn-sm btn-outline-secondary sentinel-clipper-toggle" @onclick="() => _clipperOpen = !_clipperOpen"
                 aria-expanded="@(_clipperOpen ? "true" : "false")" title="Clip web pages into Sentinel from Chrome, Edge or Safari">
@@ -835,6 +847,11 @@
                                 <i class="bi bi-three-dots"></i>
                             </button>
                             <div class="dropdown-menu dropdown-menu-end sentinel-style-menu">
+                                <button type="button" class="dropdown-item d-flex align-items-center gap-2" @onclick="ToggleKeepOfflineAsync" disabled="@IsBusy"
+                                        aria-pressed="@(_keptOffline ? "true" : "false")">
+                                    <i class="bi @(_keptOffline ? "bi-cloud-check-fill" : "bi-cloud-download")"></i>
+                                    <span>@(_keptOffline ? "Kept offline in the Mac app" : "Keep offline in the Mac app")<small class="d-block text-secondary">@(_keptOffline ? "Click to stop keeping a copy" : "Readable in the Mac app's Offline tab without a connection")</small></span>
+                                </button>
                                 <button type="button" class="dropdown-item d-flex align-items-center gap-2" @onclick="OpenCleanupAsync" disabled="@IsBusy">
                                     <i class="bi bi-magic"></i>
                                     <span>Clean up this note<small class="d-block text-secondary">Headings, bullets and to-dos, previewed first</small></span>
@@ -955,6 +972,10 @@
                     @if (SelectedPageId is { } tagsPageId)
                     {
                         <SentinelPageTags WikiPageId="tagsPageId" OnTagClicked="OpenInsightsForTag" />
+                    }
+                    @if (SelectedPageId is { } typesPageId)
+                    {
+                        <SentinelPageTypesBar WikiPageId="typesPageId" CanEdit="_canEditPage" Generation="_typesGeneration" OnOpenType="OpenTypesPanel" />
                     }
 
                     @if (_showIconPicker)
@@ -1926,6 +1947,42 @@
     private bool _insightsOpen;
     // Web clipper tokens (Sentinel item 8).
     private bool _clipperOpen;
+    // Page types (Sentinel item 11).
+    private bool _typesOpen;
+    private Guid? _typesInitial;
+    private int _typesGeneration;
+
+    // Offline reading (Sentinel item 12): whether this page is kept offline for the Mac app.
+    private bool _keptOffline;
+    private Guid? _keptOfflineLoadedFor;
+
+    private async Task RefreshKeptOfflineAsync()
+    {
+        if (SelectedPageId == _keptOfflineLoadedFor) return;
+        _keptOfflineLoadedFor = SelectedPageId;
+        _keptOffline = SelectedPageId is { } pageId && await OfflineService.IsKeptOfflineAsync(pageId, await CurrentUserNameAsync());
+    }
+
+    private async Task ToggleKeepOfflineAsync()
+    {
+        if (SelectedPageId is not { } pageId) return;
+        try
+        {
+            await OfflineService.SetKeptOfflineAsync(pageId, await CurrentUserNameAsync(), !_keptOffline);
+            _keptOffline = !_keptOffline;
+            StatusMessage = _keptOffline ? "Kept offline - the Mac app picks it up next time it syncs." : "No longer kept offline.";
+        }
+        catch (ArgumentException ex)
+        {
+            ErrorMessage = ex.Message;
+        }
+    }
+
+    private void OpenTypesPanel(Guid? typeId)
+    {
+        _typesInitial = typeId;
+        _typesOpen = true;
+    }
     // Email into Sentinel (item 29), admins only.
     private bool _emailInOpen;
     private string? _insightsTag;
@@ -2281,8 +2338,17 @@
         try
         {
             var user = await CurrentUserNameAsync();
+            // What this save sends, and the version it expects - SavePageAsync merges in place
+            // when someone else saved in between (see the reconcile step below).
+            var sentBlocksJson = Editor.BlocksJson;
+            var expectedVersion = Editor.ExpectedContentVersion;
             var saved = await WikiService.SavePageAsync(Editor, user, createRevisionCheckpoint: false, cancellationToken: cancellationToken);
             if (cancellationToken.IsCancellationRequested) return;
+            // The server merged another save into this one (the version moved by more than one):
+            // bring that person's blocks into the editor too. Without this the editor kept showing
+            // only its own version, and its next save quietly undid the other person's change.
+            var saveAgain = !wasNew && saved.ContentVersion > expectedVersion + 1
+                && await ReconcileMergedSaveAsync(sentBlocksJson ?? "[]", saved.BlocksJson);
 
             Editor.WikiPageId = saved.Id;
             Editor.ExpectedContentVersion = saved.ContentVersion;
@@ -2290,6 +2356,10 @@
             Editor.Slug = saved.Slug;
             _hasUnsavedAutosaveChanges = false;
             _autosaveStatus = "Saved";
+            RememberServerMeta(saved.Title, saved.Icon, saved.CoverImageUrl);
+            PublishLiveSave(saved, user);
+            // Typed here while that save was in flight: save it on top.
+            if (saveAgain) ScheduleAutosave();
 
             // Keep the sidebar/breadcrumb title in step with an autosaved title edit, without
             // reloading the whole tree on every debounced save.
@@ -2689,6 +2759,7 @@
             _isAdmin = authState.User.IsInRole(AppRoles.Admin);
         }
         CursorTracker.Moved += HandleCursorsMoved;
+        CollaborationNotifier.ContentSaved += HandleContentSaved;
         await LoadTreeAsync(selectFirstPage: false);
         await LoadWorkspaceNavigationAsync();
         await RestoreLastOpenedItemAsync();
@@ -2718,6 +2789,112 @@
         if (SelectedPageId is { } wikiPageId && Guid.TryParse(blockId, out var parsedBlockId))
         {
             CursorTracker.Move(wikiPageId, CurrentUsername, parsedBlockId, start, end);
+        }
+    }
+
+    // ---- Live co-editing (Sentinel item 9) ----------------------------------------------------
+    // Each open editor publishes its saves; every other editor on the same page takes them in at
+    // block level (SentinelLiveEditing) instead of finding out at its own next save. Process-local
+    // like the rest of the collaboration fan-out. Turn off with Sentinel:LiveCoEditing=false.
+    private readonly Guid _liveSessionId = Guid.NewGuid();
+    private string? _serverTitle;
+    private string? _serverIcon;
+    private string? _serverCover;
+    private bool LiveCoEditingEnabled => Configuration.GetValue("Sentinel:LiveCoEditing", true);
+
+    private void RememberServerMeta(string? title, string? icon, string? cover)
+    {
+        _serverTitle = title ?? string.Empty;
+        _serverIcon = icon;
+        _serverCover = cover;
+    }
+
+    private void PublishLiveSave(WikiPage saved, string user)
+    {
+        if (LiveCoEditingEnabled) CollaborationNotifier.PublishContentSaved(saved.Id, saved.ContentVersion, _liveSessionId, user);
+    }
+
+    // After a save the server merged with someone else's: apply their part to the editor, keeping
+    // anything typed here since the save was sent (it's saved on the next autosave).
+    // Returns true when the editor still has changes of its own to save.
+    private async Task<bool> ReconcileMergedSaveAsync(string sentBlocksJson, string savedBlocksJson)
+    {
+        if (!_blockEditorInitialized || _blockEditorModule is null) return false;
+        try
+        {
+            var local = await _blockEditorModule.InvokeAsync<string>("getBlocksJson", _blockEditorContainer);
+            var plan = SentinelLiveEditing.PlanRemoteApply(sentBlocksJson, local, savedBlocksJson);
+            if (!plan.Apply) return false;
+            var applied = await _blockEditorModule.InvokeAsync<bool>("applyRemoteBlocks",
+                _blockEditorContainer, plan.MergedJson, plan.ChangedBlockIds.Select(id => id.ToString()).ToArray(), plan.NoLocalChanges);
+            if (!applied) return !plan.NoLocalChanges;
+            Editor.BlocksJson = plan.MergedJson;
+            return !plan.NoLocalChanges;
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException)
+        {
+            Logger.LogDebug(ex, "Reconciling a merged save of Sentinel page {WikiPageId} was skipped.", Editor.WikiPageId);
+            return false;
+        }
+    }
+
+    private void HandleContentSaved(SentinelContentSaved change)
+    {
+        if (change.EditorSessionId == _liveSessionId || change.WikiPageId != Editor.WikiPageId || !LiveCoEditingEnabled) return;
+        _ = InvokeAsync(() => ApplyRemoteSaveAsync(change));
+    }
+
+    private async Task ApplyRemoteSaveAsync(SentinelContentSaved change)
+    {
+        if (_suggesting || PageConflict is not null || Editor.WikiPageId != change.WikiPageId
+            || change.ContentVersion <= Editor.ExpectedContentVersion || !_blockEditorInitialized || _blockEditorModule is null) return;
+        try
+        {
+            await _saveLock.WaitAsync(_disposeCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        try
+        {
+            var page = await WikiService.GetPageAsync(change.WikiPageId);
+            if (page is null || page.TrashedAt is not null || Editor.WikiPageId != page.Id || page.ContentVersion <= Editor.ExpectedContentVersion) return;
+            var local = await CaptureEditorBlocksAsync();
+            var plan = SentinelLiveEditing.PlanRemoteApply(Editor.BaseBlocksJson ?? "[]", local, page.BlocksJson);
+            // The same block changed here and there: leave it for the next save to report as a
+            // conflict rather than choose a side.
+            if (!plan.Apply) return;
+            var applied = await _blockEditorModule.InvokeAsync<bool>("applyRemoteBlocks",
+                _blockEditorContainer, plan.MergedJson, plan.ChangedBlockIds.Select(id => id.ToString()).ToArray(), plan.NoLocalChanges);
+            if (!applied) return;
+
+            Editor.BlocksJson = plan.MergedJson;
+            Editor.BaseBlocksJson = page.BlocksJson;
+            Editor.ExpectedContentVersion = page.ContentVersion;
+            // Title, icon and cover follow the other person's change unless they were also
+            // changed here (then this editor's next save wins, as before).
+            var titleChanged = false;
+            if (string.Equals(Editor.Title ?? string.Empty, _serverTitle, StringComparison.Ordinal) && Editor.Title != page.Title)
+            {
+                Editor.Title = page.Title;
+                titleChanged = true;
+            }
+            if (string.Equals(Editor.Icon, _serverIcon, StringComparison.Ordinal)) Editor.Icon = page.Icon;
+            if (string.Equals(Editor.CoverImageUrl, _serverCover, StringComparison.Ordinal)) Editor.CoverImageUrl = page.CoverImageUrl;
+            RememberServerMeta(page.Title, page.Icon, page.CoverImageUrl);
+            if (titleChanged) RefreshRenderedTitle();
+            if (!plan.NoLocalChanges) ScheduleAutosave();
+            _autosaveStatus = $"Updated with {change.Actor}'s changes";
+            StateHasChanged();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or InvalidOperationException)
+        {
+            Logger.LogDebug(ex, "Applying a live change to Sentinel page {WikiPageId} was skipped.", change.WikiPageId);
+        }
+        finally
+        {
+            _saveLock.Release();
         }
     }
 
@@ -2784,6 +2961,9 @@
                 _titleSnapshotEditor = Editor;
                 _titleSnapshot = Editor.Title ?? string.Empty;
                 _titleSnapshotVersion++;
+                // A newly loaded Editor holds the page as the server has it (live co-editing
+                // compares against this to tell a local title/icon edit from a stale value).
+                RememberServerMeta(Editor.Title, Editor.Icon, Editor.CoverImageUrl);
             }
 
             return _titleSnapshotVersion;
@@ -2801,6 +2981,11 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (SelectedPageId != _keptOfflineLoadedFor)
+        {
+            await RefreshKeptOfflineAsync();
+            StateHasChanged();
+        }
         // Fill the title box when a different page has been loaded (see the textarea's comment).
         if (_titleAppliedVersion != _titleSnapshotVersion && _titleInput.Context is not null)
         {
@@ -3353,7 +3538,7 @@
 
     // Whiteboard pages (Sentinel item 10): a page whose only block is a canvas fills the page.
     private Task NewWhiteboardAsync() => CreateAndOpenPageAsync(
-        "Whiteboard", WikiBlockJson.Serialize([SentinelCanvas.NewBlock()]), "⬚", "Unable to create the whiteboard.");
+        "Whiteboard", WikiBlockJson.Serialize([SentinelCanvas.NewBlock()]), "⬚", "Unable to create the whiteboard.", isFullWidth: true);
 
     // Cached per BlocksJson instance: a board can be large and this is read on every render.
     private string? _canvasCheckedJson;
@@ -3373,7 +3558,7 @@
         }
     }
 
-    private async Task CreateAndOpenPageAsync(string title, string? blocksJson, string? icon, string failureMessage)
+    private async Task CreateAndOpenPageAsync(string title, string? blocksJson, string? icon, string failureMessage, bool isFullWidth = false)
     {
         await FlushAutosaveAsync();
         if (PageConflict is not null) return;
@@ -3388,6 +3573,7 @@
             var editor = new WikiPageEditorModel { Title = title };
             if (blocksJson is not null) editor.BlocksJson = blocksJson;
             if (icon is not null) editor.Icon = icon;
+            editor.IsFullWidth = isFullWidth;
             var saved = await WikiService.SavePageAsync(editor, user);
             createdId = saved.Id;
             await LoadTreeAsync(selectFirstPage: false);
@@ -3779,6 +3965,7 @@
             await CaptureEditorBlocksAsync();
             var user = await CurrentUserNameAsync();
             var saved = await WikiService.SavePageAsync(Editor, user);
+            PublishLiveSave(saved, user);
             SelectedPageId = saved.Id;
             Editor = new WikiPageEditorModel
             {
@@ -4643,6 +4830,7 @@
         }
 
         CursorTracker.Moved -= HandleCursorsMoved;
+        CollaborationNotifier.ContentSaved -= HandleContentSaved;
         LeaveCursorTracking();
         await _disposeCts.CancelAsync();
 

@@ -5776,8 +5776,25 @@ a.wiki-live-title:hover { text-decoration: underline; }
 .sentinel-canvas .sc-handle { fill: var(--bs-primary, #f59e0b); cursor: nwse-resize; }
 .sentinel-canvas .sc-marquee { fill: rgba(245, 158, 11, .08); stroke: var(--bs-primary, #f59e0b); stroke-width: 1; vector-effect: non-scaling-stroke; }
 /* A page whose only block is a whiteboard fills the editor area. */
-.sentinel-workspace.is-canvas-page .sentinel-editor-hint, .sentinel-workspace.is-canvas-page .sentinel-reading-stats { display: none; }
-.sentinel-workspace.is-canvas-page .wiki-canvas-host { height: max(28rem, calc(100vh - 16rem)); }
+/* Only the title stays above the board, and the board fits the window: a full-page board takes
+   the scroll wheel for panning, so anything below the fold would be hard to reach. */
+.sentinel-workspace.is-canvas-page .sentinel-editor-hint, .sentinel-workspace.is-canvas-page .sentinel-reading-stats,
+.sentinel-workspace.is-canvas-page .sentinel-page-aliases, .sentinel-workspace.is-canvas-page .sentinel-page-types,
+.sentinel-workspace.is-canvas-page .sentinel-ai-panel, .sentinel-workspace.is-canvas-page .sentinel-page-properties { display: none; }
+.sentinel-workspace.is-canvas-page .wiki-canvas-host { height: max(24rem, calc(100dvh - 23rem)); }
 /* Read-only renders (public shares, presentations). */
 .wiki-canvas-static { position: relative; height: 520px; margin: 1rem 0; border: 1px solid rgba(127, 127, 127, .25); border-radius: .6rem; overflow: hidden; }
 .wiki-canvas-static .wiki-canvas-fallback { padding: 1rem 1.5rem; }
+
+/* Typed pages (Sentinel item 11). */
+.sentinel-page-types { display: grid; gap: .5rem; margin: .25rem 0 .75rem; }
+.sentinel-page-type { border: 1px solid var(--sentinel-border, rgba(214, 211, 209, .12)); border-radius: .5rem; padding: .5rem .7rem; }
+.sentinel-page-type-head { display: flex; align-items: center; margin-bottom: .35rem; }
+.sentinel-page-type-fields { display: grid; grid-template-columns: minmax(6rem, 10rem) minmax(0, 1fr); gap: .3rem .6rem; align-items: center; }
+.sentinel-page-type-label { margin: 0; font-size: .85rem; color: var(--sentinel-muted, #a8a29e); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sentinel-page-types-add { max-width: 16rem; }
+.sentinel-types-panel { width: min(46rem, calc(100vw - 2rem)); }
+.sentinel-types-field-row, .sentinel-types-filter { display: grid; grid-template-columns: minmax(0, 1fr) minmax(6rem, 9rem) auto; gap: .35rem; }
+.sentinel-types-filter { grid-template-columns: minmax(0, 1fr) minmax(0, 8rem) minmax(0, 1fr) auto; }
+.sentinel-types-options { grid-column: 1 / -1; }
+.sentinel-types-table { max-height: 55vh; overflow: auto; }

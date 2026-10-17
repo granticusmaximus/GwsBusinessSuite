@@ -875,6 +875,33 @@ public sealed class SentinelInboundEmail : AuditableEntity
     public long ProcessedAtUnix { get; set; }
 }
 
+// Typed pages (Sentinel item 11, "supertags"): a page type defines fields; any page given the
+// type gains those fields, and the type lists its pages like a database. FieldsJson holds the
+// field definitions (SentinelPageTypes), validated on save.
+public sealed class SentinelPageType : AuditableEntity
+{
+    public required string Name { get; set; }
+    public required string NormalizedName { get; set; }
+    public string Icon { get; set; } = "🏷️";
+    public string Description { get; set; } = string.Empty;
+    public string FieldsJson { get; set; } = "[]";
+}
+
+// A page having a type, with its values for that type's fields (field id -> normalized value).
+public sealed class SentinelPageTypeAssignment : AuditableEntity
+{
+    public Guid WikiPageId { get; set; }
+    public Guid PageTypeId { get; set; }
+    public string ValuesJson { get; set; } = "{}";
+}
+
+// Pages a user keeps a copy of in the Mac app for reading offline (Sentinel item 12).
+public sealed class SentinelOfflinePage : AuditableEntity
+{
+    public required string Username { get; set; }
+    public Guid WikiPageId { get; set; }
+}
+
 public sealed class SentinelNotification : AuditableEntity
 {
     public required string Username { get; set; }

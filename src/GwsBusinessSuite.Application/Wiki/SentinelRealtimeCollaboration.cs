@@ -14,9 +14,63 @@ public sealed record SentinelCollaborationChange(
 public sealed class SentinelCollaborationNotifier(TimeProvider timeProvider)
 {
     public event Action<SentinelCollaborationChange>? Changed;
+    // Live co-editing (Sentinel item 9): a page editor saved new content.
+    public event Action<SentinelContentSaved>? ContentSaved;
 
     public void Publish(Guid wikiPageId, string kind, string actor) =>
         Changed?.Invoke(new SentinelCollaborationChange(wikiPageId, kind, actor, timeProvider.GetUtcNow()));
+
+    public void PublishContentSaved(Guid wikiPageId, long contentVersion, Guid editorSessionId, string actor) =>
+        ContentSaved?.Invoke(new SentinelContentSaved(wikiPageId, contentVersion, editorSessionId, actor));
+}
+
+public sealed record SentinelContentSaved(Guid WikiPageId, long ContentVersion, Guid EditorSessionId, string Actor);
+
+// Live co-editing (Sentinel item 9): how an open editor takes in a save made elsewhere. Block
+// level, built on the same three-way merge saves already use: blocks only the other person changed
+// come in, blocks only this editor changed stay, and the same block changed on both sides is left
+// for the next save to report as a conflict (the existing banner) - nothing is overwritten
+// silently. Text inside one block isn't merged character by character.
+public static class SentinelLiveEditing
+{
+    public sealed record Plan(bool Apply, string MergedJson, IReadOnlyList<Guid> ChangedBlockIds, bool NoLocalChanges);
+
+    public static Plan PlanRemoteApply(string baseJson, string localJson, string remoteJson)
+    {
+        var local = WikiBlockJson.ParseBlocks(localJson);
+        var noLocalChanges = SameBlocks(WikiBlockJson.ParseBlocks(baseJson), local);
+        string merged;
+        if (noLocalChanges)
+        {
+            merged = remoteJson;
+        }
+        else
+        {
+            var result = WikiBlockMerge.ThreeWayMerge(baseJson, localJson, remoteJson);
+            if (!result.IsSuccess) return new Plan(false, localJson, [], false);
+            merged = result.MergedBlocksJson;
+        }
+        var localById = local.ToDictionary(block => block.Id, Key);
+        var changed = WikiBlockJson.ParseBlocks(merged)
+            .Where(block => !localById.TryGetValue(block.Id, out var localKey) || localKey != Key(block))
+            .Select(block => block.Id).ToList();
+        return new Plan(true, merged, changed, noLocalChanges);
+    }
+
+    private static bool SameBlocks(IReadOnlyList<WikiBlock> left, IReadOnlyList<WikiBlock> right) =>
+        left.Count == right.Count && left.Zip(right).All(pair => pair.First.Id == pair.Second.Id && Key(pair.First) == Key(pair.Second));
+
+    // Whiteboards compare by their cleaned board: the server's normalized copy and the editor's
+    // own differ in formatting only, and replacing the block would reload a board mid-drawing.
+    private static string Key(WikiBlock block)
+    {
+        if (block.Type == WikiBlockTypes.Canvas)
+        {
+            try { block = SentinelCanvas.Normalize(block); }
+            catch (InvalidOperationException) { /* compare as it is */ }
+        }
+        return WikiBlockJson.Serialize([block]);
+    }
 }
 
 public sealed record SentinelPresenceView(

@@ -16,6 +16,29 @@ public sealed record ContactCreateResult(string? Url, string? FullName, string? 
 
 public sealed class NativeSessionClient(HttpClient httpClient)
 {
+    private const string SignInFirst = "Sign in on the Workspace tab first - this uses that session.";
+    private const string SessionExpired = "Your session has expired - sign in again on the Workspace tab, then retry.";
+    private const string Unreachable = "Couldn't reach the server.";
+
+    // Errors that a later retry can fix (offline, or no/expired session) - the Quick Note outbox
+    // keeps a note for these instead of failing it.
+    public static bool IsRetryable(string error) => error is SignInFirst or SessionExpired or Unreachable;
+
+    // Offline reading (Sentinel item 12): copies of the pages this person keeps offline.
+    public async Task<(IReadOnlyList<(OfflinePageEntry Entry, string Html)>? Pages, string? Error)> GetOfflinePagesAsync(CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await GetJsonAsync("/admin/api/native/offline-pages", cancellationToken);
+        if (json is not { ValueKind: JsonValueKind.Array } list) return (null, error ?? "The server sent something unexpected.");
+        var pages = list.EnumerateArray().Select(item => (
+            new OfflinePageEntry(
+                item.GetProperty("id").GetGuid(),
+                item.GetProperty("title").GetString() ?? "Untitled",
+                item.TryGetProperty("icon", out var icon) && icon.ValueKind == JsonValueKind.String ? icon.GetString() : null,
+                item.GetProperty("updatedAtUnix").GetInt64()),
+            item.GetProperty("html").GetString() ?? string.Empty)).ToList();
+        return (pages, null);
+    }
+
     // toDailyNote adds it to today's daily note instead of making a Quick Notes page.
     // contactId/bookingId link the note to a CRM contact or calendar booking (meeting notes); a
     // linked note is always its own page, never added to the daily note.
@@ -77,19 +100,19 @@ public sealed class NativeSessionClient(HttpClient httpClient)
     private async Task<(JsonElement? Json, string? Error)> GetJsonAsync(string path, CancellationToken cancellationToken)
     {
         using var request = await SessionRequestAsync(HttpMethod.Get, path);
-        if (request is null) return (null, "Sign in on the Workspace tab first - this uses that session.");
+        if (request is null) return (null, SignInFirst);
         try
         {
             using var response = await httpClient.SendAsync(request, cancellationToken);
             if (response.Content.Headers.ContentType?.MediaType != "application/json")
-                return (null, "Your session has expired - sign in again on the Workspace tab.");
+                return (null, SessionExpired);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             using var document = JsonDocument.Parse(body);
             return response.IsSuccessStatusCode ? (document.RootElement.Clone(), null) : (null, $"The server said no (HTTP {(int)response.StatusCode}).");
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
-            return (null, "Couldn't reach the server.");
+            return (null, Unreachable);
         }
     }
 
@@ -108,7 +131,7 @@ public sealed class NativeSessionClient(HttpClient httpClient)
     {
         var cookieHeader = await GetSessionCookieHeaderAsync();
         if (string.IsNullOrEmpty(cookieHeader))
-            return (null, "Sign in on the Workspace tab first - this uses that session.");
+            return (null, SignInFirst);
 
         using var request = new HttpRequestMessage(HttpMethod.Post, AppEndpoints.BaseUrl + path)
         {
@@ -122,7 +145,7 @@ public sealed class NativeSessionClient(HttpClient httpClient)
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             // An expired session redirects to the sign-in page, which answers 200 with HTML.
             if (response.Content.Headers.ContentType?.MediaType != "application/json")
-                return (null, "Your session has expired - sign in again on the Workspace tab, then retry.");
+                return (null, SessionExpired);
             using var document = JsonDocument.Parse(body);
             var root = document.RootElement.Clone();
             if (!response.IsSuccessStatusCode)
@@ -133,7 +156,7 @@ public sealed class NativeSessionClient(HttpClient httpClient)
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException or InvalidOperationException)
         {
-            return (null, "Couldn't reach the server.");
+            return (null, Unreachable);
         }
     }
 

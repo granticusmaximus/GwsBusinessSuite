@@ -4,9 +4,19 @@ namespace GwsBusinessSuite.App;
 
 public partial class App : Application
 {
-	public App()
+	private readonly OfflineSyncService _offlineSync;
+
+	public App(OfflineSyncService offlineSync)
 	{
 		InitializeComponent();
+		_offlineSync = offlineSync;
+	}
+
+	protected override void OnStart()
+	{
+		base.OnStart();
+		// Sends waiting Quick Notes and refreshes offline page copies (Sentinel item 12).
+		_offlineSync.Start();
 	}
 
 	protected override Window CreateWindow(IActivationState? activationState)

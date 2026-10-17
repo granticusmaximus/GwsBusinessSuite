@@ -346,6 +346,77 @@ function renderBlocks(container, state, blocksJson) {
     refreshBlockPresentation(container);
 }
 
+// Live co-editing (Sentinel item 9): another person's save, already merged with this editor's
+// own unsaved changes on the server side (Wiki.razor ApplyRemoteSaveAsync). Only the blocks in
+// changedIds are re-created; every other block keeps its element, so typing, the caret and
+// in-block state elsewhere are untouched. A replaced block that had the caret gets it back at the
+// same text position. The result is not reported back as a local edit (no save echo), but it is
+// a new undo baseline (see below). noLocalChanges: the editor now matches the server, so it's the new base
+// for the crash-recovery draft too.
+export function applyRemoteBlocks(container, blocksJson, changedIds, noLocalChanges) {
+    const state = states.get(container);
+    if (!state) return false;
+    let blocks;
+    try { blocks = JSON.parse(blocksJson || '[]'); } catch { return false; }
+    if (!Array.isArray(blocks)) return false;
+    const changed = new Set((changedIds || []).map(id => String(id).toLowerCase()));
+    const existing = new Map([...container.querySelectorAll(':scope > .wiki-block')]
+        .map(el => [String(el.dataset.blockId).toLowerCase(), el]));
+    const activeBlock = document.activeElement?.closest?.('.wiki-block');
+    const activeId = activeBlock && container.contains(activeBlock) ? String(activeBlock.dataset.blockId).toLowerCase() : null;
+    let caret = null;
+    if (activeId && changed.has(activeId)) {
+        const content = activeBlock.querySelector('.wiki-block-content');
+        const range = content ? getCaretRange(content) : null;
+        if (range) {
+            const before = document.createRange();
+            before.selectNodeContents(content);
+            before.setEnd(range.startContainer, range.startOffset);
+            caret = before.toString().length;
+        }
+    }
+
+    state.blockDragSelect = null;
+    state.blockSelection = null;
+    const ordered = [];
+    for (const block of blocks) {
+        const id = String(block.id).toLowerCase();
+        const current = existing.get(id);
+        if (current && !changed.has(id)) {
+            ordered.push(current);
+            existing.delete(id); // kept - everything left in existing is removed below
+        } else {
+            ordered.push(createBlockElement(block, state));
+        }
+    }
+    // Put the elements in the merged order, moving only what's out of place (moving the focused
+    // element would blur it).
+    let cursor = container.firstElementChild;
+    for (const el of ordered) {
+        if (el === cursor) { cursor = cursor.nextElementSibling; continue; }
+        container.insertBefore(el, cursor);
+    }
+    for (const leftover of existing.values()) leftover.remove();
+    refreshBlockPresentation(container);
+
+    if (caret !== null) {
+        const content = container.querySelector(`:scope > .wiki-block[data-block-id="${CSS.escape(activeBlock.dataset.blockId)}"] .wiki-block-content`);
+        if (content) {
+            try { placeCaretAtTextOffset(content, Math.min(caret, content.textContent.length)); } catch { /* caret is best-effort */ }
+        }
+    }
+    const snapshot = getBlocksJson(container);
+    state.lastSnapshot = snapshot;
+    if (noLocalChanges) state.baseSnapshot = snapshot;
+    // Undo steps are whole-page snapshots: undoing past this point would quietly revert the
+    // other person's changes and save that over them, so history starts again here.
+    state.undoStack = [];
+    state.redoStack = [];
+    persistHistory(state);
+    persistDraft(state, snapshot);
+    return true;
+}
+
 export function getBlocksJson(container) {
     return JSON.stringify(
         [...container.querySelectorAll(':scope > .wiki-block')].map(serializeBlock));
