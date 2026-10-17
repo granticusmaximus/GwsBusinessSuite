@@ -89,4 +89,12 @@
 		<Exec Command="xattr -cr '$(AppBundleDir)'" />
 	</Target>
 
+	<!-- "Check for Updates..." (AppUpdater): where this build's source lives, so an installed copy
+	     can rebuild itself from it (scripts/install-gws-mac.sh). Mac only; harmless elsewhere. -->
+	<ItemGroup Condition="'$(TargetFramework)' == 'net10.0-maccatalyst'">
+		<AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+			<_Parameter1>GwsSourceRoot</_Parameter1>
+			<_Parameter2>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../..'))</_Parameter2>
+		</AssemblyAttribute>
+	</ItemGroup>
 </Project>

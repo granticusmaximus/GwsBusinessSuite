@@ -119,6 +119,7 @@ public class AppDelegate : NSApplicationDelegate
         }
         menu.AddItem(CreateItem("Refresh Now", () => _ = RefreshAsync(), "r"));
         menu.AddItem(NSMenuItem.SeparatorItem);
+        menu.AddItem(CreateItem("Open GWS Business Suite", OpenMacApp, "o"));
         menu.AddItem(CreateItem("Open Sentinel", OpenSentinel));
         menu.AddItem(CreateItem("Open Dashboard", OpenDashboard));
         menu.AddItem(NSMenuItem.SeparatorItem);
@@ -173,6 +174,20 @@ public class AppDelegate : NSApplicationDelegate
         var item = new NSMenuItem(title) { KeyEquivalent = keyEquivalent };
         item.Activated += (_, _) => action();
         return item;
+    }
+
+    // The installed Mac app (scripts/install-gws-mac.sh); the browser when it isn't installed.
+    private static void OpenMacApp()
+    {
+        var appUrl = NSWorkspace.SharedWorkspace.UrlForApplication("net.gwsapp.businesssuite");
+        if (appUrl is null)
+        {
+            OpenUrl(BaseUrl);
+            return;
+        }
+        var configuration = NSWorkspaceOpenConfiguration.Create();
+        configuration.Activates = true;
+        NSWorkspace.SharedWorkspace.OpenApplication(appUrl, configuration, (_, _) => { });
     }
 
     private static void OpenSentinel() => OpenUrl(SentinelUrl);

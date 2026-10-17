@@ -1,4 +1,6 @@
-﻿using Foundation;
+using Foundation;
+using ObjCRuntime;
+using UIKit;
 
 namespace GwsBusinessSuite.App;
 
@@ -6,4 +8,41 @@ namespace GwsBusinessSuite.App;
 public class AppDelegate : MauiUIApplicationDelegate
 {
 	protected override MauiApp CreateMauiApp() => MauiProgram.CreateMauiApp();
+
+	// "GWS Business Suite > Check for Updates..." in the Mac menu bar (AppUpdater).
+	public override void BuildMenu(IUIMenuBuilder builder)
+	{
+		base.BuildMenu(builder);
+		if (builder.System != UIMenuSystem.MainSystem) return;
+		var checkForUpdates = UICommand.Create("Check for Updates…", null, new Selector("gwsCheckForUpdates:"), null);
+		builder.InsertSiblingMenuAfter(
+			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [checkForUpdates]),
+			UIMenuIdentifier.About.GetConstant()!);
+	}
+
+	[Export("gwsCheckForUpdates:")]
+	public void CheckForUpdates(NSObject sender) => MainThread.BeginInvokeOnMainThread(async () => await CheckForUpdatesAsync());
+
+	private static async Task CheckForUpdatesAsync()
+	{
+		var page = Microsoft.Maui.Controls.Application.Current?.Windows.FirstOrDefault()?.Page;
+		if (page is null) return;
+		var (available, problem) = await AppUpdater.CheckAsync();
+		if (available is null)
+		{
+			await page.DisplayAlertAsync("Check for Updates", $"Couldn't check for updates: {problem}", "OK");
+			return;
+		}
+		if (available == false)
+		{
+			await page.DisplayAlertAsync("Check for Updates", "GWS Business Suite is up to date.", "OK");
+			return;
+		}
+		var install = await page.DisplayAlertAsync("Update Available",
+			"A newer version is in your source folder. Install it now? The app closes, rebuilds (usually a minute or two) and opens again by itself.",
+			"Install and Reopen", "Later");
+		if (!install) return;
+		if (AppUpdater.StartUpdate() is { } error)
+			await page.DisplayAlertAsync("Check for Updates", $"The update couldn't start: {error}", "OK");
+	}
 }
