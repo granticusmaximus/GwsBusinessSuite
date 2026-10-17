@@ -54,6 +54,7 @@ const BLOCK_TYPES = [
     { type: 'table_of_contents', label: 'Table of contents', icon: '☷', group: 'Advanced & inline blocks', description: 'Auto-generates a list of jump links using your page headings.', keywords: 'outline headings' },
     { type: 'equation', label: 'Block equation', icon: '∑', group: 'Advanced & inline blocks', description: 'Centers standard LaTeX scientific formulas.', keywords: 'math formula latex' },
     { type: 'diagram', label: 'Diagram', icon: '◇', group: 'Advanced & inline blocks', description: 'Flowcharts, sequence diagrams and more, written in Mermaid.', keywords: 'mermaid flowchart sequence chart graph gantt' },
+    { type: 'canvas', label: 'Whiteboard', icon: '⬚', group: 'Advanced & inline blocks', description: 'An infinite board for sticky notes, shapes, arrows, drawing and page cards.', keywords: 'canvas whiteboard board draw sticky miro figjam' },
     { type: 'synced_block', label: 'Synced block', icon: '↻', group: 'Advanced & inline blocks', description: 'Edits here update every duplicated copy of this block.', keywords: 'reusable' },
     { type: 'button', label: 'Button', icon: '▣', group: 'Advanced & inline blocks', description: 'Opens a link or runs an Automation workflow when clicked.', keywords: 'action link automation workflow' },
     { type: '__mention_person', label: 'Mention a person', icon: '@', group: 'Advanced & inline blocks', description: 'Inline flag for a coworker.', keywords: 'mention person user' },
@@ -588,6 +589,7 @@ function createBlockElement(block, state) {
     if (block.type === 'to_do' && block.props && block.props.checked === 'true') el.dataset.checked = 'true';
     if (block.type === 'numbered_list_item') el.dataset.number = (block.props && block.props.number) || '';
     if (block.type === 'toggle') el.dataset.open = block.props && block.props.open === 'true' ? 'true' : 'false';
+    if (block.type === 'canvas') el.dataset.canvasRichText = JSON.stringify(block.richText || []);
     if (block.type === 'page_link') {
         el.dataset.pageId = (block.props && block.props.pageId) || '';
         el.dataset.pageTitle = (block.props && block.props.pageTitle) || block.richText?.[0]?.text || 'Untitled';
@@ -759,6 +761,11 @@ function createBlockBody(block, state) {
 
     if (block.type === 'business') {
         body.appendChild(createLiveBlockBody(block, state));
+        return body;
+    }
+
+    if (block.type === 'canvas') {
+        body.appendChild(createCanvasBody(block, state));
         return body;
     }
 
@@ -3008,6 +3015,10 @@ function commitBlockPickerItem(state, blockEl, item) {
         if (content) openMentionPersonPicker(state, content);
         return;
     }
+    if (item.type === 'canvas') {
+        convertToCanvas(state, blockEl);
+        return;
+    }
     if (item.type.startsWith('__live_')) {
         convertToLiveBlock(state, blockEl, item.type.slice('__live_'.length));
         return;
@@ -3018,6 +3029,63 @@ function commitBlockPickerItem(state, blockEl, item) {
         return;
     }
     convertBlockType(state, blockEl, item.type);
+}
+
+function convertToCanvas(state, blockEl) {
+    const block = serializeBlock(blockEl);
+    block.type = 'canvas';
+    block.richText = [];
+    block.props = { doc: JSON.stringify({ v: 1, items: [], view: { x: 0, y: 0, zoom: 1 } }) };
+    const created = createBlockElement(block, state);
+    blockEl.replaceWith(created);
+    refreshBlockPresentation(state.container);
+    notifyChanged(state);
+}
+
+// Whiteboard blocks (Sentinel item 10). The board itself lives in sentinel-canvas.js, loaded the
+// first time a page has one; the editor keeps the doc in the block's props and the board's words
+// as its rich text (search, tags, backlinks). A page whose only block is a whiteboard fills the
+// page (Wiki.razor's is-canvas-page).
+function createCanvasBody(block, state) {
+    const host = document.createElement('div');
+    host.className = 'wiki-canvas-host';
+    host.contentEditable = 'false';
+    const props = block.props || {};
+    const height = parseInt(props.height, 10);
+    if (height >= 200 && height <= 4000) host.style.height = `${height}px`;
+    const loading = document.createElement('div');
+    loading.className = 'wiki-canvas-loading';
+    loading.textContent = 'Loading whiteboard…';
+    host.appendChild(loading);
+    const call = (method, ...args) => {
+        try { return state.dotNetRef.invokeMethodAsync(method, ...args); }
+        catch (error) { return Promise.reject(error); }
+    };
+    import('./sentinel-canvas.js?v=1').then(module => {
+        const pageMode = !!host.closest('.is-canvas-page');
+        host.__canvas = module.mountCanvas(host, {
+            doc: props.doc,
+            pageMode,
+            onChange: (docJson, richText) => {
+                const blockEl = host.closest('.wiki-block');
+                if (!blockEl) return;
+                let stored = {};
+                try { stored = JSON.parse(blockEl.dataset.propsJson || '{}'); } catch { stored = {}; }
+                stored.doc = docJson;
+                blockEl.dataset.propsJson = JSON.stringify(stored);
+                blockEl.dataset.canvasRichText = JSON.stringify(richText);
+                notifyChanged(state);
+            },
+            // Each of these may be missing where the editor is hosted (e.g. the side pane): the
+            // board then shows stored card titles and an empty search.
+            pagePreview: id => call('GetWikiPagePreview', id),
+            searchPages: query => call('SearchWikiLinkSuggestions', query),
+            openPage: id => call('OpenWikiPageToTheSide', id).catch(() => call('NavigateToWikiPageId', id))
+        });
+    }).catch(() => {
+        loading.textContent = "The whiteboard couldn't load - reload the page to try again.";
+    });
+    return host;
 }
 
 function convertToLiveBlock(state, blockEl, kind) {
@@ -4355,6 +4423,11 @@ function serializeBlock(blockEl) {
         props.number = marker.replace(/\D/g, '') || '1';
     }
     if (type === 'toggle') props.open = blockEl.dataset.open === 'true' ? 'true' : 'false';
+    if (type === 'canvas') {
+        let canvasText = [];
+        try { canvasText = JSON.parse(blockEl.dataset.canvasRichText || '[]'); } catch { canvasText = []; }
+        return { id: blockEl.dataset.blockId, type, indentLevel: Number(blockEl.dataset.indent || 0), richText: canvasText, props };
+    }
     if (type === 'table') props.tableJson = JSON.stringify(serializeTableRichText(blockEl));
     if (type === 'columns') {
         const columns = [...blockEl.querySelectorAll(':scope > .wiki-block-body .wiki-column-blocks')];

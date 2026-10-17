@@ -25,6 +25,18 @@ window.wikiRichContentHydrate = function (root) {
         });
     }
 
+    // Whiteboards (Sentinel item 10): drawn read-only from the doc the server rendered.
+    var boards = scope.querySelectorAll('.wiki-canvas-static:not([data-canvas-mounted])');
+    if (boards.length) {
+        import(new URL('js/sentinel-canvas.js?v=1', document.baseURI).href).then(function (module) {
+            boards.forEach(function (el) {
+                el.setAttribute('data-canvas-mounted', 'true');
+                try { module.mountCanvas(el, { doc: el.getAttribute('data-canvas-doc') || '', readOnly: true }); }
+                catch { /* the text list already in the element stays as the fallback */ }
+            });
+        }).catch(function () { /* fallback text stays */ });
+    }
+
     if (window.hljs) {
         scope.querySelectorAll('code.wiki-code-hydrate').forEach(function (el) {
             try {

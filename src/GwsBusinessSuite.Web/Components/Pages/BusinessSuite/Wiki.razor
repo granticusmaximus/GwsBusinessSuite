@@ -36,7 +36,7 @@
 
 <PageTitle>Sentinel</PageTitle>
 
-<div class="sentinel-workspace @(_focusMode ? "is-focus" : string.Empty)">
+<div class="sentinel-workspace @(_focusMode ? "is-focus" : string.Empty) @(IsCanvasPage ? "is-canvas-page" : string.Empty)">
 @if (_cleanupOpen && SelectedPageId is { } cleanupPageId)
 {
     <SentinelCleanupPanel WikiPageId="cleanupPageId" CurrentBlocks="_cleanupBefore" OnApplied="CleanupAppliedAsync" OnClose="() => _cleanupOpen = false" />
@@ -321,6 +321,7 @@
                         </button>
                         <ul class="dropdown-menu">
                             <li><button type="button" class="dropdown-item" @onclick="NewBlankPageAsync">📄 Blank page</button></li>
+                            <li><button type="button" class="dropdown-item" @onclick="NewWhiteboardAsync">⬚ Whiteboard</button></li>
                             <li><hr class="dropdown-divider" /></li>
                             @foreach (var template in SentinelStarterTemplates.All)
                             {
@@ -3349,6 +3350,28 @@
     // when nothing is selected, so the old behavior looked like nothing happened at all, and the
     // page only appeared in the sidebar once autosave first fired. Autosave takes over from here.
     private Task NewBlankPageAsync() => CreateAndOpenPageAsync(string.Empty, null, null, "Unable to create the page.");
+
+    // Whiteboard pages (Sentinel item 10): a page whose only block is a canvas fills the page.
+    private Task NewWhiteboardAsync() => CreateAndOpenPageAsync(
+        "Whiteboard", WikiBlockJson.Serialize([SentinelCanvas.NewBlock()]), "⬚", "Unable to create the whiteboard.");
+
+    // Cached per BlocksJson instance: a board can be large and this is read on every render.
+    private string? _canvasCheckedJson;
+    private bool _canvasCheckedResult;
+    private bool IsCanvasPage
+    {
+        get
+        {
+            if (SelectedDatabaseId is not null || Editor.BlocksJson is not { } json) return false;
+            if (!ReferenceEquals(json, _canvasCheckedJson))
+            {
+                _canvasCheckedJson = json;
+                _canvasCheckedResult = json.Contains("\"canvas\"", StringComparison.Ordinal)
+                    && SentinelCanvas.IsCanvasPage(WikiBlockJson.ParseBlocks(json));
+            }
+            return _canvasCheckedResult;
+        }
+    }
 
     private async Task CreateAndOpenPageAsync(string title, string? blocksJson, string? icon, string failureMessage)
     {

@@ -1,4 +1,6 @@
-# Sentinel item 10: Whiteboard (Canvas pages), sub-plan (DRAFT, needs Grant's review)
+# Sentinel item 10: Whiteboard (Canvas pages), sub-plan - BUILT 2026-10-16
+
+**Built 2026-10-16** (Grant: "complete both"). One deliberate deviation: no `PageKind` column - the board is a `canvas` block and a page whose only block is a canvas is a whiteboard page. See the master plan's progress log for what shipped and what was left for later.
 
 Parent: `sentinel-best-in-class-2026-10.md`, Phase 4 item 10. This sub-plan has to be reviewed
 before any code is written, as that plan requires. Drafted 2026-10-16.
