@@ -142,7 +142,8 @@ public sealed class ClientPortalAuthServiceTests
         }
 
         public Task SendTicketReplyNotificationAsync(
-            string toEmail, string contactName, string ticketSubject, string portalUrl, CancellationToken cancellationToken = default) =>
+            string toEmail, string contactName, string ticketSubject, string portalUrl, CancellationToken cancellationToken = default,
+            TicketReplyEmail? reply = null) =>
             Task.CompletedTask;
     }
 

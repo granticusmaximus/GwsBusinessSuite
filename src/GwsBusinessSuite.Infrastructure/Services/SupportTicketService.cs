@@ -236,7 +236,7 @@ public sealed class SupportTicketService(
         {
             if (authorType == SupportTicketAuthorTypes.Staff)
             {
-                await NotifyContactOfReplyAsync(ticket, cancellationToken);
+                await NotifyContactOfReplyAsync(ticket, trimmedBody, cancellationToken);
             }
             else
             {
@@ -298,7 +298,7 @@ public sealed class SupportTicketService(
 
     // The contact may not have an email on file (Contact.Email is nullable) - skip gracefully,
     // same "opt-in, never crash" posture as every other notification path in this method.
-    private async Task NotifyContactOfReplyAsync(SupportTicket ticket, CancellationToken cancellationToken)
+    private async Task NotifyContactOfReplyAsync(SupportTicket ticket, string replyText, CancellationToken cancellationToken)
     {
         var contact = await db.Contacts.AsNoTracking()
             .Where(c => c.Id == ticket.ContactId)
@@ -307,8 +307,14 @@ public sealed class SupportTicketService(
         if (string.IsNullOrWhiteSpace(contact?.Email)) return;
 
         var portalUrl = $"{notificationOptions.Value.AdminBaseUrl.TrimEnd('/')}/client-portal/support";
+        // While the support mailbox is on, the client can answer by email (SupportEmailIn).
+        var mailbox = await db.SupportMailboxSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var replyTo = mailbox is { Enabled: true } && mailbox.PasswordProtected.Length > 0 && mailbox.Username.Contains('@')
+            ? mailbox.Username
+            : null;
         await clientPortalEmailSender.SendTicketReplyNotificationAsync(
-            contact.Email, contact.FullName, ticket.Subject, portalUrl, cancellationToken);
+            contact.Email, contact.FullName, ticket.Subject, portalUrl, cancellationToken,
+            new TicketReplyEmail(replyText, SupportEmailIn.SubjectTag(ticket.Id), replyTo));
     }
 
     public async Task<SupportTicketView> SetStatusAsync(Guid ticketId, string status, string performedBy, CancellationToken cancellationToken = default)

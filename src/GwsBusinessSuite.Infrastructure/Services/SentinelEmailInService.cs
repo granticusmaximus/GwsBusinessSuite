@@ -24,7 +24,6 @@ public sealed class SentinelEmailInService(
     TimeProvider timeProvider,
     ILogger<SentinelEmailInService> logger) : ISentinelEmailInService
 {
-    private static readonly TimeSpan ImapTimeout = TimeSpan.FromSeconds(60);
     private readonly List<SentinelImportedFile> _pendingFiles = [];
 
     public async Task<SentinelMailboxView> GetSettingsAsync(CancellationToken cancellationToken = default) =>
@@ -319,22 +318,9 @@ public sealed class SentinelEmailInService(
         return folder;
     }
 
-    private async Task<ImapClient> ConnectAsync(SentinelMailboxSettings settings, CancellationToken cancellationToken)
-    {
-        var client = new ImapClient { Timeout = (int)ImapTimeout.TotalMilliseconds };
-        try
-        {
-            var security = settings.Port == 143 ? SecureSocketOptions.StartTls : SecureSocketOptions.SslOnConnect;
-            await client.ConnectAsync(settings.Host, settings.Port, security, cancellationToken);
-            await client.AuthenticateAsync(settings.Username, secretProtector.Unprotect(settings.PasswordProtected), cancellationToken);
-            return client;
-        }
-        catch
-        {
-            client.Dispose();
-            throw;
-        }
-    }
+    private Task<ImapClient> ConnectAsync(SentinelMailboxSettings settings, CancellationToken cancellationToken) =>
+        ImapMailboxConnector.ConnectAsync(settings.Host, settings.Port, settings.Username,
+            secretProtector.Unprotect(settings.PasswordProtected), cancellationToken);
 
     private async Task RequireAdminAsync(string username, CancellationToken cancellationToken)
     {

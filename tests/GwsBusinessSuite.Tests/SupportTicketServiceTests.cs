@@ -510,10 +510,14 @@ public sealed class SupportTicketServiceTests
         public Task SendLoginLinkAsync(string toEmail, string contactName, string loginUrl, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
+        public List<TicketReplyEmail?> Replies { get; } = [];
+
         public Task SendTicketReplyNotificationAsync(
-            string toEmail, string contactName, string ticketSubject, string portalUrl, CancellationToken cancellationToken = default)
+            string toEmail, string contactName, string ticketSubject, string portalUrl, CancellationToken cancellationToken = default,
+            TicketReplyEmail? reply = null)
         {
             Messages.Add((toEmail, contactName, ticketSubject, portalUrl));
+            Replies.Add(reply);
             return Task.CompletedTask;
         }
     }

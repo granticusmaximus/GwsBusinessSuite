@@ -15,7 +15,10 @@
 
 <div class="page-header">
     <h1><i class="bi bi-life-preserver me-2 text-primary"></i>Support</h1>
-    <p>Tickets raised by contacts through the client portal, plus anything opened on their behalf.</p>
+    <p>Tickets raised by contacts through the client portal or by email, plus anything opened on their behalf.</p>
+    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _emailInOpen = !_emailInOpen" aria-expanded="@(_emailInOpen ? "true" : "false")">
+        <i class="bi bi-envelope-arrow-down me-1" aria-hidden="true"></i>Email-to-ticket
+    </button>
     @if (AverageSatisfactionRating is { } average)
     {
         <p class="small text-secondary">
@@ -30,6 +33,11 @@
 }
 else
 {
+
+@if (_emailInOpen)
+{
+    <SupportEmailInPanel OnClose="() => _emailInOpen = false" OnOpenTicket="SelectTicketAsync" OnTicketsChanged="RefreshAfterEmailAsync" />
+}
 
 <div class="row g-4">
     <div class="col-lg-4">
@@ -429,6 +437,10 @@ else
         await RefreshTicketsAsync();
         await SelectTicketAsync(ticketId);
     }
+
+    private bool _emailInOpen;
+
+    private Task RefreshAfterEmailAsync() => RefreshTicketsAsync();
 
     private async Task RefreshTicketsAsync()
     {

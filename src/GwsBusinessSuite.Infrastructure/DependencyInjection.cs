@@ -1051,6 +1051,7 @@ public static class DependencyInjection
         services.AddHostedService<SentinelReminderBackgroundService>();
         services.AddHostedService<SentinelPageVerificationBackgroundService>();
         services.AddScoped<ISentinelEmailInService, SentinelEmailInService>();
+        services.AddScoped<GwsBusinessSuite.Application.Support.ISupportEmailInService, SupportEmailInService>();
         services.AddScoped<ISentinelPageTypeService, SentinelPageTypeService>();
         services.AddScoped<ISentinelOfflineService, SentinelOfflineService>();
         services.AddSingleton<ISentinelPageLockCrypto, DataProtectionPageLockCrypto>();
@@ -1058,6 +1059,7 @@ public static class DependencyInjection
         services.AddScoped<ISentinelPasskeyService, SentinelPasskeyService>();
         services.AddScoped<ISentinelDeviceKeyService, SentinelDeviceKeyService>();
         services.AddHostedService<SentinelEmailInBackgroundService>();
+        services.AddHostedService<SupportEmailInBackgroundService>();
         services.AddScoped<ISentinelAiService, SentinelAiService>();
         services.AddScoped<ISentinelWritingAssistant, SentinelWritingAssistantService>();
         services.AddSingleton<SentinelCollaborationNotifier>();

@@ -69,7 +69,8 @@ public sealed class ClientPortalEmailSender(
     }
 
     public async Task SendTicketReplyNotificationAsync(
-        string toEmail, string contactName, string ticketSubject, string portalUrl, CancellationToken cancellationToken = default)
+        string toEmail, string contactName, string ticketSubject, string portalUrl, CancellationToken cancellationToken = default,
+        TicketReplyEmail? reply = null)
     {
         if (!MailboxAddress.TryParse(options.FromAddress, out var from))
         {
@@ -85,12 +86,33 @@ public sealed class ClientPortalEmailSender(
         var message = new MimeMessage();
         message.From.Add(new MailboxAddress(options.FromName.Trim(), from.Address));
         message.To.Add(to);
-        message.Subject = $"New reply on your support ticket: {ticketSubject}";
-        message.Body = new BodyBuilder
+        if (reply is null)
         {
-            TextBody = $"Hi {contactName},\n\nThere's a new reply on your support ticket \"{ticketSubject}\".\n\nView it here: {portalUrl}",
-            HtmlBody = $"<p>Hi {WebUtility.HtmlEncode(contactName)},</p><p>There's a new reply on your support ticket <strong>{WebUtility.HtmlEncode(ticketSubject)}</strong>.</p><p><a href=\"{WebUtility.HtmlEncode(portalUrl)}\">View it in the client portal</a></p>"
-        }.ToMessageBody();
+            message.Subject = $"New reply on your support ticket: {ticketSubject}";
+            message.Body = new BodyBuilder
+            {
+                TextBody = $"Hi {contactName},\n\nThere's a new reply on your support ticket \"{ticketSubject}\".\n\nView it here: {portalUrl}",
+                HtmlBody = $"<p>Hi {WebUtility.HtmlEncode(contactName)},</p><p>There's a new reply on your support ticket <strong>{WebUtility.HtmlEncode(ticketSubject)}</strong>.</p><p><a href=\"{WebUtility.HtmlEncode(portalUrl)}\">View it in the client portal</a></p>"
+            }.ToMessageBody();
+        }
+        else
+        {
+            // The reply itself, tagged so an emailed answer joins the same ticket.
+            message.Subject = $"Re: {ticketSubject} {reply.SubjectTag}";
+            if (reply.ReplyToAddress is { } replyTo && MailboxAddress.TryParse(replyTo, out var replyToAddress))
+                message.ReplyTo.Add(new MailboxAddress(options.FromName.Trim(), replyToAddress.Address));
+            var answerHint = reply.ReplyToAddress is null
+                ? "You can reply in the client portal"
+                : "Reply to this email, or use the client portal";
+            message.Body = new BodyBuilder
+            {
+                TextBody = $"Hi {contactName},\n\n{reply.ReplyText}\n\n--\n{answerHint}: {portalUrl}",
+                HtmlBody = $"<p>Hi {WebUtility.HtmlEncode(contactName)},</p>"
+                    + string.Concat(reply.ReplyText.Replace("\r\n", "\n").Split("\n\n").Select(paragraph =>
+                        $"<p>{string.Join("<br>", paragraph.Split('\n').Select(WebUtility.HtmlEncode))}</p>"))
+                    + $"<p style=\"color:#666\">--<br>{WebUtility.HtmlEncode(answerHint)}: <a href=\"{WebUtility.HtmlEncode(portalUrl)}\">{WebUtility.HtmlEncode(portalUrl)}</a></p>"
+            }.ToMessageBody();
+        }
 
         var route = mail.Describe(options);
         if (!route.CanSend)

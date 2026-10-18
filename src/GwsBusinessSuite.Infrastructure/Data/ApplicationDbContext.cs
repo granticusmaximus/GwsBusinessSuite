@@ -79,6 +79,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelClipToken> SentinelClipTokens => Set<SentinelClipToken>();
     public DbSet<SentinelMailboxSettings> SentinelMailboxSettings => Set<SentinelMailboxSettings>();
     public DbSet<SentinelInboundEmail> SentinelInboundEmails => Set<SentinelInboundEmail>();
+    public DbSet<SupportMailboxSettings> SupportMailboxSettings => Set<SupportMailboxSettings>();
+    public DbSet<SupportInboundEmail> SupportInboundEmails => Set<SupportInboundEmail>();
     public DbSet<SentinelPageType> SentinelPageTypes => Set<SentinelPageType>();
     public DbSet<SentinelPageTypeAssignment> SentinelPageTypeAssignments => Set<SentinelPageTypeAssignment>();
     public DbSet<SentinelOfflinePage> SentinelOfflinePages => Set<SentinelOfflinePage>();
@@ -433,6 +435,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelClipToken>().Property(x => x.Name).HasMaxLength(80);
         modelBuilder.Entity<SentinelInboundEmail>().HasIndex(x => x.MessageId).IsUnique();
         modelBuilder.Entity<SentinelInboundEmail>().HasIndex(x => x.ProcessedAtUnix);
+        modelBuilder.Entity<SupportInboundEmail>().HasIndex(x => x.MessageId).IsUnique();
+        modelBuilder.Entity<SupportInboundEmail>().HasIndex(x => x.ProcessedAtUnix);
         modelBuilder.Entity<SentinelPageType>().HasIndex(x => x.NormalizedName).IsUnique();
         modelBuilder.Entity<SentinelPageType>().Property(x => x.Name).HasMaxLength(60);
         modelBuilder.Entity<SentinelPageTypeAssignment>().HasIndex(x => new { x.WikiPageId, x.PageTypeId }).IsUnique();

@@ -887,6 +887,35 @@ public sealed class SentinelMailboxSettings : AuditableEntity
     public string? LastError { get; set; }
 }
 
+// The support mailbox (email-to-ticket): same shape as SentinelMailboxSettings, its own mailbox.
+public sealed class SupportMailboxSettings : AuditableEntity
+{
+    public bool Enabled { get; set; }
+    public string Host { get; set; } = "imap.gmail.com";
+    public int Port { get; set; } = 993;
+    public string Username { get; set; } = string.Empty;
+    public string PasswordProtected { get; set; } = string.Empty;
+    public string Folder { get; set; } = "INBOX";
+    public string AuthServId { get; set; } = "mx.google.com";
+    public long? LastPollUnix { get; set; }
+    public long? LastSuccessUnix { get; set; }
+    public string? LastError { get; set; }
+}
+
+// One row per message the support poller handled (created a ticket, added a reply, or skipped
+// it with a reason); also what stops a message being processed twice.
+public sealed class SupportInboundEmail : AuditableEntity
+{
+    public required string MessageId { get; set; }
+    public string FromAddress { get; set; } = string.Empty;
+    public string Subject { get; set; } = string.Empty;
+    // created / replied / skipped / failed
+    public required string Status { get; set; }
+    public string? Reason { get; set; }
+    public Guid? TicketId { get; set; }
+    public long ProcessedAtUnix { get; set; }
+}
+
 // One row per message the poller has handled, imported or not - the log admins see, and how a
 // message is never imported twice.
 public sealed class SentinelInboundEmail : AuditableEntity

@@ -61,6 +61,8 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SentinelClipToken> SentinelClipTokens { get; }
     DbSet<SentinelMailboxSettings> SentinelMailboxSettings { get; }
     DbSet<SentinelInboundEmail> SentinelInboundEmails { get; }
+    DbSet<SupportMailboxSettings> SupportMailboxSettings { get; }
+    DbSet<SupportInboundEmail> SupportInboundEmails { get; }
     DbSet<SentinelPageType> SentinelPageTypes { get; }
     DbSet<SentinelPageTypeAssignment> SentinelPageTypeAssignments { get; }
     DbSet<SentinelOfflinePage> SentinelOfflinePages { get; }

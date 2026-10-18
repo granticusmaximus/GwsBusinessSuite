@@ -13,7 +13,7 @@ Grep for each item first. Two hints already turned up:
 |---|-------|--------|
 | 1 | Scheduling: per-type time zone, visitor time zones, days ahead / notice / max per day, slot re-check on booking | done 18-10-26 |
 | 2 | Billing: multi-currency, reminders (manual + automatic), view/duplicate on sent/paid/void, line order | done 18-10-26 |
-| 3 | Support: email-to-ticket intake (reuse Sentinel email-in's IMAP mailbox approach) | not started |
+| 3 | Support: email-to-ticket (new mail -> ticket, tagged replies join, staff replies emailed with text + Reply-To) | done 18-10-26 |
 | 4 | Site: duplicate page, nested menus, hreflang + language switcher | not started |
 | 5 | Automation: expression functions + sandboxed transform step | not started |
 | 6 | Media: file storage instead of base64-in-DB, resizing, WebP/AVIF | not started |
@@ -51,3 +51,18 @@ Grep for each item first. Two hints already turned up:
   - Line Add/remove buttons in the Billing and Scheduling editors defaulted to type=submit inside the EditForm.
   - A Stripe error on Send would crash the circuit; now it shows as a message.
 - Migration `AddInvoiceRemindersAndLineOrder`.
+
+## Phase 3 notes (done)
+
+- `SupportEmailIn` (Application/Support) holds the rules: ticket tag `[Ticket #<first 8 hex>]`,
+  subject cleanup, automatic-mail detection, quoted-reply stripping.
+- `SupportEmailInService`: own mailbox (`SupportMailboxSettings`), log table (`SupportInboundEmail`,
+  unique MessageId), polled every 2 minutes by `SupportEmailInBackgroundService`.
+- IMAP sign-in shared with Sentinel via `ImapMailboxConnector`.
+- Security rule: only a DMARC/DKIM-verified sender who is the ticket's contact can add to a ticket.
+  Unverified mail still becomes a new ticket, tagged `unverified-sender`, and gets no receipt.
+- Staff replies now email the reply text (`TicketReplyEmail` on `IClientPortalEmailSender`), with
+  the tag, and with Reply-To set to the mailbox while it's on. Before, the email only had a portal
+  link.
+- Panel: Support page, "Email-to-ticket" button (`SupportEmailInPanel.razor`).
+- Migration `AddSupportEmailToTicket`.

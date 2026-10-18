@@ -28,6 +28,12 @@ public interface IClientPortalEmailSender
     // Fired when staff reply to a support ticket - toEmail is the ticket's Contact.Email, which
     // may be absent (a Contact can exist without one); callers should skip this call entirely
     // rather than invoke it with an empty address.
+    // reply: the staff reply itself, so the email carries the text (not just a portal link), the
+    // ticket's subject tag (so an emailed answer threads back - see SupportEmailIn) and, while
+    // the support mailbox is on, a Reply-To pointing at it.
     Task SendTicketReplyNotificationAsync(
-        string toEmail, string contactName, string ticketSubject, string portalUrl, CancellationToken cancellationToken = default);
+        string toEmail, string contactName, string ticketSubject, string portalUrl, CancellationToken cancellationToken = default,
+        TicketReplyEmail? reply = null);
 }
+
+public sealed record TicketReplyEmail(string ReplyText, string SubjectTag, string? ReplyToAddress);
