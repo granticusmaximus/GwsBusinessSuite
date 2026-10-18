@@ -6,7 +6,7 @@
 #   ./scripts/install-gws-mac.sh             build if needed and install
 #   ./scripts/install-gws-mac.sh --open      ...then open the app (what `open gws` runs)
 #   ./scripts/install-gws-mac.sh --relaunch  ...quit the running app first and reopen it after
-#                                            (what the app's "Check for Updates..." runs)
+#                                            (what "Check for Updates..." runs, via GWS Updater)
 #   ./scripts/install-gws-mac.sh --check     only report whether an update is waiting (exit 10 if so)
 #
 # Local ad-hoc builds only (no Apple Developer signing): a locally built app carries no quarantine
@@ -21,10 +21,15 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/local/share/dotnet:$HOME/.dot
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONFIGURATION="Release"
 APP_NAME="GWS Business Suite"
-APP_ID="net.gwsapp.businesssuite"
 APP_PROJECT_DIR="$REPO_ROOT/src/GwsBusinessSuite.App"
 MENU_PROJECT_DIR="$REPO_ROOT/src/GwsBusinessSuite.SentinelMenuBar"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+# The helper behind the app's "Check for Updates..." (see scripts/gws-updater.applescript). It has
+# to live outside a temp folder for macOS to route its gws-update:// links to it.
+SUPPORT_DIR="$HOME/Library/Application Support/GWS Business Suite"
+UPDATER_APP="$SUPPORT_DIR/GWS Updater.app"
+UPDATER_SOURCE="$REPO_ROOT/scripts/gws-updater.applescript"
+UPDATE_LOG="$HOME/Library/Logs/GWS Business Suite/update.log"
 
 OPEN_AFTER="false"
 RELAUNCH="false"
@@ -73,13 +78,58 @@ if [ "$CHECK_ONLY" = "true" ]; then
 fi
 
 if [ "$RELAUNCH" = "true" ]; then
-  # Let the running app close cleanly (it saves its own state) before replacing it.
-  /usr/bin/osascript -e "tell application id \"$APP_ID\" to quit" >/dev/null 2>&1 || true
+  # Ask the running app to quit: it treats SIGTERM as a normal Quit (AppDelegate). A signal rather
+  # than an Apple event, so macOS doesn't ask for permission to control the app. Last resort after
+  # 30 seconds: force it, or the reinstall below would replace a running app.
+  pkill -TERM -f "$APP_NAME.app/Contents/MacOS" >/dev/null 2>&1 || true
   for _ in $(seq 1 30); do
     pgrep -f "$APP_NAME.app/Contents/MacOS" >/dev/null 2>&1 || break
     sleep 1
   done
+  pkill -KILL -f "$APP_NAME.app/Contents/MacOS" >/dev/null 2>&1 || true
 fi
+
+# (Re)builds GWS Updater when its source, or this repo's location, changed since it was built.
+install_updater() {
+  local stamp="$UPDATER_APP/Contents/Resources/gws-repo-root"
+  if [ -d "$UPDATER_APP" ] && [ ! "$UPDATER_SOURCE" -nt "$stamp" ] && [ "$(cat "$stamp" 2>/dev/null)" = "$REPO_ROOT" ]; then
+    return 0
+  fi
+  echo "Installing the GWS Updater helper..."
+  mkdir -p "$SUPPORT_DIR"
+  local work
+  work="$(mktemp -d)"
+  # Fills in the paths as AppleScript string literals (backslashes and quotes escaped), with a
+  # literal replace - awk's gsub would treat '&' and '\' in a path specially.
+  SCRIPT_PATH="$REPO_ROOT/scripts/install-gws-mac.sh" LOG_PATH="$UPDATE_LOG" /usr/bin/awk '
+    function esc(text,   out, i, c) {
+      out = ""
+      for (i = 1; i <= length(text); i++) { c = substr(text, i, 1); if (c == "\\" || c == "\"") out = out "\\"; out = out c }
+      return out
+    }
+    function rep(line, key, value,   i) {
+      while ((i = index(line, key)) > 0) line = substr(line, 1, i - 1) value substr(line, i + length(key))
+      return line
+    }
+    { print rep(rep($0, "__INSTALL_SCRIPT__", esc(ENVIRON["SCRIPT_PATH"])), "__LOG_FILE__", esc(ENVIRON["LOG_PATH"])) }' \
+    "$UPDATER_SOURCE" > "$work/gws-updater.applescript"
+  /usr/bin/osacompile -o "$work/GWS Updater.app" "$work/gws-updater.applescript"
+  local plist="$work/GWS Updater.app/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string net.gwsapp.businesssuite.updater" \
+    -c "Add :LSUIElement bool true" \
+    -c "Add :CFBundleURLTypes array" -c "Add :CFBundleURLTypes:0 dict" \
+    -c "Add :CFBundleURLTypes:0:CFBundleURLName string net.gwsapp.businesssuite.update" \
+    -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" \
+    -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string gws-update" "$plist"
+  printf '%s' "$REPO_ROOT" > "$work/GWS Updater.app/Contents/Resources/gws-repo-root"
+  /usr/bin/codesign --force --sign - "$work/GWS Updater.app" >/dev/null 2>&1
+  [ -d "$UPDATER_APP" ] && "$LSREGISTER" -u "$UPDATER_APP" >/dev/null 2>&1 || true
+  rm -rf "$UPDATER_APP"
+  /usr/bin/ditto "$work/GWS Updater.app" "$UPDATER_APP"
+  rm -rf "$work"
+  "$LSREGISTER" -f "$UPDATER_APP" >/dev/null 2>&1 || true
+}
+install_updater
 
 if [ "$app_needs_update" = "true" ]; then
   echo "Building $APP_NAME ($CONFIGURATION)..."

@@ -70,12 +70,14 @@ public sealed class TouchIdKeyStore(string folder)
 #if MACCATALYST
         if (info.Storage == "secure-enclave")
         {
-            // The key's access control asks for Touch ID on use.
+            // The key's access control asks for Touch ID on use; the context carries the prompt text
+            // (the replacement for the obsolete UseOperationPrompt) and must outlive the signing.
+            using var promptContext = new LAContext { LocalizedReason = reason };
             var key = SecKeyChain.QueryAsConcreteType(new SecRecord(SecKind.Key)
             {
                 ApplicationTag = NSData.FromString(Tag),
                 KeyType = SecKeyType.ECSecPrimeRandom,
-                UseOperationPrompt = reason
+                AuthenticationContext = promptContext
             }, out var status) as SecKey;
             if (key is null) return (null, $"This Mac's Touch ID key is missing ({status}) - set Touch ID up again.");
             var signature = key.CreateSignature(SecKeyAlgorithm.EcdsaSignatureMessageX962Sha256, NSData.FromArray(challenge), out var error);
