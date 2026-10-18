@@ -270,6 +270,14 @@ public sealed class BillingServiceTests
             VoidedInvoiceIds.Add(stripeInvoiceId);
             return Task.CompletedTask;
         }
+
+        public List<string> ResentInvoiceIds { get; } = [];
+
+        public Task ResendInvoiceAsync(string stripeInvoiceId, CancellationToken cancellationToken = default)
+        {
+            ResentInvoiceIds.Add(stripeInvoiceId);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider

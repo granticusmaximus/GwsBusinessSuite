@@ -12,7 +12,7 @@ Grep for each item first. Two hints already turned up:
 | # | Phase | Status |
 |---|-------|--------|
 | 1 | Scheduling: per-type time zone, visitor time zones, days ahead / notice / max per day, slot re-check on booking | done 18-10-26 |
-| 2 | Billing: payment reminders, multi-currency, actions on paid/void invoices (card payments: check Stripe first) | not started |
+| 2 | Billing: multi-currency, reminders (manual + automatic), view/duplicate on sent/paid/void, line order | done 18-10-26 |
 | 3 | Support: email-to-ticket intake (reuse Sentinel email-in's IMAP mailbox approach) | not started |
 | 4 | Site: duplicate page, nested menus, hreflang + language switcher | not started |
 | 5 | Automation: expression functions + sandboxed transform step | not started |
@@ -36,3 +36,18 @@ Grep for each item first. Two hints already turned up:
 - Tests: `BookingTimeZoneTests`, covering DST gap, rules, refusing times not on offer, and the
   attendee's zone. The existing `BookingServiceTests` clock is pinned to UTC.
 - Still open: calendar sync (Google/iCloud busy times), noted in the CRM guide's limitations.
+
+## Phase 2 notes (done)
+
+- Card payments were already there: Stripe hosted invoice pages, with a webhook marking them paid.
+- `InvoiceCurrencies` (Application/Billing) holds 18 currencies and their decimals, used for Stripe
+  minor units (JPY = whole units) and for display (`EUR 1,234.50`). `UnitPriceUsd`/`TotalUsd` keep
+  their names but are in the invoice's currency.
+- Reminders: `Invoice.AutoRemind/RemindersSent/LastReminderAt`. `IStripeInvoicingClient.ResendInvoiceAsync`
+  (Stripe's send-invoice email again). Manual sends allowed once per 20 h. Automatic: a day overdue,
+  weekly, max 3 (`InvoiceReminders.MaxAutomatic`), via `InvoiceReminderBackgroundService` hourly.
+- Fixed along the way:
+  - Invoice lines had no stored order: they came back in random GUID order. `InvoiceLineItem.Position` fixes it.
+  - Line Add/remove buttons in the Billing and Scheduling editors defaulted to type=submit inside the EditForm.
+  - A Stripe error on Send would crash the circuit; now it shows as a message.
+- Migration `AddInvoiceRemindersAndLineOrder`.

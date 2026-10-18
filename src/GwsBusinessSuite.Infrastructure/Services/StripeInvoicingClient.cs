@@ -69,10 +69,10 @@ public sealed class StripeInvoicingClient(IOptions<StripeBillingOptions> configu
                     Customer = stripeCustomerId,
                     Invoice = invoice.Id,
                     Currency = currency,
-                    Amount = checked((long)decimal.Round(lineItem.TotalUsd * 100m, 0, MidpointRounding.AwayFromZero)),
+                    Amount = InvoiceCurrencies.ToMinorUnits(lineItem.TotalUsd, currency),
                     Description = lineItem.Quantity == 1
                         ? lineItem.Description
-                        : $"{lineItem.Description} ({lineItem.Quantity} x {lineItem.UnitPriceUsd:C2})"
+                        : $"{lineItem.Description} ({lineItem.Quantity} x {InvoiceCurrencies.Format(lineItem.UnitPriceUsd, currency)})"
                 }, new RequestOptions { IdempotencyKey = $"{idempotencyKey}:line:{index}" }, cancellationToken);
             }
 
@@ -107,6 +107,12 @@ public sealed class StripeInvoicingClient(IOptions<StripeBillingOptions> configu
     {
         await CreateClient().V1.Invoices.VoidInvoiceAsync(
             stripeInvoiceId, new InvoiceVoidOptions(), cancellationToken: cancellationToken);
+    }
+
+    public async Task ResendInvoiceAsync(string stripeInvoiceId, CancellationToken cancellationToken = default)
+    {
+        await CreateClient().V1.Invoices.SendInvoiceAsync(
+            stripeInvoiceId, new InvoiceSendOptions(), cancellationToken: cancellationToken);
     }
 
     private StripeClient CreateClient()

@@ -4001,6 +4001,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("AutoRemind")
+                        .HasColumnType("INTEGER");
+
                     b.Property<Guid>("ContactId")
                         .HasColumnType("TEXT");
 
@@ -4021,12 +4024,18 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<DateTimeOffset?>("DueDate")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTimeOffset?>("LastReminderAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset?>("PaidAt")
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("RemindersSent")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset?>("SentAt")
                         .HasColumnType("TEXT");
@@ -4085,6 +4094,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.Property<Guid>("InvoiceId")
                         .HasColumnType("TEXT");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("INTEGER");
 
                     b.Property<int>("Quantity")
                         .HasColumnType("INTEGER");

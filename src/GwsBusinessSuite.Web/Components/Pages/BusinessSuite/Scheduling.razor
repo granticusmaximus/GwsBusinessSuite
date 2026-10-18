@@ -106,7 +106,7 @@ else
 
                 <div class="mb-2 d-flex align-items-center justify-content-between">
                     <label class="form-label fw-semibold small mb-0">Weekly Availability (@(string.IsNullOrEmpty(Editor.TimeZoneId) ? TimeZoneInfo.Local.Id : Editor.TimeZoneId))</label>
-                    <button class="btn btn-sm btn-outline-primary" @onclick="AddWindow"><i class="bi bi-plus-lg me-1"></i>Add</button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddWindow"><i class="bi bi-plus-lg me-1"></i>Add</button>
                 </div>
                 @for (var i = 0; i < Editor.Availability.Count; i++)
                 {
@@ -128,7 +128,7 @@ else
                             <input type="time" class="form-control form-control-sm" value="@window.End.ToString("HH:mm")" @onchange="e => OnEndChanged(index, e)" />
                         </div>
                         <div class="col-2">
-                            <button class="btn btn-sm btn-outline-danger" @onclick="() => Editor.Availability.RemoveAt(index)">
+                            <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => Editor.Availability.RemoveAt(index)" aria-label="Remove window">
                                 <i class="bi bi-trash3"></i>
                             </button>
                         </div>

@@ -18,6 +18,9 @@ public sealed class BillingService(
     // as "N days from send", not a stored absolute date recomputed at send time - this keeps
     // what Stripe actually sent matching what's shown locally.
     private const int DefaultDaysUntilDue = 14;
+    private const int MaxAutoReminders = InvoiceReminders.MaxAutomatic;
+    private static readonly TimeSpan AutoReminderGap = TimeSpan.FromDays(7);
+    private static readonly TimeSpan ManualReminderGap = TimeSpan.FromHours(20);
 
     public bool IsStripeConfigured => stripe.IsConfigured;
 
@@ -81,6 +84,8 @@ public sealed class BillingService(
             }
         }
 
+        var currency = InvoiceCurrencies.Find(editor.Currency)
+            ?? throw new ArgumentException($"'{editor.Currency}' isn't a supported invoice currency.", nameof(editor));
         foreach (var lineItem in editor.LineItems)
         {
             if (string.IsNullOrWhiteSpace(lineItem.Description))
@@ -121,13 +126,16 @@ public sealed class BillingService(
             ? new DateTimeOffset(dueDate.Date, TimeSpan.Zero)
             : null;
         invoice.Notes = editor.Notes.Trim();
+        invoice.Currency = currency.Code;
+        invoice.AutoRemind = editor.AutoRemind;
         invoice.UpdatedAt = now;
         invoice.UpdatedBy = actor ?? "system";
 
-        foreach (var lineEditor in editor.LineItems)
+        foreach (var (lineEditor, position) in editor.LineItems.Select((line, index) => (line, index)))
         {
             invoice.LineItems.Add(new InvoiceLineItem
             {
+                Position = position,
                 Description = lineEditor.Description.Trim(),
                 Quantity = lineEditor.Quantity,
                 UnitPriceUsd = lineEditor.UnitPriceUsd,
@@ -204,7 +212,7 @@ public sealed class BillingService(
             contact.StripeCustomerId = stripeCustomerId;
         }
 
-        var lineItemViews = invoice.LineItems
+        var lineItemViews = Ordered(invoice.LineItems)
             .Select(item => new InvoiceLineItemView(item.Id, item.Description, item.Quantity, item.UnitPriceUsd))
             .ToList();
         var now = timeProvider.GetUtcNow();
@@ -232,7 +240,7 @@ public sealed class BillingService(
                 Details: new Dictionary<string, string?>
                 {
                     ["contactId"] = invoice.ContactId.ToString(),
-                    ["totalUsd"] = lineItemViews.Sum(item => item.TotalUsd).ToString("F2")
+                    ["total"] = InvoiceCurrencies.Format(lineItemViews.Sum(item => item.TotalUsd), invoice.Currency)
                 }), cancellationToken);
         }
 
@@ -267,6 +275,109 @@ public sealed class BillingService(
         return ToView(invoice, contactName);
     }
 
+    public async Task<InvoiceView> DuplicateAsync(Guid invoiceId, string? actor = null, CancellationToken cancellationToken = default)
+    {
+        var source = await db.Invoices.AsNoTracking().Include(item => item.LineItems)
+            .FirstOrDefaultAsync(item => item.Id == invoiceId, cancellationToken)
+            ?? throw new InvalidOperationException($"Invoice {invoiceId} was not found.");
+        // Through SaveDraftAsync, so the copy passes the same checks as a hand-made draft (the
+        // contact may since have been trashed, for one). Due date isn't copied: it's a new bill.
+        return await SaveDraftAsync(new InvoiceEditorModel
+        {
+            ContactId = source.ContactId,
+            DealId = source.DealId,
+            Title = source.Title.StartsWith("Copy of ", StringComparison.Ordinal) ? source.Title : $"Copy of {source.Title}",
+            Notes = source.Notes,
+            Currency = source.Currency,
+            AutoRemind = source.AutoRemind,
+            LineItems = Ordered(source.LineItems)
+                .Select(item => new InvoiceLineItemEditorModel { Description = item.Description, Quantity = item.Quantity, UnitPriceUsd = item.UnitPriceUsd })
+                .ToList()
+        }, actor, cancellationToken);
+    }
+
+    public async Task<InvoiceView> SendReminderAsync(Guid invoiceId, string? actor = null, CancellationToken cancellationToken = default)
+    {
+        var invoice = await db.Invoices.Include(item => item.LineItems)
+            .FirstOrDefaultAsync(item => item.Id == invoiceId, cancellationToken)
+            ?? throw new InvalidOperationException($"Invoice {invoiceId} was not found.");
+        if (invoice.Status != InvoiceStatuses.Sent || string.IsNullOrWhiteSpace(invoice.StripeInvoiceId))
+        {
+            throw new InvalidOperationException("Only a sent, unpaid invoice can be reminded.");
+        }
+        var now = timeProvider.GetUtcNow();
+        if (invoice.LastReminderAt is { } last && now - last < ManualReminderGap)
+        {
+            throw new InvalidOperationException("A reminder already went out in the last day.");
+        }
+
+        await RemindAsync(invoice, now, actor ?? "system", automatic: false, cancellationToken);
+        var contactName = await db.Contacts.AsNoTracking()
+            .Where(contact => contact.Id == invoice.ContactId)
+            .Select(contact => contact.FullName)
+            .FirstOrDefaultAsync(cancellationToken) ?? "Unknown contact";
+        return ToView(invoice, contactName);
+    }
+
+    public async Task<int> SendDueRemindersAsync(CancellationToken cancellationToken = default)
+    {
+        if (!IsStripeConfigured) return 0;
+        var now = timeProvider.GetUtcNow();
+        // SQLite/EF Core can't translate DateTimeOffset comparisons - filter dates client-side.
+        var candidates = (await db.Invoices
+                .Where(invoice => invoice.Status == InvoiceStatuses.Sent && invoice.AutoRemind
+                    && invoice.StripeInvoiceId != null && invoice.RemindersSent < MaxAutoReminders)
+                .ToListAsync(cancellationToken))
+            .Where(invoice => invoice.DueDate is { } due && now - due >= TimeSpan.FromDays(1)
+                && (invoice.LastReminderAt is not { } last || now - last >= AutoReminderGap))
+            .ToList();
+
+        var sent = 0;
+        foreach (var invoice in candidates)
+        {
+            try
+            {
+                await RemindAsync(invoice, now, "billing-reminders", automatic: true, cancellationToken);
+                sent++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // One failing invoice (e.g. paid in Stripe moments ago) mustn't stop the rest;
+                // it's retried on the next sweep.
+                if (securityAudit is not null)
+                {
+                    await securityAudit.RecordAsync(new SecurityAuditInput(
+                        SecurityAuditCategories.DataLifecycle, "InvoiceReminder", SecurityAuditOutcomes.Failed,
+                        TargetType: "Invoice", TargetId: invoice.Id.ToString(),
+                        Details: new Dictionary<string, string?> { ["error"] = ex.Message }), cancellationToken);
+                }
+            }
+        }
+        return sent;
+    }
+
+    private async Task RemindAsync(Invoice invoice, DateTimeOffset now, string actor, bool automatic, CancellationToken cancellationToken)
+    {
+        await stripe.ResendInvoiceAsync(invoice.StripeInvoiceId!, cancellationToken);
+        invoice.RemindersSent++;
+        invoice.LastReminderAt = now;
+        invoice.UpdatedAt = now;
+        invoice.UpdatedBy = actor;
+        await db.SaveChangesAsync(cancellationToken);
+
+        if (securityAudit is not null)
+        {
+            await securityAudit.RecordAsync(new SecurityAuditInput(
+                SecurityAuditCategories.DataLifecycle, "InvoiceReminder", SecurityAuditOutcomes.Succeeded,
+                TargetType: "Invoice", TargetId: invoice.Id.ToString(),
+                Details: new Dictionary<string, string?>
+                {
+                    ["automatic"] = automatic ? "true" : "false",
+                    ["count"] = invoice.RemindersSent.ToString()
+                }), cancellationToken);
+        }
+    }
+
     public async Task MarkInvoicePaidByStripeIdAsync(string stripeInvoiceId, CancellationToken cancellationToken = default)
     {
         var invoice = await db.Invoices.FirstOrDefaultAsync(item => item.StripeInvoiceId == stripeInvoiceId, cancellationToken);
@@ -290,6 +401,10 @@ public sealed class BillingService(
                 TargetType: "Invoice", TargetId: invoice.Id.ToString()), cancellationToken);
         }
     }
+
+    // Lines in the order they were entered (Id breaks ties for lines saved before Position existed).
+    private static IEnumerable<InvoiceLineItem> Ordered(IEnumerable<InvoiceLineItem> lines) =>
+        lines.OrderBy(item => item.Position).ThenBy(item => item.Id);
 
     private async Task<IReadOnlyList<InvoiceView>> ToViewsAsync(List<Invoice> invoices, CancellationToken cancellationToken)
     {
@@ -316,8 +431,11 @@ public sealed class BillingService(
         invoice.PaidAt,
         invoice.Notes,
         invoice.StripeHostedInvoiceUrl,
-        invoice.LineItems
+        Ordered(invoice.LineItems)
             .Select(item => new InvoiceLineItemView(item.Id, item.Description, item.Quantity, item.UnitPriceUsd))
             .ToList(),
-        invoice.CreatedAt);
+        invoice.CreatedAt,
+        invoice.AutoRemind,
+        invoice.RemindersSent,
+        invoice.LastReminderAt);
 }

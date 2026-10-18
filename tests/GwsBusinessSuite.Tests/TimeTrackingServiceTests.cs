@@ -146,5 +146,6 @@ public sealed class TimeTrackingServiceTests
         public Task<StripeSentInvoice> CreateAndSendInvoiceAsync(string stripeCustomerId, string currency, int daysUntilDue, IReadOnlyList<InvoiceLineItemView> lineItems, string idempotencyKey, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public Task VoidInvoiceAsync(string stripeInvoiceId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task ResendInvoiceAsync(string stripeInvoiceId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

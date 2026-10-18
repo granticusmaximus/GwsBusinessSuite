@@ -95,15 +95,32 @@ else
                     <input class="form-control" @bind="Editor.Title" placeholder="e.g. October retainer" />
                 </div>
 
-                <div class="mb-3">
-                    <label class="form-label fw-semibold small">Due Date (optional)</label>
-                    <input type="date" class="form-control" @bind="DueDateInput" />
+                <div class="row g-2 mb-3">
+                    <div class="col-7">
+                        <label class="form-label fw-semibold small" for="invoice-due">Due Date (optional)</label>
+                        <input id="invoice-due" type="date" class="form-control" @bind="DueDateInput" />
+                    </div>
+                    <div class="col-5">
+                        <label class="form-label fw-semibold small" for="invoice-currency">Currency</label>
+                        <select id="invoice-currency" class="form-select" @bind="Editor.Currency">
+                            @foreach (var currency in InvoiceCurrencies.All)
+                            {
+                                <option value="@currency.Code">@currency.Code.ToUpperInvariant() · @currency.Name</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+                <div class="form-check mb-3">
+                    <input type="checkbox" class="form-check-input" id="invoice-auto-remind" @bind="Editor.AutoRemind" />
+                    <label class="form-check-label small" for="invoice-auto-remind">
+                        Remind the client automatically if it's overdue (a day after the due date, then weekly, up to @InvoiceReminders.MaxAutomatic times)
+                    </label>
                 </div>
 
                 <div class="mb-3">
                     <div class="d-flex align-items-center justify-content-between mb-2">
                         <label class="form-label fw-semibold small mb-0">Line Items</label>
-                        <button class="btn btn-sm btn-outline-primary" @onclick="AddLineItem">
+                        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AddLineItem">
                             <i class="bi bi-plus-lg me-1"></i>Add
                         </button>
                     </div>
@@ -119,10 +136,10 @@ else
                                 <input type="number" min="1" class="form-control form-control-sm" @bind="line.Quantity" />
                             </div>
                             <div class="col-3">
-                                <input type="number" min="0" step="0.01" class="form-control form-control-sm" @bind="line.UnitPriceUsd" />
+                                <input type="number" min="0" step="@(InvoiceCurrencies.Find(Editor.Currency)?.Decimals == 0 ? "1" : "0.01")" class="form-control form-control-sm" @bind="line.UnitPriceUsd" aria-label="Unit price in @Editor.Currency.ToUpperInvariant()" />
                             </div>
                             <div class="col-1">
-                                <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveLineItem(index)">
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="() => RemoveLineItem(index)" aria-label="Remove line">
                                     <i class="bi bi-trash3"></i>
                                 </button>
                             </div>
@@ -135,7 +152,7 @@ else
                     else
                     {
                         <p class="text-end fw-semibold mb-0">
-                            Total: @Editor.LineItems.Sum(item => item.Quantity * item.UnitPriceUsd).ToString("C2")
+                            Total: @InvoiceCurrencies.Format(Editor.LineItems.Sum(item => item.Quantity * item.UnitPriceUsd), Editor.Currency)
                         </p>
                     }
                 </div>
@@ -172,14 +189,30 @@ else
                                         <div class="fw-semibold">
                                             @invoice.Title
                                             <span class="badge @StatusBadgeClass(invoice.Status) ms-1">@invoice.Status</span>
+                                            @if (invoice.IsOverdue(DateTimeOffset.UtcNow))
+                                            {
+                                                <span class="badge text-bg-warning ms-1">Overdue</span>
+                                            }
                                         </div>
                                         <div class="d-flex align-items-center gap-2 flex-wrap mt-1">
                                             <RelationshipChip ContactId="invoice.ContactId" ContactName="@invoice.ContactName" />
                                             <span class="text-secondary small">
-                                                @invoice.TotalUsd.ToString("C2")
+                                                @invoice.TotalText
                                                 @if (invoice.DueDate is not null)
                                                 {
                                                     <span> &middot; due @invoice.DueDate.Value.ToLocalTime().ToString("dd-MM-yy")</span>
+                                                }
+                                                @if (invoice.PaidAt is { } paidAt)
+                                                {
+                                                    <span> &middot; paid @paidAt.ToLocalTime().ToString("dd-MM-yy")</span>
+                                                }
+                                                @if (invoice.RemindersSent > 0)
+                                                {
+                                                    <span> &middot; @invoice.RemindersSent reminder@(invoice.RemindersSent == 1 ? "" : "s"), last @invoice.LastReminderAt?.ToLocalTime().ToString("dd-MM-yy")</span>
+                                                }
+                                                @if (invoice.AutoRemind && invoice.Status == InvoiceStatuses.Sent)
+                                                {
+                                                    <span> &middot; auto-remind on</span>
                                                 }
                                             </span>
                                         </div>
@@ -198,20 +231,58 @@ else
                                                 <i class="bi bi-trash3"></i>
                                             </button>
                                         }
-                                        else if (invoice.Status == InvoiceStatuses.Sent)
+                                        else
                                         {
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" title="Show line items"
+                                                    aria-expanded="@(_expandedInvoiceId == invoice.Id ? "true" : "false")"
+                                                    @onclick="() => _expandedInvoiceId = _expandedInvoiceId == invoice.Id ? null : invoice.Id">
+                                                <i class="bi bi-list-ul"></i>
+                                            </button>
                                             @if (!string.IsNullOrWhiteSpace(invoice.StripeHostedInvoiceUrl))
                                             {
-                                                <a class="btn btn-sm btn-outline-secondary" href="@invoice.StripeHostedInvoiceUrl" target="_blank" rel="noopener">
-                                                    <i class="bi bi-box-arrow-up-right me-1"></i>View
+                                                <a class="btn btn-sm btn-outline-secondary" href="@invoice.StripeHostedInvoiceUrl" target="_blank" rel="noopener" title="Open the Stripe invoice page">
+                                                    <i class="bi bi-box-arrow-up-right me-1"></i>Stripe
                                                 </a>
                                             }
-                                            <button class="btn btn-sm btn-outline-danger" disabled="@IsBusy" @onclick="() => VoidInvoiceAsync(invoice.Id)">
-                                                Void
+                                            @if (invoice.Status == InvoiceStatuses.Sent)
+                                            {
+                                                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(IsBusy || !BillingService.IsStripeConfigured)"
+                                                        title="Email the invoice to the client again" @onclick="() => SendReminderAsync(invoice.Id)">
+                                                    <i class="bi bi-bell me-1"></i>Remind
+                                                </button>
+                                                <button class="btn btn-sm btn-outline-danger" disabled="@IsBusy" @onclick="() => VoidInvoiceAsync(invoice.Id)">
+                                                    Void
+                                                </button>
+                                            }
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@IsBusy" title="Copy into a new draft"
+                                                    @onclick="() => DuplicateAsync(invoice.Id)">
+                                                <i class="bi bi-copy"></i>
                                             </button>
                                         }
                                     </div>
                                 </div>
+                                @if (_expandedInvoiceId == invoice.Id)
+                                {
+                                    <table class="table table-sm small mt-2 mb-0">
+                                        <thead><tr><th>Item</th><th class="text-end">Qty</th><th class="text-end">Unit</th><th class="text-end">Total</th></tr></thead>
+                                        <tbody>
+                                            @foreach (var line in invoice.LineItems)
+                                            {
+                                                <tr>
+                                                    <td>@line.Description</td>
+                                                    <td class="text-end">@line.Quantity</td>
+                                                    <td class="text-end text-nowrap">@InvoiceCurrencies.Format(line.UnitPriceUsd, invoice.Currency)</td>
+                                                    <td class="text-end text-nowrap">@InvoiceCurrencies.Format(line.TotalUsd, invoice.Currency)</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                        <tfoot><tr><th colspan="3" class="text-end">Total</th><th class="text-end text-nowrap">@invoice.TotalText</th></tr></tfoot>
+                                    </table>
+                                    @if (invoice.SentAt is { } sentAt)
+                                    {
+                                        <div class="small text-secondary mt-1">Sent @sentAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
+                                    }
+                                }
                             </div>
                         }
                     </div>
@@ -299,6 +370,8 @@ else
             Title = invoice.Title,
             DueDate = invoice.DueDate,
             Notes = invoice.Notes,
+            Currency = invoice.Currency,
+            AutoRemind = invoice.AutoRemind,
             LineItems = invoice.LineItems
                 .Select(item => new InvoiceLineItemEditorModel { Id = item.Id, Description = item.Description, Quantity = item.Quantity, UnitPriceUsd = item.UnitPriceUsd })
                 .ToList()
@@ -347,7 +420,7 @@ else
             StatusMessage = "Invoice sent.";
             await RefreshInvoicesAsync();
         }
-        catch (Exception ex) when (ex is InvalidOperationException)
+        catch (Exception ex) when (ex is InvalidOperationException or Stripe.StripeException)
         {
             ErrorMessage = ex.Message;
         }
@@ -367,6 +440,51 @@ else
             await RefreshInvoicesAsync();
         }
         catch (Exception ex) when (ex is InvalidOperationException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private Guid? _expandedInvoiceId;
+
+    private async Task DuplicateAsync(Guid invoiceId)
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy = true;
+        try
+        {
+            var copy = await BillingService.DuplicateAsync(invoiceId);
+            await RefreshInvoicesAsync();
+            await LoadIntoEditorAsync(copy);
+            StatusMessage = "Copied into a new draft - it's open in the editor.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task SendReminderAsync(Guid invoiceId)
+    {
+        ErrorMessage = string.Empty;
+        StatusMessage = string.Empty;
+        IsBusy = true;
+        try
+        {
+            await BillingService.SendReminderAsync(invoiceId);
+            StatusMessage = "Reminder sent: Stripe emailed the invoice to the client again.";
+            await RefreshInvoicesAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Stripe.StripeException)
         {
             ErrorMessage = ex.Message;
         }

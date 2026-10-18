@@ -238,6 +238,7 @@ public static class DependencyInjection
         services.AddSingleton<GwsBusinessSuite.Application.Campaigns.IArticleAlertEmailSender>(sp => sp.GetRequiredService<EmailCampaignEmailSender>());
         services.AddScoped<GwsBusinessSuite.Application.Campaigns.IEmailCampaignService, EmailCampaignService>();
         services.AddHostedService<EmailCampaignBackgroundService>();
+        services.AddHostedService<InvoiceReminderBackgroundService>();
         services.AddScoped<GwsBusinessSuite.Application.Campaigns.IArticleAlertService, ArticleAlertService>();
         services.AddHostedService<ArticleAlertBackgroundService>();
         services.AddScoped<GwsBusinessSuite.Application.SeoAudit.ISeoAuditService, SeoAuditService>();

@@ -234,6 +234,11 @@ public sealed class Invoice : AuditableEntity
     public string? StripeCustomerId { get; set; }
     public string? StripeInvoiceId { get; set; }
     public string? StripeHostedInvoiceUrl { get; set; }
+    // Payment reminders: AutoRemind lets the background sweep re-send an overdue invoice
+    // (see BillingService.SendDueRemindersAsync); manual reminders count here too.
+    public bool AutoRemind { get; set; }
+    public int RemindersSent { get; set; }
+    public DateTimeOffset? LastReminderAt { get; set; }
     public ICollection<InvoiceLineItem> LineItems { get; set; } = new List<InvoiceLineItem>();
 }
 
@@ -241,7 +246,10 @@ public sealed class InvoiceLineItem : AuditableEntity
 {
     public Guid InvoiceId { get; set; }
     public required string Description { get; set; }
+    // Line order on the invoice (0-based), as entered.
+    public int Position { get; set; }
     public int Quantity { get; set; } = 1;
+    // In the invoice's Currency (the name predates multi-currency; the column is kept).
     public decimal UnitPriceUsd { get; set; }
     public Invoice? Invoice { get; set; }
 }
