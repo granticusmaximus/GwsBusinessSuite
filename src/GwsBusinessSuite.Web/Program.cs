@@ -1691,6 +1691,23 @@ app.MapPost("/auth/touchid/login", async (TouchIdLoginRequest request, HttpConte
 })
     .AllowAnonymous().RequireRateLimiting("login");
 
+// The Mac app's web view signs itself in with Touch ID: the app gets a challenge (above), signs it
+// after Touch ID, and opens this address in the web view, so the session cookie is set right in
+// the web view's own cookie store. (Handing a cookie from the app's HTTP client to the web view
+// doesn't work on macOS - the client keeps Set-Cookie to itself.) The signature only answers that
+// one challenge, which is used up here, so the address is worthless afterwards.
+app.MapGet("/auth/touchid/web-login", async (Guid keyId, string? signature, HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelDeviceKeyService deviceKeys, IUserManagementService users,
+    ISecurityAuditService audit, GwsBusinessSuite.Application.Wiki.ISentinelPageLockService pageLocks) =>
+{
+    var username = await deviceKeys.CompleteSignInAsync(keyId, signature ?? string.Empty);
+    var result = await CompleteTouchIdSignInAsync(httpContext, username, "device", "device-key", users, audit, pageLocks, new { ok = true });
+    return result is IStatusCodeHttpResult { StatusCode: >= 400 }
+        ? Results.LocalRedirect("/admin/login?error=touchid")
+        : Results.LocalRedirect("/admin");
+})
+    .AllowAnonymous().RequireRateLimiting("login");
+
 app.MapPost("/auth/passkey/options", async (HttpContext httpContext,
     GwsBusinessSuite.Application.Wiki.ISentinelPasskeyService passkeys) =>
 {

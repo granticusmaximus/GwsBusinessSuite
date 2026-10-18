@@ -323,29 +323,41 @@ public partial class MainPage : ContentPage
             if (reportProblems) await DisplayAlertAsync("Sign In with Touch ID", "Touch ID isn't set up on this Mac yet - choose GWS Business Suite > Set Up Touch ID first.", "OK");
             return false;
         }
-        var result = await _nativeAppAuthService.TouchIdLoginAsync(_touchIdKeys);
-        DebugLog($"TouchId sign-in: ok={result.Succeeded} error={result.ErrorMessage} cookies={string.Join(",", result.SetCookieHeaders.Select(header => header.Split('=', 2)[0]))}");
-        if (!result.Succeeded)
+        // Touch ID + signature here; the web view itself opens the sign-in address, so the session
+        // cookie is set in its own store (an HTTP-client cookie can't be handed over on macOS).
+        var (url, error) = await _nativeAppAuthService.PrepareTouchIdWebSignInAsync(_touchIdKeys);
+        DebugLog($"TouchId sign-in: prepared={url is not null} error={error}");
+        if (url is null)
         {
-            if (reportProblems) await DisplayAlertAsync("Sign In with Touch ID", result.ErrorMessage ?? "Touch ID sign-in didn't work.", "OK");
+            if (reportProblems) await DisplayAlertAsync("Sign In with Touch ID", error ?? "Touch ID sign-in didn't work.", "OK");
             return false;
         }
-        await NativeCookieInjector.InjectCookiesAsync(result.SetCookieHeaders, AppEndpoints.BaseUrl);
-        var (signedIn, macApp, method) = await _session.GetSessionInfoAsync();
-        DebugLog($"TouchId sign-in: web view session signedIn={signedIn} macApp={macApp} amr={method}");
-        WorkspaceView.Source = AppEndpoints.StartUrl;
-        // Only when the server answered (signedIn) - an older server without the check stays quiet.
-        if (signedIn && !macApp && reportProblems)
-        {
-            await DisplayAlertAsync("Sign In with Touch ID",
-                $"Touch ID worked, but this window is still using a '{method}' sign-in, so Mac-only tools like Content Studio stay hidden. Quit the app (Cmd-Q) and open it again - it signs in with Touch ID on launch.",
-                "OK");
-        }
+        _verifyTouchIdSessionAfterLoad = reportProblems;
+        WorkspaceView.Source = url;
         return true;
 #else
         await Task.CompletedTask;
         return false;
 #endif
+    }
+
+    // After a Touch ID sign-in from the menu: once the workspace has loaded, confirm the window's
+    // session really is the Mac-app one (what Content Studio needs).
+    private bool _verifyTouchIdSessionAfterLoad;
+
+    private async Task VerifyTouchIdSessionAsync(string url)
+    {
+        if (!_verifyTouchIdSessionAfterLoad || !url.Contains("/admin", StringComparison.OrdinalIgnoreCase)) return;
+        _verifyTouchIdSessionAfterLoad = false;
+        if (url.Contains("/login", StringComparison.OrdinalIgnoreCase))
+        {
+            await DisplayAlertAsync("Sign In with Touch ID", "Sentinel didn't accept the Touch ID sign-in. Sign in with your password, then choose GWS Business Suite > Set Up Touch ID again.", "OK");
+            return;
+        }
+        var (signedIn, macApp, method) = await _session.GetSessionInfoAsync();
+        DebugLog($"TouchId sign-in: web view session signedIn={signedIn} macApp={macApp} amr={method}");
+        if (signedIn && !macApp)
+            await DisplayAlertAsync("Sign In with Touch ID", $"This window is still using a '{method}' sign-in, so Mac-only tools like Content Studio stay hidden.", "OK");
     }
 
     // Offered once, after the first ordinary sign-in on a Mac without Touch ID set up.
@@ -375,6 +387,7 @@ public partial class MainPage : ContentPage
         {
             StatusOverlay.IsVisible = false;
             _ = OfferTouchIdOnceAsync(args.Url);
+            _ = VerifyTouchIdSessionAsync(args.Url);
             return;
         }
 
