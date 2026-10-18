@@ -18,6 +18,23 @@ public static class NativeCookieInjector
         if (url is null) return;
 
         var store = WKWebsiteDataStore.DefaultDataStore.HttpCookieStore;
+        // Drop any existing cookie with the same name for this host first (e.g. the session from a
+        // password sign-in in the web view): left in place, WebKit could keep sending the old one,
+        // so the new Touch ID / device sign-in wouldn't take effect.
+        var newNames = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var header in setCookieHeaders)
+        {
+            var name = header.Split('=', 2)[0].Trim();
+            if (name.Length > 0) newNames.Add(name);
+        }
+        var existing = await store.GetAllCookiesAsync();
+        foreach (var old in existing.Where(cookie => newNames.Contains(cookie.Name)
+                     && url.Host is { } host && host.EndsWith(cookie.Domain.TrimStart('.'), StringComparison.OrdinalIgnoreCase)))
+        {
+            var deleted = new TaskCompletionSource();
+            store.DeleteCookie(old, () => deleted.SetResult());
+            await deleted.Task;
+        }
 
         // Processed one header at a time (not joined with ", ") - NSHttpCookie's own
         // CookiesWithResponseHeaderFields parser is the correct way to turn a raw Set-Cookie

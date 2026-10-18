@@ -90,6 +90,14 @@ public sealed class NativeSessionClient(HttpClient httpClient)
         return error;
     }
 
+    // What the web view's session is: (signed in, Mac-app sign-in that Content Studio needs).
+    public async Task<(bool SignedIn, bool MacApp, string? Method)> GetSessionInfoAsync(CancellationToken cancellationToken = default)
+    {
+        var (json, _) = await GetJsonAsync("/admin/api/native/session-info", cancellationToken);
+        if (json is not { } body) return (false, false, null);
+        return (true, body.GetProperty("macApp").GetBoolean(), body.TryGetProperty("amr", out var amr) ? amr.GetString() : null);
+    }
+
     // Confirms it's the owner (their page-lock PIN) before another way to unlock is added.
     public async Task<string?> UnlockWithPinAsync(string pin, CancellationToken cancellationToken = default)
     {

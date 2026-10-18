@@ -1353,6 +1353,19 @@ app.MapPost("/admin/api/native/lock-unlock-pin", async (
     .RequireAuthorization("ContentAccess")
     .RequireRateLimiting("login");
 
+// What the app's web-view session is (the Mac app checks it after a Touch ID sign-in: Content
+// Studio and other Mac-only tools need amr device-key or device-secret).
+app.MapGet("/admin/api/native/session-info", (HttpContext httpContext) =>
+    !IsNativeCall(httpContext)
+        ? Results.BadRequest(new { error = "Missing X-GWS-Native header." })
+        : Results.Json(new
+        {
+            username = httpContext.User.Identity?.Name,
+            amr = httpContext.User.FindFirst("amr")?.Value,
+            macApp = httpContext.User.HasClaim(claim => claim.Type == "amr" && claim.Value is "device-secret" or "device-key")
+        }))
+    .RequireAuthorization("ContentAccess");
+
 // The Mac app was hidden: lock this session's pages again.
 app.MapPost("/admin/api/native/lock-session", async (
     HttpContext httpContext,

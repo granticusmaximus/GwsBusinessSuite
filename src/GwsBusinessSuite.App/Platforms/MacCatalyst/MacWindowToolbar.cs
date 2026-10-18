@@ -28,6 +28,7 @@ internal static class MacToolbarActions
     // "Set Up Touch ID..." (app menu, toolbar, first-sign-in offer). Set by MainPage and kept while
     // other tabs show - the menu switches to the Workspace tab first.
     public static Action? SetUpTouchId { get; set; }
+    public static Action? SignInWithTouchId { get; set; }
 
     // Raised by a tab button; AppShell owns the actual navigation.
     public static Action<string>? SelectTab { get; set; }

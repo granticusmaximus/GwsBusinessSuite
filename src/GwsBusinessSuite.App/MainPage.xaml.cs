@@ -70,6 +70,7 @@ public partial class MainPage : ContentPage
         MacToolbarActions.Reload = () => OnReloadClicked(this, EventArgs.Empty);
         MacToolbarActions.ConfigureDeviceLogin = () => OnConfigureDeviceLoginClicked(this, EventArgs.Empty);
         MacToolbarActions.SetUpTouchId = () => _ = SetUpTouchIdAsync();
+        MacToolbarActions.SignInWithTouchId = () => _ = SignInWithTouchIdAsync(reportProblems: true);
         MacToolbarActions.SyncSelectedTab?.Invoke("MainPage");
 #endif
 
@@ -99,16 +100,7 @@ public partial class MainPage : ContentPage
 
         // Sign in with Touch ID when this Mac has a key; any failure or cancel falls through to
         // the device-secret / browser sign-in below.
-        if (_touchIdLock.IsSetUp)
-        {
-            var touchId = await _nativeAppAuthService.TouchIdLoginAsync(_touchIdKeys);
-            if (touchId.Succeeded)
-            {
-                await NativeCookieInjector.InjectCookiesAsync(touchId.SetCookieHeaders, AppEndpoints.BaseUrl);
-                WorkspaceView.Source = AppEndpoints.StartUrl;
-                return;
-            }
-        }
+        if (_touchIdLock.IsSetUp && await SignInWithTouchIdAsync(reportProblems: false)) return;
 
         var deviceSecret = await _deviceSecretStore.GetAsync();
         if (!string.IsNullOrWhiteSpace(deviceSecret) && await TryDeviceLoginAsync(deviceSecret))
@@ -314,16 +306,45 @@ public partial class MainPage : ContentPage
             $"{message} From now on the app signs you in with Touch ID when it opens. Sign in with Touch ID now? That also turns on Mac-only tools like Content Studio.",
             "Sign In Now", "Later");
         if (!signInNow) return;
-        var result = await _nativeAppAuthService.TouchIdLoginAsync(_touchIdKeys);
-        if (!result.Succeeded)
-        {
-            await DisplayAlertAsync("Sign In with Touch ID", result.ErrorMessage ?? "Touch ID sign-in didn't work.", "OK");
-            return;
-        }
-        await NativeCookieInjector.InjectCookiesAsync(result.SetCookieHeaders, AppEndpoints.BaseUrl);
-        WorkspaceView.Source = AppEndpoints.StartUrl;
+        await SignInWithTouchIdAsync(reportProblems: true);
 #else
         await DisplayAlertAsync("Set Up Touch ID", "Touch ID is available in the Mac app.", "OK");
+#endif
+    }
+
+    // Signs the web view in with Touch ID, then asks the server what session the web view really
+    // has - Content Studio and the other Mac-only tools need the Touch ID (or device) sign-in.
+    // Every step goes to the debug log (never cookie values).
+    private async Task<bool> SignInWithTouchIdAsync(bool reportProblems)
+    {
+#if MACCATALYST
+        if (!_touchIdLock.IsSetUp)
+        {
+            if (reportProblems) await DisplayAlertAsync("Sign In with Touch ID", "Touch ID isn't set up on this Mac yet - choose GWS Business Suite > Set Up Touch ID first.", "OK");
+            return false;
+        }
+        var result = await _nativeAppAuthService.TouchIdLoginAsync(_touchIdKeys);
+        DebugLog($"TouchId sign-in: ok={result.Succeeded} error={result.ErrorMessage} cookies={string.Join(",", result.SetCookieHeaders.Select(header => header.Split('=', 2)[0]))}");
+        if (!result.Succeeded)
+        {
+            if (reportProblems) await DisplayAlertAsync("Sign In with Touch ID", result.ErrorMessage ?? "Touch ID sign-in didn't work.", "OK");
+            return false;
+        }
+        await NativeCookieInjector.InjectCookiesAsync(result.SetCookieHeaders, AppEndpoints.BaseUrl);
+        var (signedIn, macApp, method) = await _session.GetSessionInfoAsync();
+        DebugLog($"TouchId sign-in: web view session signedIn={signedIn} macApp={macApp} amr={method}");
+        WorkspaceView.Source = AppEndpoints.StartUrl;
+        // Only when the server answered (signedIn) - an older server without the check stays quiet.
+        if (signedIn && !macApp && reportProblems)
+        {
+            await DisplayAlertAsync("Sign In with Touch ID",
+                $"Touch ID worked, but this window is still using a '{method}' sign-in, so Mac-only tools like Content Studio stay hidden. Quit the app (Cmd-Q) and open it again - it signs in with Touch ID on launch.",
+                "OK");
+        }
+        return true;
+#else
+        await Task.CompletedTask;
+        return false;
 #endif
     }
 

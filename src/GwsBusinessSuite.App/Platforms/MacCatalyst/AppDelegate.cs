@@ -16,10 +16,18 @@ public class AppDelegate : MauiUIApplicationDelegate
 		if (builder.System != UIMenuSystem.MainSystem) return;
 		var checkForUpdates = UICommand.Create("Check for Updates…", null, new Selector("gwsCheckForUpdates:"), null);
 		var setUpTouchId = UICommand.Create("Set Up Touch ID…", null, new Selector("gwsSetUpTouchId:"), null);
+		var signInWithTouchId = UICommand.Create("Sign In with Touch ID", null, new Selector("gwsSignInWithTouchId:"), null);
 		builder.InsertSiblingMenuAfter(
-			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [checkForUpdates, setUpTouchId]),
+			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [checkForUpdates, setUpTouchId, signInWithTouchId]),
 			UIMenuIdentifier.About.GetConstant()!);
 	}
+
+	[Export("gwsSignInWithTouchId:")]
+	public void SignInWithTouchId(NSObject sender) => MainThread.BeginInvokeOnMainThread(() =>
+	{
+		MacToolbarActions.SelectTab?.Invoke("MainPage");
+		MacToolbarActions.SignInWithTouchId?.Invoke();
+	});
 
 	[Export("gwsSetUpTouchId:")]
 	public void SetUpTouchId(NSObject sender) => MainThread.BeginInvokeOnMainThread(() =>
