@@ -24,10 +24,10 @@ Before ending a turn that changed code, run:
 ```
 
 It runs the exact build + full test suite (including Playwright browser tests) that CI runs.
-A `pre-push` git hook also runs it automatically (see `.githooks/pre-push` — enabled per-clone
-via `git config core.hooksPath .githooks`), but don't rely on the hook alone. It only runs
-when Grant pushes, which may be right after your edit and without another look at it. Catch
-problems before that point.
+There is no local pre-push hook any more. Grant removed it on 2026-10-17 to make pushes instant,
+because it repeated this same 7-8 minute check. CI still runs this gate and blocks the deploy
+when it fails (`deploy.yml`: the deploy job `needs: test`), but by then the commit is already on
+`main`. That makes this local run the only check before a push, so don't skip it.
 
 This exists because of a real incident: a constructor signature change broke an existing test
 file. It wasn't run locally before the change shipped, and only surfaced when CI failed on the
