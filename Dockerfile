@@ -1,16 +1,27 @@
 # ─────────────────────────────────────────────
-# Stage 1: Build the .NET Blazor app
+# Stage 1: Restore and build the .NET Blazor app
 # ─────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS dotnet-build
+# Layer order is for build caching (deploys build on the droplet, which keeps Docker's build
+# cache between deploys):
+# - Only the Web app and the three projects it references are restored and published - never
+#   the whole solution. So the image needs no maui-android workload: that's for the native app,
+#   which this image doesn't contain.
+# - The project files are copied and restored before any source, so an ordinary code change
+#   reuses the restore layer instead of downloading every package again.
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS restore
 WORKDIR /src
-# GwsBusinessSuite.App's net10.0-android target is part of the main solution, so restoring the
-# whole .slnx needs the maui-android workload - a plain dotnet/sdk image doesn't bundle it (a
-# real, confirmed production incident: this same restore started failing here once GitHub's own
-# ubuntu-latest runner image dropped it too, see .github/workflows/deploy.yml's identical fix).
-# Placed before COPY so this layer stays cached across ordinary source changes.
-RUN dotnet workload install maui-android
-COPY . .
-RUN dotnet restore GwsBusinessSuite.slnx
+COPY Directory.Build.props ./
+COPY src/GwsBusinessSuite.Domain/GwsBusinessSuite.Domain.csproj src/GwsBusinessSuite.Domain/
+COPY src/GwsBusinessSuite.Application/GwsBusinessSuite.Application.csproj src/GwsBusinessSuite.Application/
+COPY src/GwsBusinessSuite.Infrastructure/GwsBusinessSuite.Infrastructure.csproj src/GwsBusinessSuite.Infrastructure/
+COPY src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj src/GwsBusinessSuite.Web/
+RUN dotnet restore src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj
+
+FROM restore AS dotnet-build
+COPY src/GwsBusinessSuite.Domain/ src/GwsBusinessSuite.Domain/
+COPY src/GwsBusinessSuite.Application/ src/GwsBusinessSuite.Application/
+COPY src/GwsBusinessSuite.Infrastructure/ src/GwsBusinessSuite.Infrastructure/
+COPY src/GwsBusinessSuite.Web/ src/GwsBusinessSuite.Web/
 RUN dotnet publish src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj \
     -c Release -o /app/publish --no-restore
 
@@ -47,20 +58,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpangocairo-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=dotnet-build /app/publish .
-COPY scripts/measure-sentinelgpt-latency.sh /usr/local/bin/measure-sentinelgpt-latency
-RUN chmod 0755 /usr/local/bin/measure-sentinelgpt-latency
-
 # Fixed path so the build-time install below and the running container agree on where
 # the Chromium binary lives, regardless of $HOME/which user the container runs as.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
-# Bakes the Chromium binary into this image layer at build time. This base image has no
-# PowerShell, so the usual `playwright.ps1 install --with-deps chromium` script can't run
-# here - the system libraries above are installed via apt instead, and this just downloads
-# the browser itself through the driver's own cross-platform entrypoint (see the
-# --install-playwright-browsers hook at the top of Program.cs).
-RUN dotnet GwsBusinessSuite.Web.dll --install-playwright-browsers
+# Bakes the Chromium binary into the image (LocalEventsScraperService). It runs through the
+# Microsoft.Playwright package's own bundled driver (node + cli.js) - the same thing
+# `dotnet GwsBusinessSuite.Web.dll --install-playwright-browsers` calls - taken from the restore
+# stage rather than the published app. So this layer only changes when the Playwright package
+# version does, instead of re-downloading Chromium on every code change. The base image has no
+# PowerShell for playwright.ps1; the system libraries above come from apt instead.
+COPY --from=restore /root/.nuget/packages/microsoft.playwright /tmp/playwright-package
+RUN driver="$(ls -d /tmp/playwright-package/*/.playwright | head -1)" \
+    && case "$(uname -m)" in aarch64|arm64) platform=linux-arm64 ;; *) platform=linux-x64 ;; esac \
+    && "$driver/node/$platform/node" "$driver/package/cli.js" install chromium \
+    && rm -rf /tmp/playwright-package
+
+COPY scripts/measure-sentinelgpt-latency.sh /usr/local/bin/measure-sentinelgpt-latency
+RUN chmod 0755 /usr/local/bin/measure-sentinelgpt-latency
+COPY --from=dotnet-build /app/publish .
 
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080

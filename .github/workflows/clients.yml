@@ -10,6 +10,7 @@ on:
       - "src/GwsBusinessSuite.App/**"
       - "src/GwsBusinessSuite.OllamaKit/**"
       - "src/GwsBusinessSuite.SentinelAgentKit/**"
+      - "Directory.Build.props"
       - ".github/workflows/clients.yml"
   pull_request:
     branches:
@@ -18,6 +19,7 @@ on:
       - "src/GwsBusinessSuite.App/**"
       - "src/GwsBusinessSuite.OllamaKit/**"
       - "src/GwsBusinessSuite.SentinelAgentKit/**"
+      - "Directory.Build.props"
       - ".github/workflows/clients.yml"
 
 permissions:

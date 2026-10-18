@@ -36,13 +36,20 @@ ensure_dotnet_on_path() {
   return 1
 }
 
-ensure_dotnet_on_path || exit 1
+# --deployed-only needs no SDK (it only makes HTTP requests), so it must not fail on a machine or
+# runner without dotnet.
+case " $* " in
+  *" --deployed-only "*) ;;
+  *) ensure_dotnet_on_path || exit 1 ;;
+esac
 base_url=""
 public_base_url=""
 output_path=""
 require_clean=false
 skip_tests=false
 install_playwright_deps=false
+deployed_only=false
+server_only=false
 
 usage() {
   sed -n '2,80p' "$0" | sed -n '/^# Usage:/,/^$/p' | sed 's/^# \{0,1\}//'
@@ -51,7 +58,19 @@ usage() {
 # Usage:
 #   ./scripts/verify-release.sh [--base-url https://admin.example.com]
 #       [--public-base-url https://example.com] [--output artifacts/release-readiness/report.md]
-#       [--require-clean] [--install-playwright-deps] [--skip-tests]
+#       [--require-clean] [--install-playwright-deps] [--skip-tests] [--deployed-only] [--server-only]
+#
+# --server-only: restore, audit and build the test project (which references every server and
+# shared project) instead of the whole solution - i.e. everything except the native MAUI app,
+# which needs the maui-android workload and isn't part of the server deploy. deploy.yml/ci.yml
+# use it; the app is built and package-audited by clients.yml whenever it or its dependencies
+# change. Local runs default to the whole solution.
+#
+# --deployed-only: run ONLY the deployed endpoint checks (needs --base-url and/or
+# --public-base-url) - no restore, build, tests or local lint. deploy.yml uses it after a deploy;
+# the code was already built and tested by the same workflow's test job. Each deployed check then
+# retries for about a minute, since it runs right after the container swap (a cold app or the
+# CDN can briefly answer 502/524 for a release that is fine).
 #
 # Runs privacy-safe local release gates and, when --base-url/--public-base-url are supplied,
 # deployed endpoint checks. --base-url hits the admin app's own health/login surface;
@@ -88,6 +107,14 @@ while (($# > 0)); do
       install_playwright_deps=true
       shift
       ;;
+    --deployed-only)
+      deployed_only=true
+      shift
+      ;;
+    --server-only)
+      server_only=true
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -116,6 +143,11 @@ if [[ -n "$public_base_url" ]]; then
     echo "--public-base-url must use HTTPS unless it targets localhost." >&2
     exit 2
   fi
+fi
+
+if [[ "$deployed_only" == true && -z "$base_url" && -z "$public_base_url" ]]; then
+  echo "--deployed-only needs --base-url and/or --public-base-url." >&2
+  exit 2
 fi
 
 if [[ -z "$output_path" ]]; then
@@ -167,6 +199,20 @@ check_http_200() {
   [[ "$code" == "200" ]]
 }
 
+# --deployed-only runs straight after the container swap: retry a while before calling it failed.
+check_http_200_with_retry() {
+  local url="$1"
+  local attempt
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    if check_http_200 "$url"; then
+      return 0
+    fi
+    echo "Attempt $attempt: $url not 200 yet; retrying in 5s."
+    sleep 5
+  done
+  check_http_200 "$url"
+}
+
 cd "$repo_root"
 commit="$(git rev-parse --verify HEAD 2>/dev/null || printf 'unknown')"
 branch="$(git branch --show-current 2>/dev/null || printf 'detached')"
@@ -175,6 +221,11 @@ if [[ -n "$(git status --porcelain=v1 --untracked-files=all)" ]]; then
   worktree_state="Modified"
 fi
 
+http_check=check_http_200
+if [[ "$deployed_only" == true ]]; then
+  # Local gates skipped (the deploy workflow's test job already ran them on this commit).
+  http_check=check_http_200_with_retry
+else
 # -c Release: GwsBusinessSuite.App's MacCatalyst RuntimeIdentifiers are genuinely
 # configuration-dependent (see its own csproj comment - Release gets both maccatalyst-x64 and
 # maccatalyst-arm64, any other configuration gets only the host RID). A configuration-less
@@ -184,9 +235,13 @@ fi
 # fresh checkout, not just a stale-cache artifact. Matching the configuration here avoids that.
 # dotnet restore has no -c/--configuration switch (confirmed: MSB1001 "Unknown switch") -
 # Configuration is an MSBuild property, so it must go through -p: instead.
-run_check "Restore" dotnet restore GwsBusinessSuite.slnx -p:Configuration=Release
+build_target="GwsBusinessSuite.slnx"
+if [[ "$server_only" == true ]]; then
+  build_target="tests/GwsBusinessSuite.Tests/GwsBusinessSuite.Tests.csproj"
+fi
+run_check "Restore" dotnet restore "$build_target" -p:Configuration=Release
 run_check "Dependency vulnerability audit" \
-  dotnet list GwsBusinessSuite.slnx package --vulnerable --include-transitive --no-restore
+  dotnet list "$build_target" package --vulnerable --include-transitive --no-restore
 # RunAOTCompilation=false: GwsBusinessSuite.App's Android target defaults to AOT compilation in
 # Release config, which needs a separate set of per-architecture AOT cross-compiler runtime packs
 # that neither this CI image nor a fresh local machine has installed by default (confirmed: even
@@ -213,7 +268,7 @@ run_check "Dependency vulnerability audit" \
 # offending extended attributes - skipping codesigning here sidesteps the race entirely, and
 # costs nothing since this build's output is never run or distributed.
 run_check "Release build" \
-  dotnet build GwsBusinessSuite.slnx -c Release --no-restore --disable-build-servers -m:1 -p:RunAOTCompilation=false -p:ValidateXcodeVersion=false -p:EnableCodeSigning=false
+  dotnet build "$build_target" -c Release --no-restore --disable-build-servers -m:1 -p:RunAOTCompilation=false -p:ValidateXcodeVersion=false -p:EnableCodeSigning=false
 
 if [[ "$install_playwright_deps" == true ]]; then
   # This step normally finishes in well under a minute, but its underlying `apt-get install`
@@ -252,11 +307,12 @@ run_check "Patch whitespace" git diff --check
 if [[ "$require_clean" == true ]]; then
   run_check "Clean working tree" check_clean_worktree
 fi
+fi
 
 if [[ -n "$base_url" ]]; then
-  run_check "Deployed liveness" check_http_200 "$base_url/health/live"
-  run_check "Deployed readiness" check_http_200 "$base_url/health/ready"
-  run_check "Deployed login surface" check_http_200 "$base_url/admin/login"
+  run_check "Deployed liveness" "$http_check" "$base_url/health/live"
+  run_check "Deployed readiness" "$http_check" "$base_url/health/ready"
+  run_check "Deployed login surface" "$http_check" "$base_url/admin/login"
 else
   printf '| Deployed liveness | NOT RUN | 0s |\n' >>"$rows_file"
   printf '| Deployed readiness | NOT RUN | 0s |\n' >>"$rows_file"
@@ -267,7 +323,7 @@ if [[ -n "$public_base_url" ]]; then
   # Deliberately not a /health endpoint - the public site is routed by Host header to an
   # entirely separate code path (CMS page lookup + render), so this actually exercises a real
   # feature rather than a liveness probe that would pass even if that path were broken.
-  run_check "Deployed public homepage" check_http_200 "$public_base_url/"
+  run_check "Deployed public homepage" "$http_check" "$public_base_url/"
 else
   printf '| Deployed public homepage | NOT RUN | 0s |\n' >>"$rows_file"
 fi
@@ -275,6 +331,9 @@ fi
 overall="PASS"
 if ((failed != 0)); then
   overall="FAIL"
+elif [[ "$deployed_only" == true ]]; then
+  # Only deployed checks were in scope, and they all passed.
+  overall="PASS (deployed checks only)"
 elif [[ "$skip_tests" == true || -z "$base_url" || -z "$public_base_url" ]]; then
   overall="PARTIAL"
 fi

@@ -1,6 +1,10 @@
 services:
   gwssuite:
     build: .
+    # Named and tagged per commit (deploy.yml): the deploy builds this image while the tests run,
+    # then starts it with --no-build once they pass, and keeps the previous one as
+    # gwssuite-web:rollback. Plain `docker compose up --build` still works (tag "local").
+    image: gwssuite-web:${GWS_IMAGE_TAG:-local}
     ports:
       # The origin is private to the droplet. Cloudflared/reverse proxy reaches it over
       # loopback; internet clients must use the HTTPS hostname and cannot bypass TLS.

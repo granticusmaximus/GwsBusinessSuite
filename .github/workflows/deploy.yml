@@ -40,28 +40,102 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
-      # GwsBusinessSuite.App's net10.0-android target is part of the main solution, so a plain
-      # `dotnet restore`/`build` here needs the maui-android workload present - GitHub's
-      # ubuntu-latest image stopped bundling it (a real, external break: this same job used to
-      # pass without this step). `android` alone isn't enough - the actual NETSDK1147 error names
-      # `maui-android` specifically. clients.yml's own Android job installs the broader `maui`
-      # meta-workload instead, but that only works there because it runs on macos-latest - `maui`
-      # pulls in every platform including macOS-only iOS/MacCatalyst, which fails outright with
-      # "isn't supported on this platform" on Linux (confirmed live). maui-android alone has no
-      # such platform restriction.
-      - run: dotnet workload install maui-android
+      # Speed (2026-10-18): restored packages and the Playwright Chromium download are cached
+      # between runs. Keys follow every project file (packages) and the Playwright package
+      # version's home, so a dependency change gets a fresh cache automatically; a stale or
+      # missing cache only costs time, never correctness.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('src/GwsBusinessSuite.Infrastructure/GwsBusinessSuite.Infrastructure.csproj', 'tests/GwsBusinessSuite.Tests/GwsBusinessSuite.Tests.csproj') }}
 
+      # --server-only: builds and tests every server/shared project (everything the test project
+      # references) but not the native MAUI app, which isn't deployed here and needs the
+      # maui-android workload. clients.yml builds and package-audits the app whenever it or its
+      # dependencies change.
       - name: Verify release gates
         run: >-
           ./scripts/verify-release.sh
+          --server-only
           --install-playwright-deps
           --require-clean
           --output "$GITHUB_STEP_SUMMARY"
 
+  # Speed (2026-10-18): builds this commit's image ON THE DROPLET while the tests run, in its
+  # own checkout (/opt/gwssuite-build) so the live checkout and running container are never
+  # touched. It is only started (by the deploy job) if the tests pass; if this job fails or is
+  # superseded, the deploy builds the image itself as before. The droplet keeps Docker's build
+  # cache between deploys, so with the cache-friendly Dockerfile an ordinary code change rebuilds
+  # only the publish step and the final copy.
+  prebuild:
+    name: Pre-build image on droplet
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # One image build on the droplet at a time; a newer pending build replaces an older one.
+    # Never cancel a running one (the remote build would keep going without the job).
+    concurrency:
+      group: droplet-image-build
+      cancel-in-progress: false
+    steps:
+      - name: Build this commit's image on the droplet
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: root
+          command_timeout: 40m
+          key: ${{ secrets.DO_SSH_KEY }}
+          script: |
+            set -e
+            SHA="${{ github.sha }}"
+            BUILD_DIR=/opt/gwssuite-build
+
+            if [ ! -d "$BUILD_DIR/.git" ]; then
+              git clone --quiet https://github.com/granticusmaximus/GwsBusinessSuite.git "$BUILD_DIR"
+            fi
+            cd "$BUILD_DIR"
+            git fetch --quiet origin main
+            git cat-file -e "$SHA^{commit}" 2>/dev/null || git fetch --quiet origin "$SHA"
+            git checkout --quiet --force "$SHA"
+            git clean -fdxq
+
+            if docker image inspect "gwssuite-web:$SHA" >/dev/null 2>&1; then
+              echo "gwssuite-web:$SHA is already built."
+              exit 0
+            fi
+
+            # Keep the build cache (that's the speed) but bounded, and clear it completely if the
+            # disk is getting full - a build that runs out of space fails half-way (2026-08-29).
+            docker container prune -f >/dev/null 2>&1 || true
+            docker image prune -f >/dev/null 2>&1 || true
+            docker builder prune -f --reserved-space 8gb >/dev/null 2>&1 \
+              || docker builder prune -f --keep-storage 8gb >/dev/null 2>&1 \
+              || docker builder prune -f --filter until=168h >/dev/null 2>&1 || true
+            docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+            avail_kb=$(df -Pk "$docker_root" 2>/dev/null | awk 'NR==2 {print $4}')
+            # Unknown free space (df failed) skips the emergency prune rather than forcing it.
+            if [ -n "$avail_kb" ] && [ "$avail_kb" -lt 5242880 ]; then
+              echo "Less than 5 GB free: clearing the whole build cache before building."
+              docker builder prune -af >/dev/null 2>&1 || true
+            fi
+
+            echo "Building gwssuite-web:$SHA..."
+            DOCKER_BUILDKIT=1 docker build --quiet -t "gwssuite-web:$SHA" . >/dev/null
+            echo "Built gwssuite-web:$SHA."
+
   deploy:
     name: Build & Deploy
-    needs: test
+    # Waits for the pre-build too, but only the tests decide: a failed or superseded pre-build
+    # just means this job builds the image itself. (!cancelled(): a run cancelled by hand, or
+    # superseded by a newer push, doesn't deploy - the newer run will.)
+    needs: [test, prebuild]
+    if: ${{ !cancelled() && needs.test.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     # Two deployments close together can otherwise start two "docker compose up -d --build"
     # runs against the same droplet at once.
     # Both build independently, but the container recreate step names/renames the same
@@ -82,18 +156,8 @@ jobs:
       # shell on the droplet, so nothing before this checked the repo out locally.
       - uses: actions/checkout@v7
 
-      # Needed for the "Verify the live deployment from the outside" step below - it runs
-      # ./scripts/verify-release.sh, which restores/builds the whole solution (including
-      # GwsBusinessSuite.App's net10.0-android target) even under --skip-tests. This job never
-      # called setup-dotnet before, relying entirely on whatever SDK ubuntu-latest happened to
-      # bundle by default - that stopped including the maui-android workload (the same real,
-      # external break already fixed for the `test` job above), so this step failed the exact
-      # same way even after a fully successful deploy.
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: "10.0.x"
-
-      - run: dotnet workload install maui-android
+      # No .NET setup here: the final verification runs with --deployed-only (HTTP checks only;
+      # this commit was already built and tested by the test job).
 
       - name: SSH into droplet and deploy
         uses: appleboy/ssh-action@v1.2.5
@@ -112,6 +176,7 @@ jobs:
             set -e
 
             APP_DIR=/opt/gwssuite
+            SHA="${{ github.sha }}"
             REHEARSE_ROLLBACK="${{ github.event_name == 'workflow_dispatch' && inputs.rehearse_rollback && 'true' || 'false' }}"
             REHEARSE_MIGRATION_COPY="${{ github.event_name == 'workflow_dispatch' && inputs.rehearse_migration_copy && 'true' || 'false' }}"
             MEASURE_SENTINEL_LATENCY="${{ github.event_name == 'workflow_dispatch' && inputs.measure_sentinel_latency && 'true' || 'false' }}"
@@ -162,9 +227,20 @@ jobs:
               docker compose exec -T gwssuite dotnet GwsBusinessSuite.Web.dll --backup-migration-rehearse
             fi
 
-            git fetch origin main
+            git fetch --quiet origin main
+            git cat-file -e "$SHA^{commit}" 2>/dev/null || git fetch --quiet origin "$SHA"
+
+            # Never move production backwards: when a newer commit's deploy already went out
+            # (its tests finished first), this older run stops here instead of replacing it.
+            if [ "$SHA" != "$PREVIOUS_COMMIT" ] && git merge-base --is-ancestor "$SHA" "$PREVIOUS_COMMIT" 2>/dev/null; then
+              echo "A newer commit ($PREVIOUS_COMMIT) is already deployed; not deploying the older $SHA."
+              exit 0
+            fi
+
+            # Deploy exactly the commit this run built and tested - not whatever main is now (a
+            # newer push may not have finished its own tests yet).
             git checkout main
-            git reset --hard origin/main
+            git reset --hard "$SHA"
 
             # Defensive disk cleanup before building, not just after a successful one below - a
             # deploy that fails mid-build (e.g. "no space left on device" while extracting a
@@ -174,7 +250,22 @@ jobs:
             # biggest disk consumer for this repeated multi-stage .NET+Playwright image - without
             # `-a`/`--volumes`, this only removes dangling images/stopped containers/unused
             # networks/build cache, never the running container's image or any data volume.
-            docker system prune -f || true
+            # Keeps Docker's build cache (what makes rebuilds fast) but bounded, and clears it
+            # completely when the disk is getting full. Removes stopped containers and dangling
+            # images as before; never the running container's image or any data volume.
+            docker container prune -f || true
+            docker image prune -f || true
+            docker network prune -f || true
+            docker builder prune -f --reserved-space 8gb >/dev/null 2>&1 \
+              || docker builder prune -f --keep-storage 8gb >/dev/null 2>&1 \
+              || docker builder prune -f --filter until=168h >/dev/null 2>&1 || true
+            docker_root=$(docker info --format '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+            avail_kb=$(df -Pk "$docker_root" 2>/dev/null | awk 'NR==2 {print $4}')
+            # Unknown free space (df failed) skips the emergency prune rather than forcing it.
+            if [ -n "$avail_kb" ] && [ "$avail_kb" -lt 5242880 ]; then
+              echo "Less than 5 GB free: clearing the whole build cache."
+              docker builder prune -af || true
+            fi
 
             ROLLBACK_COMMIT="$PREVIOUS_COMMIT"
             if [ "$REHEARSE_ROLLBACK" = "true" ]; then
@@ -194,14 +285,32 @@ jobs:
               echo "Rollback rehearsal will restore prior runtime commit $ROLLBACK_COMMIT."
             fi
 
-            # Rebuild and restart with zero-downtime swap
-            docker compose pull --quiet || true
+            COMPOSE_FILES="-f docker-compose.yml"
             if grep -qE '^TURN_SHARED_SECRET=.{32,}$' .env 2>/dev/null && grep -qE '^TURN_URL_UDP=turn:' .env 2>/dev/null; then
               echo "TURN configuration found; deploying the coturn relay."
-              docker compose -f docker-compose.yml -f docker-compose.turn.yml up -d --build --remove-orphans
+              COMPOSE_FILES="$COMPOSE_FILES -f docker-compose.turn.yml"
             else
               echo "TURN configuration not found; deploying with STUN/direct connectivity only."
-              docker compose up -d --build --remove-orphans
+            fi
+
+            # The image now running becomes gwssuite-web:rollback, so a failed release can go
+            # back without a rebuild.
+            CURRENT_CONTAINER=$(docker compose $COMPOSE_FILES ps -q gwssuite 2>/dev/null | head -1)
+            if [ -n "$CURRENT_CONTAINER" ]; then
+              docker tag "$(docker inspect --format '{{.Image}}' "$CURRENT_CONTAINER")" gwssuite-web:rollback || true
+            fi
+
+            # Other services' images (Ollama, coturn); the app's own image is built, not pulled.
+            docker compose $COMPOSE_FILES pull --quiet --ignore-buildable 2>/dev/null \
+              || docker compose $COMPOSE_FILES pull --quiet 2>/dev/null || true
+
+            export GWS_IMAGE_TAG="$SHA"
+            if docker image inspect "gwssuite-web:$SHA" >/dev/null 2>&1; then
+              echo "Starting the pre-built image gwssuite-web:$SHA."
+              docker compose $COMPOSE_FILES up -d --no-build --remove-orphans
+            else
+              echo "No pre-built image for $SHA; building it now."
+              docker compose $COMPOSE_FILES up -d --build --remove-orphans
             fi
 
             # Smoke test: a container reporting "up" doesn't mean the app inside it is
@@ -229,10 +338,17 @@ jobs:
                 docker compose logs --tail=100 gwssuite
                 echo "Rolling application code back to $ROLLBACK_COMMIT without reverting the forward-migrated data volume."
                 git reset --hard "$ROLLBACK_COMMIT"
-                if grep -qE '^TURN_SHARED_SECRET=.{32,}$' .env 2>/dev/null && grep -qE '^TURN_URL_UDP=turn:' .env 2>/dev/null; then
-                  docker compose -f docker-compose.yml -f docker-compose.turn.yml up -d --build --remove-orphans
+                # Fast path: the previous release's own image, restarted as it was. Not for the
+                # rollback rehearsal (it rolls back to an earlier commit than the one that was
+                # running), and not when the restored compose file predates image tagging.
+                if [ "$ROLLBACK_COMMIT" = "$PREVIOUS_COMMIT" ] \
+                    && docker image inspect gwssuite-web:rollback >/dev/null 2>&1 \
+                    && grep -q 'GWS_IMAGE_TAG' docker-compose.yml; then
+                  echo "Restarting the previous release's image (gwssuite-web:rollback)."
+                  GWS_IMAGE_TAG=rollback docker compose $COMPOSE_FILES up -d --no-build --remove-orphans
                 else
-                  docker compose up -d --build --remove-orphans
+                  unset GWS_IMAGE_TAG
+                  docker compose $COMPOSE_FILES up -d --build --remove-orphans
                 fi
                 rollback_status="000"
                 for rollback_attempt in $(seq 1 24); do
@@ -257,7 +373,14 @@ jobs:
               docker compose exec -T gwssuite /usr/local/bin/measure-sentinelgpt-latency
             fi
 
-            # Clean up dangling images to save disk space
+            # Clean up: per-commit images older than this release (keeping this one and the
+            # rollback copy), then dangling layers. Newer pre-built images are left alone.
+            for old_tag in $(docker images gwssuite-web --filter "before=gwssuite-web:$SHA" --format '{{.Tag}}' 2>/dev/null); do
+              case "$old_tag" in
+                "$SHA"|rollback) ;;
+                *) docker rmi "gwssuite-web:$old_tag" >/dev/null 2>&1 || true ;;
+              esac
+            done
             docker image prune -f
 
       # The SSH step above only checks http://localhost/health/ready *from inside the
@@ -272,7 +395,7 @@ jobs:
       - name: Verify the live deployment from the outside
         run: >-
           ./scripts/verify-release.sh
-          --skip-tests
+          --deployed-only
           --base-url https://admin.gwsapp.net
           --public-base-url https://grantwatson.dev
           --output "$GITHUB_STEP_SUMMARY"
