@@ -1,0 +1,156 @@
+name: Sync droplet .env keys
+
+# Writes API keys kept as GitHub repository secrets into the droplet's /opt/gwssuite/.env (the
+# gitignored file docker-compose.yml reads), then restarts the app container on the image that's
+# already running so the new values take effect. Run it from Actions > "Sync droplet .env keys" >
+# Run workflow after adding or changing a secret.
+#
+#   gh secret set OVERWATCH_CESIUM_ION_TOKEN      (prompts for the value; never echo it)
+#   gh secret set OVERWATCH_AISSTREAM_API_KEY
+#   gh workflow run droplet-env.yml
+#
+# A secret that isn't set in GitHub is left alone on the droplet (never blanked). To manage another
+# key, add it to the step's env + envs below and to MANAGED in the script, as "ENV_NAME:Config__Key"
+# (the variable the container sees, from docker-compose.yml).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Write keys and restart
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Same lock as the deploy job, so this never restarts the app in the middle of a deploy.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - name: Update .env on the droplet
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          # Passed as environment variables (envs below), not pasted into the script text, so a
+          # value can't change the script and GitHub masks them in the log.
+          OVERWATCH_CESIUM_ION_TOKEN: ${{ secrets.OVERWATCH_CESIUM_ION_TOKEN }}
+          OVERWATCH_AISSTREAM_API_KEY: ${{ secrets.OVERWATCH_AISSTREAM_API_KEY }}
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: root
+          key: ${{ secrets.DO_SSH_KEY }}
+          command_timeout: 10m
+          envs: OVERWATCH_CESIUM_ION_TOKEN,OVERWATCH_AISSTREAM_API_KEY
+          script: |
+            set -eu
+
+            APP_DIR=/opt/gwssuite
+            MANAGED="OVERWATCH_CESIUM_ION_TOKEN:Overwatch__CesiumIonToken OVERWATCH_AISSTREAM_API_KEY:Overwatch__AisStreamApiKey"
+
+            if [ ! -f "$APP_DIR/docker-compose.yml" ]; then
+              echo "No app at $APP_DIR yet - run a deploy first."
+              exit 1
+            fi
+            cd "$APP_DIR"
+
+            # Check every value before writing any, so a bad one can't leave a half-updated file.
+            # Values go in unquoted, so only allow characters Compose reads literally (no spaces,
+            # quotes, '#' or '$'). API keys and JWTs fit.
+            for pair in $MANAGED; do
+              name="${pair%%:*}"
+              value="$(printenv "$name" || true)"
+              [ -z "$value" ] && continue
+              if ! printf '%s' "$value" | grep -qE '^[A-Za-z0-9._~+/=:-]+$' || [ "$(printf '%s' "$value" | wc -l)" -ne 0 ]; then
+                echo "$name: the secret has characters a .env line can't hold safely (spaces, quotes, #, \$ or a line break) - nothing written."
+                exit 1
+              fi
+            done
+
+            touch .env
+            chmod 600 .env
+            BACKUP=".env.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+            cp -p .env "$BACKUP"
+
+            CHANGED=""
+            for pair in $MANAGED; do
+              name="${pair%%:*}"
+              value="$(printenv "$name" || true)"
+              if [ -z "$value" ]; then
+                echo "$name: no GitHub secret set - left as it is."
+                continue
+              fi
+              current="$( { grep -E "^${name}=" .env || true; } | tail -1 | cut -d= -f2-)"
+              if [ "$current" = "$value" ]; then
+                echo "$name: already up to date."
+                continue
+              fi
+              tmp="$(mktemp "$APP_DIR/.env.XXXXXX")"
+              chmod 600 "$tmp"
+              # Replaces the first NAME= line in place (dropping any duplicates) or appends one.
+              NAME="$name" VALUE="$value" awk '
+                BEGIN { n = ENVIRON["NAME"]; v = ENVIRON["VALUE"]; done = 0 }
+                index($0, n "=") == 1 { if (!done) { print n "=" v; done = 1 } next }
+                { print }
+                END { if (!done) print n "=" v }' .env > "$tmp"
+              mv "$tmp" .env
+              if [ -n "$current" ]; then echo "$name: updated."; else echo "$name: added."; fi
+              CHANGED="$CHANGED $name"
+            done
+
+            # Keep the last 5 backups.
+            find . -maxdepth 1 -name '.env.bak-*' | sort -r | tail -n +6 | xargs -r rm -f
+
+            if [ -z "$CHANGED" ]; then
+              rm -f "$BACKUP"
+              echo "Nothing changed; the app was not restarted."
+              exit 0
+            fi
+
+            COMPOSE_FILES="-f docker-compose.yml"
+            if grep -qE '^TURN_SHARED_SECRET=.{32,}$' .env && grep -qE '^TURN_URL_UDP=turn:' .env; then
+              COMPOSE_FILES="$COMPOSE_FILES -f docker-compose.turn.yml"
+            fi
+
+            CONTAINER="$(docker compose $COMPOSE_FILES ps -q gwssuite 2>/dev/null | head -1)"
+            if [ -z "$CONTAINER" ]; then
+              echo "The app isn't running; the new keys take effect on the next deploy."
+              exit 0
+            fi
+            # Restart on exactly the image that's running now (never a rebuild, never another tag).
+            docker tag "$(docker inspect --format '{{.Image}}' "$CONTAINER")" gwssuite-web:envsync
+            export GWS_IMAGE_TAG=envsync
+
+            wait_ready() {
+              for _ in $(seq 1 36); do
+                if [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost/health/ready || echo 000)" = "200" ]; then
+                  return 0
+                fi
+                sleep 5
+              done
+              return 1
+            }
+
+            echo "Restarting the app with the new keys..."
+            docker compose $COMPOSE_FILES up -d --no-build --no-deps gwssuite
+            if ! wait_ready; then
+              echo "The app didn't report ready - putting the previous .env back."
+              cp -p "$BACKUP" .env
+              docker compose $COMPOSE_FILES up -d --no-build --no-deps --force-recreate gwssuite
+              if wait_ready; then echo "Restored and ready."; else echo "Restored, but the app still isn't ready - check the container logs."; fi
+              exit 1
+            fi
+
+            # Confirm each changed key reached the container (lengths only, never the value).
+            for pair in $MANAGED; do
+              name="${pair%%:*}"; config="${pair#*:}"
+              case " $CHANGED " in *" $name "*) ;; *) continue ;; esac
+              length="$(docker compose $COMPOSE_FILES exec -T gwssuite printenv "$config" 2>/dev/null | tr -d '\n' | wc -c)"
+              if [ "$length" -gt 0 ]; then
+                echo "$config is set in the running app ($length characters)."
+              else
+                echo "$config is NOT visible in the running app - check docker-compose.yml maps $name."
+                exit 1
+              fi
+            done
+            echo "Done:$CHANGED"
