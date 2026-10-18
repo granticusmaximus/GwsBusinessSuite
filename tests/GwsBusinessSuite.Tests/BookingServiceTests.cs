@@ -220,21 +220,27 @@ public sealed class BookingServiceTests
         public List<(string Email, string ManageUrl)> Confirmations { get; } = [];
         public List<string> Cancellations { get; } = [];
 
-        public Task SendConfirmationAsync(string attendeeEmail, string attendeeName, string bookingTypeTitle, DateTimeOffset startsAtUtc, string manageUrl, CancellationToken cancellationToken = default)
+        public List<string?> ConfirmationZones { get; } = [];
+
+        public Task SendConfirmationAsync(string attendeeEmail, string attendeeName, string bookingTypeTitle, DateTimeOffset startsAtUtc, string manageUrl, CancellationToken cancellationToken = default, string? timeZoneId = null)
         {
+            ConfirmationZones.Add(timeZoneId);
             Confirmations.Add((attendeeEmail, manageUrl));
             return Task.CompletedTask;
         }
 
-        public Task SendCancellationAsync(string attendeeEmail, string attendeeName, string bookingTypeTitle, DateTimeOffset startsAtUtc, CancellationToken cancellationToken = default)
+        public Task SendCancellationAsync(string attendeeEmail, string attendeeName, string bookingTypeTitle, DateTimeOffset startsAtUtc, CancellationToken cancellationToken = default, string? timeZoneId = null)
         {
             Cancellations.Add(attendeeEmail);
             return Task.CompletedTask;
         }
     }
 
+    // Pinned to UTC: a booking type with no zone uses the server's zone, and these tests were
+    // written in UTC - without this they'd shift on a machine set to another zone.
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
+        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
     }
 }

@@ -35,10 +35,10 @@ public sealed class BookingEmailSender(
 
     public async Task SendConfirmationAsync(
         string attendeeEmail, string attendeeName, string bookingTypeTitle, DateTimeOffset startsAtUtc, string manageUrl,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, string? timeZoneId = null)
     {
         var fullManageUrl = $"{options.PublicBaseUrl.TrimEnd('/')}{manageUrl}";
-        var when = startsAtUtc.ToString("dd-MM-yy HH:mm 'UTC'");
+        var when = When(startsAtUtc, timeZoneId);
         await SendAsync(
             attendeeEmail,
             $"Confirmed: {bookingTypeTitle}",
@@ -50,9 +50,9 @@ public sealed class BookingEmailSender(
 
     public async Task SendCancellationAsync(
         string attendeeEmail, string attendeeName, string bookingTypeTitle, DateTimeOffset startsAtUtc,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, string? timeZoneId = null)
     {
-        var when = startsAtUtc.ToString("dd-MM-yy HH:mm 'UTC'");
+        var when = When(startsAtUtc, timeZoneId);
         await SendAsync(
             attendeeEmail,
             $"Cancelled: {bookingTypeTitle}",
@@ -61,6 +61,10 @@ public sealed class BookingEmailSender(
             "booking-cancellation",
             cancellationToken);
     }
+
+    // The time in the attendee's zone, named, so it can't be misread; UTC when the zone is unknown.
+    public static string When(DateTimeOffset startsAtUtc, string? timeZoneId) =>
+        BookingTimeZones.Format(startsAtUtc, BookingTimeZones.Find(timeZoneId) ?? TimeZoneInfo.Utc);
 
     private async Task SendAsync(string toEmail, string subject, string textBody, string htmlBody, string filePrefix, CancellationToken cancellationToken)
     {

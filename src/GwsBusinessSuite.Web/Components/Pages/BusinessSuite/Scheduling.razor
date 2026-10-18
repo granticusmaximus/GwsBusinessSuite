@@ -75,13 +75,37 @@ else
                 <div class="mb-2">
                     <input class="form-control form-control-sm" placeholder="Owner username (optional)" @bind="Editor.OwnerUsername" />
                 </div>
+                <div class="mb-2">
+                    <label class="form-label small text-secondary mb-1" for="booking-type-zone">Time zone (availability is in this zone)</label>
+                    <select id="booking-type-zone" class="form-select form-select-sm" @bind="Editor.TimeZoneId">
+                        <option value="">Server zone (@TimeZoneInfo.Local.Id)</option>
+                        @foreach (var zone in ZoneIds)
+                        {
+                            <option value="@zone">@zone.Replace('_', ' ')</option>
+                        }
+                    </select>
+                </div>
+                <div class="row g-2 mb-2">
+                    <div class="col-4">
+                        <label class="form-label small text-secondary mb-1" for="booking-days-ahead">Days ahead</label>
+                        <input id="booking-days-ahead" type="number" min="1" max="90" class="form-control form-control-sm" @bind="Editor.DaysAhead" />
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label small text-secondary mb-1" for="booking-notice">Notice (min)</label>
+                        <input id="booking-notice" type="number" min="15" class="form-control form-control-sm" @bind="Editor.MinNoticeMinutes" />
+                    </div>
+                    <div class="col-4">
+                        <label class="form-label small text-secondary mb-1" for="booking-max-day">Max per day</label>
+                        <input id="booking-max-day" type="number" min="0" class="form-control form-control-sm" @bind="Editor.MaxPerDay" title="0 = no limit" />
+                    </div>
+                </div>
                 <div class="form-check mb-3">
                     <input type="checkbox" class="form-check-input" id="active-toggle" @bind="Editor.IsActive" />
                     <label class="form-check-label small" for="active-toggle">Active (bookable)</label>
                 </div>
 
                 <div class="mb-2 d-flex align-items-center justify-content-between">
-                    <label class="form-label fw-semibold small mb-0">Weekly Availability (UTC)</label>
+                    <label class="form-label fw-semibold small mb-0">Weekly Availability (@(string.IsNullOrEmpty(Editor.TimeZoneId) ? TimeZoneInfo.Local.Id : Editor.TimeZoneId))</label>
                     <button class="btn btn-sm btn-outline-primary" @onclick="AddWindow"><i class="bi bi-plus-lg me-1"></i>Add</button>
                 </div>
                 @for (var i = 0; i < Editor.Availability.Count; i++)
@@ -280,7 +304,11 @@ else
             BufferMinutes = type.BufferMinutes,
             OwnerUsername = type.OwnerUsername,
             IsActive = type.IsActive,
-            Availability = type.Availability.ToList()
+            Availability = type.Availability.ToList(),
+            TimeZoneId = type.TimeZoneId == TimeZoneInfo.Local.Id ? string.Empty : type.TimeZoneId,
+            DaysAhead = type.DaysAhead,
+            MinNoticeMinutes = type.MinNoticeMinutes,
+            MaxPerDay = type.MaxPerDay
         };
         ErrorMessage = string.Empty;
     }
@@ -350,4 +378,7 @@ else
     }
 
     private string BookingUrl(string slug) => $"{Navigation.BaseUri.TrimEnd('/')}/book/{slug}";
+
+    private static readonly IReadOnlyList<string> ZoneIds =
+        TimeZoneInfo.GetSystemTimeZones().Select(zone => zone.Id).Where(id => id.Contains('/')).Order(StringComparer.Ordinal).ToList();
 }

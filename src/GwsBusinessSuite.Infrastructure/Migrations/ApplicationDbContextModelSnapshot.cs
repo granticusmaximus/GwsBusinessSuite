@@ -1746,6 +1746,10 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("AttendeeTimeZone")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<Guid>("BookingTypeId")
                         .HasColumnType("TEXT");
 
@@ -1818,6 +1822,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("DaysAhead")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Description")
                         .IsRequired()
                         .HasColumnType("TEXT");
@@ -1828,10 +1835,20 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("INTEGER");
 
+                    b.Property<int>("MaxPerDay")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MinNoticeMinutes")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("OwnerUsername")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Slug")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TimeZoneId")
                         .IsRequired()
                         .HasColumnType("TEXT");
 

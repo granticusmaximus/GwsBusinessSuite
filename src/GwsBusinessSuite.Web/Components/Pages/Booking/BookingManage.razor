@@ -22,7 +22,7 @@
         <div class="card border-0 shadow-sm" style="max-width: 32rem;">
             <div class="card-body">
                 <h1 class="h5">@Booking.BookingTypeTitle</h1>
-                <p class="mb-1">@Booking.StartsAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</p>
+                <p class="mb-1">@BookingTimeZones.Format(Booking.StartsAt, BookingTimeZones.Find(Booking.AttendeeTimeZone) ?? TimeZoneInfo.Local)</p>
                 <span class="badge @(Booking.Status == BookingStatuses.Cancelled ? "text-bg-secondary" : "text-bg-success")">@Booking.Status</span>
 
                 @if (!string.IsNullOrWhiteSpace(StatusMessage))

@@ -12,7 +12,12 @@ public sealed record BookingTypeView(
     int BufferMinutes,
     string? OwnerUsername,
     bool IsActive,
-    IReadOnlyList<BookingAvailabilityWindow> Availability);
+    IReadOnlyList<BookingAvailabilityWindow> Availability,
+    // The zone the availability is in (resolved: never empty), plus the booking rules.
+    string TimeZoneId = "UTC",
+    int DaysAhead = 14,
+    int MinNoticeMinutes = 60,
+    int MaxPerDay = 0);
 
 public sealed class BookingTypeEditorModel
 {
@@ -26,6 +31,11 @@ public sealed class BookingTypeEditorModel
     public string? OwnerUsername { get; set; }
     public bool IsActive { get; set; } = true;
     public List<BookingAvailabilityWindow> Availability { get; set; } = [];
+    // Empty = the server's zone.
+    public string TimeZoneId { get; set; } = string.Empty;
+    public int DaysAhead { get; set; } = 14;
+    public int MinNoticeMinutes { get; set; } = 60;
+    public int MaxPerDay { get; set; }
 }
 
 // A bookable window on the public page - not yet reserved. StartsAt/EndsAt are UTC.
@@ -42,7 +52,8 @@ public sealed record BookingView(
     string Notes,
     string Status,
     DateTimeOffset CreatedAt,
-    Guid? ContactId);
+    Guid? ContactId,
+    string AttendeeTimeZone = "");
 
 public interface IBookingService
 {
@@ -59,9 +70,11 @@ public interface IBookingService
     // Null if the requested slot is no longer free (already booked by someone else, or has
     // slipped into the past) - the caller re-shows availability rather than treating this as
     // an exceptional failure.
+    // attendeeTimeZone: the visitor's IANA zone (from their browser), used for their emails;
+    // blank or unknown falls back to the booking type's zone.
     Task<BookingView?> CreateBookingAsync(
         Guid bookingTypeId, DateTimeOffset startsAtUtc, string attendeeName, string attendeeEmail, string notes,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default, string? attendeeTimeZone = null);
 
     Task<IReadOnlyList<BookingView>> ListBookingsAsync(Guid? bookingTypeId = null, CancellationToken cancellationToken = default);
 
@@ -75,6 +88,23 @@ public interface IBookingService
 
 public interface IBookingEmailSender
 {
-    Task SendConfirmationAsync(string attendeeEmail, string attendeeName, string bookingTypeTitle, DateTimeOffset startsAtUtc, string manageUrl, CancellationToken cancellationToken = default);
-    Task SendCancellationAsync(string attendeeEmail, string attendeeName, string bookingTypeTitle, DateTimeOffset startsAtUtc, CancellationToken cancellationToken = default);
+    // timeZoneId: the zone to show the time in (the attendee's); null shows UTC.
+    Task SendConfirmationAsync(string attendeeEmail, string attendeeName, string bookingTypeTitle, DateTimeOffset startsAtUtc, string manageUrl, CancellationToken cancellationToken = default, string? timeZoneId = null);
+    Task SendCancellationAsync(string attendeeEmail, string attendeeName, string bookingTypeTitle, DateTimeOffset startsAtUtc, CancellationToken cancellationToken = default, string? timeZoneId = null);
+}
+
+// Time-zone helpers shared by the booking service, its emails and pages.
+public static class BookingTimeZones
+{
+    // The zone for an id, or null when it's blank or unknown on this machine.
+    public static TimeZoneInfo? Find(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) return null;
+        try { return TimeZoneInfo.FindSystemTimeZoneById(id.Trim()); }
+        catch (Exception ex) when (ex is TimeZoneNotFoundException or InvalidTimeZoneException) { return null; }
+    }
+
+    // "20-10-26 14:30 (America/Chicago)" - the time as the person in that zone sees it.
+    public static string Format(DateTimeOffset instant, TimeZoneInfo zone) =>
+        $"{TimeZoneInfo.ConvertTime(instant, zone).ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture)} ({zone.Id})";
 }

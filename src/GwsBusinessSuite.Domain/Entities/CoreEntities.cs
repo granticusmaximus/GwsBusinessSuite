@@ -393,7 +393,16 @@ public sealed class BookingType : AuditableEntity
     // "display label, not a real FK" convention as SupportTicket.AssignedToUsername.
     public string? OwnerUsername { get; set; }
     public bool IsActive { get; set; } = true;
+    // Weekly windows, read as wall-clock times in TimeZoneId.
     public string AvailabilityJson { get; set; } = "[]";
+    // IANA zone the availability is written in (e.g. "America/New_York"). Empty means the
+    // server's own zone (the TZ setting in docker-compose.yml).
+    public string TimeZoneId { get; set; } = string.Empty;
+    // How far ahead visitors can book, and how soon (minimum notice).
+    public int DaysAhead { get; set; } = 14;
+    public int MinNoticeMinutes { get; set; } = 60;
+    // Most confirmed bookings on one day (in TimeZoneId); 0 = no limit.
+    public int MaxPerDay { get; set; }
 }
 
 public sealed record BookingAvailabilityWindow(DayOfWeek DayOfWeek, TimeOnly Start, TimeOnly End);
@@ -421,6 +430,8 @@ public sealed class Booking : AuditableEntity
     public required string AttendeeEmail { get; set; }
     public string Notes { get; set; } = string.Empty;
     public string Status { get; set; } = BookingStatuses.Confirmed;
+    // The visitor's IANA zone when they booked, so their emails and manage page show their time.
+    public string AttendeeTimeZone { get; set; } = string.Empty;
     public required string ManageTokenHash { get; set; }
     public DateTimeOffset? CancelledAt { get; set; }
 }

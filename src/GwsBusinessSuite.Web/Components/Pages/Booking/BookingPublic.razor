@@ -4,6 +4,7 @@
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.Scheduling
 @inject IBookingService BookingService
+@inject IJSRuntime JS
 
 <PageTitle>@(BookingType?.Title ?? "Book a time")</PageTitle>
 
@@ -23,7 +24,7 @@
                 <i class="bi bi-check-circle-fill text-success" style="font-size: 2.5rem;"></i>
                 <h2 class="h5 mt-3">You're booked!</h2>
                 <p class="text-secondary">
-                    @BookingType.Title &middot; @_confirmedBooking.StartsAt.ToLocalTime().ToString("dd-MM-yy HH:mm")
+                    @BookingType.Title &middot; @BookingTimeZones.Format(_confirmedBooking.StartsAt, ViewZone)
                 </p>
                 <p class="small text-secondary">A confirmation has been emailed to @_confirmedBooking.AttendeeEmail.</p>
             </div>
@@ -38,6 +39,15 @@
                 <p>@BookingType.Description</p>
             }
             <p class="text-secondary small">@BookingType.DurationMinutes minutes</p>
+            <div class="gws-booking-zone small">
+                <label for="booking-zone" class="text-secondary">Times shown in</label>
+                <select id="booking-zone" class="form-select form-select-sm" @bind="ViewZoneId" @bind:after="OnZoneChanged">
+                    @foreach (var zone in ZoneChoices)
+                    {
+                        <option value="@zone">@zone.Replace('_', ' ')</option>
+                    }
+                </select>
+            </div>
         </div>
 
         @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -49,19 +59,19 @@
         {
             @if (SlotsByDay.Count == 0)
             {
-                <div class="alert alert-info">No open times in the next two weeks.</div>
+                <div class="alert alert-info">No open times in the next @BookingType.DaysAhead days.</div>
             }
             else
             {
                 @foreach (var day in SlotsByDay)
                 {
                     <div class="mb-3">
-                        <div class="fw-semibold small mb-2">@day.Key.ToString("dd-MM-yy")</div>
+                        <div class="fw-semibold small mb-2">@day.Key.ToString("ddd dd-MM-yy")</div>
                         <div class="d-flex flex-wrap gap-2">
                             @foreach (var slot in day)
                             {
                                 <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => _selectedSlot = slot">
-                                    @slot.StartsAt.ToLocalTime().ToString("HH:mm")
+                                    @TimeZoneInfo.ConvertTime(slot.StartsAt, ViewZone).ToString("HH:mm")
                                 </button>
                             }
                         </div>
@@ -73,7 +83,7 @@
         {
             <div class="card border-0 shadow-sm" style="max-width: 32rem;">
                 <div class="card-body">
-                    <p class="fw-semibold">@_selectedSlot.StartsAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</p>
+                    <p class="fw-semibold">@BookingTimeZones.Format(_selectedSlot.StartsAt, ViewZone)</p>
                     <div class="mb-2">
                         <input class="form-control form-control-sm" placeholder="Your name" @bind="_attendeeName" />
                     </div>
@@ -99,6 +109,16 @@
         margin: 0 auto;
         padding: 1rem 0 2rem;
     }
+    .gws-booking-zone {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: .5rem;
+    }
+    .gws-booking-zone select {
+        width: auto;
+        max-width: 100%;
+    }
 </style>
 
 @code {
@@ -115,18 +135,47 @@
     private string ErrorMessage { get; set; } = string.Empty;
     private bool _isBusy;
 
+    // Times are shown in the visitor's zone (detected in the browser after the first render,
+    // changeable with the picker); until then, in the booking type's own zone.
+    private string ViewZoneId { get; set; } = string.Empty;
+    private TimeZoneInfo ViewZone => BookingTimeZones.Find(ViewZoneId) ?? BookingTimeZones.Find(BookingType?.TimeZoneId) ?? TimeZoneInfo.Utc;
+    private static readonly IReadOnlyList<string> AllZones =
+        TimeZoneInfo.GetSystemTimeZones().Select(zone => zone.Id).Where(id => id.Contains('/')).Order(StringComparer.Ordinal).ToList();
+    private IEnumerable<string> ZoneChoices => AllZones.Contains(ViewZone.Id) ? AllZones : AllZones.Prepend(ViewZone.Id);
+
     private List<IGrouping<DateTime, BookingSlot>> SlotsByDay =>
-        Slots.GroupBy(slot => slot.StartsAt.ToLocalTime().Date).ToList();
+        Slots.GroupBy(slot => TimeZoneInfo.ConvertTime(slot.StartsAt, ViewZone).Date).ToList();
 
     protected override async Task OnInitializedAsync()
     {
         BookingType = await BookingService.GetBookingTypeBySlugAsync(Slug);
         if (BookingType is not null)
         {
-            Slots = await BookingService.GetAvailableSlotsAsync(BookingType.Id, DateTimeOffset.UtcNow, 14);
+            ViewZoneId = BookingType.TimeZoneId;
+            Slots = await BookingService.GetAvailableSlotsAsync(BookingType.Id, DateTimeOffset.UtcNow, BookingType.DaysAhead);
         }
         _loading = false;
     }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || BookingType is null) return;
+        try
+        {
+            await using var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/booking-timezone.js");
+            var browserZone = await module.InvokeAsync<string>("browserTimeZone");
+            if (BookingTimeZones.Find(browserZone) is { } zone && zone.Id != ViewZone.Id)
+            {
+                ViewZoneId = zone.Id;
+                StateHasChanged();
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    private void OnZoneChanged() => _selectedSlot = null;
 
     private async Task ConfirmAsync()
     {
@@ -142,11 +191,11 @@
         try
         {
             var result = await BookingService.CreateBookingAsync(
-                BookingType.Id, _selectedSlot.StartsAt, _attendeeName, _attendeeEmail, _notes);
+                BookingType.Id, _selectedSlot.StartsAt, _attendeeName, _attendeeEmail, _notes, attendeeTimeZone: ViewZone.Id);
             if (result is null)
             {
                 ErrorMessage = "That time was just taken. Please pick another.";
-                Slots = await BookingService.GetAvailableSlotsAsync(BookingType.Id, DateTimeOffset.UtcNow, 14);
+                Slots = await BookingService.GetAvailableSlotsAsync(BookingType.Id, DateTimeOffset.UtcNow, BookingType.DaysAhead);
                 _selectedSlot = null;
             }
             else

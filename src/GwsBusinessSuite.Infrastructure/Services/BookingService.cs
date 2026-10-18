@@ -17,10 +17,10 @@ public sealed class BookingService(
     // this same pattern for why it's nullable (existing tests new this class up directly).
     ISecurityAuditService? securityAudit = null) : IBookingService
 {
-    private const int MaxDaysAhead = 60;
-    // A visitor can't book a slot starting less than this soon - avoids someone booking a
-    // meeting that starts before anyone could plausibly see the confirmation email.
-    private static readonly TimeSpan MinLeadTime = TimeSpan.FromHours(1);
+    public const int MaxDaysAhead = 90;
+    // Minimum notice can't go below this: avoids a meeting that starts before anyone could
+    // plausibly see the confirmation email.
+    private const int MinNoticeFloorMinutes = 15;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<IReadOnlyList<BookingTypeView>> ListBookingTypesAsync(bool includeInactive = false, CancellationToken cancellationToken = default)
@@ -52,6 +52,11 @@ public sealed class BookingService(
         {
             throw new ArgumentException("Duration must be at least 5 minutes.", nameof(editor));
         }
+        var zoneId = editor.TimeZoneId?.Trim() ?? string.Empty;
+        if (zoneId.Length > 0 && BookingTimeZones.Find(zoneId) is null)
+        {
+            throw new ArgumentException($"'{zoneId}' isn't a time zone this server knows (use a name like America/New_York).", nameof(editor));
+        }
 
         var now = timeProvider.GetUtcNow();
         BookingType type;
@@ -75,6 +80,10 @@ public sealed class BookingService(
         type.OwnerUsername = string.IsNullOrWhiteSpace(editor.OwnerUsername) ? null : editor.OwnerUsername.Trim();
         type.IsActive = editor.IsActive;
         type.AvailabilityJson = JsonSerializer.Serialize(editor.Availability, JsonOptions);
+        type.TimeZoneId = zoneId;
+        type.DaysAhead = Math.Clamp(editor.DaysAhead, 1, MaxDaysAhead);
+        type.MinNoticeMinutes = Math.Max(MinNoticeFloorMinutes, editor.MinNoticeMinutes);
+        type.MaxPerDay = Math.Max(0, editor.MaxPerDay);
         type.UpdatedAt = now;
         type.UpdatedBy = performedBy;
         await db.SaveChangesAsync(cancellationToken);
@@ -98,43 +107,63 @@ public sealed class BookingService(
     {
         var type = await db.BookingTypes.AsNoTracking().FirstOrDefaultAsync(item => item.Id == bookingTypeId, cancellationToken);
         if (type is null || !type.IsActive) return [];
+        return await ComputeSlotsAsync(type, fromUtc, daysAhead, cancellationToken);
+    }
 
+    // Free slots: the weekly windows read as wall-clock times in the type's zone (so 09:00 stays
+    // 09:00 across daylight-saving changes), minus confirmed bookings (plus the buffer after each),
+    // inside the notice/booking-window limits and the daily cap.
+    private async Task<List<BookingSlot>> ComputeSlotsAsync(BookingType type, DateTimeOffset fromUtc, int daysAhead, CancellationToken cancellationToken)
+    {
         var availability = ParseAvailability(type.AvailabilityJson);
         if (availability.Count == 0) return [];
 
-        var cappedDays = Math.Clamp(daysAhead, 1, MaxDaysAhead);
-        var earliestStart = timeProvider.GetUtcNow().Add(MinLeadTime);
+        var zone = ZoneOf(type);
+        var days = Math.Clamp(daysAhead, 1, Math.Clamp(type.DaysAhead, 1, MaxDaysAhead));
+        var now = timeProvider.GetUtcNow();
+        var earliestStart = now.AddMinutes(Math.Max(MinNoticeFloorMinutes, type.MinNoticeMinutes));
         if (fromUtc > earliestStart) earliestStart = fromUtc;
+        var firstDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(fromUtc, zone).DateTime);
+        var rangeStartUtc = LocalToUtc(firstDate, TimeOnly.MinValue, zone) ?? fromUtc;
+        var rangeEndUtc = LocalToUtc(firstDate.AddDays(days), TimeOnly.MinValue, zone) ?? fromUtc.AddDays(days);
 
-        var rangeEnd = fromUtc.AddDays(cappedDays);
         // SQLite/EF Core can't translate DateTimeOffset range comparisons - materialize this
         // type's confirmed bookings first, then filter the range client-side.
-        var existingBookings = (await db.Bookings.AsNoTracking()
-            .Where(booking => booking.BookingTypeId == bookingTypeId && booking.Status == BookingStatuses.Confirmed)
+        var existing = (await db.Bookings.AsNoTracking()
+            .Where(booking => booking.BookingTypeId == type.Id && booking.Status == BookingStatuses.Confirmed)
             .Select(booking => new { booking.StartsAt, booking.EndsAt })
             .ToListAsync(cancellationToken))
-            .Where(booking => booking.StartsAt < rangeEnd && booking.EndsAt > fromUtc)
+            .Where(booking => booking.StartsAt < rangeEndUtc.AddDays(1) && booking.EndsAt > rangeStartUtc.AddDays(-1))
             .ToList();
+        var buffer = TimeSpan.FromMinutes(type.BufferMinutes);
+        var perDay = existing
+            .GroupBy(booking => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(booking.StartsAt, zone).DateTime))
+            .ToDictionary(group => group.Key, group => group.Count());
 
         var slots = new List<BookingSlot>();
-        for (var offset = 0; offset < cappedDays; offset++)
+        for (var offset = 0; offset < days; offset++)
         {
-            var date = DateOnly.FromDateTime(fromUtc.UtcDateTime.Date.AddDays(offset));
+            var date = firstDate.AddDays(offset);
+            if (type.MaxPerDay > 0 && perDay.GetValueOrDefault(date) >= type.MaxPerDay) continue;
             foreach (var window in availability.Where(w => w.DayOfWeek == date.DayOfWeek))
             {
                 var step = TimeSpan.FromMinutes(type.DurationMinutes + type.BufferMinutes);
-                var windowStart = new DateTimeOffset(date.ToDateTime(window.Start), TimeSpan.Zero);
-                var windowEnd = new DateTimeOffset(date.ToDateTime(window.End), TimeSpan.Zero);
-                var slotStart = windowStart;
-                while (slotStart.AddMinutes(type.DurationMinutes) <= windowEnd)
+                for (var local = window.Start; ; )
                 {
-                    var slotEnd = slotStart.AddMinutes(type.DurationMinutes);
-                    if (slotStart >= earliestStart
-                        && !existingBookings.Any(existing => slotStart < existing.EndsAt && slotEnd > existing.StartsAt))
+                    var localEnd = local.AddMinutes(type.DurationMinutes, out var endWrapped);
+                    if (endWrapped > 0 || localEnd > window.End) break;
+                    // A start that doesn't exist that day (clocks springing forward) is skipped.
+                    if (LocalToUtc(date, local, zone) is { } slotStart)
                     {
-                        slots.Add(new BookingSlot(slotStart, slotEnd));
+                        var slotEnd = slotStart.AddMinutes(type.DurationMinutes);
+                        if (slotStart >= earliestStart
+                            && !existing.Any(booking => slotStart < booking.EndsAt + buffer && slotEnd + buffer > booking.StartsAt))
+                        {
+                            slots.Add(new BookingSlot(slotStart, slotEnd));
+                        }
                     }
-                    slotStart += step;
+                    local = local.Add(step, out var wrapped);
+                    if (wrapped > 0) break;
                 }
             }
         }
@@ -142,9 +171,23 @@ public sealed class BookingService(
         return slots.OrderBy(slot => slot.StartsAt).ToList();
     }
 
+    private TimeZoneInfo ZoneOf(BookingType type) => BookingTimeZones.Find(type.TimeZoneId) ?? timeProvider.LocalTimeZone;
+
+    private string ZoneIdOf(BookingType type) => ZoneOf(type).Id;
+
+    // A wall-clock date and time in a zone, as a UTC instant. Null when that time doesn't exist
+    // (the hour skipped when clocks spring forward); an hour that happens twice uses its first.
+    private static DateTimeOffset? LocalToUtc(DateOnly date, TimeOnly time, TimeZoneInfo zone)
+    {
+        var local = date.ToDateTime(time, DateTimeKind.Unspecified);
+        if (zone.IsInvalidTime(local)) return null;
+        var offset = zone.IsAmbiguousTime(local) ? zone.GetAmbiguousTimeOffsets(local).Max() : zone.GetUtcOffset(local);
+        return new DateTimeOffset(local, offset).ToUniversalTime();
+    }
+
     public async Task<BookingView?> CreateBookingAsync(
         Guid bookingTypeId, DateTimeOffset startsAtUtc, string attendeeName, string attendeeEmail, string notes,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, string? attendeeTimeZone = null)
     {
         var trimmedName = attendeeName.Trim();
         var trimmedEmail = attendeeEmail.Trim();
@@ -158,18 +201,19 @@ public sealed class BookingService(
         if (type is null) return null;
 
         var endsAtUtc = startsAtUtc.AddMinutes(type.DurationMinutes);
-        if (startsAtUtc < timeProvider.GetUtcNow().Add(MinLeadTime)) return null;
 
-        // Re-checked here (not just trusted from the earlier GetAvailableSlotsAsync call the
-        // UI made) to close the race between two visitors booking the same slot at once.
-        // SQLite/EF Core can't translate DateTimeOffset range comparisons - materialize this
-        // type's confirmed bookings first, then check the overlap client-side.
-        var confirmedBookings = await db.Bookings.AsNoTracking()
-            .Where(booking => booking.BookingTypeId == bookingTypeId && booking.Status == BookingStatuses.Confirmed)
-            .Select(booking => new { booking.StartsAt, booking.EndsAt })
-            .ToListAsync(cancellationToken);
-        var overlaps = confirmedBookings.Any(booking => startsAtUtc < booking.EndsAt && endsAtUtc > booking.StartsAt);
-        if (overlaps) return null;
+        // The time must still be one the page would offer right now: inside the availability,
+        // notice, booking window and daily limit, and free (re-checked here, not trusted from the
+        // page, which also closes the race between two visitors booking the same slot at once).
+        var zone = ZoneOf(type);
+        var dayStart = LocalToUtc(DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(startsAtUtc, zone).DateTime), TimeOnly.MinValue, zone) ?? startsAtUtc.AddDays(-1);
+        var offered = await ComputeSlotsAsync(type, dayStart, 1, cancellationToken);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(timeProvider.GetUtcNow(), zone).DateTime);
+        var bookingDate = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(startsAtUtc, zone).DateTime);
+        if (bookingDate.DayNumber - today.DayNumber >= Math.Clamp(type.DaysAhead, 1, MaxDaysAhead)) return null;
+        if (!offered.Any(slot => slot.StartsAt == startsAtUtc)) return null;
+
+        var visitorZone = BookingTimeZones.Find(attendeeTimeZone)?.Id ?? zone.Id;
 
         var contactId = await FindOrCreateContactAsync(trimmedName, trimmedEmail, cancellationToken);
 
@@ -184,6 +228,7 @@ public sealed class BookingService(
             AttendeeName = trimmedName,
             AttendeeEmail = trimmedEmail,
             Notes = notes.Trim(),
+            AttendeeTimeZone = visitorZone,
             ManageTokenHash = HashToken(token),
             CreatedAt = now,
             CreatedBy = trimmedEmail
@@ -200,7 +245,7 @@ public sealed class BookingService(
         }
 
         var manageUrl = $"/book/manage/{token}";
-        await emailSender.SendConfirmationAsync(trimmedEmail, trimmedName, type.Title, startsAtUtc, manageUrl, cancellationToken);
+        await emailSender.SendConfirmationAsync(trimmedEmail, trimmedName, type.Title, startsAtUtc, manageUrl, cancellationToken, visitorZone);
 
         return ToView(booking, type.Title);
     }
@@ -287,7 +332,8 @@ public sealed class BookingService(
         booking.UpdatedBy = performedBy;
         await db.SaveChangesAsync(cancellationToken);
 
-        await emailSender.SendCancellationAsync(booking.AttendeeEmail, booking.AttendeeName, type, booking.StartsAt, cancellationToken);
+        await emailSender.SendCancellationAsync(booking.AttendeeEmail, booking.AttendeeName, type, booking.StartsAt, cancellationToken,
+            string.IsNullOrEmpty(booking.AttendeeTimeZone) ? null : booking.AttendeeTimeZone);
         return true;
     }
 
@@ -365,12 +411,13 @@ public sealed class BookingService(
     private static string HashToken(string token) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 
-    private static BookingTypeView ToView(BookingType type) => new(
+    private BookingTypeView ToView(BookingType type) => new(
         type.Id, type.Title, type.Slug, type.Description, type.DurationMinutes, type.BufferMinutes,
-        type.OwnerUsername, type.IsActive, ParseAvailability(type.AvailabilityJson));
+        type.OwnerUsername, type.IsActive, ParseAvailability(type.AvailabilityJson),
+        ZoneIdOf(type), type.DaysAhead, type.MinNoticeMinutes, type.MaxPerDay);
 
     private static BookingView ToView(Booking booking, string bookingTypeTitle) => new(
         booking.Id, booking.BookingTypeId, bookingTypeTitle, booking.StartsAt, booking.EndsAt,
         booking.AttendeeName, booking.AttendeeEmail, booking.Notes, booking.Status, booking.CreatedAt,
-        booking.ContactId);
+        booking.ContactId, booking.AttendeeTimeZone);
 }
