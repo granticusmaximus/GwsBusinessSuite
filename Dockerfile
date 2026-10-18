@@ -23,7 +23,9 @@ COPY src/GwsBusinessSuite.Application/ src/GwsBusinessSuite.Application/
 COPY src/GwsBusinessSuite.Infrastructure/ src/GwsBusinessSuite.Infrastructure/
 COPY src/GwsBusinessSuite.Web/ src/GwsBusinessSuite.Web/
 RUN dotnet publish src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj \
-    -c Release -o /app/publish --no-restore
+    -c Release -o /app/publish --no-restore \
+    && grep -q '"_framework/blazor.web' /app/publish/GwsBusinessSuite.Web.staticwebassets.endpoints.json \
+    || { echo "Publish has no _framework/blazor.web.js - every button would be dead. See RequiresAspNetWebAssets in GwsBusinessSuite.Web.csproj." >&2; exit 1; }
 
 # ─────────────────────────────────────────────
 # Stage 2: Final runtime image

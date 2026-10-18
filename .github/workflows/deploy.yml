@@ -329,8 +329,17 @@ jobs:
                 echo "Rollback rehearsal: new release is healthy; injecting a synthetic readiness failure."
                 status="599"
               fi
+              # Ready isn't enough: without Blazor's script every page loads but no button works
+              # (shipped once, 18-10-26, with all health checks green). Missing, it rolls back.
               if [ "$status" = "200" ]; then
-                echo "Health check passed (HTTP $status)."
+                script_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost/_framework/blazor.web.js || echo "000")
+                if [ "$script_status" != "200" ]; then
+                  echo "App is ready but /_framework/blazor.web.js answered HTTP $script_status."
+                  status="script-$script_status"
+                fi
+              fi
+              if [ "$status" = "200" ]; then
+                echo "Health check passed (HTTP $status, Blazor script present)."
                 break
               fi
               if [ "$i" = "24" ]; then

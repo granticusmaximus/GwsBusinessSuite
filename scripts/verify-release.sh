@@ -213,6 +213,25 @@ check_http_200_with_retry() {
   check_http_200 "$url"
 }
 
+# A static script must answer 200 as JavaScript itself - no redirects followed, since a missing
+# file redirects to the login page, which answers 200.
+check_script_asset() {
+  local url="$1"
+  local attempts=1
+  local result
+  [[ "$deployed_only" == true ]] && attempts=12
+  for ((i = 1; i <= attempts; i++)); do
+    result="$(curl --silent --show-error --output /dev/null --write-out '%{http_code} %{content_type}' \
+      --connect-timeout 10 --max-time 30 "$url" || true)"
+    if [[ "$result" == 200\ *javascript* ]]; then
+      return 0
+    fi
+    echo "Attempt $i: $url answered '$result', not a 200 script."
+    ((i < attempts)) && sleep 5
+  done
+  return 1
+}
+
 cd "$repo_root"
 commit="$(git rev-parse --verify HEAD 2>/dev/null || printf 'unknown')"
 branch="$(git branch --show-current 2>/dev/null || printf 'detached')"
@@ -317,10 +336,14 @@ if [[ -n "$base_url" ]]; then
   run_check "Deployed liveness" "$http_check" "$base_url/health/live"
   run_check "Deployed readiness" "$http_check" "$base_url/health/ready"
   run_check "Deployed login surface" "$http_check" "$base_url/admin/login"
+  # Every button on the site depends on this script; a build without it (18-10-26) still passed
+  # the health checks above while nothing on any page could be clicked.
+  run_check "Deployed Blazor script" check_script_asset "$base_url/_framework/blazor.web.js"
 else
   printf '| Deployed liveness | NOT RUN | 0s |\n' >>"$rows_file"
   printf '| Deployed readiness | NOT RUN | 0s |\n' >>"$rows_file"
   printf '| Deployed login surface | NOT RUN | 0s |\n' >>"$rows_file"
+  printf '| Deployed Blazor script | NOT RUN | 0s |\n' >>"$rows_file"
 fi
 
 if [[ -n "$public_base_url" ]]; then

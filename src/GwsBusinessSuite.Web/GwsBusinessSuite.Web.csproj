@@ -39,6 +39,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <UserSecretsId>6e6f1779-d23e-4e26-a02b-bffa41d14664</UserSecretsId>
+    <!-- Always pull in Blazor's framework scripts (_framework/blazor.web.js). The SDK otherwise
+         decides by looking for .razor files at restore time, and the Dockerfile restores from
+         the .csproj files alone (for layer caching). That shipped a build with no blazor.web.js
+         on 18-10-26, which left every button on the site dead. -->
+    <RequiresAspNetWebAssets>true</RequiresAspNetWebAssets>
   </PropertyGroup>
 
 </Project>
