@@ -2,10 +2,99 @@
 // Content Studio's heavy generation never touches the droplet. The server builds the prompt and
 // saves the result; this module only carries the model call. See BrowserLocalOllamaService.cs.
 //
-// For a page served from https://admin.gwsapp.net to reach it, the local Ollama must allow that
-// origin: `launchctl setenv OLLAMA_ORIGINS "https://admin.gwsapp.net"`, then restart Ollama.
+// In the Mac app the request goes through the app (LocalOllamaBridge.cs): browsers block a secure
+// https page from fetching plain-http localhost (WebKit as mixed content; Chrome asks for local
+// network permission). In a browser it falls back to fetch, which also needs the local Ollama to
+// allow this origin: `launchctl setenv OLLAMA_ORIGINS "https://admin.gwsapp.net"`, then restart Ollama.
 
 const active = new Map();
+
+// ---- The Mac app's bridge: same shape as fetch's Response (ok, status, body stream, text, json). ----
+const nativeRequests = new Map();
+let nativeCounter = 0;
+
+function nativeBridge() {
+    return window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.gwsOllama;
+}
+
+// Called by the app with the response status, then base64 chunks, then end (or fail).
+window.gwsOllamaNative = {
+    head(id, status) {
+        const entry = nativeRequests.get(id);
+        if (!entry) return;
+        entry.resolve({
+            ok: status >= 200 && status < 300,
+            status,
+            body: entry.stream,
+            async text() {
+                const reader = entry.stream.getReader();
+                const decoder = new TextDecoder();
+                let text = "";
+                for (;;) {
+                    const { value, done } = await reader.read();
+                    if (done) return text + decoder.decode();
+                    text += decoder.decode(value, { stream: true });
+                }
+            },
+            async json() { return JSON.parse(await this.text()); }
+        });
+    },
+    chunk(id, base64) {
+        const entry = nativeRequests.get(id);
+        if (!entry) return;
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        entry.controller.enqueue(bytes);
+    },
+    end(id) {
+        const entry = nativeRequests.get(id);
+        if (!entry) return;
+        nativeRequests.delete(id);
+        entry.controller.close();
+    },
+    fail(id, message) {
+        const entry = nativeRequests.get(id);
+        if (!entry) return;
+        nativeRequests.delete(id);
+        const error = new Error(message);
+        entry.reject(error);
+        try { entry.controller.error(error); } catch { /* already closed */ }
+    }
+};
+
+function localFetch(url, init = {}) {
+    const bridge = nativeBridge();
+    if (!bridge) {
+        return fetch(url, init);
+    }
+
+    const target = new URL(url);
+    const id = `ollama-${++nativeCounter}`;
+    return new Promise((resolve, reject) => {
+        const entry = { resolve, reject };
+        entry.stream = new ReadableStream({ start(controller) { entry.controller = controller; } });
+        nativeRequests.set(id, entry);
+        if (init.signal) {
+            init.signal.addEventListener("abort", () => {
+                if (!nativeRequests.has(id)) return;
+                nativeRequests.delete(id);
+                bridge.postMessage({ op: "abort", id });
+                const error = new DOMException("The request was aborted.", "AbortError");
+                reject(error);
+                try { entry.controller.error(error); } catch { /* already closed */ }
+            }, { once: true });
+        }
+        bridge.postMessage({
+            op: "fetch",
+            id,
+            path: target.pathname,
+            method: init.method || "GET",
+            port: Number(target.port || 80),
+            body: typeof init.body === "string" ? init.body : null
+        });
+    });
+}
 
 // Blazor Server caps a single browser->server message at 32 KB, and one interop call per token
 // would flood the circuit, so streamed text is batched by time and size before it is sent up.
@@ -17,11 +106,12 @@ function describeFailure(baseUrl, error) {
         return "Local generation was cancelled.";
     }
 
-    // fetch reports a refused connection and a CORS rejection identically ("Failed to fetch"),
-    // so the message has to name both causes.
+    // fetch reports a refused connection, a CORS rejection and a browser block identically
+    // ("Failed to fetch"), so the message names the causes. (The Mac app's bridge gives its own.)
     if (error instanceof TypeError) {
-        return `Couldn't reach Ollama at ${baseUrl}. Make sure Ollama is running on this computer and ` +
-            `allows this site (set OLLAMA_ORIGINS to include ${window.location.origin}, then restart Ollama).`;
+        return `Couldn't reach Ollama at ${baseUrl}. Use the Mac app, where this works directly. In a browser, ` +
+            `Ollama must be running and allow this site (OLLAMA_ORIGINS including ${window.location.origin}), ` +
+            `and the browser must allow it: Chrome asks for permission to reach local devices; Safari blocks it.`;
     }
 
     return error && error.message ? error.message : String(error);
@@ -31,7 +121,7 @@ export async function probe(baseUrl) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 4000);
     try {
-        const response = await fetch(`${baseUrl}/api/tags`, { signal: controller.signal });
+        const response = await localFetch(`${baseUrl}/api/tags`, { signal: controller.signal });
         if (!response.ok) {
             return { ok: false, models: [], error: `Ollama answered HTTP ${response.status}.` };
         }
@@ -101,7 +191,7 @@ async function run(requestId, baseUrl, request, receiver, controller) {
             payload.format = request.format;
         }
 
-        const response = await fetch(`${baseUrl}/api/generate`, {
+        const response = await localFetch(`${baseUrl}/api/generate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),

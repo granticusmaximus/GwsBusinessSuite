@@ -98,6 +98,12 @@ public static class MauiProgram
 		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
 			"DisableFraudulentWebsiteWarning",
 			(handler, _) => handler.PlatformView.Configuration.Preferences.FraudulentWebsiteWarningEnabled = false);
+#if MACCATALYST
+		// Content Studio's local Ollama calls go through the app (see LocalOllamaBridge).
+		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
+			"LocalOllamaBridge",
+			(handler, _) => LocalOllamaBridge.Attach(handler.PlatformView));
+#endif
 #elif WINDOWS
 		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
 			"TrustedWindowsDownloads",
