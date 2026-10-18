@@ -883,6 +883,63 @@ window.tacticalGlobe = (function () {
         });
     }
 
+    // Live ships (aisstream.io AIS): a hull marker turned to its heading (or course), with name,
+    // speed and type shown when zoomed in. ships: [{ id, name, lat, lon, speedKnots, heading, type, destination }].
+    // Same primitive-collection approach as aircraft, for the same per-frame cost reason.
+    const shipIcon = (function () {
+        const canvas = document.createElement('canvas');
+        canvas.width = canvas.height = 32;
+        const ctx = canvas.getContext('2d');
+        ctx.translate(16, 16);
+        ctx.beginPath();
+        ctx.moveTo(0, -14); ctx.lineTo(6, -4); ctx.lineTo(6, 13); ctx.lineTo(-6, 13); ctx.lineTo(-6, -4); ctx.closePath();
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = '#05080a';
+        ctx.stroke();
+        return canvas.toDataURL();
+    })();
+
+    const SHIP_COLOURS = { Tanker: '#ff5252', Cargo: '#69f0ae', Passenger: '#448aff', Fishing: '#ffd740', Military: '#e040fb' };
+
+    function setShips(containerId, ships) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        if (!entry.shipPrimitives) {
+            entry.shipPrimitives = {
+                billboards: entry.viewer.scene.primitives.add(new Cesium.BillboardCollection()),
+                labels: entry.viewer.scene.primitives.add(new Cesium.LabelCollection())
+            };
+        }
+        const billboards = entry.shipPrimitives.billboards;
+        const labels = entry.shipPrimitives.labels;
+        billboards.removeAll();
+        labels.removeAll();
+        const nearOnly = new Cesium.DistanceDisplayCondition(0, 120000);
+        const withLabels = entry.viewer.camera.positionCartographic.height < 150000;
+        (ships || []).forEach(function (ship) {
+            const position = Cesium.Cartesian3.fromDegrees(Number(ship.lon), Number(ship.lat));
+            const colour = Cesium.Color.fromCssColorString(SHIP_COLOURS[ship.type] || '#ffab40');
+            const hasHeading = Number.isFinite(ship.heading);
+            billboards.add({
+                position: position, image: shipIcon, width: 14, height: 18, color: colour,
+                rotation: hasHeading ? -Cesium.Math.toRadians(Number(ship.heading)) : 0, alignedAxis: Cesium.Cartesian3.ZERO,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            });
+            if (!withLabels) return;
+            const speed = Number.isFinite(ship.speedKnots) ? '  ' + Number(ship.speedKnots).toFixed(1) + ' KN' : '';
+            const detail = [ship.type, ship.destination ? '\u2192 ' + ship.destination : null].filter(Boolean).join(' ');
+            labels.add({
+                position: position,
+                text: String(ship.name || ship.id) + speed + (detail ? '\n' + detail.toUpperCase() : ''),
+                font: '10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -18),
+                distanceDisplayCondition: nearOnly, disableDepthTestDistance: Number.POSITIVE_INFINITY
+            });
+        });
+    }
+
     // Air quality (Open-Meteo): a dot per sample point coloured by U.S. AQI band, with its value.
     // readings: [{ lat, lon, aqi, category }].
     const AQI_COLOURS = [[50, '#00e400'], [100, '#ffff00'], [150, '#ff7e00'], [200, '#ff0000'], [300, '#8f3f97'], [Infinity, '#7e0023']];
@@ -2571,6 +2628,7 @@ window.tacticalGlobe = (function () {
         startDrive: startDrive,
         setMapNotes: setMapNotes,
         setAircraft: setAircraft,
+        setShips: setShips,
         setAirQuality: setAirQuality,
         setPowerOutages: setPowerOutages,
         setThreeD: setThreeD,

@@ -289,9 +289,13 @@ else
   if [[ -n "${GWS_AUDIT_ADMIN_BASE:-}" ]]; then
     export GWS_AUDIT_ENFORCE=1
   fi
+  # --blame-hang-timeout: a single stuck test (seen 2026-10-18: a run sat 70+ minutes on one
+  # test) fails within 5 minutes, naming the test, instead of holding the deploy until the job
+  # timeout. The whole suite takes about 3.5 minutes. No memory dump - just the name.
   run_check "Full automated suite" \
     dotnet test tests/GwsBusinessSuite.Tests/GwsBusinessSuite.Tests.csproj \
-      -c Release --no-build --disable-build-servers -m:1
+      -c Release --no-build --disable-build-servers -m:1 \
+      --blame-hang --blame-hang-timeout 5m --blame-hang-dump-type none
 fi
 
 if [[ -n "${GWS_AUDIT_ADMIN_BASE:-}" && "$skip_tests" != true ]]; then

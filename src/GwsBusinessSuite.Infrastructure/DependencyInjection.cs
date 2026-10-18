@@ -853,6 +853,12 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(15);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
         });
+        // Ships (aisstream.io): one shared WebSocket for the whole app, so a singleton. Its key
+        // (OVERWATCH_AISSTREAM_API_KEY) stays server-side; without one the layer just says so.
+        services.AddSingleton(provider => new GwsBusinessSuite.Application.LiveLayers.ShipService(
+            configuration["Overwatch:AisStreamApiKey"]?.Trim(),
+            provider.GetRequiredService<ILogger<GwsBusinessSuite.Application.LiveLayers.ShipService>>(),
+            TimeProvider.System));
         services.AddHttpClient<GwsBusinessSuite.Application.LiveLayers.AirQualityService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(15);

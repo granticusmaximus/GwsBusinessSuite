@@ -31,6 +31,7 @@
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchBriefingService Briefings
 @inject GwsBusinessSuite.Infrastructure.Services.MapNoteService MapNotes
 @inject GwsBusinessSuite.Application.LiveLayers.AircraftService AircraftService
+@inject GwsBusinessSuite.Application.LiveLayers.ShipService ShipService
 @inject GwsBusinessSuite.Application.LiveLayers.AirQualityService AirQualityService
 @inject GwsBusinessSuite.Application.LiveLayers.PowerOutageService PowerOutageService
 @inject ICameraFavoritesService CameraFavoritesService
@@ -191,6 +192,19 @@
             @if ((_aircraftOn || _airQualityOn) && !string.IsNullOrWhiteSpace(_airSummary))
             {
                 <div class="tg-hazard-summary">@_airSummary</div>
+            }
+        </div>
+        <div class="tg-layer-group">
+            <div class="tg-layer-group-title">SEA</div>
+            <div class="tg-layer-buttons">
+                <button type="button" data-tg-toggle="ships" class="tg-toggle @(_shipsOn ? "tg-toggle-on" : "")"
+                        title="Ships broadcasting AIS (aisstream.io), refreshed every 30 seconds" @onclick="ToggleShipsAsync">
+                    SHIPS [@(_shipsOn ? "ON" : "OFF")]
+                </button>
+            </div>
+            @if (_shipsOn && !string.IsNullOrWhiteSpace(_shipSummary))
+            {
+                <div class="tg-hazard-summary">@_shipSummary</div>
             }
         </div>
         <div class="tg-layer-group">
@@ -1521,6 +1535,7 @@
             _signsOn ? TimedAsync("signs", PushSignsAsync) : Task.CompletedTask,
             _roadWeatherOn ? TimedAsync("road temps", PushRoadWeatherAsync) : Task.CompletedTask,
             _aircraftOn || _airQualityOn ? TimedAsync("air", PushAirLayersAsync) : Task.CompletedTask,
+            _shipsOn ? TimedAsync("ships", PushShipsAsync) : Task.CompletedTask,
             _outagesOn ? TimedAsync("power outages", PushOutagesAsync) : Task.CompletedTask);
         if (Current()) StateHasChanged();
     }
@@ -1927,7 +1942,7 @@
     private bool _helpOpen;
 
     private int ActiveLayerCount =>
-        new[] { _radarOn, _alertsOn, _incidentsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _outagesOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
+        new[] { _radarOn, _alertsOn, _incidentsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
 
     private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {
@@ -3167,6 +3182,64 @@
         }
     }
 
+    // ---- Sea layer: AIS ships from aisstream.io (the server holds one shared stream). ----
+    private bool _shipsOn;
+    private string? _shipSummary;
+    private CancellationTokenSource? _shipsCts;
+
+    private async Task ToggleShipsAsync()
+    {
+        _shipsOn = !_shipsOn;
+        _shipsCts?.Cancel();
+        _shipsCts = null;
+        if (!_shipsOn)
+        {
+            _shipSummary = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.setShips", "tg-viewport", Array.Empty<object>());
+            return;
+        }
+        await PushShipsAsync();
+        var cts = _shipsCts = new CancellationTokenSource();
+        _ = RefreshShipsAsync(cts.Token);
+    }
+
+    private async Task RefreshShipsAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                await InvokeAsync(async () =>
+                {
+                    if (!_shipsOn || ct.IsCancellationRequested) return;
+                    await PushShipsAsync();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task PushShipsAsync()
+    {
+        try
+        {
+            var result = await ShipService.GetAsync(_lastBbox);
+            await JS.InvokeVoidAsync("tacticalGlobe.setShips", "tg-viewport", result.Ships.Select(s => new
+            {
+                id = s.Mmsi, name = s.Name, lat = s.Latitude, lon = s.Longitude, speedKnots = s.SpeedKnots,
+                heading = s.HeadingDegrees ?? s.CourseDegrees, type = s.ShipType, destination = s.Destination
+            }));
+            _shipSummary = result.Note ?? $"SHIPS {result.Ships.Count} (updated {DateTimeOffset.Now.ToGwsTime()})";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch ships layer failed");
+            _shipSummary = "Ships couldn't be shown just now.";
+        }
+    }
+
     private void UpdateAirSummary() =>
         _airSummary = string.Join(" · ", new[] { _aircraftSummary, _airQualitySummary }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
@@ -3322,6 +3395,7 @@
         _briefCts?.Cancel();
         _driveCts?.Cancel();
         _aircraftCts?.Cancel();
+        _shipsCts?.Cancel();
         // The prerendered instance never initializes the browser viewport.
         if (_dotNetRef is null) return;
         try

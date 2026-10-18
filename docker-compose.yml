@@ -71,6 +71,9 @@ services:
       # Buildings only, allowed URL https://admin.gwsapp.net). It reaches the browser, so never
       # the account's default token. Blank keeps the flat globe.
       Overwatch__CesiumIonToken: ${OVERWATCH_CESIUM_ION_TOKEN:-}
+      # Overwatch ships layer: a free aisstream.io key. Server-side only (the app holds the
+      # WebSocket), so it never reaches the browser. Blank shows a "needs a key" note instead.
+      Overwatch__AisStreamApiKey: ${OVERWATCH_AISSTREAM_API_KEY:-}
       # Threat Intelligence page's optional keys (see ThreatIntelOptions.cs for signup links) -
       # RDAP and the defend.network feed need no key at all; only OTX pulses and Focsec's IP
       # reputation classification go blank until their own free key is added.
