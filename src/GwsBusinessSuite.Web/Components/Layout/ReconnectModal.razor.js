@@ -8,12 +8,30 @@ retryButton.addEventListener("click", retry);
 const resumeButton = document.getElementById("components-resume-button");
 resumeButton.addEventListener("click", resume);
 
+// Most reconnects (e.g. coming back to a tab) finish within a second or two: only show the
+// modal when one is still going after a short grace, so a quick one doesn't flash it.
+const showDelayMs = 2500;
+let showTimer = null;
+
 function handleReconnectStateChanged(event) {
     if (event.detail.state === "show") {
-        reconnectModal.showModal();
-    } else if (event.detail.state === "hide") {
+        if (!reconnectModal.open && showTimer === null) {
+            showTimer = setTimeout(() => {
+                showTimer = null;
+                reconnectModal.showModal();
+            }, showDelayMs);
+        }
+        return;
+    }
+    if (showTimer !== null) {
+        clearTimeout(showTimer);
+        showTimer = null;
+    }
+    if (event.detail.state === "hide") {
         reconnectModal.close();
     } else if (event.detail.state === "failed") {
+        // Failed inside the grace period: still show the modal, for its Retry button.
+        if (!reconnectModal.open) reconnectModal.showModal();
         document.addEventListener("visibilitychange", retryWhenDocumentBecomesVisible);
     } else if (event.detail.state === "rejected") {
         location.reload();

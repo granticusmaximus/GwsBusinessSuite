@@ -90,7 +90,15 @@ builder.Services.AddRazorComponents()
     // Long pasted emails/documents arrive through the Blazor SignalR circuit.
     // Retain a bounded allowance above SentinelGPT's 32,000-character prompt
     // limit so JSON/UTF-8 framing cannot disconnect an otherwise valid paste.
-    .AddHubOptions(options => options.MaximumReceiveMessageSize = 256 * 1024);
+    .AddHubOptions(options =>
+    {
+        options.MaximumReceiveMessageSize = 256 * 1024;
+        // Browsers throttle hidden tabs (Chrome to about one timer a minute) and the Mac app's web
+        // view when it's in the background, so the client's 15 s keep-alive can go quiet for a
+        // minute or more. At the default 30 s the server dropped those circuits, and coming back
+        // showed "Rejoining..." (prod logs 16-18 Oct 2026: 164 drops, only 2 near a server stall).
+        options.ClientTimeoutInterval = TimeSpan.FromMinutes(3);
+    });
 // Compress server-rendered HTML, JSON/API responses, and static assets. Forwarded
 // headers surface the original HTTPS scheme behind Cloudflare, so HTTPS compression
 // must be enabled explicitly or production traffic would silently skip it.
