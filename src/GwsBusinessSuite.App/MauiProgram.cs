@@ -53,9 +53,8 @@ public static class MauiProgram
 		builder.Services.AddSingleton<DeepAnalysisAdvisor>();
 		builder.Services.AddTransient<SentinelGptPage>();
 
-		// MacCatalyst-only device login (see NativeCookieInjector) - UseCookies: false so the raw
-		// Set-Cookie header survives on the response instead of being consumed into an
-		// HttpClientHandler-internal CookieContainer this app never reads from.
+		// MacCatalyst-only device login and Touch ID sign-in (NativeAppAuthService). UseCookies: false
+		// keeps this client sessionless: the web view signs itself in with a one-time address.
 		builder.Services.AddSingleton(_ =>
 			new DeviceSecretStore(Path.Combine(FileSystem.Current.AppDataDirectory, "sentinelgpt-device-secret.txt")));
 		builder.Services.AddSingleton(_ => new HttpClient(new HttpClientHandler { UseCookies = false }));

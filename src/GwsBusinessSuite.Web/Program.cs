@@ -113,6 +113,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
 builder.Services.AddScoped<GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor>();
 builder.Services.AddSingleton<GwsBusinessSuite.Web.Services.AdminThemeProvider>();
+builder.Services.AddSingleton<GwsBusinessSuite.Web.Security.NativeSignInHandoff>();
 builder.Services.AddSignalR();
 
 // Content Studio article generation can take several minutes against Ollama
@@ -1747,7 +1748,8 @@ app.MapPost("/auth/device-login", async (
     HttpContext httpContext,
     IConfiguration configuration,
     IUserManagementService userManagementService,
-    ISecurityAuditService securityAudit) =>
+    ISecurityAuditService securityAudit,
+    GwsBusinessSuite.Web.Security.NativeSignInHandoff handoff) =>
 {
     var form = await httpContext.Request.ReadFormAsync();
     var username = form["username"].ToString().Trim();
@@ -1786,12 +1788,53 @@ app.MapPost("/auth/device-login", async (
         return Results.Json(new { error = "invalid_credentials" }, statusCode: StatusCodes.Status401Unauthorized);
     }
 
+    // The Mac app asks for a one-time code to open in its web view (see NativeSignInHandoff) -
+    // signing in this HTTP client would leave the web view itself signed out.
+    if (form["handoff"] == "1")
+    {
+        await securityAudit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "DeviceSecretLogin", SecurityAuditOutcomes.Succeeded,
+            SecurityAuditSeverities.High, "AppUser", attempt.User.Id.ToString(),
+            new Dictionary<string, string?> { ["step"] = "handoff-issued" },
+            httpContext.Connection.RemoteIpAddress?.ToString(), attempt.User.Username));
+        return Results.Json(new { handoff = handoff.Issue(attempt.User.Username) });
+    }
+
     await SignInPortalAsync(httpContext, attempt.User, amr: "device-secret");
     await securityAudit.RecordAsync(new SecurityAuditInput(
         SecurityAuditCategories.Authentication, "DeviceSecretLogin", SecurityAuditOutcomes.Succeeded,
         Severity: SecurityAuditSeverities.High, TargetType: "AppUser", TargetId: attempt.User.Id.ToString(),
         NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString(), ActorUsername: attempt.User.Username));
     return Results.Ok();
+}).AllowAnonymous().RequireRateLimiting("login");
+
+// Opened in the Mac app's web view with the code from /auth/device-login above, so the session
+// cookie is set in the web view's own store. The account is checked again here (still active,
+// not locked out) since the code was issued up to a minute earlier.
+app.MapGet("/auth/device-login/web", async (string? code, HttpContext httpContext,
+    GwsBusinessSuite.Web.Security.NativeSignInHandoff handoff, IUserManagementService users, ISecurityAuditService audit) =>
+{
+    var username = handoff.Redeem(code);
+    var now = DateTimeOffset.UtcNow;
+    var user = username is null ? null : (await users.ListUsersAsync()).FirstOrDefault(item =>
+        string.Equals(item.Username, username, StringComparison.OrdinalIgnoreCase) && item.IsActive
+        && (item.LockoutEndAt is null || item.LockoutEndAt <= now));
+    if (user is null)
+    {
+        await audit.RecordAsync(new SecurityAuditInput(
+            SecurityAuditCategories.Authentication, "DeviceSecretLogin", SecurityAuditOutcomes.Failed,
+            SecurityAuditSeverities.High, "AppUser", username ?? "unknown",
+            new Dictionary<string, string?> { ["step"] = "handoff-redeem" },
+            httpContext.Connection.RemoteIpAddress?.ToString(), username));
+        return Results.LocalRedirect("/admin/login?error=device");
+    }
+    await SignInPortalAsync(httpContext, user, amr: "device-secret");
+    await audit.RecordAsync(new SecurityAuditInput(
+        SecurityAuditCategories.Authentication, "DeviceSecretLogin", SecurityAuditOutcomes.Succeeded,
+        SecurityAuditSeverities.High, "AppUser", user.Id.ToString(),
+        new Dictionary<string, string?> { ["step"] = "handoff-redeemed" },
+        httpContext.Connection.RemoteIpAddress?.ToString(), user.Username));
+    return Results.LocalRedirect("/admin");
 }).AllowAnonymous().RequireRateLimiting("login");
 
 // Reliability fallback for the native macOS app's SentinelGPT page - it does its AI work against

@@ -128,6 +128,10 @@
         {
             ErrorMessage = "Touch ID sign-in didn't work - sign in with your password instead.";
         }
+        else if (string.Equals(Error, "device", StringComparison.OrdinalIgnoreCase))
+        {
+            ErrorMessage = "The app's sign-in didn't carry over (it may have taken over a minute) - sign in here instead.";
+        }
         else if (string.Equals(Error, "expired", StringComparison.OrdinalIgnoreCase))
         {
             ErrorMessage = "Your verification session expired. Enter your username and password again.";

@@ -3,13 +3,14 @@ using System.Net.Http.Json;
 
 namespace GwsBusinessSuite.App;
 
-public sealed record DeviceLoginResult(bool Succeeded, string? ErrorMessage, IReadOnlyList<string> SetCookieHeaders);
+// WebSignInUrl: the one-time address that signs the web view in (null from a server too old to issue one).
+public sealed record DeviceLoginResult(bool Succeeded, string? ErrorMessage, string? WebSignInUrl);
 
 // Calls the server's /auth/device-login (see IUserManagementService.AttemptDeviceLoginAsync) -
-// the native app's alternative to the browser-facing MFA challenge. The injected HttpClient must
-// be configured with UseCookies = false (see MauiProgram.cs) so the raw Set-Cookie header
-// survives on the response instead of being consumed into an HttpClientHandler-internal
-// CookieContainer this app never reads from.
+// the native app's alternative to the browser-facing MFA challenge. The session has to end up in
+// the web view, and on macOS this HTTP client keeps Set-Cookie to itself, so the server hands back
+// a one-time code instead and the web view opens /auth/device-login/web with it (same idea as the
+// Touch ID sign-in below).
 public sealed class NativeAppAuthService(HttpClient httpClient)
 {
     public async Task<DeviceLoginResult> LoginAsync(
@@ -19,7 +20,8 @@ public sealed class NativeAppAuthService(HttpClient httpClient)
         {
             ["deviceSecret"] = deviceSecret,
             ["username"] = username,
-            ["password"] = password
+            ["password"] = password,
+            ["handoff"] = "1"
         });
 
         HttpResponseMessage response;
@@ -30,7 +32,7 @@ public sealed class NativeAppAuthService(HttpClient httpClient)
         }
         catch (Exception ex)
         {
-            return new DeviceLoginResult(false, $"Could not reach the server: {ex.Message}", []);
+            return new DeviceLoginResult(false, $"Could not reach the server: {ex.Message}", null);
         }
 
         if (!response.IsSuccessStatusCode)
@@ -38,11 +40,24 @@ public sealed class NativeAppAuthService(HttpClient httpClient)
             var message = response.StatusCode == HttpStatusCode.Locked
                 ? "This account is temporarily locked out after too many failed attempts."
                 : "Invalid device secret, username, or password.";
-            return new DeviceLoginResult(false, message, []);
+            return new DeviceLoginResult(false, message, null);
         }
 
-        var cookies = response.Headers.TryGetValues("Set-Cookie", out var values) ? values.ToList() : [];
-        return new DeviceLoginResult(true, null, cookies);
+        string? code = null;
+        try
+        {
+            using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            if (json.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                && json.RootElement.TryGetProperty("handoff", out var value) && value.ValueKind == System.Text.Json.JsonValueKind.String)
+                code = value.GetString();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // An older server answers with an empty 200 and no code.
+        }
+        var url = string.IsNullOrEmpty(code) ? null
+            : new Uri(new Uri(AppEndpoints.BaseUrl), $"/auth/device-login/web?code={Uri.EscapeDataString(code)}").AbsoluteUri;
+        return new DeviceLoginResult(true, null, url);
     }
 
     // The address that signs the web view in with Touch ID (opened IN the web view, so the session

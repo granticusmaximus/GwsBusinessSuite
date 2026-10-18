@@ -103,9 +103,9 @@ public partial class MainPage : ContentPage
         if (_touchIdLock.IsSetUp && await SignInWithTouchIdAsync(reportProblems: false)) return;
 
         var deviceSecret = await _deviceSecretStore.GetAsync();
-        if (!string.IsNullOrWhiteSpace(deviceSecret) && await TryDeviceLoginAsync(deviceSecret))
+        if (!string.IsNullOrWhiteSpace(deviceSecret) && await TryDeviceLoginAsync(deviceSecret) is { } signInUrl)
         {
-            WorkspaceView.Source = AppEndpoints.StartUrl;
+            WorkspaceView.Source = signInUrl;
             return;
         }
 #endif
@@ -139,23 +139,24 @@ public partial class MainPage : ContentPage
     // no masked/secure-entry mode, so the password is briefly visible in the OS alert - an
     // accepted tradeoff for a local, physically-trusted machine, not something to build a custom
     // masked-entry page to avoid.
-    private async Task<bool> TryDeviceLoginAsync(string deviceSecret)
+    // Returns the address to open in the web view (it signs the web view in), or null to fall back
+    // to the normal sign-in page.
+    private async Task<string?> TryDeviceLoginAsync(string deviceSecret)
     {
         var username = await DisplayPromptAsync("Sign In", "Username", accept: "Next", cancel: "Use browser login instead");
-        if (string.IsNullOrWhiteSpace(username)) return false;
+        if (string.IsNullOrWhiteSpace(username)) return null;
 
         var password = await DisplayPromptAsync("Sign In", $"Password for {username}", accept: "Sign In", cancel: "Cancel");
-        if (string.IsNullOrWhiteSpace(password)) return false;
+        if (string.IsNullOrWhiteSpace(password)) return null;
 
         var result = await _nativeAppAuthService.LoginAsync(deviceSecret, username, password);
         if (!result.Succeeded)
         {
             await DisplayAlertAsync("Sign In Failed", result.ErrorMessage ?? "Could not sign in.", "OK");
-            return false;
+            return null;
         }
-
-        await NativeCookieInjector.InjectCookiesAsync(result.SetCookieHeaders, AppEndpoints.BaseUrl);
-        return true;
+        DebugLog($"Device sign-in: handoff={result.WebSignInUrl is not null}");
+        return result.WebSignInUrl ?? AppEndpoints.StartUrl;
     }
 #endif
 
