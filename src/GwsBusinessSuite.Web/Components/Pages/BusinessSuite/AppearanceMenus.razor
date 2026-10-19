@@ -64,9 +64,9 @@
                 var index = i;
                 var item = activeNavItems[index];
                 <div class="d-flex gap-2 align-items-center mb-2">
-                    <input class="form-control form-control-sm" placeholder="Label" value="@item.Label"
+                    <input class="form-control form-control-sm" placeholder="Label" aria-label="Label" value="@item.Label"
                            @oninput="(e) => UpdateNavItem(activeNavItems, index, item with { Label = e.Value?.ToString() ?? string.Empty })" />
-                    <input class="form-control form-control-sm font-monospace" placeholder="/path" value="@item.Href"
+                    <input class="form-control form-control-sm font-monospace" placeholder="@(item.HasChildren ? "/path (optional)" : "/path")" aria-label="Link" value="@item.Href"
                            @oninput="(e) => UpdateNavItem(activeNavItems, index, item with { Href = e.Value?.ToString() ?? string.Empty })" />
                     <div class="form-check form-check-inline flex-shrink-0 mb-0" title="Open in new tab">
                         <input class="form-check-input" type="checkbox" id="@($"nav-newtab-{ActiveNavLocation}-{index}")"
@@ -75,18 +75,65 @@
                         <label class="form-check-label small" for="@($"nav-newtab-{ActiveNavLocation}-{index}")">↗</label>
                     </div>
                     <div class="btn-group btn-group-sm flex-shrink-0">
+                        <button type="button" class="btn btn-outline-secondary" title="Add a sub-link" @onclick="() => AddChild(activeNavItems, index)">
+                            <i class="bi bi-plus-lg"></i><i class="bi bi-arrow-return-right"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" title="Make it a sub-link of the item above"
+                                disabled="@(index == 0 || item.HasChildren)" @onclick="() => Indent(activeNavItems, index)">
+                            <i class="bi bi-text-indent-left"></i>
+                        </button>
                         <button type="button" class="btn btn-outline-secondary" title="Move up" disabled="@(index == 0)" @onclick="() => MoveNavItem(activeNavItems, index, -1)">
                             <i class="bi bi-arrow-up"></i>
                         </button>
                         <button type="button" class="btn btn-outline-secondary" title="Move down" disabled="@(index == activeNavItems.Count - 1)" @onclick="() => MoveNavItem(activeNavItems, index, 1)">
                             <i class="bi bi-arrow-down"></i>
                         </button>
-                        <button type="button" class="btn btn-outline-danger" title="Remove" @onclick="() => RemoveNavItem(activeNavItems, index)">
+                        <button type="button" class="btn btn-outline-danger" title="@(item.HasChildren ? "Remove (and its sub-links)" : "Remove")" @onclick="() => RemoveNavItem(activeNavItems, index)">
                             <i class="bi bi-trash"></i>
                         </button>
                     </div>
                 </div>
+                @if (item.Children is { Count: > 0 } children)
+                {
+                    @for (var c = 0; c < children.Count; c++)
+                    {
+                        var childIndex = c;
+                        var child = children[childIndex];
+                        <div class="d-flex gap-2 align-items-center mb-2 ps-4">
+                            <i class="bi bi-arrow-return-right text-secondary flex-shrink-0" aria-hidden="true"></i>
+                            <input class="form-control form-control-sm" placeholder="Sub-link label" aria-label="Sub-link label" value="@child.Label"
+                                   @oninput="(e) => UpdateChild(activeNavItems, index, childIndex, child with { Label = e.Value?.ToString() ?? string.Empty })" />
+                            <input class="form-control form-control-sm font-monospace" placeholder="/path" aria-label="Sub-link" value="@child.Href"
+                                   @oninput="(e) => UpdateChild(activeNavItems, index, childIndex, child with { Href = e.Value?.ToString() ?? string.Empty })" />
+                            <div class="form-check form-check-inline flex-shrink-0 mb-0" title="Open in new tab">
+                                <input class="form-check-input" type="checkbox" id="@($"nav-newtab-{ActiveNavLocation}-{index}-{childIndex}")"
+                                       checked="@child.OpenInNewTab"
+                                       @onchange="(e) => UpdateChild(activeNavItems, index, childIndex, child with { OpenInNewTab = (bool)(e.Value ?? false) })" />
+                                <label class="form-check-label small" for="@($"nav-newtab-{ActiveNavLocation}-{index}-{childIndex}")">↗</label>
+                            </div>
+                            <div class="btn-group btn-group-sm flex-shrink-0">
+                                <button type="button" class="btn btn-outline-secondary" title="Move out to the top level" @onclick="() => Outdent(activeNavItems, index, childIndex)">
+                                    <i class="bi bi-text-indent-right"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" title="Move up" disabled="@(childIndex == 0)" @onclick="() => MoveChild(activeNavItems, index, childIndex, -1)">
+                                    <i class="bi bi-arrow-up"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" title="Move down" disabled="@(childIndex == children.Count - 1)" @onclick="() => MoveChild(activeNavItems, index, childIndex, 1)">
+                                    <i class="bi bi-arrow-down"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-danger" title="Remove" @onclick="() => RemoveChild(activeNavItems, index, childIndex)">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    }
+                }
             }
+            <p class="small text-secondary mb-0">
+                @(isFooterLocation
+                    ? "Sub-links are listed under their parent in the footer."
+                    : "Sub-links open as a dropdown under their parent (on phones they're listed under it). A parent's own link is optional.")
+            </p>
         }
 
         <button class="btn btn-primary btn-sm mt-3" @onclick="SaveAsync" disabled="@IsBusy">Save changes</button>
@@ -158,6 +205,72 @@
     {
         if (index < 0 || index >= items.Count) return;
         items.RemoveAt(index);
+    }
+
+    // Sub-links (one level). NavMenuItem is immutable, so each change rebuilds the parent.
+    private static void SetChildren(List<NavMenuItem> items, int parentIndex, List<NavMenuItem> children) =>
+        items[parentIndex] = items[parentIndex] with { Children = children.Count > 0 ? children : null };
+
+    private static List<NavMenuItem> ChildrenOf(List<NavMenuItem> items, int parentIndex) =>
+        items[parentIndex].Children?.ToList() ?? [];
+
+    private void AddChild(List<NavMenuItem> items, int parentIndex)
+    {
+        if (parentIndex < 0 || parentIndex >= items.Count) return;
+        var children = ChildrenOf(items, parentIndex);
+        children.Add(new NavMenuItem(Guid.NewGuid().ToString("N")[..8], "New Link", "/", false));
+        SetChildren(items, parentIndex, children);
+    }
+
+    private void UpdateChild(List<NavMenuItem> items, int parentIndex, int childIndex, NavMenuItem updated)
+    {
+        if (parentIndex < 0 || parentIndex >= items.Count) return;
+        var children = ChildrenOf(items, parentIndex);
+        if (childIndex < 0 || childIndex >= children.Count) return;
+        children[childIndex] = updated with { Children = null };
+        SetChildren(items, parentIndex, children);
+    }
+
+    private void RemoveChild(List<NavMenuItem> items, int parentIndex, int childIndex)
+    {
+        if (parentIndex < 0 || parentIndex >= items.Count) return;
+        var children = ChildrenOf(items, parentIndex);
+        if (childIndex < 0 || childIndex >= children.Count) return;
+        children.RemoveAt(childIndex);
+        SetChildren(items, parentIndex, children);
+    }
+
+    private void MoveChild(List<NavMenuItem> items, int parentIndex, int childIndex, int direction)
+    {
+        if (parentIndex < 0 || parentIndex >= items.Count) return;
+        var children = ChildrenOf(items, parentIndex);
+        var target = childIndex + direction;
+        if (childIndex < 0 || childIndex >= children.Count || target < 0 || target >= children.Count) return;
+        (children[childIndex], children[target]) = (children[target], children[childIndex]);
+        SetChildren(items, parentIndex, children);
+    }
+
+    // The item becomes the last sub-link of the item above it (only one level, so not a parent).
+    private void Indent(List<NavMenuItem> items, int index)
+    {
+        if (index <= 0 || index >= items.Count || items[index].HasChildren) return;
+        var item = items[index];
+        items.RemoveAt(index);
+        var children = ChildrenOf(items, index - 1);
+        children.Add(item with { Children = null });
+        SetChildren(items, index - 1, children);
+    }
+
+    // The sub-link moves to the top level, just after its old parent.
+    private void Outdent(List<NavMenuItem> items, int parentIndex, int childIndex)
+    {
+        if (parentIndex < 0 || parentIndex >= items.Count) return;
+        var children = ChildrenOf(items, parentIndex);
+        if (childIndex < 0 || childIndex >= children.Count) return;
+        var child = children[childIndex];
+        children.RemoveAt(childIndex);
+        SetChildren(items, parentIndex, children);
+        items.Insert(parentIndex + 1, child);
     }
 
     private void MoveNavItem(List<NavMenuItem> items, int index, int direction)

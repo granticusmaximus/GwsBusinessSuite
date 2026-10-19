@@ -300,6 +300,13 @@ else
                     <button type="button" class="btn btn-sm btn-primary text-nowrap" disabled="@_isBusy" @onclick="() => _showCreatePage = true">
                         <i class="bi bi-plus-lg me-1"></i>Create new page
                     </button>
+                    @if (_page.Region is null)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary text-nowrap" disabled="@_isBusy" @onclick="DuplicateThisPageAsync"
+                                title="Save this page, then open a new draft copy of it">
+                            <i class="bi bi-copy me-1"></i>Duplicate this page
+                        </button>
+                    }
                     <a class="small align-self-end" href="/admin/pages/all" title="Restore from trash, bulk actions, or switch websites">
                         <i class="bi bi-list-ul me-1"></i>All pages
                     </a>
@@ -3747,6 +3754,23 @@ else
     {
         _rightTab = "page";
         _inspectorOpen = true;
+    }
+
+    // Saves this page first (so the copy has what's on screen), then opens the new draft copy.
+    private async Task DuplicateThisPageAsync()
+    {
+        if (_isBusy || _page is null || _page.Region is not null) return;
+        await SaveAsync(reloadPreview: false);
+        if (!string.IsNullOrEmpty(_errorMessage)) return;
+        try
+        {
+            var copy = await CmsBuilderService.DuplicatePageAsync(_page.Id);
+            Navigation.NavigateTo($"/admin/pages/{copy.Id}/edit", forceLoad: true);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _errorMessage = ex.Message;
+        }
     }
 
     private async Task OpenSitePageAsync(Guid pageId)

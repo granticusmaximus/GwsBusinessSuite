@@ -23,4 +23,8 @@ public interface IContentLocalizationService
     // Used by the public content routes: returns the Published localization for this
     // language, or null if none exists (falls back to the source content's own language).
     Task<PublishedLocalization?> GetPublishedAsync(string contentType, Guid contentId, string languageCode, CancellationToken cancellationToken = default);
+
+    // The language codes this content has a Published translation in (for hreflang and the
+    // language switcher). Empty when none.
+    Task<IReadOnlyList<string>> ListPublishedLanguagesAsync(string contentType, Guid contentId, CancellationToken cancellationToken = default);
 }

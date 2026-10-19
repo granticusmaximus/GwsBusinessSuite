@@ -12,6 +12,7 @@
 @inject NavigationManager Navigation
 @inject GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor CurrentCmsSiteAccessor
 @inject ILogger<Pages> Logger
+@inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 
 <PageTitle>Pages</PageTitle>
 
@@ -164,6 +165,7 @@ else
                                 <a href="/admin/pages/@cmsPage.Id/edit">Edit</a>
                                 <a href="/admin/pages/@cmsPage.Id/edit?panel=page">Settings</a>
                                 <a href="@BuildLiveUrl(cmsPage)" target="_blank" rel="noopener noreferrer">View</a>
+                                <button type="button" title="Copy into a new draft page" @onclick="() => DuplicatePageAsync(cmsPage.Id)" disabled="@IsCmsBusy">Duplicate</button>
                                 <button type="button" class="text-danger"
                                         @onclick="() => TrashPageAsync(cmsPage.Id)" disabled="@IsCmsBusy">Trash</button>
                             </div>
@@ -354,6 +356,35 @@ else
 
     private string BuildLiveUrl(CmsPage page) =>
         CurrentSite is null ? "#" : $"/cms/{CurrentSite.Slug}/{BuildFullPath(page)}";
+
+    private async Task DuplicatePageAsync(Guid pageId)
+    {
+        if (!SelectedSiteId.HasValue) return;
+        var siteId = SelectedSiteId.Value;
+        IsCmsBusy = true;
+        CmsErrorMessage = string.Empty;
+        CmsStatusMessage = string.Empty;
+        try
+        {
+            var actor = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var copy = await CmsBuilderService.DuplicatePageAsync(pageId, actor);
+            CmsPages = (await CmsBuilderService.ListPagesAsync(siteId)).ToList();
+            CmsStatusMessage = $"Created '{copy.Title}' as a draft at /{copy.Slug}.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            CmsErrorMessage = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to duplicate page {PageId}.", pageId);
+            CmsErrorMessage = "The page couldn't be duplicated - see the server log.";
+        }
+        finally
+        {
+            IsCmsBusy = false;
+        }
+    }
 
     private async Task TrashPageAsync(Guid pageId)
     {

@@ -14,7 +14,7 @@ Grep for each item first. Two hints already turned up:
 | 1 | Scheduling: per-type time zone, visitor time zones, days ahead / notice / max per day, slot re-check on booking | done 18-10-26 |
 | 2 | Billing: multi-currency, reminders (manual + automatic), view/duplicate on sent/paid/void, line order | done 18-10-26 |
 | 3 | Support: email-to-ticket (new mail -> ticket, tagged replies join, staff replies emailed with text + Reply-To) | done 18-10-26 |
-| 4 | Site: duplicate page, nested menus, hreflang + language switcher | not started |
+| 4 | Site: duplicate page, nested menus (dropdowns), hreflang + language switcher + translations on public pages | done 19-10-26 |
 | 5 | Automation: expression functions + sandboxed transform step | not started |
 | 6 | Media: file storage instead of base64-in-DB, resizing, WebP/AVIF | not started |
 | 7 | Customer timeline across apps (check ContactTimelineService first) | not started |
@@ -66,3 +66,19 @@ Grep for each item first. Two hints already turned up:
   link.
 - Panel: Support page, "Email-to-ticket" button (`SupportEmailInPanel.razor`).
 - Migration `AddSupportEmailToTicket`.
+
+## Phase 4 notes (done)
+
+- Menus: `NavMenuItem.Children` (one level; `HasChildren` is JsonIgnore'd). The header renders a
+  dropdown: hover/focus/click, Escape dismisses via `.is-dismissed` (public-site.js). Phones list
+  sub-links inline; the footer renders `.footer-group`. Editor: Add sub-link / indent / Move out
+  in AppearanceMenus.razor.
+- Duplicate: `ICmsBuilderService.DuplicatePageAsync` goes through SavePageAsync (unique slug,
+  Draft, canonical blank), with property JSON copied verbatim. Buttons on /admin/pages/all and
+  "Duplicate this page" in the editor's navigator (saves first).
+- Languages: `PageLanguages` (Application/Localization) builds hreflang, `<html lang>` and the
+  switcher; source language "en". `IContentLocalizationService.ListPublishedLanguagesAsync`.
+- Found along the way: the real public pages (`RenderPublicCanvasPageAsync`) ignored `?lang`
+  entirely; only `/cms/...` and blog posts applied translations. Translated variants now get a
+  self canonical. The output cache varies by query, so verified that the languages are cached
+  separately.

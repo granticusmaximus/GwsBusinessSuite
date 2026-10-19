@@ -29,6 +29,9 @@ public interface ICmsBuilderService
     // workflow opts into downstream chaining).
     Task<CmsPage> SavePageAsync(CmsPageEditorModel editor, string? actor = null, CancellationToken cancellationToken = default);
     string BuildFullPath(CmsPage page, IReadOnlyList<CmsPage> allPagesInSite);
+    // A new Draft copy of a page (its latest content, including an unpublished draft edit), next
+    // to the original under the same parent. Not for the site header/footer.
+    Task<CmsPage> DuplicatePageAsync(Guid pageId, string? actor = null, CancellationToken cancellationToken = default);
     Task TrashPageAsync(Guid pageId, CancellationToken cancellationToken = default);
     Task RestorePageAsync(Guid pageId, CancellationToken cancellationToken = default);
     Task DeletePageAsync(Guid pageId, CancellationToken cancellationToken = default);

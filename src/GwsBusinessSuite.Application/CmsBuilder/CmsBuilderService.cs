@@ -557,6 +557,40 @@ public sealed class CmsBuilderService(
         return page;
     }
 
+    public async Task<CmsPage> DuplicatePageAsync(Guid pageId, string? actor = null, CancellationToken cancellationToken = default)
+    {
+        // The query filter already hides header/footer regions; trashed pages can't be copied either.
+        var source = await dbContext.CmsPages.AsNoTracking()
+            .FirstOrDefaultAsync(page => page.Id == pageId && page.TrashedAt == null, cancellationToken)
+            ?? throw new InvalidOperationException("That page no longer exists (or is in the trash).");
+        var categoryName = source.CategoryId is { } categoryId
+            ? await dbContext.CmsPageCategories.Where(category => category.Id == categoryId).Select(category => category.Name).FirstOrDefaultAsync(cancellationToken)
+            : null;
+
+        // Through SavePageAsync, so the copy gets a unique slug and passes the same checks as any
+        // new page. Always a Draft; the canonical URL is left blank so the copy doesn't claim to be
+        // the original.
+        var copy = await SavePageAsync(new CmsPageEditorModel
+        {
+            SiteId = source.SiteId,
+            ParentPageId = source.ParentPageId,
+            Title = source.Title.StartsWith("Copy of ", StringComparison.Ordinal) ? source.Title : $"Copy of {source.Title}",
+            BlocksJson = source.DraftBlocksJson ?? source.BlocksJson,
+            MetaTitle = source.MetaTitle,
+            MetaDescription = source.MetaDescription,
+            OgImageUrl = source.OgImageUrl,
+            CategoryName = categoryName ?? string.Empty,
+            Tags = source.Tags,
+            CustomCss = source.CustomCss,
+            Status = CmsPageStatuses.Draft,
+            EditPermission = source.EditPermission
+        }, actor, cancellationToken);
+        // Structured fields keep their stored types (the editor model only carries text).
+        copy.PropertyValuesJson = source.PropertyValuesJson;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return copy;
+    }
+
     private static bool IsPageResolvable(CmsPage? page, bool includeUnpublished, DateTimeOffset now) =>
         page is not null
         && page.TrashedAt is null

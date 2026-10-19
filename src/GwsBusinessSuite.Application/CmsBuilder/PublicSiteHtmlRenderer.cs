@@ -130,7 +130,8 @@ public static class PublicSiteHtmlRenderer
         IReadOnlyList<NavMenuItem>? navItems = null, IReadOnlyList<NavMenuItem>? footerNavItems = null,
         string? accentColorHex = null, string? fontPairingKey = null,
         string? canonicalUrl = null, string? siteName = null, string? logoUrl = null, string? faviconUrl = null, DesignTokenSet? tokens = null,
-        string? headerHtml = null, string? footerHtml = null)
+        string? headerHtml = null, string? footerHtml = null,
+        GwsBusinessSuite.Application.Localization.PageLanguages? languages = null)
     {
         var ogImageTag = string.IsNullOrWhiteSpace(ogImageUrl)
             ? string.Empty
@@ -162,7 +163,7 @@ public static class PublicSiteHtmlRenderer
 
         return $"""
             <!DOCTYPE html>
-            <html lang="en">
+            <html lang="{Html(languages?.Current ?? "en")}">
             <head>
               <meta charset="UTF-8" />
               <link rel="icon" href="{Html(iconHref)}" />
@@ -171,6 +172,7 @@ public static class PublicSiteHtmlRenderer
               <meta name="description" content="{Html(metaDescription)}" />
               {ogImageTag}
               {canonicalTag}
+              {languages?.HeadLinks()}
               <link rel="preconnect" href="https://fonts.googleapis.com" />
               <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
               <link href="{pairing.GoogleFontsHref}" rel="stylesheet" />
@@ -184,6 +186,7 @@ public static class PublicSiteHtmlRenderer
             <body>
               {SiteHeader(headerHtml, navItems, siteName, logoUrl)}
               {bodyHtml}
+              {languages?.Switcher()}
               {SiteFooter(footerHtml, footerNavItems)}
               <script src="/public-site.js" defer></script>
               <script src="/js/responsive-tables.js" defer></script>
@@ -244,6 +247,36 @@ public static class PublicSiteHtmlRenderer
         return null;
     }
 
+    // A header menu item: a plain link, or - with sub-links - a dropdown. The menu opens on hover
+    // or keyboard focus (public-site.css) and on tap/click (public-site.js), and Escape closes it.
+    // A parent with its own address keeps it as a link, with a separate button for the menu.
+    private static string HeaderItem(NavMenuItem item)
+    {
+        if (!item.HasChildren) return NavLink(item);
+        var hasLink = !string.IsNullOrWhiteSpace(item.Href) && item.Href.Trim() != "#";
+        var label = Html(item.Label);
+        var sb = new StringBuilder("<div class=\"nav-dropdown\">");
+        if (hasLink) sb.Append(NavLink(item with { Children = null }).Replace("<a ", "<a class=\"nav-dropdown-link\" ", StringComparison.Ordinal));
+        sb.Append(hasLink
+            ? $"<button type=\"button\" class=\"nav-dropdown-toggle\" data-gws-dropdown aria-expanded=\"false\" aria-label=\"{label} menu\"><i class=\"bi bi-chevron-down\" aria-hidden=\"true\"></i></button>"
+            : $"<button type=\"button\" class=\"nav-dropdown-toggle\" data-gws-dropdown aria-expanded=\"false\">{label} <i class=\"bi bi-chevron-down\" aria-hidden=\"true\"></i></button>");
+        sb.Append("<div class=\"nav-dropdown-menu\">");
+        foreach (var child in item.Children!) sb.Append(NavLink(child with { Children = null }));
+        sb.Append("</div></div>");
+        return sb.ToString();
+    }
+
+    // A footer menu item: sub-links are listed under their parent as a small group.
+    private static string FooterItem(NavMenuItem item)
+    {
+        if (!item.HasChildren) return NavLink(item);
+        var hasLink = !string.IsNullOrWhiteSpace(item.Href) && item.Href.Trim() != "#";
+        var heading = hasLink
+            ? NavLink(item with { Children = null }).Replace("<a ", "<a class=\"footer-group-heading\" ", StringComparison.Ordinal)
+            : $"<span class=\"footer-group-heading\">{Html(item.Label)}</span>";
+        return $"<div class=\"footer-group\">{heading}{string.Concat(item.Children!.Select(child => NavLink(child with { Children = null })))}</div>";
+    }
+
     private static string NavLink(NavMenuItem item)
     {
         var targetAttrs = item.OpenInNewTab ? " target=\"_blank\" rel=\"noopener noreferrer\"" : "";
@@ -295,8 +328,10 @@ public static class PublicSiteHtmlRenderer
         html = SiteLogoPlaceholder.Replace(html, m => m.Groups[1].Value + BrandHtml(siteName, logoUrl, m.Groups[2].Value == "1") + "</a>");
         return NavMenuPlaceholder.Replace(html, m =>
         {
-            var items = m.Groups[2].Value == "footer" ? footer ?? [] : primary ?? DefaultNavItems;
-            return m.Groups[1].Value + string.Concat(items.Select(NavLink)) + "</nav>";
+            var isFooter = m.Groups[2].Value == "footer";
+            var items = isFooter ? footer ?? [] : primary ?? DefaultNavItems;
+            Func<NavMenuItem, string> render = isFooter ? FooterItem : HeaderItem;
+            return m.Groups[1].Value + string.Concat(items.Select(render)) + "</nav>";
         });
     }
 
@@ -320,7 +355,7 @@ public static class PublicSiteHtmlRenderer
             """);
         foreach (var item in navItems)
         {
-            sb.Append(NavLink(item));
+            sb.Append(HeaderItem(item));
         }
         sb.Append("</div></nav>");
         return sb.ToString();
@@ -330,7 +365,7 @@ public static class PublicSiteHtmlRenderer
     {
         var linksHtml = footerNavItems.Count == 0
             ? string.Empty
-            : $"""<nav class="footer-links" aria-label="Footer">{string.Concat(footerNavItems.Select(NavLink))}</nav>""";
+            : $"""<nav class="footer-links" aria-label="Footer">{string.Concat(footerNavItems.Select(FooterItem))}</nav>""";
 
         return $"""
             <footer class="site-footer">

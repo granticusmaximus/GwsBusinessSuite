@@ -64,6 +64,50 @@
   }
 }());
 
+// Menu dropdowns (a header item with sub-links): tap/click toggles it, a click elsewhere closes
+// it, and Escape closes it (even while hovered or focused) and returns focus to its button.
+(function () {
+  function closeAll(except) {
+    document.querySelectorAll('.nav-dropdown.is-open').forEach(function (dropdown) {
+      if (dropdown === except) return;
+      dropdown.classList.remove('is-open');
+      var button = dropdown.querySelector('[data-gws-dropdown]');
+      if (button) button.setAttribute('aria-expanded', 'false');
+    });
+  }
+  document.addEventListener('click', function (e) {
+    var toggle = e.target.closest && e.target.closest('[data-gws-dropdown]');
+    if (toggle) {
+      var dropdown = toggle.closest('.nav-dropdown');
+      var open = !dropdown.classList.contains('is-open');
+      closeAll(dropdown);
+      dropdown.classList.toggle('is-open', open);
+      dropdown.classList.remove('is-dismissed');
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      return;
+    }
+    if (!(e.target.closest && e.target.closest('.nav-dropdown'))) closeAll(null);
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    var active = document.activeElement && document.activeElement.closest && document.activeElement.closest('.nav-dropdown');
+    document.querySelectorAll('.nav-dropdown.is-open, .nav-dropdown:hover').forEach(function (dropdown) { dropdown.classList.add('is-dismissed'); });
+    if (active) {
+      active.classList.add('is-dismissed');
+      var button = active.querySelector('[data-gws-dropdown]');
+      if (button) button.focus();
+    }
+    closeAll(null);
+  });
+  // A dismissed dropdown can open again once the pointer or focus has left it.
+  ['mouseout', 'focusout'].forEach(function (type) {
+    document.addEventListener(type, function (e) {
+      var dropdown = e.target.closest && e.target.closest('.nav-dropdown.is-dismissed');
+      if (dropdown && !dropdown.contains(e.relatedTarget)) dropdown.classList.remove('is-dismissed');
+    });
+  });
+}());
+
 // Phone menu buttons (built-in header and custom-header Nav Menus): toggle the menu named by
 // aria-controls, keep aria-expanded in sync, and close on Escape or after following a link.
 (function () {

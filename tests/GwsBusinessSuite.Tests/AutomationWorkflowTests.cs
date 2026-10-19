@@ -3013,6 +3013,9 @@ public sealed class AutomationWorkflowTests
 
     private sealed class FakeCmsBuilderService : ICmsBuilderService
     {
+        public Task<CmsPage> DuplicatePageAsync(Guid pageId, string? actor = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public List<CmsPageEditorModel> SavedPages { get; } = [];
 
         public Task<CmsPage> SavePageAsync(CmsPageEditorModel editor, string? actor = null, CancellationToken cancellationToken = default)

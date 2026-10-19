@@ -1772,3 +1772,88 @@ a { color: inherit; }
   .gws-carousel-dot.is-active { background: transparent; }
   .gws-carousel-dot.is-active::before { background: var(--accent); }
 }
+
+/* ─── Menu sub-links (Appearance > Menus) ─────────────────────────────────
+   In the header a parent with sub-links is a dropdown: it opens on hover, on keyboard focus
+   and on tap (public-site.js toggles .is-open); Escape sets .is-dismissed until the pointer or
+   focus leaves. On phones the sub-links are listed indented under their parent. In the footer
+   they're a small group under the parent. */
+.nav-dropdown { position: relative; display: inline-flex; align-items: center; gap: .15rem; }
+.nav-dropdown-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .25rem;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+.nav-dropdown-toggle:hover, .nav-dropdown-toggle:focus-visible { color: var(--text-1); }
+.nav-dropdown-toggle .bi { font-size: .7rem; transition: transform .15s; }
+.nav-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 110;
+  min-width: 12rem;
+  flex-direction: column;
+  padding: .4rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, .35);
+}
+.nav-dropdown:hover .nav-dropdown-menu,
+.nav-dropdown:focus-within .nav-dropdown-menu,
+.nav-dropdown.is-open .nav-dropdown-menu { display: flex; }
+.nav-dropdown.is-dismissed .nav-dropdown-menu { display: none; }
+.nav-dropdown.is-open .nav-dropdown-toggle .bi { transform: rotate(180deg); }
+.nav-dropdown-menu a { padding: .45rem .6rem; border-radius: 6px; white-space: nowrap; }
+.nav-dropdown-menu a:hover, .nav-dropdown-menu a:focus-visible { background: var(--bg-surface-2); }
+.gws-nav-menu .nav-dropdown-toggle { color: inherit; opacity: .85; }
+.gws-nav-menu .nav-dropdown-menu a { color: var(--text-1); }
+
+.footer-links:has(.footer-group), .gws-nav-menu:has(.footer-group) { align-items: flex-start; }
+.footer-group { display: flex; flex-direction: column; gap: .35rem; }
+.footer-group-heading { color: var(--text-2); font-weight: 600; }
+span.footer-group-heading { font-size: 0.8rem; }
+
+@media (max-width: 767.98px) {
+  .nav-links .nav-dropdown, .gws-site-header .nav-dropdown { display: flex; flex-wrap: wrap; align-items: center; }
+  .nav-links .nav-dropdown-link { flex: 1; }
+  .nav-links .nav-dropdown-toggle { min-height: 44px; font-size: 1rem; }
+  .nav-links .nav-dropdown-menu,
+  .gws-site-header .nav-dropdown-menu {
+    display: flex;
+    position: static;
+    flex-basis: 100%;
+    min-width: 0;
+    padding: 0 0 0 1rem;
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+  }
+  .nav-dropdown.is-dismissed .nav-dropdown-menu { display: flex; }
+  .nav-links .nav-dropdown-toggle .bi { display: none; }
+}
+
+/* Language switcher: shown above the footer on pages with published translations. */
+.gws-lang-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: .35rem .9rem;
+  padding: 1rem max(1rem, env(safe-area-inset-right)) 1rem max(1rem, env(safe-area-inset-left));
+  font-size: 0.85rem;
+  color: var(--text-3);
+  border-top: 1px solid var(--border);
+}
+.gws-lang-switcher a { color: var(--text-2); text-decoration: none; }
+.gws-lang-switcher a:hover, .gws-lang-switcher a:focus-visible { color: var(--text-1); text-decoration: underline; }
+.gws-lang-switcher a[aria-current="true"] { color: var(--text-1); font-weight: 600; }

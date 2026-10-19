@@ -245,6 +245,20 @@ public sealed class ContentLocalizationService(
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<string>> ListPublishedLanguagesAsync(
+        string contentType,
+        Guid contentId,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateContentType(contentType);
+        return await db.ContentLocalizations.AsNoTracking()
+            .Where(item => item.ContentType == contentType
+                && item.ContentId == contentId
+                && item.Status == ContentLocalizationStatuses.Published)
+            .Select(item => item.LanguageCode)
+            .ToListAsync(cancellationToken);
+    }
+
     private async Task<List<string>> TranslateAsync(
         IOllamaService ai,
         string languageCode,

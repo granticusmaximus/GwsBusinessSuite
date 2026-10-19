@@ -103,7 +103,13 @@ public sealed class CmsPagePropertyEditor
     public IReadOnlyList<string> SelectOptions { get; set; } = [];
 }
 
-public sealed record NavMenuItem(string Id, string Label, string Href, bool OpenInNewTab);
+// Children: one level of sub-links. In the header they open as a dropdown; in the footer they're
+// listed under their parent. Absent in menus saved before sub-links existed.
+public sealed record NavMenuItem(string Id, string Label, string Href, bool OpenInNewTab, IReadOnlyList<NavMenuItem>? Children = null)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool HasChildren => Children is { Count: > 0 };
+}
 
 public sealed class CmsWorkflowBlueprintSummary
 {

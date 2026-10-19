@@ -2763,11 +2763,15 @@ app.MapGet("/blog/{slug}", async (
                 "text/html", statusCode: StatusCodes.Status404NotFound);
         }
 
-        var languageCode = request.Query["lang"].ToString();
-        if (!string.IsNullOrWhiteSpace(languageCode))
+        var postPath = $"/blog/{a.Slug}";
+        var languages = PageLanguages.Create(
+            CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), postPath), postPath,
+            await contentLocalizationService.ListPublishedLanguagesAsync(ContentLocalizationContentTypes.Article, a.Id, request.HttpContext.RequestAborted),
+            request.Query["lang"].ToString());
+        if (languages is { IsTranslated: true })
         {
             var localized = await contentLocalizationService.GetPublishedAsync(
-                ContentLocalizationContentTypes.Article, a.Id, languageCode, request.HttpContext.RequestAborted);
+                ContentLocalizationContentTypes.Article, a.Id, languages.Current, request.HttpContext.RequestAborted);
             if (localized is not null)
             {
                 a.Title = localized.Title;
@@ -2812,10 +2816,13 @@ app.MapGet("/blog/{slug}", async (
             navMenus.Footer,
             navMenus.AccentColorHex,
             navMenus.FontPairingKey,
-            canonicalUrl: CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), $"/blog/{a.Slug}"),
+            canonicalUrl: languages is { IsTranslated: true }
+                ? languages.AbsoluteUrlFor(languages.Current)
+                : CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), postPath),
             siteName: navMenus.SiteName,
             logoUrl: navMenus.LogoUrl,
-            faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens, headerHtml: navMenus.HeaderHtml, footerHtml: navMenus.FooterHtml);
+            faviconUrl: navMenus.FaviconUrl, tokens: navMenus.Tokens, headerHtml: navMenus.HeaderHtml, footerHtml: navMenus.FooterHtml,
+            languages: languages);
         return Results.Content(html, "text/html");
     })
     .RequireHost(publicHosts).AllowAnonymous().RequireRateLimiting("public-read");
@@ -3960,6 +3967,28 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
             "text/html", statusCode: StatusCodes.Status404NotFound);
     }
 
+    // Published translations: ?lang={code} shows one (same address), and every language gets
+    // hreflang links and the language switcher. Not in the theme/template previews.
+    PageLanguages? languages = null;
+    if (!isReadOnlyPreview)
+    {
+        var localization = request.HttpContext.RequestServices.GetRequiredService<IContentLocalizationService>();
+        var routePath = GetPublicCanvasRoutePath(page, normalizedPath);
+        languages = PageLanguages.Create(
+            CombineAbsoluteUrl(GetPublicBaseUrl(configuration, request), routePath), routePath,
+            await localization.ListPublishedLanguagesAsync(ContentLocalizationContentTypes.CmsPage, page.Id, request.HttpContext.RequestAborted),
+            request.Query["lang"].ToString());
+        if (languages is { IsTranslated: true }
+            && await localization.GetPublishedAsync(ContentLocalizationContentTypes.CmsPage, page.Id, languages.Current, request.HttpContext.RequestAborted) is { } localized)
+        {
+            page.Title = localized.Title;
+            page.BlocksJson = localized.Body;
+            page.MetaDescription = localized.MetaDescription ?? page.MetaDescription;
+            // The SEO title is in the original language; the translated title stands in for it.
+            page.MetaTitle = string.Empty;
+        }
+    }
+
     var layout = CmsBuilderJson.ParseLayout(page.BlocksJson);
     if (layout is not null)
     {
@@ -3989,10 +4018,13 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
         : $"<style>{SanitizeInlineCss(customCss)}</style>{bodyHtml}";
 
     var pageTitle = string.IsNullOrWhiteSpace(page.MetaTitle) ? page.Title : page.MetaTitle;
-    var canonicalUrl = ResolvePublicUrl(
-        GetPublicBaseUrl(configuration, request),
-        page.CanonicalUrl,
-        GetPublicCanvasRoutePath(page, normalizedPath));
+    // A translation is its own page to search engines: it points at itself, not the original.
+    var canonicalUrl = languages is { IsTranslated: true }
+        ? languages.AbsoluteUrlFor(languages.Current)
+        : ResolvePublicUrl(
+            GetPublicBaseUrl(configuration, request),
+            page.CanonicalUrl,
+            GetPublicCanvasRoutePath(page, normalizedPath));
     var (regionHeaderHtml, regionFooterHtml) = await RenderSiteRegionsAsync(request.HttpContext.RequestServices, site);
     var html = PublicSiteHtmlRenderer.Layout(
         pageTitle,
@@ -4007,7 +4039,7 @@ static async Task<IResult> RenderPublicCanvasPageAsync(
         siteName: site.Name,
         logoUrl: site.LogoUrl,
         faviconUrl: site.FaviconUrl, tokens: renderTokens,
-        headerHtml: regionHeaderHtml, footerHtml: regionFooterHtml);
+        headerHtml: regionHeaderHtml, footerHtml: regionFooterHtml, languages: languages);
     return Results.Content(html, "text/html");
 }
 
