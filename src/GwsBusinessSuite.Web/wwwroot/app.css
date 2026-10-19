@@ -661,6 +661,11 @@ h1:focus { outline: none; }
     color: var(--gws-text-soft);
 }
 
+.gws-empty-state-title {
+    color: var(--gws-text-strong);
+    font-size: 1rem;
+}
+
 /* ── Rich page header (eyebrow + serif title) ───────────────
    Structural only - no color here. Pages that opt in (page-header-rich)
    supply their own .page-header-eyebrow / .page-header-rich h1 color rules

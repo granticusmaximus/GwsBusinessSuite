@@ -337,6 +337,15 @@
 		results[commandIndex].scrollIntoView({ block: 'nearest' });
 	}
 
+	// An empty list's first action (EmptyState) points at the page's own form: bring its first
+	// field into view and focus it, rather than duplicating the form.
+	function focusField(selector) {
+		var field = selector ? document.querySelector(selector) : null;
+		if (!field) return;
+		field.scrollIntoView({ block: 'center', behavior: 'smooth' });
+		field.focus({ preventScroll: true });
+	}
+
 	function bindShellEventsOnce() {
 		if (shellEventsBound) return;
 		shellEventsBound = true;
@@ -353,6 +362,8 @@
 			if (event.target.closest('[data-gws-theme-toggle]')) toggleTheme();
 			if (event.target.closest('[data-gws-focus-toggle]')) toggleFocusMode();
 			if (event.target.closest('[data-gws-print]')) window.print();
+			var focusTrigger = event.target.closest('[data-gws-focus]');
+			if (focusTrigger) focusField(focusTrigger.getAttribute('data-gws-focus'));
 		});
 
 		document.addEventListener('input', function (event) {

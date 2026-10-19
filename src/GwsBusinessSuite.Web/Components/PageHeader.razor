@@ -1,0 +1,79 @@
+@using GwsBusinessSuite.Web.Services
+@inject NavigationManager Navigation
+
+@* One page anatomy (shell redesign R2): a breadcrumb (the page's workspace, then its parent for
+   a record page), the title and description, the page's main action with any others in a ⋯
+   menu, an optional row of filters, and the app's tabs for a merged app (AdminApps). Replaces
+   each page's hand-built .page-header. *@
+<header class="page-header gws-page-header">
+    <nav class="gws-breadcrumb" aria-label="Breadcrumb">
+        <ol>
+            <li>@Workspace.Label</li>
+            @if (!string.IsNullOrEmpty(ParentLabel))
+            {
+                <li><a href="@ParentHref">@ParentLabel</a></li>
+            }
+        </ol>
+    </nav>
+    <div class="gws-page-header-main">
+        <div class="gws-page-header-text">
+            <h1>
+                @if (!string.IsNullOrEmpty(Icon))
+                {
+                    <i class="bi @Icon me-2 text-primary" aria-hidden="true"></i>
+                }@Title
+            </h1>
+            @if (!string.IsNullOrEmpty(Description))
+            {
+                <p>@Description</p>
+            }
+            @Meta
+        </div>
+        @if (Actions is not null || More is not null)
+        {
+            <div class="gws-page-header-actions">
+                @Actions
+                @if (More is not null)
+                {
+                    <div class="dropdown">
+                        <button type="button" class="btn btn-outline-secondary gws-page-header-more" data-bs-toggle="dropdown"
+                                aria-expanded="false" aria-label="More actions" title="More actions">
+                            <i class="bi bi-three-dots" aria-hidden="true"></i>
+                        </button>
+                        <div class="dropdown-menu dropdown-menu-end">@More</div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+    @if (Filters is not null)
+    {
+        <div class="gws-page-header-filters">@Filters</div>
+    }
+</header>
+@if (App is not null)
+{
+    <AppTabs App="App" />
+}
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    // A Bootstrap Icons class, e.g. "bi-receipt".
+    [Parameter] public string? Icon { get; set; }
+    [Parameter] public string? Description { get; set; }
+    // A record page's list (e.g. "CRM", "admin/crm"), shown after the workspace in the breadcrumb.
+    [Parameter] public string? ParentLabel { get; set; }
+    [Parameter] public string? ParentHref { get; set; }
+    // A merged app's tab strip, shown under the header.
+    [Parameter] public AdminApp? App { get; set; }
+    // The page's main action (one primary button), beside the title.
+    [Parameter] public RenderFragment? Actions { get; set; }
+    // Less-used actions, as .dropdown-item buttons or links in a ⋯ menu after the main action.
+    [Parameter] public RenderFragment? More { get; set; }
+    // A small status line under the description (e.g. a rating or a count).
+    [Parameter] public RenderFragment? Meta { get; set; }
+    // Search, filters and view switches for the page's list, in a row under the title.
+    [Parameter] public RenderFragment? Filters { get; set; }
+
+    private NavWorkspace Workspace => NavMenuGroups.WorkspaceFor(Navigation.ToBaseRelativePath(Navigation.Uri));
+}
