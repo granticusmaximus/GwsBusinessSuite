@@ -524,6 +524,45 @@
 	// top half of the first screen, which Blazor's own scroll-to-top after navigating already
 	// shows. Measured against the page, not the window, because that scroll-to-top may still be
 	// animating. The admin layout's scroll-padding-top keeps it clear of the sticky bar.
+	// The SentinelGPT side panel reads the page it sits on: the title, the main heading, the
+	// content area's text and the last text selected outside the panel on this same page.
+	var assistantSelection = { path: '', text: '' };
+	document.addEventListener('selectionchange', function () {
+		var selection = window.getSelection();
+		if (!selection || selection.isCollapsed) return;
+		var node = selection.anchorNode;
+		var element = node && (node.nodeType === 1 ? node : node.parentElement);
+		if (!element || element.closest('.gws-assistant')) return;
+		var text = selection.toString().trim();
+		if (text) assistantSelection = { path: location.pathname, text: text.slice(0, 8000) };
+	});
+	window.gwsAssistant = {
+		selection: function () {
+			return assistantSelection.path === location.pathname ? assistantSelection.text : '';
+		},
+		clearSelection: function () { assistantSelection = { path: '', text: '' }; },
+		heading: function () {
+			var heading = document.querySelector('main.gws-content h1');
+			return heading ? heading.textContent.trim() : '';
+		},
+		capture: function () {
+			var main = document.querySelector('main.gws-content');
+			var heading = main && main.querySelector('h1');
+			return {
+				title: document.title || '',
+				heading: heading ? heading.textContent.trim() : '',
+				selection: window.gwsAssistant.selection(),
+				visibleText: main ? main.innerText.slice(0, 12000) : ''
+			};
+		},
+		copy: function (text) {
+			return navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error('Clipboard unavailable'));
+		},
+		scrollToEnd: function (element) {
+			if (element instanceof HTMLElement) element.scrollTop = element.scrollHeight;
+		}
+	};
+
 	window.gwsScroll = {
 		toId: function (id) {
 			var element = document.getElementById(id);

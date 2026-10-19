@@ -392,6 +392,31 @@ public sealed class SentinelAiServiceTests
     }
 
     [Fact]
+    public async Task StreamAgentConversationAsync_ShouldGiveTheModelThePageContext_WithoutStoringIt()
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        var ollama = new FakeStreamingOllamaService(["Here's a draft."]);
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache());
+        var conversationId = Guid.NewGuid();
+
+        await foreach (var _ in service.StreamAgentConversationAsync(
+            conversationId, null, "Draft a reply to the customer", "grant",
+            includeInternet: false, useDeepAnalysis: false, pageContext: "Page: Support\nOpen record: Ticket \"Invoice PDF won't open\""))
+        {
+        }
+
+        ollama.LastUserPrompt.Should().Contain("CURRENT ADMIN PAGE").And.Contain("Invoice PDF won't open");
+        var run = await db.SentinelAiRuns.AsNoTracking().SingleAsync(item => item.ConversationId == conversationId);
+        run.Instruction.Should().Be("Draft a reply to the customer", "the page context isn't stored with the conversation");
+    }
+
+    [Fact]
     public async Task StreamAgentConversationAsync_ShouldGroundOnSuiteDataAndOptionalWebResearch()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");

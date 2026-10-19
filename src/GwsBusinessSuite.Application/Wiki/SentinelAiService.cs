@@ -102,6 +102,7 @@ public sealed class SentinelAiService(
             includeInternet: false,
             useDeepAnalysis: false,
             maxOutputTokens: SentinelGptResponseBudgets.Standard,
+            pageContext: null,
             cancellationToken: cancellationToken))
         {
             yield return chunk;
@@ -116,6 +117,7 @@ public sealed class SentinelAiService(
         bool includeInternet,
         bool useDeepAnalysis,
         int maxOutputTokens = SentinelGptResponseBudgets.Standard,
+        string? pageContext = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         await foreach (var chunk in StreamGroundedConversationAsync(
@@ -128,6 +130,7 @@ public sealed class SentinelAiService(
             includeInternet: includeInternet,
             useDeepAnalysis: useDeepAnalysis,
             maxOutputTokens: maxOutputTokens,
+            pageContext: pageContext,
             cancellationToken: cancellationToken))
         {
             yield return chunk;
@@ -135,6 +138,7 @@ public sealed class SentinelAiService(
     }
 
     private const int MaxToolCallingRounds = 5;
+    private const int MaxPageContextLength = 16_000;
 
     private const string ToolCallingSystemPromptBase =
         "You are SentinelGPT with tool access. Use search_wiki to find relevant Sentinel pages/databases and get_page to " +
@@ -697,6 +701,7 @@ public sealed class SentinelAiService(
         bool includeInternet,
         bool useDeepAnalysis,
         int maxOutputTokens,
+        string? pageContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (conversationId == Guid.Empty) throw new ArgumentException("A conversation is required.", nameof(conversationId));
@@ -719,6 +724,13 @@ public sealed class SentinelAiService(
         var (sentinelContext, citations) = await BuildGroundedContextAsync(
             db, wikiPageId, instruction, performedBy, cancellationToken);
         var context = new StringBuilder(sentinelContext);
+        // What the admin is looking at (the SentinelGPT side panel's page context). It stays out
+        // of the stored instruction and out of the searches, which run on the question alone.
+        if (!string.IsNullOrWhiteSpace(pageContext))
+        {
+            var page = pageContext.Length <= MaxPageContextLength ? pageContext : pageContext[..MaxPageContextLength];
+            context.AppendLine().AppendLine("CURRENT ADMIN PAGE (what the user is looking at right now):").AppendLine(page);
+        }
 
         if (includeSuiteContext)
         {

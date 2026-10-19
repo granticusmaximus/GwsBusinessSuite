@@ -72,7 +72,9 @@ public sealed class SentinelGptGenerationCoordinator(
         bool includeInternet,
         bool useDeepAnalysis,
         int maxOutputTokens = SentinelGptResponseBudgets.Standard,
-        bool useTools = false)
+        bool useTools = false,
+        // The side panel's description of the page the user is on (see ISentinelAiService).
+        string? pageContext = null)
     {
         if (conversationId == Guid.Empty)
             throw new ArgumentException("A conversation is required.", nameof(conversationId));
@@ -94,7 +96,8 @@ public sealed class SentinelGptGenerationCoordinator(
             includeInternet,
             useDeepAnalysis,
             useTools,
-            maxOutputTokens);
+            maxOutputTokens,
+            pageContext);
         return Task.FromResult(state.Snapshot());
     }
 
@@ -142,7 +145,8 @@ public sealed class SentinelGptGenerationCoordinator(
         bool includeInternet,
         bool useDeepAnalysis,
         bool useTools,
-        int maxOutputTokens)
+        int maxOutputTokens,
+        string? pageContext = null)
     {
         lock (_startGate)
         {
@@ -170,7 +174,10 @@ public sealed class SentinelGptGenerationCoordinator(
                 useDeepAnalysis,
                 useTools,
                 maxOutputTokens,
-                now);
+                now)
+            {
+                PageContext = pageContext
+            };
             _jobs[state.Id] = state;
 
             _ = Task.Run(
@@ -270,7 +277,7 @@ public sealed class SentinelGptGenerationCoordinator(
                         includeInternet: false,
                         useDeepAnalysis: false,
                         state.MaxOutputTokens,
-                        generationToken.Token)
+                        cancellationToken: generationToken.Token)
                     : sentinelGpt.StreamAsync(
                         state.WikiPageId,
                         state.Action!,
@@ -292,6 +299,7 @@ public sealed class SentinelGptGenerationCoordinator(
                         state.IncludeInternet,
                         state.UseDeepAnalysis,
                         state.MaxOutputTokens,
+                        state.PageContext,
                         generationToken.Token);
             await foreach (var chunk in stream)
             {
@@ -385,6 +393,7 @@ public sealed class SentinelGptGenerationCoordinator(
         public bool UseDeepAnalysis { get; }
         public bool UseTools { get; }
         public int MaxOutputTokens { get; }
+        public string? PageContext { get; init; }
         public DateTimeOffset StartedAt { get; }
         public CancellationToken CancellationToken => _cancellation.Token;
         public bool IsCancellationRequested => _cancellation.IsCancellationRequested;

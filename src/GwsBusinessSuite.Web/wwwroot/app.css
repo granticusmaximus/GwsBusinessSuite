@@ -15,6 +15,7 @@
        this alongside the accent so a dark accent gets light text - see AdminThemeCss. */
     --gws-accent-contrast: #1c1917;
     --gws-admin-bar-height: 52px;
+    --gws-assistant-width: 400px;
     --gws-sidebar-bg: #1c1917;
     --gws-sidebar-hover-bg: #2a2522;
     --gws-sidebar-text: #d6d3d1;
@@ -391,6 +392,12 @@ h1:focus { outline: none; }
     display: flex;
     flex-direction: column;
     min-width: 0;
+}
+
+/* While the SentinelGPT panel (AssistantPanel) is open on a wide screen, the content makes room
+   for it instead of sitting underneath. Narrower screens let it lie over the content. */
+@media (min-width: 1440px) {
+    .gws-layout:has(.gws-assistant) .gws-body { margin-right: var(--gws-assistant-width); }
 }
 
 .gws-content {

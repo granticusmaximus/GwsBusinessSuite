@@ -15,6 +15,7 @@
 @inject IFormSubmissionService FormSubmissionService
 @inject IEmailCampaignService EmailCampaignService
 @inject IContactTimelineService ContactTimelineService
+@inject GwsBusinessSuite.Web.Services.AssistantContext Assistant
 @inject GwsBusinessSuite.Application.TimeTracking.ITimeTrackingService TimeTrackingService
 @inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
@@ -405,6 +406,21 @@ else
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
+    // The SentinelGPT side panel answers about this contact from the same history, and can put
+    // a draft into the note box (saving it is still the Log button).
+    private void DescribeToAssistant()
+    {
+        if (Contact is null) return;
+        Assistant.Set(GwsBusinessSuite.Application.Assistant.AssistantDescriptions.Contact(Contact, History), draft =>
+        {
+            // The note box is a single line.
+            var line = string.Join(' ', draft.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+            NewActivityNote = string.IsNullOrWhiteSpace(NewActivityNote) ? line : $"{NewActivityNote} {line}";
+            StateHasChanged();
+            return Task.CompletedTask;
+        }, "Use as note");
+    }
+
     private async Task LoadAsync()
     {
         IsLoading = true;
@@ -432,6 +448,7 @@ else
             FormSubmissions = (await FormSubmissionService.ListForContactAsync(ContactId)).ToList();
             History = (await ContactTimelineService.GetTimelineAsync(ContactId)).ToList();
             TimeEntries = (await TimeTrackingService.ListForContactAsync(ContactId)).ToList();
+            DescribeToAssistant();
         }
         catch (Exception ex)
         {
@@ -502,6 +519,7 @@ else
             Activities.Insert(0, activity);
             NewActivityNote = string.Empty;
             History = (await ContactTimelineService.GetTimelineAsync(ContactId)).ToList();
+            DescribeToAssistant();
         }
         catch (Exception ex)
         {

@@ -10,6 +10,8 @@
 @inject ICrmService CrmService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject IContactTimelineService TimelineService
+@inject GwsBusinessSuite.Web.Services.AssistantContext Assistant
+@using GwsBusinessSuite.Application.Assistant
 @inject IJSRuntime JS
 @using GwsBusinessSuite.Application.Abstractions
 
@@ -403,6 +405,7 @@ else
         {
             SelectedTicketId = null;
             ErrorMessage = "That ticket wasn't found. It may have been deleted.";
+            Assistant.Clear();
             return;
         }
         _scrollToTicket = true;
@@ -519,6 +522,26 @@ else
         SelectedTicket = await TicketService.GetTicketAsync(ticketId);
         _replyBody = string.Empty;
         await LoadCustomerHistoryAsync();
+        DescribeToAssistant();
+    }
+
+    // Tells the SentinelGPT side panel which ticket is open, and lets it hand back a reply
+    // draft. The draft only fills the reply box; sending stays a separate step.
+    private void DescribeToAssistant()
+    {
+        if (SelectedTicket is null)
+        {
+            Assistant.Clear();
+            return;
+        }
+        Assistant.Set(AssistantDescriptions.Ticket(SelectedTicket, _customerHistory), UseReplyDraftAsync, "Use as reply");
+    }
+
+    private Task UseReplyDraftAsync(string draft)
+    {
+        _replyBody = string.IsNullOrWhiteSpace(_replyBody) ? draft : $"{_replyBody}\n\n{draft}";
+        StateHasChanged();
+        return Task.CompletedTask;
     }
 
     // Once per ticket opened, not on every refresh. This ticket's own entries are left out: the

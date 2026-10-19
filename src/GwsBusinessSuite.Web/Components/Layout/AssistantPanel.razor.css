@@ -1,0 +1,193 @@
+/* Same footprint as the theme toggle beside it in the admin bar. */
+.gws-assistant-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.35rem;
+    height: 2.35rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-sm, 8px);
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-soft);
+    cursor: pointer;
+}
+
+.gws-assistant-toggle:hover,
+.gws-assistant-toggle.is-active {
+    color: var(--gws-sidebar-accent, #f59e0b);
+    border-color: var(--gws-sidebar-accent, #f59e0b);
+}
+
+/* Docked under the admin bar on the right. On wide screens app.css narrows the content to make
+   room for it; below that it lies over the content, and on a phone it fills the screen. */
+.gws-assistant {
+    position: fixed;
+    top: var(--gws-admin-bar-height, 3.5rem);
+    right: 0;
+    bottom: 0;
+    width: var(--gws-assistant-width, 400px);
+    max-width: 100vw;
+    display: flex;
+    flex-direction: column;
+    background: var(--gws-panel-bg, #1c1917);
+    color: var(--gws-text-strong, #fafaf9);
+    border-left: 1px solid var(--gws-panel-border, #292524);
+    box-shadow: var(--gws-shadow-md, 0 12px 32px rgba(0, 0, 0, 0.45));
+    z-index: 1035;
+}
+
+.gws-assistant-head {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    padding: .75rem 1rem;
+    border-bottom: 1px solid var(--gws-panel-border, #292524);
+}
+
+.gws-assistant-title {
+    flex: 1;
+    min-width: 0;
+}
+
+.gws-assistant-title .bi {
+    color: var(--gws-sidebar-accent, #f59e0b);
+}
+
+.gws-assistant-context {
+    font-size: .8rem;
+    color: var(--gws-text-soft);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gws-assistant-thread {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+}
+
+.gws-assistant-intro {
+    margin: 0;
+    font-size: .875rem;
+    color: var(--gws-text-soft);
+}
+
+.gws-assistant-question {
+    align-self: flex-end;
+    max-width: 85%;
+    padding: .5rem .75rem;
+    border-radius: 12px 12px 2px 12px;
+    background: var(--gws-panel-bg-2, #292524);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.gws-assistant-answer {
+    padding-bottom: .5rem;
+    border-bottom: 1px solid var(--gws-panel-border, #292524);
+}
+
+.gws-assistant-text {
+    overflow-wrap: anywhere;
+    font-size: .925rem;
+    line-height: 1.5;
+}
+
+/* The answer's Markdown, rendered (AssistantMarkdown). */
+.gws-assistant-text ::deep :is(p, ul, ol, pre, table) {
+    margin: 0 0 .5rem;
+}
+
+.gws-assistant-text ::deep :is(ul, ol) {
+    padding-left: 1.25rem;
+}
+
+.gws-assistant-text ::deep pre {
+    white-space: pre-wrap;
+    padding: .5rem;
+    border-radius: 6px;
+    background: var(--gws-panel-bg-2, #292524);
+}
+
+.gws-assistant-text ::deep table {
+    font-size: .85rem;
+}
+
+.gws-assistant-text ::deep :is(th, td) {
+    padding: .15rem .4rem;
+    border: 1px solid var(--gws-panel-border, #292524);
+}
+
+.gws-assistant-activity,
+.gws-assistant-intro,
+.gws-assistant-source {
+    font-size: .8rem;
+    color: var(--gws-text-soft);
+}
+
+.gws-assistant-error {
+    font-size: .85rem;
+    color: var(--bs-danger, #dc3545);
+}
+
+.gws-assistant-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .25rem .5rem;
+    margin-top: .35rem;
+}
+
+.gws-assistant-meta .btn-link {
+    padding: 0 .25rem;
+}
+
+.gws-assistant-foot {
+    display: grid;
+    gap: .5rem;
+    padding: .75rem 1rem 1rem;
+    border-top: 1px solid var(--gws-panel-border, #292524);
+}
+
+.gws-assistant-selection {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+    font-size: .8rem;
+    color: var(--gws-text-soft);
+}
+
+.gws-assistant-selection span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.gws-assistant-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .35rem;
+}
+
+.gws-assistant-form {
+    display: flex;
+    gap: .5rem;
+    align-items: flex-end;
+}
+
+.gws-assistant-form textarea {
+    resize: none;
+}
+
+@media (max-width: 575.98px) {
+    .gws-assistant {
+        width: 100vw;
+        border-left: 0;
+    }
+}

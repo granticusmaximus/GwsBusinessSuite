@@ -140,6 +140,9 @@ public interface ISentinelAiService
         bool includeInternet,
         bool useDeepAnalysis,
         int maxOutputTokens = SentinelGptResponseBudgets.Standard,
+        // The page the user is on, as plain text (see AssistantPrompt.DescribeContext). Added to
+        // the model's context only: not stored with the run and not used for searching.
+        string? pageContext = null,
         CancellationToken cancellationToken = default);
     // A bounded ReAct-style loop: the model can call search_wiki/get_page (read-only Sentinel
     // lookups) as many times as it needs, seeing each result before deciding whether to call

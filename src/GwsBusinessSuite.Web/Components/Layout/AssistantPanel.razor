@@ -1,0 +1,375 @@
+@implements IAsyncDisposable
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Assistant
+@using GwsBusinessSuite.Web.Services
+@inject AssistantContext Assistant
+@inject SentinelGptGenerationCoordinator Coordinator
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+@* One SentinelGPT panel for every admin page. It answers from what the page shows (title,
+   heading, text, the user's selection) plus whatever record the page describes through
+   AssistantContext. It never changes anything: a draft only lands in the page when the user
+   presses the page's own "Use..." button, and the page's normal Save/Send still applies.
+   The local model on this machine answers first; the server's SentinelGPT is the fallback. *@
+<button type="button" class="gws-assistant-toggle @(_open ? "is-active" : string.Empty)" @onclick="ToggleAsync"
+        title="SentinelGPT" aria-label="SentinelGPT assistant" aria-expanded="@(_open ? "true" : "false")" aria-controls="gws-assistant">
+    <i class="bi bi-stars" aria-hidden="true"></i>
+</button>
+@if (_open)
+{
+    <aside id="gws-assistant" class="gws-assistant" aria-label="SentinelGPT assistant">
+        <header class="gws-assistant-head">
+            <div class="gws-assistant-title">
+                <div class="fw-semibold"><i class="bi bi-stars me-1" aria-hidden="true"></i>SentinelGPT</div>
+                <div class="gws-assistant-context" title="@ContextLabel">@ContextLabel</div>
+            </div>
+            @if (_turns.Count > 0)
+            {
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="NewChat" disabled="@_busy">New chat</button>
+            }
+            <button type="button" class="btn-close" aria-label="Close assistant" @onclick="Close"></button>
+        </header>
+
+        <div class="gws-assistant-thread" @ref="_thread" aria-live="polite">
+            @if (_turns.Count == 0)
+            {
+                <p class="gws-assistant-intro">Ask about this page. Answers use what's on screen, any text you select, and the record that's open. Nothing in the app changes unless you choose to use a draft.</p>
+            }
+            @foreach (var turn in _turns)
+            {
+                <div class="gws-assistant-question">@turn.Question</div>
+                <div class="gws-assistant-answer">
+                    @if (turn.Answer.Length > 0)
+                    {
+                        <div class="gws-assistant-text">@((MarkupString)AssistantMarkdown.ToSafeHtml(turn.Answer))</div>
+                    }
+                    @if (turn.Activity is not null)
+                    {
+                        <div class="gws-assistant-activity"><span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>@turn.Activity</div>
+                    }
+                    @if (turn.Error is not null)
+                    {
+                        <div class="gws-assistant-error">@turn.Error</div>
+                    }
+                    @if (turn.Done && turn.Error is null && turn.Answer.Length > 0)
+                    {
+                        <div class="gws-assistant-meta">
+                            <span class="gws-assistant-source">@turn.Source</span>
+                            <button type="button" class="btn btn-sm btn-link" @onclick="() => CopyAsync(turn)">@(turn.Copied ? "Copied" : "Copy")</button>
+                            @if (ApplyFor(turn) is { } registration)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => ApplyAsync(turn, registration)" disabled="@turn.Applied">@(turn.Applied ? "Added to the page" : registration.ApplyLabel)</button>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+
+        <footer class="gws-assistant-foot">
+            @if (_selection.Length > 0)
+            {
+                <div class="gws-assistant-selection">
+                    <i class="bi bi-cursor-text" aria-hidden="true"></i>
+                    <span>Using your selection: &ldquo;@Preview(_selection)&rdquo;</span>
+                    <button type="button" class="btn-close btn-close-sm" aria-label="Don't use the selection" @onclick="ForgetSelectionAsync"></button>
+                </div>
+            }
+            @if (!_busy)
+            {
+                <div class="gws-assistant-suggestions" role="group" aria-label="Suggested questions">
+                    @foreach (var suggestion in AssistantPrompt.Suggestions(Assistant.Current?.Page, _selection.Length > 0))
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AskAsync(suggestion)">@suggestion</button>
+                    }
+                </div>
+            }
+            <form class="gws-assistant-form" @onsubmit="SendAsync" @onsubmit:preventDefault>
+                <label class="visually-hidden" for="gws-assistant-input">Ask SentinelGPT</label>
+                <textarea id="gws-assistant-input" class="form-control" rows="2" maxlength="2000" placeholder="Ask about this page…"
+                          @bind="_input" @bind:event="oninput" @onfocus="RefreshSelectionAsync" disabled="@_busy"></textarea>
+                @if (_busy)
+                {
+                    <button type="button" class="btn btn-outline-secondary" @onclick="Stop">Stop</button>
+                }
+                else
+                {
+                    <button type="submit" class="btn btn-primary" disabled="@string.IsNullOrWhiteSpace(_input)">Send</button>
+                }
+            </form>
+        </footer>
+    </aside>
+}
+
+@code {
+    // A local model that hasn't started answering by then is treated as unavailable.
+    private static readonly TimeSpan LocalFirstTokenTimeout = TimeSpan.FromMinutes(2);
+    private static readonly TimeSpan LocalRetryAfter = TimeSpan.FromMinutes(5);
+
+    private readonly List<Turn> _turns = [];
+    private bool _open;
+    private bool _busy;
+    private string _input = string.Empty;
+    private string _selection = string.Empty;
+    private string _heading = string.Empty;
+    private Guid _conversationId = Guid.NewGuid();
+    private Guid? _generationId;
+    private string? _username;
+    private CancellationTokenSource? _stop;
+    private BrowserLocalOllamaService? _local;
+    private DateTimeOffset _localUnavailableUntil;
+    private ElementReference _thread;
+    private bool _scrollToEnd;
+
+    protected override void OnInitialized()
+    {
+        Assistant.Changed += OnContextChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private string ContextLabel => Assistant.Current?.Page is { } page
+        ? page.RecordTitle is { } title ? $"{page.PageName} · {page.RecordKind}: {title}" : page.PageName
+        : _heading.Length > 0 ? _heading : "This page";
+
+    private async Task ToggleAsync()
+    {
+        _open = !_open;
+        if (_open) await RefreshSelectionAsync();
+    }
+
+    private void Close() => _open = false;
+
+    private void NewChat()
+    {
+        _turns.Clear();
+        _conversationId = Guid.NewGuid();
+    }
+
+    private Task SendAsync() => AskAsync(_input);
+
+    private async Task AskAsync(string question)
+    {
+        question = question.Trim();
+        if (question.Length == 0 || _busy) return;
+        _busy = true;
+        _input = string.Empty;
+        var turn = new Turn(question) { Activity = "Reading the page…" };
+        _turns.Add(turn);
+        _scrollToEnd = true;
+        _stop = new CancellationTokenSource();
+        StateHasChanged();
+        try
+        {
+            var capture = await JS.InvokeAsync<AssistantCapture>("gwsAssistant.capture");
+            var registration = Assistant.Current;
+            turn.RecordKey = registration is null ? null : RecordKey(registration);
+            var context = AssistantPrompt.DescribeContext(registration?.Page, capture);
+            if (!await TryLocalAsync(turn, context, _stop.Token))
+            {
+                await AskServerAsync(turn, context, _stop.Token);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (turn.Answer.Length == 0) turn.Error = "Stopped.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or JSException)
+        {
+            turn.Error = ex.Message;
+        }
+        finally
+        {
+            turn.Activity = null;
+            turn.Done = true;
+            _busy = false;
+            _generationId = null;
+            _stop?.Dispose();
+            _stop = null;
+            _scrollToEnd = true;
+            await RefreshSelectionAsync();
+        }
+    }
+
+    // The machine's own Ollama, through the browser (the Mac app's native bridge, or a browser
+    // Ollama allows). False means "use the server instead"; once local answering has started,
+    // failures are real errors rather than a reason to ask again elsewhere.
+    private async Task<bool> TryLocalAsync(Turn turn, string context, CancellationToken stop)
+    {
+        if (DateTimeOffset.UtcNow < _localUnavailableUntil) return false;
+        _local ??= new BrowserLocalOllamaService(JS);
+        var status = await _local.ProbeAsync(stop);
+        var model = status.IsReachable ? LocalModels.PickChatModel(status.Models) : null;
+        if (model is null)
+        {
+            _localUnavailableUntil = DateTimeOffset.UtcNow + LocalRetryAfter;
+            return false;
+        }
+
+        turn.Activity = $"Asking your local {model}…";
+        StateHasChanged();
+        var history = _turns.Where(item => item.Done && item.Error is null && item.Answer.Length > 0)
+            .Select(item => new AssistantTurn(item.Question, item.Answer)).ToList();
+        var (system, prompt) = AssistantPrompt.ForLocalModel(context, history, turn.Question);
+        using var firstToken = CancellationTokenSource.CreateLinkedTokenSource(stop);
+        firstToken.CancelAfter(LocalFirstTokenTimeout);
+        try
+        {
+            await foreach (var fragment in _local.GenerateStreamAsync(model, system, prompt, firstToken.Token))
+            {
+                if (turn.Answer.Length == 0) firstToken.CancelAfter(Timeout.InfiniteTimeSpan);
+                turn.Answer += fragment;
+                turn.Activity = null;
+                _scrollToEnd = true;
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex) when (turn.Answer.Length == 0 && !stop.IsCancellationRequested
+                                   && ex is JSException or InvalidOperationException or OperationCanceledException)
+        {
+            _localUnavailableUntil = DateTimeOffset.UtcNow + LocalRetryAfter;
+            return false;
+        }
+        turn.Answer = turn.Answer.Trim();
+        turn.Source = $"Local · {model}";
+        return true;
+    }
+
+    // The server's SentinelGPT through the shared generation coordinator (one job per user,
+    // queued with everything else that uses the server's Ollama). The page context goes along
+    // as context only: it isn't stored with the conversation.
+    private async Task AskServerAsync(Turn turn, string context, CancellationToken stop)
+    {
+        _username ??= await CurrentUserAccessor.GetCurrentUsernameAsync();
+        turn.Activity = "Asking SentinelGPT on the server…";
+        StateHasChanged();
+        var generation = await Coordinator.StartAsync(_conversationId, wikiPageId: null, turn.Question, _username,
+            includeInternet: false, useDeepAnalysis: false, pageContext: context);
+        _generationId = generation.Id;
+        while (true)
+        {
+            stop.ThrowIfCancellationRequested();
+            var snapshot = Coordinator.Get(generation.Id, _username)
+                ?? throw new InvalidOperationException("The SentinelGPT response is no longer available.");
+            turn.Answer = snapshot.Output;
+            turn.Activity = snapshot.Output.Length > 0 ? null : string.IsNullOrWhiteSpace(snapshot.Activity) ? "Thinking…" : snapshot.Activity;
+            switch (snapshot.Status)
+            {
+                case SentinelGptGenerationStatuses.Failed:
+                    throw new InvalidOperationException(snapshot.Error ?? "SentinelGPT couldn't answer.");
+                case SentinelGptGenerationStatuses.Cancelled:
+                    throw new OperationCanceledException();
+                case SentinelGptGenerationStatuses.Completed:
+                    turn.Answer = (snapshot.CompletedRun?.Output ?? snapshot.Output).Trim();
+                    turn.Source = $"Server · {snapshot.CompletedRun?.Model ?? "SentinelGPT"}";
+                    return;
+            }
+            _scrollToEnd = true;
+            StateHasChanged();
+            await Task.Delay(150, stop);
+        }
+    }
+
+    private void Stop()
+    {
+        _stop?.Cancel();
+        if (_generationId is { } id && _username is not null) Coordinator.Cancel(id, _username);
+    }
+
+    // A draft is only offered back to the record it was written for.
+    private AssistantContext.Registration? ApplyFor(Turn turn) =>
+        Assistant.Current is { Apply: not null } registration && turn.RecordKey == RecordKey(registration) ? registration : null;
+
+    private static string RecordKey(AssistantContext.Registration registration) =>
+        $"{registration.Path}|{registration.Page.RecordKind}|{registration.Page.RecordTitle}";
+
+    private async Task ApplyAsync(Turn turn, AssistantContext.Registration registration)
+    {
+        await registration.Apply!(turn.Answer);
+        turn.Applied = true;
+    }
+
+    private async Task CopyAsync(Turn turn)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gwsAssistant.copy", turn.Answer);
+            turn.Copied = true;
+        }
+        catch (JSException)
+        {
+            turn.Error = "Couldn't copy. Select the text and copy it instead.";
+        }
+    }
+
+    // The selection, and the page heading the header falls back to when the page describes no record.
+    private async Task RefreshSelectionAsync()
+    {
+        try
+        {
+            _selection = await JS.InvokeAsync<string>("gwsAssistant.selection");
+            _heading = await JS.InvokeAsync<string>("gwsAssistant.heading");
+        }
+        catch (JSException)
+        {
+            _selection = string.Empty;
+            _heading = string.Empty;
+        }
+    }
+
+    private async Task ForgetSelectionAsync()
+    {
+        _selection = string.Empty;
+        await JS.InvokeVoidAsync("gwsAssistant.clearSelection");
+    }
+
+    private static string Preview(string text)
+    {
+        var flat = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return flat.Length <= 60 ? flat : flat[..57] + "…";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_scrollToEnd || !_open) return;
+        _scrollToEnd = false;
+        try
+        {
+            await JS.InvokeVoidAsync("gwsAssistant.scrollToEnd", _thread);
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    private void OnContextChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) =>
+        _ = InvokeAsync(async () =>
+        {
+            if (_open) await RefreshSelectionAsync();
+            StateHasChanged();
+        });
+
+    public async ValueTask DisposeAsync()
+    {
+        Assistant.Changed -= OnContextChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
+        _stop?.Cancel();
+        if (_local is not null) await _local.DisposeAsync();
+    }
+
+    private sealed class Turn(string question)
+    {
+        public string Question { get; } = question;
+        public string Answer { get; set; } = string.Empty;
+        public string? Activity { get; set; }
+        public string? Error { get; set; }
+        public string? Source { get; set; }
+        public string? RecordKey { get; set; }
+        public bool Done { get; set; }
+        public bool Copied { get; set; }
+        public bool Applied { get; set; }
+    }
+}

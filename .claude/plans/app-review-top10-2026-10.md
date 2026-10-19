@@ -19,7 +19,7 @@ Grep for each item first. Two hints already turned up:
 | 6 | Media: files on disk (dual-write, 7-day DB grace), resized copies + WebP, srcset, backups include media | done 19-10-26 |
 | 7 | Customer timeline: comments, time, reminders, email-origin; ticket/invoice deep links; history beside tickets | done 19-10-26 |
 | 8 | Business Intelligence: answer sentence, follow-ups, examples, model choice + JSON mode, 2-min cutoff | done 19-10-26 |
-| 9 | One SentinelGPT side panel with page context | not started |
+| 9 | One SentinelGPT side panel: every admin page, page + record + selection context, local-first, drafts via Use as reply/note | done 19-10-26 |
 | 10 | Nav merge + admin shell redesign (workspace rail, inspector) | not started |
 
 ## Phase 1 notes (done)
@@ -158,3 +158,38 @@ Grep for each item first. Two hints already turned up:
   about 3 s), a model that never answers (cut off at 120 s), and keyword follow-ups.
 - Test gotcha: the login limiter allows 5 sign-ins per 15 min per IP, and is in-memory, so an app
   restart resets it. Reuse one browser context instead of signing in per page.
+
+## Phase 9 notes (done)
+
+- Report's definition: one panel docked right that knows the page and record, offers 2-3 context
+  actions, shows which model answered (local or server), and never writes silently.
+- Found first: the web had no general SentinelGPT chat any more (the standalone page was folded
+  into Sentinel in 094fef36). Only Sentinel pages had AI (SentinelAiPanel, SentinelAskPanel).
+  The server pieces (coordinator, grounded agent conversation) were reused, not rebuilt.
+- `AssistantPanel` (Layout) is an InteractiveServer island in the admin bar, so it survives
+  enhanced navigation and keeps the conversation. It's fixed on the right; at 1440px and up
+  app.css narrows `.gws-body` via `:has(.gws-assistant)`, and on phones it fills the screen.
+- Context: `gwsAssistant.capture()` (app.js) sends the title, h1, `main` innerText (12k) and the
+  last selection made outside the panel on the same path. Pages add a record through the scoped
+  `AssistantContext` (shared by page and panel on one circuit), which is stamped with the path and
+  ignored on any other path. Support (ticket + thread + the customer's other activity, Use as
+  reply) and ContactDetail (contact + history, Use as note) register;
+  `AssistantDescriptions` builds the text and `AssistantPrompt` caps every part.
+- Model: local first through `BrowserLocalOllamaService` + `LocalModels.PickChatModel` (now shared
+  with BI). 2-min first-token cutoff, then the server. A failed local probe is skipped for 5 min.
+  The server path is `SentinelGptGenerationCoordinator.StartAsync(..., pageContext)`, which goes to
+  `StreamAgentConversationAsync(pageContext)`. That context is appended to the model's context
+  block only, not stored as the instruction and not used for the searches.
+- The side panel never passes a wikiPageId: runs tied to a Sentinel page would surface in that
+  page's own panel as unreviewed drafts.
+- Answers render through `AssistantMarkdown.ToSafeHtml` (Markdig, HTML off, only http(s)/mailto/
+  relative links, images become links). Drafts stay Markdown, which the reply editor takes.
+- Not done (deliberately): existing per-page AI tools (BI Ask, Content Studio, the Sentinel page
+  panel) were kept rather than removed, since each does a structured job the chat doesn't.
+  Inspector sharing is part of Phase 10's shell redesign.
+- Live: local gemma4 answered on Support (summary, draft, then Use as reply filled the editor)
+  and on a contact and a selection. With localhost:11434 blocked, the server's sentinelgpt
+  answered. Checked docking at 1500px, overlay at 1200px, full screen at 390px with no
+  horizontal scroll, close/reopen keeping the conversation, and that a ticket draft isn't offered
+  on the contact page. Seen: the server model miscounted invoices from flattened page text
+  (adjacent badges join as "SentOverdue"), a model limit that's labelled "Server".

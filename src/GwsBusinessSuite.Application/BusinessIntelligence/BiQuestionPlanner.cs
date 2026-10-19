@@ -1,3 +1,4 @@
+using GwsBusinessSuite.Application.Abstractions;
 using System.Text.RegularExpressions;
 
 namespace GwsBusinessSuite.Application.BusinessIntelligence;
@@ -8,14 +9,8 @@ namespace GwsBusinessSuite.Application.BusinessIntelligence;
 // deterministic fallback when local Ollama is unavailable or answers something unusable.
 public static class BiQuestionPlanner
 {
-    // The installed model to plan with: general chat models first (gemma and qwen follow the
-    // JSON format more reliably than llama3.2), never an embedding model, which can't generate.
-    public static string? PickModel(IEnumerable<string> installed)
-    {
-        var usable = installed.Where(name => !name.Contains("embed", StringComparison.OrdinalIgnoreCase)).ToList();
-        string? Find(string prefix) => usable.FirstOrDefault(name => name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-        return Find("gemma") ?? Find("qwen") ?? Find("llama3") ?? Find("mistral") ?? Find("phi") ?? usable.FirstOrDefault();
-    }
+    // The installed model to plan with (see LocalModels.PickChatModel).
+    public static string? PickModel(IEnumerable<string> installed) => LocalModels.PickChatModel(installed);
 
     // previous: the last answer's report, so a follow-up like "now by month" can refine it.
     public static string SystemPrompt(IReadOnlyList<BiQueryShapeDefinition> shapes, IReadOnlyList<int> ranges, BiWidgetEditor? previous = null)
