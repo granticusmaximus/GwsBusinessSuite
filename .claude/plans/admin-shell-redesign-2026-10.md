@@ -16,13 +16,16 @@ the ⌘K palette reads the sidebar links plus hidden `.gws-command-extra` entrie
 576/768/1024/1440/1920 (lint); CSP has no `unsafe-inline` (no inline scripts); dates dd-MM-yy and
 24h times; zero warnings; the Mac app renders the same pages in WKWebView.
 
-## Decisions for Grant before R1
+## Decisions (Grant, 19-10-26)
 
-1. The workspace names and which app goes where (proposal below).
-2. On the rail: icons with a hover label only, or icons with a short label under each.
-3. The phone bar's four slots (proposal: Home, Inbox, Search, Create).
+1. Workspaces are today's sidebar groups, so nothing moves: Home (Dashboard, Community),
+   Content, Relationships, Knowledge, Intelligence, Growth, Platform. The report's
+   People/Revenue split below was not chosen.
+2. The rail shows an icon with a short label under each (about 64px wide).
+3. The phone bar holds Home, Menu (the workspaces and pages as a sheet), Search (⌘K) and
+   SentinelGPT. Notifications stay in the top bar; there's no Create menu yet.
 
-Proposed workspaces (the report's 7):
+The report's mapping, for reference (not chosen):
 
 | Workspace | Apps |
 | --- | --- |

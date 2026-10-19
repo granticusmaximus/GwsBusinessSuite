@@ -7,8 +7,12 @@
    scoped .razor.css file that already reads them picks up the new values
    automatically - only the values changed. */
 :root {
-    --gws-sidebar-width: 248px;
-    --gws-sidebar-collapsed-width: 68px;
+    /* The sidebar is the workspace rail plus the current workspace's sub-nav; collapsed, only
+       the rail shows. On phones a bottom bar replaces both (see the Responsive section). */
+    --gws-rail-width: 72px;
+    --gws-sidebar-width: 272px;
+    --gws-sidebar-collapsed-width: var(--gws-rail-width);
+    --gws-bottom-bar-height: 0px;
     --gws-sidebar-accent: #f59e0b;
     --gws-sidebar-accent-hover: #d97706;
     /* Text drawn on top of the accent (primary buttons, accent chips). The site theme overrides
@@ -371,9 +375,9 @@ h1:focus { outline: none; }
     flex-direction: column;
     height: calc(100vh - var(--gws-admin-bar-height));
     height: calc(100dvh - var(--gws-admin-bar-height));
-    overflow-y: auto;
+    overflow: hidden;
     flex-shrink: 0;
-    padding: .75rem .55rem;
+    padding: 0;
     transition: width .18s ease, transform .22s ease;
 }
 
@@ -451,62 +455,85 @@ h1:focus { outline: none; }
     display: none;
 }
 
-/* ── Sidebar nav ─────────────────────────────────────────── */
+/* ── Sidebar nav: workspace rail + sub-nav ─────────────────
+   NavMenu renders every workspace's section; the server shows the current page's one and
+   app.js switches them from the rail without a round trip (the layout is static SSR). */
 .gws-nav {
     display: flex;
-    flex-direction: column;
     flex: 1;
+    min-height: 0;
 }
 
-.gws-nav-home {
-    margin-bottom: .45rem;
-    background: rgba(255, 255, 255, .025);
-}
-
-/* Community, the other entry every role sees, sits directly under Home outside the groups. */
-.gws-nav-home + .gws-nav-link {
-    margin: -.3rem 0 .45rem;
-}
-
-.gws-nav-group {
-    border-top: 1px solid rgba(255, 255, 255, .045);
-    padding: .3rem 0;
-}
-
-.gws-nav-group > summary {
+.gws-rail {
     display: flex;
+    flex-direction: column;
+    gap: .2rem;
+    width: var(--gws-rail-width);
+    flex-shrink: 0;
+    padding: .6rem .2rem;
+    overflow-y: auto;
+    border-right: 1px solid var(--gws-panel-border);
+}
+
+.gws-rail-item {
+    display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    min-height: 2.25rem;
-    padding: .35rem .65rem;
-    border-radius: 7px;
+    justify-content: center;
+    gap: .2rem;
+    width: 100%;
+    min-height: 3.4rem;
+    padding: .4rem 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
     color: var(--gws-sidebar-text-soft);
+    font-size: .75rem;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    line-height: 1.1;
+    text-align: center;
+    text-decoration: none;
     cursor: pointer;
-    list-style: none;
+    transition: background .12s ease, color .12s ease;
+}
+
+.gws-rail-item i { font-size: 1.15rem; }
+.gws-rail-item span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gws-rail-item:hover { background: var(--gws-sidebar-hover-bg); color: var(--gws-sidebar-text); }
+.gws-rail-item.is-active,
+.gws-rail-item.active { background: var(--gws-sidebar-hover-bg); color: var(--gws-sidebar-text); }
+.gws-rail-item.is-active i,
+.gws-rail-item.active i { color: var(--gws-sidebar-accent); }
+.gws-rail-item:focus-visible { outline: 2px solid var(--gws-sidebar-accent); outline-offset: -2px; }
+.gws-rail-end { margin-top: auto; }
+
+.gws-subnav {
+    flex: 1;
+    min-width: 0;
+    padding: .6rem .5rem;
+    overflow-y: auto;
+}
+
+.gws-workspace-title,
+.gws-subnav-section {
+    margin: .2rem .65rem .45rem;
+    color: var(--gws-sidebar-text-soft);
     font-size: .75rem;
     font-weight: 750;
     letter-spacing: .09em;
+    line-height: 1.3;
     text-transform: uppercase;
 }
 
-.gws-nav-group > summary::-webkit-details-marker { display: none; }
-.gws-nav-group > summary:hover { background: rgba(255, 255, 255, .025); color: var(--gws-sidebar-text); }
-.gws-nav-group > summary i { font-size: .75rem; transition: transform .15s ease; }
-.gws-nav-group[open] > summary i { transform: rotate(90deg); }
-.gws-nav-group-items { padding-bottom: .2rem; }
-
-.gws-nav-footer {
-    margin-top: auto;
-    padding-top: .55rem;
-    border-top: 1px solid rgba(255, 255, 255, .06);
-}
+.gws-subnav-section { margin-top: .9rem; letter-spacing: .07em; }
 
 .gws-nav-link {
     display: flex;
     align-items: center;
     gap: .65rem;
-    min-height: 2.65rem;
-    padding: .5rem .65rem;
+    min-height: 2.5rem;
+    padding: .45rem .65rem;
     border-radius: 8px;
     color: var(--gws-sidebar-text);
     text-decoration: none;
@@ -526,19 +553,16 @@ h1:focus { outline: none; }
 
 .gws-nav-link-copy {
     display: flex;
+    flex: 1;
     flex-direction: column;
     min-width: 0;
 }
 
-.gws-nav-link-copy small {
-    display: block;
-    overflow: hidden;
-    color: var(--gws-sidebar-text-soft);
-    font-size: .75rem;
-    font-weight: 400;
-    line-height: 1.25;
-    text-overflow: ellipsis;
-}
+.gws-nav-link-copy > span { overflow: hidden; text-overflow: ellipsis; }
+
+/* The descriptions stay in the markup for the ⌘K palette (and each link's title is its tooltip);
+   the narrower sub-nav shows names only. */
+.gws-nav-link-copy small { display: none; }
 
 .gws-nav-count {
     min-width: 1.35rem;
@@ -573,11 +597,10 @@ h1:focus { outline: none; }
 }
 
 /* ── Collapsible sidebar ─────────────────────────────────────
-   Toggled by plain (non-Blazor) JS in app.js,
-   which flips this class on .gws-layout and remembers it in localStorage.
-   Kept outside Blazor's interactivity entirely because MainLayout isn't
-   always rendered interactively (e.g. the static Dashboard route), so a
-   @onclick handler here wouldn't reliably wire up. */
+   Toggled by plain (non-Blazor) JS in app.js, which flips this class on .gws-layout and
+   remembers it in localStorage - MainLayout is static SSR, so an @onclick here wouldn't wire
+   up. Collapsed, the sub-nav hides and the rail stays (every rail button has a title tooltip);
+   picking a workspace on the rail expands the sidebar again. */
 .gws-layout.gws-sidebar-collapsed .gws-sidebar {
     width: var(--gws-sidebar-collapsed-width);
     min-width: var(--gws-sidebar-collapsed-width);
@@ -587,31 +610,11 @@ h1:focus { outline: none; }
     margin-left: var(--gws-sidebar-collapsed-width);
 }
 
-.gws-layout.gws-sidebar-collapsed .gws-nav-group > summary { display: none; }
-.gws-layout.gws-sidebar-collapsed .gws-nav-group > .gws-nav-group-items { display: block !important; }
-.gws-layout.gws-sidebar-collapsed .gws-nav-group { border: 0; padding: .12rem 0; }
+.gws-layout.gws-sidebar-collapsed .gws-subnav { display: none; }
+.gws-layout.gws-sidebar-collapsed .gws-rail { border-right: 0; }
 
-.gws-layout.gws-sidebar-collapsed .gws-nav-link {
-    justify-content: center;
-    padding-left: 0;
-    padding-right: 0;
-    min-height: 2.75rem;
-}
-
-.gws-layout.gws-sidebar-collapsed .gws-nav-link.active {
-    background: var(--gws-sidebar-hover-bg);
-}
-
-/* Labels are hidden outright rather than shown in a custom hover flyout - a
-   CSS-positioned flyout would get clipped by .gws-sidebar's own
-   overflow-y: auto (browsers force overflow-x to auto too once overflow-y
-   isn't visible, so it can't escape past the sidebar's right edge). Each
-   NavLink instead carries a native title attribute, which renders as a
-   normal OS tooltip unaffected by any of that. */
-.gws-layout.gws-sidebar-collapsed .gws-nav-link-copy {
-    display: none;
-}
-.gws-layout.gws-sidebar-collapsed .gws-nav-count { display: none; }
+/* The phone bar (MainLayout's .gws-bottom-bar) shows below 768px only. */
+.gws-bottom-bar { display: none; }
 
 /* ── Page header ─────────────────────────────────────────── */
 .page-header {
@@ -1378,18 +1381,56 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     .gws-command-trigger { min-width: 2.5rem; width: 2.5rem; justify-content: center; padding: 0; }
     .gws-sidebar-toggle-desktop { display: none; }
     .gws-sidebar-toggle-mobile { display: inline-block; font-size: 1.25rem; }
+    /* The phone bar holds Menu, Search and SentinelGPT, so the top bar drops its copies. */
+    .gws-layout:has(.gws-bottom-bar) .gws-admin-bar :is(.gws-sidebar-toggle, .gws-command-trigger, .gws-assistant-toggle) { display: none !important; }
+    :root { --gws-bottom-bar-height: calc(3.75rem + var(--gws-safe-bottom, 0px)); }
+    .gws-bottom-bar {
+        position: fixed;
+        inset: auto 0 0;
+        z-index: 30;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        height: var(--gws-bottom-bar-height);
+        padding: 0 max(.25rem, var(--gws-safe-right, 0px)) var(--gws-safe-bottom, 0px) max(.25rem, var(--gws-safe-left, 0px));
+        border-top: 1px solid var(--gws-panel-border);
+        background: var(--gws-sidebar-bg);
+    }
+    .gws-bottom-bar-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: .2rem;
+        min-width: 44px;
+        min-height: 44px;
+        border: 0;
+        background: transparent;
+        color: var(--gws-sidebar-text-soft);
+        font-size: .75rem;
+        font-weight: 600;
+        text-decoration: none;
+    }
+    .gws-bottom-bar-item i { font-size: 1.25rem; }
+    .gws-bottom-bar-item.active,
+    .gws-layout.gws-mobile-nav-open [data-gws-nav-toggle],
+    .gws-layout:has(.gws-assistant) [data-gws-assistant-open] { color: var(--gws-sidebar-text); }
+    .gws-bottom-bar-item.active i,
+    .gws-layout.gws-mobile-nav-open [data-gws-nav-toggle] i,
+    .gws-layout:has(.gws-assistant) [data-gws-assistant-open] i { color: var(--gws-sidebar-accent); }
     .gws-sidebar {
         display: flex;
         top: var(--gws-admin-bar-height);
+        bottom: var(--gws-bottom-bar-height);
         width: min(86vw, 320px);
         min-width: min(86vw, 320px);
+        height: auto;
         transform: translateX(-105%);
         box-shadow: 18px 0 50px rgba(0, 0, 0, .5);
     }
     .gws-layout.gws-mobile-nav-open .gws-sidebar { transform: translateX(0); }
     .gws-sidebar-backdrop {
         position: fixed;
-        inset: var(--gws-admin-bar-height) 0 0 min(86vw, 320px);
+        inset: var(--gws-admin-bar-height) 0 var(--gws-bottom-bar-height) min(86vw, 320px);
         z-index: 19;
         display: block;
         border: 0;
@@ -5671,7 +5712,7 @@ a.wiki-live-title:hover { text-decoration: underline; }
 /* Reading stats status bar under the page. */
 .sentinel-reading-stats {
     position: sticky;
-    bottom: 0;
+    bottom: var(--gws-bottom-bar-height);
     margin-top: 1.5rem;
     padding: .35rem 0;
     border-top: 1px solid var(--gws-panel-border);

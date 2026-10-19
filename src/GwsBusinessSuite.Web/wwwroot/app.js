@@ -34,6 +34,37 @@
 			toggle.title = 'Open navigation';
 			toggle.setAttribute('aria-label', 'Open navigation');
 		}
+		setMenuButtonsExpanded(false);
+	}
+
+	// The phone bar's Menu button (MainLayout) opens the same drawer as the top bar's toggle.
+	function setMenuButtonsExpanded(expanded) {
+		document.querySelectorAll('[data-gws-nav-toggle]').forEach(function (button) {
+			button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+		});
+	}
+
+	// The workspace rail (NavMenu): show one workspace's sub-nav section without a round trip.
+	// The server renders the current page's workspace, and enhanced navigation re-renders it, so
+	// nothing here is stored. Picking a workspace while collapsed expands the sidebar.
+	function showWorkspace(key) {
+		document.querySelectorAll('.gws-sidebar [data-workspace]').forEach(function (section) {
+			section.hidden = section.dataset.workspace !== key;
+		});
+		document.querySelectorAll('.gws-sidebar [data-gws-workspace]').forEach(function (button) {
+			var active = button.dataset.gwsWorkspace === key;
+			button.classList.toggle('is-active', active);
+			button.setAttribute('aria-pressed', active ? 'true' : 'false');
+		});
+		var layout = shell();
+		if (layout && !isMobile() && layout.classList.contains('gws-sidebar-collapsed')) toggleNavigation();
+	}
+
+	// The phone bar's SentinelGPT button drives the panel's own (interactive) top-bar toggle,
+	// which the phone layout hides.
+	function openAssistant() {
+		var toggle = document.querySelector('.gws-assistant-toggle');
+		if (toggle && !toggle.classList.contains('is-active')) toggle.click();
 	}
 
 	function applySidebarState() {
@@ -57,6 +88,7 @@
 			toggle.setAttribute('aria-expanded', mobileOpen ? 'true' : 'false');
 			toggle.title = mobileOpen ? 'Close navigation' : 'Open navigation';
 			toggle.setAttribute('aria-label', toggle.title);
+			setMenuButtonsExpanded(mobileOpen);
 			return;
 		}
 
@@ -92,7 +124,8 @@
 			applySidebarState();
 			if (opening) {
 				window.setTimeout(function () {
-					var first = document.querySelector('.gws-sidebar .gws-nav-link');
+					var first = document.querySelector('.gws-sidebar [data-workspace]:not([hidden]) .gws-nav-link')
+						|| document.querySelector('.gws-sidebar .gws-nav-link');
 					if (first) first.focus();
 				}, 80);
 			}
@@ -155,9 +188,8 @@
 			var copy = link.querySelector('.gws-nav-link-copy');
 			var title = copy && copy.firstElementChild ? copy.firstElementChild.textContent.trim() : link.textContent.trim();
 			var description = copy && copy.querySelector('small') ? copy.querySelector('small').textContent.trim() : '';
-			var group = link.closest('.gws-nav-group');
-			var groupName = link.dataset.commandGroup
-				|| (group && group.querySelector('summary span') ? group.querySelector('summary span').textContent.trim() : 'General');
+			var workspace = link.closest('[data-workspace-label]');
+			var groupName = link.dataset.commandGroup || (workspace ? workspace.dataset.workspaceLabel : 'General');
 			var icon = link.querySelector('i');
 			return { title: title, description: description, group: groupName, href: link.href, iconClass: icon ? icon.className : 'bi bi-arrow-right' };
 		});
@@ -289,7 +321,9 @@
 		if (!elements.layer || elements.layer.hidden) return;
 		elements.layer.hidden = true;
 		document.body.classList.remove('gws-no-scroll');
-		var trigger = document.querySelector('[data-gws-command-open]');
+		var trigger = Array.from(document.querySelectorAll('[data-gws-command-open]')).find(function (button) {
+			return button.offsetParent !== null;
+		});
 		if (trigger) trigger.focus();
 	}
 
@@ -308,10 +342,13 @@
 		shellEventsBound = true;
 
 		document.addEventListener('click', function (event) {
-			if (event.target.closest('.gws-sidebar-toggle')) toggleNavigation();
+			var workspaceButton = event.target.closest('[data-gws-workspace]');
+			if (workspaceButton) showWorkspace(workspaceButton.dataset.gwsWorkspace);
+			if (event.target.closest('.gws-sidebar-toggle, [data-gws-nav-toggle]')) toggleNavigation();
 			if (event.target.closest('[data-gws-sidebar-close]')) closeMobileNavigation();
-			if (event.target.closest('.gws-sidebar .gws-nav-link') && isMobile()) closeMobileNavigation();
-			if (event.target.closest('[data-gws-command-open]')) openCommand();
+			if (event.target.closest('.gws-sidebar .gws-nav-link, .gws-sidebar a.gws-rail-item, .gws-bottom-bar a') && isMobile()) closeMobileNavigation();
+			if (event.target.closest('[data-gws-assistant-open]')) { if (isMobile()) closeMobileNavigation(); openAssistant(); }
+			if (event.target.closest('[data-gws-command-open]')) { if (isMobile()) closeMobileNavigation(); openCommand(); }
 			if (event.target.closest('[data-gws-command-close]')) closeCommand();
 			if (event.target.closest('[data-gws-theme-toggle]')) toggleTheme();
 			if (event.target.closest('[data-gws-focus-toggle]')) toggleFocusMode();

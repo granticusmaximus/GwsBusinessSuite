@@ -82,6 +82,25 @@
 
             @if (!IsChromelessRoute)
             {
+                @* The phone bar (below 768px only): Menu opens the workspace rail and sub-nav as a
+                   sheet, Search opens ⌘K, SentinelGPT opens the assistant panel. app.js handles all
+                   three, so they work on static and interactive pages alike. *@
+                <nav class="gws-bottom-bar" aria-label="Quick navigation">
+                    <NavLink class="gws-bottom-bar-item" href="admin" Match="NavLinkMatch.All">
+                        <i class="bi bi-house-door-fill" aria-hidden="true"></i><span>Home</span>
+                    </NavLink>
+                    <button type="button" class="gws-bottom-bar-item" data-gws-nav-toggle
+                            aria-controls="gws-sidebar" aria-expanded="false">
+                        <i class="bi bi-list" aria-hidden="true"></i><span>Menu</span>
+                    </button>
+                    <button type="button" class="gws-bottom-bar-item" data-gws-command-open aria-haspopup="dialog">
+                        <i class="bi bi-search" aria-hidden="true"></i><span>Search</span>
+                    </button>
+                    <button type="button" class="gws-bottom-bar-item" data-gws-assistant-open>
+                        <i class="bi bi-stars" aria-hidden="true"></i><span>SentinelGPT</span>
+                    </button>
+                </nav>
+
                 <div class="gws-command-layer" data-gws-command-layer hidden>
                     <button type="button" class="gws-command-backdrop" data-gws-command-close
                             aria-label="Close search"></button>

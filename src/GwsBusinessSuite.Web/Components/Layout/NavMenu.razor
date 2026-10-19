@@ -11,24 +11,43 @@
 @inject ISiteSettingsService SiteSettingsService
 
 <nav class="gws-nav" aria-label="Primary">
-    <NavLink class="gws-nav-link gws-nav-home" href="admin" Match="NavLinkMatch.All" title="Dashboard">
-        <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
-        <span class="gws-nav-link-copy"><span>Home</span><small>Your work at a glance</small></span>
-    </NavLink>
-    <a class="@AppLinkClass(AdminApps.Community)" href="@AdminApps.Community.Href" aria-current="@AppCurrent(AdminApps.Community)" title="Community">
-        <i class="bi @AdminApps.Community.Icon" aria-hidden="true"></i>
-        <span class="gws-nav-link-copy"><span>Community</span><small>@AdminApps.Community.Description</small></span>
-    </a>
+    @* The workspace rail: one button per workspace (today's sidebar groups), which shows that
+       workspace's pages in the column beside it without leaving the page. The workspace of the
+       current page is shown on load (NavMenuGroups.WorkspaceFor); app.js switches them. *@
+    <div class="gws-rail" role="group" aria-label="Workspaces">
+        @foreach (var workspace in VisibleWorkspaces)
+        {
+            <button type="button" class="gws-rail-item @(IsWorkspace(workspace.Key) ? "is-active" : string.Empty)"
+                    data-gws-workspace="@workspace.Key" aria-controls="gws-ws-@workspace.Key"
+                    aria-pressed="@(IsWorkspace(workspace.Key) ? "true" : "false")" title="@workspace.Label">
+                <i class="bi @workspace.Icon" aria-hidden="true"></i><span>@workspace.ShortLabel</span>
+            </button>
+        }
+        @if (IsAdmin)
+        {
+            <NavLink class="gws-rail-item gws-rail-end" href="admin/settings" title="Settings">
+                <i class="bi bi-gear-fill" aria-hidden="true"></i><span>Settings</span>
+            </NavLink>
+        }
+    </div>
 
-    <!-- Content & Publishing: everything about making and shipping content, one place - the
-         original Publishing group plus three items that used to live under the admin-only
-         Intelligence/Operations groups (Podcasts, Live Show, and the SentinelGPT Builder's Approval Queue tab).
-         The group itself stays ungated like the original Publishing did; the three newcomers
-         keep their original admin-only visibility individually, since moving group DOESN'T mean
-         moving access level - see docs/... the nav regroup from the 2026-09 design plan. -->
-    <details class="gws-nav-group" open="@IsGroupOpen(ContentPublishingPrefixes)">
-        <summary><span>Content &amp; Publishing</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
-        <div class="gws-nav-group-items">
+    <div class="gws-subnav">
+        <section class="gws-workspace" id="gws-ws-home" data-workspace="home" data-workspace-label="Home"
+                 aria-label="Home" hidden="@(!IsWorkspace("home"))">
+            <h2 class="gws-workspace-title">Home</h2>
+            <NavLink class="gws-nav-link gws-nav-home" href="admin" Match="NavLinkMatch.All" title="Dashboard">
+                <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>Home</span><small>Your work at a glance</small></span>
+            </NavLink>
+            <a class="@AppLinkClass(AdminApps.Community)" href="@AdminApps.Community.Href" aria-current="@AppCurrent(AdminApps.Community)" title="Community">
+                <i class="bi @AdminApps.Community.Icon" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>Community</span><small>@AdminApps.Community.Description</small></span>
+            </a>
+        </section>
+
+        <section class="gws-workspace" id="gws-ws-content" data-workspace="content" data-workspace-label="Content &amp; Publishing"
+                 aria-label="Content &amp; Publishing" hidden="@(!IsWorkspace("content"))">
+            <h2 class="gws-workspace-title">Content &amp; Publishing</h2>
             <NavLink class="gws-nav-link" href="admin/article-editor" title="All Posts">
                 <i class="bi bi-pencil-square" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>Posts</span><small>Write and publish</small></span>
@@ -67,6 +86,29 @@
                     @if (_pendingCommentCount > 0) { <span class="gws-nav-count">@_pendingCommentCount</span> }
                 </NavLink>
             }
+            @if (IsContributorOrAbove)
+            {
+                <NavLink class="gws-nav-link" href="admin/form-submissions" title="Form Submissions">
+                    <i class="bi bi-inbox" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Form Submissions</span><small>Visitor submissions across every page</small></span>
+                    @if (_unreadFormSubmissionCount > 0) { <span class="gws-nav-count">@_unreadFormSubmissionCount</span> }
+                </NavLink>
+            }
+            @if (IsContributorOrAbove || Shown("app-generation"))
+            {
+                <h3 class="gws-subnav-section">Site</h3>
+            }
+            @if (IsContributorOrAbove)
+            {
+                <NavLink class="gws-nav-link" href="admin/pages" title="Pages">
+                    <i class="bi bi-layout-three-columns" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Pages</span><small>Build and organize pages</small></span>
+                </NavLink>
+                <a class="@AppLinkClass(AdminApps.SiteDesign)" href="@AdminApps.SiteDesign.Href" aria-current="@AppCurrent(AdminApps.SiteDesign)" title="Site design">
+                    <i class="bi @AdminApps.SiteDesign.Icon" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Site design</span><small>@AdminApps.SiteDesign.Description</small></span>
+                </a>
+            }
             @if (Shown("app-generation"))
             {
                 <a class="@AppLinkClass(AdminApps.PageBuilder)" href="@AdminApps.PageBuilder.Href" aria-current="@AppCurrent(AdminApps.PageBuilder)" title="SentinelGPT Builder">
@@ -81,22 +123,10 @@
                     <i class="bi bi-images" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Media</span><small>Images for posts and pages</small></span>
                 </NavLink>
-                <NavLink class="gws-nav-link" href="admin/pages" title="Pages">
-                    <i class="bi bi-layout-three-columns" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Pages</span><small>Build and organize pages</small></span>
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/form-submissions" title="Form Submissions">
-                    <i class="bi bi-inbox" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Form Submissions</span><small>Visitor submissions across every page</small></span>
-                    @if (_unreadFormSubmissionCount > 0) { <span class="gws-nav-count">@_unreadFormSubmissionCount</span> }
-                </NavLink>
-                <a class="@AppLinkClass(AdminApps.SiteDesign)" href="@AdminApps.SiteDesign.Href" aria-current="@AppCurrent(AdminApps.SiteDesign)" title="Site design">
-                    <i class="bi @AdminApps.SiteDesign.Icon" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Site design</span><small>@AdminApps.SiteDesign.Description</small></span>
-                </a>
             }
             @if (IsAdmin)
             {
+                <h3 class="gws-subnav-section">Shows</h3>
                 @if (Shown("podcasts"))
                 {
                     <NavLink class="gws-nav-link" href="admin/podcasts" title="Podcast Directory">
@@ -109,15 +139,13 @@
                     <span class="gws-nav-link-copy"><span>Live Show</span><small>Broadcast studio</small></span>
                 </NavLink>
             }
-        </div>
-    </details>
+        </section>
 
-
-    @if (IsAdmin)
-    {
-        <details class="gws-nav-group" open="@IsGroupOpen(RelationshipPrefixes)">
-            <summary><span>Relationships</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
-            <div class="gws-nav-group-items">
+        @if (IsAdmin)
+        {
+            <section class="gws-workspace" id="gws-ws-relationships" data-workspace="relationships" data-workspace-label="Relationships"
+                     aria-label="Relationships" hidden="@(!IsWorkspace("relationships"))">
+                <h2 class="gws-workspace-title">Relationships</h2>
                 @if (Shown("crm"))
                 {
                     <a class="@AppLinkClass(AdminApps.Crm)" href="@AdminApps.Crm.Href" aria-current="@AppCurrent(AdminApps.Crm)" title="CRM">
@@ -165,15 +193,14 @@
                     <i class="bi bi-person-gear" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Users</span><small>Accounts and roles</small></span>
                 </NavLink>
-            </div>
-        </details>
-    }
+            </section>
+        }
 
-    @if (IsAdmin)
-    {
-        <details class="gws-nav-group" open="@IsGroupOpen(KnowledgePrefixes)">
-            <summary><span>Knowledge</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
-            <div class="gws-nav-group-items">
+        @if (IsAdmin)
+        {
+            <section class="gws-workspace" id="gws-ws-knowledge" data-workspace="knowledge" data-workspace-label="Knowledge"
+                     aria-label="Knowledge" hidden="@(!IsWorkspace("knowledge"))">
+                <h2 class="gws-workspace-title">Knowledge</h2>
                 <NavLink class="gws-nav-link" href="admin/sentinel" title="Sentinel">
                     <i class="bi bi-journal-bookmark-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Sentinel</span><small>Knowledge workspace</small></span>
@@ -182,12 +209,11 @@
                     <i class="bi bi-diagram-2-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Mind Maps</span><small>Visual outlines and roadmaps</small></span>
                 </NavLink>
-            </div>
-        </details>
+            </section>
 
-        <details class="gws-nav-group" open="@IsGroupOpen(IntelligencePrefixes)">
-            <summary><span>Intelligence</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
-            <div class="gws-nav-group-items">
+            <section class="gws-workspace" id="gws-ws-intelligence" data-workspace="intelligence" data-workspace-label="Intelligence"
+                     aria-label="Intelligence" hidden="@(!IsWorkspace("intelligence"))">
+                <h2 class="gws-workspace-title">Intelligence</h2>
                 <NavLink class="gws-nav-link" href="admin/news-intelligence" title="Media Watch">
                     <i class="bi bi-newspaper" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Media Watch</span><small>SentinelGPT-curated feeds</small></span>
@@ -208,12 +234,11 @@
                     <i class="bi bi-shield-exclamation" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Threat Intelligence</span><small>Exploited CVEs, malware, breaches, lookups</small></span>
                 </NavLink>
-            </div>
-        </details>
+            </section>
 
-        <details class="gws-nav-group" open="@IsGroupOpen(GrowthMonetizationPrefixes)">
-            <summary><span>Growth &amp; Monetization</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
-            <div class="gws-nav-group-items">
+            <section class="gws-workspace" id="gws-ws-growth" data-workspace="growth" data-workspace-label="Growth &amp; Monetization"
+                     aria-label="Growth &amp; Monetization" hidden="@(!IsWorkspace("growth"))">
+                <h2 class="gws-workspace-title">Growth &amp; Monetization</h2>
                 <NavLink class="gws-nav-link" href="admin/growth" title="Growth Studio">
                     <i class="bi bi-activity" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Growth Studio</span><small>Analytics and social publishing</small></span>
@@ -222,16 +247,11 @@
                     <i class="bi @AdminApps.Affiliate.Icon" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Affiliate</span><small>@AdminApps.Affiliate.Description</small></span>
                 </a>
-            </div>
-        </details>
+            </section>
 
-        <details class="gws-nav-group" open="@IsGroupOpen(PlatformPrefixes)">
-            <summary><span>Platform</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
-            <div class="gws-nav-group-items">
-                <NavLink class="gws-nav-link" href="admin/mission-control" title="Mission Control">
-                    <i class="bi bi-speedometer2" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Mission Control</span><small>System status at a glance</small></span>
-                </NavLink>
+            <section class="gws-workspace" id="gws-ws-platform" data-workspace="platform" data-workspace-label="Platform"
+                     aria-label="Platform" hidden="@(!IsWorkspace("platform"))">
+                <h2 class="gws-workspace-title">Platform</h2>
                 <NavLink class="gws-nav-link" href="admin/automation" title="Workflow Automation">
                     <i class="bi bi-diagram-3-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Automation</span><small>Build and run workflows</small></span>
@@ -253,19 +273,15 @@
                     <i class="bi bi-person-lock" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Privacy Operations</span><small>Requests, retention, and incidents</small></span>
                 </NavLink>
-            </div>
-        </details>
+            </section>
 
-        <div class="gws-nav-footer">
-            <NavLink class="gws-nav-link" href="admin/settings" title="Settings">
-                <i class="bi bi-gear-fill" aria-hidden="true"></i>
-                <span class="gws-nav-link-copy"><span>Settings</span><small>Portal preferences</small></span>
-            </NavLink>
-        </div>
-    }
+        }
+    </div>
 
     @* Every tab of a merged app (AdminApps) stays findable in ⌘K under its own name: app.js
-       reads these hidden entries alongside the sidebar links. Same visibility as the entries. *@
+       reads these hidden entries alongside the sidebar links (including the ones in workspaces
+       not currently shown). Same visibility as the entries; Settings is here because its rail
+       button isn't a sidebar link, and Mission Control because it is now the dashboard. *@
     <div class="gws-command-extras" hidden>
         @foreach (var (app, visible) in CommandApps)
         {
@@ -284,19 +300,22 @@
                 <i class="bi bi-journal-richtext" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>Builder Reference</span><small>CMS workflow notes</small></span>
             </a>
+            @* Mission Control's status strip lives on the dashboard; its old address redirects there. *@
+            <a class="gws-command-extra" href="admin" data-command-group="Home">
+                <i class="bi bi-speedometer2" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>Mission Control</span><small>System status on the dashboard</small></span>
+            </a>
+            <a class="gws-command-extra" href="admin/settings" data-command-group="General">
+                <i class="bi bi-gear-fill" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>Settings</span><small>Portal preferences</small></span>
+            </a>
         }
     </div>
 </nav>
 
 @code {
-    private static readonly IReadOnlyList<string> ContentPublishingPrefixes = NavMenuGroups.ContentPublishingPrefixes;
-    private static readonly IReadOnlyList<string> RelationshipPrefixes = NavMenuGroups.RelationshipPrefixes;
-    private static readonly IReadOnlyList<string> KnowledgePrefixes = NavMenuGroups.KnowledgePrefixes;
-    private static readonly IReadOnlyList<string> IntelligencePrefixes = NavMenuGroups.IntelligencePrefixes;
-    private static readonly IReadOnlyList<string> GrowthMonetizationPrefixes = NavMenuGroups.GrowthMonetizationPrefixes;
-    private static readonly IReadOnlyList<string> PlatformPrefixes = NavMenuGroups.PlatformPrefixes;
-
     private IReadOnlyList<string> _hiddenNavKeys = [];
+    private string _workspace = NavMenuGroups.Home.Key;
 
     // Hidden, not disabled: the route still resolves, so an existing bookmark keeps working and
     // turning a feature back on is a checkbox in Settings rather than a deploy.
@@ -317,6 +336,10 @@
         var state = await AuthProvider.GetAuthenticationStateAsync();
         _role = state.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
         IsNativeApp = state.User.HasClaim(claim => claim.Type == "amr" && claim.Value is "device-secret" or "device-key");
+
+        // A page in a workspace this role can't see (reached by its address) shows Home instead.
+        var workspace = NavMenuGroups.WorkspaceFor(Navigation.ToBaseRelativePath(Navigation.Uri));
+        _workspace = VisibleWorkspaces.Contains(workspace) ? workspace.Key : NavMenuGroups.Home.Key;
         if (state.User.Identity?.IsAuthenticated != true) return;
 
         // Nav visibility is a display preference, so a settings failure must never take the whole
@@ -340,8 +363,11 @@
         _unreadFormSubmissionCount = summary.UnreadFormSubmissions;
     }
 
-    private bool IsGroupOpen(IReadOnlyList<string> prefixes) =>
-        NavMenuGroups.IsGroupOpen(Navigation.ToBaseRelativePath(Navigation.Uri), prefixes);
+    // Non-admins see Home and the Content pages their role can use, as before the rail.
+    private IEnumerable<NavWorkspace> VisibleWorkspaces =>
+        NavMenuGroups.Workspaces.Where(workspace => !workspace.AdminOnly || IsAdmin);
+
+    private bool IsWorkspace(string key) => _workspace == key;
 
     // A merged app's entry is current on any of its tabs' pages; NavLink only matches its own href.
     private string AppLinkClass(AdminApp app) =>

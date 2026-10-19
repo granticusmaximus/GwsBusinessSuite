@@ -69,9 +69,9 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
 
     public static readonly Interaction[] Interactions =
     [
-        new("^/admin$", "navigation", ["click:.gws-sidebar-toggle"], "#gws-sidebar"),
+        new("^/admin$", "navigation", ["click::is(.gws-sidebar-toggle, [data-gws-nav-toggle]) >> visible=true"], "#gws-sidebar"),
         new("^/admin$", "account menu", ["click:.gws-account-menu > summary"], ".gws-account-menu"),
-        new("^/admin$", "command palette", ["click:.gws-command-trigger"], ".gws-command-dialog"),
+        new("^/admin$", "command palette", ["click:[data-gws-command-open] >> visible=true"], ".gws-command-dialog"),
         new("^/admin$", "notifications", ["click:.notif-bell-btn"], ".notif-bell-panel"),
         new("^/$", "site menu", ["click:[data-gws-menu-toggle]"], "@aria-controls"),
         new("^/admin/sentinel$", "page tree", ["click:.sentinel-mobile-nav-toggle"], "#sentinel-workspace-browser"),

@@ -1,112 +1,147 @@
+using System.Text.RegularExpressions;
 using FluentAssertions;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Web.Services;
 
 namespace GwsBusinessSuite.Tests;
 
+// The workspace rail (shell redesign R1): which workspace each admin route shows on load.
 public class NavMenuGroupsTests
 {
-    private const string NoGroup = "(none)";
+    private static string NavMenuSource => File.ReadAllText(Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory,
+        "../../../../../src/GwsBusinessSuite.Web/Components/Layout/NavMenu.razor")));
 
-    public static IEnumerable<object[]> KnownRoutesByGroup =>
+    public static IEnumerable<object[]> KnownRoutesByWorkspace =>
     [
-        // Content & Publishing
-        ["admin/article-editor", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/content-studio", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/content-calendar", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/seo-audit", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/localization", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/app-generation", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/app-generation-queue", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/media", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/pages", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/appearance/menus", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/appearance/customize", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/podcasts", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/live-show", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/live-show-recordings", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/comments", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/cms-knowledge", nameof(NavMenuGroups.ContentPublishingPrefixes)],
+        // Content
+        ["admin/article-editor", "content"],
+        ["admin/content-studio", "content"],
+        ["admin/content-studio/draft", "content"],
+        ["admin/content-calendar", "content"],
+        ["admin/seo-audit", "content"],
+        ["admin/localization", "content"],
+        ["admin/app-generation", "content"],
+        ["admin/app-generation-queue", "content"],
+        ["admin/media", "content"],
+        ["admin/pages", "content"],
+        ["admin/pages/all", "content"],
+        ["admin/appearance/menus", "content"],
+        ["admin/appearance/header-footer", "content"],
+        ["admin/appearance/customize", "content"],
+        ["admin/podcasts", "content"],
+        ["admin/live-show", "content"],
+        ["admin/live-show-recordings", "content"],
+        ["admin/comments", "content"],
+        ["admin/cms-knowledge", "content"],
+        ["admin/form-submissions", "content"],
 
         // Relationships
-        ["admin/crm", nameof(NavMenuGroups.RelationshipPrefixes)],
-        ["admin/deal-scoring", nameof(NavMenuGroups.RelationshipPrefixes)],
-        ["admin/billing", nameof(NavMenuGroups.RelationshipPrefixes)],
-        ["admin/time", nameof(NavMenuGroups.RelationshipPrefixes)],
-        ["admin/support", nameof(NavMenuGroups.RelationshipPrefixes)],
-        ["admin/scheduling", nameof(NavMenuGroups.RelationshipPrefixes)],
-        ["admin/email-campaigns", nameof(NavMenuGroups.RelationshipPrefixes)],
-        ["admin/users", nameof(NavMenuGroups.RelationshipPrefixes)],
+        ["admin/crm", "relationships"],
+        ["admin/crm/contacts/7a1b", "relationships"],
+        ["admin/deal-scoring", "relationships"],
+        ["admin/billing", "relationships"],
+        ["admin/time", "relationships"],
+        ["admin/support", "relationships"],
+        ["admin/scheduling", "relationships"],
+        ["admin/email-campaigns", "relationships"],
+        ["admin/email-campaigns/alerts", "relationships"],
+        ["admin/users", "relationships"],
 
-        // Community is a top-level entry, so its pages open no group.
-        ["admin/community", NoGroup],
-        ["admin/community/activity", NoGroup],
-        ["admin/community/messages", NoGroup],
-        ["admin/community/departments", NoGroup],
-        ["admin/community/profile/jdoe", NoGroup],
+        // Home: the dashboard, Community, and routes no workspace claims (Settings has its own rail button).
+        ["admin", "home"],
+        ["admin/community", "home"],
+        ["admin/community/activity", "home"],
+        ["admin/community/messages", "home"],
+        ["admin/community/departments", "home"],
+        ["admin/community/profile/jdoe", "home"],
+        ["admin/settings", "home"],
+        ["admin/account/touch-id", "home"],
+        ["admin/mission-control", "home"],
 
-        // Knowledge - admin/wiki has no NavLink of its own (Wiki.razor also routes at
-        // admin/sentinel, which does) but must still keep the Knowledge group expanded.
-        ["admin/sentinel", nameof(NavMenuGroups.KnowledgePrefixes)],
-        ["admin/wiki", nameof(NavMenuGroups.KnowledgePrefixes)],
-        ["admin/mind-maps", nameof(NavMenuGroups.KnowledgePrefixes)],
+        // Knowledge - admin/wiki has no sidebar link of its own (Wiki.razor also routes at admin/sentinel).
+        ["admin/sentinel", "knowledge"],
+        ["admin/sentinel/present", "knowledge"],
+        ["admin/wiki", "knowledge"],
+        ["admin/mind-maps", "knowledge"],
 
         // Intelligence
-        ["admin/news-intelligence", nameof(NavMenuGroups.IntelligencePrefixes)],
-        ["admin/government-intelligence", nameof(NavMenuGroups.IntelligencePrefixes)],
-        ["admin/business-intelligence", nameof(NavMenuGroups.IntelligencePrefixes)],
-        ["admin/osint", nameof(NavMenuGroups.IntelligencePrefixes)],
-        ["admin/threat-intel", nameof(NavMenuGroups.IntelligencePrefixes)],
+        ["admin/news-intelligence", "intelligence"],
+        ["admin/government-intelligence", "intelligence"],
+        ["admin/business-intelligence", "intelligence"],
+        ["admin/osint", "intelligence"],
+        ["admin/osint/directions", "intelligence"],
+        ["admin/threat-intel", "intelligence"],
 
-        // Growth & Monetization
-        ["admin/growth", nameof(NavMenuGroups.GrowthMonetizationPrefixes)],
-        ["admin/cj-ads", nameof(NavMenuGroups.GrowthMonetizationPrefixes)],
-        ["admin/affiliate-suggestions", nameof(NavMenuGroups.GrowthMonetizationPrefixes)],
-        ["admin/affiliate-analytics", nameof(NavMenuGroups.GrowthMonetizationPrefixes)],
+        // Growth
+        ["admin/growth", "growth"],
+        ["admin/cj-ads", "growth"],
+        ["admin/affiliate-suggestions", "growth"],
+        ["admin/affiliate-analytics", "growth"],
 
         // Platform
-        ["admin/automation", nameof(NavMenuGroups.PlatformPrefixes)],
-        ["admin/automation/credentials", nameof(NavMenuGroups.PlatformPrefixes)],
-        ["admin/automation/help", nameof(NavMenuGroups.PlatformPrefixes)],
-        ["admin/docker-health", nameof(NavMenuGroups.PlatformPrefixes)],
-        ["admin/dev-tools", nameof(NavMenuGroups.PlatformPrefixes)],
-        ["admin/security-audit", nameof(NavMenuGroups.PlatformPrefixes)],
-        ["admin/privacy-operations", nameof(NavMenuGroups.PlatformPrefixes)],
+        ["admin/automation", "platform"],
+        ["admin/automation/credentials", "platform"],
+        ["admin/automation/help", "platform"],
+        ["admin/docker-health", "platform"],
+        ["admin/dev-tools", "platform"],
+        ["admin/security-audit", "platform"],
+        ["admin/privacy-operations", "platform"],
     ];
 
-    private static readonly Dictionary<string, IReadOnlyList<string>> AllGroups = new()
-    {
-        [nameof(NavMenuGroups.ContentPublishingPrefixes)] = NavMenuGroups.ContentPublishingPrefixes,
-        [nameof(NavMenuGroups.RelationshipPrefixes)] = NavMenuGroups.RelationshipPrefixes,
-        [nameof(NavMenuGroups.KnowledgePrefixes)] = NavMenuGroups.KnowledgePrefixes,
-        [nameof(NavMenuGroups.IntelligencePrefixes)] = NavMenuGroups.IntelligencePrefixes,
-        [nameof(NavMenuGroups.GrowthMonetizationPrefixes)] = NavMenuGroups.GrowthMonetizationPrefixes,
-        [nameof(NavMenuGroups.PlatformPrefixes)] = NavMenuGroups.PlatformPrefixes,
-    };
+    [Theory]
+    [MemberData(nameof(KnownRoutesByWorkspace))]
+    public void WorkspaceFor_ShouldPickItsWorkspace_ForEveryKnownAdminRoute(string route, string expected) =>
+        NavMenuGroups.WorkspaceFor(route).Key.Should().Be(expected);
 
     [Theory]
-    [MemberData(nameof(KnownRoutesByGroup))]
-    public void IsGroupOpen_ShouldMatchExactlyItsOwnGroup_ForEveryKnownAdminRoute(string route, string expectedGroupName)
+    [InlineData("ADMIN/CRM", "relationships")]
+    [InlineData("/admin/osint?camera=12", "intelligence")]
+    [InlineData("admin/not-a-page", "home")]
+    [InlineData("", "home")]
+    public void WorkspaceFor_ShouldIgnoreCaseAndLeadingSlash_AndFallBackToHome(string route, string expected) =>
+        NavMenuGroups.WorkspaceFor(route).Key.Should().Be(expected);
+
+    [Fact]
+    public void Workspaces_ShouldHaveUniqueKeys_AndOnlyHomeAndContentOpenToEveryRole()
     {
-        foreach (var (groupName, prefixes) in AllGroups)
+        NavMenuGroups.Workspaces.Select(workspace => workspace.Key).Should().OnlyHaveUniqueItems();
+        NavMenuGroups.Workspaces.Where(workspace => !workspace.AdminOnly).Select(workspace => workspace.Key)
+            .Should().Equal("home", "content");
+        NavMenuGroups.Workspaces[0].Should().BeSameAs(NavMenuGroups.Home);
+    }
+
+    // Every link in a workspace's sub-nav section must belong to that workspace, or opening the
+    // page would show a different workspace than the one the link was clicked in.
+    [Fact]
+    public void NavMenu_ShouldListEachLink_InTheWorkspaceItsRouteOpens()
+    {
+        var source = NavMenuSource;
+        var sections = Regex.Matches(source, @"<section class=""gws-workspace"" id=""gws-ws-(?<key>[a-z]+)"".*?</section>", RegexOptions.Singleline);
+        sections.Select(match => match.Groups["key"].Value).Should().Equal(NavMenuGroups.Workspaces.Select(workspace => workspace.Key));
+
+        var links = 0;
+        foreach (Match section in sections)
         {
-            var isOpen = NavMenuGroups.IsGroupOpen(route, prefixes);
-            isOpen.Should().Be(groupName == expectedGroupName,
-                $"route '{route}' should only open '{expectedGroupName}', not '{groupName}'");
+            foreach (Match href in Regex.Matches(section.Value, @"href=""(?<href>[^""]+)"""))
+            {
+                var route = Resolve(href.Groups["href"].Value);
+                NavMenuGroups.WorkspaceFor(route).Key.Should().Be(section.Groups["key"].Value, $"'{route}' is listed there");
+                links++;
+            }
         }
+
+        links.Should().BeGreaterThan(30);
     }
 
-    [Fact]
-    public void IsGroupOpen_ShouldBeCaseInsensitive()
+    // "@AdminApps.Crm.Href" -> "admin/crm"
+    private static string Resolve(string href)
     {
-        NavMenuGroups.IsGroupOpen("ADMIN/CRM", NavMenuGroups.RelationshipPrefixes).Should().BeTrue();
-    }
-
-    [Fact]
-    public void IsGroupOpen_ShouldReturnFalse_ForUnrelatedRoute()
-    {
-        NavMenuGroups.IsGroupOpen("admin", NavMenuGroups.ContentPublishingPrefixes).Should().BeFalse();
-        NavMenuGroups.IsGroupOpen("admin/settings", NavMenuGroups.PlatformPrefixes).Should().BeFalse();
+        var app = Regex.Match(href, @"^@AdminApps\.(?<name>\w+)\.Href$");
+        if (!app.Success) return href;
+        var field = typeof(AdminApps).GetField(app.Groups["name"].Value);
+        field.Should().NotBeNull(href);
+        return ((AdminApp)field!.GetValue(null)!).Href;
     }
 }
 

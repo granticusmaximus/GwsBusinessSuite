@@ -313,7 +313,7 @@ html:has(.gws-admin-bar) {
 }
 
 /* Admin pages size their layouts to the room they actually have: the window minus the
-   sidebar (248px, 68px collapsed, none in Fullscreen or the full-screen page editor).
+   sidebar (272px: a 72px workspace rail and the sub-nav; 72px collapsed, none in Fullscreen or the full-screen page editor).
    Components query it with @container gws-main (...) instead of a viewport @media. */
 .gws-content {
     container: gws-main / inline-size;
@@ -326,6 +326,8 @@ html:has(.gws-admin-bar) {
     .gws-content {
         padding-left: max(1rem, var(--gws-safe-left));
         padding-right: max(1rem, var(--gws-safe-right));
+        /* Clear the phone bar (its height includes the safe area). */
+        padding-bottom: calc(1.5rem + var(--gws-bottom-bar-height));
     }
 }
 
@@ -344,7 +346,6 @@ html:has(.gws-admin-bar) {
    override the zero-specificity defaults above. Inline prose links keep their text flow. */
 @media (pointer: coarse) {
     .gws-content :is(button, .btn, .form-control, .form-select, .page-link, .nav-link, summary, [role="button"]),
-    .gws-sidebar summary,
     .gws-admin-bar :is(button, summary),
     .wp-row-actions :is(a, button) {
         /* This accessibility minimum must survive compact component styles. */
