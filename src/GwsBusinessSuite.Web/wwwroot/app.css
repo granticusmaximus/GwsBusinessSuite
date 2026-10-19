@@ -463,6 +463,11 @@ h1:focus { outline: none; }
     background: rgba(255, 255, 255, .025);
 }
 
+/* Community, the other entry every role sees, sits directly under Home outside the groups. */
+.gws-nav-home + .gws-nav-link {
+    margin: -.3rem 0 .45rem;
+}
+
 .gws-nav-group {
     border-top: 1px solid rgba(255, 255, 255, .045);
     padding: .3rem 0;

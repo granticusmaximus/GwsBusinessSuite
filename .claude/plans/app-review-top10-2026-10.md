@@ -20,7 +20,7 @@ Grep for each item first. Two hints already turned up:
 | 7 | Customer timeline: comments, time, reminders, email-origin; ticket/invoice deep links; history beside tickets | done 19-10-26 |
 | 8 | Business Intelligence: answer sentence, follow-ups, examples, model choice + JSON mode, 2-min cutoff | done 19-10-26 |
 | 9 | One SentinelGPT side panel: every admin page, page + record + selection context, local-first, drafts via Use as reply/note | done 19-10-26 |
-| 10 | Nav merge + admin shell redesign (workspace rail, inspector) | not started |
+| 10 | Nav merge (48 -> 38 entries, tabbed apps); shell redesign planned separately | done 19-10-26 (redesign: admin-shell-redesign-2026-10.md) |
 
 ## Phase 1 notes (done)
 
@@ -193,3 +193,27 @@ Grep for each item first. Two hints already turned up:
   horizontal scroll, close/reopen keeping the conversation, and that a ticket draft isn't offered
   on the contact page. Seen: the server model miscounted invoices from flattened page text
   (adjacent badges join as "SentOverdue"), a model limit that's labelled "Server".
+
+## Phase 10 notes (done)
+
+- Grant chose "Full redesign plan" (19-10-26): merge now, and plan the rail/inspector redesign
+  separately in `.claude/plans/admin-shell-redesign-2026-10.md` (R1-R7, decisions listed there).
+- `AdminApps` (Web/Services) defines the merged apps and their tabs (AdminOnly per tab):
+  Community, CRM (+ Deal scoring), SentinelGPT Builder (+ Approval queue), Site design (Menus,
+  Header & footer, Appearance), Affiliate (CJ Ads, Suggestions, Analytics). `AppTabs` renders the
+  strip under each member page's `.page-header` (14 pages). URLs are unchanged.
+- NavMenu: merged entries are plain links whose active state comes from `AdminApp.Contains`
+  (NavLink prefix matching can't, e.g. app-generation vs app-generation-queue). Count badges kept.
+  Community is now a top-level entry under Home for every role (Relationships is admin-only).
+  Growth Studio moved beside Affiliate. Builder Reference left the nav and is linked from the
+  page editor toolbar, since /admin/pages opens the editor. `NavMenuGroups` and its tests were
+  updated, and Community routes now open no group.
+- ⌘K: hidden `.gws-command-extra` entries in NavMenu for every tab plus Builder Reference;
+  app.js reads them and now ranks results (name starts with > name contains > description/group).
+- Removed duplicates: Community Directory's header buttons and the "Back to Staff Directory"
+  links (the tabs replace them).
+- Count: 38 entries in the markup; 37 in a browser, because Content Studio only shows in the Mac
+  app.
+- Live: checked which entry and tab are current and which group opens for all five apps, a tab
+  click, ⌘K ("departments" now finds Departments first), the editor link, and phone width (tabs
+  scroll inside their strip, no page overflow).

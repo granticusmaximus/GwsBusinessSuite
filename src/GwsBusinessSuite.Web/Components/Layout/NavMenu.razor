@@ -15,10 +15,14 @@
         <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
         <span class="gws-nav-link-copy"><span>Home</span><small>Your work at a glance</small></span>
     </NavLink>
+    <a class="@AppLinkClass(AdminApps.Community)" href="@AdminApps.Community.Href" aria-current="@AppCurrent(AdminApps.Community)" title="Community">
+        <i class="bi @AdminApps.Community.Icon" aria-hidden="true"></i>
+        <span class="gws-nav-link-copy"><span>Community</span><small>@AdminApps.Community.Description</small></span>
+    </a>
 
     <!-- Content & Publishing: everything about making and shipping content, one place - the
          original Publishing group plus three items that used to live under the admin-only
-         Intelligence/Operations groups (Podcasts, Live Show, the SentinelGPT Approval Queue).
+         Intelligence/Operations groups (Podcasts, Live Show, and the SentinelGPT Builder's Approval Queue tab).
          The group itself stays ungated like the original Publishing did; the three newcomers
          keep their original admin-only visibility individually, since moving group DOESN'T mean
          moving access level - see docs/... the nav regroup from the 2026-09 design plan. -->
@@ -63,30 +67,13 @@
                     @if (_pendingCommentCount > 0) { <span class="gws-nav-count">@_pendingCommentCount</span> }
                 </NavLink>
             }
-            @if (IsAdmin)
-            {
-                <NavLink class="gws-nav-link" href="admin/growth" title="Growth Studio">
-                    <i class="bi bi-activity" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Growth Studio</span><small>Analytics and social publishing</small></span>
-                </NavLink>
-            }
             @if (Shown("app-generation"))
             {
-                <NavLink class="gws-nav-link" href="admin/app-generation" title="SentinelGPT Page Builder">
-                    <i class="bi bi-stars" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>SentinelGPT Builder</span><small>Draft new site pages</small></span>
-                </NavLink>
-            }
-            @if (IsAdmin)
-            {
-                @if (Shown("app-generation"))
-                {
-                    <NavLink class="gws-nav-link" href="admin/app-generation-queue" title="SentinelGPT Page Queue">
-                        <i class="bi bi-inbox-fill" aria-hidden="true"></i>
-                        <span class="gws-nav-link-copy"><span>Approval Queue</span><small>Review generated plans</small></span>
-                        @if (_pendingAppGenerationCount > 0) { <span class="gws-nav-count">@_pendingAppGenerationCount</span> }
-                    </NavLink>
-                }
+                <a class="@AppLinkClass(AdminApps.PageBuilder)" href="@AdminApps.PageBuilder.Href" aria-current="@AppCurrent(AdminApps.PageBuilder)" title="SentinelGPT Builder">
+                    <i class="bi @AdminApps.PageBuilder.Icon" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>SentinelGPT Builder</span><small>Draft pages and review plans</small></span>
+                    @if (IsAdmin && _pendingAppGenerationCount > 0) { <span class="gws-nav-count">@_pendingAppGenerationCount</span> }
+                </a>
             }
             @if (IsContributorOrAbove)
             {
@@ -103,18 +90,10 @@
                     <span class="gws-nav-link-copy"><span>Form Submissions</span><small>Visitor submissions across every page</small></span>
                     @if (_unreadFormSubmissionCount > 0) { <span class="gws-nav-count">@_unreadFormSubmissionCount</span> }
                 </NavLink>
-                <NavLink class="gws-nav-link" href="admin/appearance/menus" title="Menus">
-                    <i class="bi bi-list" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Menus</span><small>Header and footer navigation</small></span>
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/appearance/header-footer" title="Header & Footer">
-                    <i class="bi bi-layout-text-window" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Header &amp; Footer</span><small>Design the site-wide header and footer</small></span>
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/appearance/customize" title="Appearance">
-                    <i class="bi bi-palette" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Appearance</span><small>Brand, fonts and CSS</small></span>
-                </NavLink>
+                <a class="@AppLinkClass(AdminApps.SiteDesign)" href="@AdminApps.SiteDesign.Href" aria-current="@AppCurrent(AdminApps.SiteDesign)" title="Site design">
+                    <i class="bi @AdminApps.SiteDesign.Icon" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Site design</span><small>@AdminApps.SiteDesign.Description</small></span>
+                </a>
             }
             @if (IsAdmin)
             {
@@ -133,30 +112,6 @@
         </div>
     </details>
 
-    <details class="gws-nav-group" open="@IsGroupOpen(CommunityPrefixes)">
-        <summary><span>Community</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
-        <div class="gws-nav-group-items">
-            <NavLink class="gws-nav-link" href="admin/community" Match="NavLinkMatch.All" title="Staff Directory">
-                <i class="bi bi-people-fill" aria-hidden="true"></i>
-                <span class="gws-nav-link-copy"><span>Staff Directory</span><small>Find teammates and departments</small></span>
-            </NavLink>
-            <NavLink class="gws-nav-link" href="admin/community/activity" title="Activity Feed">
-                <i class="bi bi-activity" aria-hidden="true"></i>
-                <span class="gws-nav-link-copy"><span>Activity Feed</span><small>Recent team activity</small></span>
-            </NavLink>
-            <NavLink class="gws-nav-link" href="admin/community/messages" title="Messages">
-                <i class="bi bi-chat-left-text" aria-hidden="true"></i>
-                <span class="gws-nav-link-copy"><span>Messages</span><small>Direct messages with teammates</small></span>
-            </NavLink>
-            @if (IsAdmin)
-            {
-                <NavLink class="gws-nav-link" href="admin/community/departments" title="Departments">
-                    <i class="bi bi-diagram-3" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Departments</span><small>Teams and department leads</small></span>
-                </NavLink>
-            }
-        </div>
-    </details>
 
     @if (IsAdmin)
     {
@@ -165,18 +120,11 @@
             <div class="gws-nav-group-items">
                 @if (Shown("crm"))
                 {
-                    <NavLink class="gws-nav-link" href="admin/crm" title="CRM">
-                        <i class="bi bi-people-fill" aria-hidden="true"></i>
-                        <span class="gws-nav-link-copy"><span>CRM</span><small>Contacts and activity</small></span>
+                    <a class="@AppLinkClass(AdminApps.Crm)" href="@AdminApps.Crm.Href" aria-current="@AppCurrent(AdminApps.Crm)" title="CRM">
+                        <i class="bi @AdminApps.Crm.Icon" aria-hidden="true"></i>
+                        <span class="gws-nav-link-copy"><span>CRM</span><small>Contacts, deals and deal scores</small></span>
                         @if (_dueFollowUpCount > 0) { <span class="gws-nav-count">@_dueFollowUpCount</span> }
-                    </NavLink>
-                }
-                @if (Shown("crm"))
-                {
-                    <NavLink class="gws-nav-link" href="admin/deal-scoring" title="Deal Scoring">
-                        <i class="bi bi-graph-up-arrow" aria-hidden="true"></i>
-                        <span class="gws-nav-link-copy"><span>Deal Scoring</span><small>Win-likelihood by deal</small></span>
-                    </NavLink>
+                    </a>
                 }
                 @if (Shown("billing"))
                 {
@@ -234,10 +182,6 @@
                     <i class="bi bi-diagram-2-fill" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Mind Maps</span><small>Visual outlines and roadmaps</small></span>
                 </NavLink>
-                <NavLink class="gws-nav-link" href="admin/cms-knowledge" title="Builder Reference">
-                    <i class="bi bi-journal-richtext" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Builder Reference</span><small>CMS workflow notes</small></span>
-                </NavLink>
             </div>
         </details>
 
@@ -270,18 +214,14 @@
         <details class="gws-nav-group" open="@IsGroupOpen(GrowthMonetizationPrefixes)">
             <summary><span>Growth &amp; Monetization</span><i class="bi bi-chevron-right" aria-hidden="true"></i></summary>
             <div class="gws-nav-group-items">
-                <NavLink class="gws-nav-link" href="admin/cj-ads" title="CJ Ads">
-                    <i class="bi bi-tags-fill" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>CJ Ads</span><small>Affiliate campaigns</small></span>
+                <NavLink class="gws-nav-link" href="admin/growth" title="Growth Studio">
+                    <i class="bi bi-activity" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Growth Studio</span><small>Analytics and social publishing</small></span>
                 </NavLink>
-                <NavLink class="gws-nav-link" href="admin/affiliate-suggestions" title="Affiliate Suggestions">
-                    <i class="bi bi-link-45deg" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Suggestions</span><small>SentinelGPT-matched placements</small></span>
-                </NavLink>
-                <NavLink class="gws-nav-link" href="admin/affiliate-analytics" title="Affiliate Analytics">
-                    <i class="bi bi-graph-up-arrow" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Analytics</span><small>Clicks and commission</small></span>
-                </NavLink>
+                <a class="@AppLinkClass(AdminApps.Affiliate)" href="@AdminApps.Affiliate.Href" aria-current="@AppCurrent(AdminApps.Affiliate)" title="Affiliate">
+                    <i class="bi @AdminApps.Affiliate.Icon" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Affiliate</span><small>@AdminApps.Affiliate.Description</small></span>
+                </a>
             </div>
         </details>
 
@@ -323,12 +263,34 @@
             </NavLink>
         </div>
     }
+
+    @* Every tab of a merged app (AdminApps) stays findable in ⌘K under its own name: app.js
+       reads these hidden entries alongside the sidebar links. Same visibility as the entries. *@
+    <div class="gws-command-extras" hidden>
+        @foreach (var (app, visible) in CommandApps)
+        {
+            if (!visible) continue;
+            foreach (var tab in app.TabsFor(_role))
+            {
+                <a class="gws-command-extra" href="@tab.Href" data-command-group="@app.Label">
+                    <i class="bi @tab.Icon" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>@tab.Label</span><small>@tab.Description</small></span>
+                </a>
+            }
+        }
+        @if (IsAdmin)
+        {
+            <a class="gws-command-extra" href="admin/cms-knowledge" data-command-group="Pages">
+                <i class="bi bi-journal-richtext" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>Builder Reference</span><small>CMS workflow notes</small></span>
+            </a>
+        }
+    </div>
 </nav>
 
 @code {
     private static readonly IReadOnlyList<string> ContentPublishingPrefixes = NavMenuGroups.ContentPublishingPrefixes;
     private static readonly IReadOnlyList<string> RelationshipPrefixes = NavMenuGroups.RelationshipPrefixes;
-    private static readonly IReadOnlyList<string> CommunityPrefixes = NavMenuGroups.CommunityPrefixes;
     private static readonly IReadOnlyList<string> KnowledgePrefixes = NavMenuGroups.KnowledgePrefixes;
     private static readonly IReadOnlyList<string> IntelligencePrefixes = NavMenuGroups.IntelligencePrefixes;
     private static readonly IReadOnlyList<string> GrowthMonetizationPrefixes = NavMenuGroups.GrowthMonetizationPrefixes;
@@ -380,6 +342,22 @@
 
     private bool IsGroupOpen(IReadOnlyList<string> prefixes) =>
         NavMenuGroups.IsGroupOpen(Navigation.ToBaseRelativePath(Navigation.Uri), prefixes);
+
+    // A merged app's entry is current on any of its tabs' pages; NavLink only matches its own href.
+    private string AppLinkClass(AdminApp app) =>
+        app.Contains(Navigation.ToBaseRelativePath(Navigation.Uri)) ? "gws-nav-link active" : "gws-nav-link";
+
+    private string? AppCurrent(AdminApp app) =>
+        app.Contains(Navigation.ToBaseRelativePath(Navigation.Uri)) ? "page" : null;
+
+    private IEnumerable<(AdminApp App, bool Visible)> CommandApps =>
+    [
+        (AdminApps.Community, true),
+        (AdminApps.Crm, IsAdmin && Shown("crm")),
+        (AdminApps.PageBuilder, Shown("app-generation")),
+        (AdminApps.SiteDesign, IsContributorOrAbove),
+        (AdminApps.Affiliate, IsAdmin)
+    ];
 
     private bool IsAdmin => _role == AppRoles.Admin;
     private bool IsContributorOrAbove => _role is AppRoles.Admin or AppRoles.Contributor;

@@ -149,12 +149,15 @@
 	}
 
 	function commandEntries() {
-		return Array.from(document.querySelectorAll('.gws-sidebar .gws-nav-link')).map(function (link) {
+		// The sidebar's links, plus hidden entries for each tab of a merged app (NavMenu's
+		// .gws-command-extra), which name their app in data-command-group.
+		return Array.from(document.querySelectorAll('.gws-sidebar .gws-nav-link, .gws-sidebar .gws-command-extra')).map(function (link) {
 			var copy = link.querySelector('.gws-nav-link-copy');
 			var title = copy && copy.firstElementChild ? copy.firstElementChild.textContent.trim() : link.textContent.trim();
 			var description = copy && copy.querySelector('small') ? copy.querySelector('small').textContent.trim() : '';
 			var group = link.closest('.gws-nav-group');
-			var groupName = group && group.querySelector('summary span') ? group.querySelector('summary span').textContent.trim() : 'General';
+			var groupName = link.dataset.commandGroup
+				|| (group && group.querySelector('summary span') ? group.querySelector('summary span').textContent.trim() : 'General');
 			var icon = link.querySelector('i');
 			return { title: title, description: description, group: groupName, href: link.href, iconClass: icon ? icon.className : 'bi bi-arrow-right' };
 		});
@@ -205,9 +208,23 @@
 		var elements = commandElements();
 		if (!elements.results) return;
 		var normalized = (query || '').trim().toLowerCase();
-		var entries = commandEntries().filter(function (entry) {
-			return !normalized || [entry.title, entry.description, entry.group].join(' ').toLowerCase().includes(normalized);
-		}).slice(0, 10);
+		// Pages whose name starts with the query first, then names containing it, then matches on
+		// the description or group; sidebar order within each.
+		var entries = commandEntries().map(function (entry, position) {
+			var title = entry.title.toLowerCase();
+			var rank = !normalized ? 0
+				: title.startsWith(normalized) ? 0
+				: title.includes(normalized) ? 1
+				: [entry.description, entry.group].join(' ').toLowerCase().includes(normalized) ? 2
+				: -1;
+			return { entry: entry, rank: rank, position: position };
+		}).filter(function (item) {
+			return item.rank >= 0;
+		}).sort(function (a, b) {
+			return a.rank - b.rank || a.position - b.position;
+		}).slice(0, 10).map(function (item) {
+			return item.entry;
+		});
 
 		elements.results.replaceChildren();
 		commandIndex = entries.length ? 0 : -1;

@@ -1,10 +1,13 @@
 using FluentAssertions;
+using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Web.Services;
 
 namespace GwsBusinessSuite.Tests;
 
 public class NavMenuGroupsTests
 {
+    private const string NoGroup = "(none)";
+
     public static IEnumerable<object[]> KnownRoutesByGroup =>
     [
         // Content & Publishing
@@ -13,7 +16,6 @@ public class NavMenuGroupsTests
         ["admin/content-calendar", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/seo-audit", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/localization", nameof(NavMenuGroups.ContentPublishingPrefixes)],
-        ["admin/growth", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/app-generation", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/app-generation-queue", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/media", nameof(NavMenuGroups.ContentPublishingPrefixes)],
@@ -24,6 +26,7 @@ public class NavMenuGroupsTests
         ["admin/live-show", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/live-show-recordings", nameof(NavMenuGroups.ContentPublishingPrefixes)],
         ["admin/comments", nameof(NavMenuGroups.ContentPublishingPrefixes)],
+        ["admin/cms-knowledge", nameof(NavMenuGroups.ContentPublishingPrefixes)],
 
         // Relationships
         ["admin/crm", nameof(NavMenuGroups.RelationshipPrefixes)],
@@ -35,19 +38,18 @@ public class NavMenuGroupsTests
         ["admin/email-campaigns", nameof(NavMenuGroups.RelationshipPrefixes)],
         ["admin/users", nameof(NavMenuGroups.RelationshipPrefixes)],
 
-        // Community
-        ["admin/community", nameof(NavMenuGroups.CommunityPrefixes)],
-        ["admin/community/activity", nameof(NavMenuGroups.CommunityPrefixes)],
-        ["admin/community/messages", nameof(NavMenuGroups.CommunityPrefixes)],
-        ["admin/community/departments", nameof(NavMenuGroups.CommunityPrefixes)],
-        ["admin/community/profile/jdoe", nameof(NavMenuGroups.CommunityPrefixes)],
+        // Community is a top-level entry, so its pages open no group.
+        ["admin/community", NoGroup],
+        ["admin/community/activity", NoGroup],
+        ["admin/community/messages", NoGroup],
+        ["admin/community/departments", NoGroup],
+        ["admin/community/profile/jdoe", NoGroup],
 
         // Knowledge - admin/wiki has no NavLink of its own (Wiki.razor also routes at
         // admin/sentinel, which does) but must still keep the Knowledge group expanded.
         ["admin/sentinel", nameof(NavMenuGroups.KnowledgePrefixes)],
         ["admin/wiki", nameof(NavMenuGroups.KnowledgePrefixes)],
         ["admin/mind-maps", nameof(NavMenuGroups.KnowledgePrefixes)],
-        ["admin/cms-knowledge", nameof(NavMenuGroups.KnowledgePrefixes)],
 
         // Intelligence
         ["admin/news-intelligence", nameof(NavMenuGroups.IntelligencePrefixes)],
@@ -57,6 +59,7 @@ public class NavMenuGroupsTests
         ["admin/threat-intel", nameof(NavMenuGroups.IntelligencePrefixes)],
 
         // Growth & Monetization
+        ["admin/growth", nameof(NavMenuGroups.GrowthMonetizationPrefixes)],
         ["admin/cj-ads", nameof(NavMenuGroups.GrowthMonetizationPrefixes)],
         ["admin/affiliate-suggestions", nameof(NavMenuGroups.GrowthMonetizationPrefixes)],
         ["admin/affiliate-analytics", nameof(NavMenuGroups.GrowthMonetizationPrefixes)],
@@ -75,7 +78,6 @@ public class NavMenuGroupsTests
     {
         [nameof(NavMenuGroups.ContentPublishingPrefixes)] = NavMenuGroups.ContentPublishingPrefixes,
         [nameof(NavMenuGroups.RelationshipPrefixes)] = NavMenuGroups.RelationshipPrefixes,
-        [nameof(NavMenuGroups.CommunityPrefixes)] = NavMenuGroups.CommunityPrefixes,
         [nameof(NavMenuGroups.KnowledgePrefixes)] = NavMenuGroups.KnowledgePrefixes,
         [nameof(NavMenuGroups.IntelligencePrefixes)] = NavMenuGroups.IntelligencePrefixes,
         [nameof(NavMenuGroups.GrowthMonetizationPrefixes)] = NavMenuGroups.GrowthMonetizationPrefixes,
@@ -105,5 +107,34 @@ public class NavMenuGroupsTests
     {
         NavMenuGroups.IsGroupOpen("admin", NavMenuGroups.ContentPublishingPrefixes).Should().BeFalse();
         NavMenuGroups.IsGroupOpen("admin/settings", NavMenuGroups.PlatformPrefixes).Should().BeFalse();
+    }
+}
+
+// The merged admin apps: one sidebar entry each, a tab per page.
+public class AdminAppsTests
+{
+    [Theory]
+    [InlineData("admin/app-generation-queue", "SentinelGPT Builder")]
+    [InlineData("admin/deal-scoring?x=1", "CRM")]
+    [InlineData("admin/community/profile/jdoe", "Community")]
+    [InlineData("Admin/Appearance/Menus/", "Site design")]
+    [InlineData("admin/affiliate-analytics#top", "Affiliate")]
+    public void Contains_ShouldClaimEveryTabsPage_ForExactlyOneApp(string path, string expected) =>
+        AdminApps.All.Where(app => app.Contains(path)).Select(app => app.Label).Should().Equal(expected);
+
+    [Theory]
+    [InlineData("admin/crm-import")]
+    [InlineData("admin/app-generation-queue-old")]
+    [InlineData("admin")]
+    public void Contains_ShouldNotClaimLookalikePaths(string path) =>
+        AdminApps.All.Should().NotContain(app => app.Contains(path));
+
+    [Fact]
+    public void Tabs_ShouldHideAdminOnlyPages_FromOtherRoles()
+    {
+        AdminApps.Community.TabsFor(AppRoles.Author).Select(tab => tab.Label).Should().Equal("Directory", "Activity", "Messages");
+        AdminApps.Community.TabsFor(AppRoles.Admin).Should().HaveCount(4);
+        AdminApps.PageBuilder.TabsFor(AppRoles.Contributor).Should().ContainSingle().Which.Href.Should().Be(AdminApps.PageBuilder.Href);
+        AdminApps.All.SelectMany(app => app.Tabs).Select(tab => tab.Href).Should().OnlyHaveUniqueItems();
     }
 }

@@ -1,0 +1,26 @@
+@using System.Security.Claims
+@using GwsBusinessSuite.Web.Services
+@inject AuthenticationStateProvider AuthProvider
+
+@* The tabs across a merged admin app's pages (see AdminApps). Each tab is an ordinary link to
+   that page, so the browser's back button and bookmarks behave as before. *@
+<nav class="gws-app-tabs" aria-label="@App.Label">
+    @foreach (var tab in App.TabsFor(_role))
+    {
+        <NavLink class="gws-app-tab" href="@tab.Href" Match="NavLinkMatch.All" title="@tab.Description">
+            <i class="bi @tab.Icon" aria-hidden="true"></i><span>@tab.Label</span>
+        </NavLink>
+    }
+</nav>
+
+@code {
+    [Parameter, EditorRequired] public AdminApp App { get; set; } = null!;
+
+    private string _role = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthProvider.GetAuthenticationStateAsync();
+        _role = state.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
+    }
+}

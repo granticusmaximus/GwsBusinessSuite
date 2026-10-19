@@ -126,6 +126,13 @@
            "Save page" to "Publish changes" in 2016 after research found new editors thought
            saving was private). *@
         <span class="studio-save-state">@SaveStateText</span>
+        @* Builder Reference's editor notes, since it left the sidebar in the app merge. Edits
+           autosave, so leaving for it loses nothing. *@
+        <AuthorizeView Policy="AdminOnly">
+            <a class="btn btn-outline-secondary" href="admin/cms-knowledge" title="Builder reference" aria-label="Builder reference">
+                <i class="bi bi-journal-richtext"></i>
+            </a>
+        </AuthorizeView>
         <button type="button" class="btn btn-outline-secondary" data-gws-focus-toggle title="Fullscreen" aria-label="Fullscreen" aria-pressed="false">
             <i class="bi bi-arrows-fullscreen"></i>
         </button>

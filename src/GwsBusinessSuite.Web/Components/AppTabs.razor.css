@@ -1,0 +1,37 @@
+/* An underline tab row under the page header; scrolls sideways rather than wrapping when the
+   content area is narrow. */
+.gws-app-tabs {
+    display: flex;
+    gap: .25rem;
+    margin: -.25rem 0 1.25rem;
+    border-bottom: 1px solid var(--gws-panel-border, #292524);
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.gws-app-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.gws-app-tabs ::deep .gws-app-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .55rem .85rem;
+    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+    color: var(--gws-text-soft);
+    text-decoration: none;
+    white-space: nowrap;
+    font-size: .9rem;
+}
+
+.gws-app-tabs ::deep .gws-app-tab:hover {
+    color: var(--gws-text-strong);
+}
+
+.gws-app-tabs ::deep .gws-app-tab.active {
+    color: var(--gws-text-strong);
+    border-bottom-color: var(--gws-sidebar-accent, #f59e0b);
+    font-weight: 600;
+}

@@ -21,6 +21,7 @@
         <span>@(IsBusy ? "Syncing..." : "Sync Commissions Now")</span>
     </button>
 </div>
+<AppTabs App="GwsBusinessSuite.Web.Services.AdminApps.Affiliate" />
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {

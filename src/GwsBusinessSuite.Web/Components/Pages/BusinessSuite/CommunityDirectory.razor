@@ -18,15 +18,8 @@
         <h1><i class="bi bi-people-fill me-2 text-primary"></i>Staff Directory</h1>
         <p>Find teammates, see who's in which department, and start a conversation.</p>
     </div>
-    <div class="d-flex gap-2">
-        <a href="/admin/community/activity" class="btn btn-sm btn-outline-secondary"><i class="bi bi-activity me-1"></i>Activity Feed</a>
-        <a href="/admin/community/messages" class="btn btn-sm btn-outline-secondary"><i class="bi bi-chat-left-text me-1"></i>Messages</a>
-        @if (IsAdmin)
-        {
-            <a href="/admin/community/departments" class="btn btn-sm btn-outline-secondary"><i class="bi bi-diagram-3 me-1"></i>Departments</a>
-        }
-    </div>
 </div>
+<AppTabs App="GwsBusinessSuite.Web.Services.AdminApps.Community" />
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -113,14 +106,11 @@ else
 }
 
 @code {
-    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
-
     private List<DepartmentView> Departments { get; set; } = [];
     private List<MemberProfileView> Profiles { get; set; } = [];
     private string SearchText { get; set; } = string.Empty;
     private Guid? SelectedDepartmentId { get; set; }
     private string CurrentUsername { get; set; } = string.Empty;
-    private bool IsAdmin { get; set; }
     private bool IsLoading { get; set; } = true;
     private bool IsBusy { get; set; }
     private string ErrorMessage { get; set; } = string.Empty;
@@ -129,7 +119,6 @@ else
     protected override async Task OnInitializedAsync()
     {
         CurrentUsername = await CurrentUserAccessor.GetCurrentUsernameAsync();
-        IsAdmin = AuthState is not null && (await AuthState).User.IsInRole(AppRoles.Admin);
         await LoadAsync();
     }
 
