@@ -33,6 +33,15 @@ function handleReconnectStateChanged(event) {
         // Failed inside the grace period: still show the modal, for its Retry button.
         if (!reconnectModal.open) reconnectModal.showModal();
         document.addEventListener("visibilitychange", retryWhenDocumentBecomesVisible);
+    } else if (event.detail.state === "paused") {
+        // A paused session (Blazor sends "show" then "paused" straight away, which cancelled the
+        // grace timer above) ignores every click until it's resumed, so this must not be silent:
+        // show the modal with its Resume button, and resume by itself when the page is next shown
+        // (e.g. switching back to the Mac app, which keeps pages open across server restarts).
+        if (!reconnectModal.open) reconnectModal.showModal();
+        document.addEventListener("visibilitychange", resumeWhenDocumentBecomesVisible);
+    } else if (event.detail.state === "resume-failed") {
+        location.reload();
     } else if (event.detail.state === "rejected") {
         location.reload();
     }
@@ -64,6 +73,7 @@ async function retry() {
 }
 
 async function resume() {
+    document.removeEventListener("visibilitychange", resumeWhenDocumentBecomesVisible);
     try {
         const successful = await Blazor.resumeCircuit();
         if (!successful) {
@@ -77,5 +87,11 @@ async function resume() {
 async function retryWhenDocumentBecomesVisible() {
     if (document.visibilityState === "visible") {
         await retry();
+    }
+}
+
+async function resumeWhenDocumentBecomesVisible() {
+    if (document.visibilityState === "visible") {
+        await resume();
     }
 }

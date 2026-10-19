@@ -166,7 +166,7 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
         navigateToWikiLink(state, anchor, event);
     });
     container.addEventListener('mouseup', state.selectionHandler = () => {
-        showInlineToolbar(state);
+        if (!state.locked) showInlineToolbar(state);
         reportCursor(state);
     });
     container.addEventListener('keyup', state.selectionHandler);
@@ -306,6 +306,71 @@ export function setSuggesting(container, suggesting) {
     if (!state) return;
     state.suggesting = Boolean(suggesting);
     clearPersistedDraft(state);
+}
+
+// Edit lock ("Lock editing" in Sentinel's toolbar): the page still reads normally - links,
+// selecting and copying all work - but nothing can change it until it's unlocked. Every editable
+// element (including ones rendered later, e.g. by a co-editor's update) is switched off, the
+// editing keys, paste, cut and drop are swallowed, and no change is reported to the server.
+const LOCK_EDITING_SHORTCUTS = new Set(['z', 'y', 'x', 'v', 'b', 'i', 'u', 'e', 'd']);
+
+export function setLocked(container, locked) {
+    const state = states.get(container);
+    if (!state) return;
+    locked = Boolean(locked);
+    if (Boolean(state.locked) === locked) return;
+    if (locked && state.notifyTimer) notifyChanged(state);
+    state.locked = locked;
+    container.classList.toggle('is-edit-locked', locked);
+    if (locked) {
+        closeFloatingMenus(state);
+        lockEditables(container);
+        state.lockObserver = new MutationObserver(() => lockEditables(container));
+        state.lockObserver.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['contenteditable'] });
+        state.lockGuard = event => {
+            if (!state.locked || event.target.closest?.('input, textarea, select')) return;
+            if (event.type === 'keydown') {
+                if (!isLockedEditingKey(event)) return;
+                // Kept from the editor's own key handling either way; Tab still moves focus and
+                // Enter still opens a focused link or button.
+                event.stopPropagation();
+                if (event.key === 'Tab' || (event.key === 'Enter' && event.target.closest?.('a[href], button'))) return;
+                event.preventDefault();
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+        };
+        for (const type of ['beforeinput', 'keydown', 'paste', 'cut', 'drop']) container.addEventListener(type, state.lockGuard, true);
+    } else {
+        unlockEditables(state);
+    }
+}
+
+function isLockedEditingKey(event) {
+    if (event.key === 'Enter' || event.key === 'Backspace' || event.key === 'Delete' || event.key === 'Tab') return true;
+    if (event.metaKey || event.ctrlKey) return LOCK_EDITING_SHORTCUTS.has(event.key.toLowerCase()) || (event.key.startsWith('Arrow') && event.shiftKey);
+    return event.key.length === 1;
+}
+
+function lockEditables(container) {
+    for (const element of container.querySelectorAll('[contenteditable="true"]')) {
+        element.contentEditable = 'false';
+        element.dataset.editLocked = 'true';
+    }
+}
+
+function unlockEditables(state) {
+    state.lockObserver?.disconnect();
+    state.lockObserver = null;
+    if (state.lockGuard) {
+        for (const type of ['beforeinput', 'keydown', 'paste', 'cut', 'drop']) state.container.removeEventListener(type, state.lockGuard, true);
+        state.lockGuard = null;
+    }
+    for (const element of state.container.querySelectorAll('[data-edit-locked]')) {
+        element.contentEditable = 'true';
+        delete element.dataset.editLocked;
+    }
 }
 
 // Blocks with a pending suggested change get a margin mark (has-suggestion).
@@ -615,6 +680,7 @@ export function dispose(container) {
     const state = states.get(container);
     if (!state) return;
     if (state.notifyTimer) clearTimeout(state.notifyTimer);
+    if (state.locked) unlockEditables(state);
     closeFloatingMenus(state);
     if (state.focusInHandler) container.removeEventListener('focusin', state.focusInHandler);
     if (state.linkClickHandler) container.removeEventListener('click', state.linkClickHandler);
@@ -4327,6 +4393,7 @@ function deleteBlockAction(state, blockEl) {
 // ---- Serialization ---------------------------------------------------------
 
 function scheduleNotify(state) {
+    if (state.locked) return;
     if (state.notifyTimer) clearTimeout(state.notifyTimer);
     state.notifyTimer = setTimeout(() => notifyChanged(state), 250);
 }
@@ -4433,6 +4500,7 @@ function persistHistory(state) {
 
 function notifyChanged(state) {
     if (state.notifyTimer) { clearTimeout(state.notifyTimer); state.notifyTimer = null; }
+    if (state.locked) return;
     const current = getBlocksJson(state.container);
     if (state.lastSnapshot !== undefined && state.lastSnapshot !== current) {
         state.undoStack.push(state.lastSnapshot);
@@ -4451,6 +4519,7 @@ function notifyChanged(state) {
 
 function notifyChangedSilently(state) {
     if (state.notifyTimer) { clearTimeout(state.notifyTimer); state.notifyTimer = null; }
+    if (state.locked) return;
     try {
         const pending = state.dotNetRef.invokeMethodAsync('OnBlocksChanged', getBlocksJson(state.container));
         pending?.catch?.(() => { /* localStorage remains the durable offline outbox */ });

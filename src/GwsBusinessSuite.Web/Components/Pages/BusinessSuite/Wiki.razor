@@ -788,11 +788,28 @@
                         <SentinelPresence WikiPageId="selectedPageId" />
                         <SentinelSharePanel TargetId="selectedPageId" TargetName="@(Editor.Title ?? "page")" />
                         <SentinelPageVerificationPanel WikiPageId="selectedPageId" />
-                        <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-tool-btn-label @(_suggesting ? "is-active" : "")"
-                                @onclick="ToggleSuggestingAsync" disabled="@IsBusy" aria-pressed="@(_suggesting ? "true" : "false")"
-                                title="Suggest: your edits become suggestions for someone with edit access to accept">
-                            <i class="bi bi-chat-square-quote" aria-hidden="true"></i><span>Suggest</span>
-                        </button>
+                        @if (!IsLockScreen && (_canEditPage || EditLocked))
+                        {
+                            @* Lock editing: read-only until unlocked, so nothing changes by accident. Not the
+                               same as "Lock page" in ⋯, which hides the page behind Touch ID or a PIN. *@
+                            <button type="button" class="btn btn-sm sentinel-tool-btn @(EditLocked ? "sentinel-tool-btn-label is-active" : string.Empty)"
+                                    @onclick="ToggleEditLockAsync" disabled="@(IsBusy || !_canEditPage)" aria-pressed="@(EditLocked ? "true" : "false")"
+                                    title="@EditLockTitle" aria-label="@(EditLocked ? "Unlock editing" : "Lock editing")">
+                                <i class="bi @(EditLocked ? "bi-lock-fill" : "bi-unlock")" aria-hidden="true"></i>
+                                @if (EditLocked)
+                                {
+                                    <span>Locked</span>
+                                }
+                            </button>
+                        }
+                        @if (!EditLocked)
+                        {
+                            <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-tool-btn-label @(_suggesting ? "is-active" : "")"
+                                    @onclick="ToggleSuggestingAsync" disabled="@IsBusy" aria-pressed="@(_suggesting ? "true" : "false")"
+                                    title="Suggest: your edits become suggestions for someone with edit access to accept">
+                                <i class="bi bi-chat-square-quote" aria-hidden="true"></i><span>Suggest</span>
+                            </button>
+                        }
                         <SentinelSuggestionsPanel @ref="_suggestionsPanel" WikiPageId="selectedPageId" CanReview="_canEditPage"
                                                   OnPageChanged="ReloadAfterSuggestionAsync" OnMarksChanged="SetSuggestionMarksAsync" />
                         <button type="button" class="btn btn-sm sentinel-tool-btn" @onclick="PresentAsync" disabled="@IsBusy"
@@ -868,7 +885,7 @@
                                     <i class="bi @(_keptOffline ? "bi-cloud-check-fill" : "bi-cloud-download")"></i>
                                     <span>@(_keptOffline ? "Kept offline in the Mac app" : "Keep offline in the Mac app")<small class="d-block text-secondary">@(_keptOffline ? "Click to stop keeping a copy" : "Readable in the Mac app's Offline tab without a connection")</small></span>
                                 </button>
-                                <button type="button" class="dropdown-item d-flex align-items-center gap-2" @onclick="OpenCleanupAsync" disabled="@IsBusy">
+                                <button type="button" class="dropdown-item d-flex align-items-center gap-2" @onclick="OpenCleanupAsync" disabled="@(IsBusy || EditLocked)">
                                     <i class="bi bi-magic"></i>
                                     <span>Clean up this note<small class="d-block text-secondary">Headings, bullets and to-dos, previewed first</small></span>
                                 </button>
@@ -917,6 +934,14 @@
                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@IsBusy" @onclick="DiscardSuggestionAsync">Discard</button>
                 </div>
             }
+            else if (EditLocked && _canEditPage)
+            {
+                <div class="sentinel-suggest-banner is-hint" role="status">
+                    <i class="bi bi-lock-fill" aria-hidden="true"></i>
+                    <span>Editing is locked, so this page can't be changed by accident.</span>
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@IsBusy" @onclick="ToggleEditLockAsync">Unlock</button>
+                </div>
+            }
             else if (SelectedPageId.HasValue && !_canEditPage)
             {
                 <div class="sentinel-suggest-banner is-hint" role="status">
@@ -930,7 +955,7 @@
                 {
                     <div class="sentinel-page-cover">
                         <img src="@Editor.CoverImageUrl" alt="Page cover" loading="lazy" />
-                        <div class="sentinel-page-cover-actions">
+                        <div class="sentinel-page-cover-actions" hidden="@EditLocked">
                             <button type="button" class="btn btn-sm btn-dark" @onclick="ToggleCoverPickerAsync">
                                 <i class="bi bi-image me-1"></i>Change cover
                             </button>
@@ -945,7 +970,7 @@
                     <DataAnnotationsValidator />
                     <ValidationSummary />
 
-                    @if (string.IsNullOrWhiteSpace(Editor.CoverImageUrl) || string.IsNullOrWhiteSpace(Editor.Icon))
+                    @if (!EditLocked && (string.IsNullOrWhiteSpace(Editor.CoverImageUrl) || string.IsNullOrWhiteSpace(Editor.Icon)))
                     {
                         <div class="sentinel-page-affordances">
                             @if (string.IsNullOrWhiteSpace(Editor.Icon))
@@ -966,7 +991,7 @@
                     <div class="sentinel-page-heading">
                         @if (!string.IsNullOrWhiteSpace(Editor.Icon))
                         {
-                            <button type="button" class="sentinel-icon-input" @onclick="ToggleIconPicker"
+                            <button type="button" class="sentinel-icon-input" @onclick="ToggleIconPicker" disabled="@EditLocked"
                                     aria-label="Change page icon" title="Change page icon">
                                 @Editor.Icon
                             </button>
@@ -979,7 +1004,7 @@
                            drops what was just typed. The text is set from JS (setTitleValue) only
                            when a different page loads; @key gives each page a fresh element. *@
                         <textarea @key="TitleElementKey" @ref="_titleInput" class="sentinel-title-input" rows="1" placeholder="Untitled"
-                                  aria-label="Page title" @oninput="OnTitleInput"></textarea>
+                                  aria-label="Page title" readonly="@EditLocked" @oninput="OnTitleInput"></textarea>
                     </div>
                     @if (SelectedPageId is { } aliasPageId)
                     {
@@ -991,7 +1016,7 @@
                     }
                     @if (SelectedPageId is { } typesPageId)
                     {
-                        <SentinelPageTypesBar WikiPageId="typesPageId" CanEdit="_canEditPage" Generation="_typesGeneration" OnOpenType="OpenTypesPanel" />
+                        <SentinelPageTypesBar WikiPageId="typesPageId" CanEdit="_canEditPage && !EditLocked" Generation="_typesGeneration" OnOpenType="OpenTypesPanel" />
                     }
 
                     @if (_showIconPicker)
@@ -1019,13 +1044,13 @@
                         <div class="sentinel-properties">
                             <div class="sentinel-property-row">
                                 <label for="sentinelSlug"><i class="bi bi-link-45deg"></i>Slug</label>
-                                <InputText id="sentinelSlug" class="sentinel-property-control" @bind-Value="Editor.Slug" placeholder="Generated from title" />
+                                <InputText id="sentinelSlug" class="sentinel-property-control" @bind-Value="Editor.Slug" placeholder="Generated from title" disabled="@EditLocked" />
                             </div>
                             @if (SelectedPageId.HasValue)
                             {
                                 <div class="sentinel-property-row">
                                     <label for="sentinelParent"><i class="bi bi-diagram-2"></i>Parent</label>
-                                    <select id="sentinelParent" class="sentinel-property-control" @bind="ParentWikiPageIdSelection" @bind:after="MoveToSelectedParentAsync">
+                                    <select id="sentinelParent" class="sentinel-property-control" @bind="ParentWikiPageIdSelection" @bind:after="MoveToSelectedParentAsync" disabled="@EditLocked">
                                         <option value="">— Top level —</option>
                                         @foreach (var candidate in WikiParentPageOptions())
                                         {
@@ -1070,7 +1095,7 @@
                         </div>
                     }
 
-                    <div class="sentinel-editor-hint">
+                    <div class="sentinel-editor-hint" hidden="@EditLocked">
                         <i class="bi bi-command"></i>
                         <span><code>/</code> commands · <code>[[</code> page links · <code>@@</code> mentions · Tab to indent</span>
                     </div>
@@ -1088,7 +1113,10 @@
                             <button type="button" class="btn btn-sm btn-link p-0 text-secondary" @onclick="RemoveLockAsync">Remove lock</button>
                         </div>
                     }
-                    <SentinelAiPanel @key="SelectedPageId" WikiPageId="SelectedPageId" OnInsert="InsertAiOutputAsync" />
+                    @if (!EditLocked)
+                    {
+                        <SentinelAiPanel @key="SelectedPageId" WikiPageId="SelectedPageId" OnInsert="InsertAiOutputAsync" />
+                    }
                     <div class="wiki-block-editor" @ref="_blockEditorContainer"></div>
                     @* Words, characters, reading time and selection - filled in live by
                        wiki-block-editor.js (attachReadingStats); Blazor never renders its text. *@
@@ -2386,7 +2414,7 @@
     {
         // The empty stand-in for a locked page (it normalizes itself on load) - saving it after
         // an unlock would overwrite the page's real content.
-        if (_editorHoldsLockedPlaceholder) return;
+        if (_editorHoldsLockedPlaceholder || EditLocked) return;
         Editor.BlocksJson = blocksJson;
         ScheduleAutosave();
         await InvokeAsync(StateHasChanged);
@@ -2395,7 +2423,7 @@
     [JSInvokable]
     public async Task OnDraftRecovered(string blocksJson)
     {
-        if (_editorHoldsLockedPlaceholder) return;
+        if (_editorHoldsLockedPlaceholder || EditLocked) return;
         Editor.BlocksJson = blocksJson;
         StatusMessage = "Recovered an unsaved local draft from this browser.";
         await InvokeAsync(StateHasChanged);
@@ -2846,6 +2874,47 @@
         await SetEditorSuggestingAsync(false);
     }
 
+    // Lock editing (WikiPage.EditLockedBy, 19-10-26): read-only in the editor until unlocked.
+    private string? _editLockedBy;
+    private long? _editLockedAtUnix;
+    private bool EditLocked => _editLockedBy is not null && SelectedPageId.HasValue && SelectedDatabaseId is null;
+
+    private string EditLockTitle => !EditLocked
+        ? "Lock editing: make this page read-only until it's unlocked"
+        : _editLockedAtUnix is { } lockedAt
+            ? $"Locked by {_editLockedBy} on {DateTimeOffset.FromUnixTimeSeconds(lockedAt).ToLocalTime().ToGwsDateTime()}. Click to unlock editing."
+            : $"Locked by {_editLockedBy}. Click to unlock editing.";
+
+    private async Task ToggleEditLockAsync()
+    {
+        if (SelectedPageId is not { } pageId || !_canEditPage) return;
+        var locking = !EditLocked;
+        if (locking)
+        {
+            // Whatever is already typed is saved first; a suggestion in progress is dropped.
+            if (_suggesting) await DiscardSuggestionAsync();
+            await FlushAutosaveAsync();
+            _showIconPicker = false;
+            _showCoverPicker = false;
+        }
+        try
+        {
+            var page = await WikiService.SetEditLockAsync(pageId, locking, CurrentUsername);
+            _editLockedBy = page.EditLockedBy;
+            _editLockedAtUnix = page.EditLockedAtUnix;
+        }
+        catch (InvalidOperationException ex)
+        {
+            ErrorMessage = ex.Message;
+            return;
+        }
+        if (_blockEditorInitialized && _blockEditorModule is not null)
+        {
+            try { await _blockEditorModule.InvokeVoidAsync("setLocked", _blockEditorContainer, EditLocked); }
+            catch (JSDisconnectedException) { /* circuit gone */ }
+        }
+    }
+
     private async Task SetEditorSuggestingAsync(bool suggesting)
     {
         if (!_blockEditorInitialized || _blockEditorModule is null) return;
@@ -3167,6 +3236,7 @@
 
     private void OnTitleInput(ChangeEventArgs args)
     {
+        if (EditLocked) return;
         Editor.Title = args.Value?.ToString() ?? string.Empty;
         ScheduleAutosave();
     }
@@ -3234,7 +3304,7 @@
         if (SelectedDatabaseId is null && !_blockEditorInitialized)
         {
             _blockEditorRef ??= DotNetObjectReference.Create(this);
-            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=13");
+            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=14");
             await _blockEditorModule.InvokeVoidAsync(
                 "initialize",
                 _blockEditorContainer,
@@ -3246,6 +3316,7 @@
             await _blockEditorModule.InvokeVoidAsync("setRemoteCursors", _blockEditorContainer, BuildRemoteCursorPayload());
             await _blockEditorModule.InvokeVoidAsync("setSuggestionMarks", _blockEditorContainer, _suggestionMarks);
             if (_suggesting) await _blockEditorModule.InvokeVoidAsync("setSuggesting", _blockEditorContainer, true);
+            if (EditLocked) await _blockEditorModule.InvokeVoidAsync("setLocked", _blockEditorContainer, true);
             _blockEditorInitialized = true;
             _blockEditorSyncedGeneration = _editorGeneration;
         }
@@ -3262,6 +3333,7 @@
             await blockEditorModule.InvokeVoidAsync("setDiscussionHighlights", _blockEditorContainer, _blockDiscussionHighlights);
             await blockEditorModule.InvokeVoidAsync("setSuggestionMarks", _blockEditorContainer, _suggestionMarks);
             if (_suggesting) await blockEditorModule.InvokeVoidAsync("setSuggesting", _blockEditorContainer, true);
+            await blockEditorModule.InvokeVoidAsync("setLocked", _blockEditorContainer, EditLocked);
             // The editor element can be replaced when the conditional page-context rail enters
             // the render tree. Reinitializing, rather than assuming the old WeakMap state still
             // owns this ElementReference, guarantees a loaded page renders its persisted blocks.
@@ -3714,6 +3786,8 @@
         _mobileWorkspaceNavOpen = false;
         SelectedPageId = null;
         SelectedDatabaseId = null;
+        _editLockedBy = null;
+        _editLockedAtUnix = null;
         Editor = new WikiPageEditorModel();
         Backlinks = new();
         History = new();
@@ -4037,6 +4111,8 @@
             _suggestionBaseline = null;
             _suggestionNote = string.Empty;
             _canEditPage = await CanAccessPageOrDatabaseAsync(page.Id, isDatabase: false, SentinelAccessLevels.Edit);
+            _editLockedBy = page.EditLockedBy;
+            _editLockedAtUnix = page.EditLockedAtUnix;
             _mobileWorkspaceNavOpen = false;
             SearchQuery = string.Empty;
             WorkspaceSearchResults = new();

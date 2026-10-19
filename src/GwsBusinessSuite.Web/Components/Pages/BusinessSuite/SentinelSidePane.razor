@@ -36,6 +36,10 @@
     {
         <p class="small text-secondary px-3 mb-0"><i class="bi bi-lock-fill me-1" aria-hidden="true"></i>This page is locked - open it in the main editor to unlock it.</p>
     }
+    else if (_page?.EditLockedBy is not null)
+    {
+        <p class="small text-secondary px-3 mb-0"><i class="bi bi-lock-fill me-1" aria-hidden="true"></i>Editing is locked - unlock it in the main editor to make changes.</p>
+    }
     else if (!_canEdit && _page is not null)
     {
         <p class="small text-secondary px-3 mb-0">View only: you can't edit this page, so changes here aren't saved.</p>
@@ -101,7 +105,9 @@
             return;
         }
         // Page lock: the side pane never shows or saves a locked page (no unlock here).
-        _canEdit = _page.LockedBy is null && await SentinelAccessService.CanAccessAsync(WikiPageId, false, username, SentinelAccessLevels.Edit);
+        // A page with "Lock editing" on (EditLockedBy) is read-only here too, until unlocked in the editor.
+        _canEdit = _page.LockedBy is null && _page.EditLockedBy is null
+            && await SentinelAccessService.CanAccessAsync(WikiPageId, false, username, SentinelAccessLevels.Edit);
         _title = _page.Title;
         _blocksJson = _page.BlocksJson;
         _baseBlocksJson = _page.BlocksJson;
@@ -114,8 +120,9 @@
         if (!_initialized)
         {
             _dotNetRef = DotNetObjectReference.Create(this);
-            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=13");
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=14");
             await _module.InvokeVoidAsync("initialize", _editorContainer, _dotNetRef, _blocksJson);
+            await _module.InvokeVoidAsync("setLocked", _editorContainer, _page?.EditLockedBy is not null);
             _initialized = true;
             _renderedFor = _loadedFor;
         }
@@ -123,6 +130,7 @@
         {
             _renderedFor = _loadedFor;
             await _module.InvokeVoidAsync("setBlocks", _editorContainer, _blocksJson);
+            await _module.InvokeVoidAsync("setLocked", _editorContainer, _page?.EditLockedBy is not null);
         }
     }
 

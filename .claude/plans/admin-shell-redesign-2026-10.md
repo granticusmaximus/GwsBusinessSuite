@@ -55,6 +55,32 @@ roles see only Home and the Publish items they can use today, the same rules as 
   gating, enhanced navigation (the layout is static SSR), Overwatch's `data-enhance-nav="false"`,
   and the Mac app.
 
+**Done 19-10-26 (rail, sub-nav, collapse, phone bar).** What shipped:
+- `NavMenuGroups.Workspaces` + `WorkspaceFor(path)` (Home is the fallback; a workspace the role
+  can't see also falls back to Home). `NavMenu` renders a `.gws-rail` and one
+  `section[data-workspace]` per workspace in `.gws-subnav`; app.js `showWorkspace` switches
+  sections client-side, and enhanced navigation re-renders the current page's one.
+- The rail is 72px, not 56: the responsive audit fails text under 12px, and "Knowledge" at 12px
+  needs ~64px. Sidebar 272px (72 + 200), collapsed 72px. Descriptions are hidden in the sub-nav
+  but stay in the markup for ⌘K, which now groups by workspace.
+- Settings is a rail button (admins) plus a ⌘K entry. The Platform "Mission Control" link went:
+  that route only redirects to the dashboard (merged 2026-09), so it opened Home; ⌘K keeps a
+  "Mission Control" entry pointing at the dashboard.
+- Phone (<768px): `.gws-bottom-bar` in MainLayout (Home, Menu, Search, SentinelGPT); the top bar
+  hides its own toggle/search/assistant buttons; the drawer sits between the bars.
+- Tests: `NavMenuGroupsTests` covers every admin route's workspace and parses NavMenu.razor so
+  every link sits in the workspace its route opens. The responsive audit's navigation/search
+  interactions pick whichever trigger is visible.
+- Not checked: the Mac app's WKWebView (same pages, so expected to match; check under R7).
+
+## R1b. Pins and recents on the rail (not started)
+
+Split out of R1: pinned pages and recent records at the bottom of the rail, stored per user.
+Needs a per-user table (pins, recents) plus a migration; recents can come from pages that already
+register a record with `AssistantContext` (Support ticket, CRM contact), and the pin button
+belongs in R2's `PageHeader`, so build this after R2's component. Rail space: 8 items use
+~470px, so about 4 pins/recents fit on a 900px-tall window before the rail scrolls.
+
 ## R2. One page anatomy
 
 - A `PageHeader` component: breadcrumb (workspace › app › record), title, one primary button,

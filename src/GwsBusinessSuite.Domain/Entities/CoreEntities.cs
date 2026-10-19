@@ -701,6 +701,12 @@ public sealed class WikiPage : AuditableEntity
     public string? LockedBy { get; set; }
     public long? LockedAtUnix { get; set; }
     public string? LockedContentProtected { get; set; }
+    // Edit lock ("Lock editing" in the Sentinel toolbar, 19-10-26): unlike the page lock above it
+    // hides nothing - the page stays readable, but its editor is read-only until someone with
+    // edit access unlocks it. Set only through IWikiService.SetEditLockAsync, so no ordinary
+    // save (autosave, automations, AI cleanup) can clear it by accident.
+    public string? EditLockedBy { get; set; }
+    public long? EditLockedAtUnix { get; set; }
     public ICollection<WikiPageRevision> Revisions { get; set; } = new List<WikiPageRevision>();
 }
 

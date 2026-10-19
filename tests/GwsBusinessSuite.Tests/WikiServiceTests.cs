@@ -10,6 +10,44 @@ namespace GwsBusinessSuite.Tests;
 
 public sealed class WikiServiceTests
 {
+    // "Lock editing" (19-10-26): content-neutral, and no ordinary save may clear it.
+    [Fact]
+    public async Task SetEditLockAsync_ShouldLockAndUnlock_WithoutTouchingContent_AndSurviveOrdinarySaves()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiService(db);
+        var page = await service.SavePageAsync(new WikiPageEditorModel { Title = "Runbook", BlocksJson = ParagraphBlocks("Steps.") }, "grant");
+        var revisions = await db.WikiPageRevisions.CountAsync();
+
+        var locked = await service.SetEditLockAsync(page.Id, true, "grant");
+
+        locked.EditLockedBy.Should().Be("grant");
+        locked.EditLockedAtUnix!.Value.Should().BeCloseTo(DateTimeOffset.UtcNow.ToUnixTimeSeconds(), 5);
+        locked.ContentVersion.Should().Be(page.ContentVersion, "locking isn't an edit");
+        (await db.WikiPageRevisions.CountAsync()).Should().Be(revisions);
+
+        (await service.SetEditLockAsync(page.Id, true, "someone-else")).EditLockedBy.Should().Be("grant", "locking twice keeps who locked it");
+
+        // An automation or AI cleanup saves through the editor model, which has no lock fields.
+        await service.SavePageAsync(new WikiPageEditorModel
+        {
+            WikiPageId = page.Id, ExpectedContentVersion = page.ContentVersion, Title = "Runbook", BlocksJson = ParagraphBlocks("New steps.")
+        }, "automation");
+        (await service.GetPageAsync(page.Id))!.EditLockedBy.Should().Be("grant");
+
+        var unlocked = await service.SetEditLockAsync(page.Id, false, "grant");
+        unlocked.EditLockedBy.Should().BeNull();
+        unlocked.EditLockedAtUnix.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task SetEditLockAsync_ShouldThrow_ForAMissingPage()
+    {
+        await using var db = await CreateDbAsync();
+        var act = () => new WikiService(db).SetEditLockAsync(Guid.NewGuid(), true, "grant");
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
     [Fact]
     public async Task SavePageAsync_ShouldCreateUpdateAndDeleteWikiPages()
     {

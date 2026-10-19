@@ -553,6 +553,21 @@ public sealed class WikiService(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<WikiPage> SetEditLockAsync(Guid wikiPageId, bool locked, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var page = await dbContext.WikiPages.FirstOrDefaultAsync(item => item.Id == wikiPageId, cancellationToken)
+            ?? throw new InvalidOperationException("Sentinel page not found.");
+        if (locked == (page.EditLockedBy is not null))
+        {
+            return page;
+        }
+
+        page.EditLockedBy = locked ? performedBy : null;
+        page.EditLockedAtUnix = locked ? DateTimeOffset.UtcNow.ToUnixTimeSeconds() : null;
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return page;
+    }
+
     public async Task RestorePageAsync(Guid wikiPageId, string performedBy, CancellationToken cancellationToken = default)
     {
         var page = await dbContext.WikiPages.FirstOrDefaultAsync(item => item.Id == wikiPageId, cancellationToken);

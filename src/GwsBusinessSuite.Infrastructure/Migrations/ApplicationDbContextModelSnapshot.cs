@@ -9078,6 +9078,12 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<long?>("EditLockedAtUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("EditLockedBy")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("FontStyle")
                         .HasColumnType("TEXT");
 

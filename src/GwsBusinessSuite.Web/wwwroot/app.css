@@ -1696,6 +1696,11 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .wiki-block-gutter.has-discussions {
     opacity: 1;
 }
+/* Edit lock (wiki-block-editor.js setLocked): no add/move/block-menu controls and no ticking
+   to-dos; comments (the discussion button) stay available. */
+.is-edit-locked :is(.wiki-block-add, .wiki-block-menu-toggle, .wiki-block-handle, .wiki-column-add, .wiki-column-add-widget, .wiki-tab-add) { display: none !important; }
+.is-edit-locked .wiki-todo-checkbox { pointer-events: none; }
+
 .wiki-block-add,
 .wiki-block-discussion,
 .wiki-block-menu-toggle,
