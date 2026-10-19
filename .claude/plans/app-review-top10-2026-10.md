@@ -18,7 +18,7 @@ Grep for each item first. Two hints already turned up:
 | 5 | Automation: expression language (functions, operators, indexing) + sandboxed Code node (Jint) | done 19-10-26 |
 | 6 | Media: files on disk (dual-write, 7-day DB grace), resized copies + WebP, srcset, backups include media | done 19-10-26 |
 | 7 | Customer timeline: comments, time, reminders, email-origin; ticket/invoice deep links; history beside tickets | done 19-10-26 |
-| 8 | Business Intelligence: plain-English questions, local model, read-only | not started |
+| 8 | Business Intelligence: answer sentence, follow-ups, examples, model choice + JSON mode, 2-min cutoff | done 19-10-26 |
 | 9 | One SentinelGPT side panel with page context | not started |
 | 10 | Nav merge + admin shell redesign (workspace rail, inspector) | not started |
 
@@ -134,3 +134,27 @@ Grep for each item first. Two hints already turned up:
   ticket's own, loaded once per ticket opened, with a Full history link.
 - Live: checked on desktop and at phone width. Paths tested: direct, from the contact page, and
   same-page ticket switch; plus missing ids and the Billing expand.
+
+## Phase 8 notes (done)
+
+- The Ask box already existed: the local model (via `BrowserLocalOllamaService`, in the browser)
+  maps the question onto one catalogued report shape, and the server validates and runs it. It
+  stays read-only because the model never sees data and can't write a query. Phase 8 filled the
+  gaps.
+- `BiAnswerSummary.Describe` writes the one-sentence answer from the result: total, change vs.
+  the previous window, leader with its share (or a tie), and high/low for month charts. Numbers
+  use en-US, and the page's `FormatValue` now uses it too, so amounts no longer depend on the
+  server's culture.
+- Follow-ups: `SystemPrompt(..., previous)` gives the model the last plan.
+  `KeywordPlan(..., previous)` keeps the source/metric/dimension/range the question doesn't
+  mention. Naming a source starts over. Only "by month"/"monthly"/"trend" etc. pick the Month
+  breakdown; "this month" is a range.
+- `PickModel`: gemma > qwen > llama3 > mistral > phi > any, never "embed" models. The old code
+  preferred llama3.2 and could pick `embeddinggemma`. Calls use Ollama JSON mode
+  (`GenerateJsonAsync`) with a 2-minute cutoff, then fall back to keywords.
+- UI: example question chips, a "New question" button, a follow-up placeholder, and the asked
+  question shown with the answer.
+- Live (local gemma4): about 30 s cold, 8-14 s warm. Also checked: Ollama unreachable (keywords,
+  about 3 s), a model that never answers (cut off at 120 s), and keyword follow-ups.
+- Test gotcha: the login limiter allows 5 sign-ins per 15 min per IP, and is in-memory, so an app
+  restart resets it. Reuse one browser context instead of signing in per page.

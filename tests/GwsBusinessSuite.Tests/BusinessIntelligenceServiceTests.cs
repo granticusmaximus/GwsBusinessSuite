@@ -230,6 +230,73 @@ public sealed class BusinessIntelligenceServiceTests
     }
 
     [Fact]
+    public async Task BiQuestionPlanner_ShouldRefineThePreviousAnswer_WhenAFollowUpNamesNoSource()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var shapes = fixture.Service.GetQueryShapes();
+        var ranges = fixture.Service.GetRangeOptions();
+        var first = BiQuestionPlanner.KeywordPlan("Support tickets by priority last 90 days", shapes, ranges);
+        (first.QueryShape, first.Dimension, first.RangeDays).Should().Be((BiQueryShapes.SupportTickets, BiDimensions.Priority, 90));
+
+        var byMonth = BiQuestionPlanner.KeywordPlan("now by month", shapes, ranges, first);
+        (byMonth.QueryShape, byMonth.Metric, byMonth.Dimension, byMonth.RangeDays, byMonth.Visualization)
+            .Should().Be((BiQueryShapes.SupportTickets, first.Metric, BiDimensions.Month, 90, BiVisualizations.Line));
+        byMonth.Title.Should().NotContain("now", "a follow-up's wording isn't a title");
+
+        var shorter = BiQuestionPlanner.KeywordPlan("just this week?", shapes, ranges, byMonth);
+        (shorter.QueryShape, shorter.Dimension, shorter.RangeDays).Should().Be((BiQueryShapes.SupportTickets, BiDimensions.Month, 7));
+
+        var fresh = BiQuestionPlanner.KeywordPlan("pipeline value by stage", shapes, ranges, shorter);
+        (fresh.QueryShape, fresh.Metric, fresh.RangeDays).Should().Be((BiQueryShapes.Deals, BiMetrics.PipelineValue, 30), "naming a source starts over");
+        BiQuestionPlanner.KeywordPlan("tickets this month", shapes, ranges).Dimension.Should().NotBe(BiDimensions.Month, "\"this month\" is a range");
+
+        BiQuestionPlanner.SystemPrompt(shapes, ranges, first).Should().Contain("\"source\":\"SupportTickets\"").And.Contain("keep every field");
+        BiQuestionPlanner.SystemPrompt(shapes, ranges).Should().NotContain("previous answer");
+    }
+
+    [Theory]
+    [InlineData("llama3.2:latest,embeddinggemma:latest,gemma4:latest", "gemma4:latest")]
+    [InlineData("embeddinggemma:latest,llama3.2:latest", "llama3.2:latest")]
+    [InlineData("nomic-embed-text,qwen2.5-coder:latest,llama3.2", "qwen2.5-coder:latest")]
+    [InlineData("mixtral:8x7b", "mixtral:8x7b")]
+    [InlineData("embeddinggemma:latest", null)]
+    [InlineData("", null)]
+    public void BiQuestionPlanner_ShouldPickAChatModel_NeverAnEmbeddingModel(string installed, string? expected) =>
+        BiQuestionPlanner.PickModel(installed.Split(',', StringSplitOptions.RemoveEmptyEntries)).Should().Be(expected);
+
+    [Fact]
+    public void BiAnswerSummary_ShouldStateOnlyWhatTheChartShows()
+    {
+        var plan = new BiWidgetEditor { Dimension = BiDimensions.Stage, RangeDays = 90 };
+        var now = new DateTimeOffset(2026, 10, 19, 0, 0, 0, TimeSpan.Zero);
+        BiChartResult Result(string format, decimal total, decimal previous, params BiDataPoint[] points) =>
+            new("Pipeline value", "Stage", format, total, now.AddDays(-90), now, points, previous);
+
+        var previousCulture = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.GetCultureInfo("fr-FR");
+            BiAnswerSummary.Describe(plan, Result("Currency", 42000, 37500, new("Proposal", 18000), new("Lead", 0), new("Negotiation", 12000), new("Won", 12000)))
+                .Should().Be("Pipeline value over the last 90 days: $42,000.00, up 12% on the 90 days before. Proposal leads with $18,000.00 (43%), then Negotiation with $12,000.00.");
+        }
+        finally
+        {
+            System.Globalization.CultureInfo.CurrentCulture = previousCulture;
+        }
+
+        BiAnswerSummary.Describe(plan, Result("Number", 0, 4)).Should().Be("Nothing recorded for pipeline value in the last 90 days.");
+        BiAnswerSummary.Describe(plan, Result("Number", 5, 0, new BiDataPoint("Lead", 5))).Should().Be("Pipeline value over the last 90 days: 5, none in the 90 days before. All of it is Lead.");
+        BiAnswerSummary.Describe(plan, Result("Number", 10, 10, new("A", 6), new("B", 4))).Should().Contain(", level with the 90 days before.");
+        BiAnswerSummary.Describe(plan, Result("Number", 2, 0, new("High", 1), new("Normal", 1))).Should().EndWith("High and Normal tie at 1 each.");
+        BiAnswerSummary.Describe(plan, Result("Rating", 4.5m, 4.25m, new("High", 4), new("Low", 5)))
+            .Should().Be("Pipeline value over the last 90 days: 4.5 / 5 (was 4.25 / 5 in the 90 days before). Low leads with 5.0 / 5, then High with 4.0 / 5.");
+
+        var monthly = new BiWidgetEditor { Dimension = BiDimensions.Month, RangeDays = 365 };
+        BiAnswerSummary.Describe(monthly, Result("Number", 30, 60, new("Aug", 5), new("Sep", 20), new("Oct", 5)))
+            .Should().EndWith("down 50% on the 365 days before. Highest in Sep (20), lowest in Aug (5).");
+    }
+
+    [Fact]
     public async Task GetDashboardAsync_ShouldServeCachedResultsUntilRefreshIsRequested()
     {
         await using var fixture = await Fixture.CreateAsync();

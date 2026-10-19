@@ -35,12 +35,26 @@
     <div class="card-body">
         <form class="bi-ask d-flex flex-wrap gap-2" @onsubmit="AskAsync" @onsubmit:preventDefault>
             <label class="visually-hidden" for="bi-ask">Ask about your data</label>
-            <input id="bi-ask" class="form-control" placeholder="Ask about your data, e.g. &quot;pipeline value by stage this quarter&quot;"
+            <input id="bi-ask" class="form-control" placeholder="@AskPlaceholder"
                    maxlength="300" @bind="_question" @bind:event="oninput" disabled="@_isBusy" />
             <button type="submit" class="btn btn-outline-primary" disabled="@(_isBusy || string.IsNullOrWhiteSpace(_question))">
                 <i class="bi bi-stars me-1"></i>Ask
             </button>
+            @if (_answerEditor is not null)
+            {
+                <button type="button" class="btn btn-outline-secondary" @onclick="ClearAnswer" disabled="@_isBusy">New question</button>
+            }
         </form>
+        @if (_answerEditor is null && !_isBusy)
+        {
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-2 small" role="group" aria-label="Example questions">
+                <span class="text-secondary">Try:</span>
+                @foreach (var example in ExampleQuestions)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AskExampleAsync(example)">@example</button>
+                }
+            </div>
+        }
         @if (_askNote is not null)
         {
             <div class="small text-secondary mt-2">@_askNote</div>
@@ -48,6 +62,8 @@
         @if (_answer is not null && _answerEditor is not null)
         {
             <div class="bi-preview mt-3">
+                <div class="small text-secondary">&ldquo;@_askedQuestion&rdquo;</div>
+                <p class="fw-semibold mb-3" role="status">@_answerSummary</p>
                 <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
                     <div>
                         <div class="fw-semibold">@_answerEditor.Title</div>
@@ -482,7 +498,41 @@ else
     private string? _askNote;
     private BiWidgetEditor? _answerEditor;
     private BiChartResult? _answer;
+    private string? _answerSummary;
+    private string? _askedQuestion;
     private BrowserLocalOllamaService? _localModels;
+
+    private static readonly TimeSpan AskModelTimeout = TimeSpan.FromMinutes(2);
+
+    private static readonly string[] ExampleQuestions =
+    [
+        "Pipeline value by stage this quarter",
+        "Support tickets by priority last 90 days",
+        "Page views by month this year",
+        "Form submissions by form this month"
+    ];
+
+    // Once there's an answer, the next question can refine it (see BiQuestionPlanner).
+    private string AskPlaceholder => _answerEditor is null
+        ? "Ask about your data, e.g. \"pipeline value by stage this quarter\""
+        : "Ask a follow-up, e.g. \"by month\" or \"last 90 days\"";
+
+    private Task AskExampleAsync(string example)
+    {
+        _question = example;
+        return AskAsync();
+    }
+
+    private void ClearAnswer()
+    {
+        _answer = null;
+        _answerEditor = null;
+        _answerSummary = null;
+        _askedQuestion = null;
+        _askNote = null;
+        _question = string.Empty;
+        _chartsDirty = true;
+    }
 
     // The question goes to the Ollama on this browser's machine (light server-AI mode: the
     // droplet does no heavy generation), which only picks a catalogued report definition; the
@@ -491,9 +541,11 @@ else
     {
         var question = _question?.Trim();
         if (string.IsNullOrWhiteSpace(question)) return;
+        var previous = _answerEditor;
         await RunBusyAsync(async () =>
         {
             _answer = null;
+            _answerSummary = null;
             _askNote = "Thinking…";
             StateHasChanged();
             BiWidgetEditor? plan = null;
@@ -502,34 +554,47 @@ else
             {
                 _localModels ??= new BrowserLocalOllamaService(JS);
                 var status = await _localModels.ProbeAsync();
-                var model = status.Models.FirstOrDefault(name => name.StartsWith("llama3", StringComparison.OrdinalIgnoreCase))
-                    ?? status.Models.FirstOrDefault(name => name.Contains("gemma", StringComparison.OrdinalIgnoreCase) || name.Contains("qwen", StringComparison.OrdinalIgnoreCase))
-                    ?? status.Models.FirstOrDefault();
+                var model = BiQuestionPlanner.PickModel(status.Models);
                 if (!status.IsReachable || model is null)
                 {
                     fallbackReason = status.Error ?? "no local Ollama model is installed";
                 }
                 else
                 {
-                    var output = await _localModels.GenerateAsync(model,
-                        BiQuestionPlanner.SystemPrompt(_queryShapes, _rangeOptions), question);
+                    _askNote = $"Asking your local {model}. The first question can take a minute while it loads.";
+                    StateHasChanged();
+                    // A model that never answers falls back to keywords instead of leaving the box busy.
+                    using var timeout = new CancellationTokenSource(AskModelTimeout);
+                    string output;
+                    try
+                    {
+                        output = await _localModels.GenerateJsonAsync(model,
+                            BiQuestionPlanner.SystemPrompt(_queryShapes, _rangeOptions, previous), question, timeout.Token);
+                    }
+                    catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+                    {
+                        throw new InvalidOperationException($"{model} took longer than {AskModelTimeout.TotalMinutes:0} minutes");
+                    }
                     plan = BiQuestionPlanner.ParseModelAnswer(output, _queryShapes, _rangeOptions);
                     fallbackReason = plan is null ? $"{model}'s answer didn't name a valid report" : null;
                     _askNote = plan is null ? null : $"Answered with your local {model}.";
                 }
             }
-            catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+            catch (Exception ex) when (ex is JSException or InvalidOperationException or OperationCanceledException)
             {
                 fallbackReason = ex.Message;
             }
 
             if (plan is null)
             {
-                plan = BiQuestionPlanner.KeywordPlan(question, _queryShapes, _rangeOptions);
+                plan = BiQuestionPlanner.KeywordPlan(question, _queryShapes, _rangeOptions, previous);
                 _askNote = $"Matched by keywords ({fallbackReason}).";
             }
             _answerEditor = plan;
             _answer = await BusinessIntelligenceService.PreviewAsync(plan);
+            _answerSummary = BiAnswerSummary.Describe(plan, _answer);
+            _askedQuestion = question;
+            _question = string.Empty;
             _chartsDirty = true;
         });
     }
@@ -542,6 +607,8 @@ else
         _showBuilder = true;
         _answer = null;
         _answerEditor = null;
+        _answerSummary = null;
+        _askedQuestion = null;
         _askNote = null;
         _chartsDirty = true;
     }
@@ -857,12 +924,8 @@ else
         return $"{(safe.Length == 0 ? "chart" : safe)}-{DateTime.UtcNow:yyyy-MM-dd}.csv";
     }
 
-    private static string FormatValue(decimal value, string format) => format switch
-    {
-        "Currency" => value.ToString("C2"),
-        "Rating" => value.ToString("0.0#") + " / 5",
-        _ => value.ToString("N0")
-    };
+    // Fixed to U.S. formatting so amounts never depend on the server's culture.
+    private static string FormatValue(decimal value, string format) => BiAnswerSummary.Format(value, format);
 
     private static BiWidgetEditor NewEditor() => new()
     {

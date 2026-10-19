@@ -54,6 +54,18 @@ public sealed class BrowserLocalOllamaService(IJSRuntime js) : IOllamaService, I
         return builder.ToString();
     }
 
+    // Ollama's JSON-only mode (its "format" option), for answers that get parsed rather than read.
+    public async Task<string> GenerateJsonAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default)
+    {
+        var builder = new System.Text.StringBuilder();
+        await foreach (var fragment in StreamCoreAsync(model, systemPrompt, userPrompt, null, ct, null, "json"))
+        {
+            builder.Append(fragment);
+        }
+
+        return builder.ToString();
+    }
+
     // A vision call: the images (base64, no data: prefix) go with the prompt, and json=true asks
     // Ollama for a JSON-only answer (its "format" option).
     public async Task<string> GenerateWithImagesAsync(string model, string systemPrompt, string userPrompt,
