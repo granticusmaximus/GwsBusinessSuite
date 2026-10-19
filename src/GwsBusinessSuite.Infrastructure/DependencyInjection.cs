@@ -1007,6 +1007,8 @@ public static class DependencyInjection
             MaxAutomaticRedirections = 5
         });
         services.AddScoped<IAutomationNodeRegistry, AutomationNodeRegistry>();
+        // The Code step's sandboxed JavaScript (Jint); stateless, a fresh engine per run.
+        services.AddSingleton<GwsBusinessSuite.Application.Automation.IAutomationCodeRunner, JintAutomationCodeRunner>();
         services.AddScoped<IAutomationCredentialService, AutomationCredentialService>();
         services.AddScoped<IAutomationWorkflowService, AutomationWorkflowService>();
         services.AddScoped<IAutomationExecutionService, AutomationExecutionService>();

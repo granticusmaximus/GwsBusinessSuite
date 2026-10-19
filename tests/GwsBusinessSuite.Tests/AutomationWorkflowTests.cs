@@ -1065,6 +1065,25 @@ public sealed class AutomationWorkflowTests
     }
 
     [Fact]
+    public async Task ValidateAsync_ShouldReportBrokenExpressions_ButNotLiteralTemplates()
+    {
+        await using var db = await CreateDbAsync();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient());
+        var service = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var workflow = await service.CreateAsync("Expressions");
+        await service.SaveNodeAsync(workflow.Id, new AutomationNodeEditor
+        {
+            Name = "Greeting", TypeKey = "core.set", PositionX = 300, PositionY = 100,
+            ParametersJson = "{\"values\":{\"good\":\"{{ upper($json.name) }}\",\"literal\":\"Dear {{name}}\",\"nested\":[\"{{ round($json.total }}\"]}}"
+        });
+
+        var result = await service.ValidateAsync(workflow.Id);
+
+        result.Errors.Should().ContainSingle(error => error.Contains("expression")).Which
+            .Should().Be("Node 'Greeting' has an invalid expression {{ round($json.total }}: is missing ')'");
+    }
+
+    [Fact]
     public async Task RunDueSchedulesAsync_ShouldRecomputeNextOccurrenceUsingCron()
     {
         await using var db = await CreateDbAsync();

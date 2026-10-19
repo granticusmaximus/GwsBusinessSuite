@@ -78,6 +78,8 @@ public sealed partial class AutomationNodeRegistry(
         new("core.sort", 1, "Sort", "Sorts an array by a JSON field.", "Data", "bi-sort-down", false, ["main"], "{\"field\":\"items\",\"sortBy\":\"name\",\"direction\":\"ascending\"}"),
         new("core.removeDuplicates", 1, "Remove Duplicates", "Removes repeated array items using a selected field.", "Data", "bi-intersect", false, ["main"], "{\"field\":\"items\",\"compareBy\":\"id\"}"),
         new("core.template", 1, "Template", "Builds formatted text from the current JSON item.", "Data", "bi-file-text", false, ["main"], "{\"outputField\":\"text\",\"template\":\"Hello {{ $json.name }}\"}"),
+        new(AutomationCodeStep.TypeKey, 1, "Code", "Runs a short JavaScript function body on the item: read $json (and $node(\"Name\")), return an object, or an array to split it into several items. Runs sandboxed: no network, files or timers, at most 3 seconds.", "Data", "bi-code-slash", false, ["main"],
+            "{\"code\":\"// $json is this step's input; return the output.\\nconst total = ($json.price || 0) * ($json.qty || 1);\\nreturn { ...$json, total };\"}"),
         new("core.dateTime", 1, "Date & Time", "Adds the current UTC time in ISO and Unix formats.", "Data", "bi-calendar3", false, ["main"], "{\"outputField\":\"timestamp\"}"),
         new("core.noOp", 1, "No Operation", "Passes input through unchanged for layout and debugging.", "Flow", "bi-arrow-right-circle", false, ["main"], "{}"),
         new("core.stopError", 1, "Stop and Error", "Stops the workflow with a configured error message.", "Flow", "bi-exclamation-octagon", false, ["main"], "{\"message\":\"Workflow stopped\"}"),
@@ -250,6 +252,7 @@ public sealed partial class AutomationNodeRegistry(
             "core.sort" => ExecuteSort(node, input),
             "core.removeDuplicates" => ExecuteRemoveDuplicates(node, input),
             "core.template" => ExecuteTemplate(node, input, nodeOutputsByName),
+            AutomationCodeStep.TypeKey => await ExecuteCodeAsync(node, input, nodeOutputsByName, cancellationToken),
             "core.dateTime" => ExecuteDateTime(node, input),
             "core.noOp" => SingleOutput("main", input),
             "core.stopError" => throw new InvalidOperationException(ResolveText(ParseObject(node.ParametersJson, node.Name)["message"]?.GetValue<string>() ?? "Workflow stopped.", input, nodeOutputsByName)),
@@ -1156,6 +1159,16 @@ public sealed partial class AutomationNodeRegistry(
         return SingleOutput("main", ReplaceArray(source, field, values));
     }
 
+    private async Task<AutomationNodeRunResult> ExecuteCodeAsync(
+        AutomationNodeSnapshot node, JsonElement input, IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName, CancellationToken cancellationToken)
+    {
+        var runner = serviceProvider?.GetService(typeof(IAutomationCodeRunner)) as IAutomationCodeRunner
+            ?? throw new InvalidOperationException("The Code step isn't available on this server.");
+        var code = ParseObject(node.ParametersJson, node.Name)["code"]?.GetValue<string>() ?? string.Empty;
+        var items = await runner.RunAsync(code, input, nodeOutputsByName, cancellationToken);
+        return items.Count == 1 ? SingleOutput("main", items[0]) : MultipleOutput("main", items);
+    }
+
     private static AutomationNodeRunResult ExecuteTemplate(
         AutomationNodeSnapshot node, JsonElement input, IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName)
     {
@@ -1506,38 +1519,8 @@ public sealed partial class AutomationNodeRegistry(
         }
     }
 
-    // Two forms: {{ $json.path }} (the current node's own input - unchanged) and
-    // {{ $node("Name").json.path }} (any earlier node's last output this run, by editor-visible
-    // Name - see IAutomationNodeRegistry.ExecuteAsync's nodeOutputsByName doc comment). This is
-    // deliberately still string-interpolation only, not a general expression language - no
-    // operators/functions/array indexing - matching docs/WORKFLOW_AUTOMATION.md's capability
-    // matrix framing of this as "node references," not a "full expression editor."
-    private static string ResolveText(string template, JsonElement input, IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName = null)
-    {
-        return ExpressionPattern().Replace(template, match =>
-        {
-            if (match.Groups["node"].Success)
-            {
-                if (nodeOutputsByName is null || !nodeOutputsByName.TryGetValue(match.Groups["node"].Value, out var nodeOutput))
-                    return string.Empty;
-                return ResolvePath(nodeOutput, match.Groups["nodePath"].Value);
-            }
-            return ResolvePath(input, match.Groups["path"].Value);
-        });
-    }
+    // {{ expressions }} in node parameters - see AutomationExpressions for the language.
+    private static string ResolveText(string template, JsonElement input, IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName = null) =>
+        AutomationExpressions.Render(template, input, nodeOutputsByName);
 
-    private static string ResolvePath(JsonElement input, string path)
-    {
-        var current = input;
-        foreach (var segment in path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(segment, out current)) return string.Empty;
-        }
-        return current.ValueKind == JsonValueKind.String ? current.GetString() ?? string.Empty : current.GetRawText();
-    }
-
-    [GeneratedRegex(
-        @"\{\{\s*(?:\$json(?:\.(?<path>[A-Za-z0-9_.-]+))?|\$node\(\s*[""'](?<node>[^""']+)[""']\s*\)\.json(?:\.(?<nodePath>[A-Za-z0-9_.-]+))?)\s*\}\}",
-        RegexOptions.Compiled)]
-    private static partial Regex ExpressionPattern();
 }

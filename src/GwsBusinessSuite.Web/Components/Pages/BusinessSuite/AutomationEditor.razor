@@ -201,9 +201,21 @@ else
                     <div class="inspector-heading"><span>Node settings</span><button class="btn btn-sm btn-light" title="Close node settings" aria-label="Close node settings" @onclick="ClearSelection"><i class="bi bi-x-lg"></i></button></div>
                     <label class="form-label small fw-semibold">Name</label>
                     <input class="form-control form-control-sm mb-3" @bind="_nodeName" />
-                    <label class="form-label small fw-semibold">Parameters (JSON)</label>
-                    <textarea class="form-control form-control-sm font-monospace mb-2" rows="12" @bind="_nodeParameters"></textarea>
-                    <div class="small text-secondary mb-3">Use expressions such as <code>{{ExpressionExample}}</code>.</div>
+                    @if (IsCodeNode)
+                    {
+                        <label class="form-label small fw-semibold" for="node-code">Code (JavaScript)</label>
+                        <textarea id="node-code" class="form-control form-control-sm font-monospace mb-2" rows="16" spellcheck="false" @bind="_nodeCode"></textarea>
+                        <div class="small text-secondary mb-3">
+                            Read <code>$json</code> (this step's input) and <code>$node("Name")</code>; <code>return</code> an object, or an array for one item per element.
+                            <code>console.log()</code> lines show up under <code>_logs</code>. Runs sandboxed: no network, files or timers, at most 3 seconds.
+                        </div>
+                    }
+                    else
+                    {
+                        <label class="form-label small fw-semibold">Parameters (JSON)</label>
+                        <textarea class="form-control form-control-sm font-monospace mb-2" rows="12" @bind="_nodeParameters"></textarea>
+                        <div class="small text-secondary mb-3">Use expressions such as <code>@ExpressionExample</code> or <code>@FunctionExample</code> (more in the Automation guide).</div>
+                    }
                     <label class="form-label small fw-semibold">Notes</label>
                     <ProfessionalWysiwygEditor @bind-Value="_nodeNotes" Compact="true" MinHeight="90px" AriaLabel="Node notes" CssClass="mb-3" />
                     <label class="form-label small fw-semibold">Credential</label>
@@ -405,6 +417,25 @@ else
 @code {
     [Parameter] public Guid WorkflowId { get; set; }
     private const string ExpressionExample = "{{ $json.customer.email }}";
+    private const string FunctionExample = "{{ upper(default($json.name, 'friend')) }}";
+    private string _nodeCode = string.Empty;
+    private bool IsCodeNode => _selectedNode?.TypeKey == AutomationCodeStep.TypeKey;
+
+    // The Code node's "code" parameter, edited as plain text rather than an escaped JSON string.
+    private static string ReadCode(string parametersJson)
+    {
+        try { return System.Text.Json.Nodes.JsonNode.Parse(parametersJson)?["code"]?.GetValue<string>() ?? string.Empty; }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException) { return string.Empty; }
+    }
+
+    private static string WithCode(string parametersJson, string code)
+    {
+        System.Text.Json.Nodes.JsonObject parameters;
+        try { parameters = System.Text.Json.Nodes.JsonNode.Parse(parametersJson)?.AsObject() ?? []; }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException) { parameters = []; }
+        parameters["code"] = code;
+        return parameters.ToJsonString();
+    }
     private AutomationWorkflowView? _view;
     private AutomationExecutionView? _latestExecution;
     private IReadOnlyList<AutomationNodeDefinition> _definitions = [];
@@ -583,6 +614,7 @@ else
         var node = _selectedNode;
         if (node is null) return;
         _nodeName = node.Name; _nodeParameters = node.ParametersJson; _nodeNotes = node.Notes; _nodeDisabled = node.IsDisabled;
+        _nodeCode = node.TypeKey == AutomationCodeStep.TypeKey ? ReadCode(node.ParametersJson) : string.Empty;
         _nodeCredentialId = node.CredentialId;
         _nodeContinueOnFail = node.ContinueOnFail; _nodeRetryOnFail = node.RetryOnFail; _nodeMaxTries = node.MaxTries; _nodeWaitMs = node.WaitBetweenTriesMs; _nodeTimeoutMs = node.TimeoutMs;
     }
@@ -877,6 +909,7 @@ else
     private async Task SaveSelectedNode()
     {
         if (_selectedNode is null) return;
+        if (IsCodeNode) _nodeParameters = WithCode(_nodeParameters, _nodeCode);
         await Work(async () =>
         {
             await WorkflowService.SaveNodeAsync(WorkflowId, new AutomationNodeEditor { Id = _selectedNode.Id, Name = _nodeName, TypeKey = _selectedNode.TypeKey, TypeVersion = _selectedNode.TypeVersion, PositionX = _selectedNode.PositionX, PositionY = _selectedNode.PositionY, ParametersJson = _nodeParameters, CredentialId = _nodeCredentialId, IsDisabled = _nodeDisabled, ContinueOnFail = _nodeContinueOnFail, RetryOnFail = _nodeRetryOnFail, MaxTries = _nodeMaxTries, WaitBetweenTriesMs = _nodeWaitMs, TimeoutMs = _nodeTimeoutMs, Notes = _nodeNotes });

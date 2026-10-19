@@ -15,7 +15,7 @@ Grep for each item first. Two hints already turned up:
 | 2 | Billing: multi-currency, reminders (manual + automatic), view/duplicate on sent/paid/void, line order | done 18-10-26 |
 | 3 | Support: email-to-ticket (new mail -> ticket, tagged replies join, staff replies emailed with text + Reply-To) | done 18-10-26 |
 | 4 | Site: duplicate page, nested menus (dropdowns), hreflang + language switcher + translations on public pages | done 19-10-26 |
-| 5 | Automation: expression functions + sandboxed transform step | not started |
+| 5 | Automation: expression language (functions, operators, indexing) + sandboxed Code node (Jint) | done 19-10-26 |
 | 6 | Media: file storage instead of base64-in-DB, resizing, WebP/AVIF | not started |
 | 7 | Customer timeline across apps (check ContactTimelineService first) | not started |
 | 8 | Business Intelligence: plain-English questions, local model, read-only | not started |
@@ -82,3 +82,18 @@ Grep for each item first. Two hints already turned up:
   entirely; only `/cms/...` and blog posts applied translations. Translated variants now get a
   self canonical. The output cache varies by query, so verified that the languages are cached
   separately.
+
+## Phase 5 notes (done)
+
+- `AutomationExpressions` (Application/Automation) is a parser and evaluator. `ResolveText`, used
+  by all ~45 node parameter sites, now calls it. Plain `$json`/`$node` paths behave exactly as
+  before: the 223 existing tests passed untouched, and numbers keep their source text. Unparseable
+  `{{ }}` text is left literal. `FindErrors` only reports text that mentions `$json`/`$node` or
+  calls a function; it runs in `AutomationWorkflowService.ValidateAsync`.
+- Code node `core.code`: `IAutomationCodeRunner` (Application) is implemented by
+  `JintAutomationCodeRunner` (Infrastructure) on Jint 4.16.4 (4.17.0 was only 12 days old). No
+  CLR access. Limits: 3 s, 32 MB, 2M statements, recursion 64, regex 500 ms, 20k chars, 1,000 items
+  / 2 MB out. The registry resolves the runner through its serviceProvider, so there's no
+  constructor change. The editor shows a plain code textarea for code nodes.
+- Fixed along the way: the automation editor's hint printed a literal "{{ExpressionExample}}"
+  (Razor doesn't interpolate `{{ }}`).

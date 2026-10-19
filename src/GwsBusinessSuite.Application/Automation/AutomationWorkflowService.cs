@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.SecurityAudit;
 using GwsBusinessSuite.Domain.Entities;
@@ -316,7 +317,10 @@ public sealed class AutomationWorkflowService(
             if (nodeRegistry.Find(node.TypeKey, node.TypeVersion) is null)
                 errors.Add($"Node '{node.Name}' uses unavailable type '{node.TypeKey}' v{node.TypeVersion}.");
             try { EnsureValidJson(node.ParametersJson, $"Parameters for '{node.Name}'"); }
-            catch (InvalidOperationException ex) { errors.Add(ex.Message); }
+            catch (InvalidOperationException ex) { errors.Add(ex.Message); continue; }
+            // Expression typos are caught here rather than failing mid-run.
+            foreach (var problem in ExpressionErrors(node.ParametersJson))
+                errors.Add($"Node '{node.Name}' has an invalid expression {problem}");
         }
 
         var webhookNodes = workflow.Nodes.Where(node => node.TypeKey == "core.webhookTrigger" && !node.IsDisabled).ToList();
@@ -385,6 +389,26 @@ public sealed class AutomationWorkflowService(
             errors.Add("One or more connections reference a missing node.");
         if (HasCycle(nodeIds, workflow.Connections)) errors.Add("The workflow graph contains a cycle.");
         return new AutomationValidationResult(errors.Count == 0, errors);
+    }
+
+    // Every string in a node's parameters, checked for broken {{ }} expressions.
+    private static IEnumerable<string> ExpressionErrors(string parametersJson)
+    {
+        JsonNode? root;
+        try { root = JsonNode.Parse(string.IsNullOrWhiteSpace(parametersJson) ? "{}" : parametersJson); }
+        catch (JsonException) { yield break; }
+        var pending = new Stack<JsonNode?>([root]);
+        while (pending.Count > 0)
+        {
+            switch (pending.Pop())
+            {
+                case JsonObject obj: foreach (var (_, child) in obj) pending.Push(child); break;
+                case JsonArray array: foreach (var child in array) pending.Push(child); break;
+                case JsonValue value when value.TryGetValue<string>(out var text):
+                    foreach (var problem in AutomationExpressions.FindErrors(text)) yield return problem;
+                    break;
+            }
+        }
     }
 
     public async Task<int> PublishAsync(Guid workflowId, string changeSummary, CancellationToken cancellationToken = default)

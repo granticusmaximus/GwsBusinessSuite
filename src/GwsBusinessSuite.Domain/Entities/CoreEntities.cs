@@ -1646,6 +1646,15 @@ public sealed class MediaAsset : AuditableEntity
     // back to serving DataUri directly (see MediaLibraryService.GetThumbnailContentAsync).
     // Always image/jpeg regardless of the original's format, to keep this small.
     public string? ThumbnailDataUri { get; set; }
+
+    // Media on disk (MediaLibraryService + IMediaFileStore). StoragePath is the original's path
+    // inside the media folder; null until the file is written. The database copies (DataUri,
+    // ThumbnailDataUri) are kept for a grace period after StoredAt so a rolled-back release, which
+    // only reads the database, still has every image; they're cleared once that's passed.
+    public string? StoragePath { get; set; }
+    public DateTimeOffset? StoredAt { get; set; }
+    public int? Width { get; set; }
+    public int? Height { get; set; }
 }
 
 public sealed class FormSubmission : AuditableEntity
