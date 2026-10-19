@@ -183,7 +183,10 @@ public static class DependencyInjection
         services.AddScoped<ICmsSiteRegionService, CmsSiteRegionService>();
         services.AddScoped<IGlobalBlockService, GlobalBlockService>();
         services.AddScoped<GlobalBlockResolver>();
+        services.Configure<MediaStorageOptions>(configuration.GetSection(MediaStorageOptions.SectionName));
+        services.AddSingleton<IMediaFileStore, FileSystemMediaFileStore>();
         services.AddScoped<IMediaLibraryService, MediaLibraryService>();
+        services.AddHostedService<MediaStorageBackgroundService>();
         services.AddScoped<IFormSubmissionService, FormSubmissionService>();
         services.AddScoped<ICommentService, CommentService>();
         services.AddScoped<IRelatedArticlesService, RelatedArticlesService>();

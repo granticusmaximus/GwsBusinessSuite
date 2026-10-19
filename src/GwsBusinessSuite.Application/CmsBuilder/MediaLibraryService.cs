@@ -6,8 +6,17 @@ using SkiaSharp;
 
 namespace GwsBusinessSuite.Application.CmsBuilder;
 
-public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsService siteSettingsService) : IMediaLibraryService
+// Images live on disk (IMediaFileStore) once a file store is available, with the database copy
+// kept for a grace period after the move (see MediaAsset.StoredAt) and then cleared. Without a
+// file store (some tests) everything stays in the database, as it always did.
+public sealed class MediaLibraryService(
+    IAppDbContext dbContext,
+    ISiteSettingsService siteSettingsService,
+    IMediaFileStore? fileStore = null,
+    TimeProvider? timeProvider = null) : IMediaLibraryService
 {
+    private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
+
     // Default matches the unbounded-TEXT base64-in-DB pattern already used for article hero
     // images (see ArticleMarkdownRenderer/SeoArticleDraft), but media assets are uploaded by
     // hand rather than AI-generated, so a hard cap guards against someone dropping a
@@ -73,17 +82,21 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
         CancellationToken cancellationToken = default)
     {
         var (normalizedFileName, detectedContentType) = await ValidateUploadAsync(fileName, content, cancellationToken);
+        var thumbnail = TryGenerateThumbnail(content);
 
         var asset = new MediaAsset
         {
             FileName = normalizedFileName,
             ContentType = detectedContentType,
-            DataUri = $"data:{detectedContentType};base64,{Convert.ToBase64String(content)}",
-            ThumbnailDataUri = TryGenerateThumbnail(content),
+            // Kept alongside the file during the grace period - see the class comment.
+            DataUri = ToDataUri(detectedContentType, content),
+            ThumbnailDataUri = thumbnail is null ? null : ToDataUri("image/jpeg", thumbnail),
             AltText = altText?.Trim() ?? string.Empty,
             SizeBytes = content.Length,
+            CreatedAt = _clock.GetUtcNow(),
             CreatedBy = "cms-media-library"
         };
+        await StoreFilesAsync(asset, content, thumbnail, cancellationToken);
 
         await dbContext.MediaAssets.AddAsync(asset, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -106,13 +119,23 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
             return null;
         }
 
+        var thumbnail = TryGenerateThumbnail(content);
+        var previousPath = asset.StoragePath;
         asset.FileName = normalizedFileName;
         asset.ContentType = detectedContentType;
-        asset.DataUri = $"data:{detectedContentType};base64,{Convert.ToBase64String(content)}";
-        asset.ThumbnailDataUri = TryGenerateThumbnail(content);
+        asset.DataUri = ToDataUri(detectedContentType, content);
+        asset.ThumbnailDataUri = thumbnail is null ? null : ToDataUri("image/jpeg", thumbnail);
         asset.AltText = altText?.Trim() ?? string.Empty;
         asset.SizeBytes = content.Length;
         asset.UpdatedBy = "cms-media-library";
+        asset.UpdatedAt = _clock.GetUtcNow();
+        if (fileStore is not null)
+        {
+            // The resized copies were of the old picture.
+            fileStore.DeleteStartingWith(MediaFilePaths.VariantFolder, MediaFilePaths.VariantPrefix(asset.Id));
+            await StoreFilesAsync(asset, content, thumbnail, cancellationToken);
+            if (previousPath is not null && previousPath != asset.StoragePath) fileStore.Delete(previousPath);
+        }
 
         await dbContext.SaveChangesAsync(cancellationToken);
         return ToSummary(asset);
@@ -159,7 +182,7 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
     // asset is already validated and stored regardless. Returns null (meaning "just serve
     // the full asset for this one too") both on failure and when the original is already
     // small enough that a separate smaller copy wouldn't help.
-    private static string? TryGenerateThumbnail(byte[] content)
+    private static byte[]? TryGenerateThumbnail(byte[] content)
     {
         try
         {
@@ -183,7 +206,7 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
 
             using var image = SKImage.FromBitmap(resized);
             using var encoded = image.Encode(SKEncodedImageFormat.Jpeg, 80);
-            return $"data:image/jpeg;base64,{Convert.ToBase64String(encoded.ToArray())}";
+            return encoded.ToArray();
         }
         catch
         {
@@ -210,49 +233,179 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
 
     public async Task<(string ContentType, byte[] Content)?> GetContentAsync(Guid mediaAssetId, CancellationToken cancellationToken = default)
     {
-        var asset = await dbContext.MediaAssets
-            .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == mediaAssetId, cancellationToken);
-
-        if (asset is null)
-        {
-            return null;
-        }
-
-        var commaIndex = asset.DataUri.IndexOf(',');
-        if (commaIndex < 0)
-        {
-            return null;
-        }
-
-        var base64Payload = asset.DataUri[(commaIndex + 1)..];
-        return (asset.ContentType, Convert.FromBase64String(base64Payload));
+        var original = await ReadOriginalAsync(mediaAssetId, cancellationToken);
+        return original is null ? null : (original.Value.ContentType, original.Value.Content);
     }
 
     public async Task<(string ContentType, byte[] Content)?> GetThumbnailContentAsync(Guid mediaAssetId, CancellationToken cancellationToken = default)
     {
-        var asset = await dbContext.MediaAssets
-            .AsNoTracking()
-            .Select(a => new { a.Id, a.ContentType, a.DataUri, a.ThumbnailDataUri })
-            .FirstOrDefaultAsync(a => a.Id == mediaAssetId, cancellationToken);
+        if (fileStore is not null && await fileStore.ReadAsync(MediaFilePaths.Thumbnail(mediaAssetId), cancellationToken) is { } file)
+            return ("image/jpeg", file);
+        var asset = await dbContext.MediaAssets.AsNoTracking()
+            .Where(item => item.Id == mediaAssetId)
+            .Select(item => new { item.ThumbnailDataUri })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (asset is null) return null;
+        // No thumbnail (a small original, or generation failed): the original serves.
+        return asset.ThumbnailDataUri is { } thumbnail && FromDataUri(thumbnail) is { } bytes
+            ? ("image/jpeg", bytes)
+            : await GetContentAsync(mediaAssetId, cancellationToken);
+    }
 
-        if (asset is null)
+    public async Task<MediaImage?> GetImageAsync(Guid mediaAssetId, int? width, bool acceptsWebp, CancellationToken cancellationToken = default)
+    {
+        var meta = await dbContext.MediaAssets.AsNoTracking()
+            .Where(item => item.Id == mediaAssetId)
+            .Select(item => new { item.ContentType, item.CreatedAt, item.UpdatedAt })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (meta is null) return null;
+        var modified = meta.UpdatedAt ?? meta.CreatedAt;
+        var version = modified.UtcTicks;
+        var target = MediaImageSizes.Snap(width);
+        // GIFs keep their animation, so they're always served as they are.
+        var webp = acceptsWebp && meta.ContentType is "image/jpeg" or "image/png";
+        if (meta.ContentType == "image/gif") { target = null; webp = false; }
+        var extension = webp ? ".webp" : MediaFilePaths.Extension(meta.ContentType);
+        var etag = $"\"{mediaAssetId:N}-{version}-{target?.ToString() ?? "o"}{extension}\"";
+
+        if (target is null && !webp)
         {
-            return null;
+            var original = await ReadOriginalAsync(mediaAssetId, cancellationToken);
+            return original is null ? null : new MediaImage(original.Value.ContentType, original.Value.Content, etag, modified);
         }
 
-        var (effectiveDataUri, effectiveContentType) = asset.ThumbnailDataUri is null
-            ? (asset.DataUri, asset.ContentType)
-            : (asset.ThumbnailDataUri, "image/jpeg");
+        var variantPath = MediaFilePaths.Variant(mediaAssetId, version, target ?? 0, extension);
+        if (fileStore is not null && await fileStore.ReadAsync(variantPath, cancellationToken) is { } cached)
+            return new MediaImage(webp ? "image/webp" : meta.ContentType, cached, etag, modified);
 
-        var commaIndex = effectiveDataUri.IndexOf(',');
-        if (commaIndex < 0)
+        var source = await ReadOriginalAsync(mediaAssetId, cancellationToken);
+        if (source is null) return null;
+        var produced = TryEncode(source.Value.Content, target, webp ? SKEncodedImageFormat.Webp : FormatOf(meta.ContentType));
+        // Can't decode it (or nothing would change): the original serves.
+        if (produced is null) return new MediaImage(source.Value.ContentType, source.Value.Content, etag, modified);
+        if (fileStore is not null) await fileStore.WriteAsync(variantPath, produced, cancellationToken);
+        return new MediaImage(webp ? "image/webp" : meta.ContentType, produced, etag, modified);
+    }
+
+    public async Task<int> MoveToFilesAsync(int batchSize, CancellationToken cancellationToken = default)
+    {
+        if (fileStore is null) return 0;
+        var pending = await dbContext.MediaAssets
+            .Where(item => item.StoragePath == null && item.DataUri != "")
+            .OrderBy(item => item.Id)
+            .Take(Math.Clamp(batchSize, 1, 200))
+            .ToListAsync(cancellationToken);
+        var moved = 0;
+        foreach (var asset in pending)
         {
-            return null;
+            if (FromDataUri(asset.DataUri) is not { } content) continue;
+            var thumbnail = asset.ThumbnailDataUri is { } stored ? FromDataUri(stored) : TryGenerateThumbnail(content);
+            await StoreFilesAsync(asset, content, thumbnail, cancellationToken);
+            moved++;
         }
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return moved;
+    }
 
-        var base64Payload = effectiveDataUri[(commaIndex + 1)..];
-        return (effectiveContentType, Convert.FromBase64String(base64Payload));
+    public async Task<int> ReleaseDatabaseCopiesAsync(TimeSpan gracePeriod, int batchSize, CancellationToken cancellationToken = default)
+    {
+        if (fileStore is null) return 0;
+        var cutoff = _clock.GetUtcNow() - gracePeriod;
+        // SQLite/EF Core can't translate DateTimeOffset comparisons - filter dates client-side.
+        var candidates = (await dbContext.MediaAssets
+                .Where(item => item.StoragePath != null && item.DataUri != "")
+                .ToListAsync(cancellationToken))
+            .Where(item => item.StoredAt is { } stored && stored <= cutoff)
+            .Take(Math.Clamp(batchSize, 1, 500))
+            .ToList();
+        var released = 0;
+        foreach (var asset in candidates)
+        {
+            // Only once the file is really there, whole.
+            if (fileStore.GetLength(asset.StoragePath!) != asset.SizeBytes) continue;
+            asset.DataUri = string.Empty;
+            asset.ThumbnailDataUri = null;
+            released++;
+        }
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return released;
+    }
+
+    // The original's bytes: from its file, or from the database copy (not yet moved, or the file
+    // went missing - the database copy is still there during the grace period).
+    private async Task<(string ContentType, byte[] Content)?> ReadOriginalAsync(Guid mediaAssetId, CancellationToken cancellationToken)
+    {
+        var meta = await dbContext.MediaAssets.AsNoTracking()
+            .Where(item => item.Id == mediaAssetId)
+            .Select(item => new { item.ContentType, item.StoragePath })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (meta is null) return null;
+        if (fileStore is not null && meta.StoragePath is { } path && await fileStore.ReadAsync(path, cancellationToken) is { } file)
+            return (meta.ContentType, file);
+        var dataUri = await dbContext.MediaAssets.AsNoTracking()
+            .Where(item => item.Id == mediaAssetId)
+            .Select(item => item.DataUri)
+            .FirstOrDefaultAsync(cancellationToken);
+        return dataUri is not null && FromDataUri(dataUri) is { } bytes ? (meta.ContentType, bytes) : null;
+    }
+
+    private async Task StoreFilesAsync(MediaAsset asset, byte[] content, byte[]? thumbnail, CancellationToken cancellationToken)
+    {
+        if (fileStore is null) return;
+        var path = MediaFilePaths.Original(asset.Id, asset.ContentType);
+        await fileStore.WriteAsync(path, content, cancellationToken);
+        if (thumbnail is not null) await fileStore.WriteAsync(MediaFilePaths.Thumbnail(asset.Id), thumbnail, cancellationToken);
+        else fileStore.Delete(MediaFilePaths.Thumbnail(asset.Id));
+        asset.StoragePath = path;
+        asset.StoredAt = _clock.GetUtcNow();
+        (asset.Width, asset.Height) = MeasureOrNull(content);
+    }
+
+    private static (int?, int?) MeasureOrNull(byte[] content)
+    {
+        try
+        {
+            using var codec = SKCodec.Create(new MemoryStream(content));
+            return codec is null ? (null, null) : (codec.Info.Width, codec.Info.Height);
+        }
+        catch { return (null, null); }
+    }
+
+    // A resized (never enlarged) and/or re-encoded copy; null when it can't be made or wouldn't change anything.
+    private static byte[]? TryEncode(byte[] content, int? width, SKEncodedImageFormat format)
+    {
+        try
+        {
+            using var original = SKBitmap.Decode(content);
+            if (original is null) return null;
+            var resize = width is { } wanted && original.Width > wanted;
+            if (!resize && format != SKEncodedImageFormat.Webp) return null;
+            using var bitmap = resize
+                ? original.Resize(new SKImageInfo(width!.Value, Math.Max(1, (int)Math.Round(original.Height * (double)width.Value / original.Width))), SKSamplingOptions.Default)
+                : original.Copy();
+            if (bitmap is null) return null;
+            using var image = SKImage.FromBitmap(bitmap);
+            using var encoded = image.Encode(format, format == SKEncodedImageFormat.Png ? 100 : 82);
+            return encoded?.ToArray();
+        }
+        catch { return null; }
+    }
+
+    private static SKEncodedImageFormat FormatOf(string contentType) => contentType switch
+    {
+        "image/png" => SKEncodedImageFormat.Png,
+        "image/webp" => SKEncodedImageFormat.Webp,
+        _ => SKEncodedImageFormat.Jpeg
+    };
+
+    private static string ToDataUri(string contentType, byte[] content) => $"data:{contentType};base64,{Convert.ToBase64String(content)}";
+
+    private static byte[]? FromDataUri(string dataUri)
+    {
+        var comma = dataUri.IndexOf(',');
+        if (comma < 0) return null;
+        try { return Convert.FromBase64String(dataUri[(comma + 1)..]); }
+        catch (FormatException) { return null; }
     }
 
     public async Task<MediaAssetSummary?> UpdateAltTextAsync(Guid mediaAssetId, string altText, CancellationToken cancellationToken = default)
@@ -279,6 +432,12 @@ public sealed class MediaLibraryService(IAppDbContext dbContext, ISiteSettingsSe
 
         dbContext.MediaAssets.Remove(asset);
         await dbContext.SaveChangesAsync(cancellationToken);
+        if (fileStore is not null)
+        {
+            if (asset.StoragePath is { } path) fileStore.Delete(path);
+            fileStore.Delete(MediaFilePaths.Thumbnail(asset.Id));
+            fileStore.DeleteStartingWith(MediaFilePaths.VariantFolder, MediaFilePaths.VariantPrefix(asset.Id));
+        }
     }
 
     private static MediaAssetSummary ToSummary(MediaAsset asset) => new()

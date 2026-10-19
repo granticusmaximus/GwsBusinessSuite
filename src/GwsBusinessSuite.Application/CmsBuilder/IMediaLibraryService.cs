@@ -36,4 +36,28 @@ public interface IMediaLibraryService
     Task<MediaAssetSummary?> UpdateAltTextAsync(Guid mediaAssetId, string altText, CancellationToken cancellationToken = default);
 
     Task DeleteAsync(Guid mediaAssetId, CancellationToken cancellationToken = default);
+
+    // What /media/{id} serves: the original, or with width a smaller copy (one of
+    // MediaImageSizes.Widths, never larger than the original), as WebP when the browser accepts it
+    // (not for GIFs, which would lose their animation). Copies are cached on disk.
+    Task<MediaImage?> GetImageAsync(Guid mediaAssetId, int? width, bool acceptsWebp, CancellationToken cancellationToken = default);
+
+    // Moves media still held only in the database onto disk (keeping the database copy for now).
+    Task<int> MoveToFilesAsync(int batchSize, CancellationToken cancellationToken = default);
+
+    // Clears database copies of media whose file has been in place longer than the grace period
+    // and checks out (exists, right size). Returns how many were cleared.
+    Task<int> ReleaseDatabaseCopiesAsync(TimeSpan gracePeriod, int batchSize, CancellationToken cancellationToken = default);
+}
+
+// One image response: its bytes plus the validator browsers revalidate with.
+public sealed record MediaImage(string ContentType, byte[] Content, string ETag, DateTimeOffset LastModified);
+
+public static class MediaImageSizes
+{
+    // The widths /media/{id}?w= serves (a request snaps up to the next one), and the srcset.
+    public static readonly IReadOnlyList<int> Widths = [320, 640, 960, 1280, 1920];
+
+    public static int? Snap(int? requested) =>
+        requested is not > 0 ? null : Widths.FirstOrDefault(width => width >= requested, Widths[^1]);
 }

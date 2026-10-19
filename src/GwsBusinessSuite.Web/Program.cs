@@ -2426,6 +2426,7 @@ app.MapGet("/cms/{siteSlug}/{**pageSlug}", async (
         PublicSiteHtmlRenderer.ParseFooterNavItems(site.FooterNavMenuJson), site.Name, site.LogoUrl);
     // External runtimes only - an inline <script> can't run under this app's CSP.
     var runtimeScriptTags = CmsBlockHtmlRenderer.BuildRuntimeScriptTags(layout, bodyHtml);
+    bodyHtml = MediaSrcset.Apply(bodyHtml);
 
     var html = $"""
         <!DOCTYPE html>
@@ -3358,10 +3359,18 @@ app.MapGet("/admin/api/overwatch/timelapse/{cameraId}/{fileName}", async (
     return contentType is null ? Results.NotFound() : Results.Bytes(bytes, contentType);
 }).RequireAuthorization("AdminOnly");
 
-app.MapGet("/media/{id:guid}", async (Guid id, IMediaLibraryService mediaLibraryService) =>
+// ?w=640 serves a smaller copy (see MediaImageSizes) and browsers that accept WebP get WebP, so
+// public pages can use srcset (MediaSrcset) without shipping full-size originals to phones.
+// Revalidated with an ETag: a replaced image keeps its address, so it's cached for an hour, not forever.
+app.MapGet("/media/{id:guid}", async (Guid id, int? w, HttpContext context, IMediaLibraryService mediaLibraryService) =>
 {
-    var content = await mediaLibraryService.GetContentAsync(id);
-    return content is null ? Results.NotFound() : Results.Bytes(content.Value.Content, content.Value.ContentType);
+    var acceptsWebp = context.Request.Headers.Accept.ToString().Contains("image/webp", StringComparison.OrdinalIgnoreCase);
+    var image = await mediaLibraryService.GetImageAsync(id, w, acceptsWebp, context.RequestAborted);
+    if (image is null) return Results.NotFound();
+    context.Response.Headers.CacheControl = "public, max-age=3600";
+    context.Response.Headers.Vary = "Accept";
+    return Results.Bytes(image.Content, image.ContentType,
+        lastModified: image.LastModified, entityTag: Microsoft.Net.Http.Headers.EntityTagHeaderValue.Parse(image.ETag));
 }).AllowAnonymous().RequireRateLimiting("public-read");
 
 // Falls back to the full-size asset when no thumbnail was generated (pre-thumbnailing

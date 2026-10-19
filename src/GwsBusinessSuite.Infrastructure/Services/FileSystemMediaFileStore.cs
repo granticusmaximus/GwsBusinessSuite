@@ -8,6 +8,8 @@ public sealed class MediaStorageOptions
     public const string SectionName = "Media";
     // Inside the persisted data volume in production (docker-compose mounts /app/data).
     public string StoragePath { get; set; } = "/app/data/media";
+    // How long database copies are kept after an image is written to disk (see MediaAsset.StoredAt).
+    public int DatabaseCopyGraceDays { get; set; } = 7;
 }
 
 // Media files in a folder on disk. Writes go to a temporary file first and are then moved into

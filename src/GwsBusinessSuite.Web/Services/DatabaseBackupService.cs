@@ -25,6 +25,8 @@ public sealed class DatabaseBackupOptions
     public string EncryptionKeyPath { get; set; } = "/app/data/backup-encryption.key";
     public string EncryptionKey { get; set; } = string.Empty;
     public string LiveShowRecordingsPath { get; set; } = "/app/data/live-show-recordings";
+    // Media library files (originals and thumbnails; resized copies are rebuilt on demand).
+    public string MediaPath { get; set; } = "/app/data/media";
     public int IntervalHours { get; set; } = 6;
     public int RetentionDays { get; set; } = 30;
 
@@ -92,6 +94,11 @@ public sealed class DatabaseBackupService(
 
             if (Directory.Exists(_options.LiveShowRecordingsPath))
                 CopyDirectory(_options.LiveShowRecordingsPath, System.IO.Path.Combine(workingDirectory, "live-show-recordings"));
+            foreach (var mediaFolder in new[] { "originals", "thumbs" })
+            {
+                var source = System.IO.Path.Combine(_options.MediaPath, mediaFolder);
+                if (Directory.Exists(source)) CopyDirectory(source, System.IO.Path.Combine(workingDirectory, "media", mediaFolder));
+            }
 
             var manifest = await BackupArchive.CreateManifestAsync(workingDirectory, timestamp, cancellationToken);
             await File.WriteAllTextAsync(System.IO.Path.Combine(workingDirectory, "manifest.json"),
@@ -273,10 +280,20 @@ public sealed class DatabaseBackupService(
             var mfaAdmins = await restoredDb.AppUsers.CountAsync(x => x.IsActive && x.Role == GwsBusinessSuite.Domain.Entities.AppRoles.Admin && x.MfaEnabled, cancellationToken);
             if (activeAdmins == 0 || mfaAdmins != activeAdmins) throw new InvalidDataException("The restored database does not have MFA enabled for every active administrator.");
             var pages = await restoredDb.WikiPages.CountAsync(cancellationToken);
+            // An image whose database copy has been cleared exists only as a file: the archive
+            // must have it, or restoring would lose the image.
+            var archivedMedia = manifest.Files.Select(x => x.Path).Where(path => path.StartsWith("media/", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal);
+            var fileOnlyMedia = await restoredDb.MediaAssets.AsNoTracking()
+                .Where(asset => asset.StoragePath != null && asset.DataUri == "")
+                .Select(asset => asset.StoragePath!)
+                .ToListAsync(cancellationToken);
+            var missingMedia = fileOnlyMedia.Count(path => !archivedMedia.Contains($"media/{path}"));
+            if (missingMedia > 0) throw new InvalidDataException($"{missingMedia} media file(s) held only on disk are missing from the backup.");
             return new(archivePath, manifest.CreatedAtUtc, manifest.Files.Count,
                 manifest.Files.Count(x => x.Path.StartsWith("live-show-recordings/", StringComparison.Ordinal)),
                 activeAdmins, pages, auditIntegrity.EventsChecked, protectedSecretsChecked, true,
-                migrationRehearsalFrom, migrationRehearsalTo);
+                migrationRehearsalFrom, migrationRehearsalTo,
+                archivedMedia.Count(path => path.StartsWith("media/originals/", StringComparison.Ordinal)));
         }
         finally
         {
@@ -410,7 +427,7 @@ public sealed class DatabaseBackupService(
 public sealed record BackupVerificationResult(string ArchivePath, DateTimeOffset CreatedAtUtc,
     int FileCount, int RecordingFileCount, int ActiveAdministratorCount, int SentinelPageCount, int AuditEventCount,
     int ProtectedSecretsChecked, bool IsValid, string? MigrationRehearsalFrom = null,
-    string? MigrationRehearsalTo = null);
+    string? MigrationRehearsalTo = null, int MediaFileCount = 0);
 
 public sealed class DatabaseBackupBackgroundService(
     IServiceScopeFactory scopeFactory,

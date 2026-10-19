@@ -32,6 +32,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         verification.SentinelPageCount.Should().Be(1);
         verification.ProtectedSecretsChecked.Should().Be(1);
         verification.RecordingFileCount.Should().Be(1);
+        verification.MediaFileCount.Should().Be(1, "the media library's file-only image");
         verification.FileCount.Should().BeGreaterThanOrEqualTo(3);
         fixture.Service.GetLatestBackupTime().Should().NotBeNull();
     }
@@ -108,6 +109,20 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         await action.Should().ThrowAsync<CryptographicException>().WithMessage("*authentication failed*");
     }
 
+    [Fact]
+    public async Task Verify_ShouldFail_WhenAnImageHeldOnlyOnDiskIsMissingFromTheBackup()
+    {
+        var fixture = await CreateFixtureAsync();
+        File.Delete(Path.Combine(_root, "media", MediaFilePath));
+        var archivePath = await fixture.Service.CreateBackupAsync();
+
+        var action = async () => await fixture.Service.VerifyBackupAsync(archivePath);
+
+        await action.Should().ThrowAsync<InvalidDataException>().WithMessage("1 media file(s) held only on disk are missing*");
+    }
+
+    private const string MediaFilePath = "originals/ab/ab000000000000000000000000000001.png";
+
     private async Task<(DatabaseBackupService Service, string DatabasePath)> CreateFixtureAsync()
     {
         var databasePath = Path.Combine(_root, "data", "source.db");
@@ -118,6 +133,12 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         Directory.CreateDirectory(keysPath);
         Directory.CreateDirectory(recordingsPath);
         await File.WriteAllTextAsync(Path.Combine(recordingsPath, "session.webm"), "recording-evidence");
+        // A media library image whose database copy has already been cleared: it exists only as a file.
+        var mediaPath = Path.Combine(_root, "media");
+        Directory.CreateDirectory(Path.Combine(mediaPath, "originals", "ab"));
+        Directory.CreateDirectory(Path.Combine(mediaPath, "variants"));
+        await File.WriteAllBytesAsync(Path.Combine(mediaPath, MediaFilePath), [0x89, 0x50, 0x4E, 0x47]);
+        await File.WriteAllBytesAsync(Path.Combine(mediaPath, "variants", "cache-only.webp"), [1]);
 
         var provider = DataProtectionProvider.Create(new DirectoryInfo(keysPath), options => options.SetApplicationName("GwsBusinessSuite"));
         var protector = new DataProtectionSecretProtector(provider);
@@ -127,6 +148,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
             await db.Database.MigrateAsync();
             db.AppUsers.Add(new AppUser { Username = "admin", Role = AppRoles.Admin, IsActive = true, MfaEnabled = true, PasswordHash = "hash" });
             db.WikiPages.Add(new WikiPage { Title = "Recovered page", Slug = "recovered-page" });
+            db.MediaAssets.Add(new MediaAsset { FileName = "logo.png", ContentType = "image/png", DataUri = string.Empty, StoragePath = MediaFilePath, SizeBytes = 4 });
             db.AutomationCredentials.Add(new AutomationCredential { Name = "Test", TypeKey = "apiKey", ProtectedData = protector.Protect("test-token") });
             await db.SaveChangesAsync();
         }
@@ -137,6 +159,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         {
             Enabled = true, Path = backupPath, DataProtectionKeysPath = keysPath,
             LiveShowRecordingsPath = recordingsPath,
+            MediaPath = Path.Combine(_root, "media"),
             EncryptionKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
             EncryptionKeyPath = Path.Combine(_root, "backup.key")
         });

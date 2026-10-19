@@ -161,6 +161,9 @@ public static class PublicSiteHtmlRenderer
             </style>
             """;
 
+        bodyHtml = MediaSrcset.Apply(bodyHtml);
+        headerHtml = headerHtml is null ? null : MediaSrcset.Apply(headerHtml);
+        footerHtml = footerHtml is null ? null : MediaSrcset.Apply(footerHtml);
         return $"""
             <!DOCTYPE html>
             <html lang="{Html(languages?.Current ?? "en")}">

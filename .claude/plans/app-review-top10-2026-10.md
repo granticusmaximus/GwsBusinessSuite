@@ -16,7 +16,7 @@ Grep for each item first. Two hints already turned up:
 | 3 | Support: email-to-ticket (new mail -> ticket, tagged replies join, staff replies emailed with text + Reply-To) | done 18-10-26 |
 | 4 | Site: duplicate page, nested menus (dropdowns), hreflang + language switcher + translations on public pages | done 19-10-26 |
 | 5 | Automation: expression language (functions, operators, indexing) + sandboxed Code node (Jint) | done 19-10-26 |
-| 6 | Media: file storage instead of base64-in-DB, resizing, WebP/AVIF | not started |
+| 6 | Media: files on disk (dual-write, 7-day DB grace), resized copies + WebP, srcset, backups include media | done 19-10-26 |
 | 7 | Customer timeline across apps (check ContactTimelineService first) | not started |
 | 8 | Business Intelligence: plain-English questions, local model, read-only | not started |
 | 9 | One SentinelGPT side panel with page context | not started |
@@ -97,3 +97,21 @@ Grep for each item first. Two hints already turned up:
   constructor change. The editor shows a plain code textarea for code nodes.
 - Fixed along the way: the automation editor's hint printed a literal "{{ExpressionExample}}"
   (Razor doesn't interpolate `{{ }}`).
+
+## Phase 6 notes (done)
+
+- `IMediaFileStore` (Application) is implemented by `FileSystemMediaFileStore` (Infrastructure):
+  `Media:StoragePath` (/app/data/media; dev uses media-files/, gitignored), temp-file + move writes,
+  and a guard against paths outside the folder. Layout: originals/{2-hex}/{id}.ext, thumbs/{id}.jpg,
+  variants/{id}-{versionTicks}-w{width}.ext.
+- `MediaAsset.StoragePath/StoredAt/Width/Height`. Uploads and replaces write the files and keep
+  DataUri. `MediaStorageBackgroundService` waits 10 min after start (the rollback window), then
+  hourly runs MoveToFilesAsync (legacy rows) and ReleaseDatabaseCopiesAsync (after
+  `Media:DatabaseCopyGraceDays`=7, and only if the file exists at the right size). Reads prefer the
+  file and fall back to DataUri.
+- `/media/{id}?w=` snaps to MediaImageSizes; WebP via Accept (not GIF); ETag + Last-Modified ->
+  304; Cache-Control public 1h; Vary: Accept. `MediaSrcset.Apply` runs on Layout and the /cms route.
+- Backups copy media/originals and media/thumbs. Verify fails if any file-only image (DataUri "")
+  is missing from the archive, and reports MediaFileCount.
+- AVIF isn't possible with SkiaSharp encode; WebP only. DB pages freed but no VACUUM.
+- Live: a 1440px PNG at 193 KB serves as WebP at 70 KB, and the 640 WebP at 23 KB.

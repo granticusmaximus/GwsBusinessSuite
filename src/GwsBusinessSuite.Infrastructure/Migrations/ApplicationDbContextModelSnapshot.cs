@@ -4239,8 +4239,17 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("Height")
+                        .HasColumnType("INTEGER");
+
                     b.Property<long>("SizeBytes")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("StoragePath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("StoredAt")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("ThumbnailDataUri")
                         .HasColumnType("TEXT");
@@ -4250,6 +4259,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("Width")
+                        .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
 

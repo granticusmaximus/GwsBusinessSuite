@@ -26,6 +26,7 @@ artifacts/
 *.sqlite
 dp-keys/
 overwatch-timelapse/
+media-files/
 *.sqlite3
 *.mmdb
 src/GwsBusinessSuite.Web/logs/
