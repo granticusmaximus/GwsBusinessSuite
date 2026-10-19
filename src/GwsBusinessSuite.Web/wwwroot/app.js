@@ -519,6 +519,20 @@
 			thread.scrollTop = thread.scrollHeight;
 		}
 	};
+
+	// Brings a record opened from a link (?ticket=, ?invoice=) into view, unless it sits in the
+	// top half of the first screen, which Blazor's own scroll-to-top after navigating already
+	// shows. Measured against the page, not the window, because that scroll-to-top may still be
+	// animating. The admin layout's scroll-padding-top keeps it clear of the sticky bar.
+	window.gwsScroll = {
+		toId: function (id) {
+			var element = document.getElementById(id);
+			if (!element) return;
+			var top = element.getBoundingClientRect().top + window.scrollY;
+			if (top < window.innerHeight / 2) return;
+			element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		}
+	};
 })();
 
 // The server renders on UTC; Blazor pages that show a "saved at" time ask the browser for its

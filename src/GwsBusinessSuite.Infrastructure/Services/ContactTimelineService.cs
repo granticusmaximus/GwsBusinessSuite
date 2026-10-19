@@ -50,10 +50,17 @@ public sealed class ContactTimelineService(IAppDbContextFactory dbContextFactory
         foreach (var invoice in await db.Invoices.AsNoTracking().Include(i => i.LineItems).Where(i => i.ContactId == contactId).ToListAsync(cancellationToken))
         {
             var total = invoice.LineItems.Sum(l => l.Quantity * l.UnitPriceUsd).ToString("C2", UsCurrencyCulture);
-            entries.Add(new(invoice.CreatedAt, ContactTimelineKinds.Invoice, $"Invoice drafted: {invoice.Title}", total, "/admin/billing"));
-            if (invoice.SentAt is { } sent) entries.Add(new(sent, ContactTimelineKinds.Invoice, $"Invoice sent: {invoice.Title}", Join(total, invoice.DueDate is { } due ? $"due {due:dd-MM-yy}" : null), "/admin/billing"));
-            if (invoice.PaidAt is { } paid) entries.Add(new(paid, ContactTimelineKinds.Invoice, $"Invoice paid: {invoice.Title}", total, "/admin/billing"));
-            if (invoice.Status == InvoiceStatuses.Void) entries.Add(new(invoice.UpdatedAt ?? invoice.CreatedAt, ContactTimelineKinds.Invoice, $"Invoice voided: {invoice.Title}", total, "/admin/billing"));
+            var link = ContactTimelineLinks.Invoice(invoice.Id);
+            entries.Add(new(invoice.CreatedAt, ContactTimelineKinds.Invoice, $"Invoice drafted: {invoice.Title}", total, link));
+            if (invoice.SentAt is { } sent) entries.Add(new(sent, ContactTimelineKinds.Invoice, $"Invoice sent: {invoice.Title}", Join(total, invoice.DueDate is { } due ? $"due {due:dd-MM-yy}" : null), link));
+            // Only the latest reminder keeps a timestamp; the count says how many went before it.
+            if (invoice.LastReminderAt is { } reminded)
+            {
+                entries.Add(new(reminded, ContactTimelineKinds.Invoice, $"Payment reminder sent: {invoice.Title}",
+                    Join(total, invoice.RemindersSent > 1 ? $"{invoice.RemindersSent} reminders so far" : null), link));
+            }
+            if (invoice.PaidAt is { } paid) entries.Add(new(paid, ContactTimelineKinds.Invoice, $"Invoice paid: {invoice.Title}", total, link));
+            if (invoice.Status == InvoiceStatuses.Void) entries.Add(new(invoice.UpdatedAt ?? invoice.CreatedAt, ContactTimelineKinds.Invoice, $"Invoice voided: {invoice.Title}", total, link));
         }
 
         // Meeting notes saved against this contact, or against one of their bookings (item 28).
@@ -69,11 +76,13 @@ public sealed class ContactTimelineService(IAppDbContextFactory dbContextFactory
         var ticketSubjects = tickets.ToDictionary(t => t.Id, t => t.Subject);
         foreach (var ticket in tickets)
         {
-            entries.Add(new(ticket.CreatedAt, ContactTimelineKinds.Ticket, $"Ticket opened: {ticket.Subject}", $"{ticket.Priority} priority", "/admin/support"));
-            if (ticket.ResolvedAt is { } resolved) entries.Add(new(resolved, ContactTimelineKinds.Ticket, $"Ticket resolved: {ticket.Subject}", null, "/admin/support"));
+            var link = ContactTimelineLinks.Ticket(ticket.Id);
+            entries.Add(new(ticket.CreatedAt, ContactTimelineKinds.Ticket, $"Ticket opened: {ticket.Subject}",
+                Join(CameByEmail(ticket.TagsCsv) ? "by email" : null, $"{ticket.Priority} priority"), link));
+            if (ticket.ResolvedAt is { } resolved) entries.Add(new(resolved, ContactTimelineKinds.Ticket, $"Ticket resolved: {ticket.Subject}", null, link));
             if (ticket.SatisfactionRating is { } rating)
             {
-                entries.Add(new(ticket.UpdatedAt ?? ticket.CreatedAt, ContactTimelineKinds.Ticket, $"Rated support {rating}/5: {ticket.Subject}", ticket.SatisfactionComment, "/admin/support"));
+                entries.Add(new(ticket.UpdatedAt ?? ticket.CreatedAt, ContactTimelineKinds.Ticket, $"Rated support {rating}/5: {ticket.Subject}", ticket.SatisfactionComment, link));
             }
         }
         if (ticketSubjects.Count > 0)
@@ -87,7 +96,7 @@ public sealed class ContactTimelineService(IAppDbContextFactory dbContextFactory
                 var fromContact = message.AuthorType == SupportTicketAuthorTypes.Contact;
                 entries.Add(new(message.CreatedAt, ContactTimelineKinds.Ticket,
                     fromContact ? $"Wrote in: {ticketSubjects[message.TicketId]}" : $"{message.AuthorName} replied: {ticketSubjects[message.TicketId]}",
-                    Excerpt(message.Body), "/admin/support"));
+                    Excerpt(message.Body), ContactTimelineLinks.Ticket(message.TicketId)));
             }
         }
 
@@ -111,6 +120,15 @@ public sealed class ContactTimelineService(IAppDbContextFactory dbContextFactory
             }
         }
 
+        foreach (var time in await db.TimeEntries.AsNoTracking().Where(t => t.ContactId == contactId).ToListAsync(cancellationToken))
+        {
+            var what = string.IsNullOrWhiteSpace(time.Description) ? "time" : time.Description.Trim();
+            entries.Add(time.EndedAt is null && time.Minutes == 0
+                ? new(time.StartedAt, ContactTimelineKinds.Time, $"Timer running: {what}", Who(time.Username), $"/admin/time?contact={contactId}")
+                : new(time.StartedAt, ContactTimelineKinds.Time, $"Logged {Duration(time.Minutes)}: {what}",
+                    Join(!time.Billable ? "not billable" : time.InvoiceId is null ? "unbilled" : "invoiced", Who(time.Username)), $"/admin/time?contact={contactId}"));
+        }
+
         // A submission is this contact's when it was linked to them, or (for older ones, before
         // linking existed) when it carried their email address.
         var email = contact.Email?.Trim().ToLowerInvariant();
@@ -125,6 +143,25 @@ public sealed class ContactTimelineService(IAppDbContextFactory dbContextFactory
             foreach (var form in forms)
             {
                 entries.Add(new(form.CreatedAt, ContactTimelineKinds.Form, $"Submitted a form: {pageTitles.GetValueOrDefault(form.PageId) ?? "a page"}", null, $"/admin/form-submissions/{form.Id}"));
+            }
+        }
+
+        // Blog comments carry no contact link, only the email the commenter typed, so they're
+        // matched on that. Spam is left out: anyone can type anyone's address.
+        if (hasEmail)
+        {
+            var comments = await db.Comments.AsNoTracking()
+                .Where(c => c.AuthorEmail.ToLower() == email && c.Status != CommentStatuses.Spam)
+                .ToListAsync(cancellationToken);
+            if (comments.Count > 0)
+            {
+                var articleIds = comments.Select(c => c.ArticleId).Distinct().ToList();
+                var articleTitles = await db.Articles.AsNoTracking().Where(a => articleIds.Contains(a.Id)).ToDictionaryAsync(a => a.Id, a => a.Title, cancellationToken);
+                foreach (var comment in comments)
+                {
+                    entries.Add(new(comment.CreatedAt, ContactTimelineKinds.Comment, $"Commented on: {articleTitles.GetValueOrDefault(comment.ArticleId) ?? "an article"}",
+                        Join(comment.Status == CommentStatuses.Pending ? "awaiting approval" : null, Excerpt(comment.Body)), "/admin/comments"));
+                }
             }
         }
 
@@ -172,6 +209,17 @@ public sealed class ContactTimelineService(IAppDbContextFactory dbContextFactory
 
         return entries.OrderByDescending(e => e.At).ToList();
     }
+
+    // Email-to-ticket tags the tickets it opens "email" (see SupportEmailInService).
+    private static bool CameByEmail(string? tagsCsv) =>
+        tagsCsv?.Split(',', StringSplitOptions.TrimEntries).Contains("email", StringComparer.OrdinalIgnoreCase) == true;
+
+    private static string Duration(int minutes) => minutes switch
+    {
+        < 60 => $"{minutes}m",
+        _ when minutes % 60 == 0 => $"{minutes / 60}h",
+        _ => $"{minutes / 60}h {minutes % 60}m"
+    };
 
     private static string? Who(string? username) => string.IsNullOrWhiteSpace(username) ? null : $"by {username}";
 

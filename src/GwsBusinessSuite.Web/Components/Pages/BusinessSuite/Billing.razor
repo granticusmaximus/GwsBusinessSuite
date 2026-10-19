@@ -7,6 +7,7 @@
 @using GwsBusinessSuite.Domain.Entities
 @inject IBillingService BillingService
 @inject ICrmService CrmService
+@inject IJSRuntime JS
 
 <PageTitle>Billing</PageTitle>
 
@@ -183,7 +184,7 @@ else
                     <div class="list-group list-group-flush">
                         @foreach (var invoice in Invoices)
                         {
-                            <div class="list-group-item">
+                            <div class="list-group-item" id="invoice-@invoice.Id">
                                 <div class="d-flex justify-content-between align-items-start gap-2">
                                     <div>
                                         <div class="fw-semibold">
@@ -333,6 +334,31 @@ else
         {
             IsLoading = false;
         }
+    }
+
+    // ?invoice={id} (from a contact's history) opens that invoice's line items and scrolls to it.
+    [SupplyParameterFromQuery(Name = "invoice")] public Guid? InvoiceQuery { get; set; }
+    private Guid? _openedInvoiceQuery;
+    private bool _scrollToInvoice;
+
+    protected override void OnParametersSet()
+    {
+        if (InvoiceQuery is not { } invoiceId || invoiceId == _openedInvoiceQuery) return;
+        _openedInvoiceQuery = invoiceId;
+        if (Invoices.All(invoice => invoice.Id != invoiceId))
+        {
+            ErrorMessage = "That invoice wasn't found. It may have been deleted.";
+            return;
+        }
+        _expandedInvoiceId = invoiceId;
+        _scrollToInvoice = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_scrollToInvoice || _expandedInvoiceId is not { } invoiceId) return;
+        _scrollToInvoice = false;
+        await JS.InvokeVoidAsync("gwsScroll.toId", $"invoice-{invoiceId}");
     }
 
     private async Task RefreshInvoicesAsync()

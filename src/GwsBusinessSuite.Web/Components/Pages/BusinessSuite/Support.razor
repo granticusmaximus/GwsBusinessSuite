@@ -9,6 +9,8 @@
 @inject ISupportTicketCannedResponseService CannedResponseService
 @inject ICrmService CrmService
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject IContactTimelineService TimelineService
+@inject IJSRuntime JS
 @using GwsBusinessSuite.Application.Abstractions
 
 <PageTitle>Support</PageTitle>
@@ -144,7 +146,7 @@ else
         }
         else
         {
-            <div class="card border-0 shadow-sm">
+            <div class="card border-0 shadow-sm" id="support-ticket">
                 <div class="card-header bg-white border-bottom py-3">
                     <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
                         <div>
@@ -235,6 +237,33 @@ else
                         <button class="btn btn-primary align-self-end" disabled="@_isBusy" @onclick="ReplyAsync">Send</button>
                     </div>
                 </div>
+            </div>
+
+            <div class="card border-0 shadow-sm mt-4">
+                <div class="card-header bg-white border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <span class="fw-semibold">Customer history <span class="text-secondary small fw-normal">everything else with @SelectedTicket.ContactName, newest first</span></span>
+                    <a class="btn btn-sm btn-outline-secondary" href="/admin/crm/contacts/@SelectedTicket.ContactId">Full history</a>
+                </div>
+                <ul class="list-group list-group-flush">
+                    @if (_customerHistory.Count == 0)
+                    {
+                        <li class="list-group-item text-secondary small">Nothing else on record.</li>
+                    }
+                    @foreach (var entry in _customerHistory)
+                    {
+                        <li class="list-group-item d-flex gap-3 align-items-start">
+                            <i class="bi @ContactTimelineKinds.Icon(entry.Kind) text-secondary mt-1" aria-hidden="true"></i>
+                            <div class="flex-grow-1 text-break">
+                                <div>@if (entry.Link is { } link) { <a href="@link">@entry.Title</a> } else { @entry.Title }</div>
+                                @if (!string.IsNullOrWhiteSpace(entry.Detail))
+                                {
+                                    <div class="small text-secondary text-break">@entry.Detail</div>
+                                }
+                            </div>
+                            <div class="small text-secondary text-nowrap">@entry.At.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
+                        </li>
+                    }
+                </ul>
             </div>
         }
 
@@ -339,6 +368,16 @@ else
     private string _cannedResponseTitle = string.Empty;
     private string _cannedResponseBody = string.Empty;
 
+    // ?ticket={id} opens that ticket (links from a contact's history and the history card here).
+    [SupplyParameterFromQuery(Name = "ticket")] public Guid? TicketQuery { get; set; }
+    private Guid? _openedTicketQuery;
+    private bool _scrollToTicket;
+
+    // A handful of the contact's latest other activity beside the ticket; the contact page has the rest.
+    private const int CustomerHistorySize = 6;
+    private IReadOnlyList<ContactTimelineEntry> _customerHistory = [];
+    private Guid? _customerHistoryTicketId;
+
     protected override async Task OnInitializedAsync()
     {
         IsLoading = true;
@@ -352,6 +391,29 @@ else
         {
             IsLoading = false;
         }
+    }
+
+    // Runs again when a link on this page points at another ticket, since the page stays mounted.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (TicketQuery is not { } ticketId || ticketId == _openedTicketQuery) return;
+        _openedTicketQuery = ticketId;
+        await SelectTicketAsync(ticketId);
+        if (SelectedTicket is null)
+        {
+            SelectedTicketId = null;
+            ErrorMessage = "That ticket wasn't found. It may have been deleted.";
+            return;
+        }
+        _scrollToTicket = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_scrollToTicket || SelectedTicket is null) return;
+        _scrollToTicket = false;
+        // On narrow screens the thread sits below the ticket list.
+        await JS.InvokeVoidAsync("gwsScroll.toId", "support-ticket");
     }
 
     private async Task RefreshCannedResponsesAsync()
@@ -456,6 +518,20 @@ else
         SelectedTicketId = ticketId;
         SelectedTicket = await TicketService.GetTicketAsync(ticketId);
         _replyBody = string.Empty;
+        await LoadCustomerHistoryAsync();
+    }
+
+    // Once per ticket opened, not on every refresh. This ticket's own entries are left out: the
+    // thread above already shows them.
+    private async Task LoadCustomerHistoryAsync()
+    {
+        if (SelectedTicket is null || SelectedTicket.Id == _customerHistoryTicketId) return;
+        _customerHistoryTicketId = SelectedTicket.Id;
+        var thisTicket = ContactTimelineLinks.Ticket(SelectedTicket.Id);
+        _customerHistory = (await TimelineService.GetTimelineAsync(SelectedTicket.ContactId))
+            .Where(entry => entry.Link != thisTicket)
+            .Take(CustomerHistorySize)
+            .ToList();
     }
 
     private async Task CreateTicketAsync()

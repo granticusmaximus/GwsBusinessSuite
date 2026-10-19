@@ -17,7 +17,7 @@ Grep for each item first. Two hints already turned up:
 | 4 | Site: duplicate page, nested menus (dropdowns), hreflang + language switcher + translations on public pages | done 19-10-26 |
 | 5 | Automation: expression language (functions, operators, indexing) + sandboxed Code node (Jint) | done 19-10-26 |
 | 6 | Media: files on disk (dual-write, 7-day DB grace), resized copies + WebP, srcset, backups include media | done 19-10-26 |
-| 7 | Customer timeline across apps (check ContactTimelineService first) | not started |
+| 7 | Customer timeline: comments, time, reminders, email-origin; ticket/invoice deep links; history beside tickets | done 19-10-26 |
 | 8 | Business Intelligence: plain-English questions, local model, read-only | not started |
 | 9 | One SentinelGPT side panel with page context | not started |
 | 10 | Nav merge + admin shell redesign (workspace rail, inspector) | not started |
@@ -115,3 +115,22 @@ Grep for each item first. Two hints already turned up:
   is missing from the archive, and reports MediaFileCount.
 - AVIF isn't possible with SkiaSharp encode; WebP only. DB pages freed but no VACUUM.
 - Live: a 1440px PNG at 193 KB serves as WebP at 70 KB, and the 640 WebP at 23 KB.
+
+## Phase 7 notes (done)
+
+- Most of the timeline already existed (ContactTimelineService + the History card on the contact
+  page). Phase 7 filled the gaps rather than rebuilding it.
+- New kinds `comment` and `time` (ContactTimelineKinds, with `Icon()` now shared by both pages).
+  Comments match on AuthorEmail (case-insensitive, Spam excluded, Pending marked). Time entries
+  show duration, unbilled/invoiced/not billable, and "Timer running". Invoices add "Payment
+  reminder sent" at LastReminderAt with the RemindersSent count. Tickets tagged exactly "email"
+  say "by email".
+- `ContactTimelineLinks.Ticket/Invoice` -> `/admin/support?ticket=`, `/admin/billing?invoice=`.
+  Support opens the ticket (OnParametersSetAsync, so in-page links work too); Billing expands
+  the invoice. Missing ids show "wasn't found". `gwsScroll.toId` (app.js) scrolls only when the
+  record isn't in the top half of the first screen, measured against the page because Blazor's
+  own scroll-to-top after navigating is smooth and may still be running.
+- Support shows a "Customer history" card under the thread: the latest 6 entries, excluding this
+  ticket's own, loaded once per ticket opened, with a Full history link.
+- Live: checked on desktop and at phone width. Paths tested: direct, from the contact page, and
+  same-page ticket switch; plus missing ids and the Billing expand.

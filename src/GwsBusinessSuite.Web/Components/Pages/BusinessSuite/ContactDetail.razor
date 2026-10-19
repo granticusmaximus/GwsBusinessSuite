@@ -323,7 +323,7 @@ else
             @foreach (var entry in FilteredHistory.Take(HistoryShown))
             {
                 <li class="list-group-item d-flex gap-3 align-items-start">
-                    <i class="bi @HistoryIcon(entry.Kind) text-secondary mt-1" aria-hidden="true"></i>
+                    <i class="bi @ContactTimelineKinds.Icon(entry.Kind) text-secondary mt-1" aria-hidden="true"></i>
                     <div class="flex-grow-1 text-break">
                         <div>@if (entry.Link is { } link) { <a href="@link">@entry.Title</a> } else { @entry.Title }</div>
                         @if (!string.IsNullOrWhiteSpace(entry.Detail))
@@ -402,18 +402,6 @@ else
         HistoryFilter = kind;
         HistoryShown = HistoryPageSize;
     }
-
-    private static string HistoryIcon(string kind) => kind switch
-    {
-        ContactTimelineKinds.Deal => "bi-briefcase",
-        ContactTimelineKinds.Invoice => "bi-receipt",
-        ContactTimelineKinds.Ticket => "bi-life-preserver",
-        ContactTimelineKinds.Booking => "bi-calendar-event",
-        ContactTimelineKinds.Form => "bi-clipboard-data",
-        ContactTimelineKinds.Email => "bi-envelope",
-        ContactTimelineKinds.Portal => "bi-box-arrow-in-right",
-        _ => "bi-journal-text"
-    };
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
