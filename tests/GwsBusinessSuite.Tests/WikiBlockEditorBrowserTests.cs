@@ -37,7 +37,8 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
 
         await page.Locator("#editor").ClickAsync(new() { Position = new() { X = 250, Y = 250 } });
 
-        await Expect(page.Locator(".wiki-block-content")).ToHaveCountAsync(1);
+        // Child-page cards carry .wiki-block-content too (wiki-page-link-card), so count only paragraphs.
+        await Expect(page.Locator(".wiki-block[data-block-type='paragraph'] .wiki-block-content")).ToHaveCountAsync(1);
         (await page.EvaluateAsync<string>("() => document.activeElement?.className || ''"))
             .Should().Contain("wiki-block-content");
         WikiBlockJson.ParseBlocks(await page.EvaluateAsync<string>("() => window.editor.getBlocksJson(document.querySelector('#editor'))"))
