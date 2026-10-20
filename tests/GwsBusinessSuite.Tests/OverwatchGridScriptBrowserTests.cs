@@ -181,6 +181,9 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                 if (methodName === 'ToggleCameraFavoriteAsync') {
                   return Promise.resolve(window.__mockToggleFavoriteResult === undefined ? true : window.__mockToggleFavoriteResult);
                 }
+                if (methodName === 'GetAircraftDetailAsync') {
+                  return Promise.resolve(window.__mockAircraftDetail || null);
+                }
                 if (methodName === 'BuildShareLinkAsync') {
                   return Promise.resolve(window.__mockShareLink || 'https://example.test/admin/osint?v=stub');
                 }
@@ -336,6 +339,66 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await page.WaitForTimeoutAsync(500);
 
         error.Should().BeNull();
+        consoleErrors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ClickingAnAircraft_ShouldShowItsDetails_AndDrawItsPath()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        // The globe opens centred on 39.8, -98.5: a plane there sits in the middle of the canvas.
+        await page.EvaluateAsync("""
+            () => {
+                // Counts the entities the panel draws (everything else on the globe was added before this).
+                window.__pathEntities = new Set();
+                const add = Cesium.EntityCollection.prototype.add;
+                Cesium.EntityCollection.prototype.add = function (e) { const added = add.call(this, e); window.__pathEntities.add(added); return added; };
+                const remove = Cesium.EntityCollection.prototype.remove;
+                Cesium.EntityCollection.prototype.remove = function (e) { window.__pathEntities.delete(e); return remove.call(this, e); };
+                window.__mockAircraftDetail = {
+                    icao24: 'ab4b34', callsign: 'DAL1536', use: 'COMMERCIAL - PASSENGER AIRLINE', isCommercial: true,
+                    flightNumber: 'DL1536 (DAL1536)', airline: 'Delta Air Lines', registration: 'N827DN',
+                    aircraftType: 'Boeing 737NG 932ER/W', typeCode: 'B739', operator: 'Delta Air Lines', typicalSeats: '177-220',
+                    route: {
+                        origin: { code: 'STL', city: 'St Louis', latitude: 38.75, longitude: -90.37 }, originSource: 'TRACKED TAKEOFF',
+                        destination: { code: 'DEN', city: 'Denver', latitude: 39.86, longitude: -104.67 }, destinationSource: 'ON FILE, HEADING THERE',
+                        note: 'The route on file for this flight number (JFK \u2192 DEN) starts somewhere else, but the plane is heading for DEN.'
+                    },
+                    track: [{ latitude: 38.75, longitude: -90.37, altitudeFeet: 0 }, { latitude: 39.5, longitude: -95, altitudeFeet: 35000 }]
+                };
+                window.tacticalGlobe.setAircraft('tg-viewport', [
+                    { id: 'ab4b34', callsign: 'DAL1536', lat: 39.8, lon: -98.5, altitudeFeet: 35000, speedKnots: 450, heading: 270 }
+                ]);
+            }
+            """);
+        await page.WaitForTimeoutAsync(800);
+        await page.Mouse.ClickAsync(400, 300);
+        await page.WaitForSelectorAsync(".tg-aircraft-panel dd:text('N827DN')", new PageWaitForSelectorOptions { Timeout = 5000 });
+
+        var call = await page.EvaluateAsync<string[]>(
+            "window.__invokedMethods.find(c => c.methodName === 'GetAircraftDetailAsync').args.slice(0, 2)");
+        call.Should().Equal("ab4b34", "DAL1536");
+        var panelText = await page.InnerTextAsync(".tg-aircraft-panel");
+        panelText.Should().Contain("COMMERCIAL - PASSENGER AIRLINE").And.Contain("DL1536").And.Contain("177-220")
+            .And.Contain("NOT PUBLISHED").And.Contain("STL (ST LOUIS) - TRACKED TAKEOFF").And.Contain("DEN (DENVER) - ON FILE, HEADING THERE").And.Contain("starts somewhere else").And.Contain("35,000 FT");
+        // Track (solid), remaining leg (dashed), and the two airports.
+        (await page.EvaluateAsync<int>("window.__pathEntities.size")).Should().Be(4);
+        (await page.IsVisibleAsync(".tg-modal-backdrop")).Should().BeFalse("the path has to stay visible behind the panel");
+
+        // The minute's refresh moves the plane and its readings.
+        await page.EvaluateAsync("""
+            () => window.tacticalGlobe.setAircraft('tg-viewport', [
+                { id: 'ab4b34', callsign: 'DAL1536', lat: 39.8, lon: -99.5, altitudeFeet: 36000, speedKnots: 455, heading: 270 }
+            ])
+            """);
+        (await page.InnerTextAsync(".tg-aircraft-panel [data-live='alt']")).Should().Be("36,000 FT");
+
+        await page.ClickAsync(".tg-aircraft-panel .tg-stream-panel-close");
+        (await page.QuerySelectorAsync(".tg-aircraft-panel")).Should().BeNull();
+        (await page.EvaluateAsync<int>("window.__pathEntities.size")).Should().Be(0);
         consoleErrors.Should().BeEmpty();
     }
 

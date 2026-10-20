@@ -22,7 +22,7 @@ public sealed class AircraftService(HttpClient httpClient, IMemoryCache cache, I
     public const double MaxSquareDegrees = 25;
     public const int MaxAircraft = 400;
     private static readonly TimeSpan CacheFor = TimeSpan.FromSeconds(60);
-    private const string LimitKey = "aircraft:limited";
+    internal const string LimitKey = "aircraft:limited";
 
     public async Task<AircraftResult> GetAsync(BoundingBox bounds, CancellationToken ct = default)
     {

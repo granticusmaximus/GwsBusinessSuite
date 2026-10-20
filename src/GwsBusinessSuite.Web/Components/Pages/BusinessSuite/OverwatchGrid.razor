@@ -31,6 +31,7 @@
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchBriefingService Briefings
 @inject GwsBusinessSuite.Infrastructure.Services.MapNoteService MapNotes
 @inject GwsBusinessSuite.Application.LiveLayers.AircraftService AircraftService
+@inject GwsBusinessSuite.Application.LiveLayers.AircraftDetailService AircraftDetailService
 @inject GwsBusinessSuite.Application.LiveLayers.ShipService ShipService
 @inject GwsBusinessSuite.Application.LiveLayers.AirQualityService AirQualityService
 @inject GwsBusinessSuite.Application.LiveLayers.PowerOutageService PowerOutageService
@@ -3060,6 +3061,7 @@
             _aircraftSummary = null;
             UpdateAirSummary();
             await JS.InvokeVoidAsync("tacticalGlobe.setAircraft", "tg-viewport", Array.Empty<object>());
+            await JS.InvokeVoidAsync("tacticalGlobe.closeAircraftPanel");
             return;
         }
         await PushAircraftAsync();
@@ -3121,6 +3123,12 @@
         }
         UpdateAirSummary();
     }
+
+    // Called when an aircraft on the globe is clicked: registration, type, airline/private,
+    // flight number, typical seats and the route on file plus the track flown so far.
+    [JSInvokable]
+    public async Task<GwsBusinessSuite.Application.LiveLayers.AircraftDetail> GetAircraftDetailAsync(string icao24, string callsign, double latitude, double longitude) =>
+        await AircraftDetailService.GetAsync(icao24, callsign, latitude, longitude);
 
     private async Task PushAirQualityAsync()
     {

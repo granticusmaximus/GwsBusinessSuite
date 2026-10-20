@@ -36,6 +36,8 @@ window.tacticalGlobe = (function () {
     let streamPanel = null;
     let watchWallPanel = null;
     let incidentPanel = null;
+    let aircraftPanel = null;
+    let aircraftRequestToken = 0;
     let weatherPanel = null;
 
     // Camera pins render as billboards (textured quad sprites), not Cesium's `point` graphics
@@ -309,6 +311,8 @@ window.tacticalGlobe = (function () {
                 openSignPanel(entity._tacticalGlobeSign);
             } else if (entity && entity._tacticalGlobeRoadWeather) {
                 openRoadWeatherPanel(entity._tacticalGlobeRoadWeather);
+            } else if (entity && entity._tacticalGlobeAircraft) {
+                openAircraftPanel(containerId, entity._tacticalGlobeAircraft);
             } else if (entity && entity._tacticalGlobeNote) {
                 const noteEntry = viewers.get(containerId);
                 if (noteEntry) noteEntry.dotNetRef.invokeMethodAsync('OnMapNoteClicked', entity._tacticalGlobeNote);
@@ -861,25 +865,216 @@ window.tacticalGlobe = (function () {
         const labels = entry.aircraftPrimitives.labels;
         billboards.removeAll();
         labels.removeAll();
-        const colour = Cesium.Color.fromCssColorString('#00e5ff');
         const nearOnly = new Cesium.DistanceDisplayCondition(0, 120000);
         const withLabels = entry.viewer.camera.positionCartographic.height < 150000;
+        const selectedId = entry.aircraftPath && entry.aircraftPath.id;
         (aircraft || []).forEach(function (plane) {
             const position = Cesium.Cartesian3.fromDegrees(Number(plane.lon), Number(plane.lat));
             const altitude = Number.isFinite(plane.altitudeFeet) ? Math.round(plane.altitudeFeet / 100) * 100 : null;
+            const selected = plane.id === selectedId;
+            const colour = Cesium.Color.fromCssColorString(selected ? AIRCRAFT_PATH_COLOUR : AIRCRAFT_COLOUR);
+            // The id is what scene.pick hands the click handler, so clicking a plane opens its panel.
+            const pickId = { _tacticalGlobeAircraft: plane };
             billboards.add({
-                position: position, image: aircraftIcon, width: 20, height: 20, color: colour,
+                id: pickId, position: position, image: aircraftIcon, width: selected ? 26 : 20, height: selected ? 26 : 20, color: colour,
                 rotation: -Cesium.Math.toRadians(Number(plane.heading) || 0), alignedAxis: Cesium.Cartesian3.ZERO,
                 disableDepthTestDistance: Number.POSITIVE_INFINITY
             });
+            if (selected) updateSelectedAircraft(entry, plane);
             if (!withLabels) return;
             labels.add({
-                position: position,
+                id: pickId, position: position,
                 text: (plane.callsign || plane.id) + (altitude !== null ? '  ' + altitude.toLocaleString('en-US') + ' FT' : ''),
                 font: '10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16),
                 distanceDisplayCondition: nearOnly, disableDepthTestDistance: Number.POSITIVE_INFINITY
             });
+        });
+    }
+
+    const AIRCRAFT_COLOUR = '#00e5ff';
+    const AIRCRAFT_PATH_COLOUR = '#ffd166';
+
+    // Recolours the clicked plane straight away rather than waiting for the next minute's refresh.
+    function highlightAircraft(entry, id, on) {
+        const billboards = entry.aircraftPrimitives && entry.aircraftPrimitives.billboards;
+        if (!billboards) return;
+        for (let i = 0; i < billboards.length; i++) {
+            const b = billboards.get(i);
+            if (!b.id || b.id._tacticalGlobeAircraft.id !== id) continue;
+            b.color = Cesium.Color.fromCssColorString(on ? AIRCRAFT_PATH_COLOUR : AIRCRAFT_COLOUR);
+            b.width = b.height = on ? 26 : 20;
+        }
+    }
+
+    function formatAircraftReadings(plane) {
+        return {
+            alt: Number.isFinite(plane.altitudeFeet) ? (Math.round(plane.altitudeFeet / 100) * 100).toLocaleString('en-US') + ' FT' : '\u2014',
+            speed: Number.isFinite(plane.speedKnots) ? Math.round(plane.speedKnots) + ' KN' : '\u2014',
+            heading: Number.isFinite(plane.heading) ? Math.round(plane.heading) + '\u00b0' : '\u2014'
+        };
+    }
+
+    function airportText(airport) {
+        return airport.code + (airport.city ? ' (' + airport.city + ')' : '');
+    }
+
+    // Clicked aircraft: opens straight away with what the globe already knows (callsign, altitude,
+    // speed), then fills in GetAircraftDetailAsync's lookup and draws the path. Unlike the other
+    // info panels this one floats without the darkening backdrop, so the path stays visible and
+    // the globe can still be panned and zoomed while it's open.
+    function openAircraftPanel(containerId, plane) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        closeAircraftPanel();
+        const shell = entry.viewer.container.closest('.tg-shell');
+        if (!shell) return;
+        const readings = formatAircraftReadings(plane);
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel tg-aircraft-panel';
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header">' +
+            '<span>' + escapeHtml(plane.callsign || String(plane.id).toUpperCase()) + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
+            '</div>' +
+            '<div class="tg-stream-panel-body">' +
+            '<div class="tg-incident-type" data-aircraft-use>LOOKING UP\u2026</div>' +
+            '<dl class="tg-incident-facts" data-aircraft-facts></dl>' +
+            '<dl class="tg-incident-facts">' +
+            '<dt>ALTITUDE</dt><dd data-live="alt">' + readings.alt + '</dd>' +
+            '<dt>SPEED</dt><dd data-live="speed">' + readings.speed + '</dd>' +
+            '<dt>HEADING</dt><dd data-live="heading">' + readings.heading + '</dd>' +
+            '</dl>' +
+            '<div class="tg-aircraft-route-note" data-aircraft-note></div>' +
+            '<button type="button" class="tg-aircraft-fit" data-aircraft-fit hidden>SHOW WHOLE PATH</button>' +
+            '<div class="tg-stream-panel-meta">SOURCES: <a href="https://www.adsbdb.com" target="_blank" rel="noopener noreferrer">ADSBDB</a> \u00b7 ' +
+            '<a href="https://opensky-network.org" target="_blank" rel="noopener noreferrer">OPENSKY NETWORK</a></div>' +
+            '</div>';
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeAircraftPanel);
+        panel.querySelector('[data-aircraft-fit]').addEventListener('click', function () { fitAircraftPath(entry); });
+        shell.appendChild(panel);
+        makeDraggableAndResizable(panel, panel.querySelector('.tg-stream-panel-header'));
+        aircraftPanel = panel;
+        entry.aircraftPath = { id: plane.id, current: [Number(plane.lon), Number(plane.lat)], track: [], origin: null, destination: null, entities: [] };
+        highlightAircraft(entry, plane.id, true);
+
+        const token = ++aircraftRequestToken;
+        Promise.resolve(entry.dotNetRef.invokeMethodAsync('GetAircraftDetailAsync', String(plane.id), String(plane.callsign || ''), Number(plane.lat), Number(plane.lon)))
+            .then(function (detail) {
+                if (token !== aircraftRequestToken || aircraftPanel !== panel) return;
+                fillAircraftPanel(entry, panel, detail);
+            })
+            .catch(function () {
+                if (token !== aircraftRequestToken || aircraftPanel !== panel) return;
+                panel.querySelector('[data-aircraft-use]').textContent = "DETAILS COULDN'T BE LOOKED UP JUST NOW";
+            });
+    }
+
+    function fillAircraftPanel(entry, panel, detail) {
+        if (!detail) return;
+        panel.querySelector('[data-aircraft-use]').textContent = detail.use;
+        const route = detail.route || {};
+        const routeEnd = function (airport, source) { return airport ? airportText(airport) + (source ? ' - ' + source : '') : null; };
+        const facts = [
+            ['FLIGHT', detail.flightNumber],
+            ['AIRLINE', detail.airline],
+            ['TAIL NUMBER', detail.registration],
+            ['AIRCRAFT', [detail.aircraftType, detail.typeCode ? '(' + detail.typeCode + ')' : null].filter(Boolean).join(' ')],
+            ['OPERATOR', detail.operator && detail.operator !== detail.airline ? detail.operator : null],
+            ['SEATS', detail.typicalSeats ? detail.typicalSeats + ' (TYPICAL FOR THIS TYPE)' : null],
+            ['ON BOARD', detail.use.indexOf('PASSENGER') >= 0 ? 'NOT PUBLISHED' : detail.use.indexOf('CARGO') >= 0 ? 'CARGO - NO PASSENGERS' : null],
+            ['FROM', routeEnd(route.origin, route.originSource)],
+            ['TO', routeEnd(route.destination, route.destinationSource)]
+        ].filter(function (f) { return f[1]; });
+        panel.querySelector('[data-aircraft-facts]').innerHTML = facts.map(function (f) {
+            return '<dt>' + f[0] + '</dt><dd>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
+        }).join('');
+
+        const notes = [];
+        if (detail.use.indexOf('PASSENGER') >= 0) {
+            notes.push("Airlines don't broadcast or publish how many people are on a flight, so the seat count for this type is the closest figure.");
+        }
+        if (route.note) notes.push(route.note);
+        if (!detail.track || detail.track.length === 0) notes.push('No track available yet for this flight.');
+        panel.querySelector('[data-aircraft-note]').textContent = notes.join(' ');
+
+        const path = entry.aircraftPath;
+        path.track = (detail.track || []).map(function (p) { return [Number(p.longitude), Number(p.latitude)]; });
+        path.origin = route.origin || null;
+        path.destination = route.destination || null;
+        drawAircraftPath(entry);
+        panel.querySelector('[data-aircraft-fit]').hidden = path.track.length === 0 && !path.origin && !path.destination;
+    }
+
+    // Track flown so far (solid), then the rest of the way to the destination (dashed). Without a
+    // track, a dashed line runs from the origin to the plane. Only the ends the server vouched for
+    // are drawn (see AircraftDetailService.PlanRoute).
+    function drawAircraftPath(entry) {
+        const path = entry.aircraftPath;
+        if (!path) return;
+        path.entities.forEach(function (e) { entry.viewer.entities.remove(e); });
+        path.entities = [];
+        const add = function (spec) { path.entities.push(entry.viewer.entities.add(spec)); };
+        const colour = Cesium.Color.fromCssColorString(AIRCRAFT_PATH_COLOUR);
+        const line = function (points, dashed) {
+            if (points.length < 2) return;
+            const flat = [];
+            points.forEach(function (p) { flat.push(p[0], p[1]); });
+            add({ polyline: {
+                positions: Cesium.Cartesian3.fromDegreesArray(flat), width: dashed ? 2 : 3,
+                material: dashed ? new Cesium.PolylineDashMaterialProperty({ color: colour, dashLength: 12 }) : colour.withAlpha(0.9)
+            } });
+        };
+        if (path.track.length > 0) line(path.track.concat([path.current]), false);
+        else if (path.origin) line([[path.origin.longitude, path.origin.latitude], path.current], true);
+        if (path.destination) line([path.current, [path.destination.longitude, path.destination.latitude]], true);
+        [path.origin, path.destination].filter(Boolean).forEach(function (airport) {
+                add({
+                    position: Cesium.Cartesian3.fromDegrees(airport.longitude, airport.latitude),
+                    point: { pixelSize: 9, color: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                    label: { text: airport.code, font: 'bold 12px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+                        style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16), disableDepthTestDistance: Number.POSITIVE_INFINITY }
+                });
+        });
+    }
+
+    // Each minute's aircraft refresh moves the selected plane: extend its path and update the readings.
+    function updateSelectedAircraft(entry, plane) {
+        const path = entry.aircraftPath;
+        path.current = [Number(plane.lon), Number(plane.lat)];
+        drawAircraftPath(entry);
+        if (!aircraftPanel) return;
+        const readings = formatAircraftReadings(plane);
+        Object.keys(readings).forEach(function (key) {
+            const cell = aircraftPanel.querySelector('[data-live="' + key + '"]');
+            if (cell) cell.textContent = readings[key];
+        });
+    }
+
+    function fitAircraftPath(entry) {
+        const path = entry.aircraftPath;
+        if (!path) return;
+        const points = path.track.concat([path.current]);
+        [path.origin, path.destination].filter(Boolean).forEach(function (airport) { points.push([airport.longitude, airport.latitude]); });
+        let west = 180, east = -180, south = 90, north = -90;
+        points.forEach(function (p) {
+            west = Math.min(west, p[0]); east = Math.max(east, p[0]);
+            south = Math.min(south, p[1]); north = Math.max(north, p[1]);
+        });
+        const padLon = Math.max(0.2, (east - west) * 0.15);
+        const padLat = Math.max(0.2, (north - south) * 0.15);
+        entry.viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(west - padLon, south - padLat, east + padLon, north + padLat) });
+    }
+
+    function closeAircraftPanel() {
+        aircraftRequestToken++;
+        if (aircraftPanel && aircraftPanel.parentNode) aircraftPanel.parentNode.removeChild(aircraftPanel);
+        aircraftPanel = null;
+        viewers.forEach(function (entry) {
+            if (!entry.aircraftPath) return;
+            entry.aircraftPath.entities.forEach(function (e) { entry.viewer.entities.remove(e); });
+            highlightAircraft(entry, entry.aircraftPath.id, false);
+            entry.aircraftPath = null;
         });
     }
 
@@ -2583,6 +2778,7 @@ window.tacticalGlobe = (function () {
     function dispose(containerId) {
         closeStreamPanel();
         closeIncidentPanel();
+        closeAircraftPanel();
         closeWatchWall();
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
@@ -2628,6 +2824,7 @@ window.tacticalGlobe = (function () {
         startDrive: startDrive,
         setMapNotes: setMapNotes,
         setAircraft: setAircraft,
+        closeAircraftPanel: closeAircraftPanel,
         setShips: setShips,
         setAirQuality: setAirQuality,
         setPowerOutages: setPowerOutages,

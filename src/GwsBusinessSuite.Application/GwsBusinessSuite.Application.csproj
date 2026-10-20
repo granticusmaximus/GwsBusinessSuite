@@ -15,6 +15,11 @@
     <PackageReference Include="QRCoder" Version="1.8.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Airport list the Overwatch aircraft panel names a tracked takeoff from (see AircraftDetailService). -->
+    <EmbeddedResource Include="LiveLayers\airports.csv" LogicalName="GwsBusinessSuite.Application.LiveLayers.airports.csv" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
