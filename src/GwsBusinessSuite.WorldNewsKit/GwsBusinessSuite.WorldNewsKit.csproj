@@ -10,7 +10,7 @@
        grouping and summarizing pipeline, kept out of the Mac app so it's unit-testable. It runs
        in the Mac app against the local Ollama. -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.13" />
   </ItemGroup>
 
   <ItemGroup>
