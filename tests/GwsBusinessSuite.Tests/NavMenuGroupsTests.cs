@@ -72,6 +72,7 @@ public class NavMenuGroupsTests
         ["admin/osint", "intelligence"],
         ["admin/osint/directions", "intelligence"],
         ["admin/threat-intel", "intelligence"],
+        ["admin/world-news", "intelligence"],
 
         // Growth
         ["admin/growth", "growth"],

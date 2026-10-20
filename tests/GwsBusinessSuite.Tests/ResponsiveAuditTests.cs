@@ -54,11 +54,11 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         "/admin/mission-control", "/admin/news-intelligence", "/admin/osint", "/admin/pages", "/admin/pages/all",
         "/admin/podcasts", "/admin/privacy-operations", "/admin/scheduling", "/admin/security-audit",
         "/admin/sentinel", "/admin/seo-audit", "/admin/settings", "/admin/support", "/admin/threat-intel",
-        "/admin/users"
+        "/admin/users", "/admin/world-news"
     ];
 
     // Open states the entry-page crawl never sees: drawers, menus, dialogs, editor panels.
-    // Steps run in order ("click:<selector>", "press:<key>", "type:<text>"); the first must be
+    // Steps run in order ("click:<selector>", "hover:<selector>", "press:<key>", "type:<text>"); the first must be
     // visible on the device or the state is recorded as not applicable (e.g. a phone-only menu
     // button on a desktop). Scope limits the target/covered checks to the opened panel -
     // everything beneath a drawer's backdrop is covered on purpose; "@aria-controls" means the
@@ -74,8 +74,11 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         new("^/admin$", "command palette", ["click:[data-gws-command-open] >> visible=true"], ".gws-command-dialog"),
         new("^/admin$", "notifications", ["click:.notif-bell-btn"], ".notif-bell-panel"),
         new("^/$", "site menu", ["click:[data-gws-menu-toggle]"], "@aria-controls"),
+        new("^/admin/world-news$", "event", ["click:.world-news-event >> nth=0"], ".world-news-detail"),
         new("^/admin/sentinel$", "page tree", ["click:.sentinel-mobile-nav-toggle"], "#sentinel-workspace-browser"),
         new("^/admin/sentinel$", "share", ["click:button[title='Share this page']"], ".sentinel-share-popover"),
+        // Notion-style hover controls beside a block, with the "+" tooltip showing.
+        new(@"^/admin/sentinel(\?page=[^&]+)?$", "block controls", ["hover:main .wiki-block-content >> visible=true", "hover:.wiki-block:hover > .wiki-block-gutter .wiki-block-add"], ".wiki-block:hover > .wiki-block-gutter"),
         new("^/admin/sentinel$", "block menu", ["click:main [contenteditable]", "press:End", "press:Enter", "type:/"], ".wiki-slash-menu"),
         new("^/admin/pages/[^/]+/edit$", "all modules", ["click:.desk-module-button:has-text('All modules')"], ".studio-panel-left:not([hidden])"),
         new("^/admin/pages/[^/]+/edit$", "page settings", ["click:.desk-nav-button:has-text('Page settings')"], "#desk-inspector"),
@@ -202,7 +205,7 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
                     <div class="d-flex"><button class="btn sentinel-tool-btn">Share</button><button class="btn sentinel-tool-btn">More</button></div>
                 </div>
                 <div class="wiki-block">
-                    <div class="wiki-block-gutter"><button class="wiki-block-add">+</button><button class="wiki-block-menu-toggle">⋮</button></div>
+                    <div class="wiki-block-gutter"><button class="wiki-block-add" aria-label="Add block below">+</button><button class="wiki-block-handle" aria-label="Block actions">⋮⋮</button></div>
                     <div class="wiki-block-body"><input class="wiki-todo-checkbox" type="checkbox"><div class="wiki-block-content" contenteditable="true">Task</div></div>
                 </div>
                 <div class="wp-row-actions"><a href="#edit">Edit</a><button>Trash</button></div>
@@ -439,6 +442,11 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
                     if (index == 0 && scope == "@aria-controls")
                         scope = "#" + (await target.GetAttributeAsync("aria-controls") ?? throw new InvalidOperationException($"'{state.Name}' trigger has no aria-controls."));
                     await target.ClickAsync(new() { Timeout = 10000 });
+                    break;
+                case "hover":
+                    var hovered = page.Locator(value).First;
+                    if (index == 0 && !await hovered.IsVisibleAsync()) return null;
+                    await hovered.HoverAsync(new() { Timeout = 10000 });
                     break;
                 case "press":
                     await page.Keyboard.PressAsync(value);

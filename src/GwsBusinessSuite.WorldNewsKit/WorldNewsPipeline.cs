@@ -16,6 +16,9 @@ public sealed record WorldNewsOptions
     public IReadOnlyList<NewsEdition> Editions { get; init; } = GoogleNewsFeed.Editions;
     public IReadOnlyList<string> GdeltQueries { get; init; } = [];
     public int EmbedBatchSize { get; init; } = 64;
+    // Caps one cycle's embedding work, so a backlog (the first read is about 6,000 reports) is
+    // spread over several cycles instead of holding a small server's CPU for minutes.
+    public int MaxEmbedPerCycle { get; init; } = int.MaxValue;
 }
 
 public sealed record CycleReport(int Fetched, int Added, int Embedded, int NewEvents, int UpdatedEvents, int MergedEvents, IReadOnlyList<string> Notes);
@@ -67,7 +70,8 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         try
         {
             IReadOnlyList<WorldArticle> batch;
-            while ((batch = store.ArticlesToEmbed(options.EmbedBatchSize)).Count > 0)
+            while (embedded < options.MaxEmbedPerCycle
+                   && (batch = store.ArticlesToEmbed(Math.Min(options.EmbedBatchSize, options.MaxEmbedPerCycle - embedded))).Count > 0)
             {
                 var vectors = await ollama.EmbedAsync(options.EmbeddingModel, batch.Select(a => a.Title).ToList(), ct);
                 store.SaveEmbeddings(batch.Select((a, i) => (a.Id, vectors[i])).ToList());

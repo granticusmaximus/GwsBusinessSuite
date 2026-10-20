@@ -1691,64 +1691,97 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .wiki-block-gutter {
     display: flex;
     align-items: center;
-    gap: 0.1rem;
-    padding-top: 0.2rem;
     opacity: 0;
-    transition: opacity 0.1s ease-in;
+    transition: opacity 0.15s ease-in;
     flex-shrink: 0;
 }
-.wiki-block:hover .wiki-block-gutter,
-.wiki-block-gutter.has-discussions {
+.wiki-block:hover > .wiki-block-gutter,
+.wiki-block-gutter:focus-within {
     opacity: 1;
 }
 /* Edit lock (wiki-block-editor.js setLocked): no add/move/block-menu controls and no ticking
-   to-dos; comments (the discussion button) stay available. */
-.is-edit-locked :is(.wiki-block-add, .wiki-block-menu-toggle, .wiki-block-handle, .wiki-column-add, .wiki-column-add-widget, .wiki-tab-add) { display: none !important; }
+   to-dos; comments (the discussion badge) stay available. */
+.is-edit-locked :is(.wiki-block-add, .wiki-block-handle, .wiki-column-add, .wiki-column-add-widget, .wiki-tab-add) { display: none !important; }
 .is-edit-locked .wiki-todo-checkbox { pointer-events: none; }
 
+/* Notion's block controls, shown on hover: a 24px "+" and an 18px-wide six-dot handle, faint
+   grey icons with a soft square highlight under the pointer. */
 .wiki-block-add,
-.wiki-block-discussion,
-.wiki-block-menu-toggle,
 .wiki-block-handle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.25rem;
-    height: 1.25rem;
-    border: none;
+    height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
     background: transparent;
-    color: #8a94a3;
-    border-radius: 0.25rem;
+    color: var(--sentinel-faint, #9b9a97);
     cursor: pointer;
-    font-size: 0.85rem;
+    transition: background 20ms ease-in;
 }
-.wiki-block-discussion {
-    width: auto;
-    min-width: 1.25rem;
-    padding: 0 0.25rem;
-    opacity: 0;
-    white-space: nowrap;
-}
-.wiki-block:hover .wiki-block-discussion,
-.wiki-block-discussion.has-discussions {
-    opacity: 1;
-}
-.wiki-block-discussion.has-discussions {
-    background: #eef2ff;
-    color: #4f46e5;
-    font-size: .75rem;
-    font-weight: 600;
-}
-.wiki-block-handle {
-    cursor: grab;
-}
+.wiki-block-add { width: 24px; }
+.wiki-block-add svg { width: 16px; height: 16px; }
+.wiki-block-handle { width: 18px; cursor: grab; }
+.wiki-block-handle:active { cursor: grabbing; }
+.wiki-block-handle svg { width: 14px; height: 14px; }
 .wiki-block-add:hover,
-.wiki-block-discussion:hover,
-.wiki-block-menu-toggle:hover,
 .wiki-block-handle:hover {
-    background: #eef1f5;
-    color: #495057;
+    background: var(--sentinel-hover, rgba(55, 53, 47, .08));
 }
+.wiki-block-add:focus-visible,
+.wiki-block-handle:focus-visible {
+    outline: 2px solid var(--gws-sidebar-accent);
+    outline-offset: 0;
+}
+
+/* A block's comments: a speech bubble and count in the margin, as in Notion. Hidden when the
+   block has none; new comments start from the handle's menu. */
+.wiki-block-discussion {
+    display: none;
+    align-items: center;
+    gap: .2rem;
+    align-self: flex-start;
+    margin-left: auto;
+    height: 24px;
+    padding: 0 .35rem;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--sentinel-faint, #9b9a97);
+    font-size: .8rem;
+    cursor: pointer;
+}
+.wiki-block-discussion svg { width: 16px; height: 16px; }
+.wiki-block-discussion.has-discussions { display: inline-flex; }
+.wiki-block-discussion:hover { background: var(--sentinel-hover, rgba(55, 53, 47, .08)); }
+
+/* Notion's dark two-line tooltip for the controls above (wiki-block-editor.js showGutterTip). */
+.wiki-gutter-tip {
+    position: fixed;
+    z-index: 1090;
+    transform: translate(-50%, -100%);
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: #252525;
+    color: rgba(255, 255, 255, .9);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.4;
+    text-align: center;
+    white-space: nowrap;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .09), 0 3px 6px rgba(0, 0, 0, .4);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .1s ease-in;
+}
+:root[data-theme="light"] .wiki-gutter-tip {
+    background: #0f0f0f;
+    box-shadow: 0 0 0 1px rgba(15, 15, 15, .1), 0 3px 6px rgba(15, 15, 15, .2);
+}
+.wiki-gutter-tip.is-below { transform: translate(-50%, 0); }
+.wiki-gutter-tip.is-visible { opacity: 1; }
+.wiki-gutter-tip-hint { color: rgba(206, 205, 202, .6); }
 .wiki-block-menu .list-group-item:disabled,
 .wiki-block-menu .list-group-item[disabled] {
     background: var(--gws-panel-bg) !important;
@@ -3670,14 +3703,27 @@ audio.wiki-embed-media { max-width: 100%; }
     position: relative;
     min-height: 1.85rem;
     padding: .12rem 0;
+    /* The first line's height and where it starts, so the hover controls centre on it the way
+       Notion's do (headings and callouts override these below). */
+    --wiki-first-line: 1.55rem;
+    --wiki-first-line-top: .12rem;
 }
 
 .sentinel-workspace .wiki-block-gutter {
     position: absolute;
-    top: .25rem;
-    left: -.5rem;
+    top: calc(var(--wiki-first-line-top) + (var(--wiki-first-line) - 24px) / 2);
+    left: -.25rem;
     transform: translateX(-100%);
     width: max-content;
+    z-index: 2;
+}
+
+.sentinel-workspace .wiki-block-discussion {
+    position: absolute;
+    top: calc(var(--wiki-first-line-top) + (var(--wiki-first-line) - 24px) / 2);
+    right: -.25rem;
+    transform: translateX(100%);
+    margin: 0;
     z-index: 2;
 }
 
@@ -3797,20 +3843,10 @@ audio.wiki-embed-media { max-width: 100%; }
 
 .sentinel-workspace .wiki-block[data-block-type="divider"] { min-height: 2rem; padding: .75rem 0; }
 .sentinel-workspace .wiki-block[data-block-type="divider"] hr { width: 100%; margin: 0; border-color: rgba(214, 211, 209, .2); opacity: 1; }
-.sentinel-workspace .wiki-block-add,
-.sentinel-workspace .wiki-block-discussion,
-.sentinel-workspace .wiki-block-menu-toggle,
-.sentinel-workspace .wiki-block-handle { color: var(--sentinel-faint); }
-
-.sentinel-workspace .wiki-block-add:hover,
-.sentinel-workspace .wiki-block-discussion:hover,
-.sentinel-workspace .wiki-block-menu-toggle:hover,
-.sentinel-workspace .wiki-block-handle:hover { background: var(--sentinel-hover); color: var(--gws-text-strong); }
-
-.sentinel-workspace .wiki-block-discussion.has-discussions {
-    background: rgba(var(--bs-primary-rgb), .13);
-    color: var(--sentinel-link);
-}
+.sentinel-workspace .wiki-block[data-block-type="heading_1"] { --wiki-first-line: 2.232rem; }
+.sentinel-workspace .wiki-block[data-block-type="heading_2"] { --wiki-first-line: 1.846rem; }
+.sentinel-workspace .wiki-block[data-block-type="heading_3"] { --wiki-first-line: 1.568rem; }
+.sentinel-workspace .wiki-block[data-block-type="callout"] { --wiki-first-line-top: calc(.12rem + .9rem + 1px); }
 
 .sentinel-workspace .wiki-block[data-block-type="quote"] .wiki-block-content {
     border-color: #78716c;
@@ -5554,7 +5590,13 @@ a.wiki-live-title:hover { text-decoration: underline; }
         gap: .25rem;
         padding-top: 0;
     }
-    .sentinel-workspace .wiki-block-discussion { opacity: 1; }
+    /* The comment badge leaves the margin for the block's own row too. */
+    .sentinel-workspace .wiki-block-discussion {
+        position: static;
+        transform: none;
+        order: 3;
+        min-height: 44px;
+    }
     /* A child-page link card's title is its tap target; give it the full 44px row. */
     .sentinel-workspace .wiki-page-link-title {
         display: block;
@@ -5565,7 +5607,6 @@ a.wiki-live-title:hover { text-decoration: underline; }
         min-width: 44px;
         height: 44px;
     }
-    .sentinel-workspace .wiki-block-discussion.has-discussions { width: auto; }
     .sentinel-workspace .sentinel-tool-btn { min-width: 44px; }
 }
 

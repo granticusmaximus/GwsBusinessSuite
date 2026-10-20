@@ -821,7 +821,7 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
                 '[]')
             """);
 
-        await page.GetByTitle("Insert block below").ClickAsync();
+        await page.GetByRole(AriaRole.Button, new() { Name = "Add block below" }).ClickAsync();
         var picker = page.GetByRole(AriaRole.Listbox, new() { Name = "Insert a block" });
         await picker.GetByRole(AriaRole.Option, new() { Name = "3-column section" }).ClickAsync();
         await Expect(page.Locator(".wiki-column-editor")).ToHaveCountAsync(3);
@@ -1408,6 +1408,75 @@ public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture
         await Expect(linkedCell.Locator("input, select")).Not.ToBeVisibleAsync();
         var calls = await page.EvaluateAsync<string>("() => JSON.stringify(window.editorCalls)");
         calls.Should().NotContain("SaveInlineDatabaseCell");
+    }
+
+    [Fact]
+    public async Task GutterControls_ShouldWorkLikeNotions()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        var pageErrors = new List<string>();
+        page.PageError += (_, error) => pageErrors.Add(error);
+        await page.RouteAsync("http://localhost/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "text/html",
+            Body = """<div id="editor" class="wiki-block-editor" style="margin-left:80px"></div>"""
+        }));
+        await page.GotoAsync("http://localhost/editor");
+        var scriptPath = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot/js/wiki-block-editor.js"));
+        var moduleSource = (await File.ReadAllTextAsync(scriptPath)).Replace("export function ", "function ", StringComparison.Ordinal)
+            + "\nwindow.sentinelBlockEditor = { initialize, getBlocksJson, dispose, setDiscussionCounts };";
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Content = moduleSource });
+        await page.WaitForFunctionAsync("() => Boolean(window.sentinelBlockEditor)");
+        await page.EvaluateAsync(
+            """
+            json => {
+                window.__calls = [];
+                window.sentinelBlockEditor.initialize(document.querySelector('#editor'),
+                    { invokeMethodAsync: (name, ...args) => { window.__calls.push([name, ...args]); return Promise.resolve([]); } },
+                    json);
+            }
+            """,
+            WikiBlockJson.Serialize([TextBlock("A", 0), TextBlock("B", 0)]));
+        var blocks = page.Locator("#editor > .wiki-block");
+
+        // Only the "+" and the six-dot handle sit in the gutter.
+        (await blocks.Nth(0).Locator(".wiki-block-gutter > *").CountAsync()).Should().Be(2);
+
+        // Option/Alt-click on "+" adds the new block above instead of below.
+        await blocks.Nth(1).Locator(".wiki-block-add").ClickAsync(new() { Modifiers = [KeyboardModifier.Alt] });
+        await page.Keyboard.PressAsync("Escape");
+        (await EditorBlocksAsync(page)).Select(block => block.PlainText).Should().Equal("A", string.Empty, "B");
+
+        // Hovering shows Notion's two-line tooltip.
+        await blocks.Nth(0).Locator(".wiki-block-handle").HoverAsync();
+        var tip = page.Locator(".wiki-gutter-tip.is-visible");
+        await Expect(tip).ToHaveTextAsync("Drag to moveClick to open menu", new() { Timeout = 3000 });
+        await blocks.Nth(0).Locator(".wiki-block-add").HoverAsync();
+        await Expect(tip).ToContainTextAsync("Click to add below");
+        await Expect(tip).ToContainTextAsync("-click to add a block above");
+
+        // A plain click on the handle opens the block menu; without discussions there's no Comment.
+        await blocks.Nth(0).GetByRole(AriaRole.Button, new() { Name = "Block actions" }).ClickAsync();
+        var menu = page.GetByRole(AriaRole.Menu, new() { Name = "Block actions" });
+        await Expect(menu).ToBeVisibleAsync();
+        await Expect(page.Locator(".wiki-gutter-tip.is-visible")).ToHaveCountAsync(0);
+        await Expect(menu.GetByRole(AriaRole.Menuitem, new() { Name = "Comment" })).ToHaveCountAsync(0);
+        await page.Keyboard.PressAsync("Escape");
+        await page.Mouse.ClickAsync(5, 5);
+
+        // Once the page reports discussions, the count shows in the margin and Comment appears.
+        var firstId = await blocks.Nth(0).GetAttributeAsync("data-block-id");
+        await page.EvaluateAsync("id => window.sentinelBlockEditor.setDiscussionCounts(document.querySelector('#editor'), { [id]: 2 })", firstId);
+        await Expect(blocks.Nth(0).Locator(".wiki-block-discussion.has-discussions")).ToHaveTextAsync("2");
+        (await blocks.Nth(1).Locator(".wiki-block-discussion.has-discussions").CountAsync()).Should().Be(0);
+        await blocks.Nth(0).GetByRole(AriaRole.Button, new() { Name = "Block actions" }).ClickAsync();
+        await page.GetByRole(AriaRole.Menuitem, new() { Name = "Comment" }).ClickAsync();
+        (await page.EvaluateAsync<string[]>("() => window.__calls.find(c => c[0] === 'OpenBlockDiscussion')"))
+            .Should().Equal("OpenBlockDiscussion", firstId);
+        pageErrors.Should().BeEmpty();
     }
 
     [Fact]

@@ -1,0 +1,152 @@
+@page "/admin/world-news"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@implements IDisposable
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject WorldNewsService News
+
+<PageTitle>World News</PageTitle>
+
+<PageHeader Title="World News" Icon="bi-globe-europe-africa"
+            Description="What newsrooms in 41 countries are reporting, with every outlet's coverage of the same event grouped together across languages.">
+    <Meta>
+        <p class="small text-secondary mb-0">@StatusLine</p>
+    </Meta>
+    <Actions>
+        <button type="button" class="btn btn-primary" @onclick="ReadNow" disabled="@News.IsRefreshing">
+            <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>@(News.IsRefreshing ? "Reading…" : "Read now")
+        </button>
+    </Actions>
+    <Filters>
+        <input type="search" class="form-control world-news-search" placeholder="Filter events" aria-label="Filter events"
+               @bind="_filter" @bind:event="oninput" />
+        <select class="form-select world-news-range" aria-label="Time range" @bind="_rangeHours" @bind:after="LoadAsync">
+            <option value="24">Last 24 hours</option>
+            <option value="72">Last 3 days</option>
+            <option value="168">Last 7 days</option>
+        </select>
+    </Filters>
+</PageHeader>
+
+@if (_events is null)
+{
+    <LoadingIndicator Message="Loading world news…" />
+}
+else if (_events.Count == 0)
+{
+    <EmptyState Icon="bi-globe-europe-africa" Title="No events yet"
+                Message="The server reads the news every 15 minutes. The first read takes a few minutes while every headline is grouped.">
+        <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="ReadNow" disabled="@News.IsRefreshing">
+            <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Read now
+        </button>
+    </EmptyState>
+}
+else
+{
+    <div class="world-news @(_selected is null ? "" : "has-selection")">
+        <div class="world-news-list" aria-label="Events">
+            @if (VisibleEvents.Count == 0)
+            {
+                <EmptyState Icon="bi-search" Message="No events match that filter." />
+            }
+            @foreach (var e in VisibleEvents)
+            {
+                <button type="button" class="world-news-event @(e.Id == _selected?.Id ? "is-selected" : "")"
+                        aria-pressed="@(e.Id == _selected?.Id ? "true" : "false")" @onclick="() => SelectAsync(e)">
+                    <span class="world-news-event-title">@e.Title</span>
+                    <span class="world-news-event-meta">@Summary(e)</span>
+                </button>
+            }
+        </div>
+
+        <section class="world-news-detail" aria-live="polite">
+            @if (_selected is null)
+            {
+                <EmptyState Icon="bi-hand-index" Message="Pick an event to see every report on it, in every language." />
+            }
+            else
+            {
+                <button type="button" class="btn btn-sm btn-outline-secondary world-news-back" @onclick="() => _selected = null">
+                    <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Events
+                </button>
+                <h2 class="world-news-detail-title">@_selected.Title</h2>
+                <p class="world-news-detail-meta">
+                    @Count(_selected.OutletCount, "outlet"), @Count(_selected.ArticleCount, "report").
+                    First seen @_selected.FirstSeen.ToLocalGwsDateTime(), latest @_selected.LastSeen.ToLocalGwsDateTime().
+                </p>
+                <dl class="world-news-facts">
+                    <dt>Languages</dt>
+                    <dd>@string.Join(", ", _selected.Languages.Order())</dd>
+                    <dt>Reported from</dt>
+                    <dd>@string.Join(", ", _selected.Countries.Order())</dd>
+                </dl>
+                @foreach (var language in _articles.GroupBy(a => a.Language).OrderByDescending(g => g.Count()).ThenBy(g => g.Key))
+                {
+                    <h3 class="world-news-language">@language.Key <span>(@language.Count())</span></h3>
+                    <ul class="world-news-reports">
+                        @foreach (var a in language.OrderByDescending(a => a.SeenAt))
+                        {
+                            <li>
+                                <a class="world-news-report" href="@a.Url" target="_blank" rel="noopener noreferrer">
+                                    <span class="world-news-report-title">@a.Title</span>
+                                    <span class="world-news-report-meta">@a.Outlet · @a.Country · @a.SeenAt.ToLocalGwsDateTime()</span>
+                                </a>
+                            </li>
+                        }
+                    </ul>
+                }
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private IReadOnlyList<EventOverview>? _events;
+    private EventOverview? _selected;
+    private IReadOnlyList<WorldArticle> _articles = [];
+    private string _filter = string.Empty;
+    private int _rangeHours = 24;
+
+    private IReadOnlyList<EventOverview> VisibleEvents => string.IsNullOrWhiteSpace(_filter)
+        ? _events ?? []
+        : (_events ?? []).Where(e => e.Title.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)).ToList();
+
+    private string StatusLine => ((News.LastRefreshed is { } at ? $"Read {at.ToLocalGwsDateTime()}. " : string.Empty) + News.Status).Trim();
+
+    protected override async Task OnInitializedAsync()
+    {
+        News.Changed += OnNewsChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var since = DateTimeOffset.UtcNow.AddHours(-_rangeHours);
+        _events = await Task.Run(() => News.Store.TopEvents(since, 300));
+        if (_selected is not null) _selected = _events.FirstOrDefault(e => e.Id == _selected.Id);
+    }
+
+    private async Task SelectAsync(EventOverview e)
+    {
+        _selected = e;
+        _articles = await Task.Run(() => News.Store.ArticlesForEvent(e.Id));
+    }
+
+    // A read takes from seconds to a few minutes; the page follows it through News.Changed.
+    private void ReadNow() => _ = News.RefreshAsync(CancellationToken.None);
+
+    private void OnNewsChanged() => _ = InvokeAsync(async () =>
+    {
+        await LoadAsync();
+        StateHasChanged();
+    });
+
+    private static string Summary(EventOverview e) =>
+        $"{Count(e.OutletCount, "outlet")} · {Count(e.Languages.Count, "language")} · {Count(e.Countries.Count, "country", "countries")} · {e.LastSeen.ToLocalGwsDateTime()}";
+
+    private static string Count(int n, string one, string? many = null) => $"{n:N0} {(n == 1 ? one : many ?? one + "s")}";
+
+    public void Dispose() => News.Changed -= OnNewsChanged;
+}

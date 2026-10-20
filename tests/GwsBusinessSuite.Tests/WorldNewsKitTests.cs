@@ -268,30 +268,6 @@ public sealed class WorldNewsKitTests : IDisposable
         store.TopEvents(Now.AddDays(-2), 5).Select(e => e.ArticleCount).Should().Equal(2, 1);
     }
 
-    [Fact]
-    public void Html_ShouldListReportsByLanguage_WithLinksAndLocalTimes()
-    {
-        var e = new EventOverview("e1", "Istanbul floods", 3, 1, ["Turkey", "Germany"], ["Turkish", "German"], Now.AddHours(-5), Now.AddHours(-1));
-        var articles = new[]
-        {
-            Article("tr1", "İstanbul'da sel", "Turkish", Now.AddHours(-5)) with { Url = "https://example.tr/a?x=1&y=2", Country = "Turkey" },
-            Article("tr2", "Sel <son durum>", "Turkish", Now.AddHours(-2)) with { Country = "Turkey" },
-            Article("de1", "Flut in Istanbul", "German", Now.AddHours(-1)) with { Country = "Germany" },
-        };
-        var zone = TimeZoneInfo.CreateCustomTimeZone("UTC+3", TimeSpan.FromHours(3), "UTC+3", "UTC+3");
-
-        WorldNewsHtml.Meta(e, zone).Should().Be("1 outlet · 2 languages · 2 countries · 20-10-26 17:00");
-        var html = WorldNewsHtml.EventDetail(e, articles, zone);
-
-        html.Should().Contain("1 outlet, 3 reports. First seen 20-10-26 13:00, latest 20-10-26 17:00.");
-        html.IndexOf("<h3>Turkish (2)</h3>", StringComparison.Ordinal).Should().BeLessThan(html.IndexOf("<h3>German (1)</h3>", StringComparison.Ordinal),
-            "the language with the most reports comes first");
-        html.IndexOf("Sel &lt;son durum&gt;", StringComparison.Ordinal).Should().BeLessThan(html.IndexOf("İstanbul&#39;da sel", StringComparison.Ordinal),
-            "newest report first, and titles are encoded");
-        html.Should().Contain("href=\"https://example.tr/a?x=1&amp;y=2\"");
-        html.Should().Contain("<strong>Reported from:</strong> Germany, Turkey");
-    }
-
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();

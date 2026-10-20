@@ -47,8 +47,27 @@ from headlines + those snippets.
   shares the installed app's bundle id and data folder, so it wasn't launched. Grant to open
   the World tab after installing.
 
+**Moved to the whole app 20-10-26 (Grant: "part of the whole application ... add it to the Intel
+section").** The Mac World tab is gone; the feature is now the web page **Intelligence > World
+News** (`/admin/world-news`, `WorldNews.razor`). The Mac app shows it in its Workspace tab.
+- **Server reading:** `Infrastructure/Services/WorldNewsService` + `WorldNewsBackgroundService`
+  run the same WorldNewsKit pipeline every 15 minutes (first read 60 s after start-up), with
+  embeddinggemma on the server's Ollama (already in `ollama/server-models.txt`; Light mode
+  allows it, since it's embeddings, not generation).
+- **Embedding cap:** `WorldNews:MaxEmbedPerCycle` (default 1,500) spreads the first ~6,000-report
+  backlog over several reads, so chat on the droplet stays responsive.
+- **Storage:** its own SQLite file, `WorldNews:DatabasePath` (default `/app/data/worldnews.db`,
+  `worldnews.db` in Development). No migrations, 30 days kept. `WorldNews:Enabled` turns
+  reading off.
+- **Checked on a throwaway local server:** the background reader alone read 5,834 reports into
+  2,645 events. The responsive audit (phone-390, laptop-1280, desktop-1920, plus an "event"
+  state that picks the first event) is clean after fixing an overlapping list and small report
+  links. The server's live performance on the droplet is not yet seen.
+- **Kept from the Mac work:** `MacMenuPickerHandler` (it fixes every Mac picker).
+  `WorldNewsHtml` was removed; the web page renders its own markup.
+
 **Revised order:**
-2. The Mac tab, browsing events: sources, languages, countries, links.
+2. ~~The Mac tab~~ The web page (done, above).
 3. Outlet RSS feeds + the combined document + summaries.
 4. Situations + claims.
 5. Monitoring, the World view, and the SentinelGPT tool.

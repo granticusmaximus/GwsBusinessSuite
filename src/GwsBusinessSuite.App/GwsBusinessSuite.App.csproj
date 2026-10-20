@@ -77,7 +77,6 @@
 	<ItemGroup>
 		<ProjectReference Include="..\GwsBusinessSuite.OllamaKit\GwsBusinessSuite.OllamaKit.csproj" />
 		<ProjectReference Include="..\GwsBusinessSuite.SentinelAgentKit\GwsBusinessSuite.SentinelAgentKit.csproj" />
-		<ProjectReference Include="..\GwsBusinessSuite.WorldNewsKit\GwsBusinessSuite.WorldNewsKit.csproj" />
 	</ItemGroup>
 
 	<!-- This repo lives under ~/Desktop, which iCloud Drive's "Desktop & Documents Folders" sync

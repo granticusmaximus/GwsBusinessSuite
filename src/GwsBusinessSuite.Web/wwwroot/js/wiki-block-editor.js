@@ -141,6 +141,7 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
         }));
     }).catch(() => { /* circuit may be gone, or no templates yet - menu just skips the group */ });
 
+    setUpGutterTooltips(container);
     container.addEventListener('pointerdown', event => onHandlePointerDown(state, event));
     container.addEventListener('pointermove', event => onHandlePointerMove(state, event));
     container.addEventListener('pointerup', event => onHandlePointerUp(state, event));
@@ -149,7 +150,7 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
         // A parent page may contain only child-page cards. The large blank editor tail must still
         // behave like an editing surface: clicking it creates a paragraph instead of leaving the
         // page with no possible caret target.
-        if (event.target === container && !state.locked) {
+        if (event.target === container && !state.locked && performance.now() > (state.ignoreTailClickUntil || 0)) {
             const created = createBlockElement(emptyBlock('paragraph'), state);
             container.appendChild(created);
             refreshBlockPresentation(container);
@@ -511,6 +512,7 @@ export function setDiscussionCounts(container, counts) {
     const state = states.get(container);
     if (!state) return;
 
+    state.discussionsEnabled = true;
     state.discussionCounts = new Map(
         Object.entries(counts || {}).map(([blockId, count]) => [blockId.toLowerCase(), Number(count) || 0]));
     for (const blockEl of container.querySelectorAll(':scope > .wiki-block')) {
@@ -690,6 +692,7 @@ function setOfflineState(state, offline) {
 export function dispose(container) {
     const state = states.get(container);
     if (!state) return;
+    hideGutterTip();
     if (state.notifyTimer) clearTimeout(state.notifyTimer);
     if (state.locked) unlockEditables(state);
     closeFloatingMenus(state);
@@ -770,11 +773,16 @@ function createBlockElement(block, state) {
     const gutter = document.createElement('div');
     gutter.className = 'wiki-block-gutter';
 
+    // Notion's hover controls: a thin "+" and a six-dot handle, with Notion's two-line tooltips
+    // (see setUpGutterTooltips). "+" adds a block below - Option/Alt-click adds one above - and
+    // opens the block picker; the handle drags the block, and a plain click opens its menu.
     const addBtn = document.createElement('button');
     addBtn.type = 'button';
     addBtn.className = 'wiki-block-add';
-    addBtn.title = 'Insert block below';
-    addBtn.textContent = '+';
+    addBtn.setAttribute('aria-label', 'Add block below');
+    addBtn.dataset.tipTitle = 'Click to add below';
+    addBtn.dataset.tipHint = `${isApplePlatform() ? 'Option' : 'Alt'}-click to add a block above`;
+    addBtn.innerHTML = PLUS_ICON;
     addBtn.addEventListener('mousedown', event => {
         event.preventDefault();
         // Without this, the same mousedown that opens the menu below keeps bubbling up to the
@@ -789,8 +797,17 @@ function createBlockElement(block, state) {
         const block = emptyBlock('paragraph');
         block.indentLevel = blockIndent(el);
         const created = createBlockElement(block, state);
-        const branch = getBlockBranch(el);
-        branch[branch.length - 1].after(created);
+        // Adding above pushes this button down, so the mouseup lands elsewhere and the browser
+        // sends the click to the editor itself - which reads as "click the blank tail, add a
+        // paragraph" (see linkClickHandler). That one click is ignored.
+        state.ignoreTailClickUntil = performance.now() + 500;
+        if (event.altKey) {
+            el.before(created);
+        } else {
+            const branch = getBlockBranch(el);
+            branch[branch.length - 1].after(created);
+        }
+        hideGutterTip();
         refreshBlockPresentation(state.container);
         focusBlock(created);
         notifyChanged(state);
@@ -813,22 +830,22 @@ function createBlockElement(block, state) {
         }
     });
 
-    const handle = document.createElement('span');
+    const handle = document.createElement('button');
+    handle.type = 'button';
     handle.className = 'wiki-block-handle';
-    handle.title = 'Drag to reorder';
-    handle.textContent = '⠿';
-
-    const menuBtn = document.createElement('button');
-    menuBtn.type = 'button';
-    menuBtn.className = 'wiki-block-menu-toggle';
-    menuBtn.title = 'Block actions';
-    menuBtn.setAttribute('aria-label', 'Block actions');
-    menuBtn.textContent = '⋮';
-    menuBtn.addEventListener('mousedown', event => event.preventDefault());
-    menuBtn.addEventListener('click', event => {
+    handle.setAttribute('aria-label', 'Block actions');
+    handle.setAttribute('aria-haspopup', 'menu');
+    handle.dataset.tipTitle = 'Drag to move';
+    handle.dataset.tipHint = 'Click to open menu';
+    handle.innerHTML = DRAG_HANDLE_ICON;
+    handle.addEventListener('mousedown', event => event.preventDefault());
+    handle.addEventListener('click', event => {
         event.preventDefault();
         event.stopPropagation();
-        openBlockMenu(state, el, menuBtn);
+        // The click that ends a drag (see onHandlePointerUp) is not a request for the menu.
+        if (state.handleDragEndedAt && performance.now() - state.handleDragEndedAt < 400) return;
+        hideGutterTip();
+        openBlockMenu(state, el, handle);
     });
 
     const discussionBtn = document.createElement('button');
@@ -842,12 +859,76 @@ function createBlockElement(block, state) {
         catch { /* the Blazor circuit may have disconnected */ }
     });
 
-    gutter.append(addBtn, discussionBtn, menuBtn, handle);
+    gutter.append(addBtn, handle);
     el.appendChild(gutter);
     el.appendChild(createBlockBody(block, state));
+    // Like Notion, a block's comments show as a count in the right margin; new ones start from
+    // the handle's menu (Comment).
+    el.appendChild(discussionBtn);
     applyDiscussionCount(el, state);
     applySuggestionMark(el, state);
     return el;
+}
+
+// Notion-style gutter icons, drawn in currentColor so the theme sets them.
+const PLUS_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M8 2.75v10.5M2.75 8h10.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+const DRAG_HANDLE_ICON = '<svg viewBox="0 0 10 10" aria-hidden="true" focusable="false" fill="currentColor"><circle cx="3" cy="1" r="1"/><circle cx="7" cy="1" r="1"/><circle cx="3" cy="5" r="1"/><circle cx="7" cy="5" r="1"/><circle cx="3" cy="9" r="1"/><circle cx="7" cy="9" r="1"/></svg>';
+const COMMENT_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3 3h10a1.5 1.5 0 0 1 1.5 1.5v5.5A1.5 1.5 0 0 1 13 11.5H7.5l-3 2.5v-2.5H3A1.5 1.5 0 0 1 1.5 10V4.5A1.5 1.5 0 0 1 3 3z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>';
+
+function isApplePlatform() {
+    return /Mac|iPhone|iPad/.test(navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '');
+}
+
+// Notion's gutter tooltip: a small dark label above the control, the action on the first line
+// and the alternative in grey below it, shown after a short hover. One shared element on <body>
+// (re-attached if enhanced navigation removed it), driven by data-tip-title/data-tip-hint.
+let gutterTip = null;
+let gutterTipTimer = 0;
+
+function setUpGutterTooltips(container) {
+    container.addEventListener('pointerover', event => {
+        const target = event.target.closest?.('[data-tip-title]');
+        if (!target || !container.contains(target) || event.pointerType === 'touch') return;
+        clearTimeout(gutterTipTimer);
+        gutterTipTimer = setTimeout(() => showGutterTip(target), 450);
+    });
+    container.addEventListener('pointerout', event => {
+        const target = event.target.closest?.('[data-tip-title]');
+        if (target && !target.contains(event.relatedTarget)) hideGutterTip();
+    });
+    container.addEventListener('pointerdown', hideGutterTip);
+    container.addEventListener('scroll', hideGutterTip, true);
+}
+
+function showGutterTip(target) {
+    if (!target.isConnected) return;
+    if (!gutterTip) {
+        gutterTip = document.createElement('div');
+        gutterTip.className = 'wiki-gutter-tip';
+        gutterTip.setAttribute('role', 'tooltip');
+    }
+    if (!gutterTip.isConnected) document.body.appendChild(gutterTip);
+    gutterTip.replaceChildren();
+    const title = document.createElement('div');
+    title.textContent = target.dataset.tipTitle;
+    gutterTip.appendChild(title);
+    if (target.dataset.tipHint) {
+        const hint = document.createElement('div');
+        hint.className = 'wiki-gutter-tip-hint';
+        hint.textContent = target.dataset.tipHint;
+        gutterTip.appendChild(hint);
+    }
+    const rect = target.getBoundingClientRect();
+    gutterTip.style.left = `${rect.left + rect.width / 2}px`;
+    gutterTip.style.top = `${rect.top - 6}px`;
+    gutterTip.classList.toggle('is-below', rect.top < 60);
+    if (rect.top < 60) gutterTip.style.top = `${rect.bottom + 6}px`;
+    gutterTip.classList.add('is-visible');
+}
+
+function hideGutterTip() {
+    clearTimeout(gutterTipTimer);
+    gutterTip?.classList.remove('is-visible');
 }
 
 function applyDiscussionCount(blockEl, state) {
@@ -855,9 +936,8 @@ function applyDiscussionCount(blockEl, state) {
     if (!button) return;
 
     const count = state.discussionCounts.get((blockEl.dataset.blockId || '').toLowerCase()) || 0;
-    blockEl.querySelector('.wiki-block-gutter')?.classList.toggle('has-discussions', count > 0);
     button.classList.toggle('has-discussions', count > 0);
-    button.textContent = count > 0 ? `💬 ${count}` : '💬';
+    button.innerHTML = COMMENT_ICON + (count > 0 ? `<span>${count}</span>` : '');
     button.title = count > 0
         ? `Open ${count} block discussion${count === 1 ? '' : 's'}`
         : 'Start a discussion on this block';
@@ -4093,8 +4173,7 @@ function onHandlePointerDown(state, event) {
     if (!blockEl) return;
 
     const branch = getBlockBranch(blockEl);
-    state.drag = { blockEl, branch, pointerId: event.pointerId };
-    branch.forEach(element => element.classList.add('is-dragging'));
+    state.drag = { blockEl, branch, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, moved: false };
     handle.setPointerCapture(event.pointerId);
     event.preventDefault();
 }
@@ -4274,6 +4353,13 @@ function navigateToWikiLink(state, anchor, event) {
 
 function onHandlePointerMove(state, event) {
     if (!state.drag || state.drag.pointerId !== event.pointerId) return;
+    if (!state.drag.moved) {
+        // Under 4px is still a click on the handle (which opens the block menu), not a drag.
+        if (Math.hypot(event.clientX - state.drag.startX, event.clientY - state.drag.startY) < 4) return;
+        state.drag.moved = true;
+        hideGutterTip();
+        state.drag.branch.forEach(element => element.classList.add('is-dragging'));
+    }
     const dragged = new Set(state.drag.branch);
     const siblings = [...state.container.querySelectorAll('.wiki-block')].filter(el => !dragged.has(el));
     const target = siblings.find(el => {
@@ -4295,8 +4381,11 @@ function onHandlePointerMove(state, event) {
 
 function onHandlePointerUp(state, event) {
     if (!state.drag || state.drag.pointerId !== event.pointerId) return;
+    const moved = state.drag.moved;
     state.drag.branch.forEach(element => element.classList.remove('is-dragging'));
     state.drag = null;
+    if (!moved) return;
+    state.handleDragEndedAt = performance.now();
     refreshBlockPresentation(state.container);
     notifyChanged(state);
 }
@@ -4331,6 +4420,12 @@ function openBlockMenu(state, blockEl, anchorEl) {
         { label: 'Move down', icon: '↓', action: () => moveBlock(state, blockEl, 1), disabled: !nextPeerRoot(blockEl) },
         { label: 'Delete', icon: '🗑', action: () => deleteBlockAction(state, blockEl) }
     ];
+    if (state.discussionsEnabled) {
+        items.unshift({ label: 'Comment', icon: '💬', action: () => {
+            try { state.dotNetRef.invokeMethodAsync('OpenBlockDiscussion', blockEl.dataset.blockId); }
+            catch { /* the Blazor circuit may have disconnected */ }
+        } });
+    }
 
     for (const item of items) {
         const option = document.createElement('button');
