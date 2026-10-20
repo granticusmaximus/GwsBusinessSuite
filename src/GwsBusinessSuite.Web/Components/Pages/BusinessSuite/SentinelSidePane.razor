@@ -120,7 +120,7 @@
         if (!_initialized)
         {
             _dotNetRef = DotNetObjectReference.Create(this);
-            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=14");
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=15");
             await _module.InvokeVoidAsync("initialize", _editorContainer, _dotNetRef, _blocksJson);
             await _module.InvokeVoidAsync("setLocked", _editorContainer, _page?.EditLockedBy is not null);
             _initialized = true;

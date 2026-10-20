@@ -439,6 +439,8 @@
                                 <div role="button" tabindex="0" class="sentinel-nav-item @(!item.IsDatabase ? "is-draggable" : string.Empty)"
                                      aria-disabled="@(IsBusy ? "true" : "false")"
                                      draggable="@(!item.IsDatabase ? "true" : "false")"
+                                     data-sentinel-drag-id="@(!item.IsDatabase ? item.Id.ToString() : null)"
+                                     data-sentinel-drag-database="false"
                                      @ondragstart="() => StartDragRecentPage(item)"
                                      @ondragend="EndDragNode"
                                      @onclick="() => OpenRecentItemAsync(item)"
@@ -619,6 +621,9 @@
                             <div class="wiki-tree-row @(nodeDepth == 0 ? "is-top-level" : string.Empty) @(hasChildren ? "has-children" : string.Empty) @((node.IsDatabase ? SelectedDatabaseId == node.Id : SelectedPageId == node.Id) ? "active" : "") @(node.IsArchived ? "wiki-tree-archived" : "") @(_dragOverNodeId == node.Id ? "wiki-tree-drag-over" : "") @(_selectedTreeNodeIds.Contains(node.Id) ? "wiki-tree-multi-selected" : "")"
                                  style="padding-left:@(0.4 + nodeDepth * 1.15)rem;"
                                  draggable="true"
+                                 data-sentinel-drag-id="@node.Id"
+                                 data-sentinel-drag-database="@(node.IsDatabase ? "true" : "false")"
+                                 data-sentinel-drop-id="@(!node.IsDatabase ? node.Id.ToString() : null)"
                                  data-sentinel-page-id="@(node.IsDatabase ? null : node.Id.ToString())"
                                  data-sentinel-page-title="@(node.IsDatabase ? null : node.Title)"
                                  data-sentinel-page-icon="@(node.IsDatabase ? null : string.IsNullOrWhiteSpace(node.Icon) ? "📄" : node.Icon)"
@@ -3276,8 +3281,9 @@
 
         if (firstRender)
         {
-            _workspaceModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-workspace.js");
-            await _workspaceModule.InvokeVoidAsync("initialize", _workspaceSearchInput);
+            _blockEditorRef ??= DotNetObjectReference.Create(this);
+            _workspaceModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-workspace.js?v=2");
+            await _workspaceModule.InvokeVoidAsync("initialize", _workspaceSearchInput, _blockEditorRef);
         }
 
         if (!_wikiLinksInitialized)
@@ -3301,7 +3307,7 @@
         if (SelectedDatabaseId is null && !_blockEditorInitialized)
         {
             _blockEditorRef ??= DotNetObjectReference.Create(this);
-            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=14");
+            _blockEditorModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/wiki-block-editor.js?v=15");
             await _blockEditorModule.InvokeVoidAsync(
                 "initialize",
                 _blockEditorContainer,
@@ -4485,6 +4491,27 @@
             _expandedPageIds.Add(targetNode.Id);
             await LoadTreeAsync(selectFirstPage: false);
         });
+    }
+
+    // WKWebView in the Mac app doesn't reliably complete native HTML drag/drop from sidebar
+    // controls. sentinel-workspace.js supplies a pointer-based fallback there and calls the same
+    // guarded reorder path used by native drag/drop.
+    [JSInvokable]
+    public async Task ReparentTreeNodeFromPointer(string draggedId, bool draggedIsDatabase, string targetId)
+    {
+        if (!Guid.TryParse(draggedId, out var nodeId)
+            || !Guid.TryParse(targetId, out var parentId)
+            || nodeId == parentId)
+        {
+            return;
+        }
+
+        var target = AllTreeNodes().FirstOrDefault(node => node.Id == parentId && !node.IsDatabase);
+        if (target == default) return;
+
+        _draggedNodeId = nodeId;
+        _draggedNodeIsDatabase = draggedIsDatabase;
+        await DropOnNodeAsync(target);
     }
 
     private void ToggleRowMenu(Guid nodeId) =>

@@ -11,6 +11,40 @@ namespace GwsBusinessSuite.Tests;
 public sealed class WikiBlockEditorBrowserTests(PlaywrightBrowserFixture fixture)
 {
     [Fact]
+    public async Task PageWithOnlyChildLinks_ClickingBlankTail_ShouldCreateEditableParagraph()
+    {
+        await using var page = await fixture.Browser.NewPageAsync();
+        await page.SetContentAsync("""<div id="editor" class="wiki-block-editor" style="min-height:300px"></div>""");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "../../../../../src/GwsBusinessSuite.Web/wwwroot"));
+        var source = await File.ReadAllTextAsync(Path.Combine(root, "js/wiki-block-editor.js"));
+        await page.AddScriptTagAsync(new()
+        {
+            Type = "module",
+            Content = source.Replace("export function ", "function ", StringComparison.Ordinal)
+                + "\nwindow.editor = { initialize, getBlocksJson };"
+        });
+        await page.WaitForFunctionAsync("() => Boolean(window.editor)");
+        var linkedId = Guid.NewGuid();
+        var json = WikiBlockJson.Serialize([
+            WikiBlockJson.CreatePageLink(linkedId, "Child one"),
+            WikiBlockJson.CreatePageLink(Guid.NewGuid(), "Child two")
+        ]);
+        await page.EvaluateAsync("""
+            json => window.editor.initialize(document.querySelector('#editor'),
+                { invokeMethodAsync: () => Promise.resolve([]) }, json)
+            """, json);
+
+        await page.Locator("#editor").ClickAsync(new() { Position = new() { X = 250, Y = 250 } });
+
+        await Expect(page.Locator(".wiki-block-content")).ToHaveCountAsync(1);
+        (await page.EvaluateAsync<string>("() => document.activeElement?.className || ''"))
+            .Should().Contain("wiki-block-content");
+        WikiBlockJson.ParseBlocks(await page.EvaluateAsync<string>("() => window.editor.getBlocksJson(document.querySelector('#editor'))"))
+            .Should().HaveCount(3);
+    }
+
+    [Fact]
     public async Task EmptyParagraphs_Enter_ShouldKeepHintOnlyAtCaretAndPersistNoText()
     {
         await using var page = await fixture.Browser.NewPageAsync();

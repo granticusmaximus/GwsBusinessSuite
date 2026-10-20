@@ -146,6 +146,17 @@ export function initialize(container, dotNetRef, initialBlocksJson, historyKey =
     container.addEventListener('pointerup', event => onHandlePointerUp(state, event));
     container.addEventListener('pointercancel', event => onHandlePointerUp(state, event));
     container.addEventListener('click', state.linkClickHandler = event => {
+        // A parent page may contain only child-page cards. The large blank editor tail must still
+        // behave like an editing surface: clicking it creates a paragraph instead of leaving the
+        // page with no possible caret target.
+        if (event.target === container && !state.locked) {
+            const created = createBlockElement(emptyBlock('paragraph'), state);
+            container.appendChild(created);
+            refreshBlockPresentation(container);
+            focusBlock(created);
+            notifyChanged(state);
+            return;
+        }
         const dateChip = event.target.closest?.('a[href^="datemention:"]');
         if (dateChip && container.contains(dateChip)) {
             event.preventDefault();
