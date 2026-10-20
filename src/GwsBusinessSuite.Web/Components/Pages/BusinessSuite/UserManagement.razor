@@ -9,17 +9,15 @@
 
 <PageTitle>User Management</PageTitle>
 
-<div class="page-header d-flex align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-person-fill-gear me-2 text-primary"></i>User Management</h1>
-        <p>Create accounts, assign roles, and control who can access the admin portal.</p>
-    </div>
-    <button class="btn btn-primary d-inline-flex align-items-center gap-2"
-            @onclick="ToggleCreateForm" disabled="@IsBusy">
-        <i class="bi @(ShowCreateForm ? "bi-x-lg" : "bi-plus-lg")"></i>
-        <span>@(ShowCreateForm ? "Cancel" : "New User")</span>
-    </button>
-</div>
+<PageHeader Title="User Management" Icon="bi-person-fill-gear" Description="Create accounts, assign roles, and control who can access the admin portal.">
+    <Actions>
+        <button type="button" class="btn btn-primary d-inline-flex align-items-center gap-2"
+                @onclick="ToggleCreateForm" disabled="@IsBusy">
+            <i class="bi @(ShowCreateForm ? "bi-x-lg" : "bi-plus-lg")" aria-hidden="true"></i>
+            <span>@(ShowCreateForm ? "Cancel" : "New User")</span>
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {

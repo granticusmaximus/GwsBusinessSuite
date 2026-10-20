@@ -26,6 +26,13 @@
     font-size: .9rem;
 }
 
+/* Touch screens get a full 44px target (the responsive audit's minimum). */
+@media (pointer: coarse) {
+    .gws-app-tabs ::deep .gws-app-tab {
+        min-height: 44px;
+    }
+}
+
 .gws-app-tabs ::deep .gws-app-tab:hover {
     color: var(--gws-text-strong);
 }

@@ -9,11 +9,23 @@
 
 <PageTitle>CRM</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-people-fill me-2 text-primary"></i>CRM</h1>
-    <p>Track leads, contacts, and deals with local SQLite persistence.</p>
-</div>
-<AppTabs App="GwsBusinessSuite.Web.Services.AdminApps.Crm" />
+<PageHeader Title="CRM" Icon="bi-people-fill" Description="Track leads, contacts, and deals with local SQLite persistence."
+            App="GwsBusinessSuite.Web.Services.AdminApps.Crm">
+    <Actions>
+        @if (ActiveTab == "Pipeline")
+        {
+            <button type="button" class="btn btn-primary" data-gws-focus="#deal-contact" @onclick="CreateNewDeal" disabled="@IsBusy">
+                <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New deal
+            </button>
+        }
+        else
+        {
+            <button type="button" class="btn btn-primary" @onclick="OpenQuickCreateAsync" disabled="@IsBusy">
+                <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New contact
+            </button>
+        }
+    </Actions>
+</PageHeader>
 
 <ul class="nav nav-pills mb-4">
     <li class="nav-item">
@@ -80,12 +92,6 @@ else
                 <button class="btn btn-sm @(ShowTrash ? "btn-secondary" : "btn-outline-secondary")" @onclick="ToggleTrashViewAsync" disabled="@IsBusy">
                     <i class="bi bi-trash3 me-1"></i>Trash@(TrashedContacts.Count > 0 ? $" ({TrashedContacts.Count})" : "")
                 </button>
-                @if (!ShowTrash)
-                {
-                    <button class="btn btn-sm btn-outline-primary" @onclick="() => ShowQuickCreate = !ShowQuickCreate" disabled="@IsBusy">
-                        <i class="bi bi-plus-lg me-1"></i>New Contact
-                    </button>
-                }
             </div>
         </div>
         @if (!ShowTrash && ShowQuickCreate)
@@ -93,7 +99,7 @@ else
             <div class="card-body border-bottom py-3">
                 <div class="row g-2">
                     <div class="col-md-5">
-                        <input class="form-control form-control-sm" placeholder="Full name"
+                        <input class="form-control form-control-sm" placeholder="Full name" aria-label="Full name" @ref="_quickCreateNameInput"
                                value="@QuickCreateName" @oninput="e => QuickCreateName = e.Value?.ToString() ?? string.Empty" />
                     </div>
                     <div class="col-md-5">
@@ -102,6 +108,7 @@ else
                     </div>
                     <div class="col-md-2 d-flex gap-2">
                         <button class="btn btn-sm btn-primary" @onclick="QuickCreateContactAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(QuickCreateName))">Save</button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => ShowQuickCreate = false">Cancel</button>
                     </div>
                 </div>
             </div>
@@ -150,7 +157,18 @@ else
                     </div>
                     @if (VisibleContacts.Count == 0)
                     {
-                        <EmptyState Icon="bi-people" Message="@(Contacts.Count == 0 ? "No contacts yet. Add your first lead or customer to get started." : "No contacts match your search.")" />
+                        if (Contacts.Count == 0)
+                        {
+                            <EmptyState Icon="bi-people" Title="No contacts yet" Message="Add your first lead or customer to get started.">
+                                <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="OpenQuickCreateAsync" disabled="@IsBusy">
+                                    <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New contact
+                                </button>
+                            </EmptyState>
+                        }
+                        else
+                        {
+                            <EmptyState Icon="bi-people" Message="No contacts match your search." />
+                        }
                     }
                     else
                     {
@@ -189,8 +207,8 @@ else
                 <ValidationSummary />
                 <div class="row g-3">
                     <div class="col-md-4">
-                        <label class="form-label fw-semibold small">Contact</label>
-                        <InputSelect class="form-select" @bind-Value="DealEditor.ContactId">
+                        <label class="form-label fw-semibold small" for="deal-contact">Contact</label>
+                        <InputSelect id="deal-contact" class="form-select" @bind-Value="DealEditor.ContactId">
                             <option value="@Guid.Empty">Select a contact...</option>
                             @foreach (var contact in Contacts)
                             {
@@ -353,6 +371,25 @@ else
             Logger.LogError(ex, "Unable to load CRM deals.");
             ErrorMessage = $"Unable to load deals. {ex.Message}";
         }
+    }
+
+    // The header's "New contact": the quick-create row on the Contacts list, with its name field focused.
+    private ElementReference _quickCreateNameInput;
+    private bool _focusQuickCreate;
+
+    private async Task OpenQuickCreateAsync()
+    {
+        if (ActiveTab != "Contacts") await SwitchTabAsync("Contacts");
+        ShowTrash = false;
+        ShowQuickCreate = true;
+        _focusQuickCreate = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusQuickCreate) return;
+        _focusQuickCreate = false;
+        await _quickCreateNameInput.FocusAsync();
     }
 
     private void CreateNewDeal()

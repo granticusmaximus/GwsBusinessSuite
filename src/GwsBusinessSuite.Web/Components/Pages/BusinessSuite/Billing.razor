@@ -11,10 +11,13 @@
 
 <PageTitle>Billing</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-receipt me-2 text-primary"></i>Billing</h1>
-    <p>Draft invoices locally, then send them through Stripe's hosted invoice page.</p>
-</div>
+<PageHeader Title="Billing" Icon="bi-receipt" Description="Draft invoices locally, then send them through Stripe's hosted invoice page.">
+    <Actions>
+        <button type="button" class="btn btn-primary" data-gws-focus="#invoice-contact" @onclick="ResetEditor">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New invoice
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (!BillingService.IsStripeConfigured)
 {
@@ -55,20 +58,14 @@ else
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
                 <span class="fw-semibold">@(EditingId is null ? "New Draft" : "Edit Draft")</span>
-                @if (EditingId is not null)
-                {
-                    <button class="btn btn-sm btn-outline-secondary" @onclick="ResetEditor">
-                        <i class="bi bi-plus-lg me-1"></i>New
-                    </button>
-                }
             </div>
             <div class="card-body">
                 <EditForm Model="Editor" OnValidSubmit="SaveDraftAsync">
                 <DataAnnotationsValidator />
                 <ValidationSummary />
                 <div class="mb-3">
-                    <label class="form-label fw-semibold small">Contact</label>
-                    <select class="form-select" @bind="Editor.ContactId" @bind:after="OnContactChangedAsync">
+                    <label class="form-label fw-semibold small" for="invoice-contact">Contact</label>
+                    <select id="invoice-contact" class="form-select" @bind="Editor.ContactId" @bind:after="OnContactChangedAsync">
                         <option value="@Guid.Empty">Select a contact...</option>
                         @foreach (var contact in Contacts)
                         {
@@ -177,7 +174,11 @@ else
             <div class="card-body p-0">
                 @if (Invoices.Count == 0)
                 {
-                    <EmptyState Icon="bi-receipt" Message="No invoices yet." />
+                    <EmptyState Icon="bi-receipt" Title="No invoices yet" Message="Draft one for a contact, then send it through Stripe.">
+                        <button type="button" class="btn btn-sm btn-primary mt-2" data-gws-focus="#invoice-contact">
+                            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New invoice
+                        </button>
+                    </EmptyState>
                 }
                 else
                 {

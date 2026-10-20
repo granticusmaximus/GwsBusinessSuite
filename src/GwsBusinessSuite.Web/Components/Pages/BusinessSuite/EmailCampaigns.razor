@@ -14,10 +14,14 @@
 
 <PageTitle>Email Campaigns</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-envelope-paper-fill me-2 text-primary"></i>Email Campaigns</h1>
-    <p>New-article alert lists that visitors sign up for, and drip sequences enrolled contacts receive days apart. Every email includes an unsubscribe link.</p>
-</div>
+<PageHeader Title="Email Campaigns" Icon="bi-envelope-paper-fill"
+            Description="New-article alert lists that visitors sign up for, and drip sequences enrolled contacts receive days apart. Every email includes an unsubscribe link.">
+    <Actions>
+        <button type="button" class="btn btn-primary" data-gws-focus="#campaign-name" @onclick="ResetEditor">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New drip sequence
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -75,17 +79,13 @@ else
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
                 <span class="fw-semibold">@(Editor.Id is null ? "New Campaign" : "Edit Campaign")</span>
-                @if (Editor.Id is not null)
-                {
-                    <button class="btn btn-sm btn-outline-secondary" @onclick="ResetEditor"><i class="bi bi-plus-lg me-1"></i>New</button>
-                }
             </div>
             <div class="card-body">
                 <EditForm Model="Editor" OnValidSubmit="SaveAsync">
                 <DataAnnotationsValidator />
                 <ValidationSummary />
                 <div class="mb-2">
-                    <input class="form-control form-control-sm" placeholder="Campaign name" @bind="Editor.Name" />
+                    <input id="campaign-name" class="form-control form-control-sm" placeholder="Campaign name" aria-label="Campaign name" @bind="Editor.Name" />
                 </div>
                 <div class="mb-3">
                     <ProfessionalWysiwygEditor @bind-Value="Editor.Description" Compact="true" MinHeight="100px" Placeholder="Description" AriaLabel="Campaign description" />
@@ -129,7 +129,11 @@ else
             <div class="card-body p-0">
                 @if (Campaigns.Count == 0)
                 {
-                    <EmptyState Icon="bi-envelope-paper" Message="No campaigns yet." />
+                    <EmptyState Icon="bi-envelope-paper" Title="No drip sequences yet" Message="A drip sequence emails enrolled contacts a series of messages, days apart.">
+                        <button type="button" class="btn btn-sm btn-primary mt-2" data-gws-focus="#campaign-name">
+                            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New drip sequence
+                        </button>
+                    </EmptyState>
                 }
                 else
                 {

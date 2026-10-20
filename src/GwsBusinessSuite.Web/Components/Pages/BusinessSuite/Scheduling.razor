@@ -11,10 +11,13 @@
 
 <PageTitle>Scheduling</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-calendar2-check me-2 text-primary"></i>Scheduling</h1>
-    <p>Booking types visitors can reserve time against, and the bookings they've made.</p>
-</div>
+<PageHeader Title="Scheduling" Icon="bi-calendar2-check" Description="Booking types visitors can reserve time against, and the bookings they've made.">
+    <Actions>
+        <button type="button" class="btn btn-primary" data-gws-focus="#booking-type-title" @onclick="ResetEditor">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New booking type
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (IsLoading)
 {
@@ -28,12 +31,6 @@ else
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
                 <span class="fw-semibold">@(Editor.Id is null ? "New Booking Type" : "Edit Booking Type")</span>
-                @if (Editor.Id is not null)
-                {
-                    <button class="btn btn-sm btn-outline-secondary" @onclick="ResetEditor">
-                        <i class="bi bi-plus-lg me-1"></i>New
-                    </button>
-                }
             </div>
             <div class="card-body">
                 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
@@ -54,7 +51,7 @@ else
                 <DataAnnotationsValidator />
                 <ValidationSummary />
                 <div class="mb-2">
-                    <input class="form-control form-control-sm" placeholder="Title" @bind="Editor.Title" />
+                    <input id="booking-type-title" class="form-control form-control-sm" placeholder="Title" aria-label="Title" @bind="Editor.Title" />
                 </div>
                 <div class="mb-2">
                     <input class="form-control form-control-sm" placeholder="URL slug (auto if blank)" @bind="Editor.Slug" />
@@ -147,7 +144,11 @@ else
             <div class="card-body p-0">
                 @if (BookingTypes.Count == 0)
                 {
-                    <EmptyState Icon="bi-calendar2-check" Message="No booking types yet." />
+                    <EmptyState Icon="bi-calendar2-check" Title="No booking types yet" Message="Add one to give visitors something to book time against.">
+                        <button type="button" class="btn btn-sm btn-primary mt-2" data-gws-focus="#booking-type-title">
+                            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New booking type
+                        </button>
+                    </EmptyState>
                 }
                 else
                 {
@@ -179,7 +180,7 @@ else
             <div class="card-body p-0">
                 @if (Bookings.Count == 0)
                 {
-                    <EmptyState Icon="bi-calendar-week" Message="No bookings yet." />
+                    <EmptyState Icon="bi-calendar-week" Title="No bookings yet" Message="Bookings appear here as visitors reserve time." />
                 }
                 else
                 {

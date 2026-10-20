@@ -17,19 +17,26 @@
 
 <PageTitle>Support</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-life-preserver me-2 text-primary"></i>Support</h1>
-    <p>Tickets raised by contacts through the client portal or by email, plus anything opened on their behalf.</p>
-    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _emailInOpen = !_emailInOpen" aria-expanded="@(_emailInOpen ? "true" : "false")">
-        <i class="bi bi-envelope-arrow-down me-1" aria-hidden="true"></i>Email-to-ticket
-    </button>
-    @if (AverageSatisfactionRating is { } average)
-    {
-        <p class="small text-secondary">
-            <i class="bi bi-star-fill text-warning me-1"></i>@average.ToString("0.0") avg satisfaction (@RatedTicketCount rating@(RatedTicketCount == 1 ? "" : "s"))
-        </p>
-    }
-</div>
+<PageHeader Title="Support" Icon="bi-life-preserver" Description="Tickets raised by contacts through the client portal or by email, plus anything opened on their behalf.">
+    <Meta>
+        @if (AverageSatisfactionRating is { } average)
+        {
+            <p class="small text-secondary mb-0">
+                <i class="bi bi-star-fill text-warning me-1" aria-hidden="true"></i>@average.ToString("0.0") avg satisfaction (@RatedTicketCount rating@(RatedTicketCount == 1 ? "" : "s"))
+            </p>
+        }
+    </Meta>
+    <Actions>
+        <button type="button" class="btn btn-primary" data-gws-focus="#ticket-contact">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New ticket
+        </button>
+    </Actions>
+    <More>
+        <button type="button" class="dropdown-item" @onclick="() => _emailInOpen = !_emailInOpen">
+            <i class="bi bi-envelope-arrow-down me-2" aria-hidden="true"></i>@(_emailInOpen ? "Hide email-to-ticket" : "Email-to-ticket")
+        </button>
+    </More>
+</PageHeader>
 
 @if (IsLoading)
 {
@@ -63,7 +70,7 @@ else
                     </div>
                 }
                 <div class="mb-2">
-                    <select class="form-select form-select-sm" @bind="_newContactId">
+                    <select id="ticket-contact" class="form-select form-select-sm" aria-label="Contact" @bind="_newContactId">
                         <option value="@Guid.Empty">Select a contact...</option>
                         @foreach (var contact in Contacts)
                         {
@@ -104,7 +111,18 @@ else
             <div class="card-body p-0">
                 @if (Tickets.Count == 0)
                 {
-                    <EmptyState Icon="bi-life-preserver" Message="No tickets." />
+                    if (string.IsNullOrWhiteSpace(StatusFilter))
+                    {
+                        <EmptyState Icon="bi-life-preserver" Title="No tickets" Message="Contacts raise them through the client portal or by email, or you can open one on their behalf.">
+                            <button type="button" class="btn btn-sm btn-primary mt-2" data-gws-focus="#ticket-contact">
+                                <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New ticket
+                            </button>
+                        </EmptyState>
+                    }
+                    else
+                    {
+                        <EmptyState Icon="bi-life-preserver" Message="@($"No {StatusFilter.ToLowerInvariant()} tickets.")" />
+                    }
                 }
                 else
                 {

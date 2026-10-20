@@ -6,5 +6,6 @@
   <Folder Name="/shared/">
     <Project Path="src/GwsBusinessSuite.OllamaKit/GwsBusinessSuite.OllamaKit.csproj" />
     <Project Path="src/GwsBusinessSuite.SentinelAgentKit/GwsBusinessSuite.SentinelAgentKit.csproj" />
+    <Project Path="src/GwsBusinessSuite.WorldNewsKit/GwsBusinessSuite.WorldNewsKit.csproj" />
   </Folder>
 </Solution>

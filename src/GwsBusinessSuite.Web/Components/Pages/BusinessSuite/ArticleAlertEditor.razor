@@ -16,30 +16,29 @@
 
 <PageTitle>@(Campaign?.Name ?? "Article alerts")</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <a class="small" href="/admin/email-campaigns"><i class="bi bi-arrow-left me-1"></i>Email Campaigns</a>
-        <h1 class="mt-1"><i class="bi bi-bell-fill me-2 text-primary"></i>@(Campaign?.Name ?? "Article alerts")</h1>
-        <p class="mb-0">@(Settings.IsWeeklyDigest
-            ? $"Emails confirmed subscribers a weekly digest every {Settings.DigestDay} at {new DateTime(2000, 1, 1, Math.Clamp(Settings.DigestHour, 0, 23), 0, 0):HH:00}."
-            : $"Emails confirmed subscribers {(Settings.GraceMinutes == 0 ? "as soon as" : $"{Settings.GraceMinutes} minutes after")} a new article goes live.")</p>
-    </div>
-    @if (Campaign is not null)
-    {
-        <div class="d-flex align-items-center gap-2">
+<PageHeader Title="@(Campaign?.Name ?? "Article alerts")" Icon="bi-bell-fill" Description="@HeaderDescription"
+            ParentLabel="Email Campaigns" ParentHref="/admin/email-campaigns">
+    <Meta>
+        @if (Campaign is not null)
+        {
             <span class="badge @(Campaign.Status == EmailCampaignStatuses.Active ? "text-bg-success" : "text-bg-secondary")">@Campaign.Status</span>
+        }
+    </Meta>
+    <Actions>
+        @if (Campaign is not null)
+        {
             @if (Campaign.Status == EmailCampaignStatuses.Active)
             {
-                <button class="btn btn-sm btn-outline-warning" disabled="@_busy" @onclick="() => SetActiveAsync(false)"><i class="bi bi-pause-fill me-1"></i>Pause</button>
+                <button type="button" class="btn btn-outline-warning" disabled="@_busy" @onclick="() => SetActiveAsync(false)"><i class="bi bi-pause-fill me-1" aria-hidden="true"></i>Pause</button>
             }
             else
             {
-                <button class="btn btn-sm btn-success" disabled="@_busy" @onclick="() => SetActiveAsync(true)"><i class="bi bi-play-fill me-1"></i>Activate</button>
+                <button type="button" class="btn btn-success" disabled="@_busy" @onclick="() => SetActiveAsync(true)"><i class="bi bi-play-fill me-1" aria-hidden="true"></i>Activate</button>
             }
-            <button class="btn btn-sm btn-primary" disabled="@_busy" @onclick="SaveAsync"><i class="bi bi-check2 me-1"></i>Save</button>
-        </div>
-    }
-</div>
+            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="SaveAsync"><i class="bi bi-check2 me-1" aria-hidden="true"></i>Save</button>
+        }
+    </Actions>
+</PageHeader>
 
 @if (!EmailSender.IsConfigured)
 {
@@ -348,6 +347,10 @@ else
                   OnPicked="PickImageAsync" OnClose="() => _picking = null" />
 
 @code {
+    private string HeaderDescription => Settings.IsWeeklyDigest
+        ? $"Emails confirmed subscribers a weekly digest every {Settings.DigestDay} at {new DateTime(2000, 1, 1, Math.Clamp(Settings.DigestHour, 0, 23), 0, 0):HH:00}."
+        : $"Emails confirmed subscribers {(Settings.GraceMinutes == 0 ? "as soon as" : $"{Settings.GraceMinutes} minutes after")} a new article goes live.";
+
     private void SetDigestDay(ChangeEventArgs e)
     {
         if (int.TryParse(e.Value?.ToString(), out var day) && day is >= 0 and <= 6) Settings.DigestDay = (DayOfWeek)day;

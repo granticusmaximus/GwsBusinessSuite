@@ -15,10 +15,13 @@
 
 <PageTitle>Time Tracking</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-stopwatch me-2 text-primary"></i>Time Tracking</h1>
-    <p class="mb-0">Track time against contacts, deals and support tickets, then bill unbilled hours as a draft invoice.</p>
-</div>
+<PageHeader Title="Time Tracking" Icon="bi-stopwatch" Description="Track time against contacts, deals and support tickets, then bill unbilled hours as a draft invoice.">
+    <Actions>
+        <button type="button" class="btn btn-primary" data-gws-focus="#time-contact">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Track time
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {

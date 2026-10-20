@@ -23,10 +23,7 @@
 
 <PageTitle>@(Contact?.FullName ?? "Contact") · CRM</PageTitle>
 
-<div class="page-header">
-    <p class="mb-1"><a href="/admin/crm"><i class="bi bi-arrow-left me-1"></i>Back to CRM</a></p>
-    <h1><i class="bi bi-person-vcard me-2 text-primary"></i>@(Contact?.FullName ?? "Contact")</h1>
-</div>
+<PageHeader Title="@(Contact?.FullName ?? "Contact")" Icon="bi-person-vcard" ParentLabel="CRM" ParentHref="/admin/crm" />
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {

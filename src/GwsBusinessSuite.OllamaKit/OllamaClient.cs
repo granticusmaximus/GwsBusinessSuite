@@ -128,6 +128,32 @@ public sealed class OllamaClient : IDisposable
         }
     }
 
+    // /api/embed: one vector per input, in input order. Ollama accepts a batch in one request,
+    // which is far faster than one call per text.
+    public async Task<IReadOnlyList<float[]>> EmbedAsync(string model, IReadOnlyList<string> inputs, CancellationToken cancellationToken)
+    {
+        if (inputs.Count == 0) return [];
+        using var response = await _http.PostAsJsonAsync("api/embed", new { model, input = inputs }, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException(
+                $"Ollama returned HTTP {(int)response.StatusCode}: {Limit(body, 1_000)}");
+
+        OllamaEmbedApiResponse? parsed;
+        try
+        {
+            parsed = JsonSerializer.Deserialize<OllamaEmbedApiResponse>(body);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidOperationException("Ollama returned an invalid embed response.", ex);
+        }
+        var embeddings = parsed?.Embeddings;
+        if (embeddings is null || embeddings.Count != inputs.Count)
+            throw new InvalidOperationException($"Ollama returned {embeddings?.Count ?? 0} embeddings for {inputs.Count} inputs.");
+        return embeddings;
+    }
+
     public async Task<IReadOnlyList<string>> ListModelsAsync(CancellationToken cancellationToken) =>
         (await ListModelDetailsAsync(cancellationToken)).Select(model => model.Name).ToArray();
 
@@ -290,6 +316,12 @@ public sealed class OllamaClient : IDisposable
 
     private static string Limit(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..maxLength] + "...";
+
+    private sealed class OllamaEmbedApiResponse
+    {
+        [JsonPropertyName("embeddings")]
+        public IReadOnlyList<float[]>? Embeddings { get; init; }
+    }
 
     private sealed class OllamaChatApiResponse
     {

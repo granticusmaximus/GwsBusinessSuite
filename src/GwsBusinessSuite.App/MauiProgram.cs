@@ -74,6 +74,8 @@ public static class MauiProgram
 		builder.Services.AddSingleton(_ => new TouchIdKeyStore(Path.Combine(FileSystem.Current.AppDataDirectory, "touchid")));
 		builder.Services.AddSingleton<TouchIdLockService>();
 		builder.Services.AddTransient<OfflinePage>();
+		builder.Services.AddSingleton<WorldNewsService>();
+		builder.Services.AddTransient<WorldNewsPage>();
 
 #if ANDROID
 		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(

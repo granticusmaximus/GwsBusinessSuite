@@ -88,6 +88,33 @@ belongs in R2's `PageHeader`, so build this after R2's component. Rail space: 8 
 - Empty-state component: what goes here and the first action.
 - Migrate pages in batches by workspace; each batch is a phase-sized unit with screenshots.
 
+**Components done 19-10-26** (`PageHeader`, `EmptyState` Title + first action, app.js
+`data-gws-focus` scrolls to and focuses a page's own form field).
+
+**Batch 1 done 20-10-26: Relationships (10 pages).** CRM, Deal Scoring, contact detail, Billing,
+Time Tracking, Support, Scheduling, Email Campaigns, article-alert editor, Users. Conventions the
+later batches should follow:
+- The page's create action is the header's primary button. When its form is always on the page,
+  the button resets the editor (`@onclick="ResetEditor"`) and carries `data-gws-focus="#field-id"`;
+  the card's own "New" button (shown only while editing) went, since the header one does the same.
+  When the form appears on demand (CRM quick create), the handler opens it and focuses the field
+  from `OnAfterRenderAsync`. CRM's primary button follows its Contacts/Pipeline tab.
+- Secondary toggles go in `More` as `.dropdown-item` buttons (Support's Email-to-ticket); small
+  status lines and badges go in `Meta` (Support's satisfaction, the alert editor's status).
+- Record pages use `ParentLabel`/`ParentHref` instead of a "Back to …" link.
+- A list's empty state gets a `Title`, a sentence on how it fills up, and the same first action
+  as the header. A filtered-empty list keeps a plain message.
+- App tabs are 44px tall on touch screens (`pointer: coarse`) for the audit's target size.
+- Checked with the responsive audit (phone-390, laptop-1280, desktop-1920) on a throwaway
+  instance with seeded records: no overflow or small targets. Email Campaigns and Support still
+  report "covered" controls on phones: mid-page form controls under the fixed bottom bar at load,
+  reachable by scrolling.
+
+**Remaining batches** (hand-built `.page-header` count, 20-10-26): Content & Publishing 22,
+Home 5 Community pages + Dashboard and Settings, Platform 7, Intelligence 4, Growth 4,
+Knowledge 1 (Mind Maps). The public booking page and client-portal login also use
+`.page-header` but aren't admin pages, so they stay as they are.
+
 ## R3. List and inspector
 
 - A `RecordInspector` that slides in from the right over or beside the list, sharing the right

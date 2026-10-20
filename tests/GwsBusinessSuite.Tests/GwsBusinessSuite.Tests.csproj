@@ -40,6 +40,8 @@
       Include="..\..\src\GwsBusinessSuite.SentinelAgentKit\GwsBusinessSuite.SentinelAgentKit.csproj" />
     <ProjectReference
       Include="..\..\src\GwsBusinessSuite.Web\GwsBusinessSuite.Web.csproj" />
+    <ProjectReference
+      Include="..\..\src\GwsBusinessSuite.WorldNewsKit\GwsBusinessSuite.WorldNewsKit.csproj" />
   </ItemGroup>
 
 </Project>
