@@ -2975,6 +2975,13 @@ audio.wiki-embed-media { max-width: 100%; }
     outline: 2px dashed var(--gws-sidebar-accent);
     outline-offset: -2px;
 }
+/* A tree row is the semantic drop target. Its toggle, label and action buttons otherwise cover
+   nearly its entire box; WebKit in particular can keep native drag events on those controls
+   instead of delivering them to the row. While a page is being dragged, hit-test the row itself
+   so expanded parent pages remain dependable reparent targets. */
+.sentinel-workspace.is-tree-dragging .wiki-tree-row > * {
+    pointer-events: none;
+}
 .sentinel-workspace .wiki-tree-row.wiki-tree-multi-selected {
     background: rgba(234, 179, 8, .12);
     box-shadow: inset 2px 0 0 #eab308;

@@ -40,7 +40,7 @@
 
 <PageTitle>Sentinel</PageTitle>
 
-<div class="sentinel-workspace @(_focusMode ? "is-focus" : string.Empty) @(IsCanvasPage ? "is-canvas-page" : string.Empty) @(IsLockScreen ? "is-page-locked" : string.Empty)">
+<div class="sentinel-workspace @(_focusMode ? "is-focus" : string.Empty) @(IsCanvasPage ? "is-canvas-page" : string.Empty) @(IsLockScreen ? "is-page-locked" : string.Empty) @(_draggedNodeId.HasValue ? "is-tree-dragging" : string.Empty)">
 @if (_cleanupOpen && SelectedPageId is { } cleanupPageId)
 {
     <SentinelCleanupPanel WikiPageId="cleanupPageId" CurrentBlocks="_cleanupBefore" OnApplied="CleanupAppliedAsync" OnClose="() => _cleanupOpen = false" />
@@ -792,14 +792,11 @@
                         {
                             @* Lock editing: read-only until unlocked, so nothing changes by accident. Not the
                                same as "Lock page" in ⋯, which hides the page behind Touch ID or a PIN. *@
-                            <button type="button" class="btn btn-sm sentinel-tool-btn @(EditLocked ? "sentinel-tool-btn-label is-active" : string.Empty)"
+                            <button type="button" class="btn btn-sm sentinel-tool-btn sentinel-tool-btn-label @(EditLocked ? "is-active" : string.Empty)"
                                     @onclick="ToggleEditLockAsync" disabled="@(IsBusy || !_canEditPage)" aria-pressed="@(EditLocked ? "true" : "false")"
                                     title="@EditLockTitle" aria-label="@(EditLocked ? "Unlock editing" : "Lock editing")">
                                 <i class="bi @(EditLocked ? "bi-lock-fill" : "bi-unlock")" aria-hidden="true"></i>
-                                @if (EditLocked)
-                                {
-                                    <span>Locked</span>
-                                }
+                                <span>@(EditLocked ? "Unlock editing" : "Lock editing")</span>
                             </button>
                         }
                         @if (!EditLocked)
