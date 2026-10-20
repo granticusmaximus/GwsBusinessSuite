@@ -14,6 +14,8 @@ COPY Directory.Build.props ./
 COPY src/GwsBusinessSuite.Domain/GwsBusinessSuite.Domain.csproj src/GwsBusinessSuite.Domain/
 COPY src/GwsBusinessSuite.Application/GwsBusinessSuite.Application.csproj src/GwsBusinessSuite.Application/
 COPY src/GwsBusinessSuite.Infrastructure/GwsBusinessSuite.Infrastructure.csproj src/GwsBusinessSuite.Infrastructure/
+COPY src/GwsBusinessSuite.OllamaKit/GwsBusinessSuite.OllamaKit.csproj src/GwsBusinessSuite.OllamaKit/
+COPY src/GwsBusinessSuite.WorldNewsKit/GwsBusinessSuite.WorldNewsKit.csproj src/GwsBusinessSuite.WorldNewsKit/
 COPY src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj src/GwsBusinessSuite.Web/
 RUN dotnet restore src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj
 
@@ -21,6 +23,8 @@ FROM restore AS dotnet-build
 COPY src/GwsBusinessSuite.Domain/ src/GwsBusinessSuite.Domain/
 COPY src/GwsBusinessSuite.Application/ src/GwsBusinessSuite.Application/
 COPY src/GwsBusinessSuite.Infrastructure/ src/GwsBusinessSuite.Infrastructure/
+COPY src/GwsBusinessSuite.OllamaKit/ src/GwsBusinessSuite.OllamaKit/
+COPY src/GwsBusinessSuite.WorldNewsKit/ src/GwsBusinessSuite.WorldNewsKit/
 COPY src/GwsBusinessSuite.Web/ src/GwsBusinessSuite.Web/
 RUN dotnet publish src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj \
     -c Release -o /app/publish --no-restore \
