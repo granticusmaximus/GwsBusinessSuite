@@ -17,14 +17,13 @@
 
 <PageTitle>Customize</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-palette me-2 text-primary"></i>Customize</h1>
-        <p>Global design tokens for @(CurrentSite?.Name ?? "the live site") — applies site-wide, across every page and the blog.</p>
-    </div>
-    <CmsSiteSwitcher SiteChanged="LoadSiteAsync" />
-</div>
-<AppTabs App="GwsBusinessSuite.Web.Services.AdminApps.SiteDesign" />
+<PageHeader Title="Customize" Icon="bi-palette"
+            Description="@($"Global design tokens for {CurrentSite?.Name ?? "the live site"} — applies site-wide, across every page and the blog.")"
+            App="GwsBusinessSuite.Web.Services.AdminApps.SiteDesign">
+    <Filters>
+        <CmsSiteSwitcher SiteChanged="LoadSiteAsync" />
+    </Filters>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {

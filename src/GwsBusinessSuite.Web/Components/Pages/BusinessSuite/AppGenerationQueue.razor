@@ -9,11 +9,9 @@
 
 <PageTitle>SentinelGPT Page Queue</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-inbox-fill me-2 text-primary"></i>SentinelGPT Page Queue</h1>
-    <p>Review SentinelGPT-drafted page plans before they're added to a site. Approved pages are created as Drafts so you can still adjust or publish them from the CMS builder.</p>
-</div>
-<AppTabs App="GwsBusinessSuite.Web.Services.AdminApps.PageBuilder" />
+<PageHeader Title="SentinelGPT Page Queue" Icon="bi-inbox-fill"
+            Description="Review SentinelGPT-drafted page plans before they're added to a site. Approved pages are created as Drafts so you can still adjust or publish them from the CMS builder."
+            App="GwsBusinessSuite.Web.Services.AdminApps.PageBuilder" />
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -50,7 +48,7 @@ else
                 }
                 @if (Requests.Count == 0)
                 {
-                    <EmptyState Icon="bi-inbox" Message="Nothing waiting on review." CssClass="list-group-item p-3 text-muted small" />
+                    <EmptyState Icon="bi-inbox" Title="Nothing to review" Message="Plans submitted from the Page Builder wait here for approval." CssClass="list-group-item p-3 text-muted small" />
                 }
             </div>
         </div>

@@ -110,10 +110,41 @@ later batches should follow:
   report "covered" controls on phones: mid-page form controls under the fixed bottom bar at load,
   reachable by scrolling.
 
-**Remaining batches** (hand-built `.page-header` count, 20-10-26): Content & Publishing 22,
-Home 5 Community pages + Dashboard and Settings, Platform 7, Intelligence 4, Growth 4,
-Knowledge 1 (Mind Maps). The public booking page and client-portal login also use
-`.page-header` but aren't admin pages, so they stay as they are.
+**Batch 2 done 21-10-26: Content & Publishing (22 pages).** Posts list and record, Content
+Studio and its draft, Content Calendar, SEO Audit, Localization, Comments, Form Submissions
+(inbox and record), Pages, Edit Page, Builder Reference, Site design's three tabs, the Page
+Builder and its queue, Media, Podcasts, Live Show and Past Shows. On top of batch 1's
+conventions:
+- The CMS site switcher goes in `Filters`; `Description` is a string, so a site name is
+  interpolated (`@($"... {CurrentSite?.Name ?? "the live site"} ...")`). Header & Footer lost
+  its inline Menus link, since Menus is the next tab.
+- A sub-page reached from another page gets that page as its parent: Builder Reference ->
+  Pages, Past Shows -> Live Show, Draft Workspace -> Content Studio, Edit Page -> Pages.
+- On Pages, "Builder reference" stays a button beside New page instead of a More item.
+  Contributors can open Pages, and an AuthorizeView inside More would leave them an empty menu.
+- Media's "Upload image" uses `data-gws-focus="#media-upload"`; `focusField` now opens a
+  file input's picker.
+- **Fixed along the way (also affects batch 1):**
+  - `focusField` lost its focus whenever the same click reset an EditForm's model. Billing's
+    New invoice did this, as did the knowledge base's New source: EditForm rebuilds its
+    fields for a new model. It now follows the field to its replacement. A negative control
+    without the fix lost focus on both.
+  - `.gws-empty-state i` also enlarged and greyed the icon inside an empty state's action
+    button; it's now `> i`.
+  - Sub-nav links were 40px on touch tablets; now 44px under `pointer: coarse`.
+- Checked: the responsive audit at phone-390, tablet-768, laptop-1280 and desktop-1920 on a
+  throwaway instance. Its only flag is a list row under the phone bottom bar at load (the
+  known pattern). Playwright clicked every header action: the picker opens, focus lands, the
+  More toggle, the new-page dialog, and a new article's record page and breadcrumb back.
+  Content Studio can't be opened locally (device-secret policy), so its header-only change
+  wasn't seen.
+- Seen, not fixed: `ProfessionalWysiwygEditor.DisposeAsync` throws TaskCanceledException
+  when its circuit goes away (logged as an unhandled circuit exception on teardown).
+
+**Remaining batches** (hand-built `.page-header` count, 21-10-26): Home 5 Community pages +
+Dashboard and Settings, Platform 7, Intelligence 4, Growth 4, Knowledge 1 (Mind Maps). The
+public booking page and client-portal login also use `.page-header` but aren't admin pages,
+so they stay as they are.
 
 ## R3. List and inspector
 

@@ -20,16 +20,8 @@
 
 <PageTitle>Content Studio Draft</PageTitle>
 
-<div class="page-header d-flex align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-file-earmark-text me-2 text-primary"></i>Draft Workspace</h1>
-        <p>Review, revise, approve, and publish drafts live to the site.</p>
-    </div>
-    <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="BackToStudio">
-        <i class="bi bi-arrow-left"></i>
-        <span>Back to Content Studio</span>
-    </button>
-</div>
+<PageHeader Title="Draft Workspace" Icon="bi-file-earmark-text" ParentLabel="Content Studio" ParentHref="/admin/content-studio"
+            Description="Review, revise, approve, and publish drafts live to the site." />
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -789,11 +781,6 @@ else
             Logger.LogWarning(ex, "Unable to record affiliate click for draft {DraftId} slot {SlotToken}.", CurrentDraft.DraftId,
 placement.SlotToken);
         }
-    }
-
-    private void BackToStudio()
-    {
-        Navigation.NavigateTo("/admin/content-studio");
     }
 
     private static string FormatDate(DateTimeOffset value)

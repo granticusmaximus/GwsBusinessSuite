@@ -11,14 +11,14 @@
 
 <PageTitle>Header &amp; Footer</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-layout-text-window me-2 text-primary"></i>Header &amp; Footer</h1>
-        <p>Design the header and footer every public page on @(_site?.Name ?? "the live site") shares - in the page editor, with your logo and <a href="/admin/appearance/menus">menus</a> built in.</p>
-    </div>
-    <CmsSiteSwitcher SiteChanged="OnSiteChangedAsync" />
-</div>
-<AppTabs App="GwsBusinessSuite.Web.Services.AdminApps.SiteDesign" />
+@* The Menus link left the description: Menus is the next tab along. *@
+<PageHeader Title="Header & Footer" Icon="bi-layout-text-window"
+            Description="@($"Design the header and footer every public page on {_site?.Name ?? "the live site"} shares - in the page editor, with your logo and menus built in.")"
+            App="GwsBusinessSuite.Web.Services.AdminApps.SiteDesign">
+    <Filters>
+        <CmsSiteSwitcher SiteChanged="OnSiteChangedAsync" />
+    </Filters>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(_error))
 {

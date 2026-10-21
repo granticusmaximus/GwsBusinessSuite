@@ -12,20 +12,20 @@
 
 <PageTitle>Live Show Studio</PageTitle>
 
-<div class="page-header d-flex align-items-start justify-content-between gap-3">
-    <div>
-        <div class="studio-kicker">Broadcast studio</div>
-        <h1><i class="bi bi-camera-video-fill me-2 text-primary"></i>Live Show</h1>
-        <p class="mb-0">Open your camera and microphone, then go live to a small group of invited viewers. Shows are recorded automatically.</p>
+<PageHeader Title="Live Show" Icon="bi-camera-video-fill"
+            Description="Open your camera and microphone, then go live to a small group of invited viewers. Shows are recorded automatically.">
+    <Meta>
         <span class="badge mt-2 @(IceServerProvider.IsTurnConfigured ? "text-bg-success" : "text-bg-warning")">
             <i class="bi @(IceServerProvider.IsTurnConfigured ? "bi-shield-check" : "bi-exclamation-triangle") me-1"></i>
             @(IceServerProvider.IsTurnConfigured ? "TURN relay configured" : "Direct connection only")
         </span>
-    </div>
-    <a class="btn btn-outline-secondary btn-sm" href="/admin/live-show-recordings">
-        <i class="bi bi-collection-play me-1"></i>Past Shows
-    </a>
-</div>
+    </Meta>
+    <Actions>
+        <a class="btn btn-outline-secondary" href="/admin/live-show-recordings">
+            <i class="bi bi-collection-play me-1" aria-hidden="true"></i>Past shows
+        </a>
+    </Actions>
+</PageHeader>
 
 <div class="live-studio">
     <div class="live-stage">

@@ -16,19 +16,21 @@
 
 <PageTitle>Pages</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-layout-three-columns me-2 text-primary"></i>Pages</h1>
-        <p>Create, edit, and preview pages on @(CurrentSite?.Name ?? "the live site").</p>
-    </div>
-    <div class="d-flex flex-wrap align-items-center gap-2">
-        @* Builder Reference left the sidebar in the app merge; its notes are about this editor. *@
+<PageHeader Title="Pages" Icon="bi-layout-three-columns" Description="@($"Create, edit, and preview pages on {CurrentSite?.Name ?? "the live site"}.")">
+    <Actions>
+        <button type="button" class="btn btn-primary" @onclick="() => ShowCreatePage = true" disabled="@(IsCmsBusy || CurrentSite is null)">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New page
+        </button>
+        @* Builder Reference left the sidebar in the app merge; its notes are about this editor. A
+           button rather than a ⋯ item: contributors see this page too, and would get an empty menu. *@
         <AuthorizeView Policy="AdminOnly">
-            <a class="btn btn-sm btn-outline-secondary" href="admin/cms-knowledge"><i class="bi bi-journal-richtext me-1" aria-hidden="true"></i>Builder reference</a>
+            <a class="btn btn-outline-secondary" href="admin/cms-knowledge"><i class="bi bi-journal-richtext me-1" aria-hidden="true"></i>Builder reference</a>
         </AuthorizeView>
+    </Actions>
+    <Filters>
         <CmsSiteSwitcher SiteChanged="OnSiteChangedAsync" />
-    </div>
-</div>
+    </Filters>
+</PageHeader>
 
 <CreatePageModal Show="ShowCreatePage" Site="CurrentSite" OnClose="() => ShowCreatePage = false" OnCreated="OpenCreatedPage" />
 
@@ -57,19 +59,16 @@ else
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center gap-3">
         <div>
-            <div class="fw-semibold">@(ShowTrash ? "Trash" : "Pages")</div>
-            <div class="small text-secondary">@(ShowTrash ? "Restore a page or delete it permanently." : "Create, edit, and preview pages on this site.")</div>
+            <div class="fw-semibold">@(ShowTrash ? "Trash" : "All pages")</div>
+            @if (ShowTrash)
+            {
+                <div class="small text-secondary">Restore a page or delete it permanently.</div>
+            }
         </div>
         <div class="d-flex gap-2">
             <button class="btn btn-sm @(ShowTrash ? "btn-secondary" : "btn-outline-secondary")" @onclick="ToggleTrashViewAsync" disabled="@IsCmsBusy">
                 <i class="bi bi-trash3 me-1"></i>Trash@(TrashedPages.Count > 0 ? $" ({TrashedPages.Count})" : "")
             </button>
-            @if (!ShowTrash)
-            {
-                <button class="btn btn-sm btn-primary" @onclick="() => ShowCreatePage = true" disabled="@(IsCmsBusy || CurrentSite is null)">
-                    <i class="bi bi-plus-lg me-1"></i>Create new page
-                </button>
-            }
         </div>
     </div>
     <div class="card-body p-0">
@@ -102,12 +101,11 @@ else
         }
         else if (CmsPages.Count == 0)
         {
-            <EmptyState Icon="bi-layout-three-columns" Message="No pages exist for this site yet." />
-            <div class="text-center pb-4">
-                <button class="btn btn-primary" @onclick="() => ShowCreatePage = true" disabled="@(IsCmsBusy || CurrentSite is null)">
-                    <i class="bi bi-plus-lg me-1"></i>Create your first page
+            <EmptyState Icon="bi-layout-three-columns" Title="No pages yet" Message="Create this site's first page, then build it in the page editor.">
+                <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="() => ShowCreatePage = true" disabled="@(IsCmsBusy || CurrentSite is null)">
+                    <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New page
                 </button>
-            </div>
+            </EmptyState>
         }
         else
         {

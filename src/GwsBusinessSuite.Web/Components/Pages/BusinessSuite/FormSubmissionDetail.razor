@@ -15,9 +15,8 @@
 
 <PageTitle>Form Submission</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-envelope-open me-2 text-primary"></i>Form Submission</h1>
+<PageHeader Title="Form Submission" Icon="bi-envelope-open" ParentLabel="Form Submissions" ParentHref="/admin/form-submissions">
+    <Meta>
         @if (SourcePage is not null)
         {
             <p class="mb-0">
@@ -28,8 +27,8 @@
                 }
             </p>
         }
-    </div>
-</div>
+    </Meta>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {

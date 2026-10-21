@@ -11,15 +11,14 @@
 
 <PageTitle>Form Submissions</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-inbox me-2 text-primary"></i>Form Submissions</h1>
-        <p class="mb-0">Every visitor submission across every page, newest first. The per-page list on each page's Edit screen is a filtered view of the same data.</p>
-    </div>
-    <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync" disabled="@_isBusy">
-        <i class="bi bi-arrow-repeat me-1"></i>Refresh
-    </button>
-</div>
+<PageHeader Title="Form Submissions" Icon="bi-inbox"
+            Description="Every visitor submission across every page, newest first. The per-page list on each page's Edit screen is a filtered view of the same data.">
+    <Actions>
+        <button type="button" class="btn btn-outline-secondary" @onclick="LoadAsync" disabled="@_isBusy">
+            <i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>Refresh
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (!string.IsNullOrEmpty(_errorMessage))
 {

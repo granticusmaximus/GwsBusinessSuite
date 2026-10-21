@@ -14,22 +14,18 @@
 
 <PageTitle>Article Editor</PageTitle>
 
-<div class="page-header d-flex align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-pencil me-2 text-primary"></i>Article Editor</h1>
-        <p>Write and publish articles manually, or manage all articles regardless of source.</p>
-    </div>
-    <div class="d-inline-flex gap-2">
-        <button class="btn btn-outline-secondary d-inline-flex align-items-center gap-2" @onclick="ToggleCategoryManager" disabled="@IsBusy">
-            <i class="bi bi-tags"></i>
-            <span>Manage Categories</span>
+<PageHeader Title="Article Editor" Icon="bi-pencil" Description="Write and publish articles manually, or manage all articles regardless of source.">
+    <Actions>
+        <button type="button" class="btn btn-primary" @onclick="CreateNewArticle" disabled="@IsBusy">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New article
         </button>
-        <button class="btn btn-primary d-inline-flex align-items-center gap-2" @onclick="CreateNewArticle" disabled="@IsBusy">
-            <i class="bi bi-plus-lg"></i>
-            <span>New Article</span>
+    </Actions>
+    <More>
+        <button type="button" class="dropdown-item" @onclick="ToggleCategoryManager" disabled="@IsBusy">
+            <i class="bi bi-tags me-2" aria-hidden="true"></i>@(ShowCategoryManager ? "Hide categories" : "Manage categories")
         </button>
-    </div>
-</div>
+    </More>
+</PageHeader>
 
 @if (ShowCategoryManager)
 {
@@ -142,7 +138,11 @@
 
             @if (Articles.Count == 0 && !IsBusy)
             {
-                <p class="text-secondary mb-0">No articles yet. Click <strong>New Article</strong> to write your first one.</p>
+                <EmptyState Icon="bi-pencil" Title="No articles yet" Message="Write one here, or publish a draft from Content Studio.">
+                    <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="CreateNewArticle" disabled="@IsBusy">
+                        <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New article
+                    </button>
+                </EmptyState>
             }
             else if (FilteredArticles.Count == 0)
             {

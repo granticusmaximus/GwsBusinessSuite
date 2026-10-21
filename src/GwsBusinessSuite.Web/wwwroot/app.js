@@ -344,6 +344,24 @@
 		if (!field) return;
 		field.scrollIntoView({ block: 'center', behavior: 'smooth' });
 		field.focus({ preventScroll: true });
+		// A file input's "field" is its picker (Media's Upload image). This runs inside the
+		// person's click, so the browser allows opening it.
+		if (field.matches('input[type="file"]') && !field.disabled) {
+			field.click();
+			return;
+		}
+		// The same click often resets the form on the server (Billing's New invoice), and an
+		// EditForm given a new model rebuilds its fields, dropping this focus when the render
+		// arrives. Follow the field to its replacement, unless focus has moved on by then.
+		var observer = new MutationObserver(function () {
+			if (field.isConnected) return;
+			observer.disconnect();
+			var replacement = document.querySelector(selector);
+			var active = document.activeElement;
+			if (replacement && (!active || active === document.body)) replacement.focus({ preventScroll: true });
+		});
+		observer.observe(document.body, { childList: true, subtree: true });
+		setTimeout(function () { observer.disconnect(); }, 3000);
 	}
 
 	function bindShellEventsOnce() {

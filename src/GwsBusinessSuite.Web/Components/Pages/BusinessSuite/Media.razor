@@ -9,12 +9,19 @@
 
 <PageTitle>Media Library</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-images me-2 text-primary"></i>Media Library</h1>
-        <p>Upload and manage the shared image library available to every website, Posts, Content Studio, and page builder blocks.</p>
-    </div>
-</div>
+<PageHeader Title="Media Library" Icon="bi-images"
+            Description="Upload and manage the shared image library available to every website, Posts, Content Studio, and page builder blocks.">
+    <Actions>
+        @* data-gws-focus on a file input opens its picker (app.js focusField). *@
+        <button type="button" class="btn btn-primary" data-gws-focus="#media-upload" disabled="@IsBusy">
+            <i class="bi bi-upload me-1" aria-hidden="true"></i>Upload image
+        </button>
+    </Actions>
+    <Filters>
+        <input type="search" class="form-control media-search" placeholder="Search filename…" aria-label="Search filename"
+               @bind="SearchInput" @bind:event="oninput" />
+    </Filters>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(StatusMessage))
 {
@@ -28,17 +35,13 @@
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body">
         <div class="row g-3 align-items-end">
-            <div class="col-md-5">
-                <label class="form-label small text-secondary">Alt text (applied to next upload)</label>
-                <input class="form-control" @bind="UploadAltTextInput" placeholder="Describe the image" />
+            <div class="col-md-6">
+                <label class="form-label small text-secondary" for="media-alt-text">Alt text (applied to next upload)</label>
+                <input id="media-alt-text" class="form-control" @bind="UploadAltTextInput" placeholder="Describe the image" />
             </div>
-            <div class="col-md-5">
-                <label class="form-label small text-secondary">Upload image</label>
-                <InputFile OnChange="OnFileSelectedAsync" disabled="@IsBusy" class="form-control" accept="image/*" />
-            </div>
-            <div class="col-md-2">
-                <label class="form-label small text-secondary">&nbsp;</label>
-                <input class="form-control" placeholder="Search filename…" @bind="SearchInput" @bind:event="oninput" />
+            <div class="col-md-6">
+                <label class="form-label small text-secondary" for="media-upload">Upload image</label>
+                <InputFile id="media-upload" OnChange="OnFileSelectedAsync" disabled="@IsBusy" class="form-control" accept="image/*" />
             </div>
         </div>
     </div>
@@ -50,7 +53,18 @@
 }
 else if (FilteredAssets.Count == 0)
 {
-    <EmptyState Icon="bi-images" Message="@(MediaAssets.Count == 0 ? "No media uploaded yet." : "No media matches your search.")" />
+@if (MediaAssets.Count == 0)
+    {
+        <EmptyState Icon="bi-images" Title="No media yet" Message="Uploaded images can be used on every site, in posts, Content Studio and page blocks.">
+            <button type="button" class="btn btn-sm btn-primary mt-2" data-gws-focus="#media-upload" disabled="@IsBusy">
+                <i class="bi bi-upload me-1" aria-hidden="true"></i>Upload image
+            </button>
+        </EmptyState>
+    }
+    else
+    {
+        <EmptyState Icon="bi-images" Message="No media matches your search." />
+    }
 }
 else
 {

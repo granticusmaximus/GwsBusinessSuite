@@ -23,9 +23,8 @@
 
 <PageTitle>@(CurrentArticle?.Title ?? "Article Editor")</PageTitle>
 
-<div class="page-header d-flex align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-pencil me-2 text-primary"></i>@(CurrentArticle?.Title ?? "Article")</h1>
+<PageHeader Title="@(CurrentArticle?.Title ?? "Article")" Icon="bi-pencil" ParentLabel="Article Editor" ParentHref="/admin/article-editor">
+    <Meta>
         @if (CurrentArticle is not null)
         {
             <div class="d-flex align-items-center gap-2 mt-1 flex-wrap">
@@ -42,21 +41,25 @@
                             <a href="/admin/content-studio/draft/@CurrentArticle.SourceDraftId" class="small">
                                 <i class="bi bi-box-arrow-up-right me-1"></i>View SentinelGPT Draft
                             </a>
-                            <button class="btn btn-sm btn-outline-primary d-inline-flex align-items-center gap-1"
-                                    @onclick="ToggleReviseWithAiPanel" disabled="@IsBusy">
-                                <i class="bi bi-magic"></i>
-                                <span>Revise with SentinelGPT</span>
-                            </button>
                         </Authorized>
                     </AuthorizeView>
                 }
             </div>
         }
-    </div>
-    <button class="btn btn-outline-secondary d-inline-flex align-items-center" @onclick="BackToList" title="All Articles">
-        <i class="bi bi-arrow-left-circle-fill"></i>
-    </button>
-</div>
+    </Meta>
+    <Actions>
+        @if (CurrentArticle?.SourceDraftId is not null)
+        {
+            <AuthorizeView Policy="NativeContentStudioAccess">
+                <Authorized>
+                    <button type="button" class="btn btn-outline-primary" @onclick="ToggleReviseWithAiPanel" disabled="@IsBusy">
+                        <i class="bi bi-magic me-1" aria-hidden="true"></i>Revise with SentinelGPT
+                    </button>
+                </Authorized>
+            </AuthorizeView>
+        }
+    </Actions>
+</PageHeader>
 
 @if (ShowReviseWithAiPanel && CurrentArticle is not null)
 {
@@ -711,11 +714,6 @@ else
         {
             IsBusy = false;
         }
-    }
-
-    private void BackToList()
-    {
-        Navigation.NavigateTo("/admin/article-editor");
     }
 
     private string PublishedAtInput

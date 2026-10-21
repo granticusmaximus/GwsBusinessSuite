@@ -7,22 +7,19 @@
 
 <PageTitle>Past Live Shows</PageTitle>
 
-<div class="page-header d-flex align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-collection-play me-2 text-primary"></i>Past Live Shows</h1>
-        <p class="mb-0">Recordings captured automatically while broadcasting from the Live Show studio.</p>
-    </div>
-    <a class="btn btn-outline-secondary btn-sm" href="/admin/live-show">
-        <i class="bi bi-camera-video me-1"></i>Back to Studio
-    </a>
-</div>
+<PageHeader Title="Past Live Shows" Icon="bi-collection-play" ParentLabel="Live Show" ParentHref="/admin/live-show"
+            Description="Recordings captured automatically while broadcasting from the Live Show studio." />
 
 @if (Recordings.Count == 0)
 {
     <div class="card border-0 shadow-sm">
-        <div class="card-body text-center text-muted py-5">
-            <i class="bi bi-camera-reels display-6 d-block mb-2"></i>
-            No recordings yet.
+        <div class="card-body">
+            <EmptyState Icon="bi-camera-reels" Title="No recordings yet" Message="Shows are recorded automatically when you go live from the Live Show studio."
+                        CssClass="p-4 text-center text-secondary">
+                <a class="btn btn-sm btn-primary mt-2" href="/admin/live-show">
+                    <i class="bi bi-camera-video me-1" aria-hidden="true"></i>Open the studio
+                </a>
+            </EmptyState>
         </div>
     </div>
 }

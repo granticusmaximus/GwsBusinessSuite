@@ -8,10 +8,13 @@
 
 <PageTitle>Content Localization</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-translate me-2 text-primary"></i>Content Localization</h1>
-    <p>Create, review, and publish translated copies of articles and CMS pages.</p>
-</div>
+<PageHeader Title="Content Localization" Icon="bi-translate" Description="Create, review, and publish translated copies of articles and CMS pages.">
+    <Actions>
+        <button type="button" class="btn btn-primary" data-gws-focus="#localization-content">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New translation
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (IsLoading)
 {
@@ -32,8 +35,8 @@ else
         }
         <div class="row g-2 align-items-end">
             <div class="col-lg-5">
-                <label class="form-label small fw-semibold">Content</label>
-                <select class="form-select form-select-sm" @bind="_selectedContentKey" @bind:after="OnContentChangedAsync" disabled="@_isBusy">
+                <label class="form-label small fw-semibold" for="localization-content">Content</label>
+                <select id="localization-content" class="form-select form-select-sm" @bind="_selectedContentKey" @bind:after="OnContentChangedAsync" disabled="@_isBusy">
                     <option value="">Select content to localize...</option>
                     @foreach (var item in _content)
                     {
@@ -130,7 +133,15 @@ else
                 <tbody>
                     @if (_localizations.Count == 0)
                     {
-                        <tr><td colspan="5"><EmptyState Icon="bi-translate" Message="No translations yet." CssClass="text-secondary text-center py-4" /></td></tr>
+                        <tr>
+                            <td colspan="5">
+                                <EmptyState Icon="bi-translate" Title="No translations yet" Message="Pick an article or page above and a language, then draft its translation." CssClass="text-secondary text-center py-4">
+                                    <button type="button" class="btn btn-sm btn-primary mt-2" data-gws-focus="#localization-content">
+                                        <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New translation
+                                    </button>
+                                </EmptyState>
+                            </td>
+                        </tr>
                     }
                     @foreach (var localization in _localizations)
                     {

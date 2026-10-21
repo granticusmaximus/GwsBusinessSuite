@@ -11,10 +11,8 @@
 
 <PageTitle>Podcast Directory</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-mic-fill me-2 text-danger"></i>Podcast Directory</h1>
-    <p>Search Apple Podcasts, curate a saved library, and refresh live episodes from each show's RSS feed.</p>
-</div>
+<PageHeader Title="Podcast Directory" Icon="bi-mic-fill"
+            Description="Search Apple Podcasts, curate a saved library, and refresh live episodes from each show's RSS feed." />
 
 @if (!string.IsNullOrWhiteSpace(_statusMessage))
 {
@@ -120,9 +118,7 @@ else if (_activeTab == "discover")
     {
         <div class="card border-0 shadow-sm">
             <div class="card-body">
-                <EmptyState Icon="bi-broadcast" Message="No podcasts found" CssClass="p-4 text-center text-secondary">
-                    <p class="mb-0">Try a different search term or switch to another category.</p>
-                </EmptyState>
+                <EmptyState Icon="bi-broadcast" Title="No podcasts found" Message="Try a different search term or switch to another category." CssClass="p-4 text-center text-secondary" />
             </div>
         </div>
     }
@@ -186,9 +182,7 @@ else
     {
         <div class="card border-0 shadow-sm">
             <div class="card-body">
-                <EmptyState Icon="bi-journal-plus" Message="Your library is empty" CssClass="p-4 text-center text-secondary">
-                    <p class="mb-0">Save a show from the Discover tab to start tracking episodes here.</p>
-                </EmptyState>
+                <EmptyState Icon="bi-journal-plus" Title="Your library is empty" Message="Save a show from the Discover tab to start tracking episodes here." CssClass="p-4 text-center text-secondary" />
             </div>
         </div>
     }
@@ -196,9 +190,7 @@ else
     {
         <div class="card border-0 shadow-sm">
             <div class="card-body">
-                <EmptyState Icon="bi-funnel" Message="No saved podcasts match" CssClass="p-4 text-center text-secondary">
-                    <p class="mb-0">Clear the current search or category filter to see the rest of your library.</p>
-                </EmptyState>
+                <EmptyState Icon="bi-funnel" Message="No saved podcasts match. Clear the search or category filter to see the rest of your library." CssClass="p-4 text-center text-secondary" />
             </div>
         </div>
     }
@@ -323,9 +315,7 @@ else
 
                         @if (SortedEpisodes.Count == 0)
                         {
-                            <EmptyState Icon="bi-radioactive" Message="No episodes yet" CssClass="py-4 text-center text-secondary">
-                                <p class="mb-0 small">This feed did not return any playable episodes. Try refreshing the feed.</p>
-                            </EmptyState>
+                            <EmptyState Icon="bi-radioactive" Title="No episodes yet" Message="This feed did not return any playable episodes. Try refreshing the feed." CssClass="py-4 text-center text-secondary" />
                         }
                         else
                         {

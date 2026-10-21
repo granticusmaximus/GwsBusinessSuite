@@ -9,18 +9,17 @@
 
 <PageTitle>Content Calendar</PageTitle>
 
-<div class="page-header d-flex flex-wrap justify-content-between align-items-start gap-2">
-    <div>
-        <h1><i class="bi bi-calendar3 me-2 text-primary"></i>Content Calendar</h1>
-        <p class="mb-0">Everything scheduled to go out - posts, pages, social posts and emails - in one view. Drag a scheduled post, page or social post to another day to move it.</p>
-    </div>
-    <div class="d-flex flex-wrap gap-1 align-items-center">
-        <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Previous month" @onclick="() => MoveMonthAsync(-1)"><i class="bi bi-chevron-left"></i></button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => MoveMonthAsync(0)">Today</button>
-        <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Next month" @onclick="() => MoveMonthAsync(1)"><i class="bi bi-chevron-right"></i></button>
-        <span class="fw-semibold ms-2">@Month.ToString("MMMM yyyy")</span>
-    </div>
-</div>
+<PageHeader Title="Content Calendar" Icon="bi-calendar3"
+            Description="Everything scheduled to go out - posts, pages, social posts and emails - in one view. Drag a scheduled post, page or social post to another day to move it.">
+    <Filters>
+        <div class="d-flex flex-wrap gap-1 align-items-center">
+            <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Previous month" @onclick="() => MoveMonthAsync(-1)"><i class="bi bi-chevron-left"></i></button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => MoveMonthAsync(0)">Today</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Next month" @onclick="() => MoveMonthAsync(1)"><i class="bi bi-chevron-right"></i></button>
+            <span class="fw-semibold ms-2">@Month.ToString("MMMM yyyy")</span>
+        </div>
+    </Filters>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {

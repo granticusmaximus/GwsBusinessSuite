@@ -9,13 +9,15 @@
 
 <PageTitle>Builder Reference Library</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-journal-richtext me-2 text-primary"></i>Builder Reference Library</h1>
-    <p>
-        Clean-room workflow notes (not copied source/assets) that the CMS builder's editor can
-        search for capability suggestions while you're building a page.
-    </p>
-</div>
+@* Reached from Pages' "Builder reference" button since the app merge, so Pages is its parent. *@
+<PageHeader Title="Builder Reference Library" Icon="bi-journal-richtext" ParentLabel="Pages" ParentHref="/admin/pages"
+            Description="Clean-room workflow notes (not copied source/assets) that the CMS builder's editor can search for capability suggestions while you're building a page.">
+    <Actions>
+        <button type="button" class="btn btn-primary" @onclick="CreateNewSource" data-gws-focus="#kb-source-key">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New source
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -83,9 +85,6 @@ else
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between gap-2">
                 <span class="fw-semibold">Sources</span>
-                <button class="btn btn-sm btn-outline-primary" @onclick="CreateNewSource">
-                    <i class="bi bi-plus-lg me-1"></i>New Source
-                </button>
             </div>
             <div class="card-body p-0">
                 <div class="list-group list-group-flush">
@@ -97,6 +96,14 @@ else
                             <div class="fw-semibold">@source.Name</div>
                             <div class="small @(SelectedSourceId == source.Id ? "text-white-50" : "text-secondary")">@source.Key</div>
                         </button>
+                    }
+                    @if (Sources.Count == 0)
+                    {
+                        <EmptyState Icon="bi-journal-richtext" Title="No sources yet" Message="Add a source, then record its workflow notes as entries." CssClass="p-3 text-secondary small">
+                            <button type="button" class="btn btn-sm btn-primary mt-2" data-gws-focus="#kb-source-key">
+                                <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New source
+                            </button>
+                        </EmptyState>
                     }
                 </div>
             </div>
@@ -113,8 +120,8 @@ else
                     <DataAnnotationsValidator />
                     <div class="row g-3">
                         <div class="col-md-6">
-                            <label class="form-label small fw-semibold">Key</label>
-                            <InputText class="form-control" @bind-Value="SourceEditor.Key" placeholder="e.g. shopify-clean-room" />
+                            <label class="form-label small fw-semibold" for="kb-source-key">Key</label>
+                            <InputText id="kb-source-key" class="form-control" @bind-Value="SourceEditor.Key" placeholder="e.g. shopify-clean-room" />
                         </div>
                         <div class="col-md-6">
                             <label class="form-label small fw-semibold">Name</label>
@@ -150,7 +157,7 @@ else
                 <div class="card-body p-0">
                     @if (Entries.Count == 0)
                     {
-                        <EmptyState Icon="bi-journal-x" Message="No entries yet." CssClass="p-3 text-secondary small" />
+                        <EmptyState Icon="bi-journal-x" Title="No entries yet" Message="Add this source's first workflow note under New Entry." CssClass="p-3 text-secondary small" />
                     }
                     else
                     {

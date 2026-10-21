@@ -11,14 +11,13 @@
 
 <PageTitle>Menus</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-list me-2 text-primary"></i>Menus</h1>
-        <p>Edit the header (primary) and footer navigation for @(CurrentSite?.Name ?? "the live site").</p>
-    </div>
-    <CmsSiteSwitcher SiteChanged="LoadSiteAsync" />
-</div>
-<AppTabs App="GwsBusinessSuite.Web.Services.AdminApps.SiteDesign" />
+<PageHeader Title="Menus" Icon="bi-list"
+            Description="@($"Edit the header (primary) and footer navigation for {CurrentSite?.Name ?? "the live site"}.")"
+            App="GwsBusinessSuite.Web.Services.AdminApps.SiteDesign">
+    <Filters>
+        <CmsSiteSwitcher SiteChanged="LoadSiteAsync" />
+    </Filters>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {

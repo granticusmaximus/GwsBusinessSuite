@@ -16,15 +16,7 @@
 
 <PageTitle>@(PageId.HasValue ? "Edit Page" : "New Page")</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-file-earmark-text me-2 text-primary"></i>@(PageId.HasValue ? "Edit Page" : "New Page")</h1>
-        <p>
-            <a href="/admin/pages/all">Pages</a> &middot;
-            @(PageId.HasValue ? PageEditorModel.Title : "New page")
-        </p>
-    </div>
-</div>
+<PageHeader Title="@HeaderTitle" Icon="bi-file-earmark-text" ParentLabel="Pages" ParentHref="/admin/pages/all" />
 
 @if (!string.IsNullOrWhiteSpace(CmsErrorMessage))
 {
@@ -435,6 +427,10 @@
 
 @code {
     private static readonly JsonSerializerOptions NavJsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+
+    // The page's own title once it has one; the breadcrumb already says it's one of Pages.
+    private string HeaderTitle => !PageId.HasValue ? "New Page"
+        : string.IsNullOrWhiteSpace(PageEditorModel.Title) ? "Edit Page" : PageEditorModel.Title;
 
     [Parameter]
     public Guid? PageId { get; set; }

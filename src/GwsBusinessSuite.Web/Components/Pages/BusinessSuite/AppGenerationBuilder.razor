@@ -11,11 +11,15 @@
 
 <PageTitle>SentinelGPT Page Builder</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-magic me-2 text-primary"></i>SentinelGPT Page Builder</h1>
-    <p>Chat with SentinelGPT to draft new pages for one of your sites, then submit the plan for an admin to review and approve. Nothing goes live until it's approved.</p>
-</div>
-<AppTabs App="GwsBusinessSuite.Web.Services.AdminApps.PageBuilder" />
+<PageHeader Title="SentinelGPT Page Builder" Icon="bi-magic"
+            Description="Chat with SentinelGPT to draft new pages for one of your sites, then submit the plan for an admin to review and approve. Nothing goes live until it's approved."
+            App="GwsBusinessSuite.Web.Services.AdminApps.PageBuilder">
+    <Actions>
+        <button type="button" class="btn btn-primary" data-gws-focus="#app-gen-site">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New request
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -39,8 +43,8 @@ else
                 <i class="bi bi-plus-circle me-2"></i>Start a New Request
             </div>
             <div class="card-body">
-                <label class="form-label fw-semibold small">Target Site</label>
-                <select class="form-select form-select-sm mb-3" @bind="NewSiteId">
+                <label class="form-label fw-semibold small" for="app-gen-site">Target Site</label>
+                <select id="app-gen-site" class="form-select form-select-sm mb-3" @bind="NewSiteId">
                     <option value="">Choose a site...</option>
                     @foreach (var site in Sites)
                     {
@@ -78,7 +82,11 @@ else
                 }
                 @if (Requests.Count == 0)
                 {
-                    <EmptyState Icon="bi-list-ul" Message="No requests yet." CssClass="list-group-item p-3 text-muted small" />
+                    <EmptyState Icon="bi-list-ul" Title="No requests yet" Message="Pick a site and describe the page you want; the chat for it appears here." CssClass="list-group-item p-3 text-muted small">
+                        <button type="button" class="btn btn-sm btn-primary mt-2" data-gws-focus="#app-gen-site">
+                            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New request
+                        </button>
+                    </EmptyState>
                 }
             </div>
         </div>
