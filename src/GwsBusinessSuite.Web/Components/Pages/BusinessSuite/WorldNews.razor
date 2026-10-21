@@ -10,7 +10,7 @@
 <PageTitle>World News</PageTitle>
 
 <PageHeader Title="World News" Icon="bi-globe-europe-africa"
-            Description="What newsrooms in 41 countries are reporting, with every outlet's coverage of the same event grouped together across languages.">
+            Description="What newsrooms around the world are reporting, with every outlet's coverage of the same event grouped together across languages, and the biggest events summarized in English.">
     <Meta>
         <p class="small text-secondary mb-0">@StatusLine</p>
     </Meta>
@@ -55,7 +55,7 @@ else
             {
                 <button type="button" class="world-news-event @(e.Id == _selected?.Id ? "is-selected" : "")"
                         aria-pressed="@(e.Id == _selected?.Id ? "true" : "false")" @onclick="() => SelectAsync(e)">
-                    <span class="world-news-event-title">@e.Title</span>
+                    <span class="world-news-event-title">@(e.Headline ?? e.Title)</span>
                     <span class="world-news-event-meta">@Summary(e)</span>
                 </button>
             }
@@ -71,11 +71,26 @@ else
                 <button type="button" class="btn btn-sm btn-outline-secondary world-news-back" @onclick="() => _selected = null">
                     <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Events
                 </button>
-                <h2 class="world-news-detail-title">@_selected.Title</h2>
+                <h2 class="world-news-detail-title">@(_selected.Headline ?? _selected.Title)</h2>
+                @if (_selected.Headline is not null)
+                {
+                    <p class="world-news-original">Original headline: @_selected.Title</p>
+                }
                 <p class="world-news-detail-meta">
                     @Count(_selected.OutletCount, "outlet"), @Count(_selected.ArticleCount, "report").
                     First seen @_selected.FirstSeen.ToLocalGwsDateTime(), latest @_selected.LastSeen.ToLocalGwsDateTime().
                 </p>
+                <section class="world-news-summary" aria-label="Summary">
+                    @if (_summary is not null)
+                    {
+                        <p class="world-news-summary-text">@_summary.Text</p>
+                    }
+                    <p class="world-news-summary-meta">@SummaryNote</p>
+                    <a class="btn btn-sm btn-outline-secondary" href="@($"admin/world-news/events/{_selected.Id}/document.md")" download
+                       title="Every source on this event in time order, with links and the outlets' descriptions, as a Markdown file">
+                        <i class="bi bi-download me-1" aria-hidden="true"></i>Download document
+                    </a>
+                </section>
                 <dl class="world-news-facts">
                     <dt>Languages</dt>
                     <dd>@string.Join(", ", _selected.Languages.Order())</dd>
@@ -106,12 +121,20 @@ else
     private IReadOnlyList<EventOverview>? _events;
     private EventOverview? _selected;
     private IReadOnlyList<WorldArticle> _articles = [];
+    private EventSummary? _summary;
     private string _filter = string.Empty;
     private int _rangeHours = 24;
 
     private IReadOnlyList<EventOverview> VisibleEvents => string.IsNullOrWhiteSpace(_filter)
         ? _events ?? []
-        : (_events ?? []).Where(e => e.Title.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)).ToList();
+        : (_events ?? []).Where(e => e.Title.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
+            || e.Headline?.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase) == true).ToList();
+
+    private string SummaryNote => _summary is null
+        ? "No summary yet. After each read, the busiest events covered by 3 or more outlets are summarized in English."
+        : $"Summary by {_summary.Model} from {Count(_summary.ArticleCount, "report")}, {_summary.CreatedAt.ToLocalGwsDateTime()}"
+          + (_summary.Version > 1 ? $" (version {_summary.Version}; rewritten as coverage grows)." : ".")
+          + " Written by AI from headlines and outlets' descriptions: check the sources before relying on a detail.";
 
     private string StatusLine => ((News.LastRefreshed is { } at ? $"Read {at.ToLocalGwsDateTime()}. " : string.Empty) + News.Status).Trim();
 
@@ -126,12 +149,14 @@ else
         var since = DateTimeOffset.UtcNow.AddHours(-_rangeHours);
         _events = await Task.Run(() => News.Store.TopEvents(since, 300));
         if (_selected is not null) _selected = _events.FirstOrDefault(e => e.Id == _selected.Id);
+        if (_selected is not null) _summary = await Task.Run(() => News.Store.LatestSummary(_selected.Id));
     }
 
     private async Task SelectAsync(EventOverview e)
     {
         _selected = e;
-        _articles = await Task.Run(() => News.Store.ArticlesForEvent(e.Id));
+        _summary = null;
+        (_articles, _summary) = await Task.Run(() => (News.Store.ArticlesForEvent(e.Id), News.Store.LatestSummary(e.Id)));
     }
 
     // A read takes from seconds to a few minutes; the page follows it through News.Changed.

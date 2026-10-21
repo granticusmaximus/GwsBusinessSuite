@@ -1,7 +1,9 @@
+using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.OllamaKit;
 using GwsBusinessSuite.WorldNewsKit;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -9,11 +11,13 @@ using Microsoft.Extensions.Options;
 namespace GwsBusinessSuite.Infrastructure.Services;
 
 // World News (Intelligence workspace, .claude/plans/world-news-situations-macos-2026-10.md):
-// WorldNewsKit's pipeline on the server. 41 Google News country editions are read every 15
-// minutes and grouped into events across languages with embeddinggemma on the server's Ollama.
-// embeddinggemma is in ollama/server-models.txt, and Light mode allows it, since it's embeddings,
-// not generation. The data lives in its own SQLite file beside the main database (no
-// migrations), keeping 30 days.
+// WorldNewsKit's pipeline on the server. 41 Google News country editions and 64 outlets' own
+// feeds are read every 15 minutes and grouped into events across languages with embeddinggemma
+// on the server's Ollama. embeddinggemma is in ollama/server-models.txt, and Light mode allows
+// it, since it's embeddings, not generation. After each read the busiest events get an English
+// headline and summary from the same model and service Media Watch summarizes with (summaries
+// are what Light mode keeps on the server). The data lives in its own SQLite file beside the
+// main database (no migrations), keeping 30 days.
 public sealed class WorldNewsService : IDisposable
 {
     public const string HttpClientName = "world-news";
@@ -24,10 +28,11 @@ public sealed class WorldNewsService : IDisposable
     private readonly SemaphoreSlim _running = new(1, 1);
     private readonly OllamaClient _ollama;
     private readonly WorldNewsPipeline _pipeline;
+    private readonly EventSummarizer _summarizer;
     private readonly ILogger<WorldNewsService> _logger;
 
     public WorldNewsService(IConfiguration configuration, IOptions<ContentStudioOptions> ollamaOptions,
-        IHttpClientFactory httpClientFactory, ILogger<WorldNewsService> logger)
+        IHttpClientFactory httpClientFactory, IServiceScopeFactory scopes, ILogger<WorldNewsService> logger)
     {
         _logger = logger;
         var path = Path.GetFullPath(configuration["WorldNews:DatabasePath"] ?? "/app/data/worldnews.db");
@@ -38,6 +43,15 @@ public sealed class WorldNewsService : IDisposable
         var http = httpClientFactory.CreateClient(HttpClientName);
         _pipeline = new WorldNewsPipeline(Store, http, new GdeltDocClient(http, TimeProvider.System), _ollama, TimeProvider.System,
             new WorldNewsOptions { MaxEmbedPerCycle = configuration.GetValue("WorldNews:MaxEmbedPerCycle", 1500) });
+        // IOllamaService is a typed HttpClient, so each summary takes a fresh one rather than this
+        // singleton holding one for the app's lifetime. 8k context fits SummaryOptions.MaxPromptChars.
+        var model = ollamaOptions.Value.Model;
+        _summarizer = new EventSummarizer(Store, async (system, prompt, ct) =>
+            {
+                await using var scope = scopes.CreateAsyncScope();
+                return await scope.ServiceProvider.GetRequiredService<IOllamaService>().GenerateAsync(model, system, prompt, 8192, ct);
+            }, model, TimeProvider.System, at => at.ToLocalGwsDateTime(),
+            new SummaryOptions { PerRun = configuration.GetValue("WorldNews:SummariesPerRead", 3) });
         LastRefreshed = Store.LastFetched(LastReadKey);
         if (LastRefreshed is not null) Status = string.Empty;
     }
@@ -60,11 +74,15 @@ public sealed class WorldNewsService : IDisposable
             var report = await Task.Run(() => _pipeline.RunCycleAsync(ct), ct);
             LastRefreshed = DateTimeOffset.UtcNow;
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
-            var problems = report.Notes.Count == 0 ? string.Empty
-                : $" {report.Notes.Count} {(report.Notes.Count == 1 ? "problem" : "problems")}: {report.Notes[0]}";
-            Status = $"{report.Added:N0} new reports, {report.NewEvents:N0} new events.{problems}";
-            if (report.Notes.Count > 0)
-                _logger.LogWarning("World news read finished with {Count} problem(s): {Notes}", report.Notes.Count, string.Join(" | ", report.Notes));
+            Status = "Summarizing the biggest events...";
+            Changed?.Invoke();
+            var summaries = await Task.Run(() => _summarizer.RunAsync(ct), ct);
+            var notes = report.Notes.Concat(summaries.Notes).ToList();
+            var problems = notes.Count == 0 ? string.Empty
+                : $" {notes.Count} {(notes.Count == 1 ? "problem" : "problems")}: {notes[0]}";
+            Status = $"{report.Added:N0} new reports, {report.NewEvents:N0} new events, {summaries.Written:N0} summaries written.{problems}";
+            if (notes.Count > 0)
+                _logger.LogWarning("World news read finished with {Count} problem(s): {Notes}", notes.Count, string.Join(" | ", notes));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -80,6 +98,14 @@ public sealed class WorldNewsService : IDisposable
             _running.Release();
             Changed?.Invoke();
         }
+    }
+
+    // The event's combined document as Markdown, or null when the event is gone.
+    public (string FileName, string Markdown)? Document(string eventId)
+    {
+        if (Store.Event(eventId) is not { } e) return null;
+        var markdown = EventDocument.ToMarkdown(e, Store.ArticlesForEvent(eventId), Store.LatestSummary(eventId), at => at.ToLocalGwsDateTime());
+        return ($"world-news-{e.FirstSeen.ToLocalTime():yyyyMMdd}-{eventId[..Math.Min(8, eventId.Length)]}.md", markdown);
     }
 
     public void Dispose()

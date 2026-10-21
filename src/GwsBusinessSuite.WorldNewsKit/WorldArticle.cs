@@ -7,7 +7,8 @@ namespace GwsBusinessSuite.WorldNewsKit;
 
 // One report from one outlet. Language and Country are English names ("Turkish", "Turkey").
 // GroupHint ties together reports a feed already says are the same story (a Google News item
-// and the related coverage listed under it), so they land in one event.
+// and the related coverage listed under it), so they land in one event. Snippet is the outlet's
+// own short description from its feed (Google News reports have none).
 public sealed record WorldArticle(
     string Id,
     string Url,
@@ -17,7 +18,8 @@ public sealed record WorldArticle(
     string Country,
     DateTimeOffset SeenAt,
     string Feed,
-    string? GroupHint = null);
+    string? GroupHint = null,
+    string? Snippet = null);
 
 public static partial class ArticleNormalizer
 {
@@ -47,6 +49,20 @@ public static partial class ArticleNormalizer
         text = SpacedPunctuation().Replace(text, "$1");
         return Whitespace().Replace(text, " ").Trim();
     }
+
+    // A feed's description as plain text: tags and entities gone, cut at a word near maxLength.
+    // Empty when nothing is left or it only repeats the headline.
+    public static string? CleanSnippet(string? html, string title, int maxLength = 500)
+    {
+        var text = CleanTitle(Tags().Replace(WebUtility.HtmlDecode(html ?? string.Empty), " "));
+        if (text.Length == 0 || string.Equals(text, title, StringComparison.OrdinalIgnoreCase)) return null;
+        if (text.Length <= maxLength) return text;
+        var cut = text.LastIndexOf(' ', maxLength);
+        return text[..(cut > maxLength / 2 ? cut : maxLength)].TrimEnd(',', ';', ':', ' ') + "…";
+    }
+
+    [GeneratedRegex("<[^>]*>")]
+    private static partial Regex Tags();
 
     [GeneratedRegex(@"\s+([,:;.!?])(?=\s|$)")]
     private static partial Regex SpacedPunctuation();

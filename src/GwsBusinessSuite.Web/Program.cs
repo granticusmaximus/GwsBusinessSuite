@@ -1081,6 +1081,15 @@ app.MapGet("/admin/sentinel/databases/{wikiDatabaseId:guid}/export.csv", async (
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");
 
+// World News: one event's combined document (header, summary, every source with its link and
+// outlet description), downloaded from the event on /admin/world-news.
+app.MapGet("/admin/world-news/events/{eventId}/document.md", (string eventId, GwsBusinessSuite.Infrastructure.Services.WorldNewsService news) =>
+    news.Document(eventId) is { } document
+        ? Results.File(Encoding.UTF8.GetBytes(document.Markdown), "text/markdown; charset=utf-8", document.FileName)
+        : Results.NotFound())
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("public-read");
+
 // Portable JSON export of a workflow's live draft (positions/notes included, unlike the
 // position-free publish snapshot) - imported back via AutomationTemplateService-style graph
 // rebuild (Automation.razor's Import button), which mints fresh node/connection ids and never

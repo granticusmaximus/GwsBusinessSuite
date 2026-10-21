@@ -4,8 +4,15 @@ using Microsoft.Data.Sqlite;
 namespace GwsBusinessSuite.WorldNewsKit;
 
 // An event as the feed shows it: its reports counted by distinct outlet, country and language.
+// Headline is the English headline from its latest summary that has one.
 public sealed record EventOverview(string Id, string Title, int ArticleCount, int OutletCount,
-    IReadOnlyList<string> Countries, IReadOnlyList<string> Languages, DateTimeOffset FirstSeen, DateTimeOffset LastSeen);
+    IReadOnlyList<string> Countries, IReadOnlyList<string> Languages, DateTimeOffset FirstSeen, DateTimeOffset LastSeen,
+    string? Headline = null);
+
+// One version of an event's summary. Versions count up from 1; ArticleCount is how many reports
+// the event had when it was written, which decides when it's due again.
+public sealed record EventSummary(string EventId, int Version, string? Headline, string Text, string Model,
+    int ArticleCount, DateTimeOffset CreatedAt);
 
 // The Mac app's local world-news database (SQLite). Times are stored as Unix seconds and vectors
 // as little-endian float32 blobs.
@@ -22,7 +29,7 @@ public sealed class WorldNewsStore
             CREATE TABLE IF NOT EXISTS articles (
                 id TEXT PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL, outlet TEXT NOT NULL,
                 language TEXT NOT NULL, country TEXT NOT NULL, seen_at INTEGER NOT NULL, feed TEXT NOT NULL,
-                group_hint TEXT, embedding BLOB, event_id TEXT);
+                group_hint TEXT, embedding BLOB, event_id TEXT, snippet TEXT);
             CREATE INDEX IF NOT EXISTS ix_articles_seen ON articles (seen_at);
             CREATE INDEX IF NOT EXISTS ix_articles_event ON articles (event_id);
             CREATE TABLE IF NOT EXISTS events (
@@ -30,7 +37,14 @@ public sealed class WorldNewsStore
                 article_count INTEGER NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS ix_events_last_seen ON events (last_seen);
             CREATE TABLE IF NOT EXISTS feed_state (feed TEXT PRIMARY KEY, last_fetched INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS summaries (
+                event_id TEXT NOT NULL, version INTEGER NOT NULL, headline TEXT, summary TEXT NOT NULL, model TEXT NOT NULL,
+                article_count INTEGER NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (event_id, version));
             """);
+        // Databases from before outlet feeds (21-10-26) have no snippet column.
+        using var columns = connection.CreateCommand();
+        columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('articles') WHERE name = 'snippet'";
+        if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE articles ADD COLUMN snippet TEXT");
     }
 
     // New reports only (a report already stored, by canonical URL, is skipped). Returns how many were new.
@@ -40,15 +54,15 @@ public sealed class WorldNewsStore
         using var transaction = connection.BeginTransaction();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT OR IGNORE INTO articles (id, url, title, outlet, language, country, seen_at, feed, group_hint)
-            VALUES ($id, $url, $title, $outlet, $language, $country, $seen, $feed, $hint)
+            INSERT OR IGNORE INTO articles (id, url, title, outlet, language, country, seen_at, feed, group_hint, snippet)
+            VALUES ($id, $url, $title, $outlet, $language, $country, $seen, $feed, $hint, $snippet)
             """;
-        var parameters = new[] { "$id", "$url", "$title", "$outlet", "$language", "$country", "$seen", "$feed", "$hint" }
+        var parameters = new[] { "$id", "$url", "$title", "$outlet", "$language", "$country", "$seen", "$feed", "$hint", "$snippet" }
             .Select(name => command.Parameters.Add(new SqliteParameter { ParameterName = name })).ToArray();
         var added = 0;
         foreach (var a in articles)
         {
-            object?[] values = [a.Id, a.Url, a.Title, a.Outlet, a.Language, a.Country, a.SeenAt.ToUnixTimeSeconds(), a.Feed, a.GroupHint];
+            object?[] values = [a.Id, a.Url, a.Title, a.Outlet, a.Language, a.Country, a.SeenAt.ToUnixTimeSeconds(), a.Feed, a.GroupHint, a.Snippet];
             for (var i = 0; i < values.Length; i++) parameters[i].Value = values[i] ?? DBNull.Value;
             added += command.ExecuteNonQuery();
         }
@@ -83,7 +97,7 @@ public sealed class WorldNewsStore
         command.CommandText = $"SELECT {ArticleColumns}, embedding FROM articles WHERE embedding IS NOT NULL AND event_id IS NULL ORDER BY seen_at";
         using var reader = command.ExecuteReader();
         var items = new List<(WorldArticle, float[])>();
-        while (reader.Read()) items.Add((ReadArticle(reader), ToFloats((byte[])reader[9])));
+        while (reader.Read()) items.Add((ReadArticle(reader), ToFloats((byte[])reader[10])));
         return items;
     }
 
@@ -179,6 +193,7 @@ public sealed class WorldNewsStore
             command.CommandText = """
                 UPDATE articles SET event_id = $keep WHERE event_id = $drop;
                 DELETE FROM events WHERE id = $drop;
+                DELETE FROM summaries WHERE event_id = $drop;
                 UPDATE events SET title = $title, title_language = $language, vector_sum = $sum, article_count = $count,
                     first_seen = $first, last_seen = $last WHERE id = $keep;
                 """;
@@ -196,28 +211,56 @@ public sealed class WorldNewsStore
     }
 
     // The busiest events since a time, by distinct outlets.
-    public IReadOnlyList<EventOverview> TopEvents(DateTimeOffset since, int limit)
+    public IReadOnlyList<EventOverview> TopEvents(DateTimeOffset since, int limit) =>
+        Overviews("WHERE e.last_seen >= $since", "", ("$since", since.ToUnixTimeSeconds()), ("$limit", limit));
+
+    public EventOverview? Event(string eventId) =>
+        Overviews("WHERE e.id = $event", "", ("$event", eventId), ("$limit", 1)).FirstOrDefault();
+
+    // The busiest events since a time, covered by at least minOutlets outlets, that have no summary
+    // yet or have grown by a quarter (and at least 3 reports) since their latest one.
+    public IReadOnlyList<EventOverview> EventsDueSummary(DateTimeOffset since, int minOutlets, int limit) =>
+        Overviews("WHERE e.last_seen >= $since", """
+            HAVING COUNT(DISTINCT a.outlet) >= $min AND COALESCE(e.article_count >= (
+                SELECT article_count + MAX(3, article_count / 4) FROM summaries
+                WHERE event_id = e.id ORDER BY version DESC LIMIT 1), 1)
+            """, ("$since", since.ToUnixTimeSeconds()), ("$min", minOutlets), ("$limit", limit));
+
+    public EventSummary? LatestSummary(string eventId)
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT e.id, e.title, e.article_count, COUNT(DISTINCT a.outlet),
-                   GROUP_CONCAT(DISTINCT a.country), GROUP_CONCAT(DISTINCT a.language), e.first_seen, e.last_seen
-            FROM events e JOIN articles a ON a.event_id = e.id
-            WHERE e.last_seen >= $since
-            GROUP BY e.id ORDER BY COUNT(DISTINCT a.outlet) DESC, e.last_seen DESC LIMIT $limit
+            SELECT event_id, version, headline, summary, model, article_count, created_at FROM summaries
+            WHERE event_id = $event ORDER BY version DESC LIMIT 1
             """;
-        command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
-        command.Parameters.AddWithValue("$limit", limit);
+        command.Parameters.AddWithValue("$event", eventId);
         using var reader = command.ExecuteReader();
-        var events = new List<EventOverview>();
-        while (reader.Read())
-        {
-            events.Add(new EventOverview(reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetInt32(3),
-                Split(reader.IsDBNull(4) ? null : reader.GetString(4)), Split(reader.IsDBNull(5) ? null : reader.GetString(5)),
-                DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(6)), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(7))));
-        }
-        return events;
+        return reader.Read()
+            ? new EventSummary(reader.GetString(0), reader.GetInt32(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetString(3),
+                reader.GetString(4), reader.GetInt32(5), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(6)))
+            : null;
+    }
+
+    // Stores the next version of an event's summary (earlier versions are kept) and returns it.
+    public EventSummary SaveSummary(string eventId, string? headline, string text, string model, int articleCount, DateTimeOffset createdAt)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO summaries (event_id, version, headline, summary, model, article_count, created_at)
+            VALUES ($event, (SELECT COALESCE(MAX(version), 0) + 1 FROM summaries WHERE event_id = $event),
+                    $headline, $summary, $model, $count, $created)
+            RETURNING version
+            """;
+        command.Parameters.AddWithValue("$event", eventId);
+        command.Parameters.AddWithValue("$headline", (object?)headline ?? DBNull.Value);
+        command.Parameters.AddWithValue("$summary", text);
+        command.Parameters.AddWithValue("$model", model);
+        command.Parameters.AddWithValue("$count", articleCount);
+        command.Parameters.AddWithValue("$created", createdAt.ToUnixTimeSeconds());
+        var version = Convert.ToInt32(command.ExecuteScalar());
+        return new EventSummary(eventId, version, headline, text, model, articleCount, DateTimeOffset.FromUnixTimeSeconds(createdAt.ToUnixTimeSeconds()));
     }
 
     public IReadOnlyList<WorldArticle> ArticlesForEvent(string eventId) =>
@@ -253,12 +296,39 @@ public sealed class WorldNewsStore
         command.CommandText = """
             DELETE FROM articles WHERE seen_at < $before;
             DELETE FROM events WHERE last_seen < $before;
+            DELETE FROM summaries WHERE event_id NOT IN (SELECT id FROM events);
             """;
         command.Parameters.AddWithValue("$before", before.ToUnixTimeSeconds());
         command.ExecuteNonQuery();
     }
 
-    private const string ArticleColumns = "id, url, title, outlet, language, country, seen_at, feed, group_hint";
+    private const string ArticleColumns = "id, url, title, outlet, language, country, seen_at, feed, group_hint, snippet";
+
+    private IReadOnlyList<EventOverview> Overviews(string where, string having, params (string Name, object Value)[] parameters)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT e.id, e.title, e.article_count, COUNT(DISTINCT a.outlet),
+                   GROUP_CONCAT(DISTINCT a.country), GROUP_CONCAT(DISTINCT a.language), e.first_seen, e.last_seen,
+                   (SELECT headline FROM summaries WHERE event_id = e.id AND headline IS NOT NULL ORDER BY version DESC LIMIT 1)
+            FROM events e JOIN articles a ON a.event_id = e.id
+            {where}
+            GROUP BY e.id {having}
+            ORDER BY COUNT(DISTINCT a.outlet) DESC, e.last_seen DESC LIMIT $limit
+            """;
+        foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value);
+        using var reader = command.ExecuteReader();
+        var events = new List<EventOverview>();
+        while (reader.Read())
+        {
+            events.Add(new EventOverview(reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetInt32(3),
+                Split(reader.IsDBNull(4) ? null : reader.GetString(4)), Split(reader.IsDBNull(5) ? null : reader.GetString(5)),
+                DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(6)), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(7)),
+                reader.IsDBNull(8) ? null : reader.GetString(8)));
+        }
+        return events;
+    }
 
     private IReadOnlyList<WorldArticle> QueryArticles(string where, params (string Name, object Value)[] parameters)
     {
@@ -274,7 +344,8 @@ public sealed class WorldNewsStore
 
     private static WorldArticle ReadArticle(SqliteDataReader r) => new(
         r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4), r.GetString(5),
-        DateTimeOffset.FromUnixTimeSeconds(r.GetInt64(6)), r.GetString(7), r.IsDBNull(8) ? null : r.GetString(8));
+        DateTimeOffset.FromUnixTimeSeconds(r.GetInt64(6)), r.GetString(7), r.IsDBNull(8) ? null : r.GetString(8),
+        r.IsDBNull(9) ? null : r.GetString(9));
 
     private static IReadOnlyList<string> Split(string? values) =>
         values is null ? [] : values.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);

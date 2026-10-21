@@ -14,6 +14,9 @@ public sealed record WorldNewsOptions
     // Mac that slept catches up, up to GDELT's one-day lookback).
     public TimeSpan FirstLookback { get; init; } = TimeSpan.FromHours(6);
     public IReadOnlyList<NewsEdition> Editions { get; init; } = GoogleNewsFeed.Editions;
+    public IReadOnlyList<NewsOutlet> Outlets { get; init; } = OutletFeeds.Outlets;
+    // Outlet feeds are read this many at a time (several share a host, such as the BBC's).
+    public int OutletConcurrency { get; init; } = 6;
     public IReadOnlyList<string> GdeltQueries { get; init; } = [];
     public int EmbedBatchSize { get; init; } = 64;
     // Caps one cycle's embedding work, so a backlog (the first read is about 6,000 reports) is
@@ -23,8 +26,9 @@ public sealed record WorldNewsOptions
 
 public sealed record CycleReport(int Fetched, int Added, int Embedded, int NewEvents, int UpdatedEvents, int MergedEvents, IReadOnlyList<string> Notes);
 
-// One refresh: read every feed, store the new reports, embed them with the local model, and
-// group them into events. Feed failures are noted and skipped so one bad edition never stops a
+// One refresh: read every feed (Google News editions, then outlets' own feeds), store the new
+// reports, embed their headlines with the local model, and group them into events. Only
+// headlines are embedded, outlets' included: the grouping thresholds were tuned on headlines. Feed failures are noted and skipped so one bad edition never stops a
 // cycle; without Ollama the reports wait, unembedded, for the next one.
 public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, GdeltDocClient gdelt, OllamaClient ollama,
     TimeProvider time, WorldNewsOptions options)
@@ -47,6 +51,29 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
             {
                 notes.Add($"Google News {edition.Country}: {ex.Message}");
             }
+        }
+
+        var outletReads = new (IReadOnlyList<WorldArticle>? Articles, string? Note)[options.Outlets.Count];
+        await Parallel.ForEachAsync(Enumerable.Range(0, options.Outlets.Count),
+            new ParallelOptions { MaxDegreeOfParallelism = options.OutletConcurrency, CancellationToken = ct }, async (i, token) =>
+            {
+                var outlet = options.Outlets[i];
+                try
+                {
+                    using var body = new MemoryStream(await http.GetByteArrayAsync(outlet.Url, token));
+                    outletReads[i] = (OutletFeeds.Parse(body, outlet, time.GetUtcNow()), null);
+                }
+                catch (Exception ex) when (ex is HttpRequestException or XmlException or TaskCanceledException && !token.IsCancellationRequested)
+                {
+                    outletReads[i] = (null, $"{outlet.Name} ({outlet.Language}): {ex.Message}");
+                }
+            });
+        foreach (var (articles, note) in outletReads)
+        {
+            if (note is not null) notes.Add(note);
+            if (articles is null) continue;
+            fetched += articles.Count;
+            added += store.AddArticles(articles);
         }
 
         foreach (var query in options.GdeltQueries)

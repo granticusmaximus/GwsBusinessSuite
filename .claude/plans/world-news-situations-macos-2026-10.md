@@ -66,9 +66,44 @@ News** (`/admin/world-news`, `WorldNews.razor`). The Mac app shows it in its Wor
 - **Kept from the Mac work:** `MacMenuPickerHandler` (it fixes every Mac picker).
   `WorldNewsHtml` was removed; the web page renders its own markup.
 
+**Phase 3 done 21-10-26: outlet feeds, the combined document, summaries.**
+- `OutletFeeds`: 64 outlets' own feeds in 22 languages (Al Jazeera + Arabic, DW en/de/es/ru,
+  France 24 en/fr/es/ar, RFI, Euronews, 16 BBC services, NHK, Yonhap en/ko, Le Monde, El País,
+  Spiegel, ANSA, NOS, SVT, NRK, Meduza, Ukrainska Pravda and more). All answered on 21-10-26.
+  Left out: Euronews fr/de (406), CBC (no answer), El Mundo (timeout), Folha (no items).
+  Reads RSS 2.0, RSS 1.0/RDF (DW) and Atom. `ParseDate` handles what feeds really write:
+  wrong weekdays, "+0300", zone names.
+  Outlets are read 6 at a time after the editions. Reports keep the outlet's description as
+  `Snippet` (cleaned, max 500 characters). Older databases get the column added on open.
+- **Only headlines are embedded,** outlets' too, because the 0.65/0.85 thresholds were tuned on
+  headlines. Embedding title + snippet would need retuning.
+- `EventDocument`: the combined document (header, summary, sources in time order with link and
+  description). Wire copies (same description, else same headline) collapse into "Also carried
+  by". It downloads as Markdown from the event: `/admin/world-news/events/{id}/document.md`.
+  The same sources feed the summary prompt, capped at 6,000 characters. Languages take turns,
+  so a big English story still lets the German and Japanese coverage in.
+- `EventSummarizer`: after each read, up to `WorldNews:SummariesPerRead` (default 3) of the
+  busiest events with 3+ outlets get an English HEADLINE + SUMMARY. It uses the server's
+  `IOllamaService` with `ContentStudio:Model` (sentinelgpt, which is llama3.2 in Light mode;
+  the same path Media Watch summarizes on), with 8k context and a 2-minute timeout. If one
+  fails, the rest wait for the next read. An event is re-summarized when it grows by a quarter
+  (at least 3 reports), and every version is kept. The list shows the English headline.
+- **Live check (21-10-26, scratch harness, real feeds):** one read took 111 s. 8,535 reports
+  (all 64 outlets and 41 editions answered) made 4,389 events. Six summaries took 33 s on the
+  Mac. **Quality:** llama3.2 at temperature 0.2 (the sentinelgpt Modelfile) gets the gist
+  right but sometimes swaps people's roles and teams (it called PSG's players Barcelona's).
+  A stricter prompt reduced but didn't end this. gemma4 got those right and named
+  disagreements (Hubbard's age: 72, 73 or 74). So the page labels summaries as AI-written,
+  to be checked against the sources.
+- **Decision for Grant:** keep the summaries on the droplet's small model (now), or write them
+  with the Mac's local gemma4 (better, but only while the Mac is on). Set
+  `WorldNews:SummariesPerRead` to 0 to turn them off.
+- Not checked: summary timing on the droplet's CPU (the status line will name a timeout), and
+  the Markdown download inside the Mac app's WKWebView.
+
 **Revised order:**
 2. ~~The Mac tab~~ The web page (done, above).
-3. Outlet RSS feeds + the combined document + summaries.
+3. ~~Outlet RSS feeds + the combined document + summaries~~ (done, above).
 4. Situations + claims.
 5. Monitoring, the World view, and the SentinelGPT tool.
 

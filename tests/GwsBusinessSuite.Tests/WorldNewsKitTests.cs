@@ -250,7 +250,7 @@ public sealed class WorldNewsKitTests : IDisposable
             return (HttpStatusCode.OK, JsonSerializer.Serialize(new { embeddings = vectors }));
         });
         var http = new HttpClient(handler);
-        var options = new WorldNewsOptions { Editions = [France, new NewsEdition("Japan", "Japanese", "ja", "JP", "JP:ja")] };
+        var options = new WorldNewsOptions { Editions = [France, new NewsEdition("Japan", "Japanese", "ja", "JP", "JP:ja")], Outlets = [] };
         var pipeline = new WorldNewsPipeline(store, http, new GdeltDocClient(http, new ManualTime(Now)),
             new OllamaClient(new Uri("http://localhost:11434/"), http), new ManualTime(Now), options);
 
@@ -268,6 +268,255 @@ public sealed class WorldNewsKitTests : IDisposable
         store.TopEvents(Now.AddDays(-2), 5).Select(e => e.ArticleCount).Should().Equal(2, 1);
     }
 
+    // Shapes taken from the live feeds (21-10-26): an RSS 2.0 item with HTML in a CDATA
+    // description and a "+0300" date, one with no link, one dated in the future.
+    private const string OutletRss = """
+        <rss version="2.0"><channel><title>Example</title>
+          <item>
+            <title>Floods hit Istanbul</title>
+            <link>https://www.example.com/world/floods?utm_source=rss</link>
+            <pubDate>Tue, 20 Oct 2026 12:00:00 +0300</pubDate>
+            <description><![CDATA[<p>Heavy rain <b>flooded</b> streets &amp; homes in Istanbul on Tuesday.</p><img src="x.jpg">]]></description>
+          </item>
+          <item><title>No link here</title></item>
+          <item>
+            <title>Dated tomorrow</title>
+            <link>https://www.example.com/world/tomorrow</link>
+            <pubDate>Thu, 22 Oct 2026 12:00:00 GMT</pubDate>
+            <description>Dated tomorrow</description>
+          </item>
+        </channel></rss>
+        """;
+
+    [Fact]
+    public void OutletFeeds_ShouldReadRssRdfAndAtom_WithTheOutletsDescriptions()
+    {
+        var outlet = new NewsOutlet("Example", "English", "Turkey", "https://www.example.com/rss");
+        var rss = OutletFeeds.Parse(new MemoryStream(Encoding.UTF8.GetBytes(OutletRss)), outlet, Now);
+        rss.Should().HaveCount(2, "an item without a link is skipped");
+        rss[0].Should().BeEquivalentTo(new
+        {
+            Id = ArticleNormalizer.IdFor("https://www.example.com/world/floods"),
+            Title = "Floods hit Istanbul", Outlet = "Example", Language = "English", Country = "Turkey",
+            SeenAt = new DateTimeOffset(2026, 10, 20, 9, 0, 0, TimeSpan.Zero), Feed = "outlet:https://www.example.com/rss",
+            Snippet = "Heavy rain flooded streets & homes in Istanbul on Tuesday.", GroupHint = (string?)null
+        });
+        rss[1].SeenAt.Should().Be(Now, "a date in the future is taken as now");
+        rss[1].Snippet.Should().BeNull("a description that only repeats the headline adds nothing");
+
+        // DW's feeds are RSS 1.0 (RDF), with the date in dc:date.
+        const string rdf = """
+            <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+              <channel><title>DW</title><link>https://www.dw.com</link><description>News</description></channel>
+              <item><title>Flut in Istanbul</title><link>https://www.dw.com/de/flut/a-1</link>
+                <description>Starkregen hat Istanbul überflutet.</description><dc:date>2026-10-20T08:30:00Z</dc:date></item>
+            </rdf:RDF>
+            """;
+        var dw = OutletFeeds.Parse(new MemoryStream(Encoding.UTF8.GetBytes(rdf)), outlet with { Language = "German" }, Now).Should().ContainSingle().Subject;
+        dw.Should().BeEquivalentTo(new { Title = "Flut in Istanbul", Url = "https://www.dw.com/de/flut/a-1", Snippet = "Starkregen hat Istanbul überflutet." });
+        dw.SeenAt.Should().Be(new DateTimeOffset(2026, 10, 20, 8, 30, 0, TimeSpan.Zero));
+
+        const string atom = """
+            <feed xmlns="http://www.w3.org/2005/Atom"><entry>
+              <title type="html">Inondations &amp;amp; pluie</title>
+              <link rel="self" href="https://example.org/self"/><link rel="alternate" href="https://example.org/inondations"/>
+              <updated>2026-10-20T10:00:00+02:00</updated><summary>Des pluies torrentielles ont inondé Istanbul.</summary>
+            </entry></feed>
+            """;
+        var entry = OutletFeeds.Parse(new MemoryStream(Encoding.UTF8.GetBytes(atom)), outlet, Now).Should().ContainSingle().Subject;
+        entry.Should().BeEquivalentTo(new { Title = "Inondations & pluie", Url = "https://example.org/inondations", Snippet = "Des pluies torrentielles ont inondé Istanbul." });
+        entry.SeenAt.Should().Be(new DateTimeOffset(2026, 10, 20, 8, 0, 0, TimeSpan.Zero));
+
+        // The XML declaration picks the encoding, and a DOCTYPE is skipped rather than fetched.
+        var latin1 = Encoding.Latin1.GetBytes("""
+            <?xml version="1.0" encoding="ISO-8859-1"?>
+            <!DOCTYPE rss PUBLIC "-//Netscape Communications//DTD RSS 0.91//EN" "http://my.netscape.com/publish/formats/rss-0.91.dtd">
+            <rss version="0.91"><channel><item><title>Crise em Brasília</title><link>https://example.com.br/a</link></item></channel></rss>
+            """);
+        OutletFeeds.Parse(new MemoryStream(latin1), outlet, Now).Single().Title.Should().Be("Crise em Brasília");
+
+        var snippet = ArticleNormalizer.CleanSnippet(string.Join(' ', Enumerable.Repeat("word", 200)), "t", maxLength: 50)!;
+        snippet.Should().EndWith("word…");
+        snippet.Length.Should().BeLessThanOrEqualTo(51);
+    }
+
+    [Theory]
+    [InlineData("Tue, 20 Oct 2026 14:49:57 GMT", "2026-10-20T14:49:57Z")]
+    [InlineData("Wed, 20 Oct 2026 14:49:57 +0300", "2026-10-20T11:49:57Z")] // the wrong weekday, as some feeds write it
+    [InlineData("20 Oct 2026 14:49 -0400", "2026-10-20T18:49:00Z")]
+    [InlineData("Tue, 20 Oct 2026 14:49:57 EDT", "2026-10-20T18:49:57Z")]
+    [InlineData("Tue, 20 Oct 2026 14:49:57 Z", "2026-10-20T14:49:57Z")]
+    [InlineData("2026-10-20T14:49:57+02:00", "2026-10-20T12:49:57Z")]
+    [InlineData("", null)]
+    [InlineData("yesterday", null)]
+    public void ParseDate_ShouldReadFeedDatesAsTheyAreWritten(string value, string? expected) =>
+        OutletFeeds.ParseDate(value).Should().Be(expected is null ? (DateTimeOffset?)null : DateTimeOffset.Parse(expected, System.Globalization.CultureInfo.InvariantCulture));
+
+    [Fact]
+    public void Store_ShouldAddTheSnippetColumn_ToADatabaseFromBeforeOutletFeeds()
+    {
+        using (var old = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath};Pooling=False"))
+        {
+            old.Open();
+            using var create = old.CreateCommand();
+            create.CommandText = """
+                CREATE TABLE articles (id TEXT PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL, outlet TEXT NOT NULL,
+                    language TEXT NOT NULL, country TEXT NOT NULL, seen_at INTEGER NOT NULL, feed TEXT NOT NULL,
+                    group_hint TEXT, embedding BLOB, event_id TEXT);
+                INSERT INTO articles (id, url, title, outlet, language, country, seen_at, feed) VALUES ('old', 'u', 'Old', 'o', 'English', 'UK', 1, 'f');
+                """;
+            create.ExecuteNonQuery();
+        }
+
+        var store = new WorldNewsStore(_dbPath);
+        store.AddArticles([Article("new", "New", "English", Now) with { Snippet = "What happened." }]);
+
+        store.ArticlesToEmbed(10).Select(a => (a.Id, a.Snippet)).Should().Equal(("old", null), ("new", "What happened."));
+        new WorldNewsStore(_dbPath).ArticlesToEmbed(10).Should().HaveCount(2, "opening it again doesn't add the column twice");
+    }
+
+    [Fact]
+    public void Store_ShouldKeepSummaryVersions_AndSayWhenAnEventIsDueAnother()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        SeedEvent(store, "big", Reports("big", 4));
+        SeedEvent(store, "small", Reports("small", 2));
+        var since = Now.AddDays(-1);
+
+        store.EventsDueSummary(since, 3, 10).Select(e => e.Id).Should().Equal(["big"], "only events with 3 or more outlets");
+        store.SaveSummary("big", "Floods in Istanbul", "First version.", "llama3.2", 4, Now).Version.Should().Be(1);
+        store.EventsDueSummary(since, 3, 10).Should().BeEmpty("nothing new since the summary");
+        store.TopEvents(since, 10).Single(e => e.Id == "big").Headline.Should().Be("Floods in Istanbul");
+        store.Event("big")!.Headline.Should().Be("Floods in Istanbul");
+        store.Event("missing").Should().BeNull();
+
+        store.SaveClustering(new ClusterResult([], [Event("big", "Floods", [1f, 0f], 6)], 0));
+        store.EventsDueSummary(since, 3, 10).Should().BeEmpty("2 more reports isn't enough");
+        store.SaveClustering(new ClusterResult([], [Event("big", "Floods", [1f, 0f], 7)], 0));
+        store.EventsDueSummary(since, 3, 10).Select(e => e.Id).Should().Equal("big");
+
+        var second = store.SaveSummary("big", null, "Second version.", "llama3.2", 7, Now.AddHours(1));
+        second.Version.Should().Be(2);
+        store.LatestSummary("big").Should().BeEquivalentTo(second);
+        store.Event("big")!.Headline.Should().Be("Floods in Istanbul", "a version without a headline keeps the last one");
+
+        var keep = store.ActiveEvents(since).Single(e => e.Id == "small");
+        var drop = store.ActiveEvents(since).Single(e => e.Id == "big");
+        keep.Absorb(drop);
+        store.ApplyMerges([new EventMerge(keep, drop)]);
+        store.LatestSummary("big").Should().BeNull("a merged-away event's summaries go with it");
+
+        store.SaveSummary("small", "Small", "A version.", "llama3.2", 6, Now);
+        store.Prune(Now);
+        store.LatestSummary("small").Should().BeNull("pruned events take their summaries with them");
+    }
+
+    [Fact]
+    public void Document_ShouldCollapseWireCopies_AndLetEveryLanguageIntoThePrompt()
+    {
+        var wire = "Heavy rain flooded streets and homes across Istanbul on Tuesday, officials said, as eight people died.";
+        var spiegel = Article("de", "Flut in Istanbul", "German", Now.AddHours(-4)) with { Outlet = "Der Spiegel", Snippet = "Starkregen hat Istanbul überflutet." };
+        var hindu = Article("hindu", "Floods kill eight in Istanbul", "English", Now.AddHours(-3)) with { Outlet = "The Hindu", Snippet = wire };
+        var dawn = Article("dawn", "Eight dead as floods hit Istanbul", "English", Now.AddHours(-2)) with { Outlet = "Dawn", Snippet = wire };
+        var nhk = Article("nhk", "イスタンブールで洪水", "Japanese", Now.AddHours(-1)) with { Outlet = "NHK" };
+        var e = new EventOverview("e1", "Floods kill eight in Istanbul", 4, 4, ["Somewhere"], ["English", "German", "Japanese"],
+            Now.AddHours(-4), Now.AddHours(-1), "Istanbul floods kill eight");
+        string Format(DateTimeOffset at) => at.ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
+        var sources = EventDocument.Sources([nhk, dawn, hindu, spiegel]);
+        sources.Select(s => s.Report.Id).Should().Equal("de", "hindu", "nhk");
+        sources[1].AlsoCarriedBy.Should().Equal("Dawn");
+
+        var summary = new EventSummary("e1", 2, "Istanbul floods kill eight", "Eight people died.", "llama3.2", 4, Now);
+        var md = EventDocument.ToMarkdown(e, [nhk, dawn, hindu, spiegel], summary, Format);
+        md.Should().StartWith("# Istanbul floods kill eight").And.Contain("Original headline: Floods kill eight in Istanbul")
+            .And.Contain("## Summary").And.Contain("_Written by llama3.2 from 4 reports, 20-10-26 15:00 (version 2)._")
+            .And.Contain("### Der Spiegel: Somewhere, German, 20-10-26 11:00")
+            .And.Contain("[Floods kill eight in Istanbul](https://example.com/hindu)").And.Contain("> " + wire)
+            .And.Contain("Also carried by: Dawn").And.NotContain("Eight dead as floods hit Istanbul");
+        md.IndexOf("Flut in Istanbul", StringComparison.Ordinal).Should().BeLessThan(md.IndexOf("イスタンブール", StringComparison.Ordinal));
+
+        // Five English sources and room for three lines: English, German and Japanese each get one.
+        var english = Enumerable.Range(1, 5).Select(i => Article($"en{i}", $"English report {i}", "English", Now.AddHours(-3).AddMinutes(i))
+            with { Snippet = new string((char)('a' + i), 100) }).ToList();
+        var prompt = EventDocument.ToPrompt(e, [.. english, spiegel, nhk], Format, maxChars: 560);
+        prompt.Length.Should().BeLessThanOrEqualTo(560);
+        prompt.Should().StartWith("Event: Floods kill eight in Istanbul").And.Contain("English report 1")
+            .And.Contain("Flut in Istanbul").And.Contain("イスタンブールで洪水").And.NotContain("English report 5");
+    }
+
+    [Fact]
+    public void Summarizer_ShouldReadTheModelsAnswer()
+    {
+        var text = "Heavy rain flooded Istanbul on Tuesday and eight people died, officials said.";
+        EventSummarizer.Parse($"HEADLINE: Floods kill eight in Istanbul\nSUMMARY: {text}").Should().Be(("Floods kill eight in Istanbul", text));
+        EventSummarizer.Parse($"**HEADLINE:** \"Floods kill eight\"\n\n**SUMMARY:**\n{text}").Should().Be(("Floods kill eight", text));
+        EventSummarizer.Parse($"<think>Let me see.</think>{text}").Should().Be(((string?)null, text));
+        EventSummarizer.Parse($"SUMMARY: {text}\nHEADLINE: Floods in Istanbul").Should().Be(("Floods in Istanbul", text));
+        EventSummarizer.Parse("SUMMARY: Too short.").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Summarizer_ShouldSummarizeTheBusiestEvents_AndStopWhenTheModelFails()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        SeedEvent(store, "big", Reports("big", 5));
+        SeedEvent(store, "mid", Reports("mid", 3));
+        SeedEvent(store, "small", Reports("small", 2));
+        var prompts = new List<string>();
+        Func<string, CancellationToken, Task<string>> answer = (_, _) =>
+            Task.FromResult("HEADLINE: An English headline\nSUMMARY: What happened, where and when, in the model's own words.");
+        var summarizer = new EventSummarizer(store, (system, prompt, ct) =>
+        {
+            system.Should().Be(EventSummarizer.SystemPrompt);
+            prompts.Add(prompt);
+            return answer(prompt, ct);
+        }, "test-model", new ManualTime(Now), at => at.ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture), new SummaryOptions { Timeout = TimeSpan.FromMilliseconds(200) });
+
+        var first = await summarizer.RunAsync(CancellationToken.None);
+        first.Should().BeEquivalentTo(new { Written = 2, Notes = Array.Empty<string>() });
+        prompts.Should().HaveCount(2);
+        prompts[0].Should().Contain("Outlet big0").And.Contain("Outlet big4");
+        store.LatestSummary("big").Should().BeEquivalentTo(new { Headline = "An English headline", Model = "test-model", ArticleCount = 5, Version = 1 });
+        store.LatestSummary("small").Should().BeNull();
+
+        (await summarizer.RunAsync(CancellationToken.None)).Written.Should().Be(0, "nothing has grown");
+        prompts.Should().HaveCount(2);
+
+        store.SaveClustering(new ClusterResult([], [Event("big", "big", [1f, 0f], 10), Event("mid", "mid", [1f, 0f], 10)], 0));
+        answer = (_, _) => throw new HttpRequestException("connection refused");
+        var down = await summarizer.RunAsync(CancellationToken.None);
+        down.Written.Should().Be(0);
+        down.Notes.Should().ContainSingle().Which.Should().Be("test-model couldn't write a summary: connection refused");
+        prompts.Should().HaveCount(3, "after one failure the rest wait for the next read");
+
+        answer = async (_, ct) => { await Task.Delay(Timeout.Infinite, ct); return ""; };
+        (await summarizer.RunAsync(CancellationToken.None)).Notes.Should().ContainSingle().Which.Should().StartWith("test-model didn't write a summary within");
+    }
+
+    [Fact]
+    public async Task Pipeline_ShouldReadOutletFeeds_AndNoteOnesThatFail()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var working = new NewsOutlet("Example", "English", "Turkey", "https://www.example.com/rss");
+        var broken = new NewsOutlet("Broken", "French", "France", "https://broken.example/rss");
+        var http = new HttpClient(new FakeHttp(request => request.RequestUri!.Host switch
+        {
+            "www.example.com" => (HttpStatusCode.OK, OutletRss),
+            "broken.example" => (HttpStatusCode.ServiceUnavailable, ""),
+            _ => (HttpStatusCode.InternalServerError, "no model")
+        }));
+        var pipeline = new WorldNewsPipeline(store, http, new GdeltDocClient(http, new ManualTime(Now)),
+            new OllamaClient(new Uri("http://localhost:11434/"), http), new ManualTime(Now),
+            new WorldNewsOptions { Editions = [], Outlets = [working, broken] });
+
+        var report = await pipeline.RunCycleAsync(CancellationToken.None);
+
+        report.Added.Should().Be(2);
+        report.Notes.Should().Contain(n => n.StartsWith("Broken (French):"));
+        store.ArticlesToEmbed(10).Should().Contain(a => a.Feed == working.Feed && a.Snippet == "Heavy rain flooded streets & homes in Istanbul on Tuesday.");
+    }
+
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
@@ -277,6 +526,17 @@ public sealed class WorldNewsKitTests : IDisposable
 
     private static WorldArticle Article(string id, string title, string language, DateTimeOffset seen, string? hint = null) =>
         new(id, $"https://example.com/{id}", title, "Outlet " + id, language, "Somewhere", seen, "test", hint);
+
+    private static WorldArticle[] Reports(string prefix, int count) =>
+        Enumerable.Range(0, count).Select(i => Article($"{prefix}{i}", $"{prefix} report {i}", "English", Now.AddHours(-2))).ToArray();
+
+    // One event holding the given reports, stored as clustering would leave it.
+    private static void SeedEvent(WorldNewsStore store, string eventId, WorldArticle[] reports)
+    {
+        store.AddArticles(reports);
+        store.SaveClustering(new ClusterResult(reports.Select(r => (r.Id, eventId)).ToList(),
+            [Event(eventId, reports[0].Title, [1f, 0f], reports.Length)], 1));
+    }
 
     private static NewsEvent Event(string id, string title, float[] direction, int count)
     {

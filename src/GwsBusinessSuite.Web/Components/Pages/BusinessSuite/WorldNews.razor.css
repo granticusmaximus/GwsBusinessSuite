@@ -167,3 +167,35 @@
         min-height: 44px;
     }
 }
+
+.world-news-original {
+    font-size: .85rem;
+    color: var(--gws-text-soft);
+    margin-bottom: .35rem;
+}
+
+/* The English summary, with who wrote it and the document download. */
+.world-news-summary {
+    margin: .75rem 0 1rem;
+    padding: .75rem 1rem;
+    background: var(--gws-body-bg);
+    border-left: 3px solid var(--gws-sidebar-accent, #f59e0b);
+    border-radius: var(--gws-radius-sm, 6px);
+}
+
+.world-news-summary-text {
+    line-height: 1.55;
+    margin-bottom: .5rem;
+}
+
+.world-news-summary-meta {
+    font-size: .8rem;
+    color: var(--gws-text-soft);
+    margin-bottom: .5rem;
+}
+
+.world-news-summary .btn {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+}
