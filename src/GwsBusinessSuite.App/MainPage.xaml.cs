@@ -241,15 +241,18 @@ public partial class MainPage : ContentPage
             _ = HandleNativeRequestAsync(nativeUri.Host);
             return;
         }
-        LoadingOverlay.IsVisible = true;
+        SlowNavigationNotice.IsVisible = false;
+        NavigationProgress.IsVisible = !LoadingOverlay.IsVisible;
         if (!Uri.TryCreate(args.Url, UriKind.Absolute, out var uri) || AppEndpoints.IsTrusted(uri))
         {
-            StartNavigationTimeout();
+            StartNavigationTimeout(blockOnTimeout: LoadingOverlay.IsVisible);
             return;
         }
 
         DebugLog($"OnWorkspaceNavigating: untrusted, cancelling and opening externally url={args.Url}");
         args.Cancel = true;
+        NavigationProgress.IsVisible = false;
+        SlowNavigationNotice.IsVisible = false;
         LoadingOverlay.IsVisible = false;
         _ = Launcher.Default.OpenAsync(uri);
     }
@@ -334,6 +337,7 @@ public partial class MainPage : ContentPage
             return false;
         }
         _verifyTouchIdSessionAfterLoad = reportProblems;
+        BeginBlockingNavigation();
         WorkspaceView.Source = url;
         return true;
 #else
@@ -383,6 +387,8 @@ public partial class MainPage : ContentPage
     {
         DebugLog($"OnWorkspaceNavigated url={args.Url} result={args.Result}");
         StopNavigationTimeout();
+        NavigationProgress.IsVisible = false;
+        SlowNavigationNotice.IsVisible = false;
         LoadingOverlay.IsVisible = false;
         if (args.Result == WebNavigationResult.Success)
         {
@@ -395,12 +401,11 @@ public partial class MainPage : ContentPage
         ShowUnavailable("The workspace could not be loaded. Check the server address and connection.");
     }
 
-    // A page that never fires Navigated (e.g. an admin page whose embedded iframe hangs waiting
-    // on a slow or unreachable backend) used to leave LoadingOverlay showing forever - it has no
-    // controls of its own, and InputTransparent="False" blocks every tap on the WebView beneath
-    // it, so there was no way back into the app short of force-quitting. Both this timeout and
-    // the overlay's own Cancel button exist so that can never happen again.
-    private void StartNavigationTimeout()
+    // Initial loads, sign-in handoffs and explicit reloads still need a blocking failure state
+    // because no usable page exists beneath them. Ordinary page changes only receive a compact
+    // notice: WebKit can delay or omit Navigated while it waits on subresources, and covering the
+    // current page during that interval makes every subsequent click appear broken.
+    private void StartNavigationTimeout(bool blockOnTimeout)
     {
         DebugLog("StartNavigationTimeout");
         StopNavigationTimeout();
@@ -412,7 +417,16 @@ public partial class MainPage : ContentPage
                 if (task.IsCanceled) return;
                 DebugLog("Navigation timeout FIRED");
                 MainThread.BeginInvokeOnMainThread(() =>
-                    ShowUnavailable("This page is taking too long to load. Check the connection and try again."));
+                {
+                    if (blockOnTimeout)
+                    {
+                        ShowUnavailable("This page is taking too long to load. Check the connection and try again.");
+                        return;
+                    }
+
+                    NavigationProgress.IsVisible = false;
+                    SlowNavigationNotice.IsVisible = true;
+                });
             },
             CancellationToken.None,
             TaskContinuationOptions.OnlyOnRanToCompletion,
@@ -440,9 +454,14 @@ public partial class MainPage : ContentPage
         }
     }
 
+    private void OnDismissSlowNavigationClicked(object? sender, EventArgs e) =>
+        SlowNavigationNotice.IsVisible = false;
+
     private void ShowUnavailable(string message)
     {
         StopNavigationTimeout();
+        NavigationProgress.IsVisible = false;
+        SlowNavigationNotice.IsVisible = false;
         LoadingOverlay.IsVisible = false;
         StatusMessage.Text = message;
         StatusOverlay.IsVisible = true;
@@ -458,14 +477,21 @@ public partial class MainPage : ContentPage
     {
         StopNavigationTimeout();
         StatusOverlay.IsVisible = false;
-        LoadingOverlay.IsVisible = true;
+        BeginBlockingNavigation();
         WorkspaceView.Reload();
     }
 
     private void ReloadWorkspace()
     {
         StatusOverlay.IsVisible = false;
-        LoadingOverlay.IsVisible = true;
+        BeginBlockingNavigation();
         WorkspaceView.Source = AppEndpoints.StartUrl;
+    }
+
+    private void BeginBlockingNavigation()
+    {
+        NavigationProgress.IsVisible = false;
+        SlowNavigationNotice.IsVisible = false;
+        LoadingOverlay.IsVisible = true;
     }
 }

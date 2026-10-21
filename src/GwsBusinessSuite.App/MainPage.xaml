@@ -11,6 +11,41 @@
                  Navigating="OnWorkspaceNavigating"
                  Navigated="OnWorkspaceNavigated" />
 
+        <!-- Ordinary same-origin page changes must never cover the WebView with an input-blocking
+             layer. This thin strip acknowledges the click while WebKit finishes the response. -->
+        <BoxView x:Name="NavigationProgress"
+                 IsVisible="False"
+                 InputTransparent="True"
+                 HeightRequest="3"
+                 HorizontalOptions="Fill"
+                 VerticalOptions="Start"
+                 Color="#F59E0B" />
+
+        <!-- A slow ordinary navigation leaves the current page usable. -->
+        <Border x:Name="SlowNavigationNotice"
+                IsVisible="False"
+                Margin="12"
+                Padding="10,7"
+                HorizontalOptions="Center"
+                VerticalOptions="Start"
+                BackgroundColor="#231F1D"
+                Stroke="#66501F"
+                StrokeShape="RoundRectangle 8">
+            <HorizontalStackLayout Spacing="10" VerticalOptions="Center">
+                <Label Text="This page is taking longer than expected. You can keep using the current page."
+                       TextColor="#E7E5E4"
+                       FontSize="12"
+                       VerticalTextAlignment="Center" />
+                <Button Text="Dismiss"
+                        Padding="10,4"
+                        BackgroundColor="Transparent"
+                        TextColor="#FBBF24"
+                        BorderWidth="0"
+                        FontSize="12"
+                        Clicked="OnDismissSlowNavigationClicked" />
+            </HorizontalStackLayout>
+        </Border>
+
         <!-- Small, always-available reload affordance - a stuck Blazor Server SignalR circuit or
              a stale render otherwise has no in-app recovery short of force-quitting. Sized to its
              content and corner-anchored (not InputTransparent="False" like the full-screen
