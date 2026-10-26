@@ -9,7 +9,15 @@ public sealed class RightPanelState
     public event Action? InspectorOpened;
     public event Action? AssistantOpened;
 
+    public bool IsAssistantOpen { get; private set; }
+
     public void NotifyInspectorOpened() => InspectorOpened?.Invoke();
 
-    public void NotifyAssistantOpened() => AssistantOpened?.Invoke();
+    public void NotifyAssistantOpened()
+    {
+        IsAssistantOpen = true;
+        AssistantOpened?.Invoke();
+    }
+
+    public void NotifyAssistantClosed() => IsAssistantOpen = false;
 }

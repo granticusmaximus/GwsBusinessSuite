@@ -620,6 +620,8 @@
 		if (text) assistantSelection = { path: location.pathname, text: text.slice(0, 8000) };
 	});
 	window.gwsAssistant = {
+		widthObservers: new Map(),
+		nextWidthObserver: 1,
 		selection: function () {
 			return assistantSelection.path === location.pathname ? assistantSelection.text : '';
 		},
@@ -645,7 +647,23 @@
 			if (element instanceof HTMLElement) element.scrollTop = element.scrollHeight;
 		},
 		// Room for SentinelGPT and a record inspector side by side (RightPanelState).
-		wide: function () { return window.matchMedia('(min-width: 1920px)').matches; }
+		wide: function () { return window.matchMedia('(min-width: 1920px)').matches; },
+		observeWidth: function (dotnet) {
+			var query = window.matchMedia('(min-width: 1920px)');
+			var id = this.nextWidthObserver++;
+			var listener = function (event) {
+				if (!event.matches) dotnet.invokeMethodAsync('OnRightPanelsNarrowedAsync');
+			};
+			query.addEventListener('change', listener);
+			this.widthObservers.set(id, { query: query, listener: listener });
+			return id;
+		},
+		unobserveWidth: function (id) {
+			var observer = this.widthObservers.get(id);
+			if (!observer) return;
+			observer.query.removeEventListener('change', observer.listener);
+			this.widthObservers.delete(id);
+		}
 	};
 
 	window.gwsScroll = {

@@ -144,6 +144,7 @@
             // Without the check, make way.
         }
         _open = false;
+        RightPanels.NotifyAssistantClosed();
         StateHasChanged();
     });
 
@@ -154,12 +155,20 @@
     private async Task ToggleAsync()
     {
         _open = !_open;
-        if (!_open) return;
+        if (!_open)
+        {
+            RightPanels.NotifyAssistantClosed();
+            return;
+        }
         RightPanels.NotifyAssistantOpened();
         await RefreshSelectionAsync();
     }
 
-    private void Close() => _open = false;
+    private void Close()
+    {
+        _open = false;
+        RightPanels.NotifyAssistantClosed();
+    }
 
     private void NewChat()
     {
@@ -374,6 +383,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        RightPanels.NotifyAssistantClosed();
         Assistant.Changed -= OnContextChanged;
         Navigation.LocationChanged -= OnLocationChanged;
         RightPanels.InspectorOpened -= OnInspectorOpened;

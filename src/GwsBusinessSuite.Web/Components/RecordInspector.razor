@@ -1,6 +1,6 @@
 @using GwsBusinessSuite.Application.Assistant
 @using GwsBusinessSuite.Web.Services
-@implements IDisposable
+@implements IAsyncDisposable
 @inject RightPanelState RightPanels
 @inject AssistantContext Assistant
 @inject IJSRuntime JS
@@ -65,6 +65,8 @@
     private bool _wasOpen;
     private bool _focus;
     private AssistantPageContext? _described;
+    private DotNetObjectReference<RecordInspector>? _selfReference;
+    private int? _widthObserver;
 
     protected override void OnInitialized() => RightPanels.AssistantOpened += OnAssistantOpened;
 
@@ -91,6 +93,18 @@
     // Focus moves into the panel when it opens, so Escape reaches it and screen readers land there.
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            _selfReference = DotNetObjectReference.Create(this);
+            try
+            {
+                _widthObserver = await JS.InvokeAsync<int>("gwsAssistant.observeWidth", _selfReference);
+            }
+            catch (JSException)
+            {
+                // The circuit went away before the listener could be registered.
+            }
+        }
         if (!_focus || !Open) return;
         _focus = false;
         try
@@ -132,9 +146,32 @@
         Assistant.Clear();
     }
 
-    public void Dispose()
+    [JSInvokable]
+    public Task OnRightPanelsNarrowedAsync()
+    {
+        if (!Open || !RightPanels.IsAssistantOpen) return Task.CompletedTask;
+        return CloseAsync();
+    }
+
+    public async ValueTask DisposeAsync()
     {
         RightPanels.AssistantOpened -= OnAssistantOpened;
         ClearAssistant();
+        if (_widthObserver is not null)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("gwsAssistant.unobserveWidth", _widthObserver.Value);
+            }
+            catch (JSDisconnectedException)
+            {
+                // The browser has already left the circuit.
+            }
+            catch (JSException)
+            {
+                // The page was replaced before cleanup completed.
+            }
+        }
+        _selfReference?.Dispose();
     }
 }
