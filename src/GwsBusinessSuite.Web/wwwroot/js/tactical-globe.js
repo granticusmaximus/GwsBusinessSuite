@@ -316,7 +316,10 @@ window.tacticalGlobe = (function () {
             } else if (entity && entity._tacticalGlobeSpeed) {
                 openSpeedPanel(entity._tacticalGlobeSpeed);
             } else if (entity && entity._tacticalGlobeRoad) {
-                openRoadPanel(entity._tacticalGlobeRoad);
+                const clicked = viewer.camera.pickEllipsoid(movement.position, viewer.scene.globe.ellipsoid);
+                const carto = clicked && Cesium.Cartographic.fromCartesian(clicked);
+                openRoadPanel(viewers.get(containerId), entity._tacticalGlobeRoad,
+                    carto ? [Cesium.Math.toDegrees(carto.latitude), Cesium.Math.toDegrees(carto.longitude)] : null);
             } else if (entity && entity._tacticalGlobeNote) {
                 const noteEntry = viewers.get(containerId);
                 if (noteEntry) noteEntry.dotNetRef.invokeMethodAsync('OnMapNoteClicked', entity._tacticalGlobeNote);
@@ -1240,20 +1243,31 @@ window.tacticalGlobe = (function () {
         entry.roadTrafficPrimitives.push(collection);
     }
 
-    function setRoadTraffic(containerId, roads, speeds) {
+    // options: { liveLookup } - whether a clicked road can be asked for its live speed (TomTom).
+    function setRoadTraffic(containerId, roads, speeds, options) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
+        entry.roadTrafficData = { roads: roads || [], speeds: speeds || [] };
+        entry.liveLookup = !!(options && options.liveLookup);
+        renderRoadTraffic(entry);
+    }
+
+    function renderRoadTraffic(entry) {
         clearRoadTraffic(entry);
+        const data = entry.roadTrafficData;
+        if (!data) return;
+        // Under the live flow, the counts step back (fainter, thinner) so its colours read through.
+        const dim = !!entry.trafficFlowLayer;
         const toPositions = function (path) { return Cesium.Cartesian3.fromDegreesArray(path.flat().map(Number)); };
         const roadLines = [];
-        (roads || []).forEach(function (road) {
-            const colour = Cesium.Color.fromCssColorString(volumeColour(Number(road.aadt))).withAlpha(0.9);
-            const width = Math.min(8, 2 + Math.min(Number(road.lanes) || 2, 12) * 0.45);
+        data.roads.forEach(function (road) {
+            const colour = Cesium.Color.fromCssColorString(volumeColour(Number(road.aadt))).withAlpha(dim ? 0.35 : 0.9);
+            const width = Math.min(8, 2 + Math.min(Number(road.lanes) || 2, 12) * 0.45) * (dim ? 0.6 : 1);
             (road.paths || []).forEach(function (path) {
                 if (path && path.length >= 2) roadLines.push({ positions: toPositions(path), width: width, colour: colour, id: { _tacticalGlobeRoad: road } });
             });
         });
-        const speedLines = (speeds || [])
+        const speedLines = data.speeds
             .filter(function (link) { return link && link.path && link.path.length >= 2; })
             .map(function (link) {
                 return { positions: toPositions(link.path), width: 7, colour: Cesium.Color.fromCssColorString(speedColour(Number(link.mph))), id: { _tacticalGlobeSpeed: link } };
@@ -1262,6 +1276,37 @@ window.tacticalGlobe = (function () {
         addLinePrimitive(entry, speedLines);
     }
 
+    // Live flow (TomTom) as an imagery layer, tiles served by this app (/admin/api/overwatch/
+    // traffic-flow) so the key stays on the server. Flow changes by the minute, so while it's on
+    // a fresh layer replaces the old one every 2 minutes (the old one goes once the new has loaded).
+    function addFlowLayer(entry) {
+        const provider = new Cesium.UrlTemplateImageryProvider({
+            url: '/admin/api/overwatch/traffic-flow/{z}/{x}/{y}?t=' + Math.floor(Date.now() / 120000),
+            maximumLevel: 18,
+            credit: 'Live traffic \u00a9 TomTom'
+        });
+        return entry.viewer.imageryLayers.addImageryProvider(provider);
+    }
+
+    function setTrafficFlow(containerId, on) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        clearInterval(entry.trafficFlowTimer);
+        entry.trafficFlowTimer = null;
+        if (entry.trafficFlowLayer) entry.viewer.imageryLayers.remove(entry.trafficFlowLayer, true);
+        entry.trafficFlowLayer = null;
+        if (on) {
+            entry.trafficFlowLayer = addFlowLayer(entry);
+            entry.trafficFlowTimer = setInterval(function () {
+                const old = entry.trafficFlowLayer;
+                entry.trafficFlowLayer = addFlowLayer(entry);
+                setTimeout(function () { entry.viewer.imageryLayers.remove(old, true); }, 4000);
+            }, 120000);
+        }
+        renderRoadTraffic(entry);
+    }
+
+    // facts: [label, value, key?]; a key marks the value for filling in later (data-fact).
     function trafficFactsPanel(title, facts, sourceHtml) {
         closeIncidentPanel();
         const panel = document.createElement('div');
@@ -1273,22 +1318,26 @@ window.tacticalGlobe = (function () {
             '</div>' +
             '<div class="tg-stream-panel-body">' +
             '<dl class="tg-incident-facts">' + facts.filter(function (f) { return f[1]; }).map(function (f) {
-                return '<dt>' + f[0] + '</dt><dd>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
+                return '<dt>' + f[0] + '</dt><dd' + (f[2] ? ' data-fact="' + f[2] + '"' : '') + '>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
             }).join('') + '</dl>' +
             '<div class="tg-stream-panel-meta">' + sourceHtml + '</div>' +
             '</div>';
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
-        if (!openAsModal(panel, closeIncidentPanel)) return;
+        if (!openAsModal(panel, closeIncidentPanel)) return null;
         incidentPanel = panel;
+        return panel;
     }
 
-    function openRoadPanel(road) {
+    // point: [lat, lon] where the road was clicked, for its live speed (TomTom) when available.
+    function openRoadPanel(entry, road, point) {
         const aadt = Number(road.aadt);
+        const live = !!(entry && entry.liveLookup && point);
         const count = function (value) { return Number(value).toLocaleString('en-US'); };
         const share = function (part) { return Math.round(100 * part / aadt) + '%'; };
         const change = road.future ? Number(road.future) - aadt : 0;
-        trafficFactsPanel(road.label, [
+        const panel = trafficFactsPanel(road.label, [
             ['NAME', road.name],
+            ['LIVE SPEED', live ? 'checking\u2026' : null, 'live'],
             ['ROAD', road.cls + (road.ramp ? ' (ramp)' : '')],
             ['VEHICLES A DAY', count(aadt) + ' on an average day'],
             ['TRUCKS A DAY', road.trucks !== null && road.trucks !== undefined ? count(road.trucks) + ' (' + share(road.trucks) + ')' : null],
@@ -1301,7 +1350,17 @@ window.tacticalGlobe = (function () {
             ['TOLL', road.toll ? 'Yes' : null],
             ['FORECAST', road.future ? count(road.future) + ' a day (' + (change >= 0 ? '+' : '') + share(change) + ')' : null]
         ], 'SOURCE: <a href="https://www.fhwa.dot.gov/policyinformation/hpms.cfm" target="_blank" rel="noopener noreferrer">FHWA HPMS</a> (' +
-            escapeHtml(road.release || '') + ' release, as the state DOT reported it)');
+            escapeHtml(road.release || '') + ' release, as the state DOT reported it)' + (live ? '; live speed \u00a9 TomTom' : ''));
+        if (!panel || !live) return;
+        const cell = panel.querySelector('[data-fact="live"]');
+        entry.dotNetRef.invokeMethodAsync('GetLiveRoadFlowAsync', point[0], point[1]).then(function (flow) {
+            if (!cell) return;
+            cell.textContent = !flow ? 'NO LIVE READING HERE'
+                : flow.closed ? 'CLOSED'
+                : Math.round(flow.currentMph) + ' MPH NOW, USUALLY ' + Math.round(flow.freeFlowMph) + ' (' + flow.percent + '%)';
+        }).catch(function () {
+            if (cell) cell.textContent = 'UNAVAILABLE JUST NOW';
+        });
     }
 
     function openSpeedPanel(link) {
@@ -2951,6 +3010,7 @@ window.tacticalGlobe = (function () {
         setAirQuality: setAirQuality,
         setPowerOutages: setPowerOutages,
         setRoadTraffic: setRoadTraffic,
+        setTrafficFlow: setTrafficFlow,
         setThreeD: setThreeD,
         flyToStreetLevel: flyToStreetLevel,
         stopDrive: stopDrive,

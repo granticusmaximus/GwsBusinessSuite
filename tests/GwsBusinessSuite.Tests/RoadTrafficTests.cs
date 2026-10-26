@@ -213,6 +213,10 @@ public sealed class RoadTrafficTests
         summary.VehicleMilesPerDay.Should().BeApproximately(371000 * 0.69 + 250000 * 0.62 + 19800 * 0.58 + 60000 * 0.007, 4000);
         summary.TruckPercent.Should().Be(9.8, "only sections with truck counts are in the truck share");
 
+        // Halfway along the section, not at either end (ends sit at junctions).
+        summary.Busiest[0].Latitude.Should().BeApproximately(33.755, 0.0001);
+        RoadTrafficSummary.Halfway([(0, 0), (0, 1), (0, 3)]).Should().Be((0, 1.5));
+
         var outside = new BoundingBox(33.752, 33.748, -84.380, -84.385);
         RoadTrafficSummary.MilesInside(roads[0], outside).Should().Be(0, "the connector runs west of that box");
     }
@@ -288,6 +292,70 @@ public sealed class RoadTrafficTests
         LiveSpeedSummary.From([]).Should().BeNull();
     }
 
+    // Trimmed from a live flowSegmentData answer (2026-10-26, downtown Atlanta).
+    private const string TomTomFlow = """
+        {"flowSegmentData":{"frc":"FRC4","currentSpeed":8,"freeFlowSpeed":10,"currentTravelTime":134,"freeFlowTravelTime":109,
+          "confidence":0.97,"roadClosure":false,"coordinates":{"coordinate":[{"latitude":33.755,"longitude":-84.388}]}}}
+        """;
+
+    private static readonly byte[] Png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+
+    private static TomTomTrafficService TomTom(RoutingHandler handler, string? key = "test-key", int tileLimit = 40000, int lookupLimit = 2000) =>
+        new(new HttpClient(handler), new MemoryCache(new MemoryCacheOptions()),
+            new TomTomTrafficOptions(key, "https://grantwatson.dev/", tileLimit, lookupLimit),
+            new FixedClock(new DateTimeOffset(2026, 10, 26, 1, 0, 0, TimeSpan.Zero)), NullLogger<TomTomTrafficService>.Instance);
+
+    [Fact]
+    public async Task TomTomTiles_ShouldSendTheKeyAndReferer_CacheTwoMinutes_AndStopAtTheDailyLimit()
+    {
+        var handler = new RoutingHandler(_ => (HttpStatusCode.OK, string.Empty), _ => Png);
+        var service = TomTom(handler, tileLimit: 2);
+
+        (await service.GetFlowTileAsync(14, 4350, 6558)).Should().Equal(Png);
+        (await service.GetFlowTileAsync(14, 4350, 6558)).Should().Equal(Png);
+        handler.Urls.Should().ContainSingle("the second ask is served from cache");
+        handler.Urls[0].Should().Contain("/traffic/map/4/tile/flow/relative0/14/4350/6558.png").And.Contain("key=test-key");
+        handler.Referers.Should().ContainSingle().Which.Should().Be("https://grantwatson.dev/");
+
+        (await service.GetFlowTileAsync(14, 4351, 6558)).Should().NotBeNull();
+        (await service.GetFlowTileAsync(14, 4352, 6558)).Should().BeNull("today's tile allowance (2) is used up");
+        handler.Urls.Should().HaveCount(2);
+
+        (await service.GetFlowTileAsync(3, 8, 0)).Should().BeNull("x is off the zoom-3 grid");
+        (await service.GetFlowTileAsync(23, 0, 0)).Should().BeNull();
+        (await TomTom(handler, key: null).GetFlowTileAsync(14, 1, 1)).Should().BeNull("no key, no TomTom");
+        TomTom(handler, key: " ").IsConfigured.Should().BeFalse();
+        handler.Urls.Should().HaveCount(2);
+
+        var refused = TomTom(new RoutingHandler(_ => (HttpStatusCode.Forbidden, """{"detailedError":{"code":"InvalidReferer"}}""")));
+        (await refused.GetFlowTileAsync(14, 4350, 6558)).Should().BeNull();
+        TomTomTrafficService.EmptyTile.Should().StartWith(new byte[] { 0x89, 0x50, 0x4E, 0x47 });
+    }
+
+    [Fact]
+    public async Task TomTomFlowAt_ShouldReadTheSpeeds_AndRememberAPointWithNoRoad()
+    {
+        var flow = TomTomTrafficService.ParseFlow(TomTomFlow)!;
+        flow.CurrentMph.Should().Be(8);
+        flow.FreeFlowMph.Should().Be(10);
+        flow.PercentOfFreeFlow.Should().Be(80);
+        flow.CurrentTravelSeconds.Should().Be(134);
+        flow.Closed.Should().BeFalse();
+        TomTomTrafficService.ParseFlow("{}").Should().BeNull();
+
+        var handler = new RoutingHandler(request => request.RequestUri!.Query.Contains("point=33.755,-84.388", StringComparison.Ordinal)
+            ? (HttpStatusCode.OK, TomTomFlow)
+            : (HttpStatusCode.BadRequest, """{"error":"Point too far from nearest existing segment."}"""));
+        var service = TomTom(handler);
+
+        (await service.GetFlowAtAsync(33.755, -84.388))!.CurrentMph.Should().Be(8);
+        (await service.GetFlowAtAsync(33.75501, -84.38801))!.CurrentMph.Should().Be(8, "points that round together share a reading");
+        (await service.GetFlowAtAsync(31.0, -84.0)).Should().BeNull();
+        (await service.GetFlowAtAsync(31.0, -84.0)).Should().BeNull();
+        handler.Urls.Should().HaveCount(2, "the no-road answer is remembered too");
+        handler.Urls[0].Should().Contain("flowSegmentData/relative0/10/json").And.Contain("unit=mph");
+    }
+
     private sealed class FakeSpeedProvider(BoundingBox coverage, IReadOnlyList<LiveRoadSpeed>? links) : ILiveRoadSpeedProvider
     {
         public int Calls { get; private set; }
@@ -306,16 +374,24 @@ public sealed class RoadTrafficTests
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    private sealed class RoutingHandler(Func<HttpRequestMessage, (HttpStatusCode Status, string Body)> route) : HttpMessageHandler
+    // bytes, when given, answers with binary content (tiles) instead of the text body.
+    private sealed class RoutingHandler(Func<HttpRequestMessage, (HttpStatusCode Status, string Body)> route, Func<HttpRequestMessage, byte[]>? bytes = null)
+        : HttpMessageHandler
     {
         private readonly object _gate = new();
         public List<string> Urls { get; } = [];
+        public List<string> Referers { get; } = [];
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            lock (_gate) Urls.Add(request.RequestUri!.AbsoluteUri);
+            lock (_gate)
+            {
+                Urls.Add(request.RequestUri!.AbsoluteUri);
+                if (request.Headers.Referrer is { } referer) Referers.Add(referer.AbsoluteUri);
+            }
             var (status, body) = route(request);
-            return Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent(body) });
+            HttpContent content = bytes is null ? new StringContent(body) : new ByteArrayContent(bytes(request));
+            return Task.FromResult(new HttpResponseMessage(status) { Content = content });
         }
     }
 }

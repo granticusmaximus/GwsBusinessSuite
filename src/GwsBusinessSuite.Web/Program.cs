@@ -3353,6 +3353,20 @@ app.MapGet("/admin/api/overwatch/streetview/{panoramaId}", async (
     return Results.File(found.Content, found.ContentType);
 }).RequireAuthorization("AdminOnly");
 
+// Overwatch live flow: TomTom's traffic tiles, fetched by the server so the key stays here, and
+// shared for 2 minutes. A tile TomTom can't give (or once today's allowance is spent) comes back
+// transparent, so the globe simply shows no flow there.
+app.MapGet("/admin/api/overwatch/traffic-flow/{z:int}/{x:int}/{y:int}", async (
+    int z, int x, int y,
+    GwsBusinessSuite.Application.RoadTraffic.TomTomTrafficService tomTom,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+{
+    var tile = await tomTom.GetFlowTileAsync(z, x, y, cancellationToken);
+    context.Response.Headers.CacheControl = tile is null ? "no-store" : "private, max-age=120";
+    return Results.File(tile ?? GwsBusinessSuite.Application.RoadTraffic.TomTomTrafficService.EmptyTile, "image/png");
+}).RequireAuthorization("AdminOnly");
+
 app.MapGet("/admin/api/overwatch/timelapse/{cameraId}/{fileName}", async (
     string cameraId, string fileName, GwsBusinessSuite.Application.CameraIntel.CameraTimelapseStore store, CancellationToken cancellationToken) =>
 {

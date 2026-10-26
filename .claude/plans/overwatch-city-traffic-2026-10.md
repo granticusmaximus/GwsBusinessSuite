@@ -58,6 +58,23 @@ sums up the traffic picture for the view.
 - Checked live on a throwaway instance (real HPMS + NYC DOT): downtown Atlanta 942 sections in 9 s,
   2.7 M vehicle-miles/day, I-75 369,000/day; 45 km Atlanta 39.8 M across GA + NC; Queens with 7 NYC
   DOT links (Van Wyck 4 mph); road pop-up by clicking the map; phone bottom sheet; no console errors.
-- **Next candidates:** more live-speed cities (Finland Digitraffic TMS works key-less; Maryland
+- **TomTom live flow done 26-10-26** (Grant made a key). `TomTomTrafficService`: flow tiles
+  (relative0, cached 2 min, 40,000/day cap) proxied through `/admin/api/overwatch/traffic-flow/
+  {z}/{x}/{y}` (AdminOnly; transparent PNG when unavailable), and flowSegmentData lookups
+  (cached 2 min per ~10 m point, "too far from a road" 400s remembered, 2,000/day cap). Its
+  HttpClient has `RemoveAllLoggers()` because the key rides in the query string.
+  - The key is referer-locked to exactly `https://grantwatson.dev/` (admin.gwsapp.net, www. and
+    no-referer all 403 InvalidReferer), so the server sends `Overwatch:TomTomReferer`.
+  - Overwatch: LIVE FLOW toggle (imagery layer rebuilt every 2 min; HPMS lines dim to 35 %), live
+    speed in the road window (clicked point), LIVE SPEEDS button on the busiest roads.
+  - Busiest-road points were a section's end vertex, which matched cross streets (I-20 read
+    14 mph); now the halfway point along the section (I-20 then read 63).
+  - Deploy: `OVERWATCH_TOMTOM_API_KEY` GitHub secret -> ssh-action `envs` -> `sync_env_secret`
+    rewrites that one line of the droplet .env each deploy (no-op when the secret is unset).
+    Grant sets the secret; Claude can't write to GitHub.
+  - Checked live: 79/79 tiles with flow over Atlanta, busiest live speeds, road window live speed,
+    key absent from all logs and output.
+- **Next candidates:** TomTom incident details (worldwide incidents; watch the daily allowance and
+  duplicates of state feeds), more live-speed cities (Finland Digitraffic TMS works key-less; Maryland
   CHART and Houston TranStar to check), FARS crash history via bulk CSVs, camera-based anonymous
   vehicle counts with the local vision model, and TomTom flow if Grant adds a key.

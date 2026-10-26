@@ -33,6 +33,7 @@
 @inject GwsBusinessSuite.Application.LiveLayers.AircraftService AircraftService
 @inject GwsBusinessSuite.Application.RoadTraffic.HpmsRoadTrafficService RoadTrafficService
 @inject GwsBusinessSuite.Application.RoadTraffic.LiveRoadSpeedService LiveRoadSpeedService
+@inject GwsBusinessSuite.Application.RoadTraffic.TomTomTrafficService TomTom
 @inject GwsBusinessSuite.Application.LiveLayers.AircraftDetailService AircraftDetailService
 @inject GwsBusinessSuite.Application.LiveLayers.ShipService ShipService
 @inject GwsBusinessSuite.Application.LiveLayers.AirQualityService AirQualityService
@@ -146,6 +147,14 @@
                         @onclick="ToggleCityTrafficAsync">
                     CITY TRAFFIC [@(_cityTrafficOn ? "ON" : "OFF")]
                 </button>
+                @if (TomTom.IsConfigured)
+                {
+                    <button type="button" data-tg-toggle="live-flow" class="tg-toggle @(_liveFlowOn ? "tg-toggle-on" : "")"
+                            title="Live congestion on every road TomTom covers, worldwide: green flowing freely, through orange, to red slow"
+                            @onclick="ToggleLiveFlowAsync">
+                        LIVE FLOW [@(_liveFlowOn ? "ON" : "OFF")]
+                    </button>
+                }
             </div>
             @if (_cityTrafficOn && CityTrafficStatus is { } cityTrafficStatus)
             {
@@ -589,7 +598,16 @@
                                     }
                                     <dt>SHOWING</dt><dd>@(_cityTrafficCoverage?.ToUpperInvariant())</dd>
                                 </dl>
-                                <div class="tg-traffic-subhead">BUSIEST ROADS</div>
+                                <div class="tg-traffic-subhead">
+                                    BUSIEST ROADS
+                                    @if (TomTom.IsConfigured)
+                                    {
+                                        <button type="button" class="tg-traffic-live-check" disabled="@_checkingBusiestLive" @onclick="CheckBusiestLiveAsync"
+                                                title="Ask TomTom for the speed on each of these roads right now">
+                                            @(_checkingBusiestLive ? "CHECKING…" : "LIVE SPEEDS")
+                                        </button>
+                                    }
+                                </div>
                                 <ul class="tg-coverage-list">
                                     @foreach (var road in roadSummary.Busiest)
                                     {
@@ -599,6 +617,23 @@
                                                 <small class="tg-coverage-status">
                                                     @road.VehiclesPerDay.ToString("N0") A DAY@(road.TruckPercent is { } t ? $" · {t:0.#}% TRUCKS" : "")@(road.Lanes is { } lanes ? $" · {lanes} LANES" : "")
                                                 </small>
+                                                @if (_busiestLive.TryGetValue(road.Label, out var live))
+                                                {
+                                                    <small class="tg-coverage-status tg-traffic-live">
+                                                        @if (live is null)
+                                                        {
+                                                            @:NO LIVE READING
+                                                        }
+                                                        else if (live.Closed)
+                                                        {
+                                                            <i class="tg-traffic-swatch tg-spd-0" aria-hidden="true"></i>@:CLOSED NOW
+                                                        }
+                                                        else
+                                                        {
+                                                            <i class="tg-traffic-swatch tg-spd-@SpeedBand(live.CurrentMph)" aria-hidden="true"></i>@($"NOW {live.CurrentMph:0} MPH · USUALLY {live.FreeFlowMph:0} ({live.PercentOfFreeFlow}%)")
+                                                        }
+                                                    </small>
+                                                }
                                             </span>
                                             <button type="button" title="Fly to @road.Label" @onclick="() => FlyToRoadAsync(road)">GO</button>
                                         </li>
@@ -640,6 +675,14 @@
                                 {
                                     <span><i class="tg-traffic-swatch tg-vol-@band" aria-hidden="true"></i>@VolumeBandLabels[band]</span>
                                 }
+                                @if (_liveFlowOn)
+                                {
+                                    <span class="tg-traffic-legend-title">LIVE FLOW (TOMTOM, VS. EACH ROAD'S USUAL SPEED)</span>
+                                    <span><i class="tg-traffic-swatch tg-flow-free" aria-hidden="true"></i>FREE</span>
+                                    <span><i class="tg-traffic-swatch tg-flow-slow" aria-hidden="true"></i>SLOWER</span>
+                                    <span><i class="tg-traffic-swatch tg-flow-jam" aria-hidden="true"></i>SLOW</span>
+                                    <span><i class="tg-traffic-swatch tg-flow-stop" aria-hidden="true"></i>STOPPED</span>
+                                }
                                 @if (_speedSummary is not null)
                                 {
                                     <span class="tg-traffic-legend-title">LIVE MPH</span>
@@ -652,7 +695,7 @@
                             @if (_cityTrafficReleases.Count > 0 || _speedSources.Count > 0)
                             {
                                 <p class="tg-traffic-source">
-                                    SOURCES: FHWA HPMS@(_cityTrafficReleases.Count > 0 ? $" ({string.Join(", ", _cityTrafficReleases)} release{(_cityTrafficReleases.Count == 1 ? "" : "s")})" : "")@(_speedSources.Count > 0 ? $" · {string.Join(", ", _speedSources)} live speeds" : ""). CLICK A ROAD FOR ITS DETAILS.
+                                    SOURCES: FHWA HPMS@(_cityTrafficReleases.Count > 0 ? $" ({string.Join(", ", _cityTrafficReleases)} release{(_cityTrafficReleases.Count == 1 ? "" : "s")})" : "")@(_speedSources.Count > 0 ? $" · {string.Join(", ", _speedSources)} live speeds" : "")@(_liveFlowOn || _busiestLive.Count > 0 ? " · live flow © TomTom" : ""). CLICK A ROAD FOR ITS DETAILS.
                                 </p>
                             }
                         </div>
@@ -2042,7 +2085,7 @@
     private bool _helpOpen;
 
     private int ActiveLayerCount =>
-        new[] { _radarOn, _alertsOn, _incidentsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _cityTrafficOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
+        new[] { _radarOn, _alertsOn, _incidentsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
 
     private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {
@@ -3204,6 +3247,7 @@
             if (!_cityTrafficOn || generation != _cityTrafficGeneration) return;
 
             _roadSummary = roads.Roads.Count > 0 ? GwsBusinessSuite.Application.RoadTraffic.RoadTrafficSummary.From(roads.Roads, view) : null;
+            _busiestLive = [];
             _speedSummary = GwsBusinessSuite.Application.RoadTraffic.LiveSpeedSummary.From(speeds.Links);
             _speedSources = speeds.Sources;
             _cityTrafficCoverage = roads.Coverage;
@@ -3218,7 +3262,7 @@
                 .Select(g => (IncidentCategories.Label(g.Key), g.Count()))
                 .OrderByDescending(g => g.Item2).ToList();
             await JS.InvokeVoidAsync("tacticalGlobe.setRoadTraffic", "tg-viewport",
-                drawn.Select(RoadPayload), speeds.Links.Select(SpeedPayload));
+                drawn.Select(RoadPayload), speeds.Links.Select(SpeedPayload), new { liveLookup = TomTom.IsConfigured });
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -3246,6 +3290,48 @@
         asOf = $"{link.AsOf.ToLocalGwsDate()} {link.AsOf.ToLocalGwsTime()}", source = link.Source, sourceUrl = link.SourceUrl,
         path = link.Path.Select(p => new[] { Math.Round(p.Longitude, 5), Math.Round(p.Latitude, 5) })
     };
+
+    // ---- Live flow (TomTom): congestion tiles over the map, and live speeds on request. ----
+    private bool _liveFlowOn;
+    private bool _checkingBusiestLive;
+    // Live speed per busiest road (by label); null means TomTom had no reading there.
+    private Dictionary<string, GwsBusinessSuite.Application.RoadTraffic.LiveRoadFlow?> _busiestLive = [];
+
+    private async Task ToggleLiveFlowAsync()
+    {
+        _liveFlowOn = !_liveFlowOn;
+        await JS.InvokeVoidAsync("tacticalGlobe.setTrafficFlow", "tg-viewport", _liveFlowOn);
+    }
+
+    // Each lookup counts against TomTom's daily allowance, so this runs only when asked.
+    private async Task CheckBusiestLiveAsync()
+    {
+        if (_roadSummary is not { } summary) return;
+        _checkingBusiestLive = true;
+        try
+        {
+            var roads = summary.Busiest;
+            var flows = await Task.WhenAll(roads.Select(r => TomTom.GetFlowAtAsync(r.Latitude, r.Longitude)));
+            if (!ReferenceEquals(summary, _roadSummary)) return;
+            _busiestLive = roads.Zip(flows).ToDictionary(p => p.First.Label, p => p.Second);
+        }
+        finally
+        {
+            _checkingBusiestLive = false;
+        }
+    }
+
+    // A clicked road's live speed, for its window on the globe.
+    [JSInvokable]
+    public async Task<object?> GetLiveRoadFlowAsync(double latitude, double longitude)
+    {
+        var flow = await TomTom.GetFlowAtAsync(latitude, longitude);
+        return flow is null ? null : new
+        {
+            currentMph = flow.CurrentMph, freeFlowMph = flow.FreeFlowMph, percent = flow.PercentOfFreeFlow,
+            currentTravel = flow.CurrentTravelSeconds, freeFlowTravel = flow.FreeFlowTravelSeconds, closed = flow.Closed
+        };
+    }
 
     private async Task FlyToRoadAsync(GwsBusinessSuite.Application.RoadTraffic.BusyRoad road) =>
         await JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", road.Latitude, road.Longitude, 2500);

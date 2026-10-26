@@ -161,8 +161,12 @@ jobs:
 
       - name: SSH into droplet and deploy
         uses: appleboy/ssh-action@v1.2.5
+        env:
+          OVERWATCH_TOMTOM_API_KEY: ${{ secrets.OVERWATCH_TOMTOM_API_KEY }}
         with:
           host: ${{ secrets.DO_HOST }}
+          # Secrets the script writes into the droplet's .env (see sync_env_secret below).
+          envs: OVERWATCH_TOMTOM_API_KEY
           username: root
           # appleboy/ssh-action's command_timeout defaults to 10m, which the remote script now
           # exceeds on a cold/no-cache Docker build alone (dotnet publish ~8m, plus apt-get and
@@ -196,6 +200,23 @@ jobs:
             fi
 
             cd "$APP_DIR"
+
+            # Keys kept as GitHub Actions secrets are written into the droplet's .env on every
+            # deploy, so setting or rotating one is `gh secret set NAME`, not an edit on the
+            # droplet. An unset secret leaves .env as it was; values are never echoed.
+            sync_env_secret() {
+              name="$1"
+              value="$2"
+              [ -n "$value" ] || return 0
+              touch .env
+              tmp=$(mktemp)
+              grep -v "^${name}=" .env > "$tmp" || true
+              printf '%s=%s\n' "$name" "$value" >> "$tmp"
+              cat "$tmp" > .env
+              rm -f "$tmp"
+              echo "$name written to .env from its GitHub secret."
+            }
+            sync_env_secret OVERWATCH_TOMTOM_API_KEY "${OVERWATCH_TOMTOM_API_KEY:-}"
 
             PREVIOUS_COMMIT=$(git rev-parse HEAD)
 

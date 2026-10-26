@@ -898,6 +898,15 @@ public static class DependencyInjection
         services.AddTransient<GwsBusinessSuite.Application.RoadTraffic.ILiveRoadSpeedProvider>(provider =>
             provider.GetRequiredService<GwsBusinessSuite.Application.RoadTraffic.NycDotSpeedProvider>());
         services.AddTransient<GwsBusinessSuite.Application.RoadTraffic.LiveRoadSpeedService>();
+        // Live flow (TomTom, worldwide): the key is passed in the query string, so this client
+        // logs nothing at all - no request URL (with the key) can reach a log.
+        services.AddSingleton(new GwsBusinessSuite.Application.RoadTraffic.TomTomTrafficOptions(
+            configuration["Overwatch:TomTomApiKey"]?.Trim(), configuration["Overwatch:TomTomReferer"]?.Trim()));
+        services.AddHttpClient<GwsBusinessSuite.Application.RoadTraffic.TomTomTrafficService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        }).RemoveAllLoggers();
         // Power outages: DOE/ORNL ODIN's anonymous county-level map API (key-less).
         services.AddHttpClient<GwsBusinessSuite.Application.LiveLayers.PowerOutageService>(client =>
         {

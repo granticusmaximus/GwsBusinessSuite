@@ -38,8 +38,7 @@ public sealed record RoadTrafficSummary(int Sections, double MilesInView, double
             .Take(BusiestCount)
             .Select(r =>
             {
-                var path = r.Paths[0];
-                var (lon, lat) = path[path.Count / 2];
+                var (lon, lat) = Halfway(r.Paths.MaxBy(PathMiles)!);
                 return new BusyRoad(r.Label, r.Name == r.Label ? null : r.Name, r.RoadClass, r.VehiclesPerDay,
                     r.TrucksPerDay is { } t ? Math.Round(100.0 * t / r.VehiclesPerDay, 1) : null, r.Lanes, r.SpeedLimitMph, lat, lon);
             })
@@ -47,6 +46,33 @@ public sealed record RoadTrafficSummary(int Sections, double MilesInView, double
 
         return new RoadTrafficSummary(roads.Count, miles, vehicleMiles,
             vehicleMilesWithTrucks > 0 ? Math.Round(100 * truckMiles / vehicleMilesWithTrucks, 1) : null, busiest);
+    }
+
+    // The point halfway along a path - not a vertex, since a section's ends sit at junctions where a
+    // live-speed lookup would match the cross street.
+    public static (double Longitude, double Latitude) Halfway(IReadOnlyList<(double Longitude, double Latitude)> path)
+    {
+        var remaining = PathMiles(path) / 2;
+        for (var i = 1; i < path.Count; i++)
+        {
+            var (lon1, lat1) = path[i - 1];
+            var (lon2, lat2) = path[i];
+            var piece = Miles(lat1, lon1, lat2, lon2);
+            if (piece >= remaining && piece > 0)
+            {
+                var t = remaining / piece;
+                return (lon1 + (lon2 - lon1) * t, lat1 + (lat2 - lat1) * t);
+            }
+            remaining -= piece;
+        }
+        return path[^1];
+    }
+
+    private static double PathMiles(IReadOnlyList<(double Longitude, double Latitude)> path)
+    {
+        double total = 0;
+        for (var i = 1; i < path.Count; i++) total += Miles(path[i - 1].Latitude, path[i - 1].Longitude, path[i].Latitude, path[i].Longitude);
+        return total;
     }
 
     // A piece of a path counts when its midpoint is in the view: close enough at these zooms.
