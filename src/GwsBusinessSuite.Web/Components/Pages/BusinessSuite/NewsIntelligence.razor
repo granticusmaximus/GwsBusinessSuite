@@ -143,6 +143,11 @@
                     <i class="bi bi-graph-up me-2"></i>Trends
                 </button>
 
+                <button type="button" class="list-group-item list-group-item-action @(_activeFilter == "web" ? "active" : "")"
+                        @onclick='() => SelectFilter("web")'>
+                    <i class="bi bi-search me-2"></i>Web search
+                </button>
+
                 <button type="button" class="list-group-item list-group-item-action @(_activeFilter == "settings" ? "active" : "")"
                         @onclick='() => SelectFilter("settings")'>
                     <i class="bi bi-envelope-paper me-2"></i>Digest &amp; settings
@@ -295,6 +300,10 @@
         {
             @RenderTrendsView()
         }
+        else if (_activeFilter == "web")
+        {
+            <MediaWatchWebSearch />
+        }
         else if (_activeFilter == "settings")
         {
             @RenderSettingsView()
@@ -315,7 +324,7 @@
     // ── State ────────────────────────────────────────────────
     private List<WatchedTopicSummary> _topics = [];
     private NewsFeedResult? _feed;
-    private string _activeFilter = "all";   // "all" | "breaking" | "saved" | "trends" | "settings" | topic-id string
+    private string _activeFilter = "all";   // "all" | "breaking" | "saved" | "trends" | "web" | "settings" | topic-id string
     private string _username = string.Empty;
     private HashSet<string> _readHashes = [];
     private HashSet<string> _savedHashes = [];
@@ -408,6 +417,9 @@
                     return;
                 case "trends":
                     _trends = await WatchService.GetTrendsAsync();
+                    return;
+                case "web":
+                    // MediaWatchWebSearch loads its own index and status.
                     return;
                 case "settings":
                     LoadSettingsForm(await WatchService.GetSettingsAsync());
@@ -668,6 +680,10 @@
     {
         "all" => "All News",
         "breaking" => "Breaking News",
+        "saved" => "Saved",
+        "trends" => "Trends",
+        "web" => "Web Search",
+        "settings" => "Digest & settings",
         _ => _topics.FirstOrDefault(t => t.Id.ToString() == _activeFilter)?.Name ?? "Feed"
     };
 

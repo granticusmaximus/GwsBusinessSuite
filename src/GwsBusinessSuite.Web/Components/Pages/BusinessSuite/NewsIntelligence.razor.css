@@ -60,12 +60,12 @@
 
 .media-watch .row.g-4 { max-width: 1380px; margin: 0 auto; }
 
-.media-watch .card { border-radius: var(--civic-radius) !important; border: 1px solid var(--civic-line) !important; background: var(--civic-surface); box-shadow: 0 .6rem 1.6rem rgba(24,37,43,.035) !important; color: var(--civic-ink); }
-.media-watch .card-header { background: var(--civic-surface) !important; border-color: var(--civic-line) !important; color: var(--civic-ink); }
-.media-watch .card-body { color: var(--civic-ink); }
-.media-watch .list-group-item { background: transparent; border-color: var(--civic-line); color: var(--civic-ink); }
-.media-watch .list-group-item:hover { background: var(--civic-soft); }
-.media-watch .list-group-item.active { background: var(--civic-accent-soft) !important; border-color: var(--civic-line) !important; color: var(--civic-accent-strong) !important; }
+.media-watch ::deep .card { border-radius: var(--civic-radius) !important; border: 1px solid var(--civic-line) !important; background: var(--civic-surface); box-shadow: 0 .6rem 1.6rem rgba(24,37,43,.035) !important; color: var(--civic-ink); }
+.media-watch ::deep .card-header { background: var(--civic-surface) !important; border-color: var(--civic-line) !important; color: var(--civic-ink); }
+.media-watch ::deep .card-body { color: var(--civic-ink); }
+.media-watch ::deep .list-group-item { background: transparent; border-color: var(--civic-line); color: var(--civic-ink); }
+.media-watch ::deep .list-group-item:hover { background: var(--civic-soft); }
+.media-watch ::deep .list-group-item.active { background: var(--civic-accent-soft) !important; border-color: var(--civic-line) !important; color: var(--civic-accent-strong) !important; }
 .media-watch .badge.text-bg-secondary { background: var(--civic-soft) !important; color: var(--civic-muted) !important; }
 .media-watch .badge.text-bg-light { background: var(--civic-accent-soft) !important; color: var(--civic-accent-strong) !important; }
 .media-watch .dropdown-menu { background: var(--civic-surface); border-color: var(--civic-line); }

@@ -1094,6 +1094,27 @@ public static class DependencyInjection
         services.AddScoped<ISentinelSuggestionService, SentinelSuggestionService>();
         services.AddHostedService<SentinelReminderBackgroundService>();
         services.AddHostedService<SentinelPageVerificationBackgroundService>();
+        // Media Watch's web crawler: its own SQLite index (WebCrawl:DatabasePath), a background
+        // service that crawls politely, and every connection checked to be a public address.
+        services.Configure<GwsBusinessSuite.Infrastructure.WebCrawl.WebCrawlOptions>(configuration.GetSection(GwsBusinessSuite.Infrastructure.WebCrawl.WebCrawlOptions.SectionName));
+        services.AddHttpClient(GwsBusinessSuite.Infrastructure.WebCrawl.WebCrawler.HttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(GwsBusinessSuite.Infrastructure.WebCrawl.WebCrawler.UserAgent);
+        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            ConnectCallback = AutomationDestinationValidator.ConnectAsync,
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 5,
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        });
+        services.AddSingleton<GwsBusinessSuite.Infrastructure.WebCrawl.WebCrawler>();
+        services.AddSingleton<GwsBusinessSuite.Application.NewsIntelligence.IWebCrawlService>(provider =>
+            provider.GetRequiredService<GwsBusinessSuite.Infrastructure.WebCrawl.WebCrawler>());
+        services.AddHostedService<GwsBusinessSuite.Infrastructure.WebCrawl.WebCrawlBackgroundService>();
+        // The .env SMTP login, lent to the two mail-in features when no mailbox is saved for them.
+        services.AddSingleton<ServerMailAccount>();
         services.AddScoped<ISentinelEmailInService, SentinelEmailInService>();
         services.AddScoped<GwsBusinessSuite.Application.Support.ISupportEmailInService, SupportEmailInService>();
         services.AddScoped<ISentinelPageTypeService, SentinelPageTypeService>();

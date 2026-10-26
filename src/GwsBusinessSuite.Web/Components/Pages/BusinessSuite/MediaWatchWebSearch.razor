@@ -1,0 +1,195 @@
+@using GwsBusinessSuite.Application.NewsIntelligence
+@inject IWebCrawlService WebCrawl
+@inject ILogger<MediaWatchWebSearch> Logger
+
+@* Media Watch > Web search: search everything the crawler has read, see what it's doing, and add
+   or remove sites. Topic keywords are matched by the crawler itself (hits land in each topic's feed). *@
+<div class="row g-4">
+    <div class="col-lg-8">
+        <form class="d-flex gap-2 mb-2" role="search" @onsubmit="SearchAsync" @onsubmit:preventDefault>
+            <input type="search" class="form-control" placeholder="Search everything the crawler has read" aria-label="Search the web index"
+                   @bind="_query" @bind:event="oninput" />
+            <button type="submit" class="btn btn-primary" disabled="@(_searching || string.IsNullOrWhiteSpace(_query))">
+                @(_searching ? "Searching…" : "Search")
+            </button>
+        </form>
+        <p class="small text-secondary">
+            Every word has to appear; put "quotes" round a phrase. Your topics' keywords are checked against new pages every
+            few minutes, and matches show up in each topic's feed as <strong>Web · site</strong>.
+        </p>
+        @if (_error is not null)
+        {
+            <div class="alert alert-danger small py-2" role="alert">@_error</div>
+        }
+        @if (_results is { } results)
+        {
+            @if (results.Count == 0)
+            {
+                <EmptyState Icon="bi-search" Title="Nothing found" Message="No page the crawler has kept mentions that yet. It adds pages all day, so try again later." />
+            }
+            else
+            {
+                <p class="small text-secondary mb-2">@results.Count result@(results.Count == 1 ? "" : "s"), best first.</p>
+                <ol class="list-unstyled mb-0">
+                    @foreach (var hit in results)
+                    {
+                        <li class="card mb-2">
+                            <div class="card-body py-2">
+                                <a class="fw-semibold" href="@hit.Url" target="_blank" rel="noopener noreferrer">@hit.Title</a>
+                                <div class="small text-secondary">
+                                    @hit.Host · @((hit.PublishedAt ?? hit.FetchedAt).ToLocalGwsDate())@(hit.PublishedAt is null ? " (read)" : "")
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(hit.Snippet))
+                                {
+                                    <p class="small mb-0 mt-1">@hit.Snippet</p>
+                                }
+                            </div>
+                        </li>
+                    }
+                </ol>
+            }
+        }
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card mb-3">
+            <div class="card-header fw-semibold">Crawler</div>
+            <div class="card-body small">
+                @if (_status is not { } status)
+                {
+                    <span class="text-secondary">Loading…</span>
+                }
+                else
+                {
+                    @if (!status.Enabled)
+                    {
+                        <p class="text-secondary">The crawler is off on this server (WebCrawl:Enabled), so the index isn't growing here.</p>
+                    }
+                    <dl class="row mb-0">
+                        <dt class="col-7 fw-normal text-secondary">Pages kept</dt><dd class="col-5 mb-1">@status.PagesIndexed.ToString("N0")</dd>
+                        <dt class="col-7 fw-normal text-secondary">Sites</dt><dd class="col-5 mb-1">@status.Sites.ToString("N0")</dd>
+                        <dt class="col-7 fw-normal text-secondary">Fetched today</dt><dd class="col-5 mb-1">@status.PagesToday.ToString("N0") of @status.DailyLimit.ToString("N0")</dd>
+                        <dt class="col-7 fw-normal text-secondary">Waiting</dt><dd class="col-5 mb-1">@status.Queued.ToString("N0")</dd>
+                        <dt class="col-7 fw-normal text-secondary">Topic matches today</dt><dd class="col-5 mb-1">@status.TopicMatchesToday.ToString("N0")</dd>
+                        <dt class="col-7 fw-normal text-secondary">Last fetch</dt>
+                        <dd class="col-5 mb-1">@(status.LastCrawlAt is { } last ? $"{last.ToLocalGwsDate()} {last.ToLocalGwsTime()}" : "not yet")</dd>
+                    </dl>
+                    <p class="text-secondary mt-2 mb-0">
+                        Pages are kept @status.RetentionDays days. It keeps to each site's robots.txt, waits between visits to
+                        one site, and spreads the day's fetches across the day.
+                    </p>
+                }
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header fw-semibold">Sites</div>
+            <div class="card-body small">
+                <form class="d-flex gap-2 mb-2" @onsubmit="AddSiteAsync" @onsubmit:preventDefault>
+                    <input class="form-control form-control-sm" placeholder="example.com" aria-label="Site to crawl" @bind="_newSite" @bind:event="oninput" />
+                    <button type="submit" class="btn btn-sm btn-outline-primary" disabled="@string.IsNullOrWhiteSpace(_newSite)">Add</button>
+                </form>
+                <p class="text-secondary">
+                    It starts from the outlets Media Watch and World News already read, and finds more through their links.
+                    Add any site to crawl it too.
+                </p>
+                @if (_sites.Count == 0)
+                {
+                    <p class="text-secondary mb-0">No sites yet - they appear once the crawler starts.</p>
+                }
+                else
+                {
+                    <ul class="list-unstyled mb-0">
+                        @foreach (var site in _sites)
+                        {
+                            <li class="d-flex align-items-start justify-content-between gap-2 py-1 border-bottom">
+                                <span class="text-break">
+                                    @site.Host
+                                    @if (site.AddedByHand)
+                                    {
+                                        <span class="badge text-bg-secondary ms-1">added</span>
+                                    }
+                                    <span class="d-block text-secondary">
+                                        @site.PagesIndexed.ToString("N0") page@(site.PagesIndexed == 1 ? "" : "s")@(site.LastError is { } siteError ? $" · {siteError}" : "")
+                                    </span>
+                                </span>
+                                <button type="button" class="btn btn-sm btn-link text-danger p-0" title="Stop crawling @site.Host and forget its pages"
+                                        aria-label="@($"Remove {site.Host}")" @onclick="() => RemoveSiteAsync(site.Host)">Remove</button>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _query = string.Empty;
+    private string _newSite = string.Empty;
+    private bool _searching;
+    private string? _error;
+    private IReadOnlyList<WebSearchHit>? _results;
+    private WebCrawlStatus? _status;
+    private IReadOnlyList<WebCrawlSite> _sites = [];
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _status = await WebCrawl.GetStatusAsync();
+            _sites = await WebCrawl.ListSitesAsync(60);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Media Watch web crawl status failed");
+            _error = "The crawler's index couldn't be opened.";
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        _searching = true;
+        _error = null;
+        try
+        {
+            _results = await WebCrawl.SearchAsync(_query, 50);
+        }
+        catch (WebCrawlException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Media Watch web search failed");
+            _error = "The search didn't work - see the server log.";
+        }
+        finally
+        {
+            _searching = false;
+        }
+    }
+
+    private async Task AddSiteAsync()
+    {
+        _error = null;
+        try
+        {
+            await WebCrawl.AddSiteAsync(_newSite);
+            _newSite = string.Empty;
+            await LoadAsync();
+        }
+        catch (WebCrawlException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task RemoveSiteAsync(string host)
+    {
+        await WebCrawl.RemoveSiteAsync(host);
+        await LoadAsync();
+    }
+}

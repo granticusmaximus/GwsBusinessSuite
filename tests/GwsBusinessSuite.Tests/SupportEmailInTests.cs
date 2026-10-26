@@ -9,6 +9,7 @@ using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using MimeKit;
@@ -174,18 +175,88 @@ public sealed class SupportEmailInTests
         return message;
     }
 
+    private static ServerMailAccount GoogleServerAccount(string host = "smtp.gmail.com") =>
+        new(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Smtp:Host"] = host, ["Smtp:Port"] = "587", ["Smtp:Username"] = "grant@gwsapp.net", ["Smtp:Password"] = "abcd efgh ijkl mnop"
+        }).Build());
+
+    [Fact]
+    public void ServerMailAccount_ShouldLendAGoogleLoginOnAPlusAddress_AndNothingElse()
+    {
+        var mailbox = GoogleServerAccount().For("support")!;
+        mailbox.Host.Should().Be("imap.gmail.com");
+        mailbox.Port.Should().Be(993);
+        mailbox.Username.Should().Be("grant@gwsapp.net");
+        mailbox.Password.Should().Be("abcdefghijklmnop", "app passwords are shown with spaces");
+        mailbox.Address.Should().Be("grant+support@gwsapp.net");
+        mailbox.AuthServId.Should().Be("mx.google.com");
+
+        GoogleServerAccount("smtp.sendgrid.net").For("support").Should().BeNull("only a Google login is known to open IMAP");
+        new ServerMailAccount(new ConfigurationBuilder().Build()).For("support").Should().BeNull();
+        var plussed = ServerMailAccount.Resolve(new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Smtp:Host"] = "smtp.gmail.com", ["Smtp:Username"] = "grant+app@gwsapp.net", ["Smtp:Password"] = "x"
+        }).Build().GetSection("Smtp"), "sentinel");
+        plussed!.Address.Should().Be("grant+sentinel@gwsapp.net");
+    }
+
+    [Fact]
+    public void IsAddressedTo_ShouldMatchToCcOrDeliveredTo_Only()
+    {
+        const string address = "grant+support@gwsapp.net";
+        var to = Message("ana@client.com", "Help", Pass);
+        to.To.Add(MailboxAddress.Parse("Grant+Support@gwsapp.net"));
+        ServerMailAccount.IsAddressedTo(to, address).Should().BeTrue("addresses compare without case");
+
+        var bcc = Message("ana@client.com", "Help", Pass);
+        bcc.Headers.Add("Delivered-To", address);
+        ServerMailAccount.IsAddressedTo(bcc, address).Should().BeTrue();
+
+        var other = Message("ana@client.com", "Lunch?", Pass);
+        other.To.Add(MailboxAddress.Parse("grant@gwsapp.net"));
+        ServerMailAccount.IsAddressedTo(other, address).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ServerAccount_ShouldRunEmailToTicketWithNothingSaved_UntilTurnedOff_AndASavedMailboxWins()
+    {
+        await using var fixture = await Fixture.CreateAsync(GoogleServerAccount(), savedMailbox: false);
+
+        var view = await fixture.EmailIn.GetSettingsAsync();
+        view.ServerAccountAddress.Should().Be("grant+support@gwsapp.net");
+        view.Enabled.Should().BeTrue();
+        (await fixture.EmailIn.GetReplyToAddressAsync()).Should().Be("grant+support@gwsapp.net", "clients reply to the plus-address");
+
+        (await fixture.EmailIn.SetServerAccountEnabledAsync(false, "admin")).Enabled.Should().BeFalse();
+        (await fixture.EmailIn.GetReplyToAddressAsync()).Should().BeNull();
+        (await fixture.EmailIn.PollAsync()).Should().Be(0, "turned off, it doesn't sign in at all");
+        (await fixture.EmailIn.SetServerAccountEnabledAsync(true, "admin")).Enabled.Should().BeTrue();
+
+        await fixture.EmailIn.SaveSettingsAsync(new SupportMailboxUpdate(true, "imap.gmail.com", 993, Mailbox, "app-password", "INBOX", AuthServ), "admin");
+        var saved = await fixture.EmailIn.GetSettingsAsync();
+        saved.ServerAccountAddress.Should().BeNull("a mailbox saved in the panel wins");
+        (await fixture.EmailIn.GetReplyToAddressAsync()).Should().Be(Mailbox);
+        var refuse = () => fixture.EmailIn.SetServerAccountEnabledAsync(false, "admin");
+        await refuse.Should().ThrowAsync<SupportEmailInException>();
+
+        await using var unconfigured = await Fixture.CreateAsync(savedMailbox: false);
+        (await unconfigured.EmailIn.GetSettingsAsync()).ServerAccountAddress.Should().BeNull();
+        (await unconfigured.EmailIn.GetReplyToAddressAsync()).Should().BeNull();
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
 
-        private Fixture(SqliteConnection connection, ApplicationDbContext db)
+        private Fixture(SqliteConnection connection, ApplicationDbContext db, ServerMailAccount? serverAccount)
         {
             _connection = connection;
             Db = db;
             var options = Options.Create(new SupportNotificationOptions { AdminBaseUrl = "https://admin.example.test" });
             Tickets = new SupportTicketService(db, TimeProvider.System, new NoAdminEmail(), ContactSender, options, NullLogger<SupportTicketService>.Instance);
             EmailIn = new SupportEmailInService(db, Tickets, new CrmService(db), ContactSender, options, new Passthrough(),
-                TimeProvider.System, NullLogger<SupportEmailInService>.Instance);
+                TimeProvider.System, NullLogger<SupportEmailInService>.Instance, serverAccount);
         }
 
         public ApplicationDbContext Db { get; }
@@ -195,16 +266,18 @@ public sealed class SupportEmailInTests
 
         public Task<SupportInboundEmail> Import(MimeMessage message) => EmailIn.ImportAsync(message, AuthServ, Mailbox);
 
-        public static async Task<Fixture> CreateAsync()
+        // savedMailbox false: nothing saved in the panel, so the server's account (if given) is used.
+        public static async Task<Fixture> CreateAsync(ServerMailAccount? serverAccount = null, bool savedMailbox = true)
         {
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
             var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options);
             await db.Database.EnsureCreatedAsync();
             // The mailbox is on, so ticket emails ask clients to reply to it.
-            db.SupportMailboxSettings.Add(new SupportMailboxSettings { Enabled = true, Username = Mailbox, PasswordProtected = "secret", CreatedBy = "test" });
+            if (savedMailbox) db.SupportMailboxSettings.Add(new SupportMailboxSettings { Enabled = true, Username = Mailbox, PasswordProtected = "secret", CreatedBy = "test" });
+            db.AppUsers.Add(new AppUser { Username = "admin", Role = AppRoles.Admin, PasswordHash = "x", CreatedBy = "test" });
             await db.SaveChangesAsync();
-            return new Fixture(connection, db);
+            return new Fixture(connection, db, serverAccount);
         }
 
         public async ValueTask DisposeAsync()

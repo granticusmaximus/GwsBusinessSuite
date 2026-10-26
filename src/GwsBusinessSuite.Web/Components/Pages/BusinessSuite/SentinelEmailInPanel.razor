@@ -22,6 +22,21 @@
     }
     else
     {
+        @if (_settings?.ServerAccountAddress is { } serverAddress)
+        {
+            <div class="alert alert-info small py-2 mb-3" role="status">
+                <div class="d-flex align-items-start justify-content-between gap-2">
+                    <span>
+                        Using the server's own mail account, so there's nothing to set up. Email sent to
+                        <strong>@serverAddress</strong> from a member's own address becomes a page in Inbox; nothing else in that inbox is read or marked.
+                        @(_settings.Enabled ? "" : "Email-in is turned off.")
+                    </span>
+                    <button type="button" class="btn btn-sm @(_settings.Enabled ? "btn-outline-secondary" : "btn-primary") text-nowrap" disabled="@_busy"
+                            @onclick="ToggleServerAccountAsync">@(_settings.Enabled ? "Turn off" : "Turn on")</button>
+                </div>
+                <div class="mt-1">To use a dedicated mailbox instead, save its details below.</div>
+            </div>
+        }
         <div class="form-check form-switch mb-2">
             <input class="form-check-input" type="checkbox" id="email-in-enabled" @bind="_enabled" />
             <label class="form-check-label small" for="email-in-enabled">Check the mailbox for new mail</label>
@@ -54,7 +69,7 @@
         </div>
         <div class="d-flex gap-2 mb-2">
             <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="SaveAsync">Save</button>
-            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || !_hasPassword)" @onclick="TestAsync">Test connection</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || !CanConnect)" @onclick="TestAsync">Test connection</button>
         </div>
         @if (_message is not null)
         {
@@ -151,6 +166,15 @@
     });
 
     private async Task TestAsync() => await RunAsync(username => EmailIn.TestConnectionAsync(username));
+
+    // A saved app password, or the server's own mail account.
+    private bool CanConnect => _hasPassword || _settings?.ServerAccountAddress is not null;
+
+    private async Task ToggleServerAccountAsync() => await RunAsync(async username =>
+    {
+        Apply(await EmailIn.SetServerAccountEnabledAsync(!(_settings?.Enabled ?? false), username));
+        return _settings!.Enabled ? "Email-in is on." : "Email-in is off.";
+    });
 
     private async Task RunAsync(Func<string, Task<string>> action)
     {

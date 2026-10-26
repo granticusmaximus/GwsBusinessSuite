@@ -73,7 +73,10 @@ public sealed record SentinelMailboxView(
     string AuthServId,
     long? LastPollUnix,
     long? LastSuccessUnix,
-    string? LastError);
+    string? LastError,
+    // Set when no mailbox is saved here and the server's own mail account (the .env SMTP login)
+    // is used instead - the plus-address to send notes to.
+    string? ServerAccountAddress = null);
 
 // Password null = keep the stored one.
 public sealed record SentinelMailboxUpdate(bool Enabled, string Host, int Port, string Username, string? Password, string Folder, string AuthServId);
@@ -87,6 +90,8 @@ public interface ISentinelEmailInService
 {
     Task<SentinelMailboxView> GetSettingsAsync(CancellationToken cancellationToken = default);
     Task<SentinelMailboxView> SaveSettingsAsync(SentinelMailboxUpdate update, string performedBy, CancellationToken cancellationToken = default);
+    // Turns email-in on or off while it runs on the server's own mail account.
+    Task<SentinelMailboxView> SetServerAccountEnabledAsync(bool enabled, string performedBy, CancellationToken cancellationToken = default);
     // Connects and signs in with the saved settings; returns a short description or throws.
     Task<string> TestConnectionAsync(string performedBy, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SentinelInboundEmailView>> ListRecentAsync(int count, CancellationToken cancellationToken = default);

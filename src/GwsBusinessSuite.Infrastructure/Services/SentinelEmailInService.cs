@@ -22,12 +22,48 @@ public sealed class SentinelEmailInService(
     ISentinelAccessService accessService,
     ISecretProtector secretProtector,
     TimeProvider timeProvider,
-    ILogger<SentinelEmailInService> logger) : ISentinelEmailInService
+    ILogger<SentinelEmailInService> logger,
+    ServerMailAccount? serverAccount = null) : ISentinelEmailInService
 {
     private readonly List<SentinelImportedFile> _pendingFiles = [];
+    private const string ServerAccountTag = "sentinel";
+
+    // What the poller reads: a mailbox saved in the panel (with its app password) wins; otherwise
+    // the server's own mail account on its plus-address (see ServerMailAccount), on until turned
+    // off here. Same rules as email-to-ticket (SupportEmailInService).
+    private sealed record Mailbox(string Host, int Port, string Username, string Password, string Folder, string AuthServId,
+        string Address, bool OnlyAddressed, bool Enabled);
+
+    private Mailbox? Effective(SentinelMailboxSettings? settings)
+    {
+        if (settings is { PasswordProtected.Length: > 0 })
+            return new Mailbox(settings.Host, settings.Port, settings.Username, secretProtector.Unprotect(settings.PasswordProtected),
+                settings.Folder, settings.AuthServId, settings.Username, false, settings.Enabled);
+        if (serverAccount?.For(ServerAccountTag) is not { } server) return null;
+        return new Mailbox(server.Host, server.Port, server.Username, server.Password, "INBOX", server.AuthServId, server.Address, true,
+            settings?.Enabled ?? true);
+    }
 
     public async Task<SentinelMailboxView> GetSettingsAsync(CancellationToken cancellationToken = default) =>
-        ToView(await db.SentinelMailboxSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken) ?? new SentinelMailboxSettings());
+        ToView(await db.SentinelMailboxSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken));
+
+    public async Task<SentinelMailboxView> SetServerAccountEnabledAsync(bool enabled, string performedBy, CancellationToken cancellationToken = default)
+    {
+        await RequireAdminAsync(performedBy, cancellationToken);
+        var settings = await db.SentinelMailboxSettings.FirstOrDefaultAsync(cancellationToken);
+        if (settings is { PasswordProtected.Length: > 0 }) throw new SentinelEmailInException("A mailbox is saved here, so email-in uses that one.");
+        if (serverAccount?.For(ServerAccountTag) is null) throw new SentinelEmailInException("The server's mail account isn't a Google account this can read.");
+        if (settings is null)
+        {
+            settings = new SentinelMailboxSettings { CreatedBy = performedBy };
+            db.SentinelMailboxSettings.Add(settings);
+        }
+        settings.Enabled = enabled;
+        settings.UpdatedAt = timeProvider.GetUtcNow();
+        settings.UpdatedBy = performedBy;
+        await db.SaveChangesAsync(cancellationToken);
+        return ToView(settings);
+    }
 
     public async Task<SentinelMailboxView> SaveSettingsAsync(SentinelMailboxUpdate update, string performedBy, CancellationToken cancellationToken = default)
     {
@@ -63,16 +99,18 @@ public sealed class SentinelEmailInService(
     public async Task<string> TestConnectionAsync(string performedBy, CancellationToken cancellationToken = default)
     {
         await RequireAdminAsync(performedBy, cancellationToken);
-        var settings = await db.SentinelMailboxSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+        var mailbox = Effective(await db.SentinelMailboxSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken))
             ?? throw new SentinelEmailInException("Save the mailbox settings first.");
         try
         {
-            using var client = await ConnectAsync(settings, cancellationToken);
-            var folder = await client.GetFolderAsync(settings.Folder, cancellationToken);
+            using var client = await ConnectAsync(mailbox, cancellationToken);
+            var folder = await client.GetFolderAsync(mailbox.Folder, cancellationToken);
             await folder.OpenAsync(FolderAccess.ReadOnly, cancellationToken);
-            var unread = await folder.SearchAsync(SearchQuery.NotSeen, cancellationToken);
+            var unread = await folder.SearchAsync(mailbox.OnlyAddressed ? ServerMailAccount.UnreadFor(mailbox.Address) : SearchQuery.NotSeen, cancellationToken);
             await client.DisconnectAsync(true, cancellationToken);
-            return $"Connected to {settings.Folder}: {unread.Count} unread message(s) waiting.";
+            return mailbox.OnlyAddressed
+                ? $"Connected through the server's mail account: {unread.Count} unread message(s) to {mailbox.Address} waiting."
+                : $"Connected to {mailbox.Folder}: {unread.Count} unread message(s) waiting.";
         }
         catch (Exception ex) when (ex is not SentinelEmailInException and not OperationCanceledException)
         {
@@ -90,19 +128,27 @@ public sealed class SentinelEmailInService(
     public async Task<int> PollAsync(CancellationToken cancellationToken = default)
     {
         var settings = await db.SentinelMailboxSettings.FirstOrDefaultAsync(cancellationToken);
-        if (settings is not { Enabled: true } || settings.PasswordProtected.Length == 0) return 0;
+        if (Effective(settings) is not { Enabled: true } mailbox) return 0;
+        if (settings is null)
+        {
+            // The server's account needs somewhere to keep its last poll and error.
+            settings = new SentinelMailboxSettings { Enabled = true, CreatedBy = "system" };
+            db.SentinelMailboxSettings.Add(settings);
+        }
         settings.LastPollUnix = timeProvider.GetUtcNow().ToUnixTimeSeconds();
         var handled = 0;
         try
         {
-            using var client = await ConnectAsync(settings, cancellationToken);
-            var folder = await client.GetFolderAsync(settings.Folder, cancellationToken);
+            using var client = await ConnectAsync(mailbox, cancellationToken);
+            var folder = await client.GetFolderAsync(mailbox.Folder, cancellationToken);
             await folder.OpenAsync(FolderAccess.ReadWrite, cancellationToken);
-            var unread = await folder.SearchAsync(SearchQuery.NotSeen, cancellationToken);
+            var unread = await folder.SearchAsync(mailbox.OnlyAddressed ? ServerMailAccount.UnreadFor(mailbox.Address) : SearchQuery.NotSeen, cancellationToken);
             foreach (var uid in unread.Take(SentinelEmailIn.MaxMessagesPerPoll))
             {
                 var message = await folder.GetMessageAsync(uid, cancellationToken);
-                await ImportAsync(message, settings.AuthServId, cancellationToken);
+                // Anything not sent to the plus-address is left exactly as it was (still unread).
+                if (mailbox.OnlyAddressed && !ServerMailAccount.IsAddressedTo(message, mailbox.Address)) continue;
+                await ImportAsync(message, mailbox.AuthServId, cancellationToken);
                 // Marked read only after it's recorded, so a crash mid-message retries it and
                 // the Message-ID log stops a double import.
                 await folder.AddFlagsAsync(uid, MessageFlags.Seen, true, cancellationToken);
@@ -318,9 +364,8 @@ public sealed class SentinelEmailInService(
         return folder;
     }
 
-    private Task<ImapClient> ConnectAsync(SentinelMailboxSettings settings, CancellationToken cancellationToken) =>
-        ImapMailboxConnector.ConnectAsync(settings.Host, settings.Port, settings.Username,
-            secretProtector.Unprotect(settings.PasswordProtected), cancellationToken);
+    private static Task<ImapClient> ConnectAsync(Mailbox mailbox, CancellationToken cancellationToken) =>
+        ImapMailboxConnector.ConnectAsync(mailbox.Host, mailbox.Port, mailbox.Username, mailbox.Password, cancellationToken);
 
     private async Task RequireAdminAsync(string username, CancellationToken cancellationToken)
     {
@@ -328,9 +373,15 @@ public sealed class SentinelEmailInService(
             throw new SentinelEmailInException("Only an admin can manage email-in.");
     }
 
-    private static SentinelMailboxView ToView(SentinelMailboxSettings settings) =>
-        new(settings.Enabled, settings.Host, settings.Port, settings.Username, settings.PasswordProtected.Length > 0,
-            settings.Folder, settings.AuthServId, settings.LastPollUnix, settings.LastSuccessUnix, settings.LastError);
+    private SentinelMailboxView ToView(SentinelMailboxSettings? saved)
+    {
+        var settings = saved ?? new SentinelMailboxSettings();
+        var mailbox = Effective(saved);
+        var onServer = mailbox is { OnlyAddressed: true };
+        return new(onServer ? mailbox!.Enabled : settings.Enabled, settings.Host, settings.Port, settings.Username, settings.PasswordProtected.Length > 0,
+            settings.Folder, settings.AuthServId, settings.LastPollUnix, settings.LastSuccessUnix, settings.LastError,
+            onServer ? mailbox!.Address : null);
+    }
 
     private static string Escape(string text) => text.Replace("\\", "\\\\").Replace("[", "\\[").Replace("]", "\\]").Replace("*", "\\*").Replace("_", "\\_");
 

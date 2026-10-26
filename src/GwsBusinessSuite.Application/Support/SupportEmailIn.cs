@@ -88,9 +88,11 @@ public static partial class SupportEmailIn
     private static partial Regex QuoteHeader();
 }
 
+// ServerAccountAddress: set when no mailbox is saved here and the server's own mail account
+// (the .env SMTP login) is used instead - the plus-address clients write to.
 public sealed record SupportMailboxView(
     bool Enabled, string Host, int Port, string Username, bool HasPassword, string Folder, string AuthServId,
-    long? LastPollUnix, long? LastSuccessUnix, string? LastError);
+    long? LastPollUnix, long? LastSuccessUnix, string? LastError, string? ServerAccountAddress = null);
 
 public sealed record SupportMailboxUpdate(
     bool Enabled, string? Host, int Port, string? Username, string? Password, string? Folder, string? AuthServId);
@@ -104,6 +106,8 @@ public interface ISupportEmailInService
 {
     Task<SupportMailboxView> GetSettingsAsync(CancellationToken cancellationToken = default);
     Task<SupportMailboxView> SaveSettingsAsync(SupportMailboxUpdate update, string performedBy, CancellationToken cancellationToken = default);
+    // Turns email-to-ticket on or off while it runs on the server's own mail account.
+    Task<SupportMailboxView> SetServerAccountEnabledAsync(bool enabled, string performedBy, CancellationToken cancellationToken = default);
     Task<string> TestConnectionAsync(string performedBy, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<SupportInboundEmailView>> ListRecentAsync(int count, CancellationToken cancellationToken = default);
     // Checks the mailbox once; returns how many messages were handled.
