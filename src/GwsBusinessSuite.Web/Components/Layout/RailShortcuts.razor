@@ -28,7 +28,8 @@
     @if (_open)
     {
         <button type="button" class="gws-rail-backdrop" aria-label="Close" tabindex="-1" @onclick="Close"></button>
-        <div class="gws-rail-flyout" id="gws-rail-recent" role="dialog" aria-label="Pinned pages and recent records" @onkeydown="OnKeyDown">
+        <div class="gws-rail-flyout" id="gws-rail-recent" role="dialog" aria-label="Pinned pages and recent records" tabindex="-1"
+             @ref="_flyout" @onkeydown="OnKeyDown">
             <div class="gws-rail-flyout-title">Pinned</div>
             @if (view.Pins.Count == 0)
             {
@@ -73,6 +74,10 @@
     private UserShortcutsView? _view;
     private string? _username;
     private bool _open;
+    // The list takes focus when it opens (and after a removal takes the focused button away), so
+    // Escape always reaches it.
+    private ElementReference _flyout;
+    private bool _focusFlyout;
 
     protected override async Task OnInitializedAsync()
     {
@@ -98,7 +103,16 @@
     private async Task ToggleAsync()
     {
         _open = !_open;
-        if (_open) await LoadAsync();
+        if (!_open) return;
+        await LoadAsync();
+        _focusFlyout = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusFlyout || !_open) return;
+        _focusFlyout = false;
+        await _flyout.FocusAsync();
     }
 
     private void Close() => _open = false;
@@ -113,6 +127,7 @@
         if (_username is null) return;
         await Shortcuts.RemoveAsync(_username, shortcut.Kind, shortcut.Url);
         await LoadAsync();
+        _focusFlyout = true;
         // A page's header pin button follows the change too.
         State.NotifyChanged();
     }

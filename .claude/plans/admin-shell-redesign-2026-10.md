@@ -73,7 +73,7 @@ roles see only Home and the Publish items they can use today, the same rules as 
   interactions pick whichever trigger is visible.
 - Not checked: the Mac app's WKWebView (same pages, so expected to match; check under R7).
 
-## R1b. Pins and recents on the rail (in progress 26-10-26)
+## R1b. Pins and recents on the rail (done 26-10-26)
 
 Design (26-10-26): the layout is static SSR, so the rail's shortcuts are an interactive island
 (`RailShortcuts`, like AssistantPanel/NotificationBell) on the same circuit as the page; a scoped
@@ -83,6 +83,17 @@ since SQLite can't order DateTimeOffset). Pins: a pin button in every PageHeader
 pages only), up to 4 shown as rail items. Recents: PageHeader `Record="true"` pages (article,
 form submission, contact, page editor, draft, alert campaign, container, staff profile) record a
 visit; the rail's "Recent" button opens a list of the last 8 plus the pins (with Unpin).
+
+**Done 26-10-26.** `UserShortcut` + migration `AddUserShortcuts` (unique Username+Kind+Url),
+`IUserShortcutService` / `UserShortcutService` (a DbContext per call from the factory: the page's
+header and the rail island run on one circuit at the same moment, and the circuit's shared
+IAppDbContext can't run two operations at once), `ShortcutsState`, `RailShortcuts` (rail items +
+Recent list; backdrop closes it, it takes focus so Escape works - found when a removal took the
+focused button away and Escape stopped reaching it), PageHeader pin button + `Record`. Rail
+bottom group `.gws-rail-bottom` (the old `.gws-rail-end` went). Tests: `UserShortcutServiceTests`
+(7). Checked live: pin shows on the rail at once, the container record shows under Recent, unpin
+from the list updates the rail and the page's button, the rail pin link navigates, phone drawer
+layout; responsive audit (phone/tablet/laptop) only the known Support "Open Ticket" under the bar.
 
 Split out of R1: pinned pages and recent records at the bottom of the rail, stored per user.
 Needs a per-user table (pins, recents) plus a migration; recents can come from pages that already
