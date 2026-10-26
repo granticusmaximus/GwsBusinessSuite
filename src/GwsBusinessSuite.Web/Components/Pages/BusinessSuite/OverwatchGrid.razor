@@ -31,6 +31,8 @@
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchBriefingService Briefings
 @inject GwsBusinessSuite.Infrastructure.Services.MapNoteService MapNotes
 @inject GwsBusinessSuite.Application.LiveLayers.AircraftService AircraftService
+@inject GwsBusinessSuite.Application.RoadTraffic.HpmsRoadTrafficService RoadTrafficService
+@inject GwsBusinessSuite.Application.RoadTraffic.LiveRoadSpeedService LiveRoadSpeedService
 @inject GwsBusinessSuite.Application.LiveLayers.AircraftDetailService AircraftDetailService
 @inject GwsBusinessSuite.Application.LiveLayers.ShipService ShipService
 @inject GwsBusinessSuite.Application.LiveLayers.AirQualityService AirQualityService
@@ -139,7 +141,16 @@
                         title="What highway message signs say right now (Caltrans, Montana)" @onclick="ToggleSignsAsync">
                     SIGNS [@(_signsOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="city-traffic" class="tg-toggle @(_cityTrafficOn ? "tg-toggle-on" : "")"
+                        title="When zoomed in to a city: how many vehicles use each road (every US state) and live speeds where the city publishes them"
+                        @onclick="ToggleCityTrafficAsync">
+                    CITY TRAFFIC [@(_cityTrafficOn ? "ON" : "OFF")]
+                </button>
             </div>
+            @if (_cityTrafficOn && CityTrafficStatus is { } cityTrafficStatus)
+            {
+                <div class="tg-hazard-summary">@cityTrafficStatus</div>
+            }
             @if (_incidentsOn && _lastIncidents.Count > 0)
             {
                 <div class="tg-hud-toggles tg-incident-filters" role="group" aria-label="Filter incidents by type">
@@ -559,6 +570,93 @@
             @switch (_panelTab)
             {
                 case "explore":
+                    @if (_cityTrafficOn)
+                    {
+                        <div class="tg-coverage-panel-header"><span>TRAFFIC IN VIEW</span></div>
+                        <div class="tg-traffic">
+                            @if (CityTrafficStatus is { } trafficStatus)
+                            {
+                                <p class="tg-traffic-note" role="status">@trafficStatus</p>
+                            }
+                            @if (_roadSummary is { Sections: > 0 } roadSummary)
+                            {
+                                <dl class="tg-incident-facts tg-traffic-facts">
+                                    <dt>VEHICLE-MILES</dt><dd>@BigNumber(roadSummary.VehicleMilesPerDay) A DAY</dd>
+                                    <dt>COUNTED ROADS</dt><dd>@roadSummary.MilesInView.ToString("N0") MI (@roadSummary.Sections.ToString("N0") SECTIONS)</dd>
+                                    @if (roadSummary.TruckPercent is { } truckPercent)
+                                    {
+                                        <dt>TRUCKS</dt><dd>@truckPercent.ToString("0.#")% OF VEHICLE-MILES</dd>
+                                    }
+                                    <dt>SHOWING</dt><dd>@(_cityTrafficCoverage?.ToUpperInvariant())</dd>
+                                </dl>
+                                <div class="tg-traffic-subhead">BUSIEST ROADS</div>
+                                <ul class="tg-coverage-list">
+                                    @foreach (var road in roadSummary.Busiest)
+                                    {
+                                        <li class="tg-coverage-item">
+                                            <span>
+                                                <i class="tg-traffic-swatch tg-vol-@VolumeBand(road.VehiclesPerDay)" aria-hidden="true"></i>@road.Label@(road.Name is { } roadName ? $" · {roadName}" : "")
+                                                <small class="tg-coverage-status">
+                                                    @road.VehiclesPerDay.ToString("N0") A DAY@(road.TruckPercent is { } t ? $" · {t:0.#}% TRUCKS" : "")@(road.Lanes is { } lanes ? $" · {lanes} LANES" : "")
+                                                </small>
+                                            </span>
+                                            <button type="button" title="Fly to @road.Label" @onclick="() => FlyToRoadAsync(road)">GO</button>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                            @if (_speedSummary is { } speedSummary)
+                            {
+                                <div class="tg-traffic-subhead">LIVE SPEEDS · @string.Join(", ", _speedSources)</div>
+                                <dl class="tg-incident-facts tg-traffic-facts">
+                                    <dt>LINKS</dt><dd>@speedSummary.Links REPORTING, TYPICAL @speedSummary.MedianMph.ToString("0") MPH</dd>
+                                    <dt>SLOW</dt><dd>@speedSummary.SlowLinks UNDER @GwsBusinessSuite.Application.RoadTraffic.LiveSpeedSummary.SlowMph.ToString("0") MPH</dd>
+                                    @if (speedSummary.Newest is { } newest)
+                                    {
+                                        <dt>AS OF</dt><dd>@newest.ToLocalGwsDate() @newest.ToLocalGwsTime()</dd>
+                                    }
+                                </dl>
+                                <ul class="tg-coverage-list">
+                                    @foreach (var link in speedSummary.Slowest)
+                                    {
+                                        <li class="tg-coverage-item">
+                                            <span>
+                                                <i class="tg-traffic-swatch tg-spd-@SpeedBand(link.SpeedMph)" aria-hidden="true"></i>@link.Name
+                                                <small class="tg-coverage-status">@link.SpeedMph.ToString("0") MPH@(string.IsNullOrEmpty(link.Area) ? "" : $" · {link.Area.ToUpperInvariant()}")</small>
+                                            </span>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                            <div class="tg-traffic-subhead">LIVE NOW</div>
+                            <dl class="tg-incident-facts tg-traffic-facts">
+                                <dt>INCIDENTS</dt>
+                                <dd>@(_trafficIncidents.Count == 0 ? "NONE LISTED" : string.Join(" · ", _trafficIncidents.Select(i => $"{i.Count} {i.Label.ToUpperInvariant()}")))</dd>
+                                <dt>CAMERAS</dt><dd>@_camerasInViewTotal.ToString("N0") IN VIEW</dd>
+                            </dl>
+                            <div class="tg-traffic-legend" aria-label="Map key">
+                                <span class="tg-traffic-legend-title">VEHICLES A DAY</span>
+                                @for (var band = 0; band < VolumeBandLabels.Length; band++)
+                                {
+                                    <span><i class="tg-traffic-swatch tg-vol-@band" aria-hidden="true"></i>@VolumeBandLabels[band]</span>
+                                }
+                                @if (_speedSummary is not null)
+                                {
+                                    <span class="tg-traffic-legend-title">LIVE MPH</span>
+                                    @for (var band = 0; band < SpeedBandLabels.Length; band++)
+                                    {
+                                        <span><i class="tg-traffic-swatch tg-spd-@band" aria-hidden="true"></i>@SpeedBandLabels[band]</span>
+                                    }
+                                }
+                            </div>
+                            @if (_cityTrafficReleases.Count > 0 || _speedSources.Count > 0)
+                            {
+                                <p class="tg-traffic-source">
+                                    SOURCES: FHWA HPMS@(_cityTrafficReleases.Count > 0 ? $" ({string.Join(", ", _cityTrafficReleases)} release{(_cityTrafficReleases.Count == 1 ? "" : "s")})" : "")@(_speedSources.Count > 0 ? $" · {string.Join(", ", _speedSources)} live speeds" : ""). CLICK A ROAD FOR ITS DETAILS.
+                                </p>
+                            }
+                        </div>
+                    }
                     @if (!_hasAnyProviderConfigured && !_bannerDismissed)
                     {
                         <div class="tg-favorites-empty tg-explore-note" role="note">
@@ -1537,7 +1635,8 @@
             _roadWeatherOn ? TimedAsync("road temps", PushRoadWeatherAsync) : Task.CompletedTask,
             _aircraftOn || _airQualityOn ? TimedAsync("air", PushAirLayersAsync) : Task.CompletedTask,
             _shipsOn ? TimedAsync("ships", PushShipsAsync) : Task.CompletedTask,
-            _outagesOn ? TimedAsync("power outages", PushOutagesAsync) : Task.CompletedTask);
+            _outagesOn ? TimedAsync("power outages", PushOutagesAsync) : Task.CompletedTask,
+            _cityTrafficOn ? TimedAsync("city traffic", PushCityTrafficAsync) : Task.CompletedTask);
         if (Current()) StateHasChanged();
     }
 
@@ -1943,7 +2042,7 @@
     private bool _helpOpen;
 
     private int ActiveLayerCount =>
-        new[] { _radarOn, _alertsOn, _incidentsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
+        new[] { _radarOn, _alertsOn, _incidentsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _cityTrafficOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
 
     private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {
@@ -3042,6 +3141,114 @@
             Logger.LogWarning(ex, "Message signs failed to load");
         }
     }
+
+    // ---- City traffic: HPMS road volumes + live speeds on the globe, summed up in EXPLORE. ----
+    private bool _cityTrafficOn;
+    private bool _cityTrafficLoading;
+    private string? _cityTrafficNote;
+    private string? _cityTrafficCoverage;
+    private IReadOnlyList<string> _cityTrafficReleases = [];
+    private GwsBusinessSuite.Application.RoadTraffic.RoadTrafficSummary? _roadSummary;
+    private GwsBusinessSuite.Application.RoadTraffic.LiveSpeedSummary? _speedSummary;
+    private IReadOnlyList<string> _speedSources = [];
+    private IReadOnlyList<(string Label, int Count)> _trafficIncidents = [];
+    private int _cityTrafficGeneration;
+
+    // Matches tactical-globe.js's volumeBands / speedColour.
+    private static readonly int[] VolumeBandFloors = [0, 5000, 15000, 40000, 100000, 200000];
+    private static readonly string[] VolumeBandLabels = ["<5K", "5-15K", "15-40K", "40-100K", "100-200K", "200K+"];
+    private static readonly string[] SpeedBandLabels = ["<15", "15-30", "30-45", "45+"];
+    // The globe draws at most this many sections (the busiest); the summary counts them all.
+    private const int MaxDrawnRoads = 4000;
+
+    private static int VolumeBand(int vehiclesPerDay) => Array.FindLastIndex(VolumeBandFloors, floor => vehiclesPerDay >= floor);
+    private static int SpeedBand(double mph) => mph < 15 ? 0 : mph < 30 ? 1 : mph < 45 ? 2 : 3;
+
+    private static string BigNumber(double value) => value >= 1_000_000
+        ? $"{value / 1_000_000:0.#} MILLION"
+        : value.ToString("N0");
+
+    private string? CityTrafficStatus => _cityTrafficLoading && _roadSummary is null
+        ? "LOADING ROAD TRAFFIC…"
+        : string.IsNullOrWhiteSpace(_cityTrafficNote) ? null : _cityTrafficNote;
+
+    private async Task ToggleCityTrafficAsync()
+    {
+        _cityTrafficOn = !_cityTrafficOn;
+        _cityTrafficGeneration++;
+        if (!_cityTrafficOn)
+        {
+            (_cityTrafficLoading, _cityTrafficNote, _cityTrafficCoverage, _roadSummary, _speedSummary) = (false, null, null, null, null);
+            (_cityTrafficReleases, _speedSources, _trafficIncidents) = ([], [], []);
+            await JS.InvokeVoidAsync("tacticalGlobe.setRoadTraffic", "tg-viewport", Array.Empty<object>(), Array.Empty<object>());
+            return;
+        }
+        // The summary lives in EXPLORE, so that's where turning it on takes you.
+        await SelectPanelTabAsync("explore", keepOpen: true);
+        await PushCityTrafficAsync();
+    }
+
+    private async Task PushCityTrafficAsync()
+    {
+        var view = _lastBbox;
+        var generation = ++_cityTrafficGeneration;
+        _cityTrafficLoading = true;
+        StateHasChanged();
+        try
+        {
+            var roadsTask = RoadTrafficService.GetAsync(view);
+            var speedsTask = LiveRoadSpeedService.GetAsync(view);
+            var incidentsTask = TrafficIncidentDirectoryService.GetIncidentsInBoundingBoxAsync(view);
+            await Task.WhenAll(roadsTask, speedsTask, incidentsTask);
+            var (roads, speeds, incidents) = (await roadsTask, await speedsTask, await incidentsTask);
+            if (!_cityTrafficOn || generation != _cityTrafficGeneration) return;
+
+            _roadSummary = roads.Roads.Count > 0 ? GwsBusinessSuite.Application.RoadTraffic.RoadTrafficSummary.From(roads.Roads, view) : null;
+            _speedSummary = GwsBusinessSuite.Application.RoadTraffic.LiveSpeedSummary.From(speeds.Links);
+            _speedSources = speeds.Sources;
+            _cityTrafficCoverage = roads.Coverage;
+            _cityTrafficReleases = roads.Releases;
+            var drawn = roads.Roads.Count <= MaxDrawnRoads ? roads.Roads
+                : roads.Roads.OrderByDescending(r => r.VehiclesPerDay).Take(MaxDrawnRoads).OrderBy(r => r.VehiclesPerDay).ToList();
+            var drawnNote = drawn.Count < roads.Roads.Count
+                ? $"The busiest {MaxDrawnRoads:N0} of {roads.Roads.Count:N0} sections are drawn; zoom in for the rest."
+                : null;
+            _cityTrafficNote = string.Join(" ", new[] { roads.Note, speeds.Note, drawnNote }.Where(n => !string.IsNullOrWhiteSpace(n)));
+            _trafficIncidents = incidents.GroupBy(i => i.Category)
+                .Select(g => (IncidentCategories.Label(g.Key), g.Count()))
+                .OrderByDescending(g => g.Item2).ToList();
+            await JS.InvokeVoidAsync("tacticalGlobe.setRoadTraffic", "tg-viewport",
+                drawn.Select(RoadPayload), speeds.Links.Select(SpeedPayload));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch city traffic layer failed");
+            _cityTrafficNote = "City traffic couldn't be shown just now.";
+        }
+        finally
+        {
+            if (generation == _cityTrafficGeneration) _cityTrafficLoading = false;
+        }
+    }
+
+    private static object RoadPayload(GwsBusinessSuite.Application.RoadTraffic.RoadSegment road) => new
+    {
+        id = $"{road.State}{road.Id}", label = road.Label, name = road.Name == road.Label ? null : road.Name, cls = road.RoadClass, aadt = road.VehiclesPerDay, trucks = road.TrucksPerDay,
+        future = road.FutureVehiclesPerDay, peak = road.PeakHourPercent, dir = road.PeakDirectionPercent, lanes = road.Lanes,
+        limit = road.SpeedLimitMph, signals = road.Signals, stops = road.StopSigns, toll = road.Toll, ramp = road.Ramp,
+        oneWay = road.OneWay, release = $"{road.State} {road.ReleaseYear}",
+        paths = road.Paths.Select(path => path.Select(p => new[] { Math.Round(p.Longitude, 5), Math.Round(p.Latitude, 5) }))
+    };
+
+    private static object SpeedPayload(GwsBusinessSuite.Application.RoadTraffic.LiveRoadSpeed link) => new
+    {
+        id = link.Id, name = link.Name, area = link.Area, mph = link.SpeedMph, travel = link.TravelTimeSeconds,
+        asOf = $"{link.AsOf.ToLocalGwsDate()} {link.AsOf.ToLocalGwsTime()}", source = link.Source, sourceUrl = link.SourceUrl,
+        path = link.Path.Select(p => new[] { Math.Round(p.Longitude, 5), Math.Round(p.Latitude, 5) })
+    };
+
+    private async Task FlyToRoadAsync(GwsBusinessSuite.Application.RoadTraffic.BusyRoad road) =>
+        await JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", road.Latitude, road.Longitude, 2500);
 
     // ---- Air layers: OpenSky aircraft (refreshed every minute while on) and Open-Meteo air quality. ----
     private bool _aircraftOn;

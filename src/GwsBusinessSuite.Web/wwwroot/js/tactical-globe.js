@@ -313,6 +313,10 @@ window.tacticalGlobe = (function () {
                 openRoadWeatherPanel(entity._tacticalGlobeRoadWeather);
             } else if (entity && entity._tacticalGlobeAircraft) {
                 openAircraftPanel(containerId, entity._tacticalGlobeAircraft);
+            } else if (entity && entity._tacticalGlobeSpeed) {
+                openSpeedPanel(entity._tacticalGlobeSpeed);
+            } else if (entity && entity._tacticalGlobeRoad) {
+                openRoadPanel(entity._tacticalGlobeRoad);
             } else if (entity && entity._tacticalGlobeNote) {
                 const noteEntry = viewers.get(containerId);
                 if (noteEntry) noteEntry.dotNetRef.invokeMethodAsync('OnMapNoteClicked', entity._tacticalGlobeNote);
@@ -1190,6 +1194,124 @@ window.tacticalGlobe = (function () {
                 }
             }));
         });
+    }
+
+    // City traffic: FHWA HPMS road sections coloured by vehicles a day (a cool ramp - volume isn't
+    // congestion) with live speeds on top where a city publishes them (green/amber/red). One ground
+    // primitive per kind keeps thousands of sections cheap and drapes them on 3D terrain.
+    // roads: [{ id, label, name, cls, aadt, trucks, future, peak, dir, lanes, limit, signals, stops, toll,
+    // ramp, oneWay, release, paths: [[[lon, lat], ...]] }];
+    // speeds: [{ id, name, area, mph, travel, asOf, source, sourceUrl, path: [[lon, lat], ...] }].
+    const volumeBands = [[200000, '#ff4fd8'], [100000, '#d04cff'], [40000, '#8b6bff'], [15000, '#4fa3ff'], [5000, '#20c1c1'], [0, '#2b8a8a']];
+    function volumeColour(aadt) {
+        const band = volumeBands.find(function (b) { return aadt >= b[0]; });
+        return band ? band[1] : volumeBands[volumeBands.length - 1][1];
+    }
+    // Under 15 mph matches the summary's "slow" count.
+    function speedColour(mph) {
+        return mph < 15 ? '#ff3b3b' : mph < 30 ? '#ff8c2a' : mph < 45 ? '#ffd23f' : '#3ddc84';
+    }
+
+    function clearRoadTraffic(entry) {
+        (entry.roadTrafficPrimitives || []).forEach(function (primitive) { entry.viewer.scene.primitives.remove(primitive); });
+        entry.roadTrafficPrimitives = [];
+    }
+
+    function addLinePrimitive(entry, lines) {
+        if (lines.length === 0) return;
+        const scene = entry.viewer.scene;
+        if (Cesium.GroundPolylinePrimitive.isSupported(scene)) {
+            entry.roadTrafficPrimitives.push(scene.primitives.add(new Cesium.GroundPolylinePrimitive({
+                geometryInstances: lines.map(function (line) {
+                    return new Cesium.GeometryInstance({
+                        geometry: new Cesium.GroundPolylineGeometry({ positions: line.positions, width: line.width }),
+                        id: line.id,
+                        attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(line.colour) }
+                    });
+                }),
+                appearance: new Cesium.PolylineColorAppearance()
+            })));
+            return;
+        }
+        const collection = scene.primitives.add(new Cesium.PolylineCollection());
+        lines.forEach(function (line) {
+            collection.add({ positions: line.positions, width: line.width, id: line.id, material: Cesium.Material.fromType('Color', { color: line.colour }) });
+        });
+        entry.roadTrafficPrimitives.push(collection);
+    }
+
+    function setRoadTraffic(containerId, roads, speeds) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        clearRoadTraffic(entry);
+        const toPositions = function (path) { return Cesium.Cartesian3.fromDegreesArray(path.flat().map(Number)); };
+        const roadLines = [];
+        (roads || []).forEach(function (road) {
+            const colour = Cesium.Color.fromCssColorString(volumeColour(Number(road.aadt))).withAlpha(0.9);
+            const width = Math.min(8, 2 + Math.min(Number(road.lanes) || 2, 12) * 0.45);
+            (road.paths || []).forEach(function (path) {
+                if (path && path.length >= 2) roadLines.push({ positions: toPositions(path), width: width, colour: colour, id: { _tacticalGlobeRoad: road } });
+            });
+        });
+        const speedLines = (speeds || [])
+            .filter(function (link) { return link && link.path && link.path.length >= 2; })
+            .map(function (link) {
+                return { positions: toPositions(link.path), width: 7, colour: Cesium.Color.fromCssColorString(speedColour(Number(link.mph))), id: { _tacticalGlobeSpeed: link } };
+            });
+        addLinePrimitive(entry, roadLines);
+        addLinePrimitive(entry, speedLines);
+    }
+
+    function trafficFactsPanel(title, facts, sourceHtml) {
+        closeIncidentPanel();
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel';
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header">' +
+            '<span>' + escapeHtml(title) + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
+            '</div>' +
+            '<div class="tg-stream-panel-body">' +
+            '<dl class="tg-incident-facts">' + facts.filter(function (f) { return f[1]; }).map(function (f) {
+                return '<dt>' + f[0] + '</dt><dd>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
+            }).join('') + '</dl>' +
+            '<div class="tg-stream-panel-meta">' + sourceHtml + '</div>' +
+            '</div>';
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        if (!openAsModal(panel, closeIncidentPanel)) return;
+        incidentPanel = panel;
+    }
+
+    function openRoadPanel(road) {
+        const aadt = Number(road.aadt);
+        const count = function (value) { return Number(value).toLocaleString('en-US'); };
+        const share = function (part) { return Math.round(100 * part / aadt) + '%'; };
+        const change = road.future ? Number(road.future) - aadt : 0;
+        trafficFactsPanel(road.label, [
+            ['NAME', road.name],
+            ['ROAD', road.cls + (road.ramp ? ' (ramp)' : '')],
+            ['VEHICLES A DAY', count(aadt) + ' on an average day'],
+            ['TRUCKS A DAY', road.trucks !== null && road.trucks !== undefined ? count(road.trucks) + ' (' + share(road.trucks) + ')' : null],
+            ['BUSIEST HOUR', road.peak ? 'about ' + count(Math.round(aadt * road.peak / 100)) + ' (' + Math.round(road.peak * 10) / 10 + '% of the day)' : null],
+            ['PEAK DIRECTION', road.dir ? Math.round(road.dir) + '% of the busiest hour one way' : null],
+            ['LANES', road.lanes ? road.lanes + (road.oneWay ? ' (one-way)' : '') : null],
+            ['SPEED LIMIT', road.limit ? road.limit + ' mph' : null],
+            ['SIGNALS', road.signals > 0 ? String(road.signals) : null],
+            ['STOP SIGNS', road.stops > 0 ? String(road.stops) : null],
+            ['TOLL', road.toll ? 'Yes' : null],
+            ['FORECAST', road.future ? count(road.future) + ' a day (' + (change >= 0 ? '+' : '') + share(change) + ')' : null]
+        ], 'SOURCE: <a href="https://www.fhwa.dot.gov/policyinformation/hpms.cfm" target="_blank" rel="noopener noreferrer">FHWA HPMS</a> (' +
+            escapeHtml(road.release || '') + ' release, as the state DOT reported it)');
+    }
+
+    function openSpeedPanel(link) {
+        const travel = Number(link.travel);
+        trafficFactsPanel(link.name || 'Live speed', [
+            ['SPEED', Math.round(Number(link.mph)) + ' mph'],
+            ['TRAVEL TIME', travel > 0 ? Math.floor(travel / 60) + ' min ' + (travel % 60) + ' s' : null],
+            ['AREA', link.area],
+            ['AS OF', link.asOf]
+        ], 'SOURCE: <a href="' + escapeHtml(link.sourceUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(link.source) + '</a>');
     }
 
     // Map notes: pins and drawn areas, each clickable (OnMapNoteClicked). draft is the area being
@@ -2828,6 +2950,7 @@ window.tacticalGlobe = (function () {
         setShips: setShips,
         setAirQuality: setAirQuality,
         setPowerOutages: setPowerOutages,
+        setRoadTraffic: setRoadTraffic,
         setThreeD: setThreeD,
         flyToStreetLevel: flyToStreetLevel,
         stopDrive: stopDrive,

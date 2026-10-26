@@ -883,6 +883,21 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(15);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
         });
+        // City traffic (key-less): FHWA HPMS road volumes for every state (geo.dot.gov) and live
+        // speeds where a city publishes them (NYC DOT so far - add an ILiveRoadSpeedProvider per city).
+        services.AddHttpClient<GwsBusinessSuite.Application.RoadTraffic.HpmsRoadTrafficService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        });
+        services.AddHttpClient<GwsBusinessSuite.Application.RoadTraffic.NycDotSpeedProvider>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        });
+        services.AddTransient<GwsBusinessSuite.Application.RoadTraffic.ILiveRoadSpeedProvider>(provider =>
+            provider.GetRequiredService<GwsBusinessSuite.Application.RoadTraffic.NycDotSpeedProvider>());
+        services.AddTransient<GwsBusinessSuite.Application.RoadTraffic.LiveRoadSpeedService>();
         // Power outages: DOE/ORNL ODIN's anonymous county-level map API (key-less).
         services.AddHttpClient<GwsBusinessSuite.Application.LiveLayers.PowerOutageService>(client =>
         {

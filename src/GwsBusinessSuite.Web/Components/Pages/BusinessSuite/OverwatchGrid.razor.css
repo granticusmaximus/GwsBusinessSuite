@@ -953,3 +953,25 @@
 @media (pointer: coarse) {
     .tg-note-swatch, .tg-note-new button { min-width: 44px; min-height: 44px; }
 }
+
+/* City traffic summary (EXPLORE > TRAFFIC IN VIEW). Swatch colours match tactical-globe.js's
+   volumeBands (a cool ramp: volume isn't congestion) and speedColour. */
+.tg-traffic { padding: .25rem .75rem .75rem; font-size: .75rem; }
+.tg-traffic-note { margin: .25rem 0 .5rem; opacity: .85; }
+.tg-traffic-subhead { margin: .75rem 0 .25rem; font-weight: 700; letter-spacing: .06em; opacity: .8; }
+.tg-traffic-facts { margin: .25rem 0; }
+.tg-traffic .tg-coverage-list { padding-left: 0; padding-right: 0; }
+.tg-traffic-swatch { display: inline-block; width: .8rem; height: .35rem; margin-right: .4rem; border-radius: 2px; vertical-align: middle; }
+.tg-vol-0 { background: #2b8a8a; }
+.tg-vol-1 { background: #20c1c1; }
+.tg-vol-2 { background: #4fa3ff; }
+.tg-vol-3 { background: #8b6bff; }
+.tg-vol-4 { background: #d04cff; }
+.tg-vol-5 { background: #ff4fd8; }
+.tg-spd-0 { background: #ff3b3b; }
+.tg-spd-1 { background: #ff8c2a; }
+.tg-spd-2 { background: #ffd23f; }
+.tg-spd-3 { background: #3ddc84; }
+.tg-traffic-legend { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .7rem; margin-top: .75rem; }
+.tg-traffic-legend-title { flex-basis: 100%; font-weight: 700; letter-spacing: .06em; opacity: .8; }
+.tg-traffic-source { margin: .6rem 0 0; line-height: 1.4; opacity: .7; }
