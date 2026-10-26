@@ -8,14 +8,9 @@
 
 <PageTitle>Affiliate Suggestions</PageTitle>
 
-<div class="page-header">
-  <h1><i class="bi bi-magic me-2 text-primary"></i>Affiliate Suggestions</h1>
-  <p>
-    SentinelGPT-matched affiliate offers for your articles, pulled from your synced CJ links.
-    Nothing goes live until you click Apply - review each pick, then apply the ones that fit.
-  </p>
-</div>
-<AppTabs App="GwsBusinessSuite.Web.Services.AdminApps.Affiliate" />
+<PageHeader Title="Affiliate Suggestions" Icon="bi-magic"
+            Description="SentinelGPT-matched affiliate offers for your articles, pulled from your synced CJ links. Nothing goes live until you click Apply - review each pick, then apply the ones that fit."
+            App="GwsBusinessSuite.Web.Services.AdminApps.Affiliate" />
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {

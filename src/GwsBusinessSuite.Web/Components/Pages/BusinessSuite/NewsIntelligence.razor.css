@@ -50,14 +50,13 @@
 :root:not([data-theme="light"]) .media-watch .alert-danger { background: #2a1412; border-color: rgba(248,113,113,.3); color: #fca5a5; }
 
 /* Same theme-aware header tokens as Civic Watch (see GovernmentIntelligence.razor.css) - this
-   page's --civic-* tokens follow data-theme too, so only color + this page's own sizing need
-   to be supplied, no defensive pinning required. */
-.page-header { max-width: 1380px; margin-left: auto; margin-right: auto; }
-.page-header-eyebrow { display: inline-flex; align-items: center; gap: .4rem; color: var(--civic-accent-strong); }
-.page-header-rich h1 { color: var(--civic-ink); }
-.page-header p { max-width: 720px; color: var(--civic-muted); font-size: clamp(.8rem, 1.1vw, .95rem); line-height: 1.5; margin: 0; }
-.page-header p span { white-space: nowrap; }
-.masthead-actions { display: flex; align-items: center; gap: .6rem; }
+   page's --civic-* tokens follow data-theme too, so the shared PageHeader only needs this
+   page's colors and sizing. */
+.media-watch ::deep .gws-page-header { max-width: 1380px; margin-left: auto; margin-right: auto; }
+.media-watch ::deep .gws-breadcrumb ol { color: var(--civic-accent-strong); }
+.media-watch ::deep .gws-page-header h1 { color: var(--civic-ink); }
+.media-watch ::deep .gws-page-header-text > p { max-width: 720px; color: var(--civic-muted); font-size: clamp(.8rem, 1.1vw, .95rem); line-height: 1.5; margin: 0; }
+.media-watch-updated { margin: .35rem 0 0; color: var(--civic-muted); font-size: .8rem; }
 
 .media-watch .row.g-4 { max-width: 1380px; margin: 0 auto; }
 
@@ -87,8 +86,6 @@
 
 @container gws-main (max-width: 728px) {
     .media-watch { margin: -1rem; padding: 1rem; }
-    .masthead-actions { width: 100%; }
-    .masthead-actions .btn { flex: 1; }
 }
 
 /* Read stories recede; unread ones carry a dot next to the outlet. */

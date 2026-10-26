@@ -24,16 +24,16 @@
     gap: 1rem;
 }
 
-/* Page header text must stay pinned to Growth's own palette, not the global
-   theme-aware --gws-* tokens - .growth-shell never follows data-theme (it's
-   always dark), so a global light-theme override would go dark-on-dark here. */
-.page-header-eyebrow { color: var(--growth-accent); }
-.page-header-rich h1 { color: var(--growth-ink); max-width: 780px; }
-.page-header p { color: var(--growth-muted); margin: 0; }
+/* The shared PageHeader's text must stay pinned to Growth's own palette, not the global
+   theme-aware --gws-* tokens - .growth-shell never follows data-theme (it's always dark), so a
+   global light-theme override would go dark-on-dark here. */
+.growth-shell ::deep .gws-breadcrumb ol { color: var(--growth-accent); }
+.growth-shell ::deep .gws-page-header h1 { color: var(--growth-ink); max-width: 780px; }
+.growth-shell ::deep .gws-page-header-text > p { color: var(--growth-muted); margin: 0; }
 .section-toolbar p { color: var(--growth-muted); margin: 0; }
 .alert-success { color: #86efac; }
 .alert-danger { color: #fca5a5; }
-.growth-live { border: 1px solid var(--growth-line); border-radius: 999px; padding: .6rem .85rem; color: var(--growth-muted); white-space: nowrap; }
+.growth-live { display: inline-block; margin-top: .75rem; border: 1px solid var(--growth-line); border-radius: 999px; padding: .6rem .85rem; color: var(--growth-muted); white-space: nowrap; }
 .growth-live span { display: inline-block; width: .5rem; height: .5rem; border-radius: 50%; background: #37c776; box-shadow: 0 0 0 .25rem rgba(55,199,118,.12); margin-right: .45rem; }
 .growth-live strong { color: var(--growth-ink); }
 
@@ -186,7 +186,6 @@
     .growth-shell { margin: -1rem; padding: 1rem; }
     .section-toolbar { align-items: flex-start; flex-direction: column; }
     .analytics-actions { width: 100%; justify-content: space-between; }
-    .growth-live { align-self: flex-start; }
     .metric-grid { grid-template-columns: 1fr 1fr; }
     .trend-chart { overflow-x: auto; }
     .trend-day { min-width: 10px; }

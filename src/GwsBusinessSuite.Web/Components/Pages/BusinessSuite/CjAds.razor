@@ -10,12 +10,9 @@
 
 <PageTitle>CJ Ads Manager</PageTitle>
 
-<div class="page-header">
-  <h1><i class="bi bi-tags-fill me-2 text-primary"></i>CJ Ads Manager</h1>
-  <p>Only your current CJ My Advertisers are shown below. Expand an advertiser to view active ads you can use in
-    articles.</p>
-  </div>
-<AppTabs App="GwsBusinessSuite.Web.Services.AdminApps.Affiliate" />
+<PageHeader Title="CJ Ads Manager" Icon="bi-tags-fill"
+            Description="Only your current CJ My Advertisers are shown below. Expand an advertiser to view active ads you can use in articles."
+            App="GwsBusinessSuite.Web.Services.AdminApps.Affiliate" />
 
   @if (!string.IsNullOrWhiteSpace(ErrorMessage))
   {

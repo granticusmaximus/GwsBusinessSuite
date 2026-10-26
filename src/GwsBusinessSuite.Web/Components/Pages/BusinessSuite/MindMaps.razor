@@ -9,15 +9,13 @@
 
 <PageTitle>Mind Maps</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-diagram-2-fill me-2 text-primary"></i>Mind Maps</h1>
-        <p>Structured, visual outlines saved as their own documents.</p>
-    </div>
-    <button type="button" class="btn btn-primary" @onclick="OpenCreate" disabled="@_busy">
-        <i class="bi bi-plus-lg me-1"></i>New mind map
-    </button>
-</div>
+<PageHeader Title="Mind Maps" Icon="bi-diagram-2-fill" Description="Structured, visual outlines saved as their own documents.">
+    <Actions>
+        <button type="button" class="btn btn-primary" @onclick="OpenCreate" disabled="@_busy">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New mind map
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(_error))
 {

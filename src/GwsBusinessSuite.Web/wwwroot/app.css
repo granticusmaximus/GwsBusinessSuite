@@ -670,20 +670,10 @@ h1:focus { outline: none; }
     font-size: 1rem;
 }
 
-/* ── Rich page header (eyebrow + serif title) ───────────────
-   Structural only - no color here. Pages that opt in (page-header-rich)
-   supply their own .page-header-eyebrow / .page-header-rich h1 color rules
-   in their own scoped CSS, since some page shells (e.g. Growth) never
-   follow the global data-theme toggle. */
-.page-header-eyebrow {
-    display: inline-block;
-    font-size: .75rem;
-    font-weight: 800;
-    letter-spacing: .14em;
-    text-transform: uppercase;
-    margin-bottom: .35rem;
-}
-
+/* ── Rich page header (serif title) ─────────────────────────
+   Structural only - no color here. Pages that opt in (PageHeader CssClass="page-header-rich")
+   supply their own title and breadcrumb colors in their own scoped CSS, since some page
+   shells (e.g. Growth) never follow the global data-theme toggle. */
 .page-header-rich h1 {
     font: 650 clamp(1.9rem, 3.2vw, 3.1rem)/1.05 var(--gws-font-serif);
     letter-spacing: -.03em;
@@ -1076,8 +1066,6 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     text-transform: uppercase;
 }
 
-.gws-dashboard-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem; }
-.gws-dashboard-quick-actions { display: flex; flex-wrap: wrap; gap: .65rem; }
 .gws-section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
 .gws-section-heading h2 { margin: 0; font-size: 1.1rem; font-weight: 700; }
 

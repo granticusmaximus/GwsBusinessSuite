@@ -16,23 +16,20 @@
 <PageTitle>Civic Watch</PageTitle>
 
 <main class="civic-watch">
-    <div class="page-header page-header-rich d-flex flex-wrap justify-content-between gap-3 align-items-end">
-        <div>
-            <span class="page-header-eyebrow"><i class="bi bi-broadcast-pin"></i> Public life, made legible</span>
-            <h1>Civic Watch</h1>
-            <p>One calm briefing for local meetings, Georgia government, and the votes moving through Congress.</p>
-        </div>
-        <div class="masthead-actions">
-            <button type="button" class="btn btn-outline-secondary" @onclick="ToggleSettings" aria-expanded="@(_showSettings ? "true" : "false")">
-                <i class="bi bi-sliders"></i>
-                <span>Settings</span>
-            </button>
+    <PageHeader Title="Civic Watch" CssClass="page-header-rich"
+                Description="One calm briefing for local meetings, Georgia government, and the votes moving through Congress.">
+        <Actions>
             <button type="button" class="btn btn-outline-secondary" @onclick="RefreshAsync" disabled="@_loading">
-                <i class="bi bi-arrow-clockwise @(_loading ? "gws-spin" : string.Empty)"></i>
+                <i class="bi bi-arrow-clockwise @(_loading ? "gws-spin" : string.Empty)" aria-hidden="true"></i>
                 <span>@(_loading ? "Refreshing sources…" : "Refresh sources")</span>
             </button>
-        </div>
-    </div>
+        </Actions>
+        <More>
+            <button type="button" class="dropdown-item" @onclick="ToggleSettings" aria-expanded="@(_showSettings ? "true" : "false")">
+                <i class="bi bi-sliders me-2" aria-hidden="true"></i>@(_showSettings ? "Hide settings" : "Settings")
+            </button>
+        </More>
+    </PageHeader>
 
     @if (_showIntroHint)
     {

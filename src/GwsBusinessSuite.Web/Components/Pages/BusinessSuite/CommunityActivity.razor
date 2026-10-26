@@ -7,11 +7,8 @@
 
 <PageTitle>Activity Feed · Community</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-activity me-2 text-primary"></i>Activity Feed</h1>
-    <p>What the team has been up to across the wiki and CRM.</p>
-</div>
-<AppTabs App="GwsBusinessSuite.Web.Services.AdminApps.Community" />
+<PageHeader Title="Activity Feed" Icon="bi-activity" Description="What the team has been up to across the wiki and CRM."
+            App="GwsBusinessSuite.Web.Services.AdminApps.Community" />
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {

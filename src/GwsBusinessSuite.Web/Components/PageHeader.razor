@@ -5,7 +5,7 @@
    a record page), the title and description, the page's main action with any others in a ⋯
    menu, an optional row of filters, and the app's tabs for a merged app (AdminApps). Replaces
    each page's hand-built .page-header. *@
-<header class="page-header gws-page-header">
+<header class="page-header gws-page-header @CssClass">
     <nav class="gws-breadcrumb" aria-label="Breadcrumb">
         <ol>
             <li>@Workspace.Label</li>
@@ -74,6 +74,9 @@
     [Parameter] public RenderFragment? Meta { get; set; }
     // Search, filters and view switches for the page's list, in a row under the title.
     [Parameter] public RenderFragment? Filters { get; set; }
+    // Extra classes on the header, e.g. "page-header-rich" for the serif title the Intelligence
+    // watch pages and Growth use.
+    [Parameter] public string? CssClass { get; set; }
 
     private NavWorkspace Workspace => NavMenuGroups.WorkspaceFor(Navigation.ToBaseRelativePath(Navigation.Uri));
 }

@@ -9,10 +9,7 @@
 
 <PageTitle>@ContainerName - Docker Management</PageTitle>
 
-<div class="page-header">
-    <p><a href="/admin/docker-health">&larr; Docker Management</a></p>
-    <h1><i class="bi bi-box-seam me-2 text-primary"></i>@ContainerName</h1>
-</div>
+<PageHeader Title="@ContainerName" Icon="bi-box-seam" ParentLabel="Docker Management" ParentHref="/admin/docker-health" />
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {

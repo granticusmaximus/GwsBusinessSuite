@@ -11,27 +11,26 @@
 <PageTitle>Growth Studio</PageTitle>
 
 <main class="growth-shell">
-    <div class="page-header page-header-rich d-flex flex-wrap justify-content-between gap-3 align-items-end">
-        <div>
-            <span class="page-header-eyebrow">GWS Growth Studio</span>
-            <h1>Understand what works. Publish what matters.</h1>
-            <p>First-party audience intelligence and considered social publishing in one workspace.</p>
-        </div>
-        <div class="growth-live"><span></span><strong>@Dashboard.VisitorsNow</strong> active now</div>
-    </div>
-
-    <ul class="nav nav-pills mb-4" aria-label="Growth Studio sections">
-        <li class="nav-item">
-            <button type="button" class="nav-link @TabClass("analytics")" @onclick="@(() => ActiveTab = "analytics")">
-                <i class="bi bi-graph-up"></i> Analytics
-            </button>
-        </li>
-        <li class="nav-item">
-            <button type="button" class="nav-link @TabClass("publish")" @onclick="@(() => ActiveTab = "publish")">
-                <i class="bi bi-send"></i> Social publisher
-            </button>
-        </li>
-    </ul>
+    <PageHeader Title="Growth Studio" CssClass="page-header-rich"
+                Description="Understand what works and publish what matters: first-party audience intelligence and considered social publishing in one workspace.">
+        <Meta>
+            <div class="growth-live"><span></span><strong>@Dashboard.VisitorsNow</strong> active now</div>
+        </Meta>
+        <Filters>
+            <ul class="nav nav-pills mb-0" aria-label="Growth Studio sections">
+                <li class="nav-item">
+                    <button type="button" class="nav-link @TabClass("analytics")" @onclick="@(() => ActiveTab = "analytics")">
+                        <i class="bi bi-graph-up"></i> Analytics
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button type="button" class="nav-link @TabClass("publish")" @onclick="@(() => ActiveTab = "publish")">
+                        <i class="bi bi-send"></i> Social publisher
+                    </button>
+                </li>
+            </ul>
+        </Filters>
+    </PageHeader>
 
     @if (!string.IsNullOrWhiteSpace(ErrorMessage))
     {

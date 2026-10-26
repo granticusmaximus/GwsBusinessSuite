@@ -7,16 +7,14 @@
 
 <PageTitle>Security Audit · GWS Business Suite</PageTitle>
 
-<div class="page-header d-flex flex-wrap justify-content-between gap-3 align-items-start">
-    <div>
-        <span class="text-uppercase text-secondary small fw-semibold">Security center</span>
-        <h1><i class="bi bi-shield-check me-2 text-primary"></i>Security audit</h1>
-        <p>Append-only evidence for authentication, account administration, protected data access, and security operations.</p>
-    </div>
-    <a class="btn btn-outline-secondary" href="/admin/api/security-audit/export.csv">
-        <i class="bi bi-download me-1"></i> Export CSV
-    </a>
-</div>
+<PageHeader Title="Security audit" Icon="bi-shield-check"
+            Description="Append-only evidence for authentication, account administration, protected data access, and security operations.">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="/admin/api/security-audit/export.csv">
+            <i class="bi bi-download me-1" aria-hidden="true"></i>Export CSV
+        </a>
+    </Actions>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(_error))
 {

@@ -8,10 +8,12 @@
 
 <PageTitle>Automation Help</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-question-circle me-2 text-primary"></i>Automation Help</h1>
-    <p>The complete, screenshot-illustrated guide to Workflow Automation. The same content also lives at <code>docs/AUTOMATION_USER_GUIDE.md</code> in the repository, for anyone reading it outside the app.</p>
-</div>
+<PageHeader Title="Automation Help" Icon="bi-question-circle" ParentLabel="Workflow Automation" ParentHref="/admin/automation"
+            Description="The complete, screenshot-illustrated guide to Workflow Automation.">
+    <Meta>
+        <p class="small text-secondary mb-0">The same content also lives at <code>docs/AUTOMATION_USER_GUIDE.md</code> in the repository, for anyone reading it outside the app.</p>
+    </Meta>
+</PageHeader>
 
 @if (_renderedHtml is not null)
 {

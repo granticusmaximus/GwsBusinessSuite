@@ -16,23 +16,22 @@
 
 <PageTitle>Docker Management</PageTitle>
 
-<div class="page-header d-flex align-items-center justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-box-seam me-2 text-primary"></i>Docker Management</h1>
-        <p>Manage every container on the droplet, and bridge into DigitalOcean for droplet-level actions.</p>
-    </div>
-    <button class="btn btn-outline-primary d-inline-flex align-items-center gap-2" @onclick="LoadContainersAsync" disabled="@IsBusy">
-        @if (IsBusy)
-        {
-            <span class="spinner-border spinner-border-sm"></span>
-        }
-        else
-        {
-            <i class="bi bi-arrow-clockwise"></i>
-        }
-        <span>Refresh Now</span>
-    </button>
-</div>
+<PageHeader Title="Docker Management" Icon="bi-box-seam"
+            Description="Manage every container on the droplet, and bridge into DigitalOcean for droplet-level actions.">
+    <Actions>
+        <button type="button" class="btn btn-outline-primary d-inline-flex align-items-center gap-2" @onclick="LoadContainersAsync" disabled="@IsBusy">
+            @if (IsBusy)
+            {
+                <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+            }
+            else
+            {
+                <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+            }
+            <span>Refresh Now</span>
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -161,7 +160,8 @@ else if (!_available)
 }
 else if (Containers.Count == 0)
 {
-    <EmptyState Icon="bi-box-seam" Message="No containers found." />
+    <EmptyState Icon="bi-box-seam" Title="No containers found"
+                Message="The list fills from the droplet's Docker socket. Refresh once the containers are running." />
 }
 else
 {

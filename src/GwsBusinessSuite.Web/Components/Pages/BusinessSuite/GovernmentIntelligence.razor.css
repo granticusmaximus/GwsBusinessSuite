@@ -20,15 +20,12 @@
         linear-gradient(180deg, #f7f5f0 0, var(--civic-bg) 22rem);
 }
 
-/* This page's own header/eyebrow tokens are theme-aware (see the dark-mode block below), unlike
-   Growth's permanently-dark shell, so no defensive color-pinning is needed here - the shared
-   .page-header-eyebrow/.page-header-rich h1 structural rules just need color + this page's own
-   sizing preserved. */
-.page-header { max-width: 1380px; margin-left: auto; margin-right: auto; }
-.page-header-eyebrow { display: inline-flex; align-items: center; gap: .4rem; color: var(--civic-accent-strong); }
-.page-header-rich h1 { color: var(--civic-ink); }
-.page-header p { max-width: 720px; color: var(--civic-muted); font-size: clamp(.88rem, 1.2vw, 1.05rem); line-height: 1.5; margin: 0; }
-.masthead-actions { display: flex; align-items: center; gap: .6rem; }
+/* This page's own tokens are theme-aware (see the dark-mode block below), unlike Growth's
+   permanently-dark shell, so the shared PageHeader only needs this page's colors and sizing. */
+.civic-watch ::deep .gws-page-header { max-width: 1380px; margin-left: auto; margin-right: auto; }
+.civic-watch ::deep .gws-breadcrumb ol { color: var(--civic-accent-strong); }
+.civic-watch ::deep .gws-page-header h1 { color: var(--civic-ink); }
+.civic-watch ::deep .gws-page-header-text > p { max-width: 720px; color: var(--civic-muted); font-size: clamp(.88rem, 1.2vw, 1.05rem); line-height: 1.5; margin: 0; }
 
 .source-note { display: flex; align-items: flex-start; gap: .65rem; max-width: 1380px; margin: 0 auto 1rem; padding: .8rem 1rem; border-radius: .75rem; font-size: .75rem; border: 1px solid rgba(194,107,58,.22); background: #fff8ee; color: #815033; }
 
@@ -202,8 +199,6 @@
 
 @container gws-main (max-width: 728px) {
     .civic-watch { margin: -1rem; padding: 1rem; }
-    .masthead-actions { width: 100%; }
-    .masthead-actions .btn { flex: 1; }
     .briefing-signals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .signal-card { align-items: flex-start; flex-direction: column; gap: .35rem; min-height: 5.2rem; padding: .65rem; }
     .signal-card small { white-space: normal; }

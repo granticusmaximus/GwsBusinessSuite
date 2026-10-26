@@ -16,23 +16,17 @@
 <PageTitle>Threat Intelligence</PageTitle>
 
 <main class="threat-intel">
-<div class="page-header page-header-rich d-flex flex-wrap justify-content-between gap-3 align-items-end">
-    <div>
-        <span class="page-header-eyebrow"><i class="bi bi-shield-exclamation"></i> Threat Intelligence</span>
-        <h1>Threat Intelligence</h1>
-        <p>
-            Investigate any IP, domain, URL, file hash or CVE against free public sources, and watch your own
-            domains, servers, software and packages under My exposure.
-        </p>
-    </div>
-</div>
-
-<div class="btn-group mb-4 threat-intel-tabs" role="tablist" aria-label="Threat Intelligence views">
-    <button type="button" role="tab" aria-selected="@(_tab == "live")" class="btn @(_tab == "live" ? "btn-primary" : "btn-outline-primary")"
-            @onclick='() => _tab = "live"'><i class="bi bi-broadcast"></i> Live intel</button>
-    <button type="button" role="tab" aria-selected="@(_tab == "exposure")" class="btn @(_tab == "exposure" ? "btn-primary" : "btn-outline-primary")"
-            @onclick='() => _tab = "exposure"'><i class="bi bi-shield-check"></i> My exposure</button>
-</div>
+<PageHeader Title="Threat Intelligence" CssClass="page-header-rich"
+            Description="Investigate any IP, domain, URL, file hash or CVE against free public sources, and watch your own domains, servers, software and packages under My exposure.">
+    <Filters>
+        <div class="btn-group threat-intel-tabs" role="tablist" aria-label="Threat Intelligence views">
+            <button type="button" role="tab" aria-selected="@(_tab == "live")" class="btn @(_tab == "live" ? "btn-primary" : "btn-outline-primary")"
+                    @onclick='() => _tab = "live"'><i class="bi bi-broadcast"></i> Live intel</button>
+            <button type="button" role="tab" aria-selected="@(_tab == "exposure")" class="btn @(_tab == "exposure" ? "btn-primary" : "btn-outline-primary")"
+                    @onclick='() => _tab = "exposure"'><i class="bi bi-shield-check"></i> My exposure</button>
+        </div>
+    </Filters>
+</PageHeader>
 
 @if (_tab == "exposure")
 {

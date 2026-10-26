@@ -102,7 +102,8 @@
         if (_initialized)
         {
             try { await JS.InvokeVoidAsync("gwsProfessionalEditor.destroy", _rootId); }
-            catch (JSDisconnectedException) { }
+            // A circuit going away either disconnects the call or cancels it mid-flight.
+            catch (Exception ex) when (ex is JSDisconnectedException or TaskCanceledException) { }
         }
         _dotNetRef?.Dispose();
     }

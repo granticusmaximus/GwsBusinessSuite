@@ -29,13 +29,12 @@
 
 <PageTitle>Settings</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-gear-fill me-2 text-primary"></i>Settings</h1>
-        <p>Website identity plus shared platform defaults for reading, writing, media, and SentinelGPT.</p>
-    </div>
-    <CmsSiteSwitcher SiteChanged="OnSiteChangedAsync" />
-</div>
+<PageHeader Title="Settings" Icon="bi-gear-fill"
+            Description="Website identity plus shared platform defaults for reading, writing, media, and SentinelGPT.">
+    <Filters>
+        <CmsSiteSwitcher SiteChanged="OnSiteChangedAsync" />
+    </Filters>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(StatusMessage))
 {

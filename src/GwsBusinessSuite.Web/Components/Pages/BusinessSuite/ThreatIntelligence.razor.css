@@ -46,23 +46,27 @@
         linear-gradient(180deg, #17140f 0, var(--civic-bg) 22rem);
 }
 
-.threat-intel :global(.page-header-eyebrow) {
-    display: inline-flex;
-    align-items: center;
-    gap: .4rem;
-    font-size: .8rem;
-    font-weight: 600;
-    letter-spacing: .04em;
-    text-transform: uppercase;
+.threat-intel ::deep .gws-breadcrumb ol {
     color: var(--civic-accent-strong);
 }
 
-.threat-intel :global(.card) {
+.threat-intel ::deep .gws-page-header h1 {
+    color: var(--civic-ink);
+}
+
+.threat-intel ::deep .gws-page-header-text > p {
+    max-width: 720px;
+    color: var(--civic-muted);
+}
+
+/* ::deep (not :global, which Blazor's scoped CSS doesn't support and left these rules invalid)
+   so the My exposure panel's cards are themed too. */
+.threat-intel ::deep .card {
     background: var(--civic-surface-raised);
     border-radius: var(--civic-radius);
 }
 
-.threat-intel :global(.card-header) {
+.threat-intel ::deep .card-header {
     background: var(--civic-surface) !important;
     border-color: var(--civic-line) !important;
 }

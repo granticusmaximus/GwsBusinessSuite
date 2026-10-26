@@ -16,20 +16,24 @@
 
 <PageTitle>Workflow Automation</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-diagram-3-fill me-2 text-primary"></i>Workflow Automation</h1>
-        <p>Build, publish, run, and inspect durable business automations.</p>
-    </div>
-    <div class="d-flex gap-2">
-        <a class="btn btn-outline-secondary" href="/admin/automation/help"><i class="bi bi-question-circle me-1"></i>Help</a>
-        <a class="btn btn-outline-secondary" href="/admin/automation/credentials"><i class="bi bi-key-fill me-1"></i>Credentials</a>
-        <label class="btn btn-outline-secondary mb-0" for="importWorkflowFile"><i class="bi bi-upload me-1"></i>Import @if (_importing) { <span class="spinner-border spinner-border-sm ms-1"></span> }</label>
-        <InputFile id="importWorkflowFile" class="visually-hidden" OnChange="ImportWorkflowAsync" accept=".json,application/json" />
-        <button class="btn btn-outline-secondary" @onclick="OpenTemplates"><i class="bi bi-collection me-1"></i>New from template</button>
-        <button class="btn btn-primary" @onclick="OpenCreate"><i class="bi bi-plus-lg me-1"></i>New workflow</button>
-    </div>
-</div>
+<PageHeader Title="Workflow Automation" Icon="bi-diagram-3-fill" Description="Build, publish, run, and inspect durable business automations.">
+    <Meta>
+        @if (_importing)
+        {
+            <p class="small text-secondary mb-0"><span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Importing workflow…</p>
+        }
+    </Meta>
+    <Actions>
+        <button type="button" class="btn btn-primary" @onclick="OpenCreate"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New workflow</button>
+    </Actions>
+    <More>
+        <button type="button" class="dropdown-item" @onclick="OpenTemplates"><i class="bi bi-collection me-2" aria-hidden="true"></i>New from template</button>
+        <label class="dropdown-item mb-0" for="importWorkflowFile"><i class="bi bi-upload me-2" aria-hidden="true"></i>Import</label>
+        <a class="dropdown-item" href="/admin/automation/credentials"><i class="bi bi-key-fill me-2" aria-hidden="true"></i>Credentials</a>
+        <a class="dropdown-item" href="/admin/automation/help"><i class="bi bi-question-circle me-2" aria-hidden="true"></i>Help</a>
+    </More>
+</PageHeader>
+<InputFile id="importWorkflowFile" class="visually-hidden" OnChange="ImportWorkflowAsync" accept=".json,application/json" />
 
 @if (!string.IsNullOrWhiteSpace(_error))
 {

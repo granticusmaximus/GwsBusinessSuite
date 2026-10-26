@@ -7,11 +7,14 @@
 
 <PageTitle>Departments · Community</PageTitle>
 
-<div class="page-header">
-    <h1><i class="bi bi-diagram-3 me-2 text-primary"></i>Departments</h1>
-    <p>Create departments, assign a lead, and see who belongs where.</p>
-</div>
-<AppTabs App="GwsBusinessSuite.Web.Services.AdminApps.Community" />
+<PageHeader Title="Departments" Icon="bi-diagram-3" Description="Create departments, assign a lead, and see who belongs where."
+            App="GwsBusinessSuite.Web.Services.AdminApps.Community">
+    <Actions>
+        <button type="button" class="btn btn-primary" @onclick="OpenNewDepartmentForm" disabled="@IsBusy">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New department
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -29,18 +32,15 @@
 }
 
 <div class="card border-0 shadow-sm mb-4">
-    <div class="card-header bg-white border-bottom py-3 d-flex align-items-center justify-content-between">
+    <div class="card-header bg-white border-bottom py-3">
         <span class="fw-semibold">Departments</span>
-        <button class="btn btn-sm btn-outline-primary" @onclick="() => ShowNewDepartmentForm = !ShowNewDepartmentForm" disabled="@IsBusy">
-            <i class="bi bi-plus-lg me-1"></i>New Department
-        </button>
     </div>
     @if (ShowNewDepartmentForm)
     {
         <div class="card-body border-bottom py-3">
             <div class="row g-2">
-                <div class="col-md-4">
-                    <input class="form-control form-control-sm" placeholder="Department name"
+                <div class="col-md-3">
+                    <input class="form-control form-control-sm" placeholder="Department name" aria-label="Department name" @ref="_newNameInput"
                            value="@NewName" @oninput="e => NewName = e.Value?.ToString() ?? string.Empty" />
                 </div>
                 <div class="col-md-4">
@@ -51,8 +51,9 @@
                     <input class="form-control form-control-sm" placeholder="Lead username (optional)"
                            value="@NewLeadUsername" @oninput="e => NewLeadUsername = e.Value?.ToString() ?? string.Empty" />
                 </div>
-                <div class="col-md-1">
-                    <button class="btn btn-sm btn-primary w-100" @onclick="CreateDepartmentAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewName))">Save</button>
+                <div class="col-md-2 d-flex gap-2">
+                    <button class="btn btn-sm btn-primary flex-fill" @onclick="CreateDepartmentAsync" disabled="@(IsBusy || string.IsNullOrWhiteSpace(NewName))">Save</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary flex-fill" @onclick="() => ShowNewDepartmentForm = false">Cancel</button>
                 </div>
             </div>
         </div>
@@ -64,7 +65,15 @@
         }
         else if (Departments.Count == 0)
         {
-            <EmptyState Icon="bi-diagram-3" Message="No departments yet." />
+            <EmptyState Icon="bi-diagram-3" Title="No departments yet"
+                        Message="Add a department to group people under a lead; members show it in the Staff Directory.">
+                @if (!ShowNewDepartmentForm)
+                {
+                    <button type="button" class="btn btn-primary btn-sm" @onclick="OpenNewDepartmentForm" disabled="@IsBusy">
+                        <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New department
+                    </button>
+                }
+            </EmptyState>
         }
         else
         {
@@ -138,6 +147,23 @@
     private string EditLeadUsername { get; set; } = string.Empty;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    // The header's "New department": opens the form with its name field focused.
+    private ElementReference _newNameInput;
+    private bool _focusNewName;
+
+    private void OpenNewDepartmentForm()
+    {
+        ShowNewDepartmentForm = true;
+        _focusNewName = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusNewName) return;
+        _focusNewName = false;
+        await _newNameInput.FocusAsync();
+    }
 
     private async Task LoadAsync()
     {

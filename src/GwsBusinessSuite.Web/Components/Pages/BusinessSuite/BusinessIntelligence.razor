@@ -12,15 +12,14 @@
 
 <PageTitle>Business Intelligence</PageTitle>
 
-<div class="page-header d-flex flex-wrap align-items-start justify-content-between gap-3">
-    <div>
-        <h1><i class="bi bi-bar-chart-line-fill me-2 text-primary"></i>Business Intelligence</h1>
-        <p>Build safe reports from suite data and pin the charts that matter to your dashboard.</p>
-    </div>
-    <button type="button" class="btn btn-primary" @onclick="BeginCreate" disabled="@_isBusy">
-        <i class="bi bi-plus-lg me-1"></i>Build chart
-    </button>
-</div>
+<PageHeader Title="Business Intelligence" Icon="bi-bar-chart-line-fill"
+            Description="Build safe reports from suite data and pin the charts that matter to your dashboard.">
+    <Actions>
+        <button type="button" class="btn btn-primary" @onclick="BeginCreate" disabled="@_isBusy">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Build chart
+        </button>
+    </Actions>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(_errorMessage))
 {

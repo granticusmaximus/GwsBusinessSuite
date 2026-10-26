@@ -15,13 +15,11 @@
 
 <PageTitle>Dashboard · GWS Business Suite</PageTitle>
 
-<div class="page-header gws-dashboard-header">
-    <div>
-        <span class="gws-eyebrow">@DateTimeOffset.Now.ToString("dd-MM-yy")</span>
-        <h1>Good @GreetingPeriod()</h1>
-        <p>@DashboardDescription</p>
-    </div>
-    <div class="gws-dashboard-quick-actions" aria-label="Quick actions">
+<PageHeader Title="@($"Good {GreetingPeriod()}")" Description="@DashboardDescription">
+    <Meta>
+        <p class="small text-secondary mb-0">@DateTimeOffset.Now.ToString("dd-MM-yy")</p>
+    </Meta>
+    <Actions>
         <a class="btn btn-primary" href="/admin/article-editor"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Manage posts</a>
         @if (IsNativeApp)
         {
@@ -30,8 +28,8 @@
         <button type="button" class="btn btn-outline-secondary" @onclick="OpenQuickNote">
             <i class="bi bi-stickies-fill me-1" aria-hidden="true"></i>Quick Note
         </button>
-    </div>
-</div>
+    </Actions>
+</PageHeader>
 
 <QuickNoteModal @bind-IsOpen="_showQuickNote" OnSaved="OnQuickNoteSaved" />
 

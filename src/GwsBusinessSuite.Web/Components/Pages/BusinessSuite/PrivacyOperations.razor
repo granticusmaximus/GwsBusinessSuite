@@ -7,11 +7,8 @@
 
 <PageTitle>Privacy Operations · GWS Business Suite</PageTitle>
 
-<div class="page-header">
-    <span class="text-uppercase text-secondary small fw-semibold">Security center</span>
-    <h1><i class="bi bi-person-lock me-2 text-primary"></i>Privacy operations</h1>
-    <p>Operational records for data-subject rights, retention review, and security-incident response. This supports—not replaces—legal and compliance review.</p>
-</div>
+<PageHeader Title="Privacy operations" Icon="bi-person-lock"
+            Description="Operational records for data-subject rights, retention review, and security-incident response. This supports—not replaces—legal and compliance review." />
 
 @if (!string.IsNullOrWhiteSpace(_message)) { <div class="alert @(_error ? "alert-danger" : "alert-success")" role="alert">@_message</div> }
 
