@@ -1,0 +1,140 @@
+@using GwsBusinessSuite.Application.Assistant
+@using GwsBusinessSuite.Web.Services
+@implements IDisposable
+@inject RightPanelState RightPanels
+@inject AssistantContext Assistant
+@inject IJSRuntime JS
+
+@* A record opened beside its list (shell redesign R3): it slides in on the right, sharing that
+   edge with the SentinelGPT panel (RightPanelState - side by side only where there's room), and
+   hands its record to SentinelGPT. The list stays put; "Open full page" goes to the record's own
+   page. Escape or the close button closes it. *@
+@if (Open)
+{
+    <aside class="gws-record-inspector" role="dialog" aria-modal="false" aria-labelledby="gws-record-inspector-title" tabindex="-1"
+           @ref="_panel" @onkeydown="OnKeyDownAsync">
+        <header class="gws-record-inspector-head">
+            <div class="gws-record-inspector-heading">
+                @if (!string.IsNullOrEmpty(Icon))
+                {
+                    <i class="bi @Icon" aria-hidden="true"></i>
+                }
+                <div>
+                    <h2 id="gws-record-inspector-title">@Title</h2>
+                    @if (!string.IsNullOrEmpty(Subtitle))
+                    {
+                        <p>@Subtitle</p>
+                    }
+                </div>
+            </div>
+            <div class="gws-record-inspector-tools">
+                @if (!string.IsNullOrEmpty(FullPageHref))
+                {
+                    <a class="btn btn-sm btn-outline-secondary" href="@FullPageHref" title="Open full page" aria-label="@($"Open {Title} as a full page")">
+                        <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                    </a>
+                }
+                <button type="button" class="btn btn-sm btn-outline-secondary" title="Close (Esc)" aria-label="Close" @onclick="CloseAsync">
+                    <i class="bi bi-x-lg" aria-hidden="true"></i>
+                </button>
+            </div>
+        </header>
+        @if (Actions is not null)
+        {
+            <div class="gws-record-inspector-actions">@Actions</div>
+        }
+        <div class="gws-record-inspector-body">@ChildContent</div>
+    </aside>
+}
+
+@code {
+    [Parameter] public bool Open { get; set; }
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string? Subtitle { get; set; }
+    // A Bootstrap Icons class, e.g. "bi-receipt".
+    [Parameter] public string? Icon { get; set; }
+    [Parameter] public string? FullPageHref { get; set; }
+    // What SentinelGPT is told while the inspector is open (cleared when it closes).
+    [Parameter] public AssistantPageContext? AssistantPage { get; set; }
+    // Buttons for the record, under its title.
+    [Parameter] public RenderFragment? Actions { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private ElementReference _panel;
+    private bool _wasOpen;
+    private bool _focus;
+    private AssistantPageContext? _described;
+
+    protected override void OnInitialized() => RightPanels.AssistantOpened += OnAssistantOpened;
+
+    protected override void OnParametersSet()
+    {
+        if (Open && !_wasOpen)
+        {
+            RightPanels.NotifyInspectorOpened();
+            _focus = true;
+        }
+        _wasOpen = Open;
+        if (!Open)
+        {
+            ClearAssistant();
+            return;
+        }
+        if (AssistantPage is not null && !Equals(AssistantPage, _described))
+        {
+            Assistant.Set(AssistantPage);
+            _described = AssistantPage;
+        }
+    }
+
+    // Focus moves into the panel when it opens, so Escape reaches it and screen readers land there.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focus || !Open) return;
+        _focus = false;
+        try
+        {
+            await _panel.FocusAsync();
+        }
+        catch (JSException)
+        {
+            // The panel went before the browser got to it.
+        }
+    }
+
+    private Task CloseAsync() => OnClose.InvokeAsync();
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await CloseAsync();
+    }
+
+    // SentinelGPT opened: make way, unless the screen has room for both.
+    private void OnAssistantOpened() => _ = InvokeAsync(async () =>
+    {
+        if (!Open) return;
+        try
+        {
+            if (await JS.InvokeAsync<bool>("gwsAssistant.wide")) return;
+        }
+        catch (JSException)
+        {
+            // Without the check, make way.
+        }
+        await CloseAsync();
+    });
+
+    private void ClearAssistant()
+    {
+        if (_described is null) return;
+        _described = null;
+        Assistant.Clear();
+    }
+
+    public void Dispose()
+    {
+        RightPanels.AssistantOpened -= OnAssistantOpened;
+        ClearAssistant();
+    }
+}

@@ -1,0 +1,62 @@
+/* Same edge and height as the SentinelGPT panel (AssistantPanel.razor.css); app.css makes the
+   page room for it on wide screens and places it beside that panel where both fit. */
+.gws-record-inspector {
+    position: fixed;
+    top: var(--gws-admin-bar-height, 3.5rem);
+    right: 0;
+    bottom: 0;
+    z-index: 1034;
+    display: flex;
+    flex-direction: column;
+    width: var(--gws-inspector-width, 440px);
+    max-width: 100vw;
+    border-left: 1px solid var(--gws-panel-border);
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+    box-shadow: var(--gws-shadow-md, 0 12px 32px rgba(0, 0, 0, .45));
+    animation: gws-inspector-in .16s ease-out;
+}
+
+.gws-record-inspector:focus { outline: none; }
+
+@keyframes gws-inspector-in {
+    from { opacity: 0; transform: translateX(16px); }
+}
+
+.gws-record-inspector-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: .75rem;
+    padding: 1rem 1rem .75rem;
+    border-bottom: 1px solid var(--gws-panel-border);
+}
+
+.gws-record-inspector-heading { display: flex; gap: .6rem; min-width: 0; }
+.gws-record-inspector-heading i { margin-top: .1rem; color: var(--gws-sidebar-accent); font-size: 1.25rem; }
+.gws-record-inspector-heading h2 { margin: 0; font-size: 1.1rem; font-weight: 700; overflow-wrap: anywhere; }
+.gws-record-inspector-heading p { margin: .15rem 0 0; color: var(--gws-text-soft); font-size: .875rem; }
+.gws-record-inspector-tools { display: flex; flex-shrink: 0; gap: .35rem; }
+
+.gws-record-inspector-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    padding: .6rem 1rem;
+    border-bottom: 1px solid var(--gws-panel-border);
+}
+
+.gws-record-inspector-body { flex: 1; overflow-y: auto; padding: 1rem; }
+
+@media (pointer: coarse) {
+    .gws-record-inspector-tools .btn { min-width: 44px; min-height: 44px; }
+}
+
+/* On a phone it covers the page between the top bar and the bottom bar. */
+@media (max-width: 767.98px) {
+    .gws-record-inspector { bottom: var(--gws-bottom-bar-height, 0px); width: 100vw; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .gws-record-inspector { animation: none; }
+}

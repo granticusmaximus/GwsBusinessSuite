@@ -27,6 +27,8 @@
     </Actions>
 </PageHeader>
 
+<ContactInspector ContactId="_inspectedContactId" OnClose="() => _inspectedContactId = null" />
+
 <ul class="nav nav-pills mb-4">
     <li class="nav-item">
         <button type="button" class="nav-link @(ActiveTab == "Contacts" ? "active" : string.Empty)" @onclick='() => SwitchTabAsync("Contacts")'>
@@ -66,7 +68,7 @@
                 @foreach (var contact in DueFollowUps)
                 {
                     <li>
-                        <a href="/admin/crm/contacts/@contact.Id">@contact.FullName</a>
+                        <button type="button" class="btn btn-link p-0 align-baseline" @onclick="() => _inspectedContactId = contact.Id">@contact.FullName</button>
                         &mdash; due @contact.FollowUpDate?.ToLocalTime().ToString("dd-MM-yy")
                     </li>
                 }
@@ -175,8 +177,9 @@ else
                         <div class="list-group list-group-flush">
                             @foreach (var contact in VisibleContacts)
                             {
-                                <a href="/admin/crm/contacts/@contact.Id"
-                                   class="list-group-item list-group-item-action d-flex justify-content-between align-items-start gap-2">
+                                <button type="button" aria-pressed="@(contact.Id == _inspectedContactId ? "true" : "false")"
+                                        class="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-start gap-2 @(contact.Id == _inspectedContactId ? "active" : string.Empty)"
+                                        @onclick="() => _inspectedContactId = contact.Id">
                                     <div>
                                         <div class="fw-semibold">@contact.FullName</div>
                                         <div class="small text-secondary">
@@ -186,7 +189,7 @@ else
                                     <span class="badge text-bg-secondary">
                                         @contact.Status
                                     </span>
-                                </a>
+                                </button>
                             }
                         </div>
                     }
@@ -336,6 +339,8 @@ else
     private string QuickCreateName { get; set; } = string.Empty;
     private string QuickCreateEmail { get; set; } = string.Empty;
     private bool IsBusy { get; set; }
+    // The contact open in the inspector (shell redesign R3), beside the list.
+    private Guid? _inspectedContactId;
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
     private string SearchText { get; set; } = string.Empty;

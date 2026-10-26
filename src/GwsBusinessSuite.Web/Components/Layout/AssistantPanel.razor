@@ -3,6 +3,7 @@
 @using GwsBusinessSuite.Application.Assistant
 @using GwsBusinessSuite.Web.Services
 @inject AssistantContext Assistant
+@inject RightPanelState RightPanels
 @inject SentinelGptGenerationCoordinator Coordinator
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
@@ -127,7 +128,24 @@
     {
         Assistant.Changed += OnContextChanged;
         Navigation.LocationChanged += OnLocationChanged;
+        RightPanels.InspectorOpened += OnInspectorOpened;
     }
+
+    // A record inspector opened: make way for it unless the screen has room for both.
+    private void OnInspectorOpened() => _ = InvokeAsync(async () =>
+    {
+        if (!_open) return;
+        try
+        {
+            if (await JS.InvokeAsync<bool>("gwsAssistant.wide")) return;
+        }
+        catch (JSException)
+        {
+            // Without the check, make way.
+        }
+        _open = false;
+        StateHasChanged();
+    });
 
     private string ContextLabel => Assistant.Current?.Page is { } page
         ? page.RecordTitle is { } title ? $"{page.PageName} · {page.RecordKind}: {title}" : page.PageName
@@ -136,7 +154,9 @@
     private async Task ToggleAsync()
     {
         _open = !_open;
-        if (_open) await RefreshSelectionAsync();
+        if (!_open) return;
+        RightPanels.NotifyAssistantOpened();
+        await RefreshSelectionAsync();
     }
 
     private void Close() => _open = false;
@@ -356,6 +376,7 @@
     {
         Assistant.Changed -= OnContextChanged;
         Navigation.LocationChanged -= OnLocationChanged;
+        RightPanels.InspectorOpened -= OnInspectorOpened;
         _stop?.Cancel();
         if (_local is not null) await _local.DisposeAsync();
     }

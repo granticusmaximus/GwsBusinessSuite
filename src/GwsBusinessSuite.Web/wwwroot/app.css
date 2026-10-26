@@ -20,6 +20,7 @@
     --gws-accent-contrast: #1c1917;
     --gws-admin-bar-height: 52px;
     --gws-assistant-width: 400px;
+    --gws-inspector-width: 440px;
     --gws-sidebar-bg: #1c1917;
     --gws-sidebar-hover-bg: #2a2522;
     --gws-sidebar-text: #d6d3d1;
@@ -404,6 +405,15 @@ h1:focus { outline: none; }
    for it instead of sitting underneath. Narrower screens let it lie over the content. */
 @media (min-width: 1440px) {
     .gws-layout:has(.gws-assistant) .gws-body { margin-right: var(--gws-assistant-width); }
+    /* A record inspector (RecordInspector) makes room for itself the same way. */
+    .gws-layout:has(.gws-record-inspector) .gws-body { margin-right: var(--gws-inspector-width); }
+}
+
+/* Only from 1920px do the two fit side by side (RightPanelState): the inspector sits to the
+   panel's left, and the page makes room for both. */
+@media (min-width: 1920px) {
+    .gws-layout:has(.gws-assistant):has(.gws-record-inspector) .gws-body { margin-right: calc(var(--gws-assistant-width) + var(--gws-inspector-width)); }
+    .gws-layout:has(.gws-assistant) .gws-record-inspector { right: var(--gws-assistant-width); }
 }
 
 .gws-content {
@@ -508,6 +518,20 @@ h1:focus { outline: none; }
 .gws-rail-item.is-active i,
 .gws-rail-item.active i { color: var(--gws-sidebar-accent); }
 .gws-rail-item:focus-visible { outline: 2px solid var(--gws-sidebar-accent); outline-offset: -2px; }
+/* Inside a record inspector (RecordInspector): facts as label/value rows, then short sections. */
+.gws-inspector-facts { display: grid; grid-template-columns: max-content 1fr; gap: .35rem 1rem; margin: 0 0 1rem; font-size: .9rem; }
+.gws-inspector-facts dt { color: var(--gws-text-soft); font-weight: 500; }
+.gws-inspector-facts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.gws-inspector-section { margin-top: 1.25rem; }
+.gws-inspector-section h3 { margin: 0 0 .5rem; color: var(--gws-text-soft); font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.gws-inspector-list { margin: 0; padding: 0; list-style: none; }
+.gws-inspector-list li { padding: .45rem 0; border-bottom: 1px solid var(--gws-panel-border); font-size: .9rem; }
+.gws-inspector-list li:last-child { border-bottom: 0; }
+.gws-inspector-list small { display: block; color: var(--gws-text-soft); }
+/* The list row whose record is open in the inspector. */
+.gws-row-selected { background: var(--gws-panel-bg-2); box-shadow: inset 3px 0 0 var(--gws-sidebar-accent); }
+.gws-preserve-lines { white-space: pre-wrap; }
+
 /* The rail's shortcuts (RailShortcuts): pinned pages and the Recent list, at the bottom with
    Settings. The list is fixed-positioned so the scrolling rail doesn't clip it. */
 .gws-rail-bottom { margin-top: auto; display: flex; flex-direction: column; gap: .2rem; }

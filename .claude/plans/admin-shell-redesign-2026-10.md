@@ -205,6 +205,17 @@ of the earlier conventions:
 - The SentinelGPT panel gets the inspector's record as its context automatically (the
   `AssistantContext` already works this way).
 
+**R3a built 26-10-26 (not yet checked in a browser):** `RecordInspector` (fixed right panel, same
+edge as SentinelGPT; Escape/close; focus on open; sets AssistantContext from `AssistantPage`),
+`RightPanelState` (opening one closes the other unless `gwsAssistant.wide()` - 1920px+, not 1440:
+at 1440 both leave ~350px of page), app.css makes room at 1440+ and side by side at 1920+.
+Adopters: CRM contacts (`ContactInspector`: status, email, follow-up, open deals/tickets, unpaid
+invoices, latest activity, SentinelGPT context) and Billing (title opens the invoice with facts,
+notes, line items and the row's actions; replaces expand-in-place; `?invoice=` opens it).
+Support kept its two-column view for now.
+**Still to do:** browser check (CRM inspector, Billing inspector, SentinelGPT coexistence at
+1440 and 1920, phone), then R3b (saved views, column chooser, sticky headers).
+
 ## R4. Visual system
 
 - Audit tokens: a 4px spacing scale, flat surfaces with 1px borders, shadows only on floating

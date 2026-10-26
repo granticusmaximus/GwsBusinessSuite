@@ -1,0 +1,164 @@
+@using GwsBusinessSuite.Application.Assistant
+@using GwsBusinessSuite.Application.Billing
+@using GwsBusinessSuite.Application.Crm
+@using GwsBusinessSuite.Application.Support
+@using GwsBusinessSuite.Domain.Entities
+@inject ICrmService CrmService
+@inject ISupportTicketService SupportTicketService
+@inject IBillingService BillingService
+@inject IContactTimelineService ContactTimelineService
+@inject ILogger<ContactInspector> Logger
+
+@* A contact opened from the CRM list (shell redesign R3): the essentials, what's open with them
+   (deals, tickets, unpaid invoices) and their latest activity; the full page is a click away. *@
+<RecordInspector Open="ContactId is not null" Title="@(_contact?.FullName ?? "Contact")" Subtitle="@_contact?.Company" Icon="bi-person-vcard"
+                 FullPageHref="@(ContactId is { } id ? $"/admin/crm/contacts/{id}" : null)" AssistantPage="_assistantPage" OnClose="OnClose">
+    @if (_loading)
+    {
+        <LoadingIndicator Message="Loading contact…" />
+    }
+    else if (_contact is not { } contact)
+    {
+        <EmptyState Icon="bi-person-x" Message="This contact couldn't be found. It may have been deleted." />
+    }
+    else
+    {
+        <dl class="gws-inspector-facts">
+            <dt>Status</dt><dd>@contact.Status</dd>
+            @if (!string.IsNullOrWhiteSpace(contact.Email))
+            {
+                <dt>Email</dt><dd><a href="mailto:@contact.Email">@contact.Email</a></dd>
+            }
+            @if (contact.FollowUpDate is { } followUp)
+            {
+                <dt>Follow up</dt><dd>@followUp.ToLocalTime().ToString("dd-MM-yy")@(followUp < DateTimeOffset.UtcNow ? " (due)" : "")</dd>
+            }
+            <dt>Added</dt><dd>@contact.CreatedAt.ToLocalTime().ToString("dd-MM-yy")</dd>
+        </dl>
+
+        <section class="gws-inspector-section" aria-label="Open deals">
+            <h3>Open deals</h3>
+            @if (_deals.Count == 0)
+            {
+                <p class="small text-secondary mb-0">None open.</p>
+            }
+            else
+            {
+                <ul class="gws-inspector-list">
+                    @foreach (var deal in _deals)
+                    {
+                        <li>@deal.Title <small>@deal.Stage · @deal.ValueUsd.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"))@(deal.ExpectedCloseDate is { } close ? $" · closes {close.ToLocalTime():dd-MM-yy}" : "")</small></li>
+                    }
+                </ul>
+            }
+        </section>
+
+        <section class="gws-inspector-section" aria-label="Open tickets">
+            <h3>Open tickets</h3>
+            @if (_tickets.Count == 0)
+            {
+                <p class="small text-secondary mb-0">None open.</p>
+            }
+            else
+            {
+                <ul class="gws-inspector-list">
+                    @foreach (var ticket in _tickets)
+                    {
+                        <li><a href="/admin/support?ticket=@ticket.Id">@ticket.Subject</a> <small>@ticket.Status · @ticket.Priority</small></li>
+                    }
+                </ul>
+            }
+        </section>
+
+        <section class="gws-inspector-section" aria-label="Unpaid invoices">
+            <h3>Unpaid invoices</h3>
+            @if (_invoices.Count == 0)
+            {
+                <p class="small text-secondary mb-0">Nothing owed.</p>
+            }
+            else
+            {
+                <ul class="gws-inspector-list">
+                    @foreach (var invoice in _invoices)
+                    {
+                        <li><a href="/admin/billing?invoice=@invoice.Id">@invoice.Title</a> <small>@invoice.TotalText@(invoice.DueDate is { } due ? $" · due {due.ToLocalTime():dd-MM-yy}" : "")</small></li>
+                    }
+                </ul>
+            }
+        </section>
+
+        <section class="gws-inspector-section" aria-label="Latest activity">
+            <h3>Latest activity</h3>
+            @if (_history.Count == 0)
+            {
+                <p class="small text-secondary mb-0">Nothing recorded yet.</p>
+            }
+            else
+            {
+                <ul class="gws-inspector-list">
+                    @foreach (var entry in _history.Take(8))
+                    {
+                        <li>
+                            @if (!string.IsNullOrEmpty(entry.Link))
+                            {
+                                <a href="@entry.Link">@entry.Title</a>
+                            }
+                            else
+                            {
+                                @entry.Title
+                            }
+                            <small>@entry.At.ToLocalTime().ToString("dd-MM-yy HH:mm") · @entry.Kind@(string.IsNullOrWhiteSpace(entry.Detail) ? "" : $" · {entry.Detail}")</small>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    }
+</RecordInspector>
+
+@code {
+    // Null closes it.
+    [Parameter] public Guid? ContactId { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private Guid? _loadedId;
+    private bool _loading;
+    private Contact? _contact;
+    private IReadOnlyList<DealView> _deals = [];
+    private IReadOnlyList<SupportTicketView> _tickets = [];
+    private IReadOnlyList<InvoiceView> _invoices = [];
+    private IReadOnlyList<ContactTimelineEntry> _history = [];
+    private AssistantPageContext? _assistantPage;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ContactId == _loadedId) return;
+        _loadedId = ContactId;
+        (_contact, _deals, _tickets, _invoices, _history, _assistantPage) = (null, [], [], [], [], null);
+        if (ContactId is not { } id) return;
+        _loading = true;
+        try
+        {
+            // One at a time: these share the circuit's database context.
+            var contact = await CrmService.GetContactAsync(id);
+            if (contact is null || contact.TrashedAt is not null) return;
+            var deals = (await CrmService.ListDealsForContactAsync(id)).Where(d => d.Stage is not (DealStages.Won or DealStages.Lost)).ToList();
+            var tickets = (await SupportTicketService.ListTicketsForContactAsync(id))
+                .Where(t => t.Status is not (SupportTicketStatuses.Resolved or SupportTicketStatuses.Closed)).ToList();
+            var invoices = (await BillingService.ListInvoicesForContactAsync(id)).Where(i => i.Status == InvoiceStatuses.Sent).ToList();
+            var history = await ContactTimelineService.GetTimelineAsync(id);
+            // Another contact was opened meanwhile: that one's load wins.
+            if (ContactId != id) return;
+            (_contact, _deals, _tickets, _invoices, _history) = (contact, deals, tickets, invoices, history);
+            _assistantPage = AssistantDescriptions.Contact(contact, history);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Contact inspector couldn't load {ContactId}", id);
+        }
+        finally
+        {
+            if (ContactId == id) _loading = false;
+        }
+    }
+}

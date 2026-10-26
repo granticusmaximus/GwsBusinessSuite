@@ -643,7 +643,9 @@
 		},
 		scrollToEnd: function (element) {
 			if (element instanceof HTMLElement) element.scrollTop = element.scrollHeight;
-		}
+		},
+		// Room for SentinelGPT and a record inspector side by side (RightPanelState).
+		wide: function () { return window.matchMedia('(min-width: 1920px)').matches; }
 	};
 
 	window.gwsScroll = {

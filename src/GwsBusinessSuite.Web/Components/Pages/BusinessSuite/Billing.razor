@@ -19,6 +19,111 @@
     </Actions>
 </PageHeader>
 
+<RecordInspector Open="InspectedInvoice is not null" Title="@(InspectedInvoice?.Title ?? "Invoice")" Subtitle="@InspectedInvoice?.ContactName"
+                 Icon="bi-receipt" OnClose="() => _inspectedInvoiceId = null">
+    <Actions>
+        @if (InspectedInvoice is { } actionInvoice)
+        {
+            @if (actionInvoice.Status == InvoiceStatuses.Draft)
+            {
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@IsBusy" @onclick="() => EditFromInspectorAsync(actionInvoice)">
+                    <i class="bi bi-pencil me-1" aria-hidden="true"></i>Edit
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-primary" title="@(BillingService.IsStripeConfigured ? "Send via Stripe" : "Stripe is not configured")"
+                        disabled="@(IsBusy || !BillingService.IsStripeConfigured)" @onclick="() => SendInvoiceAsync(actionInvoice.Id)">
+                    <i class="bi bi-send me-1" aria-hidden="true"></i>Send
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@IsBusy" @onclick="() => DeleteDraftAsync(actionInvoice.Id)">
+                    <i class="bi bi-trash3 me-1" aria-hidden="true"></i>Delete
+                </button>
+            }
+            else
+            {
+                @if (!string.IsNullOrWhiteSpace(actionInvoice.StripeHostedInvoiceUrl))
+                {
+                    <a class="btn btn-sm btn-outline-secondary" href="@actionInvoice.StripeHostedInvoiceUrl" target="_blank" rel="noopener" title="Open the Stripe invoice page">
+                        <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>Stripe
+                    </a>
+                }
+                @if (actionInvoice.Status == InvoiceStatuses.Sent)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-primary" disabled="@(IsBusy || !BillingService.IsStripeConfigured)"
+                            title="Email the invoice to the client again" @onclick="() => SendReminderAsync(actionInvoice.Id)">
+                        <i class="bi bi-bell me-1" aria-hidden="true"></i>Remind
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger" disabled="@IsBusy" @onclick="() => VoidInvoiceAsync(actionInvoice.Id)">Void</button>
+                }
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@IsBusy" title="Copy into a new draft" @onclick="() => DuplicateAsync(actionInvoice.Id)">
+                    <i class="bi bi-copy me-1" aria-hidden="true"></i>Duplicate
+                </button>
+            }
+        }
+    </Actions>
+    <ChildContent>
+        @if (InspectedInvoice is { } shown)
+        {
+            <dl class="gws-inspector-facts">
+                <dt>Status</dt>
+                <dd>
+                    <span class="badge @StatusBadgeClass(shown.Status)">@shown.Status</span>
+                    @if (shown.IsOverdue(DateTimeOffset.UtcNow))
+                    {
+                        <span class="badge text-bg-warning ms-1">Overdue</span>
+                    }
+                </dd>
+                <dt>Client</dt><dd><a href="/admin/crm/contacts/@shown.ContactId">@shown.ContactName</a></dd>
+                <dt>Total</dt><dd>@shown.TotalText</dd>
+                @if (shown.DueDate is { } due)
+                {
+                    <dt>Due</dt><dd>@due.ToLocalTime().ToString("dd-MM-yy")</dd>
+                }
+                @if (shown.SentAt is { } sent)
+                {
+                    <dt>Sent</dt><dd>@sent.ToLocalTime().ToString("dd-MM-yy HH:mm")</dd>
+                }
+                @if (shown.PaidAt is { } paid)
+                {
+                    <dt>Paid</dt><dd>@paid.ToLocalTime().ToString("dd-MM-yy")</dd>
+                }
+                @if (shown.RemindersSent > 0)
+                {
+                    <dt>Reminders</dt><dd>@shown.RemindersSent, last @shown.LastReminderAt?.ToLocalTime().ToString("dd-MM-yy")</dd>
+                }
+                @if (shown.AutoRemind && shown.Status == InvoiceStatuses.Sent)
+                {
+                    <dt>Auto-remind</dt><dd>On</dd>
+                }
+                <dt>Created</dt><dd>@shown.CreatedAt.ToLocalTime().ToString("dd-MM-yy")</dd>
+            </dl>
+            @if (!string.IsNullOrWhiteSpace(shown.Notes))
+            {
+                <section class="gws-inspector-section" aria-label="Notes">
+                    <h3>Notes</h3>
+                    <p class="small mb-0 gws-preserve-lines">@shown.Notes</p>
+                </section>
+            }
+            <section class="gws-inspector-section" aria-label="Line items">
+                <h3>Line items</h3>
+                <table class="table table-sm small mb-0">
+                    <thead><tr><th>Item</th><th class="text-end">Qty</th><th class="text-end">Unit</th><th class="text-end">Total</th></tr></thead>
+                    <tbody>
+                        @foreach (var line in shown.LineItems)
+                        {
+                            <tr>
+                                <td>@line.Description</td>
+                                <td class="text-end">@line.Quantity</td>
+                                <td class="text-end text-nowrap">@InvoiceCurrencies.Format(line.UnitPriceUsd, shown.Currency)</td>
+                                <td class="text-end text-nowrap">@InvoiceCurrencies.Format(line.TotalUsd, shown.Currency)</td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot><tr><th colspan="3" class="text-end">Total</th><th class="text-end text-nowrap">@shown.TotalText</th></tr></tfoot>
+                </table>
+            </section>
+        }
+    </ChildContent>
+</RecordInspector>
+
 @if (!BillingService.IsStripeConfigured)
 {
     <div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="alert">
@@ -185,11 +290,12 @@ else
                     <div class="list-group list-group-flush">
                         @foreach (var invoice in Invoices)
                         {
-                            <div class="list-group-item" id="invoice-@invoice.Id">
+                            <div class="list-group-item @(invoice.Id == _inspectedInvoiceId ? "gws-row-selected" : string.Empty)" id="invoice-@invoice.Id">
                                 <div class="d-flex justify-content-between align-items-start gap-2">
                                     <div>
                                         <div class="fw-semibold">
-                                            @invoice.Title
+                                            <button type="button" class="btn btn-link p-0 fw-semibold text-start align-baseline" title="Open this invoice beside the list"
+                                                    aria-pressed="@(invoice.Id == _inspectedInvoiceId ? "true" : "false")" @onclick="() => _inspectedInvoiceId = invoice.Id">@invoice.Title</button>
                                             <span class="badge @StatusBadgeClass(invoice.Status) ms-1">@invoice.Status</span>
                                             @if (invoice.IsOverdue(DateTimeOffset.UtcNow))
                                             {
@@ -235,11 +341,6 @@ else
                                         }
                                         else
                                         {
-                                            <button type="button" class="btn btn-sm btn-outline-secondary" title="Show line items"
-                                                    aria-expanded="@(_expandedInvoiceId == invoice.Id ? "true" : "false")"
-                                                    @onclick="() => _expandedInvoiceId = _expandedInvoiceId == invoice.Id ? null : invoice.Id">
-                                                <i class="bi bi-list-ul"></i>
-                                            </button>
                                             @if (!string.IsNullOrWhiteSpace(invoice.StripeHostedInvoiceUrl))
                                             {
                                                 <a class="btn btn-sm btn-outline-secondary" href="@invoice.StripeHostedInvoiceUrl" target="_blank" rel="noopener" title="Open the Stripe invoice page">
@@ -263,28 +364,6 @@ else
                                         }
                                     </div>
                                 </div>
-                                @if (_expandedInvoiceId == invoice.Id)
-                                {
-                                    <table class="table table-sm small mt-2 mb-0">
-                                        <thead><tr><th>Item</th><th class="text-end">Qty</th><th class="text-end">Unit</th><th class="text-end">Total</th></tr></thead>
-                                        <tbody>
-                                            @foreach (var line in invoice.LineItems)
-                                            {
-                                                <tr>
-                                                    <td>@line.Description</td>
-                                                    <td class="text-end">@line.Quantity</td>
-                                                    <td class="text-end text-nowrap">@InvoiceCurrencies.Format(line.UnitPriceUsd, invoice.Currency)</td>
-                                                    <td class="text-end text-nowrap">@InvoiceCurrencies.Format(line.TotalUsd, invoice.Currency)</td>
-                                                </tr>
-                                            }
-                                        </tbody>
-                                        <tfoot><tr><th colspan="3" class="text-end">Total</th><th class="text-end text-nowrap">@invoice.TotalText</th></tr></tfoot>
-                                    </table>
-                                    @if (invoice.SentAt is { } sentAt)
-                                    {
-                                        <div class="small text-secondary mt-1">Sent @sentAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
-                                    }
-                                }
                             </div>
                         }
                     </div>
@@ -337,7 +416,7 @@ else
         }
     }
 
-    // ?invoice={id} (from a contact's history) opens that invoice's line items and scrolls to it.
+    // ?invoice={id} (from a contact's history or inspector) opens that invoice beside the list and scrolls to it.
     [SupplyParameterFromQuery(Name = "invoice")] public Guid? InvoiceQuery { get; set; }
     private Guid? _openedInvoiceQuery;
     private bool _scrollToInvoice;
@@ -351,13 +430,13 @@ else
             ErrorMessage = "That invoice wasn't found. It may have been deleted.";
             return;
         }
-        _expandedInvoiceId = invoiceId;
+        _inspectedInvoiceId = invoiceId;
         _scrollToInvoice = true;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!_scrollToInvoice || _expandedInvoiceId is not { } invoiceId) return;
+        if (!_scrollToInvoice || _inspectedInvoiceId is not { } invoiceId) return;
         _scrollToInvoice = false;
         await JS.InvokeVoidAsync("gwsScroll.toId", $"invoice-{invoiceId}");
     }
@@ -476,7 +555,16 @@ else
         }
     }
 
-    private Guid? _expandedInvoiceId;
+    // The invoice open in the inspector (shell redesign R3); follows the list as it refreshes.
+    private Guid? _inspectedInvoiceId;
+    private InvoiceView? InspectedInvoice => _inspectedInvoiceId is { } id ? Invoices.FirstOrDefault(i => i.Id == id) : null;
+
+    // A draft opened for editing goes to the editor form, so the inspector makes way.
+    private async Task EditFromInspectorAsync(InvoiceView invoice)
+    {
+        _inspectedInvoiceId = null;
+        await LoadIntoEditorAsync(invoice);
+    }
 
     private async Task DuplicateAsync(Guid invoiceId)
     {
