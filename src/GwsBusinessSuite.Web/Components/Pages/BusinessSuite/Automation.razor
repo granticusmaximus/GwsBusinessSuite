@@ -131,7 +131,7 @@ else
                         <p class="text-secondary small workflow-description">@(string.IsNullOrWhiteSpace(workflow.Description) ? "No description" : workflow.Description)</p>
                         <div class="d-flex flex-wrap gap-3 small text-secondary">
                             <span><i class="bi bi-box me-1"></i>@workflow.NodeCount nodes</span>
-                            <span><i class="bi bi-layers me-1"></i>v@workflow.CurrentVersion</span>
+                            <span><i class="bi bi-layers me-1"></i>v@(workflow.CurrentVersion)</span>
                             <span><i class="bi bi-clock me-1"></i>@FormatLastRun(workflow.LastExecutedAt)</span>
                         </div>
                         @if (WorkflowTags(workflow).Count > 0)

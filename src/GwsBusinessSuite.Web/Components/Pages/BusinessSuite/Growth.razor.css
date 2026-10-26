@@ -6,6 +6,18 @@
     --growth-line: rgba(255,255,255,.09);
     --growth-accent: #f59e0b;
     --growth-canvas: #100f0d;
+    /* Always dark, so the app-wide theme tokens are pinned to their dark values here too: in the
+       light theme, headings and outline buttons (and child components such as the report
+       scheduler) otherwise read the light theme's dark text and vanish on this background. */
+    --gws-text-strong: #fafaf9;
+    --gws-text-soft: #a8a29e;
+    --gws-panel-bg: #1c1917;
+    --gws-panel-bg-2: #231f1d;
+    --gws-panel-border: #292524;
+    --bs-heading-color: #fafaf9;
+    --bs-body-color: #fafaf9;
+    --bs-secondary-color: #a8a29e;
+    --bs-border-color: #292524;
     color: var(--growth-ink);
     margin: -1.5rem;
     min-height: calc(100vh - 3.5rem);

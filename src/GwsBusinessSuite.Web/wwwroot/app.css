@@ -24,6 +24,7 @@
     --gws-sidebar-hover-bg: #2a2522;
     --gws-sidebar-text: #d6d3d1;
     --gws-sidebar-text-soft: #78716c;
+    --gws-sidebar-text-strong: #fff;
     --gws-admin-bar-bg: #141210;
     --gws-body-bg: #141210;
     --gws-panel-bg: #1c1917;
@@ -94,6 +95,7 @@
     --gws-sidebar-hover-bg: #efeeec;
     --gws-sidebar-text: #44403c;
     --gws-sidebar-text-soft: #857f79;
+    --gws-sidebar-text-strong: #1c1917;
     --gws-admin-bar-bg: #ffffff;
     --gws-body-bg: #ffffff;
     --gws-panel-bg: #ffffff;
@@ -582,16 +584,16 @@ h1:focus { outline: none; }
 
 .gws-nav-link:hover {
     background: var(--gws-sidebar-hover-bg);
-    color: #fff;
+    color: var(--gws-sidebar-text-strong);
 }
 
 .gws-nav-link:hover i {
-    color: #fff;
+    color: var(--gws-sidebar-text-strong);
 }
 
 .gws-nav-link.active {
     background: var(--gws-sidebar-hover-bg);
-    color: #fff;
+    color: var(--gws-sidebar-text-strong);
     box-shadow: inset 3px 0 0 var(--gws-sidebar-accent);
 }
 

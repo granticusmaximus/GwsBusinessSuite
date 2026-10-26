@@ -138,13 +138,42 @@ conventions:
   More toggle, the new-page dialog, and a new article's record page and breadcrumb back.
   Content Studio can't be opened locally (device-secret policy), so its header-only change
   wasn't seen.
-- Seen, not fixed: `ProfessionalWysiwygEditor.DisposeAsync` throws TaskCanceledException
-  when its circuit goes away (logged as an unhandled circuit exception on teardown).
+- Seen 21-10-26, fixed 25-10-26: `ProfessionalWysiwygEditor.DisposeAsync` threw
+  TaskCanceledException when its circuit went away; it now ignores that as well as a disconnect.
 
-**Remaining batches** (hand-built `.page-header` count, 21-10-26): Home 5 Community pages +
-Dashboard and Settings, Platform 7, Intelligence 4, Growth 4, Knowledge 1 (Mind Maps). The
-public booking page and client-portal login also use `.page-header` but aren't admin pages,
-so they stay as they are.
+**Batch 3 done 25-10-26: the last 23 pages, so R2 is complete.** Home (dashboard), Settings, the
+5 Community pages, Workflow Automation + Credentials + Help, Docker Management + container
+detail, Security audit, Privacy operations, Civic Watch, Media Watch, Threat Intelligence,
+Business Intelligence, Growth Studio, Affiliate Analytics, Affiliate Suggestions, CJ Ads and
+Mind Maps. Only the public booking page and the client-portal login keep `.page-header`. On top
+of the earlier conventions:
+- `PageHeader` has a `CssClass`; the four pages with the serif "rich" title (Civic Watch, Media
+  Watch, Threat Intelligence, Growth) pass `page-header-rich`. The eyebrow went (the breadcrumb
+  names the workspace); each page colours the breadcrumb, title and description from its own
+  palette with `.<page-shell> ::deep .gws-page-header ...` rules, since scoped CSS doesn't reach
+  into the child component. The `masthead-actions` rules went (PageHeader stacks its own actions).
+- Growth Studio's title is now "Growth Studio" (the nav name); its old tagline is the
+  description, the live-visitors pill is `Meta`, the Analytics/Social publisher switch is
+  `Filters`. Threat Intelligence's Live intel/My exposure switch is `Filters` too.
+- On-demand create forms (Departments, Messages): the header button opens the form and focuses
+  its first field from `OnAfterRenderAsync` (CRM's pattern), and the form gained a Cancel button
+  in place of the card's toggle.
+- Secondary actions in `More`: Automation (New from template, Import, Credentials, Help),
+  Credentials (Connect Slack/Google), Civic Watch (Settings toggle), Media Watch (Refresh All
+  News only). Home keeps its three quick actions side by side.
+- **Fixed along the way:** Threat Intelligence's stylesheet used `:global(...)`, which Blazor's
+  scoped CSS doesn't support, so its card theming never applied (now `::deep`, which also reaches
+  the My exposure panel). In the light theme, the active/hovered sub-nav link was white on
+  near-white (now `--gws-sidebar-text-strong`), and Growth's always-dark shell showed dark
+  headings and outline buttons (the shell now pins the theme tokens to their dark values).
+  Automation's workflow cards printed `v@workflow.CurrentVersion` literally (Razor read it as an
+  email address).
+- Checked: the responsive audit (phone-390, tablet-768, laptop-1280, desktop-1920) on a
+  throwaway instance over all 23 routes. No overflow, small targets or console errors; two
+  phone "covered" flags (Settings, profile) are the known mid-page-field-under-the-bottom-bar
+  pattern. Light-theme screenshots of the four rich pages, Home and Automation; Playwright
+  clicked New department / New conversation (focus lands in the form, Cancel closes it) and
+  every new ⋯ menu.
 
 ## R3. List and inspector
 
