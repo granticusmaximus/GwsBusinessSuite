@@ -296,9 +296,20 @@ if [[ "$install_playwright_deps" == true ]]; then
   # interactive prompt, not anything this app's own code can control. Bounding it turns a
   # multi-hour silent hang (blocking every subsequent deploy until someone notices and manually
   # cancels the run) into a fast, clear, retryable failure instead.
-  run_check "Playwright browser install" \
-    timeout 480 pwsh tests/GwsBusinessSuite.Tests/bin/Release/net10.0/playwright.ps1 \
-      install --with-deps chromium
+  # A stalled mirror has also failed the gate outright (2026-10-26, the apt step cut off by the
+  # timeout mid-download on the same runner image that had just passed), so it gets one more try
+  # before it fails.
+  install_playwright() {
+    local attempt
+    for attempt in 1 2; do
+      if timeout 300 pwsh tests/GwsBusinessSuite.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium; then
+        return 0
+      fi
+      echo "Playwright browser install attempt $attempt failed or timed out."
+    done
+    return 1
+  }
+  run_check "Playwright browser install" install_playwright
 fi
 
 if [[ "$skip_tests" == true ]]; then

@@ -73,7 +73,16 @@ roles see only Home and the Publish items they can use today, the same rules as 
   interactions pick whichever trigger is visible.
 - Not checked: the Mac app's WKWebView (same pages, so expected to match; check under R7).
 
-## R1b. Pins and recents on the rail (not started)
+## R1b. Pins and recents on the rail (in progress 26-10-26)
+
+Design (26-10-26): the layout is static SSR, so the rail's shortcuts are an interactive island
+(`RailShortcuts`, like AssistantPanel/NotificationBell) on the same circuit as the page; a scoped
+`ShortcutsState` carries "changed" from the page's PageHeader to the island, so pinning shows at
+once. Table `UserShortcuts` (Username, Kind pin|recent, Url, Title, Icon, LastUsedUnix - a long,
+since SQLite can't order DateTimeOffset). Pins: a pin button in every PageHeader (interactive
+pages only), up to 4 shown as rail items. Recents: PageHeader `Record="true"` pages (article,
+form submission, contact, page editor, draft, alert campaign, container, staff profile) record a
+visit; the rail's "Recent" button opens a list of the last 8 plus the pins (with Unpin).
 
 Split out of R1: pinned pages and recent records at the bottom of the rail, stored per user.
 Needs a per-user table (pins, recents) plus a migration; recents can come from pages that already

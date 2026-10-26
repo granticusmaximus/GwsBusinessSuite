@@ -16,7 +16,7 @@
 
 <PageTitle>@(Campaign?.Name ?? "Article alerts")</PageTitle>
 
-<PageHeader Title="@(Campaign?.Name ?? "Article alerts")" Icon="bi-bell-fill" Description="@HeaderDescription"
+<PageHeader Record="true" Title="@(Campaign?.Name ?? "Article alerts")" Icon="bi-bell-fill" Description="@HeaderDescription"
             ParentLabel="Email Campaigns" ParentHref="/admin/email-campaigns">
     <Meta>
         @if (Campaign is not null)

@@ -508,7 +508,56 @@ h1:focus { outline: none; }
 .gws-rail-item.is-active i,
 .gws-rail-item.active i { color: var(--gws-sidebar-accent); }
 .gws-rail-item:focus-visible { outline: 2px solid var(--gws-sidebar-accent); outline-offset: -2px; }
-.gws-rail-end { margin-top: auto; }
+/* The rail's shortcuts (RailShortcuts): pinned pages and the Recent list, at the bottom with
+   Settings. The list is fixed-positioned so the scrolling rail doesn't clip it. */
+.gws-rail-bottom { margin-top: auto; display: flex; flex-direction: column; gap: .2rem; }
+.gws-rail-backdrop { position: fixed; inset: 0; z-index: 1040; border: 0; padding: 0; background: transparent; cursor: default; }
+.gws-rail-flyout {
+    position: fixed;
+    left: calc(var(--gws-rail-width) + .5rem);
+    bottom: 1rem;
+    z-index: 1041;
+    width: min(20rem, calc(100vw - var(--gws-rail-width) - 1.5rem));
+    max-height: min(32rem, calc(100vh - var(--gws-admin-bar-height) - 2rem));
+    overflow-y: auto;
+    padding: .5rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: 12px;
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .28);
+}
+.gws-rail-flyout-title { margin: .45rem .5rem .2rem; color: var(--gws-text-soft); font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.gws-rail-flyout ul { margin: 0; padding: 0; list-style: none; }
+.gws-rail-flyout li { display: flex; align-items: center; gap: .2rem; }
+.gws-rail-flyout li a {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: .55rem;
+    min-width: 0;
+    min-height: 40px;
+    padding: .35rem .5rem;
+    border-radius: 8px;
+    color: inherit;
+    font-size: .875rem;
+    text-decoration: none;
+}
+.gws-rail-flyout li a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gws-rail-flyout li a:hover,
+.gws-rail-flyout li a:focus-visible { background: var(--gws-sidebar-hover-bg); }
+.gws-rail-flyout-remove { flex-shrink: 0; width: 36px; height: 36px; border: 0; border-radius: 8px; background: transparent; color: var(--gws-text-soft); }
+.gws-rail-flyout-remove:hover,
+.gws-rail-flyout-remove:focus-visible { background: var(--gws-sidebar-hover-bg); color: var(--gws-text-strong); }
+.gws-rail-flyout-empty { margin: .2rem .5rem .55rem; color: var(--gws-text-soft); font-size: .8125rem; }
+@media (pointer: coarse) {
+    .gws-rail-flyout li a { min-height: 44px; }
+    .gws-rail-flyout-remove { width: 44px; height: 44px; }
+}
+/* In the phone drawer (which is transformed, so it holds fixed children) the list fills its foot. */
+@media (max-width: 767.98px) {
+    .gws-rail-flyout { left: .5rem; right: .5rem; bottom: .5rem; width: auto; }
+}
 
 .gws-subnav {
     flex: 1;

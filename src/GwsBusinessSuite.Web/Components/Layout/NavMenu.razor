@@ -23,12 +23,15 @@
                 <i class="bi @workspace.Icon" aria-hidden="true"></i><span>@workspace.ShortLabel</span>
             </button>
         }
-        @if (IsAdmin)
-        {
-            <NavLink class="gws-rail-item gws-rail-end" href="admin/settings" title="Settings">
-                <i class="bi bi-gear-fill" aria-hidden="true"></i><span>Settings</span>
-            </NavLink>
-        }
+        <div class="gws-rail-bottom">
+            <RailShortcuts @rendermode="InteractiveServer" />
+            @if (IsAdmin)
+            {
+                <NavLink class="gws-rail-item" href="admin/settings" title="Settings">
+                    <i class="bi bi-gear-fill" aria-hidden="true"></i><span>Settings</span>
+                </NavLink>
+            }
+        </div>
     </div>
 
     <div class="gws-subnav">

@@ -23,7 +23,7 @@
 
 <PageTitle>@(CurrentArticle?.Title ?? "Article Editor")</PageTitle>
 
-<PageHeader Title="@(CurrentArticle?.Title ?? "Article")" Icon="bi-pencil" ParentLabel="Article Editor" ParentHref="/admin/article-editor">
+<PageHeader Record="true" Title="@(CurrentArticle?.Title ?? "Article")" Icon="bi-pencil" ParentLabel="Article Editor" ParentHref="/admin/article-editor">
     <Meta>
         @if (CurrentArticle is not null)
         {

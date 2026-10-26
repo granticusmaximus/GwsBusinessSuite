@@ -1,5 +1,11 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.AdminPortal
 @using GwsBusinessSuite.Web.Services
+@implements IDisposable
 @inject NavigationManager Navigation
+@inject IUserShortcutService Shortcuts
+@inject ShortcutsState ShortcutsState
+@inject ICurrentUserAccessor CurrentUser
 
 @* One page anatomy (shell redesign R2): a breadcrumb (the page's workspace, then its parent for
    a record page), the title and description, the page's main action with any others in a ⋯
@@ -29,7 +35,7 @@
             }
             @Meta
         </div>
-        @if (Actions is not null || More is not null)
+        @if (Actions is not null || More is not null || CanPin)
         {
             <div class="gws-page-header-actions">
                 @Actions
@@ -43,9 +49,21 @@
                         <div class="dropdown-menu dropdown-menu-end">@More</div>
                     </div>
                 }
+                @if (CanPin)
+                {
+                    <button type="button" class="btn btn-outline-secondary gws-page-header-pin @(_pinned ? "is-pinned" : string.Empty)"
+                            aria-pressed="@(_pinned ? "true" : "false")" title="@(_pinned ? "Unpin from the rail" : "Pin to the rail")"
+                            aria-label="@(_pinned ? $"Unpin {Title} from the rail" : $"Pin {Title} to the rail")" @onclick="TogglePinAsync">
+                        <i class="bi @(_pinned ? "bi-pin-angle-fill" : "bi-pin-angle")" aria-hidden="true"></i>
+                    </button>
+                }
             </div>
         }
     </div>
+    @if (_pinError is not null)
+    {
+        <p class="small text-danger mb-0 mt-2" role="alert">@_pinError</p>
+    }
     @if (Filters is not null)
     {
         <div class="gws-page-header-filters">@Filters</div>
@@ -78,5 +96,70 @@
     // watch pages and Growth use.
     [Parameter] public string? CssClass { get; set; }
 
+    // A page showing one record (an article, a contact, a container...) adds itself to the
+    // rail's Recent list once its title is known.
+    [Parameter] public bool Record { get; set; }
+
     private NavWorkspace Workspace => NavMenuGroups.WorkspaceFor(Navigation.ToBaseRelativePath(Navigation.Uri));
+
+    // Rail shortcuts (shell redesign R1b): only on an interactive page, for a signed-in person.
+    private string? _username;
+    private bool _pinned;
+    private string? _pinnedFor;
+    private string? _recorded;
+    private string? _pinError;
+
+    private bool CanPin => _username is not null;
+    private string CurrentUrl => Navigation.ToBaseRelativePath(Navigation.Uri);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!RendererInfo.IsInteractive) return;
+        var username = await CurrentUser.GetCurrentUsernameAsync();
+        if (username is "unknown" or "") return;
+        _username = username;
+        ShortcutsState.Changed += OnShortcutsChanged;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_username is null) return;
+        var url = CurrentUrl;
+        if (_pinnedFor != url)
+        {
+            _pinnedFor = url;
+            _pinned = await Shortcuts.IsPinnedAsync(_username, url);
+        }
+        if (!Record || string.IsNullOrWhiteSpace(Title)) return;
+        var visit = $"{url}|{Title}";
+        if (visit == _recorded) return;
+        _recorded = visit;
+        await Shortcuts.RecordVisitAsync(_username, url, Title, Icon ?? string.Empty);
+        ShortcutsState.NotifyChanged();
+    }
+
+    private async Task TogglePinAsync()
+    {
+        if (_username is null) return;
+        _pinError = null;
+        try
+        {
+            _pinned = await Shortcuts.TogglePinAsync(_username, CurrentUrl, Title, Icon ?? string.Empty);
+            ShortcutsState.NotifyChanged();
+        }
+        catch (UserShortcutException ex)
+        {
+            _pinError = ex.Message;
+        }
+    }
+
+    // Unpinned from the rail's list: the button follows.
+    private void OnShortcutsChanged() => _ = InvokeAsync(async () =>
+    {
+        if (_username is null) return;
+        _pinned = await Shortcuts.IsPinnedAsync(_username, CurrentUrl);
+        StateHasChanged();
+    });
+
+    public void Dispose() => ShortcutsState.Changed -= OnShortcutsChanged;
 }

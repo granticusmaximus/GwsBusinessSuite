@@ -11,7 +11,7 @@
 
 <PageTitle>@(Profile?.DisplayName ?? "Profile") · Community</PageTitle>
 
-<PageHeader Title="@(Profile?.DisplayName ?? "Profile")" Icon="bi-person-badge" ParentLabel="Staff Directory" ParentHref="/admin/community" />
+<PageHeader Record="true" Title="@(Profile?.DisplayName ?? "Profile")" Icon="bi-person-badge" ParentLabel="Staff Directory" ParentHref="/admin/community" />
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {

@@ -71,3 +71,7 @@
         flex: 1 1 auto;
     }
 }
+
+/* The pin stays an icon button, even where the actions stretch to fill a narrow header. */
+.gws-page-header-pin { flex: 0 0 auto; }
+.gws-page-header-pin.is-pinned { color: var(--gws-sidebar-accent); border-color: var(--gws-sidebar-accent); }

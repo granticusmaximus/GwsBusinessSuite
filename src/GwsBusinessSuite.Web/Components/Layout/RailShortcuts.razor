@@ -1,0 +1,142 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.AdminPortal
+@using GwsBusinessSuite.Web.Services
+@using Microsoft.AspNetCore.Components.Routing
+@implements IDisposable
+@inject IUserShortcutService Shortcuts
+@inject ShortcutsState State
+@inject ICurrentUserAccessor CurrentUser
+@inject NavigationManager Navigation
+@inject ILogger<RailShortcuts> Logger
+
+@* The rail's own shortcuts (shell redesign R1b): the first pinned pages as rail items, and a
+   Recent button listing every pin and the records opened lately. An interactive island in the
+   static layout (like the SentinelGPT panel), so a pin from a page's header shows at once. *@
+@if (_view is { } view)
+{
+    @foreach (var pin in view.Pins.Take(UserShortcutRules.RailPins))
+    {
+        <a class="gws-rail-item gws-rail-shortcut @(IsCurrent(pin.Url) ? "is-active" : string.Empty)" href="@pin.Url" title="@pin.Title"
+           aria-current="@(IsCurrent(pin.Url) ? "page" : null)">
+            <i class="bi @IconOr(pin.Icon, "bi-pin-angle-fill")" aria-hidden="true"></i><span>@pin.Title</span>
+        </a>
+    }
+    <button type="button" class="gws-rail-item @(_open ? "is-active" : string.Empty)" title="Pinned pages and recent records"
+            aria-expanded="@(_open ? "true" : "false")" aria-controls="gws-rail-recent" @onclick="ToggleAsync">
+        <i class="bi bi-clock-history" aria-hidden="true"></i><span>Recent</span>
+    </button>
+    @if (_open)
+    {
+        <button type="button" class="gws-rail-backdrop" aria-label="Close" tabindex="-1" @onclick="Close"></button>
+        <div class="gws-rail-flyout" id="gws-rail-recent" role="dialog" aria-label="Pinned pages and recent records" @onkeydown="OnKeyDown">
+            <div class="gws-rail-flyout-title">Pinned</div>
+            @if (view.Pins.Count == 0)
+            {
+                <p class="gws-rail-flyout-empty">Pin a page with the pin button beside its title.</p>
+            }
+            else
+            {
+                <ul>
+                    @foreach (var pin in view.Pins)
+                    {
+                        <li>
+                            <a href="@pin.Url" @onclick="Close"><i class="bi @IconOr(pin.Icon, "bi-pin-angle-fill")" aria-hidden="true"></i><span>@pin.Title</span></a>
+                            <button type="button" class="gws-rail-flyout-remove" title="Unpin" aria-label="@($"Unpin {pin.Title}")"
+                                    @onclick="() => RemoveAsync(pin)"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+                        </li>
+                    }
+                </ul>
+            }
+            <div class="gws-rail-flyout-title">Recent</div>
+            @if (view.Recents.Count == 0)
+            {
+                <p class="gws-rail-flyout-empty">Articles, contacts, submissions and other records you open show up here.</p>
+            }
+            else
+            {
+                <ul>
+                    @foreach (var recent in view.Recents)
+                    {
+                        <li>
+                            <a href="@recent.Url" @onclick="Close"><i class="bi @IconOr(recent.Icon, "bi-clock-history")" aria-hidden="true"></i><span>@recent.Title</span></a>
+                            <button type="button" class="gws-rail-flyout-remove" title="Remove from recent" aria-label="@($"Remove {recent.Title} from recent")"
+                                    @onclick="() => RemoveAsync(recent)"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    }
+}
+
+@code {
+    private UserShortcutsView? _view;
+    private string? _username;
+    private bool _open;
+
+    protected override async Task OnInitializedAsync()
+    {
+        State.Changed += OnChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _username ??= await CurrentUser.GetCurrentUsernameAsync();
+            _view = _username is "unknown" or "" ? null : await Shortcuts.ListAsync(_username);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Rail shortcuts couldn't be loaded");
+            _view = null;
+        }
+    }
+
+    private async Task ToggleAsync()
+    {
+        _open = !_open;
+        if (_open) await LoadAsync();
+    }
+
+    private void Close() => _open = false;
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") _open = false;
+    }
+
+    private async Task RemoveAsync(UserShortcutView shortcut)
+    {
+        if (_username is null) return;
+        await Shortcuts.RemoveAsync(_username, shortcut.Kind, shortcut.Url);
+        await LoadAsync();
+        // A page's header pin button follows the change too.
+        State.NotifyChanged();
+    }
+
+    private void OnChanged() => _ = InvokeAsync(async () =>
+    {
+        await LoadAsync();
+        StateHasChanged();
+    });
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(() =>
+    {
+        _open = false;
+        StateHasChanged();
+    });
+
+    private bool IsCurrent(string url) =>
+        string.Equals(UserShortcutRules.NormalizeUrl(Navigation.ToBaseRelativePath(Navigation.Uri)), url, StringComparison.OrdinalIgnoreCase);
+
+    private static string IconOr(string icon, string fallback) => string.IsNullOrWhiteSpace(icon) ? fallback : icon;
+
+    public void Dispose()
+    {
+        State.Changed -= OnChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+}

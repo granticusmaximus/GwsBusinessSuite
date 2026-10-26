@@ -16,7 +16,7 @@
 
 <PageTitle>@(PageId.HasValue ? "Edit Page" : "New Page")</PageTitle>
 
-<PageHeader Title="@HeaderTitle" Icon="bi-file-earmark-text" ParentLabel="Pages" ParentHref="/admin/pages/all" />
+<PageHeader Record="true" Title="@HeaderTitle" Icon="bi-file-earmark-text" ParentLabel="Pages" ParentHref="/admin/pages/all" />
 
 @if (!string.IsNullOrWhiteSpace(CmsErrorMessage))
 {
