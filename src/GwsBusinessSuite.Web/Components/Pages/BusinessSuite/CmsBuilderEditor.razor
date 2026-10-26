@@ -85,7 +85,7 @@
 <div class="studio-header page-header">
     <div>
         <div class="studio-kicker">Site Desk</div>
-        <h1><i class="bi bi-grid-1x2 me-2 text-primary"></i>@(_page?.Title ?? "Page editor")</h1>
+        <h1><i class="bi bi-grid-1x2 me-2 text-secondary"></i>@(_page?.Title ?? "Page editor")</h1>
         <p class="mb-0">Manage pages, arrange modules, and edit directly on your website.</p>
         @if (_site is not null && _page is not null)
         {
@@ -170,7 +170,7 @@
 @if (_isLoading)
 {
     <div class="canvas-loading">
-        <div class="spinner-border text-primary" role="status"></div>
+        <div class="spinner-border text-secondary" role="status"></div>
         <p class="mt-3 text-secondary">Loading…</p>
     </div>
 }

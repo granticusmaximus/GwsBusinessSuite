@@ -538,7 +538,7 @@ else
     private static string AnnouncementBadge(string status) => status switch
     {
         ArticleAnnouncementStatuses.Sent => "text-bg-success",
-        ArticleAnnouncementStatuses.Sending => "text-bg-primary",
+        ArticleAnnouncementStatuses.Sending => "text-bg-info",
         ArticleAnnouncementStatuses.Scheduled => "text-bg-info",
         _ => "text-bg-secondary"
     };

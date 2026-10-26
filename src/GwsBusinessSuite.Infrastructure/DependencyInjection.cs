@@ -109,6 +109,7 @@ public static class DependencyInjection
         services.AddScoped<IAdminPortalSummaryService, AdminPortalSummaryService>();
         services.AddScoped<IUserShortcutService, UserShortcutService>();
         services.AddScoped<IAdminListViewService, AdminListViewService>();
+        services.AddScoped<IUserPreferenceService, UserPreferenceService>();
         services.AddScoped<ISecretProtector, DataProtectionSecretProtector>();
         // Non-web hosts and startup probes do not have an authenticated HTTP/circuit
         // accessor. The web app registers its CurrentUserAccessor afterward and becomes

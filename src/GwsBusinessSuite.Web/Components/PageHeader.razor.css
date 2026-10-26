@@ -75,3 +75,6 @@
 /* The pin stays an icon button, even where the actions stretch to fill a narrow header. */
 .gws-page-header-pin { flex: 0 0 auto; }
 .gws-page-header-pin.is-pinned { color: var(--gws-sidebar-accent); border-color: var(--gws-sidebar-accent); }
+
+/* The title icon is quiet: the brand orange marks the page's primary action only (R4). */
+.gws-page-header-icon { color: var(--gws-text-soft); }

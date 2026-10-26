@@ -317,8 +317,8 @@ html:has(.gws-admin-bar) {
    Components query it with @container gws-main (...) instead of a viewport @media. */
 .gws-content {
     container: gws-main / inline-size;
-    padding-left: max(1.75rem, var(--gws-safe-left));
-    padding-right: max(1.75rem, var(--gws-safe-right));
+    padding-left: max(var(--gws-content-pad-x), var(--gws-safe-left));
+    padding-right: max(var(--gws-content-pad-x), var(--gws-safe-right));
     padding-bottom: max(2rem, var(--gws-safe-bottom));
 }
 

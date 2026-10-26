@@ -77,7 +77,7 @@ else
                         {
                             var isUser = message.Role == AppGenerationMessageRoles.User;
                             <div class="d-flex @(isUser ? "justify-content-end" : "justify-content-start")">
-                                <div class="p-2 rounded-3 @(isUser ? "bg-primary text-white" : "bg-light border") small" style="max-width:80%;white-space:pre-wrap;">
+                                <div class="p-2 rounded-3 @(isUser ? "bg-primary-subtle text-body" : "bg-light border") small" style="max-width:80%;white-space:pre-wrap;">
                                     @message.Content
                                 </div>
                             </div>

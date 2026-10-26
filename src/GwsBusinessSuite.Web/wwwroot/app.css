@@ -40,6 +40,46 @@
     --gws-radius-sm: 8px;
     --gws-radius-md: 12px;
     --gws-control-height: 40px;
+    --gws-control-height-sm: 34px;
+    /* Visual system (shell redesign R4). Spacing is a 4px scale (step-N is N x 4px; gws-responsive.css
+       has its own fluid --gws-space-* scale); the layout tokens under it are what the density
+       switch changes (see "Density"). */
+    --gws-step-1: 4px;
+    --gws-step-2: 8px;
+    --gws-step-3: 12px;
+    --gws-step-4: 16px;
+    --gws-step-5: 20px;
+    --gws-step-6: 24px;
+    --gws-step-7: 28px;
+    --gws-step-8: 32px;
+    --gws-content-pad-y: var(--gws-step-6);
+    --gws-content-pad-x: var(--gws-step-7);
+    --gws-card-pad: var(--gws-step-4);
+    --gws-card-cap-pad-y: var(--gws-step-2);
+    --gws-cell-pad-y: var(--gws-step-2);
+    --gws-cell-pad-x: var(--gws-step-2);
+    --gws-row-pad-y: var(--gws-step-2);
+    --gws-font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+    /* Status colors, one meaning each: success, warning (due soon, overdue), danger (failed,
+       breached), info (open, sent, new) and neutral. "-fill" is a badge or stripe, "-on" the text
+       drawn on it (4.5:1 or better), and "-text" the color for status text on the page; the
+       fills are the same in both themes, the text colors per theme. The brand orange is not a
+       status: it marks primary actions only. */
+    --gws-status-success-fill: #15803d;
+    --gws-status-success-on: #fff;
+    --gws-status-success-text: #4ade80;
+    --gws-status-warning-fill: #facc15;
+    --gws-status-warning-on: #1c1917;
+    --gws-status-warning-text: #facc15;
+    --gws-status-danger-fill: #dc2626;
+    --gws-status-danger-on: #fff;
+    --gws-status-danger-text: #f87171;
+    --gws-status-info-fill: #2563eb;
+    --gws-status-info-on: #fff;
+    --gws-status-info-text: #60a5fa;
+    --gws-status-neutral-fill: #57534e;
+    --gws-status-neutral-on: #fff;
+    --gws-status-neutral-text: #a8a29e;
     /* Kept for any component still referencing the old glass tokens by name. */
     --gws-shadow-lg: var(--gws-shadow-md);
 }
@@ -68,6 +108,18 @@
     --bs-link-hover-color: #d97706;
     --bs-link-hover-color-rgb: 217, 119, 6;
     --bs-heading-color: #fafaf9;
+    /* Bootstrap's status colors follow the status tokens above: the -rgb triplets (fills, used by
+       .bg-*, .text-bg-* and .border-*) repeat the -fill values, since a triplet can't be read from
+       a hex token. Status text (.text-*) is set from the -text tokens further down. */
+    --bs-success: var(--gws-status-success-text);
+    --bs-success-rgb: 21, 128, 61;
+    --bs-warning: var(--gws-status-warning-text);
+    --bs-warning-rgb: 250, 204, 21;
+    --bs-danger: var(--gws-status-danger-text);
+    --bs-danger-rgb: 220, 38, 38;
+    --bs-info: var(--gws-status-info-text);
+    --bs-info-rgb: 37, 99, 235;
+    --bs-font-monospace: var(--gws-font-mono);
     /* .bg-white/.bg-light (e.g. every "card-header bg-white" in the admin pages, and
        .text-bg-light badges) are driven by these two vars, not the ones above - left
        at Bootstrap's light-mode defaults, these render literal white/near-white
@@ -106,6 +158,11 @@
     --gws-shadow-md: 0 4px 16px rgba(28, 25, 23, 0.12);
     --gws-text-strong: #1c1917;
     --gws-text-soft: #6b6560;
+    --gws-status-success-text: #15803d;
+    --gws-status-warning-text: #a16207;
+    --gws-status-danger-text: #b91c1c;
+    --gws-status-info-text: #1d4ed8;
+    --gws-status-neutral-text: #57534e;
 }
 
 :root[data-theme="light"] {
@@ -159,6 +216,21 @@
 
 .text-dark {
     color: var(--gws-text-strong) !important;
+}
+
+/* Status utilities from the status tokens. Bootstrap pairs each fill with a hardcoded text color
+   (white, or black for warning/info) and colors .text-* from the fill, so both need overrides. */
+.text-success { color: var(--gws-status-success-text) !important; }
+.text-warning { color: var(--gws-status-warning-text) !important; }
+.text-danger { color: var(--gws-status-danger-text) !important; }
+.text-info { color: var(--gws-status-info-text) !important; }
+.text-bg-success { color: var(--gws-status-success-on) !important; }
+.text-bg-warning { color: var(--gws-status-warning-on) !important; }
+.text-bg-danger { color: var(--gws-status-danger-on) !important; }
+.text-bg-info { color: var(--gws-status-info-on) !important; }
+.text-bg-secondary {
+    color: var(--gws-status-neutral-on) !important;
+    background-color: var(--gws-status-neutral-fill) !important;
 }
 
 /* ── Base ────────────────────────────────────────────────── */
@@ -359,6 +431,14 @@ h1:focus { outline: none; }
 .gws-account-popover-user span { color: var(--gws-text-soft); font-size: .75rem; margin-top: .1rem; }
 .gws-account-popover a { display: flex; align-items: center; gap: .65rem; padding: .6rem .7rem; border-radius: 7px; color: var(--gws-text-strong); text-decoration: none; }
 .gws-account-popover a:hover { background: var(--gws-panel-bg-2); }
+.gws-density-toggle { display: flex; align-items: center; gap: .65rem; width: 100%; padding: .6rem .7rem; border: 0; border-radius: 7px; background: none; color: var(--gws-text-strong); font: inherit; text-align: start; }
+.gws-density-toggle:hover { background: var(--gws-panel-bg-2); }
+.gws-density-switch { position: relative; width: 28px; height: 16px; margin-inline-start: auto; border-radius: 8px; background: var(--gws-panel-border); transition: background-color .14s ease; }
+.gws-density-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--gws-text-strong); transition: transform .14s ease; }
+.gws-density-toggle[aria-checked="true"] .gws-density-switch { background: var(--gws-sidebar-accent); }
+.gws-density-toggle[aria-checked="true"] .gws-density-switch::after { background: var(--gws-accent-contrast); transform: translateX(12px); }
+/* Compact needs a precise pointer (see "Density"), so touch screens don't get the switch. */
+@media (pointer: coarse) { .gws-density-toggle { display: none; } }
 
 .gws-layout-body {
     display: flex;
@@ -420,13 +500,16 @@ h1:focus { outline: none; }
     flex: 1;
     min-width: 0;
     overflow-y: auto;
-    padding: 1.5rem 1.75rem 2rem;
+    padding: var(--gws-content-pad-y) var(--gws-content-pad-x) 2rem;
 }
 
 .gws-content > *,
 .gws-content .card,
 .gws-content .card-body,
 .gws-content .table-responsive { min-width: 0; max-width: 100%; }
+/* A gutter row is wider than its container by design (its negative margins absorb the outer
+   half-gutters), so capping it at 100% cut the right gutter off every page that starts with one. */
+.gws-content > .row { max-width: calc(100% + var(--bs-gutter-x)); }
 
 /* Shared R3 list anatomy: the table owns its vertical scroll so headings remain available while
    reviewing a long queue. Lists can opt into columns without changing the page shell. */
@@ -437,6 +520,50 @@ h1:focus { outline: none; }
     border-bottom-color: var(--gws-panel-border);
     box-shadow: 0 1px 0 var(--gws-panel-border);
 }
+
+/* ── Density (shell redesign R4) ─────────────────────────────
+   Cards, list rows, table cells and controls size themselves from the layout tokens, and the
+   account menu's switch puts .gws-density-compact on .gws-layout to tighten them. Compact needs a
+   precise pointer: on touch screens the comfortable sizes (and 44px targets) always apply.
+   Spacing a page sets itself with Bootstrap utilities (p-3, mb-4...) stays as it is. */
+.gws-content .card {
+    --bs-card-spacer-y: var(--gws-card-pad);
+    --bs-card-spacer-x: var(--gws-card-pad);
+    --bs-card-cap-padding-y: var(--gws-card-cap-pad-y);
+    --bs-card-cap-padding-x: var(--gws-card-pad);
+}
+.gws-content .list-group { --bs-list-group-item-padding-y: var(--gws-row-pad-y); }
+/* Above the width where tables stack into cards (gws-responsive.css owns those cells). */
+@media (min-width: 768px) {
+    .gws-content .table:not(.table-sm) > :not(caption) > * > * { padding: var(--gws-cell-pad-y) var(--gws-cell-pad-x); }
+}
+
+@media (pointer: fine) {
+    .gws-density-compact {
+        --gws-control-height: 32px;
+        --gws-control-height-sm: 28px;
+        --gws-content-pad-y: var(--gws-step-4);
+        --gws-content-pad-x: var(--gws-step-5);
+        --gws-card-pad: var(--gws-step-3);
+        --gws-card-cap-pad-y: var(--gws-step-1);
+        --gws-cell-pad-y: var(--gws-step-1);
+        --gws-row-pad-y: var(--gws-step-1);
+    }
+
+    /* Bootstrap's own padding would hold buttons and fields at 38px. */
+    .gws-density-compact .btn { --bs-btn-padding-y: .1875rem; }
+    .gws-density-compact .btn-sm { --bs-btn-padding-y: .125rem; }
+    .gws-density-compact :is(.form-control:not(.form-control-sm), .form-select:not(.form-select-sm)) {
+        padding-top: .1875rem;
+        padding-bottom: .1875rem;
+    }
+}
+
+/* Figures line up down a column: Inter's tabular digits for amounts, dates and times in every
+   admin table (gws-num adds them, unwrapped, anywhere else), and the mono face (.font-monospace,
+   code, kbd) for IDs and code, where 0 and O must differ. */
+.gws-content .table { font-variant-numeric: tabular-nums; }
+.gws-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* ── Canvas fullscreen mode ──────────────────────────────────
    Mirrors how WordPress/Elementor/Squarespace take over the full
@@ -779,11 +906,13 @@ h1:focus { outline: none; }
     border-color: var(--gws-panel-border);
 }
 
+/* Surfaces on the page are flat: a 1px border, no shadow. Shadows belong to layers that float
+   over the page (menus, popovers, dialogs, the inspector and assistant panels). */
 .card.border-0.shadow-sm,
 .surface-panel {
     background: var(--gws-panel-bg);
     border: 1px solid var(--gws-panel-border) !important;
-    box-shadow: var(--gws-shadow-sm) !important;
+    box-shadow: none !important;
 }
 
 .btn {
@@ -792,7 +921,7 @@ h1:focus { outline: none; }
     font-weight: 600;
 }
 
-.btn-sm { min-height: 34px; }
+.btn-sm { min-height: var(--gws-control-height-sm); }
 
 .btn-primary {
     background: var(--gws-sidebar-accent);
@@ -820,6 +949,35 @@ h1:focus { outline: none; }
     background: var(--gws-panel-bg-2);
     border-color: var(--gws-sidebar-accent);
     color: var(--gws-text-strong);
+}
+
+/* Solid status buttons share the status badges' fills (R4), darkened on hover and press. */
+.btn-success { --gws-btn-fill: var(--gws-status-success-fill); --gws-btn-on: var(--gws-status-success-on); }
+.btn-danger { --gws-btn-fill: var(--gws-status-danger-fill); --gws-btn-on: var(--gws-status-danger-on); }
+.btn-warning { --gws-btn-fill: var(--gws-status-warning-fill); --gws-btn-on: var(--gws-status-warning-on); }
+:is(.btn-success, .btn-danger, .btn-warning) {
+    --bs-btn-color: var(--gws-btn-on);
+    --bs-btn-bg: var(--gws-btn-fill);
+    --bs-btn-border-color: var(--gws-btn-fill);
+    --bs-btn-hover-color: var(--gws-btn-on);
+    --bs-btn-hover-bg: color-mix(in srgb, var(--gws-btn-fill) 85%, #000);
+    --bs-btn-hover-border-color: var(--bs-btn-hover-bg);
+    --bs-btn-active-color: var(--gws-btn-on);
+    --bs-btn-active-bg: color-mix(in srgb, var(--gws-btn-fill) 75%, #000);
+    --bs-btn-active-border-color: var(--bs-btn-active-bg);
+    --bs-btn-disabled-color: var(--gws-btn-on);
+    --bs-btn-disabled-bg: var(--gws-btn-fill);
+    --bs-btn-disabled-border-color: var(--gws-btn-fill);
+}
+.btn-outline-warning {
+    --bs-btn-color: var(--gws-status-warning-text);
+    --bs-btn-border-color: var(--gws-status-warning-text);
+    --bs-btn-hover-color: var(--gws-status-warning-on);
+    --bs-btn-hover-bg: var(--gws-status-warning-fill);
+    --bs-btn-hover-border-color: var(--gws-status-warning-fill);
+    --bs-btn-active-color: var(--gws-status-warning-on);
+    --bs-btn-active-bg: var(--gws-status-warning-fill);
+    --bs-btn-active-border-color: var(--gws-status-warning-fill);
 }
 
 .form-control,
@@ -1145,7 +1303,7 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .gws-eyebrow {
     display: block;
     margin-bottom: .35rem;
-    color: var(--gws-sidebar-accent);
+    color: var(--gws-text-soft);
     font-size: .75rem;
     font-weight: 750;
     letter-spacing: .09em;
@@ -1166,21 +1324,20 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     flex-shrink: 0;
 }
 
-.gws-attention-card { color: inherit; border: 1px solid var(--gws-panel-border); transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease; }
-.gws-attention-card:hover { color: inherit; border-color: #44403c; transform: translateY(-2px); box-shadow: var(--gws-shadow-md); }
+.gws-attention-card { color: inherit; border: 1px solid var(--gws-panel-border); transition: border-color .14s ease; }
+.gws-attention-card:hover { color: inherit; border-color: var(--gws-text-soft); }
 .gws-attention-count { margin: 1.1rem 0 .35rem; color: var(--gws-text-strong); font-size: 2rem; font-weight: 750; line-height: 1; letter-spacing: -.04em; }
 .gws-card-arrow { color: var(--gws-text-soft); transition: transform .14s ease, color .14s ease; }
 .gws-attention-card:hover .gws-card-arrow { color: var(--gws-sidebar-accent); transform: translate(2px, -2px); }
 
 .gws-module-card {
-    transition: transform .14s ease, box-shadow .14s ease;
+    transition: border-color .14s ease;
     color: inherit;
     text-decoration: none;
 }
 
 .gws-module-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--gws-shadow-md) !important;
+    border-color: var(--gws-text-soft) !important;
     color: inherit;
 }
 
@@ -1205,11 +1362,11 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     font-size: .78rem;
 }
 
-.gws-kpi-card { color: inherit; border: 1px solid var(--gws-panel-border); transition: border-color .14s ease, transform .14s ease, box-shadow .14s ease; }
-.gws-kpi-card:hover { color: inherit; border-color: var(--gws-sidebar-accent); transform: translateY(-2px); box-shadow: var(--gws-shadow-md); }
+.gws-kpi-card { color: inherit; border: 1px solid var(--gws-panel-border); transition: border-color .14s ease; }
+.gws-kpi-card:hover { color: inherit; border-color: var(--gws-text-soft); }
 .gws-kpi-value { margin-top: .35rem; color: var(--gws-text-strong); font-size: 1.75rem; font-weight: 750; line-height: 1; letter-spacing: -.03em; }
-.gws-kpi-card-danger .gws-kpi-value { color: #ef4444; }
-.gws-kpi-card-warning .gws-kpi-value { color: #f59e0b; }
+.gws-kpi-card-danger .gws-kpi-value { color: var(--gws-status-danger-text); }
+.gws-kpi-card-warning .gws-kpi-value { color: var(--gws-status-warning-text); }
 
 .gws-module-chevron { align-self: center; color: var(--gws-text-soft); font-size: .75rem; }
 .gws-module-card:hover .gws-module-chevron { color: var(--gws-sidebar-accent); transform: translateX(2px); }

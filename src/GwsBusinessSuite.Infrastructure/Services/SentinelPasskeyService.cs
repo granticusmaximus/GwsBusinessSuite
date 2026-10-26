@@ -197,18 +197,24 @@ public sealed class SentinelPasskeyService(
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    // The relying party is the page's own host; only Sentinel's own hosts are accepted.
+    // The relying party is the page's own host; only Sentinel's own hosts are accepted. The admin
+    // also runs on the public site's hosts (same app, for in-place editing), so those are allowed
+    // too, and www shares the bare domain's relying party so one passkey works on both.
     private Fido2 Create(string origin)
     {
         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) throw new SentinelLockException("Touch ID isn't available on this address.");
-        var allowed = configuration.GetSection("Sentinel:Passkeys:Hosts").Get<string[]>() ?? ["admin.gwsapp.net"];
+        var allowed = configuration.GetSection("Sentinel:Passkeys:Hosts").Get<string[]>()
+            ?? ["admin.gwsapp.net", "grantwatson.dev", "www.grantwatson.dev"];
         var isLocal = uri.Host is "localhost" or "127.0.0.1";
         if (!(isLocal || (uri.Scheme == Uri.UriSchemeHttps && allowed.Contains(uri.Host, StringComparer.OrdinalIgnoreCase))))
             throw new SentinelLockException("Touch ID isn't available on this address.");
         var normalized = uri.GetLeftPart(UriPartial.Authority);
+        var rpId = uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) && allowed.Contains(uri.Host[4..], StringComparer.OrdinalIgnoreCase)
+            ? uri.Host[4..]
+            : uri.Host;
         return new Fido2(new Fido2Configuration
         {
-            RPID = uri.Host,
+            RPID = rpId,
             RPName = "GWS Sentinel",
             Origins = new HashSet<string>([normalized])
         });

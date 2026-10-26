@@ -407,7 +407,7 @@ else
 
     private static string EnrollmentBadgeClass(string status) => status switch
     {
-        EmailCampaignEnrollmentStatuses.Active => "text-bg-primary",
+        EmailCampaignEnrollmentStatuses.Active => "text-bg-info",
         EmailCampaignEnrollmentStatuses.Completed => "text-bg-success",
         _ => "text-bg-secondary"
     };

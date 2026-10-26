@@ -94,7 +94,7 @@
                                     <span class="fw-semibold">@if (thread.IsGroup) { <i class="bi bi-people-fill me-1"></i> }@thread.Title</span>
                                     @if (thread.UnreadCount > 0)
                                     {
-                                        <span class="badge text-bg-primary rounded-pill">@thread.UnreadCount</span>
+                                        <span class="badge text-bg-info rounded-pill">@thread.UnreadCount</span>
                                     }
                                 </div>
                                 @if (!string.IsNullOrWhiteSpace(thread.LastMessagePreview))
@@ -163,7 +163,7 @@
                                     <div class="small text-secondary">@message.SenderDisplayName · @message.SentAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
                                     @if (!string.IsNullOrWhiteSpace(message.Body))
                                     {
-                                        <div class="p-2 rounded-3 @(isMine ? "bg-primary text-white" : "bg-body-tertiary")" style="max-width:75%;white-space:pre-wrap;">@message.Body</div>
+                                        <div class="p-2 rounded-3 @(isMine ? "bg-primary-subtle text-body" : "bg-body-tertiary")" style="max-width:75%;white-space:pre-wrap;">@message.Body</div>
                                     }
                                     @foreach (var attachment in message.AllAttachments)
                                     {

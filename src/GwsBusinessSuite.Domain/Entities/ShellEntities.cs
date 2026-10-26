@@ -32,3 +32,12 @@ public sealed class AdminListView : AuditableEntity
     public string FilterJson { get; set; } = "{}";
     public string ColumnsCsv { get; set; } = string.Empty;
 }
+
+// A person's own admin setting (shell redesign R4), such as the layout density, so it follows
+// them to every browser and the Mac app. One row per Username + Key.
+public sealed class UserPreference : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string Key { get; set; }
+    public required string Value { get; set; }
+}

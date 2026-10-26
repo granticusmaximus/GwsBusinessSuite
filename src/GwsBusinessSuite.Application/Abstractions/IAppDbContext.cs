@@ -77,6 +77,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<OverwatchMapNote> OverwatchMapNotes { get; }
     DbSet<UserShortcut> UserShortcuts { get; }
     DbSet<AdminListView> AdminListViews { get; }
+    DbSet<UserPreference> UserPreferences { get; }
     DbSet<SentinelQuestion> SentinelQuestions { get; }
     DbSet<PageTag> PageTags { get; }
     DbSet<PageView> PageViews { get; }

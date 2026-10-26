@@ -43,7 +43,7 @@
             <span class="badge @GetStatusBadgeClass()">
                 @GetStatusBadgeLabel()
             </span>
-            <span class="badge @(PageId.HasValue ? "text-bg-primary" : "text-bg-secondary")">
+            <span class="badge @(PageId.HasValue ? "text-bg-info" : "text-bg-secondary")">
                 @(PageId.HasValue ? "Editing Existing Page" : "New Page")
             </span>
         </div>
@@ -282,7 +282,7 @@
                                         @submission.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")
                                         @if (!submission.IsRead)
                                         {
-                                            <span class="badge text-bg-primary ms-2">New</span>
+                                            <span class="badge text-bg-info ms-2">New</span>
                                         }
                                     </div>
                                     <dl class="row small mb-0 mt-2">

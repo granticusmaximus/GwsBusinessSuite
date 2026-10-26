@@ -773,7 +773,7 @@ else
                         <i class="bi bi-funnel me-1"></i>View options
                         @if ((ActiveViewConfig?.Filters.Count ?? 0) + (ActiveViewConfig?.Sorts.Count ?? 0) > 0)
                         {
-                            <span class="badge text-bg-primary ms-1">@((ActiveViewConfig?.Filters.Count ?? 0) + (ActiveViewConfig?.Sorts.Count ?? 0))</span>
+                            <span class="badge text-bg-secondary ms-1">@((ActiveViewConfig?.Filters.Count ?? 0) + (ActiveViewConfig?.Sorts.Count ?? 0))</span>
                         }
                     </summary>
                     <div class="border rounded-3 p-3 mt-2 bg-body-tertiary">
@@ -861,7 +861,7 @@ else
                                 Advanced filters (AND/OR groups)
                                 @if (ActiveViewConfig?.FilterGroup is { IsEmpty: false })
                                 {
-                                    <span class="badge text-bg-primary ms-1">Active</span>
+                                    <span class="badge text-bg-info ms-1">Active</span>
                                 }
                             </summary>
                             <div class="mt-2">

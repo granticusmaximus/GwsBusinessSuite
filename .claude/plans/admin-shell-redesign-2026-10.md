@@ -237,6 +237,43 @@ no console errors or warnings. The persistence tests, Release web build, and bre
 - Density toggle (comfortable/compact) stored per user, applied as a class on `.gws-layout`.
 - Mono face with `tabular-nums` for IDs, money, times and code in tables.
 
+**Done 26-10-26.** What shipped:
+- Tokens (app.css `:root`): a 4px scale `--gws-step-1..8` (gws-responsive.css already owns a
+  fluid `--gws-space-*` scale and loads later, so the plan's obvious name would have been
+  overridden), the layout tokens density changes (`--gws-content-pad-x/y`, `--gws-card-pad`,
+  `--gws-card-cap-pad-y`, `--gws-cell-pad-x/y`, `--gws-row-pad-y`, `--gws-control-height(-sm)`),
+  `--gws-font-mono` (system mono stack, no new font load; also `--bs-font-monospace`), and status
+  colors `--gws-status-{success,warning,danger,info,neutral}-{fill,on,text}`. Fills are the same in
+  both themes (each `-on` passes 4.5:1); `-text` is per theme. Bootstrap's `--bs-*-rgb` repeat the
+  fills, and `.text-*` / `.text-bg-*` are overridden from the tokens (Bootstrap colors status text
+  from the fill and hardcodes the text on a fill). Status-meaning badges that were primary (Open,
+  Sent, Active, Sending, New, Warm) are now info; counts, categories and step numbers are neutral.
+- Flat surfaces: cards and `.surface-panel` lost their shadow; dashboard/module/KPI cards change
+  border on hover instead of lifting. Floating layers (menus, popovers, inspector, assistant,
+  command palette) keep `--gws-shadow-md`.
+- Orange only for primary actions (plus the rail/sub-nav's current item and focus rings):
+  PageHeader's title icon is `--gws-text-soft` (`.gws-page-header-icon`), decorative
+  `text-primary` icons and spinners are `text-secondary`, the dashboard eyebrows are soft, and the
+  "mine" chat bubbles (Community messages, Builder chat) are `bg-primary-subtle text-body` - white
+  on amber was 2.1:1. The client-portal login keeps its orange icon (not the admin shell).
+- Density: `UserPreference` (Username + Key unique, Value) + migration `AddUserPreferences`,
+  `IUserPreferenceService` / `UserPreferenceService` (factory DbContext per call; keys have a fixed
+  value list whose first entry is the default, so a stale stored value reads as the default).
+  MainLayout reads it per request and renders `gws-density-compact` on `.gws-layout`; the
+  `DensityToggle` island in the account menu saves and swaps the class through app.js
+  `gwsDensity.set`. Compact (32px controls, 28px small, 16/20px content padding, 12px card
+  padding, 4px cell/row padding) is inside `@media (pointer: fine)`, and the switch is hidden on
+  coarse pointers, so touch screens always keep 44px targets. Utilities a page sets itself (p-3,
+  mb-4) don't change. Table cell padding is set only from 768px up, where tables don't stack.
+- Figures: every `.gws-content .table` uses tabular digits; `.gws-num` (tabular, no wrap) for
+  figures elsewhere; mono stays for IDs/code via `.font-monospace`/`code`, since Inter's tabular
+  digits already align amounts and dates without switching faces. Billing's Total is right-aligned.
+- **Fixed along the way:** `.gws-content > * { max-width: 100% }` capped every top-level gutter
+  `.row`, cutting its right gutter off (Billing's Invoices card stopped 24px short of the alert
+  above it, on every page that starts with a row). Top-level rows now get
+  `calc(100% + var(--bs-gutter-x))`.
+- Tests: `UserPreferenceServiceTests` (3).
+
 ## R5. Status and feedback
 
 - Status pills and row stripes (overdue, SLA breach, frozen camera) as shared components.

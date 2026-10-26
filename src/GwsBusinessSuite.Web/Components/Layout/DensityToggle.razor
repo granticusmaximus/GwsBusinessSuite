@@ -1,0 +1,47 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.AdminPortal
+@inject IUserPreferenceService Preferences
+@inject ICurrentUserAccessor CurrentUser
+@inject IJSRuntime JS
+@inject ILogger<DensityToggle> Logger
+
+@* The account menu's density switch (shell redesign R4). The layout renders the saved density as
+   a class on .gws-layout; this island saves a change and swaps that class in place (app.js
+   gwsDensity), so nothing reloads. Compact only applies with a mouse or trackpad, so app.css
+   hides the switch on touch screens. *@
+<button type="button" class="gws-density-toggle" role="switch" aria-checked="@(_compact ? "true" : "false")"
+        disabled="@_busy" @onclick="ToggleAsync">
+    <i class="bi bi-arrows-collapse" aria-hidden="true"></i>
+    <span>Compact layout</span>
+    <span class="gws-density-switch" aria-hidden="true"></span>
+</button>
+
+@code {
+    [Parameter] public bool Compact { get; set; }
+
+    private bool _compact;
+    private bool _busy;
+
+    protected override void OnParametersSet() => _compact = Compact;
+
+    private async Task ToggleAsync()
+    {
+        var next = !_compact;
+        _busy = true;
+        try
+        {
+            await Preferences.SetAsync(await CurrentUser.GetCurrentUsernameAsync(), UserPreferenceKeys.Density,
+                next ? Densities.Compact : Densities.Comfortable);
+            _compact = next;
+            await JS.InvokeVoidAsync("gwsDensity.set", next);
+        }
+        catch (Exception ex) when (ex is ArgumentException or JSException)
+        {
+            Logger.LogWarning(ex, "The layout density couldn't be changed");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

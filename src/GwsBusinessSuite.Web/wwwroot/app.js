@@ -497,6 +497,15 @@
 	// Sentinel's focus mode (Wiki.razor) hides the admin chrome through the same toggle.
 	window.gwsFocusMode = { set: setFocusMode, isOn: isFocusModeOn };
 
+	// The account menu's density switch (DensityToggle) saves the choice, then swaps the class the
+	// layout rendered, so the change shows without a reload.
+	window.gwsDensity = {
+		set: function (compact) {
+			var layout = shell();
+			if (layout) layout.classList.toggle('gws-density-compact', !!compact);
+		}
+	};
+
 	var quickNoteCleanups = {};
 	window.gwsQuickNote = {
 		init: function (elementId) {

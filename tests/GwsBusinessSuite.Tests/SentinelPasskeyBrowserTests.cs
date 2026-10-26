@@ -61,6 +61,11 @@ public sealed class SentinelPasskeyBrowserTests(PlaywrightBrowserFixture fixture
         await passkeys.CompleteRegistrationAsync("grant", Origin, "Touch ID", attestation);
 
         await passkeys.Invoking(p => p.BeginRegistrationAsync("grant", Session, "https://evil.example")).Should().ThrowAsync<SentinelLockException>();
+        await passkeys.Invoking(p => p.BeginSignInAsync("http://grantwatson.dev")).Should().ThrowAsync<SentinelLockException>();
+        // The admin also runs on the public site's hosts; www shares the bare domain's passkeys.
+        (await passkeys.BeginSignInAsync("https://admin.gwsapp.net")).OptionsJson.Should().Contain("\"rpId\":\"admin.gwsapp.net\"");
+        (await passkeys.BeginSignInAsync("https://grantwatson.dev")).OptionsJson.Should().Contain("\"rpId\":\"grantwatson.dev\"");
+        (await passkeys.BeginSignInAsync("https://www.grantwatson.dev")).OptionsJson.Should().Contain("\"rpId\":\"grantwatson.dev\"");
         await passkeys.Invoking(p => p.BeginUnlockAsync("sam", Session, Origin)).Should().ThrowAsync<SentinelLockException>().WithMessage("Add a Touch ID*");
 
         // Grant's passkey answering Sam's unlock: not registered for Sam.
