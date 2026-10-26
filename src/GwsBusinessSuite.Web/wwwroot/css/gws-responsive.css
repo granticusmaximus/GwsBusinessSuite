@@ -160,6 +160,10 @@ small, .small { font-size: max(.75rem, .875em); }
         background: var(--gws-panel-bg, transparent);
     }
 
+    /* A stacked row is a card, so its status stripe (app.css) runs down the card's edge. */
+    table.gws-table-stack > tbody > tr.gws-stripe { box-shadow: inset 3px 0 0 var(--gws-stripe); }
+    table.gws-table-stack > tbody > tr.gws-stripe > :first-child { box-shadow: none; }
+
     /* Label on the left, the cell's content on the right; a cell holding several things
        (a title link, its slug, Edit/Trash/View) stacks them instead of squeezing them. */
     table.gws-table-stack > tbody > tr > td {

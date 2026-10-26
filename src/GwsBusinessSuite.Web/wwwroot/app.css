@@ -158,8 +158,8 @@
     --gws-shadow-md: 0 4px 16px rgba(28, 25, 23, 0.12);
     --gws-text-strong: #1c1917;
     --gws-text-soft: #6b6560;
-    --gws-status-success-text: #15803d;
-    --gws-status-warning-text: #a16207;
+    --gws-status-success-text: #166534;
+    --gws-status-warning-text: #854d0e;
     --gws-status-danger-text: #b91c1c;
     --gws-status-info-text: #1d4ed8;
     --gws-status-neutral-text: #57534e;
@@ -231,6 +231,48 @@
 .text-bg-secondary {
     color: var(--gws-status-neutral-on) !important;
     background-color: var(--gws-status-neutral-fill) !important;
+}
+
+/* ── Status pills and row stripes (shell redesign R5) ────────
+   StatusPill: the status's text color on a 14% tint of its fill, with a dot, so it reads apart
+   from a plain badge (a count or a label). Every text/tint pair is 4.8:1 or better on both
+   themes' panels. A stripe (StatusTones.Stripe) marks a row that needs attention with a 3px left
+   edge in its tone; a selected row's highlight (.gws-row-selected, later) wins over it. */
+.gws-pill {
+    --gws-pill-fill: var(--gws-status-neutral-fill);
+    --gws-pill-text: var(--gws-status-neutral-text);
+    display: inline-flex;
+    align-items: center;
+    gap: .4em;
+    padding: .2em .6em;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--gws-pill-fill) 14%, transparent);
+    color: var(--gws-pill-text);
+    font-size: .75rem;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+.gws-pill::before { content: ""; flex: none; width: .45em; height: .45em; border-radius: 50%; background: currentColor; }
+.gws-pill + .gws-pill { margin-inline-start: .25rem; }
+.gws-pill-success { --gws-pill-fill: var(--gws-status-success-fill); --gws-pill-text: var(--gws-status-success-text); }
+.gws-pill-warning { --gws-pill-fill: var(--gws-status-warning-fill); --gws-pill-text: var(--gws-status-warning-text); }
+.gws-pill-danger { --gws-pill-fill: var(--gws-status-danger-fill); --gws-pill-text: var(--gws-status-danger-text); }
+.gws-pill-info { --gws-pill-fill: var(--gws-status-info-fill); --gws-pill-text: var(--gws-status-info-text); }
+
+.gws-stripe-success { --gws-stripe: var(--gws-status-success-fill); }
+.gws-stripe-warning { --gws-stripe: var(--gws-status-warning-fill); }
+.gws-stripe-danger { --gws-stripe: var(--gws-status-danger-fill); }
+.gws-stripe-info { --gws-stripe: var(--gws-status-info-fill); }
+.gws-stripe-neutral { --gws-stripe: var(--gws-status-neutral-fill); }
+.gws-stripe:not(tr) { box-shadow: inset 3px 0 0 var(--gws-stripe); }
+/* Cards are flat (box-shadow: none !important above), so a striped card needs the same weight. */
+.card.gws-stripe { box-shadow: inset 3px 0 0 var(--gws-stripe) !important; }
+/* Table cells paint over their row, so a row's stripe goes on its first cell, kept alongside
+   Bootstrap's own cell shadow (hover and striped rows). */
+tr.gws-stripe > :first-child {
+    box-shadow: inset 3px 0 0 var(--gws-stripe), inset 0 0 0 9999px var(--bs-table-bg-state, var(--bs-table-bg-type, var(--bs-table-accent-bg)));
 }
 
 /* ── Base ────────────────────────────────────────────────── */
@@ -435,8 +477,8 @@ h1:focus { outline: none; }
 .gws-density-toggle:hover { background: var(--gws-panel-bg-2); }
 .gws-density-switch { position: relative; width: 28px; height: 16px; margin-inline-start: auto; border-radius: 8px; background: var(--gws-panel-border); transition: background-color .14s ease; }
 .gws-density-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--gws-text-strong); transition: transform .14s ease; }
-.gws-density-toggle[aria-checked="true"] .gws-density-switch { background: var(--gws-sidebar-accent); }
-.gws-density-toggle[aria-checked="true"] .gws-density-switch::after { background: var(--gws-accent-contrast); transform: translateX(12px); }
+.gws-density-toggle[aria-checked="true"] .gws-density-switch { background: var(--gws-text-strong); }
+.gws-density-toggle[aria-checked="true"] .gws-density-switch::after { background: var(--gws-panel-bg); transform: translateX(12px); }
 /* Compact needs a precise pointer (see "Density"), so touch screens don't get the switch. */
 @media (pointer: coarse) { .gws-density-toggle { display: none; } }
 
@@ -923,32 +965,62 @@ h1:focus { outline: none; }
 
 .btn-sm { min-height: var(--gws-control-height-sm); }
 
+/* Buttons set Bootstrap's own variables rather than plain properties: its hover, pressed and
+   disabled states read those variables, and their defaults are its hardcoded blue (#0d6efd),
+   which a disabled Remind or a pressed outline button used to show. */
 .btn-primary {
-    background: var(--gws-sidebar-accent);
+    --bs-btn-color: var(--gws-accent-contrast);
+    --bs-btn-bg: var(--gws-sidebar-accent);
+    --bs-btn-border-color: var(--gws-sidebar-accent);
+    --bs-btn-hover-color: var(--gws-accent-contrast);
+    --bs-btn-hover-bg: var(--gws-sidebar-accent-hover);
+    --bs-btn-hover-border-color: var(--gws-sidebar-accent-hover);
+    --bs-btn-active-color: var(--gws-accent-contrast);
+    --bs-btn-active-bg: var(--gws-sidebar-accent-hover);
+    --bs-btn-active-border-color: var(--gws-sidebar-accent-hover);
+    --bs-btn-disabled-color: var(--gws-accent-contrast);
+    --bs-btn-disabled-bg: var(--gws-sidebar-accent);
+    --bs-btn-disabled-border-color: var(--gws-sidebar-accent);
     border: none;
-    color: var(--gws-accent-contrast);
     box-shadow: none;
-}
-
-.btn-primary:hover {
-    background: var(--gws-sidebar-accent-hover);
-    color: var(--gws-accent-contrast);
 }
 
 .btn-outline-secondary,
 .btn-outline-success,
 .btn-outline-primary,
 .btn-outline-danger {
-    background: transparent;
-    border-color: var(--gws-panel-border);
-    color: var(--gws-text-strong);
+    --bs-btn-color: var(--gws-text-strong);
+    --bs-btn-bg: transparent;
+    --bs-btn-border-color: var(--gws-panel-border);
+    --bs-btn-hover-color: var(--gws-text-strong);
+    --bs-btn-hover-bg: var(--gws-panel-bg-2);
+    --bs-btn-hover-border-color: var(--gws-panel-border);
+    --bs-btn-active-color: var(--gws-text-strong);
+    --bs-btn-active-bg: var(--gws-panel-bg-2);
+    --bs-btn-active-border-color: var(--gws-sidebar-accent);
+    --bs-btn-disabled-color: var(--gws-text-strong);
+    --bs-btn-disabled-bg: transparent;
+    --bs-btn-disabled-border-color: var(--gws-panel-border);
 }
 
-.btn-outline-primary:hover,
-.btn-outline-secondary:hover {
-    background: var(--gws-panel-bg-2);
-    border-color: var(--gws-sidebar-accent);
-    color: var(--gws-text-strong);
+.btn-outline-primary,
+.btn-outline-secondary { --bs-btn-hover-border-color: var(--gws-sidebar-accent); }
+/* A delete or confirm button still fills with its meaning on hover and press. */
+.btn-outline-danger {
+    --bs-btn-hover-color: var(--gws-status-danger-on);
+    --bs-btn-hover-bg: var(--gws-status-danger-fill);
+    --bs-btn-hover-border-color: var(--gws-status-danger-fill);
+    --bs-btn-active-color: var(--gws-status-danger-on);
+    --bs-btn-active-bg: var(--gws-status-danger-fill);
+    --bs-btn-active-border-color: var(--gws-status-danger-fill);
+}
+.btn-outline-success {
+    --bs-btn-hover-color: var(--gws-status-success-on);
+    --bs-btn-hover-bg: var(--gws-status-success-fill);
+    --bs-btn-hover-border-color: var(--gws-status-success-fill);
+    --bs-btn-active-color: var(--gws-status-success-on);
+    --bs-btn-active-bg: var(--gws-status-success-fill);
+    --bs-btn-active-border-color: var(--gws-status-success-fill);
 }
 
 /* Solid status buttons share the status badges' fills (R4), darkened on hover and press. */
@@ -978,6 +1050,51 @@ h1:focus { outline: none; }
     --bs-btn-active-color: var(--gws-status-warning-on);
     --bs-btn-active-bg: var(--gws-status-warning-fill);
     --bs-btn-active-border-color: var(--gws-status-warning-fill);
+}
+
+/* The rest of Bootstrap's hardcoded blue: pills, the active dropdown item, open accordions,
+   progress (in flight, so info blue), and checked boxes, radios and switches. Checked controls
+   are monochrome - the text color with the check or knob in the panel color - since the live
+   site's theme can swap the accent and a data-URI check can't follow a variable. */
+.nav-pills {
+    --bs-nav-link-color: var(--gws-text-soft);
+    --bs-nav-link-hover-color: var(--gws-text-strong);
+    --bs-nav-pills-link-active-color: var(--gws-text-strong);
+    --bs-nav-pills-link-active-bg: var(--gws-panel-bg-2);
+}
+.dropdown-menu {
+    --bs-dropdown-link-active-color: var(--gws-text-strong);
+    --bs-dropdown-link-active-bg: var(--gws-panel-bg-2);
+}
+.accordion {
+    --bs-accordion-active-color: var(--gws-text-strong);
+    --bs-accordion-active-bg: var(--gws-panel-bg-2);
+    --bs-accordion-btn-focus-box-shadow: 0 0 0 .25rem rgba(var(--bs-primary-rgb), .25);
+}
+.progress, .progress-stacked { --bs-progress-bar-bg: var(--gws-status-info-fill); }
+.form-check-input:focus { border-color: var(--gws-text-soft); box-shadow: 0 0 0 .25rem rgba(var(--bs-primary-rgb), .25); }
+.form-check-input:checked,
+.form-check-input[type="checkbox"]:indeterminate {
+    background-color: var(--gws-text-strong);
+    border-color: var(--gws-text-strong);
+}
+.form-check-input:checked[type="checkbox"] {
+    --bs-form-check-bg-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%231c1917' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m6 10 3 3 6-6'/%3e%3c/svg%3e");
+}
+.form-check-input:checked[type="radio"] {
+    --bs-form-check-bg-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='2' fill='%231c1917'/%3e%3c/svg%3e");
+}
+.form-switch .form-check-input:checked {
+    --bs-form-switch-bg: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%231c1917'/%3e%3c/svg%3e");
+}
+:root[data-theme="light"] .form-check-input:checked[type="checkbox"] {
+    --bs-form-check-bg-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3e%3cpath fill='none' stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='m6 10 3 3 6-6'/%3e%3c/svg%3e");
+}
+:root[data-theme="light"] .form-check-input:checked[type="radio"] {
+    --bs-form-check-bg-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='2' fill='%23fff'/%3e%3c/svg%3e");
+}
+:root[data-theme="light"] .form-switch .form-check-input:checked {
+    --bs-form-switch-bg: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e");
 }
 
 .form-control,

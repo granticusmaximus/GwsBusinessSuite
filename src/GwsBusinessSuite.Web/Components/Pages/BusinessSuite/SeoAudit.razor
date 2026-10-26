@@ -122,7 +122,7 @@ else
                                     <div class="fw-semibold small">@finding.Category</div>
                                     <div class="text-secondary small">@finding.Message</div>
                                 </div>
-                                <span class="badge @FindingBadgeClass(finding.Status) flex-shrink-0">@finding.Status</span>
+                                <StatusPill Tone="StatusTones.ForSeoFinding(finding.Status)" CssClass="flex-shrink-0">@finding.Status</StatusPill>
                             </div>
                         </div>
                     }
@@ -193,10 +193,4 @@ else
         _ => "text-danger"
     };
 
-    private static string FindingBadgeClass(string status) => status switch
-    {
-        SeoAuditFindingStatuses.Pass => "text-bg-success",
-        SeoAuditFindingStatuses.Warning => "text-bg-warning",
-        _ => "text-bg-danger"
-    };
 }

@@ -272,7 +272,21 @@ no console errors or warnings. The persistence tests, Release web build, and bre
   `.row`, cutting its right gutter off (Billing's Invoices card stopped 24px short of the alert
   above it, on every page that starts with a row). Top-level rows now get
   `calc(100% + var(--bs-gutter-x))`.
+- Solid `.btn-success/.btn-danger/.btn-warning` and `.btn-outline-warning` use the status fills
+  too (hover/press darken with `color-mix`), so a red button and a red badge are the same red.
 - Tests: `UserPreferenceServiceTests` (3).
+- Checked on a throwaway instance: Playwright measured comfortable (24/28px content padding, 40px
+  controls, 16px card padding) and compact (16/20px, 32px, 12px), the switch's choice surviving a
+  reload and an enhanced navigation, a touch phone keeping 44px controls with the switch hidden,
+  no shadow on cards, and no console errors; screenshots in dark and light. Responsive audit over
+  all 50 admin routes: comfortable on phone-390/tablet-768/laptop-1280/desktop-1920 (226 loads,
+  no overflow) and compact on laptop-1280/desktop-1920 (114 loads, nothing flagged). The
+  comfortable run's flags were all existing: the phone "covered" control under the bottom bar at
+  load (which control sits there moves with layout), ArcGIS tile CORS errors on OSINT from a
+  localhost origin, and Government Intelligence's "PDF" links at 38x18 on touch (data-dependent,
+  not touched here). Light-theme danger text was darkened to #b91c1c after a contrast check put
+  #dc2626 at 4.4:1 on `--gws-panel-bg-2`.
+- Not checked: the Mac app's WKWebView (R7).
 
 ## R5. Status and feedback
 

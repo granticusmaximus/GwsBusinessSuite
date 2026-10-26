@@ -272,7 +272,7 @@
                         {
                             <tr>
                                 <td class="fw-semibold">@draft.Topic</td>
-                                <td><span class="badge @GetDraftStatusBadgeClass(draft.Status)">@draft.Status</span></td>
+                                <td><StatusPill Tone="StatusTones.ForArticleDraft(draft.Status)">@draft.Status</StatusPill></td>
                                 <td>@draft.RevisionNumber</td>
                                 <td>@FormatDate(draft.UpdatedAt ?? draft.CreatedAt)</td>
                                 <td class="text-end">
@@ -386,17 +386,6 @@
     private static string FormatDate(DateTimeOffset value)
     {
         return value.ToLocalTime().ToString("dd-MM-yy HH:mm");
-    }
-
-    private static string GetDraftStatusBadgeClass(string status)
-    {
-        return status switch
-        {
-            "PendingReview" => "text-bg-warning",
-            "Approved" => "text-bg-success",
-            "Rejected" => "text-bg-danger",
-            _ => "text-bg-secondary"
-        };
     }
 
     private void ClearDraftFilters()

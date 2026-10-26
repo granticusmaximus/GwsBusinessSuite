@@ -190,9 +190,7 @@
                                         </div>
                                     </td>
                                     <td>
-                                        <span class="badge @(IsScheduledArticle(article) ? "text-bg-info" : GetStatusBadgeClass(article.Status))">
-                                            @(IsScheduledArticle(article) ? "Scheduled" : article.Status)
-                                        </span>
+                                        <StatusPill Tone="@(IsScheduledArticle(article) ? StatusTone.Info : StatusTones.ForArticle(article.Status))">@(IsScheduledArticle(article) ? "Scheduled" : article.Status)</StatusPill>
                                         @if (article.Status == ArticleStatuses.Draft)
                                         {
                                             <button class="btn btn-xs btn-link p-0 ms-1" @onclick="() => PublishArticle(article.Id)" disabled="@IsBusy">Publish</button>
@@ -650,13 +648,6 @@
             IsBusy = false;
         }
     }
-
-    private static string GetStatusBadgeClass(string status) => status switch
-    {
-        ArticleStatuses.Published => "text-bg-success",
-        ArticleStatuses.Draft     => "text-bg-warning",
-        _                         => "text-bg-secondary"
-    };
 
     private static string FormatSource(string source) => source switch
     {

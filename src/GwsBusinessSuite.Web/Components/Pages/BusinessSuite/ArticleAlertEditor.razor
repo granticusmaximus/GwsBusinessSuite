@@ -284,7 +284,7 @@ else
                                 <tr>
                                     <td><RelationshipChip ContactId="subscriber.ContactId" ContactName="@subscriber.Email" /></td>
                                     <td>@subscriber.FirstName</td>
-                                    <td><span class="badge @SubscriberBadge(subscriber.Status)">@subscriber.Status</span></td>
+                                    <td><StatusPill Tone="StatusTones.ForSubscriber(subscriber.Status)">@subscriber.Status</StatusPill></td>
                                     <td class="small">@subscriber.SubscribedAt.ToLocalTime().ToString("dd-MM-yy")</td>
                                     <td class="small">@(subscriber.ConfirmedAt?.ToLocalTime().ToString("dd-MM-yy") ?? "—")</td>
                                     <td class="small text-secondary">@subscriber.SourcePath</td>
@@ -323,7 +323,7 @@ else
                             {
                                 <tr>
                                     <td>@announcement.ArticleTitle</td>
-                                    <td><span class="badge @AnnouncementBadge(announcement.Status)">@announcement.Status</span></td>
+                                    <td><StatusPill Tone="StatusTones.ForAnnouncement(announcement.Status)">@announcement.Status</StatusPill></td>
                                     <td class="small">@announcement.DueAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</td>
                                     <td>@announcement.DeliveredCount / @announcement.RecipientCount</td>
                                     <td>@announcement.FailedCount</td>
@@ -528,18 +528,4 @@ else
         }
     }
 
-    private static string SubscriberBadge(string status) => status switch
-    {
-        EmailCampaignSubscriptionStatuses.Confirmed => "text-bg-success",
-        EmailCampaignSubscriptionStatuses.Pending => "text-bg-warning",
-        _ => "text-bg-secondary"
-    };
-
-    private static string AnnouncementBadge(string status) => status switch
-    {
-        ArticleAnnouncementStatuses.Sent => "text-bg-success",
-        ArticleAnnouncementStatuses.Sending => "text-bg-info",
-        ArticleAnnouncementStatuses.Scheduled => "text-bg-info",
-        _ => "text-bg-secondary"
-    };
 }

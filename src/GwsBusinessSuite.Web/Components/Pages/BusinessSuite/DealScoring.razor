@@ -56,7 +56,7 @@ else
                             <div class="text-secondary small">@deal.ContactName &middot; @deal.Stage &middot; @deal.ValueUsd.ToString("C0")</div>
                         </div>
                         <div class="d-flex align-items-center gap-2 flex-shrink-0">
-                            <span class="badge @BandBadgeClass(deal.Band)">@deal.Band</span>
+                            <StatusPill Tone="StatusTones.ForDealBand(deal.Band)">@deal.Band</StatusPill>
                             <span class="fw-semibold">@deal.Score</span>
                             <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleExpanded(deal.DealId)">
                                 <i class="bi @(IsExpanded(deal.DealId) ? "bi-chevron-up" : "bi-chevron-down")"></i>
@@ -99,11 +99,4 @@ else
 
     private bool IsExpanded(Guid dealId) => _expanded.Contains(dealId);
 
-    private static string BandBadgeClass(string band) => band switch
-    {
-        DealScoreBands.Hot => "text-bg-success",
-        DealScoreBands.Warm => "text-bg-info",
-        DealScoreBands.Cool => "text-bg-warning",
-        _ => "text-bg-secondary"
-    };
 }

@@ -40,9 +40,7 @@
             <div class="small text-secondary">Title, path, SEO, and publish status.</div>
         </div>
         <div class="d-flex align-items-center gap-2">
-            <span class="badge @GetStatusBadgeClass()">
-                @GetStatusBadgeLabel()
-            </span>
+            <StatusPill Tone="PageStatusTone">@GetStatusBadgeLabel()</StatusPill>
             <span class="badge @(PageId.HasValue ? "text-bg-info" : "text-bg-secondary")">
                 @(PageId.HasValue ? "Editing Existing Page" : "New Page")
             </span>
@@ -1032,10 +1030,8 @@
         return PageEditorModel.Status == CmsPageStatuses.Published ? "Published" : "Draft";
     }
 
-    private string GetStatusBadgeClass() =>
-        IsScheduledPage()
-            ? "text-bg-info"
-            : PageEditorModel.Status == CmsPageStatuses.Published ? "text-bg-success" : "text-bg-secondary";
+    private StatusTone PageStatusTone =>
+        IsScheduledPage() ? StatusTone.Info : StatusTones.ForPage(PageEditorModel.Status);
 
     private static DateTimeOffset? ParseDateTimeLocal(string? value)
     {

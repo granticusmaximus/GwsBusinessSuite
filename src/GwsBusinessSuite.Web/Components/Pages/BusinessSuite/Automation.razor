@@ -125,7 +125,7 @@ else
                     <button type="button" class="card-body text-start w-100 border-0 bg-transparent p-3" @onclick="() => OpenWorkflow(workflow.Id)">
                         <div class="d-flex justify-content-between gap-2 mb-3">
                             <div class="automation-icon"><i class="bi bi-diagram-3-fill"></i></div>
-                            <span class="badge @StatusClass(workflow.Status)">@workflow.Status</span>
+                            <StatusPill Tone="StatusTones.ForWorkflow(workflow.Status)">@workflow.Status</StatusPill>
                         </div>
                         <h2 class="h5">@workflow.Name</h2>
                         <p class="text-secondary small workflow-description">@(string.IsNullOrWhiteSpace(workflow.Description) ? "No description" : workflow.Description)</p>
@@ -425,6 +425,5 @@ else
         catch (Exception ex) { Logger.LogError(ex, "Unable to import workflow export."); _error = ex.Message; }
         finally { _importing = false; }
     }
-    private static string StatusClass(string status) => status == "Active" ? "text-bg-success" : status == "Inactive" ? "text-bg-secondary" : "text-bg-warning";
     private static string FormatLastRun(DateTimeOffset? value) => value is null ? "Never run" : value.Value.ToLocalTime().ToString("dd-MM-yy HH:mm");
 }

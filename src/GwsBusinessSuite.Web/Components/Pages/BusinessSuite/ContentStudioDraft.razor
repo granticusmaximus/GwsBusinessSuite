@@ -68,7 +68,7 @@ else
         </div>
         <div class="card-body">
             <div class="d-flex flex-wrap gap-2 mb-3">
-                <span class="badge @GetDraftStatusBadgeClass(CurrentDraft.Status)">Status: @CurrentDraft.Status</span>
+                <StatusPill Tone="StatusTones.ForArticleDraft(CurrentDraft.Status)">Status: @CurrentDraft.Status</StatusPill>
                 <span class="badge text-bg-light">Revision: @CurrentDraft.RevisionNumber</span>
                 <span class="badge text-bg-light">Created: @FormatDate(CurrentDraft.CreatedAt)</span>
             </div>
@@ -850,16 +850,6 @@ placement.SlotToken);
         return "gws-tooltip-flat";
     }
 
-    private static string GetDraftStatusBadgeClass(string status)
-    {
-        return status switch
-        {
-            "PendingReview" => "text-bg-warning",
-            "Approved" => "text-bg-success",
-            "Rejected" => "text-bg-danger",
-            _ => "text-bg-secondary"
-        };
-    }
 }
 
 <style>

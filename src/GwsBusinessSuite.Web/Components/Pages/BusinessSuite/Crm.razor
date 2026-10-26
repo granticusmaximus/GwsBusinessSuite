@@ -189,11 +189,11 @@ else
                                 <tbody>
                                 @foreach (var contact in VisibleContacts)
                                 {
-                                    <tr class="@(contact.Id == _inspectedContactId ? "gws-row-selected" : string.Empty)">
-                                        <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" aria-pressed="@(contact.Id == _inspectedContactId ? "true" : "false")" @onclick="() => _inspectedContactId = contact.Id">@contact.FullName</button></td>
+                                    <tr class="@(contact.Id == _inspectedContactId ? "gws-row-selected" : string.Empty) @StatusTones.Stripe(_dueFollowUpIds.Contains(contact.Id) ? StatusTone.Warning : null)">
+                                        <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" aria-pressed="@(contact.Id == _inspectedContactId ? "true" : "false")" @onclick="() => _inspectedContactId = contact.Id">@contact.FullName</button>@if (_dueFollowUpIds.Contains(contact.Id)) { <StatusPill Tone="StatusTone.Warning" CssClass="ms-2">Follow-up due</StatusPill> }</td>
                                         @if (ContactColumnVisible("company")) { <td>@(string.IsNullOrWhiteSpace(contact.Company) ? "—" : contact.Company)</td> }
                                         @if (ContactColumnVisible("email")) { <td>@(string.IsNullOrWhiteSpace(contact.Email) ? "—" : contact.Email)</td> }
-                                        @if (ContactColumnVisible("status")) { <td><span class="badge text-bg-secondary">@contact.Status</span></td> }
+                                        @if (ContactColumnVisible("status")) { <td><StatusPill Tone="StatusTones.ForContact(contact.Status)">@contact.Status</StatusPill></td> }
                                     </tr>
                                 }
                                 </tbody>
@@ -340,6 +340,8 @@ else
     private List<Contact> Contacts { get; set; } = new();
     private List<Contact> TrashedContacts { get; set; } = new();
     private List<Contact> DueFollowUps { get; set; } = new();
+    // Rows for these contacts get a warning stripe and a "Follow-up due" pill (R5).
+    private HashSet<Guid> _dueFollowUpIds = [];
     private bool IsLoading { get; set; } = true;
     private bool ShowTrash { get; set; }
     private bool ShowQuickCreate { get; set; }
@@ -577,6 +579,7 @@ else
             var dashboard = await CrmService.GetDashboardAsync();
             Contacts = dashboard.Contacts.ToList();
             DueFollowUps = dashboard.DueFollowUps.ToList();
+            _dueFollowUpIds = DueFollowUps.Select(contact => contact.Id).ToHashSet();
             Deals = dashboard.OpenDeals.ToList();
         }
         catch (Exception ex)

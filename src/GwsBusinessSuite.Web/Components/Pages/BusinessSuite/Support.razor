@@ -143,13 +143,13 @@ else
                             <tbody>
                             @foreach (var ticket in Tickets)
                             {
-                                <tr class="@(SelectedTicketId == ticket.Id ? "gws-row-selected" : "")">
-                                    <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" @onclick="() => SelectTicketAsync(ticket.Id)">@ticket.Subject</button></td>
+                                <tr class="@(SelectedTicketId == ticket.Id ? "gws-row-selected" : "") @StatusTones.Stripe(IsSlaBreached(ticket) ? StatusTone.Danger : null)">
+                                    <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" @onclick="() => SelectTicketAsync(ticket.Id)">@ticket.Subject</button>@if (IsSlaBreached(ticket)) { <StatusPill Tone="StatusTone.Danger" CssClass="ms-2">SLA overdue</StatusPill> }</td>
                                     @if (TicketColumnVisible("contact")) { <td>@ticket.ContactName</td> }
-                                    @if (TicketColumnVisible("priority")) { <td><span class="badge @PriorityBadgeClass(ticket.Priority)">@ticket.Priority</span></td> }
+                                    @if (TicketColumnVisible("priority")) { <td><StatusPill Tone="StatusTones.ForTicketPriority(ticket.Priority)">@ticket.Priority</StatusPill></td> }
                                     @if (TicketColumnVisible("status"))
                                     {
-                                        <td><span class="badge @StatusBadgeClass(ticket.Status)">@ticket.Status</span>@if (IsSlaBreached(ticket)) { <span class="badge text-bg-danger ms-1">SLA overdue</span> }</td>
+                                        <td><StatusPill Tone="StatusTones.ForTicket(ticket.Status)">@ticket.Status</StatusPill></td>
                                     }
                                     @if (TicketColumnVisible("tags")) { <td>@(string.IsNullOrWhiteSpace(ticket.TagsCsv) ? "—" : ticket.TagsCsv)</td> }
                                 </tr>
@@ -694,23 +694,6 @@ else
         await RefreshTicketsAsync();
         await SelectTicketAsync(ticketId);
     }
-
-    private static string StatusBadgeClass(string status) => status switch
-    {
-        SupportTicketStatuses.Open => "text-bg-info",
-        SupportTicketStatuses.Pending => "text-bg-warning",
-        SupportTicketStatuses.Resolved => "text-bg-success",
-        SupportTicketStatuses.Closed => "text-bg-secondary",
-        _ => "text-bg-secondary"
-    };
-
-    private static string PriorityBadgeClass(string priority) => priority switch
-    {
-        SupportTicketPriorities.Urgent => "text-bg-danger",
-        SupportTicketPriorities.High => "text-bg-warning",
-        SupportTicketPriorities.Low => "text-bg-secondary",
-        _ => "text-bg-info"
-    };
 
     // Only Open/Pending tickets can be "overdue" - a Resolved/Closed ticket's due dates are
     // frozen history, not an active breach to flag in the queue.

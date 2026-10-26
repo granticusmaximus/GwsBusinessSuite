@@ -114,7 +114,7 @@
                             </td>
                             <td class="small text-secondary">@comment.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</td>
                             <td>
-                                <span class="badge @StatusBadgeClass(comment.Status)">@comment.Status</span>
+                                <StatusPill Tone="StatusTones.ForComment(comment.Status)">@comment.Status</StatusPill>
                             </td>
                         </tr>
                     }
@@ -305,10 +305,4 @@
     private static string Excerpt(string body) =>
         body.Length > 140 ? body[..140].Trim() + "…" : body;
 
-    private static string StatusBadgeClass(string status) => status switch
-    {
-        CommentStatuses.Approved => "text-bg-success",
-        CommentStatuses.Spam => "text-bg-danger",
-        _ => "text-bg-warning"
-    };
 }

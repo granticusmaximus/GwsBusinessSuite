@@ -28,7 +28,7 @@
         @if (CurrentArticle is not null)
         {
             <div class="d-flex align-items-center gap-2 mt-1 flex-wrap">
-                <span class="badge @GetStatusBadgeClass(CurrentArticle.Status)">@CurrentArticle.Status</span>
+                <StatusPill Tone="StatusTones.ForArticle(CurrentArticle.Status)">@CurrentArticle.Status</StatusPill>
                 <span class="badge text-bg-light">@FormatSource(CurrentArticle.Source)</span>
                 @if (CurrentArticle.PublishedAt.HasValue)
                 {
@@ -1002,13 +1002,6 @@ else
         s = Regex.Replace(s, @"\s+", "-");
         return s.Trim('-');
     }
-
-    private static string GetStatusBadgeClass(string status) => status switch
-    {
-        ArticleStatuses.Published => "text-bg-success",
-        ArticleStatuses.Draft     => "text-bg-warning",
-        _                         => "text-bg-secondary"
-    };
 
     private static string FormatSource(string source) => source switch
     {

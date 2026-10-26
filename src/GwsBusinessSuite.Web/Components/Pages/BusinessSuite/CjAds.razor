@@ -161,8 +161,7 @@
                       <div class="small text-secondary font-monospace">@partner.AdvertiserId</div>
                     </div>
                     <div class="d-flex flex-wrap align-items-center gap-2">
-                      <span
-                      class="badge @GetRelationshipBadgeClass(partner.RelationshipStatus)">@NormalizeRelationshipStatus(partner.RelationshipStatus)</span>
+                      <StatusPill Tone="StatusTones.ForAffiliateRelationship(NormalizeRelationshipStatus(partner.RelationshipStatus))">@NormalizeRelationshipStatus(partner.RelationshipStatus)</StatusPill>
                       <span class="badge text-bg-light">@partner.OfferCount active ads</span>
                       @if (!string.IsNullOrWhiteSpace(partner.PrimaryCategory))
                       {

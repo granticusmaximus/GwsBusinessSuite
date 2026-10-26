@@ -67,10 +67,10 @@
             <dl class="gws-inspector-facts">
                 <dt>Status</dt>
                 <dd>
-                    <span class="badge @StatusBadgeClass(shown.Status)">@shown.Status</span>
+                    <StatusPill Tone="StatusTones.ForInvoice(shown.Status)">@shown.Status</StatusPill>
                     @if (shown.IsOverdue(DateTimeOffset.UtcNow))
                     {
-                        <span class="badge text-bg-warning ms-1">Overdue</span>
+                        <StatusPill Tone="StatusTone.Warning">Overdue</StatusPill>
                     }
                 </dd>
                 <dt>Client</dt><dd><a href="/admin/crm/contacts/@shown.ContactId">@shown.ContactName</a></dd>
@@ -314,12 +314,12 @@ else
                         </tr></thead><tbody>
                         @foreach (var invoice in VisibleInvoices)
                         {
-                            <tr class="@(invoice.Id == _inspectedInvoiceId ? "gws-row-selected" : string.Empty)" id="invoice-@invoice.Id">
-                                <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" title="Open this invoice beside the list" aria-pressed="@(invoice.Id == _inspectedInvoiceId ? "true" : "false")" @onclick="() => _inspectedInvoiceId = invoice.Id">@invoice.Title</button></td>
+                            <tr class="@(invoice.Id == _inspectedInvoiceId ? "gws-row-selected" : string.Empty) @StatusTones.Stripe(invoice.IsOverdue(DateTimeOffset.UtcNow) ? StatusTone.Warning : null)" id="invoice-@invoice.Id">
+                                <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" title="Open this invoice beside the list" aria-pressed="@(invoice.Id == _inspectedInvoiceId ? "true" : "false")" @onclick="() => _inspectedInvoiceId = invoice.Id">@invoice.Title</button>@if (invoice.IsOverdue(DateTimeOffset.UtcNow)) { <StatusPill Tone="StatusTone.Warning" CssClass="ms-2">Overdue</StatusPill> }</td>
                                 @if (InvoiceColumnVisible("client")) { <td><RelationshipChip ContactId="invoice.ContactId" ContactName="@invoice.ContactName" /></td> }
                                 @if (InvoiceColumnVisible("total")) { <td class="gws-num text-end">@invoice.TotalText</td> }
                                 @if (InvoiceColumnVisible("due")) { <td class="gws-num">@(invoice.DueDate?.ToLocalTime().ToString("dd-MM-yy") ?? "—")</td> }
-                                @if (InvoiceColumnVisible("status")) { <td><span class="badge @StatusBadgeClass(invoice.Status)">@invoice.Status</span>@if (invoice.IsOverdue(DateTimeOffset.UtcNow)) { <span class="badge text-bg-warning ms-1">Overdue</span> }</td> }
+                                @if (InvoiceColumnVisible("status")) { <td><StatusPill Tone="StatusTones.ForInvoice(invoice.Status)">@invoice.Status</StatusPill></td> }
                                 <td><div class="d-flex gap-1 justify-content-end">
                                         @if (invoice.Status == InvoiceStatuses.Draft)
                                         {
@@ -663,12 +663,4 @@ else
         }
     }
 
-    private static string StatusBadgeClass(string status) => status switch
-    {
-        InvoiceStatuses.Draft => "text-bg-secondary",
-        InvoiceStatuses.Sent => "text-bg-info",
-        InvoiceStatuses.Paid => "text-bg-success",
-        InvoiceStatuses.Void => "text-bg-danger",
-        _ => "text-bg-secondary"
-    };
 }

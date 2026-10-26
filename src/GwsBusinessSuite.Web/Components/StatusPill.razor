@@ -1,0 +1,11 @@
+@* A status in its tone (shell redesign R5): a tinted pill with a dot, so a status reads apart from
+   a plain badge (a count or a label). Map the status with StatusTones, e.g.
+   <StatusPill Tone="StatusTones.ForInvoice(invoice.Status)">@invoice.Status</StatusPill>. *@
+<span class="gws-pill gws-pill-@StatusTones.CssName(Tone) @CssClass" title="@Title">@ChildContent</span>
+
+@code {
+    [Parameter, EditorRequired] public StatusTone Tone { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public string? Title { get; set; }
+}

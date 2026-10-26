@@ -169,11 +169,11 @@ else
         @foreach (var container in Containers)
         {
             <div class="col-md-6 col-lg-4">
-                <div class="card border-0 shadow-sm h-100">
+                <div class="card border-0 shadow-sm h-100 @StatusTones.Stripe(container.IsError ? StatusTone.Danger : null)">
                     <div class="card-body">
                         <div class="d-flex align-items-center justify-content-between mb-2">
                             <span class="fw-semibold">@container.Name</span>
-                            <span class="badge @StatusBadgeClass(container)">@StatusLabel(container)</span>
+                            <StatusPill Tone="StatusTones.ForContainer(container.IsError, container.State)">@StatusLabel(container)</StatusPill>
                         </div>
                         <div class="small text-secondary mb-1">@container.Image</div>
                         <div class="small text-secondary mb-1">@container.Status</div>
@@ -454,6 +454,4 @@ else
     private static string StatusLabel(ContainerHealthView c) =>
         c.IsError ? "Error" : c.State;
 
-    private static string StatusBadgeClass(ContainerHealthView c) =>
-        c.IsError ? "text-bg-danger" : c.State == "running" ? "text-bg-success" : "text-bg-secondary";
 }
