@@ -4,6 +4,8 @@
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.Crm
 @using GwsBusinessSuite.Application.Support
+@using GwsBusinessSuite.Application.AdminPortal
+@using System.Text.Json
 @using GwsBusinessSuite.Domain.Entities
 @inject ISupportTicketService TicketService
 @inject ISupportTicketCannedResponseService CannedResponseService
@@ -108,6 +110,9 @@ else
                     }
                 </select>
             </div>
+            <ListViewToolbar ListKey="support.tickets" FilterJson="@TicketFilterJson" Columns="TicketColumns"
+                             VisibleColumns="_visibleTicketColumns" VisibleColumnsChanged="SetTicketColumnsAsync"
+                             OnApply="ApplyTicketViewAsync" />
             <div class="card-body p-0">
                 @if (Tickets.Count == 0)
                 {
@@ -126,31 +131,31 @@ else
                 }
                 else
                 {
-                    <div class="list-group list-group-flush">
-                        @foreach (var ticket in Tickets)
-                        {
-                            <button type="button" class="list-group-item list-group-item-action @(SelectedTicketId == ticket.Id ? "active" : "")"
-                                    @onclick="() => SelectTicketAsync(ticket.Id)">
-                                <div class="d-flex justify-content-between align-items-start gap-2">
-                                    <div class="min-w-0">
-                                        <div class="fw-semibold text-truncate">@ticket.Subject</div>
-                                        <div class="small text-truncate @(SelectedTicketId == ticket.Id ? "" : "text-secondary")">@ticket.ContactName</div>
-                                    </div>
-                                    <span class="badge @PriorityBadgeClass(ticket.Priority)">@ticket.Priority</span>
-                                </div>
-                                <span class="badge @StatusBadgeClass(ticket.Status) mt-1">@ticket.Status</span>
-                                @if (IsSlaBreached(ticket))
-                                {
-                                    <span class="badge text-bg-danger mt-1 ms-1">SLA overdue</span>
-                                }
-                                @if (!string.IsNullOrWhiteSpace(ticket.TagsCsv))
-                                {
-                                    <div class="small text-truncate @(SelectedTicketId == ticket.Id ? "" : "text-secondary")">
-                                        <i class="bi bi-tags me-1"></i>@ticket.TagsCsv
-                                    </div>
-                                }
-                            </button>
-                        }
+                    <div class="table-responsive gws-list-table-wrap">
+                        <table class="table table-hover align-middle mb-0 gws-list-table">
+                            <thead><tr>
+                                <th>Subject</th>
+                                @if (TicketColumnVisible("contact")) { <th>Contact</th> }
+                                @if (TicketColumnVisible("priority")) { <th>Priority</th> }
+                                @if (TicketColumnVisible("status")) { <th>Status</th> }
+                                @if (TicketColumnVisible("tags")) { <th>Tags</th> }
+                            </tr></thead>
+                            <tbody>
+                            @foreach (var ticket in Tickets)
+                            {
+                                <tr class="@(SelectedTicketId == ticket.Id ? "gws-row-selected" : "")">
+                                    <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" @onclick="() => SelectTicketAsync(ticket.Id)">@ticket.Subject</button></td>
+                                    @if (TicketColumnVisible("contact")) { <td>@ticket.ContactName</td> }
+                                    @if (TicketColumnVisible("priority")) { <td><span class="badge @PriorityBadgeClass(ticket.Priority)">@ticket.Priority</span></td> }
+                                    @if (TicketColumnVisible("status"))
+                                    {
+                                        <td><span class="badge @StatusBadgeClass(ticket.Status)">@ticket.Status</span>@if (IsSlaBreached(ticket)) { <span class="badge text-bg-danger ms-1">SLA overdue</span> }</td>
+                                    }
+                                    @if (TicketColumnVisible("tags")) { <td>@(string.IsNullOrWhiteSpace(ticket.TagsCsv) ? "—" : ticket.TagsCsv)</td> }
+                                </tr>
+                            }
+                            </tbody>
+                        </table>
                     </div>
                 }
             </div>
@@ -341,6 +346,13 @@ else
     private SupportTicketView? SelectedTicket { get; set; }
     private Guid? SelectedTicketId { get; set; }
     private string StatusFilter { get; set; } = string.Empty;
+    private static readonly IReadOnlyList<ListColumnOption> TicketColumns =
+    [
+        new("subject", "Subject", true), new("contact", "Contact"), new("priority", "Priority"),
+        new("status", "Status"), new("tags", "Tags")
+    ];
+    private IReadOnlySet<string> _visibleTicketColumns = new HashSet<string>(["subject", "contact", "priority", "status", "tags"], StringComparer.Ordinal);
+    private string TicketFilterJson => JsonSerializer.Serialize(new TicketViewFilter(StatusFilter));
     private string ErrorMessage { get; set; } = string.Empty;
     private string StatusMessage { get; set; } = string.Empty;
     private bool IsLoading { get; set; } = true;
@@ -533,6 +545,30 @@ else
             SelectedTicket = Tickets.FirstOrDefault(ticket => ticket.Id == id);
         }
     }
+
+    private bool TicketColumnVisible(string key) => _visibleTicketColumns.Contains(key);
+
+    private Task SetTicketColumnsAsync(IReadOnlySet<string> columns)
+    {
+        _visibleTicketColumns = columns;
+        return Task.CompletedTask;
+    }
+
+    private async Task ApplyTicketViewAsync(AdminListViewDefinition view)
+    {
+        try
+        {
+            var filter = JsonSerializer.Deserialize<TicketViewFilter>(view.FilterJson);
+            StatusFilter = filter is not null && SupportTicketStatuses.All.Contains(filter.Status) ? filter.Status : string.Empty;
+        }
+        catch (JsonException) { StatusFilter = string.Empty; }
+        var columns = view.Columns.Where(column => TicketColumns.Any(option => option.Key == column)).ToHashSet(StringComparer.Ordinal);
+        columns.Add("subject");
+        _visibleTicketColumns = columns;
+        await RefreshTicketsAsync();
+    }
+
+    private sealed record TicketViewFilter(string Status);
 
     private async Task SelectTicketAsync(Guid ticketId)
     {

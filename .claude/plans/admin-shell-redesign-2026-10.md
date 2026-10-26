@@ -218,14 +218,17 @@ sit side by side at 1920 (440px + 400px), and carry/clear the contact context. R
 dual-panel window down to phone width originally left both panels overlapping; a media-query
 observer now closes the inspector and clears its record context when the layout narrows. Billing's
 row inspector, Escape close and direct `?invoice=` open were also checked with a draft invoice.
-**R3b started 26-10-26:** shared role-level list views now persist filter JSON and selected columns
+**R3b built and browser-checked 26-10-26:** shared role-level list views persist filter JSON and selected columns
 in `AdminListViews` (unique role + list + name, capped at 12), with `ListViewToolbar` providing
-apply/save/update/delete and a column chooser. CRM Contacts is the first adopter: search + status
+apply/save/update/delete and a column chooser. CRM Contacts supports search + status
 and Name/Company/Email/Status columns restore from a saved view, Name cannot be hidden, and its
 table header stays visible in the capped scrolling list. Checked live at desktop and phone: a
 "Lead queue" survived reload, restored its filter/two-column layout, and logged no console errors.
-**Still to do:** adopt the shared toolbar/table anatomy in Billing and Support, then browser-check
-all three together before calling R3b complete.
+Billing invoices now save search/status and Invoice/Client/Total/Due/Status columns; Support tickets
+save status and Subject/Contact/Priority/Status/Tags columns. Invoice and Subject are always shown.
+Checked both remaining adopters against the same disposable data: saved views survived reload and
+restored their filters/columns, their tables became labeled rows at 390px, and the browser logged
+no console errors or warnings. The persistence tests, Release web build, and breakpoint lint pass.
 
 ## R4. Visual system
 

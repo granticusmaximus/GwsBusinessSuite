@@ -5,6 +5,8 @@
 @using GwsBusinessSuite.Application.Billing
 @using GwsBusinessSuite.Application.Crm
 @using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Application.AdminPortal
+@using System.Text.Json
 @inject IBillingService BillingService
 @inject ICrmService CrmService
 @inject IJSRuntime JS
@@ -276,6 +278,16 @@ else
     <div class="col-lg-7">
         <div class="card border-0 shadow-sm">
             <div class="card-header bg-white border-bottom py-3 fw-semibold">Invoices</div>
+            <div class="p-2 border-bottom d-flex gap-2">
+                <input type="search" class="form-control form-control-sm" placeholder="Search invoice or client..." @bind="InvoiceSearch" @bind:event="oninput" />
+                <select class="form-select form-select-sm w-auto" @bind="InvoiceStatusFilter">
+                    <option value="">All statuses</option>
+                    @foreach (var status in InvoiceStatuses.All) { <option value="@status">@status</option> }
+                </select>
+            </div>
+            <ListViewToolbar ListKey="billing.invoices" FilterJson="@InvoiceFilterJson" Columns="InvoiceColumns"
+                             VisibleColumns="_visibleInvoiceColumns" VisibleColumnsChanged="SetInvoiceColumnsAsync"
+                             OnApply="ApplyInvoiceViewAsync" />
             <div class="card-body p-0">
                 @if (Invoices.Count == 0)
                 {
@@ -285,59 +297,35 @@ else
                         </button>
                     </EmptyState>
                 }
+                else if (VisibleInvoices.Count == 0)
+                {
+                    <EmptyState Icon="bi-receipt" Message="No invoices match this view." />
+                }
                 else
                 {
-                    <div class="list-group list-group-flush">
-                        @foreach (var invoice in Invoices)
+                    <div class="table-responsive gws-list-table-wrap">
+                    <table class="table table-hover align-middle mb-0 gws-list-table">
+                        <thead><tr><th>Invoice</th>
+                            @if (InvoiceColumnVisible("client")) { <th>Client</th> }
+                            @if (InvoiceColumnVisible("total")) { <th>Total</th> }
+                            @if (InvoiceColumnVisible("due")) { <th>Due</th> }
+                            @if (InvoiceColumnVisible("status")) { <th>Status</th> }
+                            <th><span class="visually-hidden">Actions</span></th>
+                        </tr></thead><tbody>
+                        @foreach (var invoice in VisibleInvoices)
                         {
-                            <div class="list-group-item @(invoice.Id == _inspectedInvoiceId ? "gws-row-selected" : string.Empty)" id="invoice-@invoice.Id">
-                                <div class="d-flex justify-content-between align-items-start gap-2">
-                                    <div>
-                                        <div class="fw-semibold">
-                                            <button type="button" class="btn btn-link p-0 fw-semibold text-start align-baseline" title="Open this invoice beside the list"
-                                                    aria-pressed="@(invoice.Id == _inspectedInvoiceId ? "true" : "false")" @onclick="() => _inspectedInvoiceId = invoice.Id">@invoice.Title</button>
-                                            <span class="badge @StatusBadgeClass(invoice.Status) ms-1">@invoice.Status</span>
-                                            @if (invoice.IsOverdue(DateTimeOffset.UtcNow))
-                                            {
-                                                <span class="badge text-bg-warning ms-1">Overdue</span>
-                                            }
-                                        </div>
-                                        <div class="d-flex align-items-center gap-2 flex-wrap mt-1">
-                                            <RelationshipChip ContactId="invoice.ContactId" ContactName="@invoice.ContactName" />
-                                            <span class="text-secondary small">
-                                                @invoice.TotalText
-                                                @if (invoice.DueDate is not null)
-                                                {
-                                                    <span> &middot; due @invoice.DueDate.Value.ToLocalTime().ToString("dd-MM-yy")</span>
-                                                }
-                                                @if (invoice.PaidAt is { } paidAt)
-                                                {
-                                                    <span> &middot; paid @paidAt.ToLocalTime().ToString("dd-MM-yy")</span>
-                                                }
-                                                @if (invoice.RemindersSent > 0)
-                                                {
-                                                    <span> &middot; @invoice.RemindersSent reminder@(invoice.RemindersSent == 1 ? "" : "s"), last @invoice.LastReminderAt?.ToLocalTime().ToString("dd-MM-yy")</span>
-                                                }
-                                                @if (invoice.AutoRemind && invoice.Status == InvoiceStatuses.Sent)
-                                                {
-                                                    <span> &middot; auto-remind on</span>
-                                                }
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <div class="d-flex gap-2 flex-shrink-0">
+                            <tr class="@(invoice.Id == _inspectedInvoiceId ? "gws-row-selected" : string.Empty)" id="invoice-@invoice.Id">
+                                <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" title="Open this invoice beside the list" aria-pressed="@(invoice.Id == _inspectedInvoiceId ? "true" : "false")" @onclick="() => _inspectedInvoiceId = invoice.Id">@invoice.Title</button></td>
+                                @if (InvoiceColumnVisible("client")) { <td><RelationshipChip ContactId="invoice.ContactId" ContactName="@invoice.ContactName" /></td> }
+                                @if (InvoiceColumnVisible("total")) { <td class="text-nowrap">@invoice.TotalText</td> }
+                                @if (InvoiceColumnVisible("due")) { <td class="text-nowrap">@(invoice.DueDate?.ToLocalTime().ToString("dd-MM-yy") ?? "—")</td> }
+                                @if (InvoiceColumnVisible("status")) { <td><span class="badge @StatusBadgeClass(invoice.Status)">@invoice.Status</span>@if (invoice.IsOverdue(DateTimeOffset.UtcNow)) { <span class="badge text-bg-warning ms-1">Overdue</span> }</td> }
+                                <td><div class="d-flex gap-1 justify-content-end">
                                         @if (invoice.Status == InvoiceStatuses.Draft)
                                         {
-                                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => LoadIntoEditorAsync(invoice)" disabled="@IsBusy">
-                                                <i class="bi bi-pencil"></i>
-                                            </button>
-                                            <button class="btn btn-sm btn-outline-primary" title="@(BillingService.IsStripeConfigured ? "Send via Stripe" : "Stripe is not configured")"
-                                                    disabled="@(IsBusy || !BillingService.IsStripeConfigured)" @onclick="() => SendInvoiceAsync(invoice.Id)">
-                                                <i class="bi bi-send me-1"></i>Send
-                                            </button>
-                                            <button class="btn btn-sm btn-outline-danger" disabled="@IsBusy" @onclick="() => DeleteDraftAsync(invoice.Id)">
-                                                <i class="bi bi-trash3"></i>
-                                            </button>
+                                            <button class="btn btn-sm btn-outline-secondary" title="Edit" @onclick="() => LoadIntoEditorAsync(invoice)" disabled="@IsBusy"><i class="bi bi-pencil"></i></button>
+                                            <button class="btn btn-sm btn-outline-primary" title="@(BillingService.IsStripeConfigured ? "Send via Stripe" : "Stripe is not configured")" disabled="@(IsBusy || !BillingService.IsStripeConfigured)" @onclick="() => SendInvoiceAsync(invoice.Id)"><i class="bi bi-send"></i></button>
+                                            <button class="btn btn-sm btn-outline-danger" title="Delete" disabled="@IsBusy" @onclick="() => DeleteDraftAsync(invoice.Id)"><i class="bi bi-trash3"></i></button>
                                         }
                                         else
                                         {
@@ -362,11 +350,10 @@ else
                                                 <i class="bi bi-copy"></i>
                                             </button>
                                         }
-                                    </div>
-                                </div>
-                            </div>
+                                </div></td>
+                            </tr>
                         }
-                    </div>
+                    </tbody></table></div>
                 }
             </div>
         </div>
@@ -389,6 +376,21 @@ else
     private string ErrorMessage { get; set; } = string.Empty;
     private string StatusMessage { get; set; } = string.Empty;
     private Guid? PendingDeleteDraftId { get; set; }
+    private string InvoiceSearch { get; set; } = string.Empty;
+    private string InvoiceStatusFilter { get; set; } = string.Empty;
+    private static readonly IReadOnlyList<ListColumnOption> InvoiceColumns =
+    [
+        new("invoice", "Invoice", true), new("client", "Client"), new("total", "Total"),
+        new("due", "Due"), new("status", "Status")
+    ];
+    private IReadOnlySet<string> _visibleInvoiceColumns = new HashSet<string>(["invoice", "client", "total", "due", "status"], StringComparer.Ordinal);
+    private string InvoiceFilterJson => JsonSerializer.Serialize(new InvoiceViewFilter(InvoiceSearch, InvoiceStatusFilter));
+    private IReadOnlyList<InvoiceView> VisibleInvoices => Invoices
+        .Where(invoice => string.IsNullOrWhiteSpace(InvoiceStatusFilter) || invoice.Status == InvoiceStatusFilter)
+        .Where(invoice => string.IsNullOrWhiteSpace(InvoiceSearch)
+            || invoice.Title.Contains(InvoiceSearch, StringComparison.OrdinalIgnoreCase)
+            || invoice.ContactName.Contains(InvoiceSearch, StringComparison.OrdinalIgnoreCase))
+        .ToList();
 
     private string DealIdInput
     {
@@ -445,6 +447,38 @@ else
     {
         Invoices = await BillingService.ListInvoicesAsync();
     }
+
+    private bool InvoiceColumnVisible(string key) => _visibleInvoiceColumns.Contains(key);
+
+    private Task SetInvoiceColumnsAsync(IReadOnlySet<string> columns)
+    {
+        _visibleInvoiceColumns = columns;
+        return Task.CompletedTask;
+    }
+
+    private Task ApplyInvoiceViewAsync(AdminListViewDefinition view)
+    {
+        try
+        {
+            var filter = JsonSerializer.Deserialize<InvoiceViewFilter>(view.FilterJson);
+            InvoiceSearch = filter?.Search ?? string.Empty;
+            InvoiceStatusFilter = filter is not null && InvoiceStatuses.All.Contains(filter.Status)
+                ? filter.Status
+                : string.Empty;
+        }
+        catch (JsonException)
+        {
+            InvoiceSearch = string.Empty;
+            InvoiceStatusFilter = string.Empty;
+        }
+
+        var columns = view.Columns.Where(column => InvoiceColumns.Any(option => option.Key == column)).ToHashSet(StringComparer.Ordinal);
+        columns.Add("invoice");
+        _visibleInvoiceColumns = columns;
+        return Task.CompletedTask;
+    }
+
+    private sealed record InvoiceViewFilter(string Search, string Status);
 
     private async Task OnContactChangedAsync()
     {
