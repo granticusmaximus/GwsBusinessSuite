@@ -77,7 +77,7 @@
             <div class="card-body p-0" style="max-height:520px;overflow-y:auto;">
                 @if (IsLoadingThreads)
                 {
-                    <LoadingIndicator Message="Loading conversations…" />
+                    <ListSkeleton Message="Loading conversations…" />
                 }
                 else if (Threads.Count == 0)
                 {

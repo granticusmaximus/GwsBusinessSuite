@@ -1,0 +1,80 @@
+@using GwsBusinessSuite.Web.Services
+@using Microsoft.AspNetCore.Components.Routing
+@implements IDisposable
+@inject ToastState Toasts
+@inject NavigationManager Navigation
+
+@* The undo toast (shell redesign R5): an interactive island in the static layout that shows
+   ToastState's current toast. The polite live region is always in the page, so screen readers
+   hear each new message; the toast leaves after 8 seconds, and the timer stops while the pointer
+   or keyboard focus is on it. *@
+<div class="gws-toast-region" role="status" aria-live="polite">
+    @if (Toasts.Current is { } toast)
+    {
+        <div class="gws-toast gws-toast-@StatusTones.CssName(toast.Tone)" @key="toast.Id"
+             @onmouseenter="Pause" @onmouseleave="Resume" @onfocusin="Pause" @onfocusout="Resume">
+            <span class="gws-toast-message">@toast.Message</span>
+            @if (toast.Undo is not null)
+            {
+                <button type="button" class="gws-toast-undo" @onclick="() => Toasts.UndoAsync(toast.Id)">Undo</button>
+            }
+            <button type="button" class="gws-toast-close" aria-label="Dismiss" @onclick="() => Toasts.Dismiss(toast.Id)">
+                <i class="bi bi-x-lg" aria-hidden="true"></i>
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    private static readonly TimeSpan Visible = TimeSpan.FromSeconds(8);
+    private CancellationTokenSource? _timer;
+
+    protected override void OnInitialized()
+    {
+        Toasts.Changed += OnChanged;
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnChanged() => _ = InvokeAsync(() =>
+    {
+        Resume();
+        StateHasChanged();
+    });
+
+    // A toast belongs to the page it was shown on (unless it asked to survive one navigation).
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e) => _ = InvokeAsync(Toasts.OnNavigated);
+
+    private void Pause()
+    {
+        _timer?.Cancel();
+        _timer = null;
+    }
+
+    private void Resume()
+    {
+        Pause();
+        if (Toasts.Current is not { } toast) return;
+        _timer = new CancellationTokenSource();
+        _ = DismissLaterAsync(toast.Id, _timer.Token);
+    }
+
+    private async Task DismissLaterAsync(int id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(Visible, cancellationToken);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        await InvokeAsync(() => Toasts.Dismiss(id));
+    }
+
+    public void Dispose()
+    {
+        Pause();
+        Toasts.Changed -= OnChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+}

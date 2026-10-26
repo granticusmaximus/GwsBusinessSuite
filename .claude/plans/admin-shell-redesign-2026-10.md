@@ -295,6 +295,45 @@ no console errors or warnings. The persistence tests, Release web build, and bre
   where an undo exists (delete, archive, status change).
 - Notification bell becomes an inbox: done, snooze, filter by app.
 
+Built as three units: R5a pills and stripes, R5b skeletons and undo, R5c the inbox.
+
+**R5a done 26-10-26.** What shipped:
+- `StatusTone` (Neutral, Success, Warning, Danger, Info) and `StatusTones` (Components/StatusTones.cs):
+  every status a page shows maps to its tone there (invoice, ticket, priority, article, article
+  draft, page, comment, campaign, enrollment, subscriber, announcement, SEO finding, deal band,
+  workflow, affiliate relationship, container, contact), replacing ~15 per-page `*BadgeClass`
+  helpers. `StatusTones.Stripe(tone?)` gives a row its stripe classes. Articles changed meaning on
+  purpose: Draft was yellow and PendingReview fell through to grey; now Draft is neutral and
+  PendingReview is warning (it needs someone). Contacts: Customer success, Lead/Prospect info.
+- `StatusPill` renders a status: the tone's text color on a 14% tint of its fill, with a dot, so
+  it reads apart from a plain badge (counts and labels such as roles stay `badge`). Light-theme
+  success/warning text darkened to #166534/#854d0e so every pill passes 4.8:1 on both themes'
+  panels.
+- Stripes (`.gws-stripe-*`, 3px inset left edge): on a table row's first cell (cells paint over
+  the row; Bootstrap's own cell shadow for hover is kept), on the whole card when the table
+  stacks on phones, and on cards/list items. A selected row's highlight wins. Used for overdue
+  invoices (warning), SLA-breached tickets (danger), CRM contacts with a follow-up due (warning,
+  from the dashboard's own due list), overdue privacy requests (danger, replacing `table-danger`)
+  and failed containers (danger card). The attention pill (Overdue, SLA overdue, Follow-up due)
+  sits in each table's always-shown first column, so a saved view that hides Status can't hide it.
+- Overwatch's frozen/stale cameras are drawn by tactical-globe.js in the tactical (tg-*) style, not
+  in a Blazor list, so they keep their own labels.
+- **Fixed along the way (R4 gaps the live check showed):** app.css styled `.btn-primary` and the
+  outline buttons with plain properties, but Bootstrap's hover/pressed/disabled states read its
+  variables, whose defaults are its hardcoded blue: every disabled primary or outline-primary
+  button (Billing's Remind without Stripe) and every pressed outline button was blue. Buttons now
+  set the variables (outline danger/success still fill red/green on hover). The same blue came
+  from `.nav-pills` (CRM's Contacts/Pipeline), the active dropdown item, open accordions, progress
+  bars (now info blue) and checked checkboxes, radios and switches (~100 uses), now monochrome:
+  the text color with the check in the panel color, per theme, since the live site can swap the
+  accent and a data-URI check can't follow a variable. The density switch matches.
+- Tests: `StatusTonesTests` (18: mappings, every known status deliberate, stripe classes, and
+  app.css having a pill and stripe style per tone).
+- Checked on a throwaway instance with seeded records: every stripe draws (desktop first cell,
+  phone card edge), pills carry the right tones on CRM/Billing/Support/Privacy, dark and light
+  screenshots, computed colors for the disabled Remind/primary, checked box, pills and
+  outline-danger hover; no console errors.
+
 ## R6. Keyboard
 
 - `g` then a letter jumps to a workspace, `j`/`k` move through lists, `?` opens a shortcut sheet.

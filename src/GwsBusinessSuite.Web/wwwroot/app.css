@@ -275,6 +275,100 @@ tr.gws-stripe > :first-child {
     box-shadow: inset 3px 0 0 var(--gws-stripe), inset 0 0 0 9999px var(--bs-table-bg-state, var(--bs-table-bg-type, var(--bs-table-accent-bg)));
 }
 
+/* ── Undo toast and list skeletons (shell redesign R5) ───────
+   ToastHost floats one toast at the bottom centre, above the phone bar, with a stripe in its
+   tone. ListSkeleton's rows stand in for a list while it loads; the shimmer stops for people who
+   ask for reduced motion. */
+.gws-toast-region {
+    position: fixed;
+    left: 50%;
+    bottom: calc(var(--gws-bottom-bar-height) + var(--gws-step-4));
+    z-index: 1070;
+    width: max-content;
+    max-width: calc(100vw - 2 * var(--gws-step-4));
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+.gws-toast {
+    --gws-toast-tone: var(--gws-status-neutral-fill);
+    display: flex;
+    align-items: center;
+    gap: var(--gws-step-2);
+    padding: var(--gws-step-1) var(--gws-step-1) var(--gws-step-1) var(--gws-step-4);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md);
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+    box-shadow: inset 3px 0 0 var(--gws-toast-tone), var(--gws-shadow-md);
+    font-size: .875rem;
+    pointer-events: auto;
+    animation: gws-toast-in .16s ease-out;
+}
+.gws-toast-success { --gws-toast-tone: var(--gws-status-success-fill); }
+.gws-toast-warning { --gws-toast-tone: var(--gws-status-warning-fill); }
+.gws-toast-danger { --gws-toast-tone: var(--gws-status-danger-fill); }
+.gws-toast-info { --gws-toast-tone: var(--gws-status-info-fill); }
+.gws-toast-message { padding-block: var(--gws-step-1); }
+.gws-toast-undo,
+.gws-toast-close {
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0 var(--gws-step-2);
+    border: 0;
+    border-radius: var(--gws-radius-sm);
+    background: none;
+    color: var(--gws-text-strong);
+    font-weight: 700;
+}
+.gws-toast-undo { color: var(--bs-link-color); }
+.gws-toast-undo:hover,
+.gws-toast-close:hover { background: var(--gws-panel-bg-2); }
+.gws-toast-close { color: var(--gws-text-soft); font-size: .75rem; }
+@keyframes gws-toast-in { from { opacity: 0; transform: translateY(8px); } }
+
+.gws-skeleton { display: grid; gap: var(--gws-step-3); padding: var(--gws-card-pad); }
+.gws-skeleton.is-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 14rem), 1fr)); }
+.gws-skeleton-row { display: flex; align-items: center; gap: var(--gws-step-4); min-height: 2.25rem; }
+.gws-skeleton.is-grid .gws-skeleton-row {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+    gap: var(--gws-step-3);
+    min-height: 7rem;
+    padding: var(--gws-step-4);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md);
+}
+.gws-skeleton-row > span {
+    height: .75rem;
+    border-radius: 999px;
+    background: linear-gradient(90deg,
+        color-mix(in srgb, var(--gws-text-soft) 16%, transparent) 0%,
+        color-mix(in srgb, var(--gws-text-soft) 30%, transparent) 50%,
+        color-mix(in srgb, var(--gws-text-soft) 16%, transparent) 100%);
+    background-size: 200% 100%;
+    animation: gws-shimmer 1.4s ease-in-out infinite;
+}
+.gws-skeleton-row > span:nth-child(1) { flex: 0 0 34%; }
+.gws-skeleton-row > span:nth-child(2) { flex: 0 0 22%; }
+.gws-skeleton-row > span:nth-child(3) { flex: 0 0 12%; margin-inline-start: auto; }
+.gws-skeleton-row:nth-of-type(3n + 2) > span:nth-child(1) { flex-basis: 26%; }
+.gws-skeleton-row:nth-of-type(3n) > span:nth-child(1) { flex-basis: 40%; }
+.gws-skeleton.is-grid .gws-skeleton-row > span { flex: none; margin: 0; }
+.gws-skeleton.is-grid .gws-skeleton-row > span:nth-child(1) { width: 60%; }
+.gws-skeleton.is-grid .gws-skeleton-row > span:nth-child(2) { width: 85%; }
+.gws-skeleton.is-grid .gws-skeleton-row > span:nth-child(3) { width: 40%; }
+@keyframes gws-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+    .gws-toast { animation: none; }
+    .gws-skeleton-row > span { animation: none; }
+}
+@media (pointer: coarse) {
+    .gws-toast-undo,
+    .gws-toast-close { min-width: 44px; min-height: 44px; }
+}
+
 /* ── Base ────────────────────────────────────────────────── */
 html, body {
     height: 100%;

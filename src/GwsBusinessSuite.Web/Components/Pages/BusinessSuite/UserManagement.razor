@@ -79,7 +79,7 @@
     <div class="card-body p-0">
         @if (IsLoading)
         {
-            <LoadingIndicator Message="Loading users…" />
+            <ListSkeleton Message="Loading users…" />
         }
         else if (Users.Count == 0)
         {

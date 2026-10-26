@@ -6,6 +6,7 @@
 @using GwsBusinessSuite.Domain.Entities
 @inject ICommentService CommentService
 @inject ILogger<Comments> Logger
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
 
 <PageTitle>Comments</PageTitle>
 
@@ -41,7 +42,7 @@
     <div class="card-body p-0">
         @if (!_loaded)
         {
-            <LoadingIndicator Message="Loading comments…" CssClass="p-4 text-secondary" />
+            <ListSkeleton Message="Loading comments…" />
         }
         else if (AllComments.Count == 0)
         {
@@ -190,13 +191,17 @@
         IsBusy = true;
         StatusMessage = string.Empty;
         ErrorMessage = string.Empty;
+        var previous = AllComments.FirstOrDefault(c => c.Id == commentId)?.Status;
         try
         {
-            if (status == CommentStatuses.Approved) await CommentService.ApproveAsync(commentId);
-            else if (status == CommentStatuses.Spam) await CommentService.MarkSpamAsync(commentId);
-            else if (status == CommentStatuses.Pending) await CommentService.MarkPendingAsync(commentId);
+            await SetStatusAsync(commentId, status);
             await LoadAsync();
-            StatusMessage = $"Comment marked {status}.";
+            Toasts.Show($"Comment marked {status}.", previous is null || previous == status ? null : async () =>
+            {
+                await SetStatusAsync(commentId, previous);
+                await LoadAsync();
+                StateHasChanged();
+            });
         }
         catch (Exception ex)
         {
@@ -208,6 +213,14 @@
             IsBusy = false;
         }
     }
+
+    // Every moderation change goes through here, so an undo can put a comment's old status back.
+    private Task SetStatusAsync(Guid commentId, string status) => status switch
+    {
+        CommentStatuses.Approved => CommentService.ApproveAsync(commentId),
+        CommentStatuses.Spam => CommentService.MarkSpamAsync(commentId),
+        _ => CommentService.MarkPendingAsync(commentId)
+    };
 
     private void DeleteAsync(Guid commentId) => PendingDeleteId = commentId;
 
@@ -244,16 +257,18 @@
         StatusMessage = string.Empty;
         ErrorMessage = string.Empty;
         var ids = SelectedIds.ToList();
+        var previous = AllComments.Where(c => ids.Contains(c.Id) && c.Status != status).ToDictionary(c => c.Id, c => c.Status);
         try
         {
-            foreach (var id in ids)
-            {
-                if (status == CommentStatuses.Approved) await CommentService.ApproveAsync(id);
-                else if (status == CommentStatuses.Spam) await CommentService.MarkSpamAsync(id);
-            }
+            foreach (var id in ids) await SetStatusAsync(id, status);
             SelectedIds.Clear();
             await LoadAsync();
-            StatusMessage = $"Marked {ids.Count} comment(s) as {status}.";
+            Toasts.Show($"Marked {ids.Count} comment(s) as {status}.", previous.Count == 0 ? null : async () =>
+            {
+                foreach (var (id, was) in previous) await SetStatusAsync(id, was);
+                await LoadAsync();
+                StateHasChanged();
+            });
         }
         catch (Exception ex)
         {

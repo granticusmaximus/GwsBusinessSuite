@@ -55,7 +55,7 @@
     </div>
     @if (_busy && Page is null)
     {
-        <div class="card-body text-secondary">Loading security events…</div>
+        <ListSkeleton Message="Loading security events…" />
     }
     else if (Page?.Events.Count is null or 0)
     {

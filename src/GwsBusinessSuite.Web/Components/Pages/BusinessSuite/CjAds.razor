@@ -187,7 +187,7 @@
                   </div>
                   @if (IsLoadingAdvertiserOffers && LoadingAdvertiserId == partner.AdvertiserId)
                   {
-                    <LoadingIndicator Message="Loading active ads…" CssClass="text-secondary" />
+                    <ListSkeleton Message="Loading active ads…" />
                   }
                   else if (activeOffers.Count == 0)
                   {

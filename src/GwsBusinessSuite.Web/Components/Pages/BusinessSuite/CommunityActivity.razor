@@ -22,7 +22,7 @@
     <div class="card-body p-0">
         @if (IsLoading)
         {
-            <LoadingIndicator Message="Loading recent activity…" />
+            <ListSkeleton Message="Loading recent activity…" />
         }
         else if (Events.Count == 0)
         {

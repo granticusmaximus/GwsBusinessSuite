@@ -49,7 +49,7 @@
 
 @if (!_loaded)
 {
-    <LoadingIndicator Message="Loading media…" />
+    <ListSkeleton Message="Loading media…" Grid="true" Rows="6" />
 }
 else if (FilteredAssets.Count == 0)
 {

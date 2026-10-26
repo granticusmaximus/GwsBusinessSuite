@@ -32,7 +32,7 @@
 
 @if (_events is null)
 {
-    <LoadingIndicator Message="Loading world news…" />
+    <ListSkeleton Message="Loading world news…" />
 }
 else if (_events.Count == 0)
 {

@@ -20,6 +20,7 @@
 @inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject ILogger<ContactDetail> Logger
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
 
 <PageTitle>@(Contact?.FullName ?? "Contact") · CRM</PageTitle>
 
@@ -342,8 +343,6 @@ else
     </div>
 }
 
-<ConfirmModal Show="ShowTrashConfirm" Title="Move to Trash" Message="Move this contact to Trash?"
-              ConfirmText="Move to Trash" Busy="IsBusy" OnConfirm="ConfirmTrashAsync" OnCancel="CancelTrash" />
 
 @code {
     [Parameter] public Guid ContactId { get; set; }
@@ -362,7 +361,6 @@ else
     private bool IsBusy { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
     private string ErrorMessage { get; set; } = string.Empty;
-    private bool ShowTrashConfirm { get; set; }
     private List<GwsBusinessSuite.Application.TimeTracking.TimeEntryView> TimeEntries { get; set; } = new();
 
     private async Task BillTimeAsync()
@@ -480,20 +478,23 @@ else
         }
     }
 
-    private void TrashAsync()
+    // No confirmation (R5): Trash keeps the contact, and the toast's Undo restores it and comes
+    // back here, so the toast survives the move to the CRM list.
+    private async Task TrashAsync()
     {
         if (IsBusy) return;
-        ShowTrashConfirm = true;
-    }
-
-    private async Task ConfirmTrashAsync()
-    {
-        ShowTrashConfirm = false;
         IsBusy = true;
+        var contactId = ContactId;
+        var name = Contact?.FullName ?? "Contact";
         try
         {
-            await CrmService.TrashContactAsync(ContactId);
+            await CrmService.TrashContactAsync(contactId);
             Navigation.NavigateTo("/admin/crm");
+            Toasts.Show($"Moved {name} to Trash.", async () =>
+            {
+                await CrmService.RestoreContactAsync(contactId);
+                Navigation.NavigateTo($"/admin/crm/contacts/{contactId}");
+            }, survivesNavigation: true);
         }
         catch (Exception ex)
         {
@@ -502,8 +503,6 @@ else
             IsBusy = false;
         }
     }
-
-    private void CancelTrash() => ShowTrashConfirm = false;
 
     private async Task AddActivityAsync()
     {

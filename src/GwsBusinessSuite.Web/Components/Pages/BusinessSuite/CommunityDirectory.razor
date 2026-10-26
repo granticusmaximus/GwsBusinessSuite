@@ -43,7 +43,7 @@
 
 @if (IsLoading)
 {
-    <LoadingIndicator Message="Loading staff directory…" />
+    <ListSkeleton Message="Loading staff directory…" Grid="true" Rows="6" />
 }
 else if (Profiles.Count == 0)
 {

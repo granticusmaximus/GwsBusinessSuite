@@ -48,7 +48,7 @@
     <div class="card-body">
         @if (!_doLoaded)
         {
-            <LoadingIndicator Message="Loading…" CssClass="text-secondary" />
+            <ListSkeleton Message="Loading containers…" Grid="true" Rows="6" CssClass="px-0" />
         }
         else
         {

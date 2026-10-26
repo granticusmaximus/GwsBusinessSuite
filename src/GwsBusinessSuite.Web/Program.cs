@@ -114,6 +114,7 @@ builder.Services.AddSingleton<PerformanceTelemetry>();
 builder.Services.AddSingleton<SentinelGptGenerationCoordinator>();
 builder.Services.AddScoped<AssistantContext>();
 builder.Services.AddScoped<ShortcutsState>();
+builder.Services.AddScoped<ToastState>();
 builder.Services.AddScoped<RightPanelState>();
 builder.Services.AddOptions<LiveShowIceOptions>()
     .Bind(builder.Configuration.GetSection("LiveShow:Ice"));

@@ -12,6 +12,7 @@
 @inject NavigationManager Navigation
 @inject GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor CurrentCmsSiteAccessor
 @inject ILogger<Pages> Logger
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
 @inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 
 <PageTitle>Pages</PageTitle>
@@ -51,7 +52,7 @@
 
 @if (IsLoading)
 {
-    <LoadingIndicator Message="Loading pages…" />
+    <ListSkeleton Message="Loading pages…" />
 }
 else
 {
@@ -398,19 +399,29 @@ else
         IsCmsBusy = true;
         CmsErrorMessage = string.Empty;
         CmsStatusMessage = string.Empty;
+        // The row leaves at once (R5); if the trash is refused it goes back where it was.
+        var page = CmsPages.FirstOrDefault(p => p.Id == pageId);
+        var index = page is null ? -1 : CmsPages.IndexOf(page);
+        if (page is not null) CmsPages.Remove(page);
         try
         {
-            var title = CmsPages.FirstOrDefault(p => p.Id == pageId)?.Title ?? "Page";
             await CmsBuilderService.TrashPageAsync(pageId);
             CmsPages = (await CmsBuilderService.ListPagesAsync(siteId)).ToList();
             TrashedPages = (await CmsBuilderService.ListTrashedPagesAsync(siteId)).ToList();
-            CmsStatusMessage = $"Moved '{title}' to Trash.";
+            Toasts.Show($"Moved '{page?.Title ?? "Page"}' to Trash.", async () =>
+            {
+                await CmsBuilderService.RestorePageAsync(pageId);
+                CmsPages = (await CmsBuilderService.ListPagesAsync(siteId)).ToList();
+                TrashedPages = (await CmsBuilderService.ListTrashedPagesAsync(siteId)).ToList();
+                StateHasChanged();
+            });
         }
         catch (Exception ex)
         {
             // Same reason the bulk path collects failures: a page with active children refuses.
             Logger.LogError(ex, "Failed to trash page {PageId}.", pageId);
             CmsErrorMessage = ex.Message;
+            if (page is not null && !CmsPages.Contains(page)) CmsPages.Insert(Math.Min(index, CmsPages.Count), page);
         }
         finally
         {

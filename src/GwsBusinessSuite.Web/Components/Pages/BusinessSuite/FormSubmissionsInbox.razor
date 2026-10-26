@@ -57,7 +57,7 @@
     <div class="card-body p-0">
         @if (_isBusy)
         {
-            <p class="text-secondary p-4 mb-0">Loading…</p>
+            <ListSkeleton Message="Loading submissions…" />
         }
         else if (FilteredSubmissions.Count == 0)
         {

@@ -61,7 +61,7 @@
     <div class="card-body p-0">
         @if (IsLoading)
         {
-            <LoadingIndicator Message="Loading departments…" />
+            <ListSkeleton Message="Loading departments…" />
         }
         else if (Departments.Count == 0)
         {
