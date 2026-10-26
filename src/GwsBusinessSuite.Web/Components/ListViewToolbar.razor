@@ -1,0 +1,103 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.AdminPortal
+@using GwsBusinessSuite.Domain.Entities
+@inject IAdminListViewService Views
+@inject ICurrentUserAccessor CurrentUser
+
+<div class="gws-list-view-toolbar" aria-label="List views and columns">
+    <select class="form-select form-select-sm" aria-label="Saved view" value="@(_selectedId?.ToString() ?? string.Empty)" @onchange="SelectAsync">
+        <option value="">Current view</option>
+        @foreach (var view in _views)
+        {
+            <option value="@view.Id">@view.Name</option>
+        }
+    </select>
+    <input class="form-control form-control-sm" aria-label="View name" maxlength="80" placeholder="View name" @bind="_name" />
+    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="SaveAsync" disabled="@_busy">Save view</button>
+    @if (_selectedId is not null)
+    {
+        <button type="button" class="btn btn-sm btn-outline-danger" title="Delete this saved view" aria-label="Delete saved view" @onclick="DeleteAsync" disabled="@_busy">
+            <i class="bi bi-trash3" aria-hidden="true"></i>
+        </button>
+    }
+    <details class="dropdown gws-column-chooser">
+        <summary class="btn btn-sm btn-outline-secondary">Columns</summary>
+        <div class="dropdown-menu dropdown-menu-end show">
+            @foreach (var column in Columns)
+            {
+                <label class="dropdown-item d-flex align-items-center gap-2">
+                    <input type="checkbox" checked="@VisibleColumns.Contains(column.Key)" disabled="@column.Required"
+                           @onchange="args => ToggleColumnAsync(column, args.Value is true)" />
+                    <span>@column.Label</span>
+                </label>
+            }
+        </div>
+    </details>
+</div>
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="small text-danger px-2 pb-2" role="alert">@_error</div>
+}
+@code {
+    [Parameter, EditorRequired] public string ListKey { get; set; } = string.Empty;
+    [Parameter] public string Role { get; set; } = AppRoles.Admin;
+    [Parameter] public string FilterJson { get; set; } = "{}";
+    [Parameter, EditorRequired] public IReadOnlyList<ListColumnOption> Columns { get; set; } = [];
+    [Parameter, EditorRequired] public IReadOnlySet<string> VisibleColumns { get; set; } = new HashSet<string>();
+    [Parameter] public EventCallback<AdminListViewDefinition> OnApply { get; set; }
+    [Parameter] public EventCallback<IReadOnlySet<string>> VisibleColumnsChanged { get; set; }
+
+    private IReadOnlyList<AdminListViewDefinition> _views = [];
+    private Guid? _selectedId;
+    private string _name = string.Empty;
+    private string _error = string.Empty;
+    private bool _busy;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync() => _views = await Views.ListAsync(Role, ListKey);
+
+    private async Task SelectAsync(ChangeEventArgs args)
+    {
+        _selectedId = Guid.TryParse(args.Value?.ToString(), out var id) ? id : null;
+        var selected = _views.FirstOrDefault(view => view.Id == _selectedId);
+        if (selected is null) return;
+        _name = selected.Name;
+        await OnApply.InvokeAsync(selected);
+    }
+
+    private async Task ToggleColumnAsync(ListColumnOption column, bool visible)
+    {
+        var next = VisibleColumns.ToHashSet(StringComparer.Ordinal);
+        if (visible) next.Add(column.Key); else if (!column.Required) next.Remove(column.Key);
+        foreach (var required in Columns.Where(item => item.Required)) next.Add(required.Key);
+        await VisibleColumnsChanged.InvokeAsync(next);
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _error = string.Empty;
+        try
+        {
+            var username = await CurrentUser.GetCurrentUsernameAsync();
+            var saved = await Views.SaveAsync(Role, ListKey, _name, FilterJson, VisibleColumns, username);
+            await ReloadAsync();
+            _selectedId = saved.Id;
+            _name = saved.Name;
+        }
+        catch (ArgumentException ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_selectedId is not { } id) return;
+        _busy = true;
+        await Views.DeleteAsync(id, Role, ListKey);
+        _selectedId = null;
+        _name = string.Empty;
+        await ReloadAsync();
+        _busy = false;
+    }
+}

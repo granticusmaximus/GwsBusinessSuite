@@ -3,6 +3,7 @@
 @attribute [Authorize(Policy = "AdminOnly")]
 @using GwsBusinessSuite.Application.Crm
 @using GwsBusinessSuite.Domain.Entities
+@using System.Text.Json
 @inject ICrmService CrmService
 @inject NavigationManager Navigation
 @inject ILogger<Crm> Logger
@@ -157,6 +158,9 @@ else
                             }
                         </select>
                     </div>
+                    <ListViewToolbar ListKey="crm.contacts" FilterJson="@ContactFilterJson" Columns="ContactColumns"
+                                     VisibleColumns="_visibleContactColumns" VisibleColumnsChanged="SetContactColumnsAsync"
+                                     OnApply="ApplyContactViewAsync" />
                     @if (VisibleContacts.Count == 0)
                     {
                         if (Contacts.Count == 0)
@@ -174,23 +178,26 @@ else
                     }
                     else
                     {
-                        <div class="list-group list-group-flush">
-                            @foreach (var contact in VisibleContacts)
-                            {
-                                <button type="button" aria-pressed="@(contact.Id == _inspectedContactId ? "true" : "false")"
-                                        class="list-group-item list-group-item-action text-start d-flex justify-content-between align-items-start gap-2 @(contact.Id == _inspectedContactId ? "active" : string.Empty)"
-                                        @onclick="() => _inspectedContactId = contact.Id">
-                                    <div>
-                                        <div class="fw-semibold">@contact.FullName</div>
-                                        <div class="small text-secondary">
-                                            @(!string.IsNullOrWhiteSpace(contact.Company) ? contact.Company : "No company")
-                                        </div>
-                                    </div>
-                                    <span class="badge text-bg-secondary">
-                                        @contact.Status
-                                    </span>
-                                </button>
-                            }
+                        <div class="table-responsive gws-list-table-wrap">
+                            <table class="table table-hover align-middle mb-0 gws-list-table">
+                                <thead><tr>
+                                    <th>Name</th>
+                                    @if (ContactColumnVisible("company")) { <th>Company</th> }
+                                    @if (ContactColumnVisible("email")) { <th>Email</th> }
+                                    @if (ContactColumnVisible("status")) { <th>Status</th> }
+                                </tr></thead>
+                                <tbody>
+                                @foreach (var contact in VisibleContacts)
+                                {
+                                    <tr class="@(contact.Id == _inspectedContactId ? "gws-row-selected" : string.Empty)">
+                                        <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" aria-pressed="@(contact.Id == _inspectedContactId ? "true" : "false")" @onclick="() => _inspectedContactId = contact.Id">@contact.FullName</button></td>
+                                        @if (ContactColumnVisible("company")) { <td>@(string.IsNullOrWhiteSpace(contact.Company) ? "—" : contact.Company)</td> }
+                                        @if (ContactColumnVisible("email")) { <td>@(string.IsNullOrWhiteSpace(contact.Email) ? "—" : contact.Email)</td> }
+                                        @if (ContactColumnVisible("status")) { <td><span class="badge text-bg-secondary">@contact.Status</span></td> }
+                                    </tr>
+                                }
+                                </tbody>
+                            </table>
                         </div>
                     }
                 }
@@ -346,6 +353,12 @@ else
     private string SearchText { get; set; } = string.Empty;
     private string StatusFilter { get; set; } = "All";
     private string ActiveTab { get; set; } = "Contacts";
+    private static readonly IReadOnlyList<ListColumnOption> ContactColumns =
+    [
+        new("name", "Name", true), new("company", "Company"), new("email", "Email"), new("status", "Status")
+    ];
+    private IReadOnlySet<string> _visibleContactColumns = new HashSet<string>(["name", "company", "email", "status"], StringComparer.Ordinal);
+    private string ContactFilterJson => JsonSerializer.Serialize(new ContactViewFilter(SearchText, StatusFilter));
     private List<DealView> Deals { get; set; } = new();
     private DealEditorModel DealEditor { get; set; } = new();
     private Guid? EditingDealId { get; set; }
@@ -498,6 +511,35 @@ else
     }
 
     private void OnStatusFilterChange(ChangeEventArgs e) => StatusFilter = e.Value?.ToString() ?? "All";
+
+    private bool ContactColumnVisible(string key) => _visibleContactColumns.Contains(key);
+
+    private Task SetContactColumnsAsync(IReadOnlySet<string> columns)
+    {
+        _visibleContactColumns = columns;
+        return Task.CompletedTask;
+    }
+
+    private Task ApplyContactViewAsync(GwsBusinessSuite.Application.AdminPortal.AdminListViewDefinition view)
+    {
+        try
+        {
+            var filter = JsonSerializer.Deserialize<ContactViewFilter>(view.FilterJson);
+            SearchText = filter?.Search ?? string.Empty;
+            StatusFilter = filter is not null && ContactStatuses.All.Contains(filter.Status) ? filter.Status : "All";
+        }
+        catch (JsonException)
+        {
+            SearchText = string.Empty;
+            StatusFilter = "All";
+        }
+        var columns = view.Columns.Where(column => ContactColumns.Any(option => option.Key == column)).ToHashSet(StringComparer.Ordinal);
+        columns.Add("name");
+        _visibleContactColumns = columns;
+        return Task.CompletedTask;
+    }
+
+    private sealed record ContactViewFilter(string Search, string Status);
 
     private List<Contact> VisibleContacts
     {

@@ -205,7 +205,7 @@ of the earlier conventions:
 - The SentinelGPT panel gets the inspector's record as its context automatically (the
   `AssistantContext` already works this way).
 
-**R3a built 26-10-26 (not yet checked in a browser):** `RecordInspector` (fixed right panel, same
+**R3a built and browser-checked 26-10-26:** `RecordInspector` (fixed right panel, same
 edge as SentinelGPT; Escape/close; focus on open; sets AssistantContext from `AssistantPage`),
 `RightPanelState` (opening one closes the other unless `gwsAssistant.wide()` - 1920px+, not 1440:
 at 1440 both leave ~350px of page), app.css makes room at 1440+ and side by side at 1920+.
@@ -213,8 +213,19 @@ Adopters: CRM contacts (`ContactInspector`: status, email, follow-up, open deals
 invoices, latest activity, SentinelGPT context) and Billing (title opens the invoice with facts,
 notes, line items and the row's actions; replaces expand-in-place; `?invoice=` opens it).
 Support kept its two-column view for now.
-**Still to do:** browser check (CRM inspector, Billing inspector, SentinelGPT coexistence at
-1440 and 1920, phone), then R3b (saved views, column chooser, sticky headers).
+Checked on a disposable local instance: CRM inspector and assistant exclude each other at 1440,
+sit side by side at 1920 (440px + 400px), and carry/clear the contact context. Resizing a live
+dual-panel window down to phone width originally left both panels overlapping; a media-query
+observer now closes the inspector and clears its record context when the layout narrows. Billing's
+row inspector, Escape close and direct `?invoice=` open were also checked with a draft invoice.
+**R3b started 26-10-26:** shared role-level list views now persist filter JSON and selected columns
+in `AdminListViews` (unique role + list + name, capped at 12), with `ListViewToolbar` providing
+apply/save/update/delete and a column chooser. CRM Contacts is the first adopter: search + status
+and Name/Company/Email/Status columns restore from a saved view, Name cannot be hidden, and its
+table header stays visible in the capped scrolling list. Checked live at desktop and phone: a
+"Lead queue" survived reload, restored its filter/two-column layout, and logged no console errors.
+**Still to do:** adopt the shared toolbar/table anatomy in Billing and Support, then browser-check
+all three together before calling R3b complete.
 
 ## R4. Visual system
 

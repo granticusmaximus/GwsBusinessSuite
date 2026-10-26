@@ -428,6 +428,16 @@ h1:focus { outline: none; }
 .gws-content .card-body,
 .gws-content .table-responsive { min-width: 0; max-width: 100%; }
 
+/* Shared R3 list anatomy: the table owns its vertical scroll so headings remain available while
+   reviewing a long queue. Lists can opt into columns without changing the page shell. */
+.gws-list-table-wrap { max-height: min(60dvh, 42rem); overflow: auto; }
+.gws-list-table > thead { position: sticky; top: 0; z-index: 2; }
+.gws-list-table > thead > tr > th {
+    background: var(--gws-panel-bg);
+    border-bottom-color: var(--gws-panel-border);
+    box-shadow: 0 1px 0 var(--gws-panel-border);
+}
+
 /* ── Canvas fullscreen mode ──────────────────────────────────
    Mirrors how WordPress/Elementor/Squarespace take over the full
    viewport while editing — no app sidebar/topbar/admin-bar, the builder's

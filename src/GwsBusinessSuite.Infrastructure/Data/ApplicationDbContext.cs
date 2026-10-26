@@ -94,6 +94,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<OverwatchBriefingSubscription> OverwatchBriefingSubscriptions => Set<OverwatchBriefingSubscription>();
     public DbSet<OverwatchMapNote> OverwatchMapNotes => Set<OverwatchMapNote>();
     public DbSet<UserShortcut> UserShortcuts => Set<UserShortcut>();
+    public DbSet<AdminListView> AdminListViews => Set<AdminListView>();
     public DbSet<SentinelQuestion> SentinelQuestions => Set<SentinelQuestion>();
     public DbSet<PageTag> PageTags => Set<PageTag>();
     public DbSet<PageView> PageViews => Set<PageView>();
@@ -474,6 +475,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<UserShortcut>().Property(x => x.Url).HasMaxLength(500);
         modelBuilder.Entity<UserShortcut>().Property(x => x.Title).HasMaxLength(200);
         modelBuilder.Entity<UserShortcut>().Property(x => x.Icon).HasMaxLength(60);
+        modelBuilder.Entity<AdminListView>().HasIndex(x => new { x.Role, x.ListKey, x.Name }).IsUnique();
+        modelBuilder.Entity<AdminListView>().Property(x => x.Role).HasMaxLength(40);
+        modelBuilder.Entity<AdminListView>().Property(x => x.ListKey).HasMaxLength(80);
+        modelBuilder.Entity<AdminListView>().Property(x => x.Name).HasMaxLength(80);
+        modelBuilder.Entity<AdminListView>().Property(x => x.FilterJson).HasMaxLength(4000);
+        modelBuilder.Entity<AdminListView>().Property(x => x.ColumnsCsv).HasMaxLength(1000);
         modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Title).HasMaxLength(80);
         modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Body).HasMaxLength(2000);
         modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Color).HasMaxLength(9);

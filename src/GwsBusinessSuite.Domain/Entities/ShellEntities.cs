@@ -21,3 +21,14 @@ public static class UserShortcutKinds
     public const string Pin = "pin";
     public const string Recent = "recent";
 }
+
+// A named filter/column layout for an admin list. Views belong to a role rather than a person so
+// a useful queue assembled by one operator is immediately available to the rest of that role.
+public sealed class AdminListView : AuditableEntity
+{
+    public required string Role { get; set; }
+    public required string ListKey { get; set; }
+    public required string Name { get; set; }
+    public string FilterJson { get; set; } = "{}";
+    public string ColumnsCsv { get; set; } = string.Empty;
+}
