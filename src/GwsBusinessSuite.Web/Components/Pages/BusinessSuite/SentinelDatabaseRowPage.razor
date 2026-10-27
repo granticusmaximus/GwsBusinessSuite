@@ -100,6 +100,9 @@
                     <span class="sentinel-row-page-title-static text-truncate">@RowTitle</span>
                 </div>
 
+                @* Editable fields a host puts above the page (Boards' card drawer). *@
+                @FieldsContent
+
                 @if (PageProperties.Count > 0)
                 {
                     <div class="sentinel-row-page-properties">
@@ -237,6 +240,7 @@
     [Parameter] public EventCallback OnSaved { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback<Guid> OnOpenPage { get; set; }
+    [Parameter] public RenderFragment? FieldsContent { get; set; }
 
     private ElementReference _editorContainer;
     private IJSObjectReference? _module;
@@ -379,7 +383,8 @@
                 BlocksJson = _blocksJson,
                 Icon = _icon,
                 CoverImageUrl = _coverImageUrl,
-                Values = Values.ToDictionary(pair => pair.Key, pair => pair.Value),
+                // This page never edits properties: keep whatever is stored, not the copy it opened with.
+                KeepPropertyValues = true,
                 CreateRevisionCheckpoint = false,
                 ExpectedVersion = _currentVersion
             }, user, cancellationToken);
@@ -593,7 +598,8 @@
                 BlocksJson = _blocksJson,
                 Icon = _icon,
                 CoverImageUrl = _coverImageUrl,
-                Values = Values.ToDictionary(pair => pair.Key, pair => pair.Value),
+                // This page never edits properties: keep whatever is stored, not the copy it opened with.
+                KeepPropertyValues = true,
                 ExpectedVersion = _currentVersion
             }, user);
             _currentVersion = saved.ConcurrencyVersion;

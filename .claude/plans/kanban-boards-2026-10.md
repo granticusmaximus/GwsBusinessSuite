@@ -107,6 +107,35 @@ Route: `/admin/boards` (your boards, new board from a template) and `/admin/boar
   card left/right, `1`-`4` priority, `e` rename, `x` select, Esc closes; ? sheet lists them.
 - Multi-select + bulk move/label/priority/trash with Undo (T3's ListSelection and toasts).
 
+**K2 done 27-10-26.**
+- The drawer is Sentinel's own `SentinelDatabaseRowPage` (side peek: the card's page, history,
+  autosave) with a new `FieldsContent` slot holding `KanbanCardFields`: title, Status (moves the card
+  to the top of that column), Priority, Labels (toggle chips), Due, Assignee (+ Me), Estimate, any
+  other Select (Sprint), sub-items (tick done, open, add), created/updated. `?card={rowId}` opens
+  it, so a card has its own link.
+- **Fixed in Sentinel along the way:** the row page's autosave resent the property values it opened
+  with (`editor.Values` is a full replacement), reverting anything changed since - a table cell,
+  a board drag, the drawer's fields. `WikiDatabaseRowEditor.KeepPropertyValues` makes a page-only
+  save keep the stored values (and skip re-validating them); the row page always sets it, since it
+  never edits properties. Also: wiki-block-editor.js's `OnCursorMoved` call raised an unhandled
+  rejection on every cursor move in any host without live cursors (Sentinel's row page too) - the
+  try/catch never saw the async failure; it now catches the promise.
+- Dates "as written" (`DateTimeOffset.Date`): Sentinel stores a picked date at UTC midnight, which
+  local time showed as the day before west of UTC.
+- Service: `SetCardsValueAsync` (one property, per-card change function, returns previous values),
+  `RestoreCardValuesAsync`, sub-items (list/add/done), trash/restore. `KanbanBoard` carries the
+  Priority and Label options.
+- Keys (kanban-board.js; off while typing or the drawer is open): `e` open + rename, `c` quick add
+  in the card's column, `x` select (⇧ range), `0`-`4` priority with Undo, `?` shortcut card, Esc
+  clears the selection; ⇧/⌘/Ctrl-click selects instead of opening (a capture listener, so Blazor
+  never sees that click). Bulk bar: Move to, Priority, Add label, Assign to me, Trash - each with Undo.
+- Tests: `KanbanBoardServiceTests` +3 (a page-only save keeps a field changed since it opened;
+  per-card set, unchanged skipped, restore; sub-items and trash/restore). Sentinel's 170+ database
+  tests still pass.
+- Checked live: every drawer field, sub-items, status move, rename, autosave then reload keeps
+  the fields, `2` / `?` / `c`, ⌘-click selection, bulk move + Undo, label, trash + Undo, deep link,
+  no console errors.
+
 ### K3 - Flow control
 - WIP limits per column (header "3 / 4", amber at the limit, red over it).
 - Card aging: days in the current column on each in-progress card, faded dots after N days.
@@ -130,5 +159,32 @@ Route: `/admin/boards` (your boards, new board from a template) and `/admin/boar
   notify, or run an Automation workflow.
 - Live updates when a card changes elsewhere (the board's open in two places), recurring cards and
   card templates from the board, Mac app check, user guide.
+
+### K7 - Visual polish (Grant: "complete all", 27-10-26)
+- Motion: FLIP glide when cards move, neighbours open a gap while dragging, a lift (shadow, tilt
+  with the pointer) and a settle on drop; reduced motion turns it off.
+- Sticky frosted column headers, a faint status-colour wash down each column.
+- Board backgrounds (gradients, mesh, an image) and an accent colour per board, light and dark.
+- Covers from the first image in a card's page; compact / comfortable / rich card sizes.
+- Column WIP rings, card checklist bars, a sprint burndown sparkline in the header.
+- Aging: cards fade and pick up an amber glow the longer they sit in progress.
+- Presence rings on avatars of others viewing the board; a pulse on a card being edited.
+- Zoom out (mini-map of a big board) and focus one column.
+- Done celebration (a check burst), illustrated empty columns.
+
+### K8 - Beyond the competition
+- One-line cards: "Fix login !high #bug @grant fri" -> priority, label, assignee, due, as chips
+  while typing, no AI needed.
+- SentinelGPT on the board (local Ollama, free and private): break a card into sub-cards and a
+  checklist, a standup from the status log, "what's stuck and why".
+- Forecasts: Monte Carlo from real throughput ("85% likely done by Friday") for a column, a
+  sprint or a set of cards.
+- Business links: make a card from a support ticket; link cards to contacts, tickets and invoices
+  (RelationshipChip + hover previews); Done can resolve the ticket.
+- Time on cards: start/stop a timer (Time Tracking) from a card; billable hours go to Billing.
+- Rules through the Automation engine (K6) - no run caps.
+- "My day": every card assigned to me across boards, plus tickets and follow-ups due today.
+- Capture from anywhere on the Mac: menu-bar / hotkey quick add to a board; offline in the Mac app.
+- Public roadmaps: publish a board read-only through Sentinel publishing, with votes.
 
 Each phase is one verified unit (verify-release + a live browser check), in order.

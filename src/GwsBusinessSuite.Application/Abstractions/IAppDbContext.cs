@@ -14,6 +14,8 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<TimeEntry> TimeEntries { get; }
     DbSet<InvoiceLineItem> InvoiceLineItems { get; }
     DbSet<BillingSettings> BillingSettings { get; }
+    DbSet<WikiDatabaseRowStatusChange> WikiDatabaseRowStatusChanges { get; }
+    DbSet<KanbanBoardSettings> KanbanBoardSettings { get; }
     DbSet<SupportTicket> SupportTickets { get; }
     DbSet<SupportTicketMessage> SupportTicketMessages { get; }
     DbSet<SupportTicketAttachment> SupportTicketAttachments { get; }

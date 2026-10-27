@@ -3,8 +3,11 @@
 @attribute [Authorize(Policy = "AdminOnly")]
 @implements IAsyncDisposable
 @using GwsBusinessSuite.Application.Boards
+@using System.Text.Json.Nodes
+@using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
 @inject IKanbanBoardService BoardService
+@inject IWikiDatabaseService Databases
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
@@ -38,8 +41,60 @@ else
                 <a class="btn btn-sm btn-outline-secondary" href="admin/sentinel?database=@_board.DatabaseId" title="The same board in Sentinel, with table, calendar and timeline views">
                     <i class="bi bi-journal-bookmark me-1" aria-hidden="true"></i>Sentinel
                 </a>
+                <button type="button" class="btn btn-sm btn-outline-secondary kb-help-toggle" title="Keyboard shortcuts (?)" aria-expanded="@(_showHelp ? "true" : "false")"
+                        @onclick="() => _showHelp = !_showHelp"><i class="bi bi-keyboard" aria-hidden="true"></i><span class="visually-hidden">Keyboard shortcuts</span></button>
             </div>
         </header>
+
+        @if (_showHelp)
+        {
+            <section class="kb-help" aria-label="Board keyboard shortcuts">
+                <dl>
+                    <dt><kbd>←</kbd> <kbd>→</kbd> <kbd>↑</kbd> <kbd>↓</kbd> or <kbd>h</kbd> <kbd>j</kbd> <kbd>k</kbd> <kbd>l</kbd></dt><dd>Move between cards</dd>
+                    <dt><kbd>Enter</kbd></dt><dd>Open the card</dd>
+                    <dt><kbd>e</kbd></dt><dd>Open it and rename</dd>
+                    <dt><kbd>c</kbd></dt><dd>New card in this column</dd>
+                    <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Move the card a column left or right</dd>
+                    <dt><kbd>Alt</kbd> + <kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Move it up or down</dd>
+                    <dt><kbd>1</kbd>–<kbd>4</kbd>, <kbd>0</kbd></dt><dd>Priority: urgent, high, medium, low; none</dd>
+                    <dt><kbd>x</kbd>, <kbd>⇧</kbd>/<kbd>⌘</kbd>-click</dt><dd>Select cards (⇧ selects a range)</dd>
+                    <dt><kbd>Esc</kbd></dt><dd>Clear the selection</dd>
+                    <dt><kbd>?</kbd></dt><dd>Show or hide this list</dd>
+                </dl>
+            </section>
+        }
+
+        @if (SelectedCards.Count > 0)
+        {
+            <div class="kb-bulk" role="region" aria-label="Actions for the selected cards">
+                <span class="kb-bulk-count"><strong>@SelectedCards.Count</strong> selected</span>
+                <select class="form-select form-select-sm w-auto" aria-label="Move the selected cards to a column" @key="@($"move-{_bulkKey}")" @onchange="BulkMoveAsync">
+                    <option value="">Move to…</option>
+                    @foreach (var column in _columns.Where(column => column.OptionId is not null)) { <option value="@column.Key">@column.Label</option> }
+                </select>
+                @if (PriorityOptions.Count > 0)
+                {
+                    <select class="form-select form-select-sm w-auto" aria-label="Set the selected cards' priority" @key="@($"priority-{_bulkKey}")" @onchange="BulkPriorityAsync">
+                        <option value="">Priority…</option>
+                        @foreach (var option in PriorityOptions) { <option value="@option.Id">@option.Label</option> }
+                        <option value="none">None</option>
+                    </select>
+                }
+                @if (LabelOptions.Count > 0)
+                {
+                    <select class="form-select form-select-sm w-auto" aria-label="Add a label to the selected cards" @key="@($"label-{_bulkKey}")" @onchange="BulkLabelAsync">
+                        <option value="">Add label…</option>
+                        @foreach (var option in LabelOptions) { <option value="@option.Id">@option.Label</option> }
+                    </select>
+                }
+                @if (_board.Fields.AssigneePropertyId is not null)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="BulkAssignMeAsync"><i class="bi bi-person-check me-1" aria-hidden="true"></i>Assign to me</button>
+                }
+                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="BulkTrashAsync"><i class="bi bi-trash3 me-1" aria-hidden="true"></i>Trash</button>
+                <button type="button" class="btn btn-sm btn-link ms-auto" @onclick="() => ClearSelection()">Clear</button>
+            </div>
+        }
 
         <div class="kb-columns" data-kb-scroller>
             @foreach (var column in _columns)
@@ -72,8 +127,10 @@ else
                     <ol class="kb-cards" data-kb-cards>
                         @foreach (var card in cards)
                         {
-                            <li class="kb-card @(IsOverdue(card, column) ? "is-overdue" : "")" @key="card.RowId" data-kb-card="@card.RowId" tabindex="0"
+                            <li class="kb-card @(IsOverdue(card, column) ? "is-overdue" : "") @(_selection.IsSelected(card.RowId) ? "is-selected" : "") @(card.RowId == CardQuery ? "is-open" : "")"
+                                @key="card.RowId" data-kb-card="@card.RowId" tabindex="0" aria-selected="@(_selection.IsSelected(card.RowId) ? "true" : "false")"
                                 aria-label="@CardLabel(card)" @onclick="() => OpenCard(card)">
+                                @if (_selection.IsSelected(card.RowId)) { <span class="kb-check" aria-hidden="true"><i class="bi bi-check-lg"></i></span> }
                                 <span class="kb-grip" data-kb-grip aria-hidden="true"><i class="bi bi-grip-vertical"></i></span>
                                 @if (!string.IsNullOrWhiteSpace(card.CoverImageUrl))
                                 {
@@ -101,7 +158,7 @@ else
                                     <div class="kb-card-foot">
                                         @if (card.Due is { } due)
                                         {
-                                            <span class="kb-meta @DueClass(card, column)" title="Due @due.ToLocalGwsDate()"><i class="bi bi-calendar-event" aria-hidden="true"></i>@due.ToLocalGwsDate()</span>
+                                            <span class="kb-meta @DueClass(card, column)" title="Due @AsWritten(due).ToGwsDate()"><i class="bi bi-calendar-event" aria-hidden="true"></i>@AsWritten(due).ToGwsDate()</span>
                                         }
                                         @if (card.ChecklistTotal > 0)
                                         {
@@ -133,10 +190,34 @@ else
             }
         </div>
     </div>
+
+    @if (_openRow is not null && _database is not null)
+    {
+        @* The card drawer (K2): Sentinel's own page panel - the card's page, history, autosave - with
+           the board's fields on top. Its saves keep property values (KeepPropertyValues), so a field
+           changed here is never reverted by the page's autosave. *@
+        <SentinelDatabaseRowPage @key="_openRow.Id" Database="_database" Row="_openRow" OpenMode="@WikiDatabaseOpenPageModes.SidePeek"
+                                 OnSaved="RefreshAsync" OnClose="CloseCard" OnOpenPage="OpenSentinelPage">
+            <FieldsContent>
+                <KanbanCardFields Board="_board" Database="_database" Row="_openRow" OnChanged="RefreshAsync"
+                                  OnStatusChanged="SetOpenCardStatusAsync" OnOpenSubItem="OpenRow" />
+            </FieldsContent>
+        </SentinelDatabaseRowPage>
+    }
 }
 
 @code {
     [Parameter] public Guid DatabaseId { get; set; }
+    // ?card={rowId}: the card open in the drawer, so a card has a link of its own.
+    [SupplyParameterFromQuery(Name = "card")] public Guid? CardQuery { get; set; }
+
+    private WikiDatabase? _database;
+    private WikiDatabaseRow? _openRow;
+    private Guid _loadedDatabase;
+    private bool _focusTitle;
+    private bool _showHelp;
+    private int _bulkKey;
+    private readonly ListSelection<Guid> _selection = new();
 
     private KanbanBoard? _board;
     private List<ColumnState> _columns = [];
@@ -166,7 +247,40 @@ else
     private int TotalCount => _columns.Sum(column => column.Cards.Count);
     private int OpenCount => _columns.Where(column => !column.IsComplete).Sum(column => column.Cards.Count);
 
-    protected override async Task OnParametersSetAsync() => await LoadAsync();
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedDatabase != DatabaseId)
+        {
+            _loadedDatabase = DatabaseId;
+            _selection.Clear();
+            await LoadAsync();
+        }
+        await SyncDrawerAsync();
+    }
+
+    private async Task SyncDrawerAsync()
+    {
+        if (CardQuery is not { } id || _board is null)
+        {
+            _openRow = null;
+            return;
+        }
+        if (_openRow?.Id == id) return;
+        _database = await Databases.GetDatabaseAsync(DatabaseId);
+        _openRow = _database?.Rows.FirstOrDefault(row => row.Id == id);
+    }
+
+    // After a change anywhere: the board, and the open card's fresh row.
+    private async Task RefreshAsync()
+    {
+        await LoadAsync();
+        if (_openRow is not null)
+        {
+            _database = await Databases.GetDatabaseAsync(DatabaseId);
+            _openRow = _database?.Rows.FirstOrDefault(row => row.Id == _openRow.Id);
+            if (_openRow is null) CloseCard();
+        }
+    }
 
     private async Task LoadAsync()
     {
@@ -174,6 +288,7 @@ else
         {
             _board = await BoardService.GetBoardAsync(DatabaseId);
             _columns = _board?.Columns.Select(column => new ColumnState(column)).ToList() ?? [];
+            _selection.Retain(_columns.SelectMany(column => column.Cards).Select(card => card.RowId));
         }
         catch (Exception ex)
         {
@@ -198,6 +313,11 @@ else
         {
             _focusQuickAdd = false;
             await _quickAddInput.FocusAsync();
+        }
+        if (_focusTitle && _openRow is not null)
+        {
+            _focusTitle = false;
+            await JS.InvokeVoidAsync("gwsFocus.field", "#kb-card-title");
         }
     }
 
@@ -284,19 +404,191 @@ else
         }
     }
 
-    // The card's own page, in Sentinel (a drawer on the board comes in K2).
-    private void OpenCard(KanbanCard card) => Navigation.NavigateTo($"admin/sentinel?database={DatabaseId}&row={card.RowId}");
+    private void OpenCard(KanbanCard card) => OpenRow(card.RowId);
+
+    private void OpenRow(Guid rowId) => Navigation.NavigateTo($"admin/boards/{DatabaseId}?card={rowId}", replace: CardQuery is not null);
+
+    private void CloseCard() => Navigation.NavigateTo($"admin/boards/{DatabaseId}", replace: true);
+
+    private void OpenSentinelPage(Guid pageId) => Navigation.NavigateTo($"admin/sentinel?page={pageId}");
+
+    // The drawer's Status field: the card moves to the top of the new column, as a drop there would.
+    private async Task SetOpenCardStatusAsync(string columnKey)
+    {
+        if (_openRow is null || _columns.FirstOrDefault(column => column.Key == columnKey) is not { } target) return;
+        var first = target.Cards.FirstOrDefault(card => card.RowId != _openRow.Id);
+        await MoveCard(_openRow.Id.ToString(), columnKey, first?.RowId.ToString() ?? string.Empty);
+        await RefreshAsync();
+    }
+
+    // ---- Keyboard (kanban-board.js) ----
+
+    [JSInvokable]
+    public void OpenCardFromKeys(string rowId, bool rename)
+    {
+        if (!Guid.TryParse(rowId, out var id)) return;
+        _focusTitle = rename;
+        OpenRow(id);
+    }
+
+    [JSInvokable]
+    public void QuickAddIn(string columnKey)
+    {
+        if (_columns.FirstOrDefault(column => column.Key == columnKey) is not { } column) return;
+        OpenQuickAdd(column);
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void ToggleHelp()
+    {
+        _showHelp = !_showHelp;
+        StateHasChanged();
+    }
+
+    // 1-4 pick the priority options in order (Urgent, High, Medium, Low); 0 clears it.
+    [JSInvokable]
+    public async Task SetPriorityByNumber(string rowId, int number)
+    {
+        if (!Guid.TryParse(rowId, out var id) || _board?.Fields.PriorityPropertyId is not { } priorityId) return;
+        var option = number == 0 ? null : PriorityOptions.ElementAtOrDefault(number - 1);
+        if (number != 0 && option is null) return;
+        await ApplyAsync([id], priorityId, _ => option is null ? null : JsonValue.Create(option.Id), $"{option?.Label ?? "no"} priority");
+    }
+
+    // ---- Selection and bulk actions ----
+
+    private IReadOnlyList<Guid> CardOrder => _columns.SelectMany(column => Visible(column)).Select(card => card.RowId).ToList();
+    private List<KanbanCard> SelectedCards => _columns.SelectMany(column => column.Cards).Where(card => _selection.IsSelected(card.RowId)).ToList();
+    private IReadOnlyList<KanbanOption> PriorityOptions => _board?.PriorityOptions ?? [];
+    private IReadOnlyList<KanbanOption> LabelOptions => _board?.LabelOptions ?? [];
+
+    [JSInvokable]
+    public void ToggleSelect(string rowId, bool range)
+    {
+        if (!Guid.TryParse(rowId, out var id)) return;
+        _selection.Toggle(id, range, CardOrder);
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public bool ClearSelection()
+    {
+        if (_selection.Count == 0) return false;
+        _selection.Clear();
+        StateHasChanged();
+        return true;
+    }
+
+    private async Task BulkMoveAsync(ChangeEventArgs e)
+    {
+        _bulkKey++;
+        if (e.Value is not string key || key.Length == 0 || _board is null) return;
+        var column = _columns.FirstOrDefault(item => item.Key == key);
+        if (column?.OptionId is not { } optionId) return;
+        await ApplyAsync(SelectedCards.Select(card => card.RowId).ToList(), _board.Fields.StatusPropertyId, _ => JsonValue.Create(optionId), $"moved to {column.Label}");
+    }
+
+    private async Task BulkPriorityAsync(ChangeEventArgs e)
+    {
+        _bulkKey++;
+        if (e.Value is not string value || value.Length == 0 || _board?.Fields.PriorityPropertyId is not { } priorityId) return;
+        var label = value == "none" ? "no" : PriorityOptions.FirstOrDefault(option => option.Id == value)?.Label;
+        if (label is null) return;
+        await ApplyAsync(SelectedCards.Select(card => card.RowId).ToList(), priorityId, _ => value == "none" ? null : JsonValue.Create(value), $"{label} priority");
+    }
+
+    private async Task BulkLabelAsync(ChangeEventArgs e)
+    {
+        _bulkKey++;
+        if (e.Value is not string value || value.Length == 0 || _board?.Fields.LabelsPropertyId is not { } labelsId) return;
+        var label = LabelOptions.FirstOrDefault(option => option.Id == value)?.Label;
+        if (label is null) return;
+        await ApplyAsync(SelectedCards.Select(card => card.RowId).ToList(), labelsId, current =>
+        {
+            var ids = current is JsonArray array ? array.Select(node => node?.GetValue<string>()).OfType<string>().ToList() : [];
+            if (!ids.Contains(value)) ids.Add(value);
+            return new JsonArray(ids.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
+        }, $"labelled {label}");
+    }
+
+    private async Task BulkAssignMeAsync()
+    {
+        if (_board?.Fields.AssigneePropertyId is not { } assigneeId) return;
+        var me = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await ApplyAsync(SelectedCards.Select(card => card.RowId).ToList(), assigneeId, current =>
+        {
+            var people = current is JsonArray array ? array.Select(node => node?.GetValue<string>()).OfType<string>().ToList() : [];
+            if (!people.Contains(me, StringComparer.OrdinalIgnoreCase)) people.Add(me);
+            return new JsonArray(people.Select(person => (JsonNode?)JsonValue.Create(person)).ToArray());
+        }, $"assigned to {me}");
+    }
+
+    private async Task BulkTrashAsync()
+    {
+        var ids = SelectedCards.Select(card => card.RowId).ToList();
+        if (ids.Count == 0) return;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await BoardService.TrashCardsAsync(DatabaseId, ids, performedBy);
+            _selection.Clear();
+            await RefreshAsync();
+            Toasts.Show($"Moved {Cards(ids.Count)} to Sentinel's trash.", async () =>
+            {
+                await BoardService.RestoreCardsAsync(DatabaseId, ids, performedBy);
+                await RefreshAsync();
+                StateHasChanged();
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            await RefreshAsync();
+            Toasts.Show($"Some cards weren't trashed. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
+    // One property on the given cards, with an Undo that puts each card's own value back.
+    private async Task ApplyAsync(IReadOnlyList<Guid> ids, Guid propertyId, Func<JsonNode?, JsonNode?> change, string done)
+    {
+        if (ids.Count == 0) return;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var before = await BoardService.SetCardsValueAsync(DatabaseId, ids, propertyId, change, performedBy);
+            await RefreshAsync();
+            StateHasChanged();
+            if (before.Count == 0) return;
+            Toasts.Show($"{Cards(before.Count)} {done}.", async () =>
+            {
+                await BoardService.RestoreCardValuesAsync(DatabaseId, propertyId, before, performedBy);
+                await RefreshAsync();
+                StateHasChanged();
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            await RefreshAsync();
+            Toasts.Show($"Couldn't change {(ids.Count == 1 ? "that card" : "those cards")}. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
+    private static string Cards(int count) => count == 1 ? "1 card" : $"{count} cards";
 
     private static bool HasFooter(KanbanCard card) =>
         card.Due is not null || card.ChecklistTotal > 0 || card.SubItemCount > 0 || card.Estimate is not null || card.Assignees.Count > 0;
 
+    // A due date as written: Sentinel stores a picked date at UTC midnight, which local time would
+    // show as the day before west of UTC.
+    private static DateOnly AsWritten(DateTimeOffset due) => DateOnly.FromDateTime(due.Date);
+
     private static bool IsOverdue(KanbanCard card, ColumnState column) =>
-        !column.IsComplete && card.Due is { } due && due.ToLocalTime().Date < DateTime.Today;
+        !column.IsComplete && card.Due is { } due && AsWritten(due) < DateOnly.FromDateTime(DateTime.Today);
 
     private static string DueClass(KanbanCard card, ColumnState column)
     {
         if (column.IsComplete || card.Due is not { } due) return string.Empty;
-        var days = (due.ToLocalTime().Date - DateTime.Today).TotalDays;
+        var days = AsWritten(due).DayNumber - DateOnly.FromDateTime(DateTime.Today).DayNumber;
         return days < 0 ? "is-overdue" : days <= 2 ? "is-soon" : string.Empty;
     }
 
@@ -321,7 +613,7 @@ else
     private static string CardLabel(KanbanCard card) => string.Join(", ", new[]
     {
         card.Key, card.Title, card.Priority is { } p ? $"{p.Label} priority" : null,
-        card.Due is { } due ? $"due {due.ToLocalGwsDate()}" : null,
+        card.Due is { } due ? $"due {AsWritten(due).ToGwsDate()}" : null,
         card.ChecklistTotal > 0 ? $"checklist {card.ChecklistDone} of {card.ChecklistTotal}" : null
     }.Where(part => !string.IsNullOrEmpty(part)));
 

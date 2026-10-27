@@ -130,6 +130,103 @@ public sealed class KanbanBoardServiceTests : IAsyncLifetime
         (card.ChecklistDone, card.ChecklistTotal).Should().Be((1, 2), "an empty to-do line isn't an item");
     }
 
+    // K2: the drawer edits fields while Sentinel's page panel autosaves the body beside them.
+    [Fact]
+    public async Task APageOnlySave_ShouldKeepPropertiesChangedSinceThePageOpened()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        var row = await _boards.AddCardAsync(id, OptionId(board, "Doing"), "Ship it", "grant");
+        var openedWith = (await _databases.GetDatabaseAsync(id))!.Rows.Single(r => r.Id == row);
+
+        await _boards.SetCardsValueAsync(id, [row], board.Fields.PriorityPropertyId!.Value, _ => JsonValue.Create(board.PriorityOptions[0].Id), "grant");
+        await _databases.SaveRowAsync(id, new WikiDatabaseRowEditor
+        {
+            Id = row,
+            BlocksJson = "[]",
+            Values = WikiPropertyValues.ParseObject(openedWith.PropertyValuesJson).ToDictionary(pair => pair.Key, pair => pair.Value?.DeepClone()),
+            KeepPropertyValues = true
+        }, "grant");
+
+        (await _boards.GetBoardAsync(id))!.Columns.Single(c => c.Label == "Doing").Cards.Single().Priority!.Label
+            .Should().Be("Urgent", "the page save carried stale values but kept the stored ones");
+    }
+
+    [Fact]
+    public async Task SetCardsValue_ShouldReturnOnlyWhatChanged_AndRestoreShouldPutEachBack()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        var a = await _boards.AddCardAsync(id, OptionId(board, "To do"), "A", "grant");
+        var b = await _boards.AddCardAsync(id, OptionId(board, "To do"), "B", "grant");
+        var labels = board.Fields.LabelsPropertyId!.Value;
+        var bug = board.LabelOptions.Single(o => o.Label == "Bug").Id;
+        var feature = board.LabelOptions.Single(o => o.Label == "Feature").Id;
+        await _boards.SetCardsValueAsync(id, [a], labels, _ => new JsonArray(JsonValue.Create(bug)), "grant");
+
+        JsonNode? AddFeature(JsonNode? current)
+        {
+            var ids = current is JsonArray array ? array.Select(n => n!.GetValue<string>()).ToList() : [];
+            if (!ids.Contains(feature)) ids.Add(feature);
+            return new JsonArray(ids.Select(i => (JsonNode?)JsonValue.Create(i)).ToArray());
+        }
+        var before = await _boards.SetCardsValueAsync(id, [a, b], labels, AddFeature, "grant");
+        var unchanged = await _boards.SetCardsValueAsync(id, [a, b], labels, AddFeature, "grant");
+
+        before.Keys.Should().BeEquivalentTo([a, b]);
+        unchanged.Should().BeEmpty("both already had the label");
+        var cards = (await _boards.GetBoardAsync(id))!.Columns.Single(c => c.Label == "To do").Cards;
+        cards.Single(c => c.RowId == a).Labels.Select(l => l.Label).Should().Equal("Bug", "Feature");
+
+        await _boards.RestoreCardValuesAsync(id, labels, before, "grant");
+        cards = (await _boards.GetBoardAsync(id))!.Columns.Single(c => c.Label == "To do").Cards;
+        cards.Single(c => c.RowId == a).Labels.Select(l => l.Label).Should().Equal("Bug");
+        cards.Single(c => c.RowId == b).Labels.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task SubItems_ShouldListAddAndTickDone_AndTrashShouldRestore()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        var card = await _boards.AddCardAsync(id, OptionId(board, "Doing"), "Launch", "grant");
+
+        var first = await _boards.AddSubItemAsync(id, card, "Write copy", "grant");
+        await _boards.AddSubItemAsync(id, card, "Test forms", "grant");
+        await _boards.SetSubItemDoneAsync(id, first, true, "grant");
+
+        var items = await _boards.ListSubItemsAsync(id, card);
+        items.Select(i => (i.Title, i.Done)).Should().Equal(("Write copy", true), ("Test forms", false));
+        (await _boards.GetBoardAsync(id))!.Columns.Single(c => c.Label == "Doing").Cards.Single().SubItemCount.Should().Be(2);
+
+        await _boards.TrashCardsAsync(id, [card], "grant");
+        (await _boards.GetBoardAsync(id))!.Columns.SelectMany(c => c.Cards).Should().BeEmpty();
+        await _boards.RestoreCardsAsync(id, [card], "grant");
+        (await _boards.GetBoardAsync(id))!.Columns.Single(c => c.Label == "Doing").Cards.Should().ContainSingle(c => c.Title == "Launch");
+    }
+
+    // K3/K5: the change log behind card age and flow metrics, written on save whatever the path.
+    [Fact]
+    public async Task EveryStatusOrSelectChange_ShouldBeLogged_ButNotAPageOnlySave()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        var todo = OptionId(board, "To do");
+        var doing = OptionId(board, "Doing");
+        var card = await _boards.AddCardAsync(id, todo, "Ship it", "grant");
+        await _boards.MoveCardAsync(id, card, doing, null, "grant");
+        await _boards.SetCardsValueAsync(id, [card], board.Fields.PriorityPropertyId!.Value, _ => JsonValue.Create(board.PriorityOptions[1].Id), "grant");
+        await _boards.SetCardsValueAsync(id, [card], board.Fields.EstimatePropertyId!.Value, _ => JsonValue.Create(3m), "grant");
+        await _databases.SaveRowAsync(id, new WikiDatabaseRowEditor { Id = card, BlocksJson = "[]", KeepPropertyValues = true }, "grant");
+
+        var log = await _db.WikiDatabaseRowStatusChanges.AsNoTracking().Where(change => change.RowId == card).ToListAsync();
+        log.Where(change => change.PropertyId == board.Fields.StatusPropertyId).Select(change => (change.FromOptionId, change.ToOptionId))
+            .Should().Equal((null, todo), (todo, doing));
+        log.Should().ContainSingle(change => change.PropertyId == board.Fields.PriorityPropertyId && change.ToOptionId == board.PriorityOptions[1].Id);
+        log.Should().HaveCount(3, "a number and a page-only save aren't column or select changes");
+        log.Should().OnlyContain(change => change.WikiDatabaseId == id && change.AtUnixSeconds > 0 && change.CreatedBy == "grant");
+    }
+
     [Fact]
     public async Task AnySentinelDatabaseWithAStatus_ShouldOpenAsABoard_AndOneWithoutShouldNot()
     {

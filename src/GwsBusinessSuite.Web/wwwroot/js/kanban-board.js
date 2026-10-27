@@ -144,10 +144,40 @@ export function init(root, dotnet) {
 
     function onPointerCancel() { end(false); }
 
+    // ⇧/⌘/Ctrl-click selects instead of opening (⇧ selects the range from the last one picked).
+    function onClickCapture(event) {
+        if (!(event.metaKey || event.ctrlKey || event.shiftKey)) return;
+        const card = event.target.closest('[data-kb-card]');
+        if (!card || event.target.closest('a, button, input, select, textarea')) return;
+        event.preventDefault();
+        event.stopPropagation();
+        dotnet.invokeMethodAsync('ToggleSelect', card.getAttribute('data-kb-card'), event.shiftKey);
+    }
+
+    const typing = target => target instanceof Element && target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
+    // The card drawer (Sentinel's page panel) has the keyboard while it's open.
+    const drawerOpen = () => !!document.querySelector('.sentinel-row-page-host');
+
     function onKeyDown(event) {
         if (drag && event.key === 'Escape') { event.preventDefault(); end(false); return; }
+        if (event.metaKey || event.ctrlKey || typing(event.target) || drawerOpen() || !root.isConnected) return;
         const card = event.target.closest && event.target.closest('[data-kb-card]');
+        if (event.key === '?') { event.preventDefault(); dotnet.invokeMethodAsync('ToggleHelp'); return; }
+        if (event.key === 'Escape') { dotnet.invokeMethodAsync('ClearSelection'); return; }
+        if (event.key === 'c' && !event.altKey) {
+            const column = (card && card.closest('[data-kb-column]')) || columns()[0];
+            if (column) { event.preventDefault(); dotnet.invokeMethodAsync('QuickAddIn', column.getAttribute('data-kb-column')); }
+            return;
+        }
         if (!card || !root.contains(card) || event.target !== card) return;
+        const id = card.getAttribute('data-kb-card');
+        if (event.key === 'e') { event.preventDefault(); dotnet.invokeMethodAsync('OpenCardFromKeys', id, true); return; }
+        if (event.key === 'x') { event.preventDefault(); dotnet.invokeMethodAsync('ToggleSelect', id, event.shiftKey); return; }
+        if (/^[0-4]$/.test(event.key) && !event.altKey) {
+            event.preventDefault();
+            dotnet.invokeMethodAsync('SetPriorityByNumber', id, Number(event.key)).then(() => refocus(id));
+            return;
+        }
         const column = card.closest('[data-kb-column]');
         const all = columns();
         const here = cardsIn(column);
@@ -181,6 +211,7 @@ export function init(root, dotnet) {
     }
 
     root.addEventListener('pointerdown', onPointerDown);
+    root.addEventListener('click', onClickCapture, true);
     window.addEventListener('pointermove', onPointerMove, { passive: false });
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerCancel);
@@ -190,6 +221,7 @@ export function init(root, dotnet) {
         dispose() {
             end(false);
             root.removeEventListener('pointerdown', onPointerDown);
+            root.removeEventListener('click', onClickCapture, true);
             window.removeEventListener('pointermove', onPointerMove);
             window.removeEventListener('pointerup', onPointerUp);
             window.removeEventListener('pointercancel', onPointerCancel);

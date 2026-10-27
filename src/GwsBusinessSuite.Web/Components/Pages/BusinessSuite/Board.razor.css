@@ -141,6 +141,54 @@
 }
 
 .kb-card.is-overdue { border-inline-start: 3px solid var(--gws-status-danger-fill); }
+.kb-card.is-selected { border-color: var(--gws-sidebar-accent); box-shadow: 0 0 0 1px var(--gws-sidebar-accent); }
+.kb-card.is-open { border-color: color-mix(in srgb, var(--gws-sidebar-accent) 60%, var(--gws-panel-border)); }
+
+.kb-check {
+    position: absolute;
+    top: -6px;
+    left: -6px;
+    display: grid;
+    place-items: center;
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 50%;
+    font-size: .6875rem;
+    color: var(--gws-accent-contrast, #1c1917);
+    background: var(--gws-sidebar-accent);
+}
+
+.kb-bulk {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--gws-step-2);
+    padding: var(--gws-step-2) var(--gws-step-3);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md, 10px);
+    background: var(--gws-panel-bg-2);
+}
+
+.kb-bulk-count { margin-inline-end: var(--gws-step-2); font-size: .875rem; }
+
+.kb-help {
+    padding: var(--gws-step-3) var(--gws-step-4);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md, 10px);
+    background: var(--gws-panel-bg-2);
+}
+
+.kb-help dl {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: 4px var(--gws-step-5);
+    margin: 0;
+    font-size: .8125rem;
+}
+
+.kb-help dt { font-weight: 500; color: var(--gws-text-soft); }
+.kb-help dd { margin: 0 0 var(--gws-step-2); color: var(--gws-text-strong); }
+.kb-help kbd { padding: .05rem .35rem; font-size: .6875rem; }
 .kb-card.kb-dragging { opacity: .35; }
 
 /* The floating copy kanban-board.js drags (a clone of a card, so it carries this scope). */

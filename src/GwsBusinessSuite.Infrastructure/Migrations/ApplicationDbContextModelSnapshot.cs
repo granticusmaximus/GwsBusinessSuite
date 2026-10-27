@@ -4209,6 +4209,40 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("InvoiceLineItems");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.KanbanBoardSettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SettingsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("WikiDatabaseId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WikiDatabaseId")
+                        .IsUnique();
+
+                    b.ToTable("KanbanBoardSettings");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.LiveShowRecording", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9140,6 +9174,52 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsUnique();
 
                     b.ToTable("WikiDatabaseRowRevisions");
+                });
+
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.WikiDatabaseRowStatusChange", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("AtUnixSeconds")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("FromOptionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("PropertyId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RowId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ToOptionId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("WikiDatabaseId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RowId");
+
+                    b.HasIndex("WikiDatabaseId", "AtUnixSeconds");
+
+                    b.ToTable("WikiDatabaseRowStatusChanges");
                 });
 
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.WikiDatabaseRowTemplate", b =>

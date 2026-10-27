@@ -128,7 +128,10 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         {
             columns.Insert(0, new KanbanColumn(null, "No status", "#78716c", null, unsorted));
         }
-        return new KanbanBoard(database.Id, database.Title, database.Icon, fields, columns);
+        IReadOnlyList<KanbanOption> OptionsOf(Guid? propertyId) => properties.FirstOrDefault(property => property.Id == propertyId) is { } property
+            ? WikiDatabasePropertyConfig.GetOptions(property).Select(option => new KanbanOption(option.Id, option.Label, SafeColor(option.Color))).ToList()
+            : [];
+        return new KanbanBoard(database.Id, database.Title, database.Icon, fields, columns, OptionsOf(fields.PriorityPropertyId), OptionsOf(fields.LabelsPropertyId));
     }
 
     public async Task MoveCardAsync(Guid databaseId, Guid rowId, string? optionId, Guid? beforeRowId, string performedBy, CancellationToken cancellationToken = default)
@@ -154,8 +157,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
     {
         if (string.IsNullOrWhiteSpace(title)) throw new ArgumentException("A card needs a title.", nameof(title));
         var status = await StatusPropertyAsync(databaseId, cancellationToken);
-        var titleProperty = await db.WikiDatabaseProperties.AsNoTracking()
-            .FirstAsync(property => property.WikiDatabaseId == databaseId && property.Type == WikiDatabasePropertyTypes.Title, cancellationToken);
+        var titleProperty = await TitlePropertyAsync(databaseId, cancellationToken);
         var values = new JsonObject();
         WikiPropertyValues.SetText(values, titleProperty.Id, title.Trim());
         if (optionId is not null) WikiPropertyValues.SetText(values, status.Id, optionId);
@@ -167,6 +169,105 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         await databases.MoveRowAsync(databaseId, row.Id, status.Id, optionId, 0, performedBy, cancellationToken);
         return row.Id;
     }
+
+    public async Task<IReadOnlyDictionary<Guid, JsonNode?>> SetCardsValueAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, Guid propertyId,
+        Func<JsonNode?, JsonNode?> change, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var key = propertyId.ToString();
+        var before = new Dictionary<Guid, JsonNode?>();
+        foreach (var rowId in rowIds.Distinct())
+        {
+            var row = await db.WikiDatabaseRows.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == rowId && item.WikiDatabaseId == databaseId && item.TrashedAt == null, cancellationToken)
+                ?? throw new InvalidOperationException("That card no longer exists.");
+            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            var previous = values[key]?.DeepClone();
+            var next = change(previous?.DeepClone());
+            if (JsonNode.DeepEquals(previous, next)) continue;
+            values[key] = next?.DeepClone();
+            await SaveValuesAsync(databaseId, row, values, performedBy, cancellationToken);
+            before[rowId] = previous;
+        }
+        return before;
+    }
+
+    public async Task RestoreCardValuesAsync(Guid databaseId, Guid propertyId, IReadOnlyDictionary<Guid, JsonNode?> values, string performedBy, CancellationToken cancellationToken = default)
+    {
+        foreach (var (rowId, value) in values)
+        {
+            await SetCardsValueAsync(databaseId, [rowId], propertyId, _ => value?.DeepClone(), performedBy, cancellationToken);
+        }
+    }
+
+    public async Task<IReadOnlyList<KanbanSubItem>> ListSubItemsAsync(Guid databaseId, Guid parentRowId, CancellationToken cancellationToken = default)
+    {
+        var status = await StatusPropertyAsync(databaseId, cancellationToken);
+        var complete = CompleteOptionIds(status);
+        var titleProperty = await TitlePropertyAsync(databaseId, cancellationToken);
+        var rows = await db.WikiDatabaseRows.AsNoTracking()
+            .Where(row => row.WikiDatabaseId == databaseId && row.ParentRowId == parentRowId && row.TrashedAt == null)
+            .OrderBy(row => row.SortOrder)
+            .Select(row => new { row.Id, row.PropertyValuesJson })
+            .ToListAsync(cancellationToken);
+        return rows.Select(row =>
+        {
+            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            var title = WikiPropertyValues.GetText(values, titleProperty.Id);
+            return new KanbanSubItem(row.Id, string.IsNullOrWhiteSpace(title) ? "Untitled" : title,
+                WikiPropertyValues.GetText(values, status.Id) is { } option && complete.Contains(option));
+        }).ToList();
+    }
+
+    public async Task<Guid> AddSubItemAsync(Guid databaseId, Guid parentRowId, string title, string performedBy, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(title)) throw new ArgumentException("A sub-item needs a title.", nameof(title));
+        var status = await StatusPropertyAsync(databaseId, cancellationToken);
+        var titleProperty = await TitlePropertyAsync(databaseId, cancellationToken);
+        var values = new JsonObject();
+        WikiPropertyValues.SetText(values, titleProperty.Id, title.Trim());
+        if (ColumnOrder(status).FirstOrDefault() is { } first) WikiPropertyValues.SetText(values, status.Id, first.Id);
+        var row = await databases.SaveRowAsync(databaseId, new WikiDatabaseRowEditor
+        {
+            ParentRowId = parentRowId,
+            Values = values.ToDictionary(pair => pair.Key, pair => pair.Value?.DeepClone())
+        }, performedBy, cancellationToken);
+        return row.Id;
+    }
+
+    public async Task SetSubItemDoneAsync(Guid databaseId, Guid rowId, bool done, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var status = await StatusPropertyAsync(databaseId, cancellationToken);
+        var options = ColumnOrder(status);
+        var target = done
+            ? options.FirstOrDefault(option => option.Group == WikiDatabaseStatusGroups.Complete) ?? options.LastOrDefault()
+            : options.FirstOrDefault();
+        if (target is null) return;
+        await SetCardsValueAsync(databaseId, [rowId], status.Id, _ => JsonValue.Create(target.Id), performedBy, cancellationToken);
+    }
+
+    public async Task TrashCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default)
+    {
+        foreach (var rowId in rowIds.Distinct()) await databases.TrashRowAsync(databaseId, rowId, performedBy, cancellationToken);
+    }
+
+    public async Task RestoreCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default)
+    {
+        foreach (var rowId in rowIds.Distinct()) await databases.RestoreRowAsync(databaseId, rowId, performedBy, cancellationToken);
+    }
+
+    // A property-only save through Sentinel (its validation, relations and automation triggers),
+    // leaving the card's page alone.
+    private Task<WikiDatabaseRow> SaveValuesAsync(Guid databaseId, WikiDatabaseRow row, JsonObject values, string performedBy, CancellationToken cancellationToken) =>
+        databases.SaveRowAsync(databaseId, new WikiDatabaseRowEditor
+        {
+            Id = row.Id,
+            ParentRowId = row.ParentRowId,
+            Values = values.ToDictionary(pair => pair.Key, pair => pair.Value?.DeepClone())
+        }, performedBy, cancellationToken);
+
+    private async Task<WikiDatabaseProperty> TitlePropertyAsync(Guid databaseId, CancellationToken cancellationToken) =>
+        await db.WikiDatabaseProperties.AsNoTracking()
+            .FirstAsync(property => property.WikiDatabaseId == databaseId && property.Type == WikiDatabasePropertyTypes.Title, cancellationToken);
 
     private async Task<WikiDatabaseProperty> StatusPropertyAsync(Guid databaseId, CancellationToken cancellationToken)
     {

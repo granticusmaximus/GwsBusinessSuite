@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using GwsBusinessSuite.Domain.Entities;
 
 namespace GwsBusinessSuite.Application.Boards;
@@ -34,7 +35,14 @@ public sealed record KanbanColumn(string? OptionId, string Label, string Color, 
 public sealed record KanbanFields(Guid StatusPropertyId, Guid? PriorityPropertyId, Guid? LabelsPropertyId, Guid? DuePropertyId,
     Guid? AssigneePropertyId, Guid? EstimatePropertyId, Guid? KeyPropertyId);
 
-public sealed record KanbanBoard(Guid DatabaseId, string Title, string? Icon, KanbanFields Fields, IReadOnlyList<KanbanColumn> Columns);
+public sealed record KanbanOption(string Id, string Label, string Color);
+
+// PriorityOptions / LabelOptions: the choices for those fields, in order (empty when the board has none).
+public sealed record KanbanBoard(Guid DatabaseId, string Title, string? Icon, KanbanFields Fields, IReadOnlyList<KanbanColumn> Columns,
+    IReadOnlyList<KanbanOption> PriorityOptions, IReadOnlyList<KanbanOption> LabelOptions);
+
+// A card's sub-item (a row nested under it), done when its status is in the Complete group.
+public sealed record KanbanSubItem(Guid RowId, string Title, bool Done);
 
 public sealed record KanbanColumnSeed(string Label, string Color, string Group);
 
@@ -100,4 +108,22 @@ public interface IKanbanBoardService
 
     // A new card at the top of a column; returns its row id.
     Task<Guid> AddCardAsync(Guid databaseId, string? optionId, string title, string performedBy, CancellationToken cancellationToken = default);
+
+    // One property on one or more cards, each to what change makes of its current value (a
+    // Select/Status option id, a JSON array of option ids or usernames, a number, an ISO date,
+    // text, or null to clear). Returns each card's value from before, for Undo.
+    Task<IReadOnlyDictionary<Guid, JsonNode?>> SetCardsValueAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, Guid propertyId,
+        Func<JsonNode?, JsonNode?> change, string performedBy, CancellationToken cancellationToken = default);
+
+    // Undo for SetCardsValueAsync: each card's value put back.
+    Task RestoreCardValuesAsync(Guid databaseId, Guid propertyId, IReadOnlyDictionary<Guid, JsonNode?> values, string performedBy, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<KanbanSubItem>> ListSubItemsAsync(Guid databaseId, Guid parentRowId, CancellationToken cancellationToken = default);
+    // A sub-item starts in the board's first column; done moves it to the first Complete one.
+    Task<Guid> AddSubItemAsync(Guid databaseId, Guid parentRowId, string title, string performedBy, CancellationToken cancellationToken = default);
+    Task SetSubItemDoneAsync(Guid databaseId, Guid rowId, bool done, string performedBy, CancellationToken cancellationToken = default);
+
+    // To Sentinel's trash, and back (Undo).
+    Task TrashCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default);
+    Task RestoreCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default);
 }

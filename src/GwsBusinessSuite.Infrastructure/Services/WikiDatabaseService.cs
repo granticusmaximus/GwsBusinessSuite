@@ -1254,16 +1254,26 @@ public sealed class WikiDatabaseService(
                 }
             }
         }
-        var properties = await dbContext.WikiDatabaseProperties
-            .Where(property => property.WikiDatabaseId == wikiDatabaseId)
-            .ToListAsync(cancellationToken);
-        var validationErrors = WikiDatabasePropertyValidation.Validate(properties, values);
-        if (validationErrors.Count > 0)
+        var keepValues = !isNew && editor.KeepPropertyValues;
+        if (keepValues)
         {
-            throw new InvalidOperationException(string.Join(" ", validationErrors));
+            // Unchanged by this save, so not re-validated either: a page save mustn't fail over a
+            // property rule added since the values were set.
+            values = (System.Text.Json.Nodes.JsonObject)previousValues.DeepClone();
         }
+        else
+        {
+            var properties = await dbContext.WikiDatabaseProperties
+                .Where(property => property.WikiDatabaseId == wikiDatabaseId)
+                .ToListAsync(cancellationToken);
+            var validationErrors = WikiDatabasePropertyValidation.Validate(properties, values);
+            if (validationErrors.Count > 0)
+            {
+                throw new InvalidOperationException(string.Join(" ", validationErrors));
+            }
 
-        await ValidateTimelineDependenciesAsync(wikiDatabaseId, row.Id, values, cancellationToken);
+            await ValidateTimelineDependenciesAsync(wikiDatabaseId, row.Id, values, cancellationToken);
+        }
         row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
         var propertyValuesChanged = isNew || !string.Equals(WikiPropertyValues.Serialize(previousValues), row.PropertyValuesJson, StringComparison.Ordinal);
         // Content-affecting fields, mirroring WikiPage's null-preserves convention: a

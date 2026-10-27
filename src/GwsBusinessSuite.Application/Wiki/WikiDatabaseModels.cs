@@ -286,6 +286,11 @@ public sealed class WikiDatabaseRowEditor
     // Keyed by property id (as string) - value shape matches WikiPropertyValues' per-type
     // getters/setters (string/decimal/bool/string[]/ISO-8601 date string).
     public Dictionary<string, JsonNode?> Values { get; set; } = new();
+    // A save that only carries the page (body, icon, cover): the row's stored property values are
+    // kept and Values is ignored. The row page (SentinelDatabaseRowPage) shows properties but never
+    // edits them, yet its autosave used to resend the values it loaded on open - reverting any
+    // property changed meanwhile (a table cell, a board drag, the board's card drawer).
+    public bool KeepPropertyValues { get; set; }
     // Silent background autosave (SentinelDatabaseRowPage) sets this false so a debounced
     // save-per-keystroke-burst doesn't spam history the way an explicit "Save page" click
     // should. Defaults true so every other caller (property-only edits, tests, the explicit

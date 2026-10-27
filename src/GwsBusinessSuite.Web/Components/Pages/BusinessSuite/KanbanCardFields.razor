@@ -1,0 +1,258 @@
+@using System.Globalization
+@using System.Text.Json.Nodes
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject IKanbanBoardService BoardService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
+
+@* A card's fields in the board's drawer (Boards K2): everything the card shows, editable, above its
+   Sentinel page. Each change saves at once; a refusal re-draws the control (@key) and says why. *@
+<section class="kb-fields" aria-label="Card fields">
+    <label class="visually-hidden" for="kb-card-title">Title</label>
+    <input id="kb-card-title" class="kb-fields-title" value="@Title" @key="@($"title-{_revision}")" maxlength="300"
+           @onchange="e => SetAsync(TitleProperty!.Id, Text(e.Value))" />
+
+    <dl class="kb-fields-grid">
+        <dt><i class="bi bi-circle-half" aria-hidden="true"></i>Status</dt>
+        <dd>
+            <select class="form-select form-select-sm" aria-label="Status" value="@Text(Board.Fields.StatusPropertyId)" @key="@($"status-{_revision}")"
+                    @onchange="e => OnStatusChanged.InvokeAsync(e.Value as string ?? string.Empty)">
+                @foreach (var column in Board.Columns) { <option value="@(column.OptionId ?? "")">@column.Label</option> }
+            </select>
+        </dd>
+
+        @if (Property(Board.Fields.PriorityPropertyId) is { } priority)
+        {
+            <dt><i class="bi bi-reception-4" aria-hidden="true"></i>Priority</dt>
+            <dd>
+                <select class="form-select form-select-sm" aria-label="Priority" value="@(Text(priority.Id) ?? "")" @key="@($"priority-{_revision}")"
+                        @onchange="e => SetAsync(priority.Id, Text(e.Value))">
+                    <option value="">None</option>
+                    @foreach (var option in Options(priority)) { <option value="@option.Id">@option.Label</option> }
+                </select>
+            </dd>
+        }
+
+        @if (Property(Board.Fields.LabelsPropertyId) is { } labels)
+        {
+            var chosen = Multi(labels.Id);
+            <dt><i class="bi bi-tags" aria-hidden="true"></i>@labels.Name</dt>
+            <dd class="kb-fields-labels">
+                @foreach (var option in Options(labels))
+                {
+                    var on = chosen.Contains(option.Id);
+                    <button type="button" class="kb-label-toggle @(on ? "is-on" : "")" aria-pressed="@(on ? "true" : "false")" style="--tone: @Color(option.Color)"
+                            @onclick="() => ToggleLabelAsync(labels.Id, option.Id)">@option.Label</button>
+                }
+            </dd>
+        }
+
+        @if (Property(Board.Fields.DuePropertyId) is { } due)
+        {
+            <dt><i class="bi bi-calendar-event" aria-hidden="true"></i>@due.Name</dt>
+            <dd>
+                <input type="date" class="form-control form-control-sm" aria-label="@due.Name" @key="@($"due-{_revision}")"
+                       value="@(Date(due.Id)?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))" @onchange="e => SetDateAsync(due.Id, e.Value as string)" />
+            </dd>
+        }
+
+        @if (Property(Board.Fields.AssigneePropertyId) is { } assignee)
+        {
+            <dt><i class="bi bi-person" aria-hidden="true"></i>@assignee.Name</dt>
+            <dd class="kb-fields-inline">
+                <input class="form-control form-control-sm" aria-label="@assignee.Name" placeholder="Usernames, comma-separated" @key="@($"assignee-{_revision}")"
+                       value="@string.Join(", ", Multi(assignee.Id))" @onchange="e => SetPeopleAsync(assignee.Id, e.Value as string)" />
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AssignMeAsync(assignee.Id)">Me</button>
+            </dd>
+        }
+
+        @if (Property(Board.Fields.EstimatePropertyId) is { } estimate)
+        {
+            <dt><i class="bi bi-speedometer2" aria-hidden="true"></i>@estimate.Name</dt>
+            <dd>
+                <input type="number" min="0" step="0.5" class="form-control form-control-sm kb-fields-number" aria-label="@estimate.Name" @key="@($"estimate-{_revision}")"
+                       value="@(Number(estimate.Id)?.ToString("0.##", CultureInfo.InvariantCulture))" @onchange="e => SetNumberAsync(estimate.Id, e.Value as string)" />
+            </dd>
+        }
+
+        @foreach (var other in OtherSelects)
+        {
+            <dt><i class="bi bi-list-ul" aria-hidden="true"></i>@other.Name</dt>
+            <dd>
+                <select class="form-select form-select-sm" aria-label="@other.Name" value="@(Text(other.Id) ?? "")" @key="@($"{other.Id}-{_revision}")"
+                        @onchange="e => SetAsync(other.Id, Text(e.Value))">
+                    <option value="">None</option>
+                    @foreach (var option in Options(other)) { <option value="@option.Id">@option.Label</option> }
+                </select>
+            </dd>
+        }
+    </dl>
+
+    <div class="kb-fields-subitems">
+        <h3><i class="bi bi-diagram-3" aria-hidden="true"></i>Sub-items
+            @if (_subItems.Count > 0) { <span>@_subItems.Count(item => item.Done)/@_subItems.Count</span> }
+        </h3>
+        @if (_subItems.Count > 0)
+        {
+            <ul>
+                @foreach (var item in _subItems)
+                {
+                    <li class="@(item.Done ? "is-done" : "")">
+                        <input type="checkbox" class="form-check-input" checked="@item.Done" aria-label="@item.Title done" @key="@($"{item.RowId}-{_revision}")"
+                               @onchange="e => SetSubItemDoneAsync(item, e.Value is true)" />
+                        <button type="button" class="btn btn-link p-0 text-start" @onclick="() => OnOpenSubItem.InvokeAsync(item.RowId)">@item.Title</button>
+                    </li>
+                }
+            </ul>
+        }
+        <form class="kb-fields-subitem-add" @onsubmit="AddSubItemAsync" @onsubmit:preventDefault>
+            <label class="visually-hidden" for="kb-subitem-new">New sub-item</label>
+            <input id="kb-subitem-new" class="form-control form-control-sm" placeholder="Add a sub-item, then Enter" maxlength="300"
+                   @bind="_newSubItem" @bind:event="oninput" />
+        </form>
+    </div>
+
+    <p class="kb-fields-meta">
+        Created @Row.CreatedAt.ToLocalGwsDateTime()@(string.IsNullOrWhiteSpace(Row.CreatedBy) ? "" : $" by {Row.CreatedBy}")
+        @if (Row.UpdatedAt is { } updated) { <span> · Updated @updated.ToLocalGwsDateTime()</span> }
+    </p>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public required KanbanBoard Board { get; set; }
+    [Parameter, EditorRequired] public required WikiDatabase Database { get; set; }
+    [Parameter, EditorRequired] public required WikiDatabaseRow Row { get; set; }
+    // Something changed: the board reloads and hands this a fresh Row.
+    [Parameter] public EventCallback OnChanged { get; set; }
+    // Status goes through the board, which moves the card to the top of the new column.
+    [Parameter] public EventCallback<string> OnStatusChanged { get; set; }
+    [Parameter] public EventCallback<Guid> OnOpenSubItem { get; set; }
+
+    private int _revision;
+    private IReadOnlyList<KanbanSubItem> _subItems = [];
+    private string _newSubItem = string.Empty;
+    private Guid? _loadedFor;
+
+    private JsonObject Values => WikiPropertyValues.ParseObject(Row.PropertyValuesJson);
+    private WikiDatabaseProperty? TitleProperty => Database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Title);
+    private string Title => TitleProperty is null ? string.Empty : WikiPropertyValues.GetText(Values, TitleProperty.Id) ?? string.Empty;
+
+    // Select properties the board doesn't already use (a Sprint, say).
+    private IEnumerable<WikiDatabaseProperty> OtherSelects => Database.Properties
+        .Where(property => property.Type == WikiDatabasePropertyTypes.Select
+            && property.Id != Board.Fields.StatusPropertyId && property.Id != Board.Fields.PriorityPropertyId)
+        .OrderBy(property => property.SortOrder);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == Row.Id) return;
+        _loadedFor = Row.Id;
+        _newSubItem = string.Empty;
+        await LoadSubItemsAsync();
+    }
+
+    private async Task LoadSubItemsAsync() => _subItems = await BoardService.ListSubItemsAsync(Database.Id, Row.Id);
+
+    private WikiDatabaseProperty? Property(Guid? id) => id is { } value ? Database.Properties.FirstOrDefault(property => property.Id == value) : null;
+    private static IReadOnlyList<WikiDatabasePropertyOption> Options(WikiDatabaseProperty property) => WikiDatabasePropertyConfig.GetOptions(property);
+    private string? Text(Guid propertyId) => WikiPropertyValues.GetText(Values, propertyId);
+    private static string? Text(object? value) => value is string text && text.Trim().Length > 0 ? text.Trim() : null;
+    private IReadOnlyList<string> Multi(Guid propertyId) => WikiPropertyValues.GetMultiSelect(Values, propertyId);
+    private decimal? Number(Guid propertyId) => WikiPropertyValues.GetNumber(Values, propertyId);
+    // A date as written (Sentinel stores a picked date at UTC midnight), not shifted to local time.
+    private DateOnly? Date(Guid propertyId) => WikiPropertyValues.GetDate(Values, propertyId) is { } date ? DateOnly.FromDateTime(date.Date) : null;
+    private static string Color(string? color) => color is not null && System.Text.RegularExpressions.Regex.IsMatch(color, "^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20})$") ? color : "#78716c";
+
+    private Task SetAsync(Guid propertyId, string? text) => ChangeAsync(propertyId, _ => text is null ? null : JsonValue.Create(text));
+
+    private Task ToggleLabelAsync(Guid propertyId, string optionId) => ChangeAsync(propertyId, current =>
+    {
+        var ids = current is JsonArray array ? array.Select(node => node?.GetValue<string>()).OfType<string>().ToList() : [];
+        if (!ids.Remove(optionId)) ids.Add(optionId);
+        return new JsonArray(ids.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
+    });
+
+    private Task SetDateAsync(Guid propertyId, string? value)
+    {
+        JsonNode? node = null;
+        if (DateTimeOffset.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var date))
+        {
+            // Through WikiPropertyValues, so the stored format is Sentinel's own.
+            var holder = new JsonObject();
+            WikiPropertyValues.SetDate(holder, propertyId, date);
+            node = holder[propertyId.ToString()]?.DeepClone();
+        }
+        return ChangeAsync(propertyId, _ => node);
+    }
+
+    private Task SetNumberAsync(Guid propertyId, string? value) =>
+        ChangeAsync(propertyId, _ => decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var number) ? JsonValue.Create(number) : null);
+
+    private Task SetPeopleAsync(Guid propertyId, string? value) => ChangeAsync(propertyId, _ =>
+    {
+        var people = (value ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return people.Count == 0 ? null : new JsonArray(people.Select(person => (JsonNode?)JsonValue.Create(person)).ToArray());
+    });
+
+    private async Task AssignMeAsync(Guid propertyId)
+    {
+        var me = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        await ChangeAsync(propertyId, current =>
+        {
+            var people = current is JsonArray array ? array.Select(node => node?.GetValue<string>()).OfType<string>().ToList() : [];
+            if (!people.Contains(me, StringComparer.OrdinalIgnoreCase)) people.Add(me);
+            return new JsonArray(people.Select(person => (JsonNode?)JsonValue.Create(person)).ToArray());
+        });
+    }
+
+    private async Task ChangeAsync(Guid propertyId, Func<JsonNode?, JsonNode?> change)
+    {
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await BoardService.SetCardsValueAsync(Database.Id, [Row.Id], propertyId, change, performedBy);
+            await OnChanged.InvokeAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _revision++;
+            Toasts.Show($"Couldn't save that. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
+    private async Task SetSubItemDoneAsync(KanbanSubItem item, bool done)
+    {
+        try
+        {
+            await BoardService.SetSubItemDoneAsync(Database.Id, item.RowId, done, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await LoadSubItemsAsync();
+            await OnChanged.InvokeAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _revision++;
+            Toasts.Show($"Couldn't update that sub-item. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
+    private async Task AddSubItemAsync()
+    {
+        var title = _newSubItem.Trim();
+        if (title.Length == 0) return;
+        _newSubItem = string.Empty;
+        try
+        {
+            await BoardService.AddSubItemAsync(Database.Id, Row.Id, title, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await LoadSubItemsAsync();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _newSubItem = title;
+            Toasts.Show($"Couldn't add that sub-item. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+}

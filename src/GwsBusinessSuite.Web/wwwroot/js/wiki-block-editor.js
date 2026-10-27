@@ -664,8 +664,11 @@ function reportCursor(state, preferredContent = null) {
     const key = `${blockEl.dataset.blockId}:${start}:${end}`;
     if (key === state.lastCursorKey) return;
     state.lastCursorKey = key;
-    try { state.dotNetRef.invokeMethodAsync('OnCursorMoved', blockEl.dataset.blockId, start, end); }
-    catch { /* the Blazor circuit may have disconnected */ }
+    // invokeMethodAsync fails asynchronously, so a try/catch alone never saw it: a host without live
+    // cursors (Sentinel's database row page, Boards' card drawer) raised an unhandled rejection on
+    // every cursor move. The circuit may also have disconnected.
+    try { state.dotNetRef.invokeMethodAsync('OnCursorMoved', blockEl.dataset.blockId, start, end).catch(() => { }); }
+    catch { /* no circuit */ }
 }
 
 function cssEscape(value) {

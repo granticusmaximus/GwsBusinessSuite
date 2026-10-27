@@ -1384,6 +1384,27 @@ public sealed class WikiDatabaseRow : AuditableEntity
     public ICollection<WikiDatabaseRowRevision> Revisions { get; set; } = new List<WikiDatabaseRowRevision>();
 }
 
+// Boards' flow metrics (cycle time, card age, cumulative flow): one row per change of a database
+// row's Status or Select value, whichever write made it - ApplicationDbContext records them on save.
+// From is null for a new row. AtUnixSeconds because SQLite can't range-compare a DateTimeOffset.
+public sealed class WikiDatabaseRowStatusChange : AuditableEntity
+{
+    public Guid WikiDatabaseId { get; set; }
+    public Guid RowId { get; set; }
+    public Guid PropertyId { get; set; }
+    public string? FromOptionId { get; set; }
+    public string? ToOptionId { get; set; }
+    public long AtUnixSeconds { get; set; }
+}
+
+// A board's own settings (Boards, .claude/plans/kanban-boards-2026-10.md): WIP limits, swimlanes,
+// card age, its look. One row per board database; SettingsJson is KanbanSettings.
+public sealed class KanbanBoardSettings : AuditableEntity
+{
+    public Guid WikiDatabaseId { get; set; }
+    public string SettingsJson { get; set; } = "{}";
+}
+
 // A reusable starting state for new rows in one database. Property IDs remain those of the
 // owning database; materialization filters stale/system-managed keys before SaveRowAsync.
 public sealed class WikiDatabaseRowTemplate : AuditableEntity

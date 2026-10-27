@@ -1,4 +1,5 @@
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -10,6 +11,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         SynchronizeNewsItemTimestamps();
+        RecordStatusChanges();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
@@ -18,7 +20,57 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         CancellationToken cancellationToken = default)
     {
         SynchronizeNewsItemTimestamps();
+        RecordStatusChanges();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    // Boards' flow metrics: a WikiDatabaseRowStatusChange for every Status/Select value a row gains,
+    // loses or changes in this save - here rather than in each of WikiDatabaseService's write paths
+    // (save, drag, cell, bulk, import, automation), so none can miss it. The property lookup is
+    // synchronous: SQLite's "async" is anyway, and a save touches rows of few databases.
+    private void RecordStatusChanges()
+    {
+        var changed = ChangeTracker.Entries<WikiDatabaseRow>()
+            .Where(entry => entry.State == EntityState.Added
+                || (entry.State == EntityState.Modified
+                    && !string.Equals(entry.OriginalValues.GetValue<string>(nameof(WikiDatabaseRow.PropertyValuesJson)), entry.Entity.PropertyValuesJson, StringComparison.Ordinal)))
+            .ToList();
+        if (changed.Count == 0) return;
+
+        var databaseIds = changed.Select(entry => entry.Entity.WikiDatabaseId).Distinct().ToList();
+        var properties = WikiDatabaseProperties.AsNoTracking()
+            .Where(property => databaseIds.Contains(property.WikiDatabaseId)
+                && (property.Type == WikiDatabasePropertyTypes.Status || property.Type == WikiDatabasePropertyTypes.Select))
+            .Select(property => new { property.Id, property.WikiDatabaseId })
+            .ToList();
+        if (properties.Count == 0) return;
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var entry in changed)
+        {
+            var before = entry.State == EntityState.Added
+                ? new System.Text.Json.Nodes.JsonObject()
+                : WikiPropertyValues.ParseObject(entry.OriginalValues.GetValue<string>(nameof(WikiDatabaseRow.PropertyValuesJson)) ?? "{}");
+            var after = WikiPropertyValues.ParseObject(entry.Entity.PropertyValuesJson);
+            foreach (var property in properties.Where(property => property.WikiDatabaseId == entry.Entity.WikiDatabaseId))
+            {
+                var from = WikiPropertyValues.GetText(before, property.Id);
+                var to = WikiPropertyValues.GetText(after, property.Id);
+                if (string.Equals(from, to, StringComparison.Ordinal)) continue;
+                var by = entry.Entity.UpdatedBy ?? entry.Entity.CreatedBy;
+                WikiDatabaseRowStatusChanges.Add(new WikiDatabaseRowStatusChange
+                {
+                    WikiDatabaseId = entry.Entity.WikiDatabaseId,
+                    RowId = entry.Entity.Id,
+                    PropertyId = property.Id,
+                    FromOptionId = from,
+                    ToOptionId = to,
+                    AtUnixSeconds = now.ToUnixTimeSeconds(),
+                    CreatedAt = now,
+                    CreatedBy = by
+                });
+            }
+        }
     }
 
     public Task<IDbContextTransaction> BeginTransactionAsync(CancellationToken cancellationToken = default) =>
@@ -32,6 +84,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<TimeEntry> TimeEntries => Set<TimeEntry>();
     public DbSet<InvoiceLineItem> InvoiceLineItems => Set<InvoiceLineItem>();
     public DbSet<BillingSettings> BillingSettings => Set<BillingSettings>();
+    public DbSet<WikiDatabaseRowStatusChange> WikiDatabaseRowStatusChanges => Set<WikiDatabaseRowStatusChange>();
+    public DbSet<KanbanBoardSettings> KanbanBoardSettings => Set<KanbanBoardSettings>();
     public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
     public DbSet<SupportTicketMessage> SupportTicketMessages => Set<SupportTicketMessage>();
     public DbSet<SupportTicketAttachment> SupportTicketAttachments => Set<SupportTicketAttachment>();
@@ -965,6 +1019,10 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<AutomationFailureAcknowledgement>()
             .HasIndex(x => x.ExecutionId)
             .IsUnique();
+
+        modelBuilder.Entity<WikiDatabaseRowStatusChange>().HasIndex(x => new { x.WikiDatabaseId, x.AtUnixSeconds });
+        modelBuilder.Entity<WikiDatabaseRowStatusChange>().HasIndex(x => x.RowId);
+        modelBuilder.Entity<KanbanBoardSettings>().HasIndex(x => x.WikiDatabaseId).IsUnique();
     }
 
     private void SynchronizeNewsItemTimestamps()
