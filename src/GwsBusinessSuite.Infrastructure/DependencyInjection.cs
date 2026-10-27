@@ -110,6 +110,7 @@ public static class DependencyInjection
         services.AddScoped<IUserShortcutService, UserShortcutService>();
         services.AddScoped<IAdminListViewService, AdminListViewService>();
         services.AddScoped<IUserPreferenceService, UserPreferenceService>();
+        services.AddScoped<INotificationInboxStateService, NotificationInboxStateService>();
         services.AddScoped<ISecretProtector, DataProtectionSecretProtector>();
         // Non-web hosts and startup probes do not have an authenticated HTTP/circuit
         // accessor. The web app registers its CurrentUserAccessor afterward and becomes
@@ -1075,6 +1076,7 @@ public static class DependencyInjection
         services.AddScoped<ISentinelWorkspaceImportService, SentinelWorkspaceImportService>();
         services.AddScoped<ISentinelWorkspaceService, SentinelWorkspaceService>();
         services.AddScoped<GwsBusinessSuite.Application.SuiteSearch.ISuiteSearchService, SuiteSearchService>();
+        services.AddScoped<GwsBusinessSuite.Application.SuiteSearch.ISuiteSearchAssistant, GwsBusinessSuite.Application.SuiteSearch.SuiteSearchAssistantService>();
         services.AddScoped<IHybridSearchService, HybridSemanticSearchService>();
         services.AddHostedService<SemanticIndexBackgroundService>();
         services.AddScoped<ISentinelCollaborationService, SentinelCollaborationService>();

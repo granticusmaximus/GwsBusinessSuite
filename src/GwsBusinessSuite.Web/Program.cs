@@ -115,6 +115,7 @@ builder.Services.AddSingleton<SentinelGptGenerationCoordinator>();
 builder.Services.AddScoped<AssistantContext>();
 builder.Services.AddScoped<ShortcutsState>();
 builder.Services.AddScoped<ToastState>();
+builder.Services.AddScoped<RecordPreviewService>();
 builder.Services.AddScoped<RightPanelState>();
 builder.Services.AddOptions<LiveShowIceOptions>()
     .Bind(builder.Configuration.GetSection("LiveShow:Ice"));
@@ -1126,6 +1127,18 @@ app.MapGet("/admin/api/automation/{workflowId:guid}/export.json", async (
 // - a plain JSON GET rather than a Blazor circuit call since app.js runs outside any component's
 // lifecycle and needs to work identically on every admin page. Any signed-in user, not just
 // admins, since the existing nav-entry palette this widens is already available to every user.
+// The person's pins and recent records (the rail's, R1b) for the empty ⌘K palette.
+app.MapGet("/admin/api/shortcuts", async (
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.AdminPortal.IUserShortcutService shortcuts,
+    CancellationToken cancellationToken) =>
+{
+    var username = httpContext.User.Identity?.Name ?? string.Empty;
+    return Results.Json(await shortcuts.ListAsync(username, cancellationToken));
+})
+    .RequireAuthorization()
+    .RequireRateLimiting("public-read");
+
 app.MapGet("/admin/api/suite-search", async (
     string? q,
     HttpContext httpContext,
@@ -1134,9 +1147,41 @@ app.MapGet("/admin/api/suite-search", async (
 {
     var username = httpContext.User.Identity?.Name ?? string.Empty;
     var results = await suiteSearchService.SearchAsync(q ?? string.Empty, username, cancellationToken: cancellationToken);
-    return Results.Json(results);
+    return Results.Json(GwsBusinessSuite.Application.SuiteSearch.SuiteSearchVisibility.For(
+        results, httpContext.User.IsInRole(GwsBusinessSuite.Domain.Entities.AppRoles.Admin)));
 })
     .RequireAuthorization()
+    .RequireRateLimiting("public-read");
+
+// SentinelGPT in ⌘K (tech-forward T1b): a plain-language request ("unpaid invoices for Dana")
+// becomes one structured search. The palette calls this after its keyword results are showing,
+// so the budget only limits how long that extra group can take; 204 means no answer.
+app.MapGet("/admin/api/suite-search/ask", async (
+    string? q,
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.SuiteSearch.ISuiteSearchAssistant assistant,
+    CancellationToken cancellationToken) =>
+{
+    using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    budget.CancelAfter(TimeSpan.FromSeconds(15));
+    var username = httpContext.User.Identity?.Name ?? string.Empty;
+    try
+    {
+        var answer = await assistant.AskAsync(q ?? string.Empty, username, budget.Token);
+        return answer is null ? Results.NoContent() : Results.Json(answer);
+    }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    {
+        return Results.NoContent();
+    }
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("public-read");
+
+// Hover previews (tech-forward T2): a contact, ticket or invoice summarised for the card.
+app.MapGet("/admin/api/preview/{kind}/{id:guid}", async (string kind, Guid id, RecordPreviewService previews, CancellationToken cancellationToken) =>
+    await previews.GetAsync(kind, id, cancellationToken) is { } preview ? Results.Json(preview) : Results.NotFound())
+    .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");
 
 // Part 4.8 - server-side readiness for mobile push approvals only. A future MAUI client can

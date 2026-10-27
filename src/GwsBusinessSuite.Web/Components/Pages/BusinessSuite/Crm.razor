@@ -190,7 +190,7 @@ else
                                 @foreach (var contact in VisibleContacts)
                                 {
                                     <tr class="@(contact.Id == _inspectedContactId ? "gws-row-selected" : string.Empty) @StatusTones.Stripe(_dueFollowUpIds.Contains(contact.Id) ? StatusTone.Warning : null)">
-                                        <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" aria-pressed="@(contact.Id == _inspectedContactId ? "true" : "false")" @onclick="() => _inspectedContactId = contact.Id">@contact.FullName</button>@if (_dueFollowUpIds.Contains(contact.Id)) { <StatusPill Tone="StatusTone.Warning" CssClass="ms-2">Follow-up due</StatusPill> }</td>
+                                        <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" data-preview="contact:@contact.Id" aria-pressed="@(contact.Id == _inspectedContactId ? "true" : "false")" @onclick="() => _inspectedContactId = contact.Id">@contact.FullName</button>@if (_dueFollowUpIds.Contains(contact.Id)) { <StatusPill Tone="StatusTone.Warning" CssClass="ms-2">Follow-up due</StatusPill> }</td>
                                         @if (ContactColumnVisible("company")) { <td>@(string.IsNullOrWhiteSpace(contact.Company) ? "—" : contact.Company)</td> }
                                         @if (ContactColumnVisible("email")) { <td>@(string.IsNullOrWhiteSpace(contact.Email) ? "—" : contact.Email)</td> }
                                         @if (ContactColumnVisible("status")) { <td><StatusPill Tone="StatusTones.ForContact(contact.Status)">@contact.Status</StatusPill></td> }
@@ -405,8 +405,19 @@ else
         _focusQuickCreate = true;
     }
 
+    // ⌘K's "New contact" (tech-forward T1) arrives as ?new=1: open the quick create once loaded.
+    [SupplyParameterFromQuery(Name = "new")] public string? NewQuery { get; set; }
+    private bool _newHandled;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (NewQuery == "1" && !_newHandled && !IsLoading)
+        {
+            _newHandled = true;
+            await OpenQuickCreateAsync();
+            StateHasChanged();
+            return;
+        }
         if (!_focusQuickCreate) return;
         _focusQuickCreate = false;
         await _quickCreateNameInput.FocusAsync();

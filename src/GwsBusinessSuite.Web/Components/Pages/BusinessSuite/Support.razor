@@ -144,7 +144,7 @@ else
                             @foreach (var ticket in Tickets)
                             {
                                 <tr class="@(SelectedTicketId == ticket.Id ? "gws-row-selected" : "") @StatusTones.Stripe(IsSlaBreached(ticket) ? StatusTone.Danger : null)">
-                                    <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" @onclick="() => SelectTicketAsync(ticket.Id)">@ticket.Subject</button>@if (IsSlaBreached(ticket)) { <StatusPill Tone="StatusTone.Danger" CssClass="ms-2">SLA overdue</StatusPill> }</td>
+                                    <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" @onclick="() => SelectTicketAsync(ticket.Id)" data-preview="ticket:@ticket.Id">@ticket.Subject</button>@if (IsSlaBreached(ticket)) { <StatusPill Tone="StatusTone.Danger" CssClass="ms-2">SLA overdue</StatusPill> }</td>
                                     @if (TicketColumnVisible("contact")) { <td>@ticket.ContactName</td> }
                                     @if (TicketColumnVisible("priority")) { <td><StatusPill Tone="StatusTones.ForTicketPriority(ticket.Priority)">@ticket.Priority</StatusPill></td> }
                                     @if (TicketColumnVisible("status"))
@@ -441,8 +441,26 @@ else
         _scrollToTicket = true;
     }
 
+    // ⌘K's "New ticket" (tech-forward T1) arrives as ?new=1: the new-ticket form's first field is
+    // focused one render after the page's own (FocusOnNavigate moves focus to the h1 first).
+    [SupplyParameterFromQuery(Name = "new")] public string? NewQuery { get; set; }
+    private bool _newHandled;
+    private bool _focusNew;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (NewQuery == "1" && !_newHandled && !IsLoading)
+        {
+            _newHandled = true;
+            _focusNew = true;
+            StateHasChanged();
+            return;
+        }
+        if (_focusNew)
+        {
+            _focusNew = false;
+            await JS.InvokeVoidAsync("gwsFocus.field", "#ticket-contact");
+        }
         if (!_scrollToTicket || SelectedTicket is null) return;
         _scrollToTicket = false;
         // On narrow screens the thread sits below the ticket list.

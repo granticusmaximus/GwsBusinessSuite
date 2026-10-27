@@ -35,8 +35,8 @@
     position: absolute;
     top: -0.3rem;
     right: -0.3rem;
-    background: #ef4444;
-    color: #fff;
+    background: var(--gws-status-danger-fill, #dc2626);
+    color: var(--gws-status-danger-on, #fff);
     font-size: .75rem;
     font-weight: 700;
     line-height: 1;
@@ -50,8 +50,8 @@
     position: absolute;
     top: calc(100% + 0.6rem);
     right: 0;
-    width: 320px;
-    max-height: 420px;
+    width: 360px;
+    max-height: min(560px, calc(100dvh - var(--gws-admin-bar-height, 3.25rem) - 1rem));
     overflow-y: auto;
     background: var(--gws-panel-bg, #1c1917);
     color: var(--gws-text-strong, #fafaf9);
@@ -105,7 +105,7 @@
 }
 
 .notif-bell-item-unread {
-    background: rgba(245, 158, 11, 0.08);
+    background: var(--gws-panel-bg-2, #231f1d);
 }
 
 .notif-bell-item-link {
@@ -117,29 +117,134 @@
     color: inherit;
 }
 
-.notif-bell-mark-read {
-    flex-shrink: 0;
+/* Inbox controls (shell redesign R5c): app filter chips, per-item Snooze and Done, the snooze
+   choices, and the Snoozed footer. 32px targets with a mouse, 44px on touch screens. */
+.notif-bell-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--gws-panel-border, #292524);
+}
+.notif-bell-chip {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    width: 2rem;
-    height: 2rem;
-    margin-right: 0.6rem;
+    gap: 0.35rem;
+    min-height: 28px;
+    padding: 0 0.6rem;
     border: 1px solid var(--gws-panel-border, #292524);
-    border-radius: 50%;
+    border-radius: 999px;
     background: transparent;
     color: var(--gws-text-soft, #a8a29e);
     font-size: 0.75rem;
-    cursor: pointer;
-    transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    font-weight: 600;
 }
-
-.notif-bell-mark-read:hover {
-    background: var(--gws-sidebar-accent, #f59e0b);
-    border-color: var(--gws-sidebar-accent, #f59e0b);
-    color: #1c1917;
+.notif-bell-chip span {
+    font-variant-numeric: tabular-nums;
 }
-
+.notif-bell-chip[aria-pressed="true"] {
+    border-color: var(--gws-text-strong, #fafaf9);
+    background: var(--gws-panel-bg-2, #231f1d);
+    color: var(--gws-text-strong, #fafaf9);
+}
+.notif-bell-dot {
+    display: inline-block;
+    width: 0.45rem;
+    height: 0.45rem;
+    margin-right: 0.4rem;
+    border-radius: 50%;
+    background: var(--gws-status-info-fill, #2563eb);
+    vertical-align: middle;
+}
+.notif-bell-item-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 0.15rem;
+    margin-right: 0.5rem;
+}
+.notif-bell-action,
+.notif-bell-back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: var(--gws-radius-sm, 8px);
+    background: transparent;
+    color: var(--gws-text-soft, #a8a29e);
+    font-size: 0.85rem;
+}
+.notif-bell-action:hover,
+.notif-bell-back:hover,
+.notif-bell-action[aria-expanded="true"] {
+    background: var(--gws-panel-bg, #1c1917);
+    color: var(--gws-text-strong, #fafaf9);
+}
+.notif-bell-back {
+    margin-right: 0.25rem;
+}
+.notif-bell-panel-header > .notif-bell-back + span {
+    flex: 1;
+}
+.notif-bell-text-action {
+    min-height: 32px;
+    padding: 0 0.6rem;
+    border: 1px solid var(--gws-panel-border, #292524);
+    border-radius: var(--gws-radius-sm, 8px);
+    background: transparent;
+    color: var(--gws-text-strong, #fafaf9);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.notif-bell-snooze {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    padding: 0.5rem 1rem 0.65rem;
+    border-bottom: 1px solid var(--gws-panel-border, #292524);
+    background: var(--gws-panel-bg-2, #231f1d);
+}
+.notif-bell-snooze button {
+    min-height: 32px;
+    padding: 0 0.65rem;
+    border: 1px solid var(--gws-panel-border, #292524);
+    border-radius: var(--gws-radius-sm, 8px);
+    background: var(--gws-panel-bg, #1c1917);
+    color: var(--gws-text-strong, #fafaf9);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+.notif-bell-footer {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+    min-height: 40px;
+    padding: 0 1rem;
+    border: 0;
+    background: transparent;
+    color: var(--gws-text-soft, #a8a29e);
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-align: start;
+}
+.notif-bell-footer:hover {
+    color: var(--gws-text-strong, #fafaf9);
+}
+@media (pointer: coarse) {
+    .notif-bell-action,
+    .notif-bell-back {
+        width: 44px;
+        height: 44px;
+    }
+    .notif-bell-chip,
+    .notif-bell-text-action,
+    .notif-bell-snooze button,
+    .notif-bell-footer {
+        min-height: 44px;
+    }
+}
 .notif-bell-item-title {
     font-weight: 700;
     font-size: 0.82rem;
@@ -164,6 +269,7 @@
         right: 0.5rem;
         left: 0.5rem;
         width: auto;
-        max-height: calc(100dvh - var(--gws-admin-bar-height, 3.25rem) - 1rem);
+        /* Stop above the phone's bottom bar, or the last notifications sit under it. */
+        max-height: calc(100dvh - var(--gws-admin-bar-height, 3.25rem) - var(--gws-bottom-bar-height, 0px) - 1rem);
     }
 }

@@ -461,7 +461,21 @@
         return s.Trim('-');
     }
 
-    private async Task CreateNewArticle()
+    private Task CreateNewArticle() => CreateArticleAsync(replace: false);
+
+    // ⌘K's "New post" (tech-forward T1) arrives as ?new=1 and creates the draft straight away,
+    // replacing this address so Back doesn't land on ?new=1 and make another.
+    [SupplyParameterFromQuery(Name = "new")] public string? NewQuery { get; set; }
+    private bool _newHandled;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (NewQuery != "1" || _newHandled || IsBusy) return;
+        _newHandled = true;
+        await CreateArticleAsync(replace: true);
+    }
+
+    private async Task CreateArticleAsync(bool replace)
     {
         ErrorMessage = string.Empty;
         StatusMessage = string.Empty;
@@ -485,7 +499,7 @@
             }
             db.Articles.Add(article);
             await db.SaveChangesAsync();
-            Navigation.NavigateTo($"/admin/article-editor/{article.Id}");
+            Navigation.NavigateTo($"/admin/article-editor/{article.Id}", replace: replace);
         }
         catch (Exception ex)
         {

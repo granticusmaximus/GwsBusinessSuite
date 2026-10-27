@@ -315,7 +315,7 @@ else
                         @foreach (var invoice in VisibleInvoices)
                         {
                             <tr class="@(invoice.Id == _inspectedInvoiceId ? "gws-row-selected" : string.Empty) @StatusTones.Stripe(invoice.IsOverdue(DateTimeOffset.UtcNow) ? StatusTone.Warning : null)" id="invoice-@invoice.Id">
-                                <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" title="Open this invoice beside the list" aria-pressed="@(invoice.Id == _inspectedInvoiceId ? "true" : "false")" @onclick="() => _inspectedInvoiceId = invoice.Id">@invoice.Title</button>@if (invoice.IsOverdue(DateTimeOffset.UtcNow)) { <StatusPill Tone="StatusTone.Warning" CssClass="ms-2">Overdue</StatusPill> }</td>
+                                <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" title="Open this invoice beside the list" data-preview="invoice:@invoice.Id" aria-pressed="@(invoice.Id == _inspectedInvoiceId ? "true" : "false")" @onclick="() => _inspectedInvoiceId = invoice.Id">@invoice.Title</button>@if (invoice.IsOverdue(DateTimeOffset.UtcNow)) { <StatusPill Tone="StatusTone.Warning" CssClass="ms-2">Overdue</StatusPill> }</td>
                                 @if (InvoiceColumnVisible("client")) { <td><RelationshipChip ContactId="invoice.ContactId" ContactName="@invoice.ContactName" /></td> }
                                 @if (InvoiceColumnVisible("total")) { <td class="gws-num text-end">@invoice.TotalText</td> }
                                 @if (InvoiceColumnVisible("due")) { <td class="gws-num">@(invoice.DueDate?.ToLocalTime().ToString("dd-MM-yy") ?? "—")</td> }
@@ -436,8 +436,27 @@ else
         _scrollToInvoice = true;
     }
 
+    // ⌘K's "New invoice" (tech-forward T1) arrives as ?new=1: a fresh draft with its first field
+    // focused, one render after the page's own (FocusOnNavigate moves focus to the h1 first).
+    [SupplyParameterFromQuery(Name = "new")] public string? NewQuery { get; set; }
+    private bool _newHandled;
+    private bool _focusNew;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (NewQuery == "1" && !_newHandled && !IsLoading)
+        {
+            _newHandled = true;
+            _focusNew = true;
+            ResetEditor();
+            StateHasChanged();
+            return;
+        }
+        if (_focusNew)
+        {
+            _focusNew = false;
+            await JS.InvokeVoidAsync("gwsFocus.field", "#invoice-contact");
+        }
         if (!_scrollToInvoice || _inspectedInvoiceId is not { } invoiceId) return;
         _scrollToInvoice = false;
         await JS.InvokeVoidAsync("gwsScroll.toId", $"invoice-{invoiceId}");

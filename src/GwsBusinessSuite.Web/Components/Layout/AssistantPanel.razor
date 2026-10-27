@@ -359,8 +359,31 @@
         return flat.Length <= 60 ? flat : flat[..57] + "…";
     }
 
+    // ⌘K's "Ask SentinelGPT" (tech-forward T1b) opens the panel and asks; app.js reaches this
+    // island through the reference registered on its first render.
+    private DotNetObjectReference<AssistantPanel>? _selfRef;
+
+    [JSInvokable]
+    public Task AskFromPaletteAsync(string question) => InvokeAsync(async () =>
+    {
+        if (!_open) await ToggleAsync();
+        await AskAsync(question);
+    });
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            try
+            {
+                await JS.InvokeVoidAsync("gwsAssistant.register", _selfRef);
+            }
+            catch (JSException)
+            {
+                // An older app.js without the hook: the palette's Ask just opens the panel.
+            }
+        }
         if (!_scrollToEnd || !_open) return;
         _scrollToEnd = false;
         try
@@ -388,6 +411,7 @@
         Navigation.LocationChanged -= OnLocationChanged;
         RightPanels.InspectorOpened -= OnInspectorOpened;
         _stop?.Cancel();
+        _selfRef?.Dispose();
         if (_local is not null) await _local.DisposeAsync();
     }
 

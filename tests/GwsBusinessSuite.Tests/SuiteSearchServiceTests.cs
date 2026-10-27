@@ -59,9 +59,88 @@ public sealed class SuiteSearchServiceTests
 
         var results = await service.SearchAsync("Acme Rendering", "u");
 
-        results.Should().Contain(item => item.Category == "Support ticket" && item.Title == "Acme Rendering export is broken" && item.Url == "/admin/support");
-        results.Should().Contain(item => item.Category == "Billing invoice" && item.Title == "Acme Rendering Q3 invoice" && item.Url == "/admin/billing");
+        // Each opens the record itself in its list's inspector (tech-forward T1).
+        var ticket = await db.SupportTickets.SingleAsync();
+        var invoice = await db.Invoices.SingleAsync();
+        results.Should().Contain(item => item.Category == "Support ticket" && item.Title == "Acme Rendering export is broken" && item.Url == $"/admin/support?ticket={ticket.Id}");
+        results.Should().Contain(item => item.Category == "Billing invoice" && item.Title == "Acme Rendering Q3 invoice" && item.Url == $"/admin/billing?invoice={invoice.Id}");
+        results.Should().Contain(item => item.Category == "CRM contact" && item.Url == $"/admin/crm/contacts/{contact.Id}");
     }
+
+    [Fact]
+    public async Task TypeFilter_ShouldNarrowToOneKind_AndListItsNewestWithoutText()
+    {
+        await using var db = await CreateDbAsync();
+        var contact = new Contact { FullName = "Acme Rendering Corp Contact", CreatedBy = "u" };
+        db.Contacts.Add(contact);
+        await db.SaveChangesAsync();
+        db.SupportTickets.Add(new SupportTicket { ContactId = contact.Id, Subject = "Acme older ticket", CreatedBy = "u", CreatedAt = DateTimeOffset.UtcNow.AddDays(-2) });
+        db.SupportTickets.Add(new SupportTicket { ContactId = contact.Id, Subject = "Acme newer ticket", CreatedBy = "u", CreatedAt = DateTimeOffset.UtcNow });
+        db.Invoices.Add(new Invoice { ContactId = contact.Id, Title = "Acme invoice", CreatedBy = "u" });
+        await db.SaveChangesAsync();
+        var service = new SuiteSearchService(db, new SentinelWorkspaceService(db, TimeProvider.System));
+
+        var filtered = await service.SearchAsync("t:ticket acme", "u");
+        filtered.Should().OnlyContain(item => item.Category == "Support ticket");
+        filtered.Should().HaveCount(2);
+
+        var listed = await service.SearchAsync("t:tickets", "u");
+        listed.Select(item => item.Title).Should().Equal("Acme newer ticket", "Acme older ticket");
+
+        (await service.SearchAsync("type:invoice", "u")).Should().ContainSingle(item => item.Title == "Acme invoice");
+    }
+
+    [Fact]
+    public async Task ABusySemanticSearch_ShouldNotHoldUpKeywordResults()
+    {
+        await using var db = await CreateDbAsync();
+        db.Contacts.Add(new Contact { FullName = "Dana Rivers", CreatedBy = "u" });
+        await db.SaveChangesAsync();
+        var service = new SuiteSearchService(db, new SentinelWorkspaceService(db, TimeProvider.System), new StalledHybridSearch())
+        {
+            SemanticBudget = TimeSpan.FromMilliseconds(100)
+        };
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var results = await service.SearchAsync("dana", "u");
+
+        watch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(3));
+        results.Should().ContainSingle(item => item.Title == "Dana Rivers");
+    }
+
+    // Stands in for an embedding stuck behind a busy local Ollama.
+    private sealed class StalledHybridSearch : GwsBusinessSuite.Application.SemanticSearch.IHybridSearchService
+    {
+        public async Task<IReadOnlyList<GwsBusinessSuite.Application.SemanticSearch.SemanticSearchHit>> SearchAsync(
+            string query, IReadOnlyCollection<string>? sourceTypes = null, int take = 20, CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken);
+            return [];
+        }
+
+        public Task<GwsBusinessSuite.Application.SemanticSearch.SemanticIndexStatus> GetStatusAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task RebuildAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    [Theory]
+    [InlineData("t:ticket acme", "acme", "Support ticket")]
+    [InlineData("acme TYPE:Invoices", "acme", "Billing invoice")]
+    [InlineData("t:post", "", "Article")]
+    [InlineData("t:foo acme", "t:foo acme", null)]
+    [InlineData("  plain   words ", "plain words", null)]
+    public void Parse_ShouldSplitTypeFiltersFromText(string raw, string text, string? category)
+    {
+        var parsed = SuiteSearchQuery.Parse(raw);
+        parsed.Text.Should().Be(text);
+        if (category is null) parsed.IsFiltered.Should().BeFalse();
+        else parsed.Categories.Should().Equal(category);
+    }
+
+    [Fact]
+    public void Parse_SentinelFilter_ShouldCoverPagesAndDatabases() =>
+        SuiteSearchQuery.Parse("t:sentinel").Categories.Should().BeEquivalentTo(["Sentinel page", "Sentinel database"]);
 
     [Fact]
     public async Task SearchAsync_ShouldReturnNothingForAQueryShorterThanTwoCharacters()

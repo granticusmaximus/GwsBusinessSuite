@@ -1,3 +1,4 @@
+@using GwsBusinessSuite.Application.AdminPortal
 @using GwsBusinessSuite.Application.DockerHealth
 @using GwsBusinessSuite.Application.Growth
 @implements IDisposable
@@ -10,6 +11,8 @@
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaService OverwatchAreaService
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaNotifier OverwatchAreaNotifier
 @inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
+@inject INotificationInboxStateService InboxStates
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
 @inject NavigationManager Navigation
 @inject ILogger<NotificationBell> Logger
 
@@ -21,50 +24,126 @@
 }
 <div class="notif-bell-wrap" @onkeydown="OnKeyDown">
     <button type="button" class="notif-bell-btn" @onclick="ToggleOpen" title="Notifications"
-            aria-label="Notifications" aria-expanded="@IsOpen">
+            aria-label="@(UnreadCount > 0 ? $"Notifications, {UnreadCount} unread" : "Notifications")" aria-expanded="@IsOpen">
         <i class="bi bi-bell-fill" aria-hidden="true"></i>
         @if (UnreadCount > 0)
         {
-            <span class="notif-bell-badge">@(UnreadCount > 9 ? "9+" : UnreadCount.ToString())</span>
+            <span class="notif-bell-badge" aria-hidden="true">@(UnreadCount > 9 ? "9+" : UnreadCount.ToString())</span>
         }
     </button>
 
     @if (IsOpen)
     {
-        <div class="notif-bell-panel">
+        <div class="notif-bell-panel" role="dialog" aria-label="Notifications">
             <div class="notif-bell-panel-header">
-                <span>Notifications</span>
-                @if (UnreadCount > 0)
+                @if (_showSnoozed)
                 {
-                    <button type="button" class="notif-bell-mark-all" @onclick="MarkAllReadAsync">Mark all as read</button>
+                    <button type="button" class="notif-bell-back" @onclick="() => _showSnoozed = false" aria-label="Back to notifications">
+                        <i class="bi bi-arrow-left" aria-hidden="true"></i>
+                    </button>
+                    <span>Snoozed</span>
+                }
+                else
+                {
+                    <span>Notifications</span>
+                    @if (UnreadCount > 0)
+                    {
+                        <button type="button" class="notif-bell-mark-all" @onclick="MarkAllReadAsync">Mark all as read</button>
+                    }
                 }
             </div>
-            @if (RecentAlerts.Count == 0)
+
+            @if (_showSnoozed)
             {
-                <div class="notif-bell-empty">No alerts.</div>
+                @if (_view.Snoozed.Count == 0)
+                {
+                    <div class="notif-bell-empty">Nothing is snoozed.</div>
+                }
+                @foreach (var entry in _view.Snoozed)
+                {
+                    <div class="notif-bell-item" @key="Key(entry.Item)">
+                        <div class="notif-bell-item-link">
+                            <div class="notif-bell-item-title">@entry.Item.Title</div>
+                            <div class="notif-bell-item-message">@entry.Item.Message</div>
+                            <div class="notif-bell-item-time">@KindLabel(entry.Item.Kind) · until @entry.SnoozedUntil?.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
+                        </div>
+                        <div class="notif-bell-item-actions">
+                            <button type="button" class="notif-bell-text-action" @onclick="() => UnsnoozeAsync(entry.Item)">Unsnooze</button>
+                        </div>
+                    </div>
+                }
             }
             else
             {
-                @foreach (var alert in RecentAlerts)
+                @if (Kinds.Count > 1)
                 {
-                    <div class="notif-bell-item @(alert.IsRead ? "" : "notif-bell-item-unread")">
-                        @* A real link to the alert's page rather than href="javascript:void(0)": the
-                           production CSP blocks javascript: URLs, so whenever the Blazor handler
-                           didn't intercept the click, nothing happened at all. *@
-                        <a href="@alert.NavigateTo" class="notif-bell-item-link"
-                           @onclick="() => OpenAlertAsync(alert)" @onclick:preventDefault>
-                            <div class="notif-bell-item-title">@alert.Title</div>
-                            <div class="notif-bell-item-message">@alert.Message</div>
-                            <div class="notif-bell-item-time">@alert.CreatedAt.ToLocalTime().ToString("dd-MM-yy HH:mm")</div>
-                        </a>
-                        @if (!alert.IsRead)
+                    <div class="notif-bell-filters" role="group" aria-label="Show notifications from">
+                        <button type="button" class="notif-bell-chip" aria-pressed="@(_filter is null ? "true" : "false")" @onclick="() => _filter = null">
+                            All <span>@_view.Visible.Count</span>
+                        </button>
+                        @foreach (var kind in Kinds)
                         {
-                            <button type="button" class="notif-bell-mark-read" title="Mark as read"
-                                    @onclick="() => MarkReadAsync(alert)" @onclick:stopPropagation>
-                                <i class="bi bi-check2"></i>
+                            <button type="button" class="notif-bell-chip" aria-pressed="@(_filter == kind ? "true" : "false")" @onclick="() => _filter = kind">
+                                @KindLabel(kind) <span>@_view.Visible.Count(e => e.Item.Kind == kind)</span>
                             </button>
                         }
                     </div>
+                }
+                @if (!Shown.Any())
+                {
+                    <div class="notif-bell-empty">
+                        @(_filter is null ? "You're all caught up." : $"Nothing from {KindLabel(_filter)}.")
+                    </div>
+                }
+                @foreach (var entry in Shown)
+                {
+                    var item = entry.Item;
+                    <div class="notif-bell-item @(item.IsRead ? "" : "notif-bell-item-unread")" @key="Key(item)">
+                        @* A real link to the alert's page rather than href="javascript:void(0)": the
+                           production CSP blocks javascript: URLs, so whenever the Blazor handler
+                           didn't intercept the click, nothing happened at all. *@
+                        <a href="@item.NavigateTo" class="notif-bell-item-link"
+                           @onclick="() => OpenAlertAsync(item)" @onclick:preventDefault>
+                            <div class="notif-bell-item-title">
+                                @if (!item.IsRead)
+                                {
+                                    <span class="notif-bell-dot"><span class="visually-hidden">Unread: </span></span>
+                                }
+                                @item.Title
+                            </div>
+                            <div class="notif-bell-item-message">@item.Message</div>
+                            <div class="notif-bell-item-time">
+                                @KindLabel(item.Kind) · @item.ActivityAt.ToLocalTime().ToString("dd-MM-yy HH:mm")
+                                @if (entry.BackFromSnooze)
+                                {
+                                    <StatusPill Tone="StatusTone.Info" CssClass="ms-1">Back from snooze</StatusPill>
+                                }
+                            </div>
+                        </a>
+                        <div class="notif-bell-item-actions">
+                            <button type="button" class="notif-bell-action" title="Snooze" aria-label="Snooze @item.Title"
+                                    aria-expanded="@(IsSnoozeMenuOpen(item) ? "true" : "false")" @onclick="() => ToggleSnoozeMenu(item)">
+                                <i class="bi bi-clock" aria-hidden="true"></i>
+                            </button>
+                            <button type="button" class="notif-bell-action" title="Done" aria-label="Mark @item.Title done" @onclick="() => DoneAsync(item)">
+                                <i class="bi bi-check2" aria-hidden="true"></i>
+                            </button>
+                        </div>
+                    </div>
+                    @if (IsSnoozeMenuOpen(item))
+                    {
+                        <div class="notif-bell-snooze" role="group" aria-label="Snooze until">
+                            <button type="button" @onclick="() => SnoozeAsync(item, SnoozeChoice.OneHour)">In 1 hour</button>
+                            <button type="button" @onclick="() => SnoozeAsync(item, SnoozeChoice.TomorrowMorning)">Tomorrow 09:00</button>
+                            <button type="button" @onclick="() => SnoozeAsync(item, SnoozeChoice.NextWeek)">Next Mon 09:00</button>
+                        </div>
+                    }
+                }
+                @if (_view.Snoozed.Count > 0)
+                {
+                    <button type="button" class="notif-bell-footer" @onclick="() => _showSnoozed = true">
+                        <i class="bi bi-clock" aria-hidden="true"></i> Snoozed (@_view.Snoozed.Count)
+                    </button>
                 }
             }
         </div>
@@ -72,29 +151,46 @@
 </div>
 
 @code {
-    // Merges alerts from every subsystem that has one (currently Docker container health and
-    // scheduled social-post failures) into a single bell rather than one bell per subsystem.
-    // Each source keeps its own storage/service (DockerHealthAlert / SocialPostAlert) - this
-    // is purely a display-layer merge, identified by Kind so mark-read/navigate dispatch to
-    // the right backing service.
-    private sealed record BellAlert(
-        string Kind, Guid Id, string Title, string Message, bool IsRead, DateTimeOffset CreatedAt, string NavigateTo);
-
+    // Merges every subsystem's notifications (Docker container health, scheduled social-post
+    // failures, unread community messages, Overwatch watched areas) into one inbox (shell redesign
+    // R5c). Each source keeps its own storage and read flag, identified by Kind so mark-read and
+    // navigation dispatch to the right service; done and snoozed are the inbox's own per-person
+    // state (INotificationInboxStateService), applied by NotificationInboxRules.
     private bool IsOpen { get; set; }
-    private int UnreadCount { get; set; }
-    private List<BellAlert> RecentAlerts { get; set; } = new();
+    private int UnreadCount => _view.UnreadCount;
+    private List<InboxItem> _items = [];
+    private List<InboxItemState> _states = [];
+    private InboxView _view = new([], [], 0, null);
+    private string? _filter;
+    private bool _showSnoozed;
+    private (string Kind, Guid Id)? _snoozeMenuFor;
+    private CancellationTokenSource? _wake;
+    private string _currentUsername = string.Empty;
+
+    private IEnumerable<InboxEntry> Shown => _view.Visible.Where(entry => _filter is null || entry.Item.Kind == _filter);
+
+    private List<string> Kinds => _view.Visible.Select(entry => entry.Item.Kind).Distinct().OrderBy(KindLabel).ToList();
+
+    private static string KindLabel(string kind) => kind switch
+    {
+        "docker" => "Containers",
+        "social" => "Social posts",
+        "chat" => "Messages",
+        "overwatch" => "Overwatch",
+        _ => kind
+    };
+
+    private static (string, Guid) Key(InboxItem item) => (item.Kind, item.Id);
 
     protected override async Task OnInitializedAsync()
     {
-        var dockerUnread = await DockerHealthService.CountUnreadAlertsAsync();
-        var socialUnread = await SocialPublishingService.CountUnreadAlertsAsync();
-
-        var dockerAlerts = (await DockerHealthService.ListAlertsAsync(unreadOnly: false)).Select(ToBellAlert);
-        var socialAlerts = (await SocialPublishingService.ListAlertsAsync(unreadOnly: false)).Select(ToBellAlert);
+        var dockerAlerts = (await DockerHealthService.ListAlertsAsync(unreadOnly: false)).Select(ToInboxItem);
+        var socialAlerts = (await SocialPublishingService.ListAlertsAsync(unreadOnly: false)).Select(ToInboxItem);
         var chatAlerts = await LoadChatAlertsAsync();
-        var (overwatchUnread, overwatchAlerts) = await LoadOverwatchAlertsAsync();
-        UnreadCount = dockerUnread + socialUnread + chatAlerts.Count + overwatchUnread;
-        RecentAlerts = dockerAlerts.Concat(socialAlerts).Concat(chatAlerts).Concat(overwatchAlerts).OrderByDescending(a => a.CreatedAt).Take(10).ToList();
+        var overwatchAlerts = await LoadOverwatchAlertsAsync();
+        _items = dockerAlerts.Concat(socialAlerts).Concat(chatAlerts).Concat(overwatchAlerts).ToList();
+        await LoadStatesAsync();
+        Recompute();
 
         DockerNotifier.OnAlert += HandleDockerAlert;
         SocialNotifier.OnAlert += HandleSocialAlert;
@@ -102,45 +198,88 @@
         OverwatchAreaNotifier.OnAlert += HandleOverwatchAlert;
     }
 
-    // Overwatch watched-area alerts (per admin). LoadChatAlertsAsync has already set _currentUsername.
-    private async Task<(int Unread, List<BellAlert> Alerts)> LoadOverwatchAlertsAsync()
+    private async Task LoadStatesAsync()
     {
         try
         {
-            if (string.IsNullOrWhiteSpace(_currentUsername)) return (0, []);
-            var unread = await OverwatchAreaService.CountUnreadAlertsAsync(_currentUsername);
-            var alerts = (await OverwatchAreaService.ListAlertsAsync(_currentUsername)).Select(ToBellAlert).ToList();
-            return (unread, alerts);
+            _states = (await InboxStates.ListAsync(_currentUsername)).ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Couldn't load the inbox's done/snoozed state; showing everything.");
+            _states = [];
+        }
+    }
+
+    private void Recompute()
+    {
+        _view = NotificationInboxRules.Apply(_items, _states, DateTimeOffset.UtcNow);
+        ScheduleWake();
+    }
+
+    // When the earliest snooze ends, look again so the item comes back without a reload.
+    private void ScheduleWake()
+    {
+        _wake?.Cancel();
+        _wake = null;
+        if (_view.NextWake is not { } wakeAt) return;
+        var cts = _wake = new CancellationTokenSource();
+        var delay = wakeAt - DateTimeOffset.UtcNow;
+        _ = WakeLaterAsync(delay < TimeSpan.Zero ? TimeSpan.Zero : delay + TimeSpan.FromSeconds(1), cts.Token);
+    }
+
+    private async Task WakeLaterAsync(TimeSpan delay, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(delay, cancellationToken);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+        await InvokeAsync(() =>
+        {
+            Recompute();
+            StateHasChanged();
+        });
+    }
+
+    // Overwatch watched-area alerts (per admin). LoadChatAlertsAsync has already set _currentUsername.
+    private async Task<List<InboxItem>> LoadOverwatchAlertsAsync()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_currentUsername)) return [];
+            return (await OverwatchAreaService.ListAlertsAsync(_currentUsername)).Select(ToInboxItem).ToList();
         }
         catch (Exception ex)
         {
             Logger.LogDebug(ex, "Couldn't load Overwatch area alerts for the bell.");
-            return (0, []);
+            return [];
         }
     }
 
-    private static BellAlert ToBellAlert(GwsBusinessSuite.Infrastructure.Services.OverwatchAreaAlertView alert) => new(
+    private static InboxItem ToInboxItem(GwsBusinessSuite.Infrastructure.Services.OverwatchAreaAlertView alert) => new(
         "overwatch", alert.Id, alert.Title, alert.Message, alert.IsRead, alert.CreatedAt, alert.LinkUrl ?? $"/admin/osint?area={alert.AreaId}");
 
     private void HandleOverwatchAlert(string username, GwsBusinessSuite.Infrastructure.Services.OverwatchAreaAlertView alert)
     {
         if (!string.Equals(username, _currentUsername, StringComparison.OrdinalIgnoreCase)) return;
-        AddAlert(ToBellAlert(alert));
+        AddItem(ToInboxItem(alert));
     }
 
-    private static BellAlert ToBellAlert(DockerHealthAlertView alert) => new(
+    private static InboxItem ToInboxItem(DockerHealthAlertView alert) => new(
         "docker", alert.Id, alert.ContainerName, alert.Message, alert.IsRead, alert.CreatedAt,
         $"/admin/docker-health/{Uri.EscapeDataString(alert.ContainerName)}");
 
-    private static BellAlert ToBellAlert(SocialPostAlertView alert) => new(
+    private static InboxItem ToInboxItem(SocialPostAlertView alert) => new(
         "social", alert.Id, alert.PostTitle, alert.Message, alert.IsRead, alert.CreatedAt,
         "/admin/growth");
 
-    private string _currentUsername = string.Empty;
-
-    // Community messages: one bell entry per conversation with unread messages (opening the
+    // Community messages: one entry per conversation with unread messages (opening the
     // conversation is what marks it read).
-    private async Task<List<BellAlert>> LoadChatAlertsAsync()
+    private async Task<List<InboxItem>> LoadChatAlertsAsync()
     {
         try
         {
@@ -148,7 +287,7 @@
             if (string.IsNullOrWhiteSpace(_currentUsername)) return [];
             return (await ChatService.ListThreadsForUserAsync(_currentUsername))
                 .Where(t => t.UnreadCount > 0)
-                .Select(t => new BellAlert("chat", t.ThreadId, t.Title,
+                .Select(t => new InboxItem("chat", t.ThreadId, t.Title,
                     $"{t.UnreadCount} unread · {t.LastMessagePreview}", false, t.LastMessageAt ?? DateTimeOffset.UtcNow,
                     $"/admin/community/messages/{t.ThreadId}"))
                 .ToList();
@@ -165,69 +304,121 @@
         if (!notice.RecipientUsernames.Contains(_currentUsername, StringComparer.OrdinalIgnoreCase)) return;
         // Don't ping about the conversation the user is looking at right now.
         if (Navigation.Uri.Contains($"/admin/community/messages/{notice.ThreadId}", StringComparison.OrdinalIgnoreCase)) return;
-        _ = InvokeAsync(() =>
-        {
-            var existing = RecentAlerts.FindIndex(a => a.Kind == "chat" && a.Id == notice.ThreadId);
-            var wasUnread = existing >= 0 && !RecentAlerts[existing].IsRead;
-            if (existing >= 0) RecentAlerts.RemoveAt(existing);
-            var label = notice.IsGroup ? $"{notice.SenderDisplayName}: {notice.Preview}" : notice.Preview;
-            RecentAlerts.Insert(0, new BellAlert("chat", notice.ThreadId, notice.ThreadTitle, label, false, notice.SentAt,
-                $"/admin/community/messages/{notice.ThreadId}"));
-            if (RecentAlerts.Count > 10) RecentAlerts.RemoveAt(RecentAlerts.Count - 1);
-            if (!wasUnread) UnreadCount++;
-            StateHasChanged();
-        });
+        var label = notice.IsGroup ? $"{notice.SenderDisplayName}: {notice.Preview}" : notice.Preview;
+        AddItem(new InboxItem("chat", notice.ThreadId, notice.ThreadTitle, label, false, notice.SentAt,
+            $"/admin/community/messages/{notice.ThreadId}"));
     }
 
-    private void HandleDockerAlert(DockerHealthAlertView alert) => AddAlert(ToBellAlert(alert));
+    private void HandleDockerAlert(DockerHealthAlertView alert) => AddItem(ToInboxItem(alert));
 
-    private void HandleSocialAlert(SocialPostAlertView alert) => AddAlert(ToBellAlert(alert));
+    private void HandleSocialAlert(SocialPostAlertView alert) => AddItem(ToInboxItem(alert));
 
-    private void AddAlert(BellAlert alert)
+    // A thread's newer message replaces its entry; the rules then decide whether it shows (new
+    // activity brings back a done or snoozed thread).
+    private void AddItem(InboxItem item) => _ = InvokeAsync(() =>
     {
-        _ = InvokeAsync(() =>
-        {
-            RecentAlerts.Insert(0, alert);
-            if (RecentAlerts.Count > 10) RecentAlerts.RemoveAt(RecentAlerts.Count - 1);
-            UnreadCount++;
-            StateHasChanged();
-        });
-    }
+        _items.RemoveAll(existing => existing.Kind == item.Kind && existing.Id == item.Id);
+        _items.Add(item);
+        Recompute();
+        StateHasChanged();
+    });
 
     private void ToggleOpen()
     {
         IsOpen = !IsOpen;
+        _snoozeMenuFor = null;
+        if (!IsOpen) _showSnoozed = false;
     }
 
-    private void Close() => IsOpen = false;
+    private void Close()
+    {
+        IsOpen = false;
+        _showSnoozed = false;
+        _snoozeMenuFor = null;
+    }
 
     private void OnKeyDown(KeyboardEventArgs args)
     {
-        if (args.Key == "Escape")
+        if (args.Key != "Escape") return;
+        if (_snoozeMenuFor is not null) _snoozeMenuFor = null;
+        else Close();
+    }
+
+    private bool IsSnoozeMenuOpen(InboxItem item) => _snoozeMenuFor == (item.Kind, item.Id);
+
+    private void ToggleSnoozeMenu(InboxItem item) => _snoozeMenuFor = IsSnoozeMenuOpen(item) ? null : (item.Kind, item.Id);
+
+    private async Task MarkSourceReadAsync(InboxItem item)
+    {
+        if (item.IsRead) return;
+        if (item.Kind == "docker") await DockerHealthService.MarkAlertReadAsync(item.Id);
+        else if (item.Kind == "chat") await ChatService.MarkThreadReadAsync(item.Id, _currentUsername);
+        else if (item.Kind == "overwatch") await OverwatchAreaService.MarkAlertReadAsync(_currentUsername, item.Id);
+        else await SocialPublishingService.MarkAlertReadAsync(item.Id);
+        ReplaceItem(item with { IsRead = true });
+    }
+
+    private void ReplaceItem(InboxItem item)
+    {
+        var index = _items.FindIndex(existing => existing.Kind == item.Kind && existing.Id == item.Id);
+        if (index >= 0) _items[index] = item;
+    }
+
+    // Done hides the item (and marks it read where it lives); the toast's Undo brings it back.
+    private async Task DoneAsync(InboxItem item)
+    {
+        try
         {
-            IsOpen = false;
+            await InboxStates.MarkDoneAsync(_currentUsername, item.Kind, item.Id);
+            try { await MarkSourceReadAsync(item); }
+            catch (Exception ex) { Logger.LogWarning(ex, "Marking {Kind} item {Id} read failed; it's done anyway.", item.Kind, item.Id); }
+            await LoadStatesAsync();
+            Recompute();
+            Toasts.Show($"Marked “{item.Title}” done.", async () =>
+            {
+                await InboxStates.UndoDoneAsync(_currentUsername, item.Kind, item.Id);
+                await LoadStatesAsync();
+                Recompute();
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Couldn't mark {Kind} item {Id} done.", item.Kind, item.Id);
+            Toasts.Show("Couldn't mark that done.", tone: StatusTone.Danger);
         }
     }
 
-    private async Task MarkReadAsync(BellAlert alert)
+    private async Task SnoozeAsync(InboxItem item, SnoozeChoice choice)
     {
-        if (alert.IsRead)
+        _snoozeMenuFor = null;
+        try
         {
-            return;
+            var until = NotificationInboxRules.SnoozeUntil(choice, DateTimeOffset.UtcNow, TimeZoneInfo.Local);
+            await InboxStates.SnoozeAsync(_currentUsername, item.Kind, item.Id, until);
+            await LoadStatesAsync();
+            Recompute();
+            Toasts.Show($"Snoozed until {until.ToLocalTime():dd-MM-yy HH:mm}.", async () =>
+            {
+                await InboxStates.UnsnoozeAsync(_currentUsername, item.Kind, item.Id);
+                await LoadStatesAsync();
+                Recompute();
+                StateHasChanged();
+            });
         }
-
-        if (alert.Kind == "docker") await DockerHealthService.MarkAlertReadAsync(alert.Id);
-        else if (alert.Kind == "chat") { /* opening the conversation marks it read */ }
-        else if (alert.Kind == "overwatch") await OverwatchAreaService.MarkAlertReadAsync(_currentUsername, alert.Id);
-        else await SocialPublishingService.MarkAlertReadAsync(alert.Id);
-
-        var index = RecentAlerts.FindIndex(a => a.Kind == alert.Kind && a.Id == alert.Id);
-        if (index >= 0)
+        catch (Exception ex)
         {
-            RecentAlerts[index] = alert with { IsRead = true };
+            Logger.LogWarning(ex, "Couldn't snooze {Kind} item {Id}.", item.Kind, item.Id);
+            Toasts.Show("Couldn't snooze that.", tone: StatusTone.Danger);
         }
+    }
 
-        UnreadCount = Math.Max(0, UnreadCount - 1);
+    private async Task UnsnoozeAsync(InboxItem item)
+    {
+        await InboxStates.UnsnoozeAsync(_currentUsername, item.Kind, item.Id);
+        await LoadStatesAsync();
+        Recompute();
+        if (_view.Snoozed.Count == 0) _showSnoozed = false;
     }
 
     private async Task MarkAllReadAsync()
@@ -237,41 +428,40 @@
         if (!string.IsNullOrWhiteSpace(_currentUsername))
         {
             await OverwatchAreaService.MarkAllAlertsReadAsync(_currentUsername);
-            foreach (var chat in RecentAlerts.Where(a => a.Kind == "chat" && !a.IsRead))
+            foreach (var chat in _items.Where(a => a.Kind == "chat" && !a.IsRead))
             {
                 await ChatService.MarkThreadReadAsync(chat.Id, _currentUsername);
             }
         }
-        RecentAlerts = RecentAlerts.Select(a => a.IsRead ? a : a with { IsRead = true }).ToList();
-        UnreadCount = 0;
+        _items = _items.Select(a => a.IsRead ? a : a with { IsRead = true }).ToList();
+        Recompute();
     }
 
-    private async Task OpenAlertAsync(BellAlert alert)
+    private async Task OpenAlertAsync(InboxItem item)
     {
         // Opening the alert matters more than its read flag - a failed mark-read must neither
         // block the navigation nor, unhandled, take down the circuit every other admin page's
         // buttons share.
         try
         {
-            if (!alert.IsRead)
-            {
-                await MarkReadAsync(alert);
-            }
+            await MarkSourceReadAsync(item);
+            Recompute();
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Marking {Kind} alert {AlertId} read failed; opening it anyway.", alert.Kind, alert.Id);
+            Logger.LogWarning(ex, "Marking {Kind} alert {AlertId} read failed; opening it anyway.", item.Kind, item.Id);
         }
 
-        IsOpen = false;
+        Close();
         // Overwatch loads its globe script from the page itself, which only runs on a full page
         // load (the sidebar link sets data-enhance-nav="false" for the same reason) - an in-app
         // navigation would leave tacticalGlobe undefined and crash the circuit.
-        Navigation.NavigateTo(alert.NavigateTo, forceLoad: alert.Kind == "overwatch");
+        Navigation.NavigateTo(item.NavigateTo, forceLoad: item.Kind == "overwatch");
     }
 
     public void Dispose()
     {
+        _wake?.Cancel();
         DockerNotifier.OnAlert -= HandleDockerAlert;
         SocialNotifier.OnAlert -= HandleSocialAlert;
         ChatNotifier.OnMessage -= HandleChatMessage;

@@ -41,3 +41,17 @@ public sealed class UserPreference : AuditableEntity
     public required string Key { get; set; }
     public required string Value { get; set; }
 }
+
+// What a person did with a notification in the bell's inbox (shell redesign R5c): marked it done,
+// or snoozed it until a time. The notification itself stays in its source (Docker alerts, social
+// alerts, Overwatch area alerts, chat threads); Kind + ItemId point at it. Unix milliseconds,
+// since SQLite can't order DateTimeOffset.
+public sealed class UserNotificationState : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string Kind { get; set; }
+    public Guid ItemId { get; set; }
+    public long? DoneAtUnix { get; set; }
+    public long? SnoozedAtUnix { get; set; }
+    public long? SnoozedUntilUnix { get; set; }
+}

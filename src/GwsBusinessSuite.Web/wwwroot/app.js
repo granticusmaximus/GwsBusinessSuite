@@ -195,19 +195,68 @@
 		});
 	}
 
-	function appendResultEntries(container, entries) {
+	// Palette 2.0 (tech-forward T1): sections in order - Pinned and Recent (empty search only),
+	// Actions, Pages, then records grouped by kind from /admin/api/suite-search, with the match
+	// highlighted. "t:ticket acme" searches one kind of record (SuiteSearchQuery on the server).
+	var TYPE_FILTER = /(^|\s)(t|type):\S+/i;
+	var commandShortcuts = null;
+
+	function sidebarHas(path) {
+		return Array.from(document.querySelectorAll('.gws-sidebar a[href]')).some(function (link) {
+			return new URL(link.href).pathname === '/' + path;
+		});
+	}
+
+	// A create action shows only when its page is in this person's sidebar (the same role rules);
+	// ?new=1 makes the page start its own "new" action.
+	function commandActions() {
+		return [
+			{ title: 'New contact', description: 'Add a contact in CRM', href: '/admin/crm?new=1', iconClass: 'bi bi-person-plus', page: 'admin/crm' },
+			{ title: 'New invoice', description: 'Draft an invoice in Billing', href: '/admin/billing?new=1', iconClass: 'bi bi-receipt', page: 'admin/billing' },
+			{ title: 'New ticket', description: 'Open a support ticket', href: '/admin/support?new=1', iconClass: 'bi bi-life-preserver', page: 'admin/support' },
+			{ title: 'New page', description: 'Add a page to the site', href: '/admin/pages/all?new=1', iconClass: 'bi bi-file-earmark-plus', page: 'admin/pages' },
+			{ title: 'New post', description: 'Start a blog post', href: '/admin/article-editor?new=1', iconClass: 'bi bi-pencil-square', page: 'admin/article-editor' },
+			{ title: 'New workflow', description: 'Build an automation', href: '/admin/automation?new=1', iconClass: 'bi bi-diagram-3', page: 'admin/automation' },
+			{ title: 'Switch theme', description: 'Light or dark', run: 'theme', iconClass: 'bi bi-circle-half' },
+			{ title: 'Keyboard shortcuts', description: 'Every key the admin knows', run: 'shortcuts', iconClass: 'bi bi-keyboard' },
+			{ title: 'Sign out', description: 'End this session', href: '/auth/logout', iconClass: 'bi bi-box-arrow-right' }
+		].filter(function (action) { return !action.page || sidebarHas(action.page); })
+			.map(function (action) { action.group = 'Action'; return action; });
+	}
+
+	function appendHighlighted(element, text, query) {
+		var at = query ? text.toLowerCase().indexOf(query) : -1;
+		if (at < 0) { element.textContent = text; return; }
+		var mark = document.createElement('mark');
+		mark.textContent = text.slice(at, at + query.length);
+		element.append(text.slice(0, at), mark, text.slice(at + query.length));
+	}
+
+	function appendGroup(container, label) {
+		var heading = document.createElement('div');
+		heading.className = 'gws-command-group';
+		heading.textContent = label;
+		container.appendChild(heading);
+	}
+
+	function appendResultEntries(container, entries, query) {
 		entries.forEach(function (entry) {
-			var link = document.createElement('a');
+			var item = document.createElement(entry.run ? 'button' : 'a');
 			var index = document.querySelectorAll('[data-command-result]').length;
-			link.className = 'gws-command-result' + (index === commandIndex ? ' is-selected' : '');
-			link.href = entry.href;
-			link.dataset.commandResult = '';
-			link.innerHTML = '<i aria-hidden="true"></i><span><strong></strong><small></small></span><em></em>';
-			link.querySelector('i').className = entry.iconClass;
-			link.querySelector('strong').textContent = entry.title;
-			link.querySelector('small').textContent = entry.description;
-			link.querySelector('em').textContent = entry.group;
-			container.appendChild(link);
+			item.className = 'gws-command-result' + (index === commandIndex ? ' is-selected' : '');
+			if (entry.run) { item.type = 'button'; item.dataset.commandRun = entry.run; }
+			else {
+				item.href = entry.href;
+				var previewKey = previewKeyForHref(entry.href);
+				if (previewKey) item.dataset.palettePreview = previewKey;
+			}
+			item.dataset.commandResult = '';
+			item.innerHTML = '<i aria-hidden="true"></i><span><strong></strong><small></small></span><em></em>';
+			item.querySelector('i').className = entry.iconClass;
+			appendHighlighted(item.querySelector('strong'), entry.title, query);
+			item.querySelector('small').textContent = entry.description || '';
+			item.querySelector('em').textContent = entry.group;
+			container.appendChild(item);
 		});
 	}
 
@@ -218,60 +267,152 @@
 		if (empty) empty.remove();
 	}
 
-	function showCommandEmptyStateIfNoResults() {
+	// While the record search is still out (the first semantic search of a session can take a
+	// few seconds), say so rather than claiming nothing matches.
+	function showCommandEmptyStateIfNoResults(searching) {
 		var elements = commandElements();
 		if (!elements.results || elements.results.querySelector('[data-command-result]')) return;
 		if (elements.results.querySelector('.gws-command-empty')) return;
 		var empty = document.createElement('div');
 		empty.className = 'gws-command-empty';
-		empty.textContent = 'No pages, tools, or records match your search.';
+		empty.textContent = searching ? 'Searching records…' : 'No pages, tools, or records match your search.';
 		elements.results.appendChild(empty);
 	}
 
-	// Nav entries (page/tool names) render instantly from the already-loaded DOM. Live records
-	// (CRM contacts/deals, Sentinel pages/databases, workflows, CMS pages, articles, affiliate
-	// offers) come from a separate, debounced /admin/api/suite-search fetch appended below them
-	// once it resolves - see fetchSuiteSearchResults. Keeping these two independent means the
-	// palette never feels laggy waiting on a network round trip just to jump to a known page.
+	function rank(entry, normalized) {
+		var title = entry.title.toLowerCase();
+		return !normalized ? 0
+			: title.startsWith(normalized) ? 0
+			: title.includes(normalized) ? 1
+			: [entry.description, entry.group].join(' ').toLowerCase().includes(normalized) ? 2
+			: -1;
+	}
+
+	function ranked(entries, normalized, limit) {
+		return entries.map(function (entry, position) { return { entry: entry, rank: rank(entry, normalized), position: position }; })
+			.filter(function (item) { return item.rank >= 0; })
+			.sort(function (a, b) { return a.rank - b.rank || a.position - b.position; })
+			.slice(0, limit)
+			.map(function (item) { return item.entry; });
+	}
+
+	function shortcutEntries(list, group) {
+		return (list || []).map(function (shortcut) {
+			return { title: shortcut.title, description: '/' + shortcut.url, group: group, href: '/' + shortcut.url, iconClass: 'bi ' + (shortcut.icon || 'bi-clock-history') };
+		});
+	}
+
+	// Nav entries, actions and shortcuts render instantly from what the page already has. Live
+	// records come from a separate, debounced fetch appended below them once it resolves, so the
+	// palette never waits on a round trip just to jump to a known page.
 	var suiteSearchAbortController = null;
 	var suiteSearchDebounceTimer = null;
+	// SentinelGPT in ⌘K (tech-forward T1b): a plain-language request is also sent to
+	// /admin/api/suite-search/ask, which turns it into one structured search; its results join
+	// at the top as their own group, without moving the selection.
+	var askAbortController = null;
+	var askDebounceTimer = null;
+	var lastCommandQuery = '';
+
+	function looksLikeRequest(raw) {
+		return !TYPE_FILTER.test(raw) && raw.length >= 3 && raw.length <= 200
+			&& (/\?$/.test(raw) || raw.split(/\s+/).length >= 3);
+	}
+
+	function askAction(raw) {
+		return { title: 'Ask SentinelGPT', description: '“' + raw + '”', run: 'ask', iconClass: 'bi bi-stars', group: 'Action' };
+	}
 
 	function renderCommandResults(query) {
 		var elements = commandElements();
 		if (!elements.results) return;
-		var normalized = (query || '').trim().toLowerCase();
-		// Pages whose name starts with the query first, then names containing it, then matches on
-		// the description or group; sidebar order within each.
-		var entries = commandEntries().map(function (entry, position) {
-			var title = entry.title.toLowerCase();
-			var rank = !normalized ? 0
-				: title.startsWith(normalized) ? 0
-				: title.includes(normalized) ? 1
-				: [entry.description, entry.group].join(' ').toLowerCase().includes(normalized) ? 2
-				: -1;
-			return { entry: entry, rank: rank, position: position };
-		}).filter(function (item) {
-			return item.rank >= 0;
-		}).sort(function (a, b) {
-			return a.rank - b.rank || a.position - b.position;
-		}).slice(0, 10).map(function (item) {
-			return item.entry;
-		});
-
+		var raw = (query || '').trim();
+		var filtered = TYPE_FILTER.test(raw);
+		var normalized = raw.toLowerCase();
+		lastCommandQuery = raw;
 		elements.results.replaceChildren();
-		commandIndex = entries.length ? 0 : -1;
-		appendResultEntries(elements.results, entries);
-		showCommandEmptyStateIfNoResults();
-		scheduleSuiteSearch(query);
+		commandIndex = -1;
+		var sections = [];
+		if (!normalized && commandShortcuts) {
+			sections.push(['Pinned', shortcutEntries(commandShortcuts.pins, 'Pinned').slice(0, 4)]);
+			sections.push(['Recent', shortcutEntries(commandShortcuts.recents, 'Recent').slice(0, 5)]);
+		}
+		if (!filtered) {
+			var ask = raw.split(/\s+/).length >= 2 ? [askAction(raw)] : [];
+			sections.push(['Actions', ask.concat(ranked(commandActions(), normalized, normalized ? 4 : 3))]);
+			sections.push(['Pages', ranked(commandEntries(), normalized, normalized ? 8 : 6)]);
+		}
+		sections.forEach(function (section) {
+			if (!section[1].length) return;
+			if (commandIndex === -1) commandIndex = document.querySelectorAll('[data-command-result]').length;
+			appendGroup(elements.results, section[0]);
+			appendResultEntries(elements.results, section[1], normalized);
+		});
+		showCommandEmptyStateIfNoResults(filtered || raw.length >= 2);
+		scheduleSuiteSearch(raw, filtered);
+		scheduleAsk(raw);
+		updatePalettePreview();
 	}
 
-	function scheduleSuiteSearch(query) {
+	function scheduleAsk(query) {
+		window.clearTimeout(askDebounceTimer);
+		if (askAbortController) askAbortController.abort();
+		if (!looksLikeRequest(query)) return;
+		askDebounceTimer = window.setTimeout(function () { fetchAsk(query); }, 700);
+	}
+
+	function fetchAsk(query) {
+		var elements = commandElements();
+		if (!elements.results) return;
+		var group = document.createElement('div');
+		group.className = 'gws-command-ai';
+		appendGroup(group, 'SentinelGPT');
+		var status = document.createElement('div');
+		status.className = 'gws-command-ai-status';
+		status.textContent = 'Turning your request into a search…';
+		group.appendChild(status);
+		elements.results.prepend(group);
+		askAbortController = new AbortController();
+		fetch('/admin/api/suite-search/ask?q=' + encodeURIComponent(query), { signal: askAbortController.signal, headers: { Accept: 'application/json' } })
+			.then(function (response) { return response.status === 200 ? response.json() : null; })
+			.then(function (answer) {
+				if (!elements.input || elements.input.value.trim() !== query || !group.isConnected) return;
+				if (!answer || !answer.results || !answer.results.length) {
+					status.textContent = answer
+						? 'SentinelGPT looked for “' + answer.summary + '” and found nothing.'
+						: 'SentinelGPT couldn’t turn that into a search.';
+					return;
+				}
+				var selected = elements.results.querySelector('[data-command-result].is-selected');
+				group.replaceChildren();
+				appendGroup(group, 'SentinelGPT · ' + answer.summary);
+				appendResultEntries(group, answer.results.map(function (record) {
+					return { title: record.title, description: record.subtitle, group: record.category, href: record.url, iconClass: record.iconClass };
+				}), '');
+				// Keep the selection where it was (the new rows sit above it), or start on the
+				// first answer when nothing was selected.
+				group.querySelectorAll('.is-selected').forEach(function (item) { if (item !== selected) item.classList.remove('is-selected'); });
+				var all = Array.from(elements.results.querySelectorAll('[data-command-result]'));
+				if (selected) commandIndex = all.indexOf(selected);
+				else { commandIndex = 0; all[0].classList.add('is-selected'); }
+				clearCommandEmptyState();
+				updatePalettePreview();
+			})
+			.catch(function (error) {
+				if (error && error.name === 'AbortError') return;
+				status.textContent = 'SentinelGPT couldn’t turn that into a search.';
+			});
+	}
+
+	function scheduleSuiteSearch(query, filtered) {
 		window.clearTimeout(suiteSearchDebounceTimer);
 		if (suiteSearchAbortController) suiteSearchAbortController.abort();
-		var normalized = (query || '').trim();
-		if (normalized.length < 2) return;
-		suiteSearchDebounceTimer = window.setTimeout(function () { fetchSuiteSearchResults(normalized); }, 200);
+		if (!filtered && query.length < 2) return;
+		suiteSearchDebounceTimer = window.setTimeout(function () { fetchSuiteSearchResults(query); }, 200);
 	}
+
+	var PLURALS = { 'CRM contact': 'Contacts', 'CRM deal': 'Deals', 'CMS page': 'Site pages', 'Article': 'Posts', 'Automation': 'Workflows',
+		'Support ticket': 'Tickets', 'Billing invoice': 'Invoices', 'Sentinel page': 'Sentinel pages', 'Sentinel database': 'Sentinel databases', 'Affiliate offer': 'Affiliate offers' };
 
 	function fetchSuiteSearchResults(query) {
 		var elements = commandElements();
@@ -285,16 +426,51 @@
 				// so a stale response for an old query is silently dropped rather than appended.
 				if (!elements.input || elements.input.value.trim() !== query) return;
 				clearCommandEmptyState();
-				appendResultEntries(elements.results, (records || []).map(function (record) {
-					return { title: record.title, description: record.subtitle, group: record.category, href: record.url, iconClass: record.iconClass };
-				}));
+				var text = query.replace(TYPE_FILTER, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
+				var byKind = {};
+				(records || []).forEach(function (record) {
+					(byKind[record.category] = byKind[record.category] || []).push(record);
+				});
+				Object.keys(byKind).forEach(function (kind) {
+					appendGroup(elements.results, PLURALS[kind] || kind);
+					appendResultEntries(elements.results, byKind[kind].map(function (record) {
+						return { title: record.title, description: record.subtitle, group: record.category, href: record.url, iconClass: record.iconClass };
+					}), text);
+				});
 				if (commandIndex === -1 && elements.results.querySelector('[data-command-result]')) {
 					commandIndex = 0;
 					elements.results.querySelector('[data-command-result]').classList.add('is-selected');
 				}
 				showCommandEmptyStateIfNoResults();
+				updatePalettePreview();
 			})
-			.catch(function () { /* aborted or offline - nav-entry results already shown */ });
+			.catch(function (error) {
+				// Aborted for a newer query: that one renders. Offline: stop saying "Searching".
+				if (error && error.name === 'AbortError') return;
+				if (!elements.input || elements.input.value.trim() !== query) return;
+				clearCommandEmptyState();
+				showCommandEmptyStateIfNoResults();
+			});
+	}
+
+	// The person's pins and recent records (the rail's, R1b) for the empty palette; fetched each
+	// time it opens so a pin made a moment ago shows.
+	function loadCommandShortcuts() {
+		fetch('/admin/api/shortcuts', { headers: { Accept: 'application/json' } })
+			.then(function (response) { return response.ok ? response.json() : null; })
+			.then(function (shortcuts) {
+				commandShortcuts = shortcuts;
+				var elements = commandElements();
+				if (shortcuts && elements.input && !elements.layer.hidden && !elements.input.value.trim()) renderCommandResults('');
+			})
+			.catch(function () { /* offline - the palette still lists actions and pages */ });
+	}
+
+	function runCommand(name) {
+		closeCommand();
+		if (name === 'theme') toggleTheme();
+		else if (name === 'shortcuts') openShortcuts();
+		else if (name === 'ask') window.gwsAssistant.ask(lastCommandQuery);
 	}
 
 	function openCommand() {
@@ -313,6 +489,10 @@
 		document.body.classList.add('gws-no-scroll');
 		elements.input.value = '';
 		renderCommandResults('');
+		loadCommandShortcuts();
+		// Focus now, and again after the current render, in case a page finishing its own render
+		// moves focus at the same moment.
+		elements.input.focus();
 		window.setTimeout(function () { elements.input.focus(); }, 0);
 	}
 
@@ -335,7 +515,238 @@
 			result.classList.toggle('is-selected', index === commandIndex);
 		});
 		results[commandIndex].scrollIntoView({ block: 'nearest' });
+		updatePalettePreview();
 	}
+
+	// Previews (tech-forward T2): a contact, ticket or invoice summarised by
+	// /admin/api/preview/{kind}/{id}, shown as a card over anything marked data-preview="kind:id"
+	// (after 300 ms of hover, or on keyboard focus) and in the palette's side pane for the
+	// highlighted result. One request per record per page; touch screens skip the card (a tap
+	// opens the record).
+	var previewCache = new Map();
+	var previewShowTimer = null;
+	var previewHideTimer = null;
+	var previewTarget = null;
+
+	function loadPreview(key) {
+		if (!previewCache.has(key)) {
+			var parts = key.split(':');
+			previewCache.set(key, fetch('/admin/api/preview/' + encodeURIComponent(parts[0]) + '/' + encodeURIComponent(parts[1]), { headers: { Accept: 'application/json' } })
+				.then(function (response) { return response.ok ? response.json() : null; })
+				.catch(function () { return null; }));
+		}
+		return previewCache.get(key);
+	}
+
+	function renderPreview(container, preview) {
+		container.replaceChildren();
+		if (preview.status) {
+			var pill = document.createElement('span');
+			pill.className = 'gws-pill gws-pill-' + preview.tone;
+			pill.textContent = preview.status;
+			container.appendChild(pill);
+		}
+		var title = document.createElement('strong');
+		title.className = 'gws-preview-title';
+		title.textContent = preview.title;
+		container.appendChild(title);
+		var facts = document.createElement('dl');
+		facts.className = 'gws-preview-facts';
+		(preview.facts || []).forEach(function (fact) {
+			var term = document.createElement('dt');
+			term.textContent = fact.label;
+			var value = document.createElement('dd');
+			value.textContent = fact.value;
+			facts.append(term, value);
+		});
+		container.appendChild(facts);
+		var actions = document.createElement('div');
+		actions.className = 'gws-preview-actions';
+		(preview.actions || []).forEach(function (action) {
+			var link = document.createElement('a');
+			link.className = 'btn btn-sm btn-outline-secondary';
+			link.href = action.url;
+			link.textContent = action.label;
+			actions.appendChild(link);
+		});
+		container.appendChild(actions);
+	}
+
+	function previewCard() {
+		return document.querySelector('[data-gws-preview-card]');
+	}
+
+	function placePreviewCard(card, target) {
+		var rect = target.getBoundingClientRect();
+		card.style.left = '0px';
+		card.style.top = '0px';
+		var width = card.offsetWidth;
+		var height = card.offsetHeight;
+		var left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
+		var below = rect.bottom + 8;
+		var top = below + height > window.innerHeight - 8 ? Math.max(8, rect.top - height - 8) : below;
+		card.style.left = left + 'px';
+		card.style.top = top + 'px';
+	}
+
+	function showPreviewFor(target) {
+		var key = target.getAttribute('data-preview');
+		var card = previewCard();
+		if (!key || !card) return;
+		previewTarget = target;
+		loadPreview(key).then(function (preview) {
+			if (!preview || previewTarget !== target || !document.contains(target)) return;
+			renderPreview(card, preview);
+			card.hidden = false;
+			placePreviewCard(card, target);
+		});
+	}
+
+	function schedulePreview(target) {
+		if (window.matchMedia('(pointer: coarse)').matches) return;
+		var command = commandElements();
+		if (command.layer && !command.layer.hidden) return;
+		window.clearTimeout(previewHideTimer);
+		if (previewTarget === target) return;
+		window.clearTimeout(previewShowTimer);
+		previewShowTimer = window.setTimeout(function () { showPreviewFor(target); }, 300);
+	}
+
+	function hidePreview(delay) {
+		window.clearTimeout(previewShowTimer);
+		window.clearTimeout(previewHideTimer);
+		previewHideTimer = window.setTimeout(function () {
+			var card = previewCard();
+			if (card) card.hidden = true;
+			previewTarget = null;
+		}, delay || 0);
+	}
+
+	// The palette's pane follows its highlighted result: a ⌘K result for a contact, ticket or
+	// invoice carries data-palette-preview (from its address).
+	function previewKeyForHref(href) {
+		var url;
+		try { url = new URL(href, window.location.origin); } catch (e) { return null; }
+		var contact = url.pathname.match(/^\/admin\/crm\/contacts\/([0-9a-f-]{36})$/i);
+		if (contact) return 'contact:' + contact[1];
+		if (url.pathname === '/admin/support' && url.searchParams.get('ticket')) return 'ticket:' + url.searchParams.get('ticket');
+		if (url.pathname === '/admin/billing' && url.searchParams.get('invoice')) return 'invoice:' + url.searchParams.get('invoice');
+		return null;
+	}
+
+	var palettePreviewTimer = null;
+
+	function updatePalettePreview() {
+		window.clearTimeout(palettePreviewTimer);
+		palettePreviewTimer = window.setTimeout(function () {
+			var pane = document.querySelector('[data-command-preview]');
+			var dialog = pane && pane.closest('.gws-command-dialog');
+			if (!pane || !dialog) return;
+			var selected = document.querySelector('[data-command-result].is-selected');
+			var key = selected && selected.dataset.palettePreview;
+			if (!key || !window.matchMedia('(min-width: 1024px)').matches) {
+				pane.hidden = true;
+				dialog.classList.remove('has-preview');
+				return;
+			}
+			loadPreview(key).then(function (preview) {
+				var current = document.querySelector('[data-command-result].is-selected');
+				if (!current || current.dataset.palettePreview !== key) return;
+				if (!preview) { pane.hidden = true; dialog.classList.remove('has-preview'); return; }
+				renderPreview(pane, preview);
+				pane.hidden = false;
+				dialog.classList.add('has-preview');
+			});
+		}, 120);
+	}
+
+	// Keyboard shortcuts (tech-forward T1): g then a letter jumps to a workspace, j/k move a
+	// cursor through the page's list and Enter opens the row, / focuses the page's search, ?
+	// lists them all. Off while typing, with a modifier held, while a dialog is open, and on
+	// pages with keys of their own (Sentinel, Overwatch, the page editor).
+	var WORKSPACE_KEYS = { h: 'home', c: 'content', r: 'relationships', k: 'knowledge', i: 'intelligence', g: 'growth', p: 'platform' };
+	var pendingG = 0;
+	var rowCursor = null;
+
+	function shortcutsLayer() {
+		return document.querySelector('[data-gws-shortcuts-layer]');
+	}
+
+	function openShortcuts() {
+		var layer = shortcutsLayer();
+		if (!layer) return;
+		layer.hidden = false;
+		var close = layer.querySelector('.gws-shortcuts-close');
+		if (close) close.focus();
+	}
+
+	function closeShortcuts() {
+		var layer = shortcutsLayer();
+		if (!layer || layer.hidden) return false;
+		layer.hidden = true;
+		return true;
+	}
+
+	function shortcutsBlocked(event) {
+		if (event.metaKey || event.ctrlKey || event.altKey) return true;
+		var target = event.target;
+		if (target instanceof Element && target.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return true;
+		if (document.querySelector('.sentinel-workspace, .tg-shell, .gws-builder-mode, .modal.d-block, [data-gws-no-shortcuts]')) return true;
+		var command = commandElements();
+		var shortcuts = shortcutsLayer();
+		return !!((command.layer && !command.layer.hidden) || (shortcuts && !shortcuts.hidden));
+	}
+
+	function listRows() {
+		return Array.from(document.querySelectorAll('.gws-content table.table > tbody > tr, .gws-content .list-group > .list-group-item'))
+			.filter(function (row) { return row.offsetParent !== null; });
+	}
+
+	function clearRowCursor() {
+		if (rowCursor) rowCursor.classList.remove('gws-row-cursor');
+		rowCursor = null;
+	}
+
+	function moveRowCursor(direction) {
+		var rows = listRows();
+		if (!rows.length) return;
+		var index = rowCursor ? rows.indexOf(rowCursor) : -1;
+		index = index === -1 ? (direction > 0 ? 0 : rows.length - 1) : Math.min(rows.length - 1, Math.max(0, index + direction));
+		clearRowCursor();
+		rowCursor = rows[index];
+		rowCursor.classList.add('gws-row-cursor');
+		rowCursor.scrollIntoView({ block: 'nearest' });
+	}
+
+	function goToWorkspace(name) {
+		var link = document.querySelector('.gws-sidebar [data-workspace="' + name + '"] a.gws-nav-link');
+		if (link) link.click();
+	}
+
+	function handleShortcut(event) {
+		if (shortcutsBlocked(event)) return;
+		var key = event.key;
+		if (pendingG && Date.now() - pendingG < 1500) {
+			pendingG = 0;
+			var workspace = WORKSPACE_KEYS[key.toLowerCase()];
+			if (workspace) { event.preventDefault(); goToWorkspace(workspace); }
+			return;
+		}
+		pendingG = 0;
+		if (key === 'g') { pendingG = Date.now(); return; }
+		if (key === '?') { event.preventDefault(); openShortcuts(); return; }
+		if (key === '/') {
+			var search = document.querySelector('.gws-content input[type="search"]');
+			if (search) { event.preventDefault(); search.focus(); }
+			return;
+		}
+		if (key === 'j' || key === 'k') { event.preventDefault(); moveRowCursor(key === 'j' ? 1 : -1); return; }
+		if (key === 'Enter' && rowCursor && document.contains(rowCursor)) {
+			var open = rowCursor.querySelector('a[href], button.btn-link, button');
+			if (open) { event.preventDefault(); open.click(); }
+		}
+	}
+
 
 	// An empty list's first action (EmptyState) points at the page's own form: bring its first
 	// field into view and focus it, rather than duplicating the form.
@@ -377,6 +788,11 @@
 			if (event.target.closest('[data-gws-assistant-open]')) { if (isMobile()) closeMobileNavigation(); openAssistant(); }
 			if (event.target.closest('[data-gws-command-open]')) { if (isMobile()) closeMobileNavigation(); openCommand(); }
 			if (event.target.closest('[data-gws-command-close]')) closeCommand();
+			// Opening a result closes the palette (it's data-permanent, so the page change won't).
+			if (event.target.closest('a[data-command-result]')) closeCommand();
+			var runButton = event.target.closest('[data-command-run]');
+			if (runButton) runCommand(runButton.dataset.commandRun);
+			if (event.target.closest('[data-gws-shortcuts-close]')) closeShortcuts();
 			if (event.target.closest('[data-gws-theme-toggle]')) toggleTheme();
 			if (event.target.closest('[data-gws-focus-toggle]')) toggleFocusMode();
 			if (event.target.closest('[data-gws-print]')) window.print();
@@ -388,6 +804,36 @@
 			if (event.target.matches('[data-gws-command-input]')) renderCommandResults(event.target.value);
 		});
 
+		document.addEventListener('mouseover', function (event) {
+			if (!(event.target instanceof Element)) return;
+			if (event.target.closest('[data-gws-preview-card]')) { window.clearTimeout(previewHideTimer); return; }
+			var target = event.target.closest('[data-preview]');
+			if (target) schedulePreview(target);
+		});
+		document.addEventListener('mouseout', function (event) {
+			if (!(event.target instanceof Element)) return;
+			var from = event.target.closest('[data-preview], [data-gws-preview-card]');
+			if (!from || (event.relatedTarget instanceof Element && from.contains(event.relatedTarget))) return;
+			hidePreview(200);
+		});
+		document.addEventListener('focusin', function (event) {
+			var target = event.target instanceof Element ? event.target.closest('[data-preview]') : null;
+			if (target) schedulePreview(target); else if (previewTarget) hidePreview();
+		});
+
+		// The palette and the shortcut sheet are modal: focus stays inside them. Without this, a
+		// page finishing its navigation (FocusOnNavigate moves focus to its h1) took focus out of
+		// the palette mid-word, and the rest of the typing landed on the page.
+		document.addEventListener('focusin', function (event) {
+			var command = commandElements();
+			if (command.layer && !command.layer.hidden && !command.layer.contains(event.target)) { command.input.focus(); return; }
+			var sheet = shortcutsLayer();
+			if (sheet && !sheet.hidden && !sheet.contains(event.target)) {
+				var close = sheet.querySelector('.gws-shortcuts-close');
+				if (close) close.focus();
+			}
+		});
+
 		document.addEventListener('keydown', function (event) {
 			if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
 				event.preventDefault();
@@ -397,7 +843,9 @@
 			var elements = commandElements();
 			var commandOpen = elements.layer && !elements.layer.hidden;
 			if (event.key === 'Escape') {
-				if (commandOpen) closeCommand(); else closeMobileNavigation();
+				if (previewTarget) hidePreview();
+				if (commandOpen) closeCommand();
+				else if (!closeShortcuts()) { clearRowCursor(); closeMobileNavigation(); }
 			} else if (commandOpen && event.key === 'ArrowDown') {
 				event.preventDefault();
 				moveCommandSelection(1);
@@ -406,7 +854,9 @@
 				moveCommandSelection(-1);
 			} else if (commandOpen && event.key === 'Enter') {
 				var selected = document.querySelector('[data-command-result].is-selected');
-				if (selected) selected.click();
+				if (selected) { event.preventDefault(); selected.click(); }
+			} else {
+				handleShortcut(event);
 			}
 		});
 
@@ -489,6 +939,9 @@
 		bindShellEventsOnce();
 		bindDraggableModalsOnce();
 		applySidebarState();
+		rowCursor = null;
+		previewCache.clear();
+		hidePreview();
 	}
 
 	// Quick Note uses browser-local pointer movement instead of sending each mousemove over
@@ -496,6 +949,9 @@
 	// while the body class prevents accidental text selection on the dashboard underneath.
 	// Sentinel's focus mode (Wiki.razor) hides the admin chrome through the same toggle.
 	window.gwsFocusMode = { set: setFocusMode, isOn: isFocusModeOn };
+
+	// Pages opened by ⌘K's create actions (?new=1) focus their form's first field through this.
+	window.gwsFocus = { field: focusField };
 
 	// The account menu's density switch (DensityToggle) saves the choice, then swaps the class the
 	// layout rendered, so the change shows without a reload.
@@ -629,6 +1085,14 @@
 		if (text) assistantSelection = { path: location.pathname, text: text.slice(0, 8000) };
 	});
 	window.gwsAssistant = {
+		// The panel island registers itself so ⌘K's "Ask SentinelGPT" can open it and ask.
+		panel: null,
+		register: function (dotnet) { this.panel = dotnet; },
+		ask: function (question) {
+			if (this.panel) return this.panel.invokeMethodAsync('AskFromPaletteAsync', question).catch(function () { openAssistant(); });
+			openAssistant();
+			return Promise.resolve();
+		},
 		widthObservers: new Map(),
 		nextWidthObserver: 1,
 		selection: function () {

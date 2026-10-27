@@ -334,7 +334,68 @@ Built as three units: R5a pills and stripes, R5b skeletons and undo, R5c the inb
   screenshots, computed colors for the disabled Remind/primary, checked box, pills and
   outline-danger hover; no console errors.
 
+**R5b done 26-10-26** (committed as dbee28b before its checks ran; checked afterwards, below).
+- `ListSkeleton` (placeholder rows, or tiles with `Grid="true"`; the message stays for screen
+  readers; the shimmer stops under reduced motion) replaces `LoadingIndicator` on 30 list pages.
+  Single records, checks and charts (a contact, Settings, "Checking Docker…", Growth, the calendar)
+  keep `LoadingIndicator`. Finding: Microsoft.Data.Sqlite's async calls complete synchronously,
+  so a page that only reads the database finishes OnInitializedAsync before its first interactive
+  render and never paints a loading state at all (it never showed the spinner either). Skeletons
+  show where loading really waits: Docker, external feeds, AI. Making prerendered pages skip the
+  reload (`[PersistentState]`) would be the real fix for the brief re-render, if it's ever noticed.
+- Undo toast: `ToastState` (scoped; one toast at a time; `Show(message, undo, tone,
+  survivesNavigation)`, `UndoAsync` confirms "Undone." or says why it couldn't) and `ToastHost`
+  (layout island; polite live region always present; 8 s, paused while the pointer or focus is on
+  it; dismissed when the page changes unless it survives one navigation). Adopters, each a clean
+  reversal: Pages' row Trash (the row leaves at once and comes back if the trash is refused; Undo
+  restores), Comments' Approve/Spam/Pending, single and bulk (Undo puts each comment's own old
+  status back), and the contact record's Move to Trash, which lost its confirm dialog: it trashes,
+  goes to the CRM list with the toast, and Undo restores the contact and returns to it.
+- Left out on purpose: ticket status (reopening a resolved ticket restarts its SLA clock from now,
+  so Undo couldn't restore the old due dates), hard deletes (no undo exists), and Sentinel's trash
+  (it has its own Trash view with restore).
+- Tests: `ToastStateTests` (5: replace, stale dismiss, undo once then confirm, failed undo,
+  navigation rules).
+- Checked on a throwaway instance with seeded comments: approve -> toast -> Undo -> both comments
+  Pending again -> toast gone after 8 s; Portfolio trashed (row gone at once) and back via Undo;
+  Dana Rivers trashed from her record -> CRM list with the toast -> Undo -> back on her record;
+  skeleton painted on Docker health (real async) and not on Support (SQLite, as above); skeleton
+  list and grid screenshots; phone toast above the bottom bar with 44px buttons; no console errors.
+
+**R5c done 26-10-26, so R5 is complete.** The bell is an inbox.
+- `UserNotificationState` (Username + Kind + ItemId unique; DoneAtUnix, SnoozedAtUnix,
+  SnoozedUntilUnix) + migration `AddUserNotificationStates`; `INotificationInboxStateService` /
+  `NotificationInboxStateService` (factory DbContext per call, since the bell is a layout island;
+  states older than 90 days pruned on write). The notifications stay in their sources (Docker,
+  social-post, Overwatch-area alerts, chat threads); this records only what the person did.
+- `NotificationInboxRules.Apply` (Application, pure): Done hides an item until it has newer
+  activity (an alert never does; a chat thread does when someone writes again); a snooze hides it
+  until its time, new activity breaks a snooze, and a returned item sorts by its return time with
+  a "Back from snooze" pill; the badge counts unread showing items only (not snoozed), over all
+  items, while the list stops at 50; `NextWake` is the earliest snooze end, and the bell sets a
+  timer for it. `SnoozeUntil`: an hour, tomorrow 09:00, next Monday 09:00 (a Monday means the next
+  one), in the server's local zone like every ToLocalTime in the admin.
+- Bell: app filter chips (All, Containers, Social posts, Messages, Overwatch - only those present,
+  with counts), per item Snooze (three choices) and Done (also marks it read in its source; the
+  undo toast brings it back), an unread dot instead of the amber row tint, a Snoozed view with
+  Unsnooze, Escape closes the snooze choices then the panel. The per-item "mark read" button went
+  (opening an item, Done, and Mark all as read cover it). The badge uses the danger token.
+- **Fixed along the way:** on phones the panel's max height ignored the bottom bar, so its last
+  rows sat under it.
+- Tests: `NotificationInboxTests` (10: done and new activity, snooze and return, activity breaking
+  a snooze, the badge and the 50 cap, the three snooze times, Monday, and the service's per-person
+  done/undo/snooze/unsnooze, refusals and pruning).
+- Checked on a throwaway instance with seeded Docker and social alerts: badge, chips and the
+  Social filter; snooze -> gone, badge down, Snoozed (1), toast; Snoozed view -> Unsnooze -> back;
+  Done -> gone -> Undo -> back (read now, as designed); a snooze shortened in the database came
+  back while the panel stayed open, on top with its pill and the badge up; Escape; phone with 44px
+  targets, no sideways overflow, panel above the bottom bar; no console errors.
+
 ## R6. Keyboard
+
+**Moved 26-10-26:** folded into T1 of tech-forward-ux-2026-10.md (command palette 2.0), with
+global record search. The bullets below are kept for reference.
+
 
 - `g` then a letter jumps to a workspace, `j`/`k` move through lists, `?` opens a shortcut sheet.
 - ⌘K becomes action-first: "new invoice for…", "open ticket …", backed by a small action
@@ -342,6 +403,9 @@ Built as three units: R5a pills and stripes, R5b skeletons and undo, R5c the inb
 - All key handling lives in app.js (CSP), and stays off while typing in inputs and editors.
 
 ## R7. Mac app
+
+**Moved 26-10-26:** folded into T11 of tech-forward-ux-2026-10.md.
+
 
 - The native sidebar mirrors the workspace rail; ⌘1–7 switch workspaces.
 - Check every R-phase in the Mac app's WKWebView before calling it done.

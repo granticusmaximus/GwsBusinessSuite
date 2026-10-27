@@ -106,7 +106,9 @@
 
                 <ToastHost @rendermode="InteractiveServer" />
 
-                <div class="gws-command-layer" data-gws-command-layer hidden>
+                @* data-permanent: an enhanced navigation finishing while the palette is open must not
+                   reset it to this markup (it closed the palette and cleared the search mid-word). *@
+                <div class="gws-command-layer" data-gws-command-layer data-permanent hidden>
                     <button type="button" class="gws-command-backdrop" data-gws-command-close
                             aria-label="Close search"></button>
                     <section class="gws-command-dialog" role="dialog" aria-modal="true"
@@ -118,8 +120,42 @@
                                    placeholder="Search pages and tools…" autocomplete="off" />
                             <kbd>Esc</kbd>
                         </header>
-                        <div class="gws-command-results" data-gws-command-results></div>
-                        <footer>Type to filter · Use ↑ ↓ to move · Enter to open</footer>
+                        <div class="gws-command-body">
+                            <div class="gws-command-results" data-gws-command-results></div>
+                            @* The highlighted record's preview, on wide screens (tech-forward T2). *@
+                            <aside class="gws-command-preview" data-command-preview hidden aria-hidden="true"></aside>
+                        </div>
+                        <footer>Type to filter · <kbd>t:ticket</kbd> <kbd>t:invoice</kbd>… for one kind · ↑ ↓ to move · Enter to open</footer>
+                    </section>
+                </div>
+
+                @* The hover preview card (tech-forward T2), filled and placed by app.js over anything with
+                   data-preview="kind:id". Supplementary (the trigger itself opens the record), so
+                   it's hidden from assistive tech. *@
+                <div class="gws-preview-card" data-gws-preview-card data-permanent hidden aria-hidden="true"></div>
+
+                @* The keyboard shortcut sheet (tech-forward T1): ? opens it; app.js handles the keys. *@
+                <div class="gws-shortcuts-layer" data-gws-shortcuts-layer data-permanent hidden>
+                    <button type="button" class="gws-command-backdrop" data-gws-shortcuts-close
+                            aria-label="Close keyboard shortcuts"></button>
+                    <section class="gws-shortcuts-dialog" role="dialog" aria-modal="true" aria-labelledby="gws-shortcuts-title">
+                        <header>
+                            <h2 id="gws-shortcuts-title">Keyboard shortcuts</h2>
+                            <button type="button" class="gws-shortcuts-close" data-gws-shortcuts-close aria-label="Close">
+                                <i class="bi bi-x-lg" aria-hidden="true"></i>
+                            </button>
+                        </header>
+                        <dl>
+                            <dt><kbd>⌘</kbd> <kbd>K</kbd></dt><dd>Search pages and records, run actions</dd>
+                            <dt><kbd>/</kbd></dt><dd>Search this page's list</dd>
+                            <dt><kbd>g</kbd> then <kbd>h</kbd> <kbd>c</kbd> <kbd>r</kbd> <kbd>k</kbd> <kbd>i</kbd> <kbd>g</kbd> <kbd>p</kbd></dt>
+                            <dd>Go to Home, Content, Relations, Knowledge, Intel, Growth or Platform</dd>
+                            <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Move down and up the list</dd>
+                            <dt><kbd>Enter</kbd></dt><dd>Open the highlighted row</dd>
+                            <dt><kbd>?</kbd></dt><dd>Show this list</dd>
+                            <dt><kbd>Esc</kbd></dt><dd>Close, or leave the list</dd>
+                        </dl>
+                        <p>Keys stay off while you type, and on pages with their own (Sentinel, Overwatch, the page editor).</p>
                     </section>
                 </div>
             }

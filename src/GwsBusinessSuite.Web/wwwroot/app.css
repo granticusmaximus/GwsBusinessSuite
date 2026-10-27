@@ -1251,6 +1251,8 @@ h1:focus { outline: none; }
 .gws-command-dialog > header > i { color: var(--gws-text-soft); font-size: 1.05rem; }
 .gws-command-dialog input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--gws-text-strong); font-size: 1rem; }
 .gws-command-dialog input::placeholder { color: var(--gws-text-soft); }
+/* Chrome's own clear button is a blue x; Esc already clears and closes the palette. */
+.gws-command-dialog input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 /* min-height: 0 lets the list shrink inside the height-capped dialog so its own scrollbar
    engages; without it, on short screens the list ran past the dialog under the footer and the
    lower results could not be reached. */
@@ -1266,6 +1268,83 @@ h1:focus { outline: none; }
 .gws-command-result em { color: var(--gws-text-soft); font-size: .75rem; font-style: normal; text-transform: uppercase; letter-spacing: .05em; }
 .gws-command-empty { padding: 2.5rem 1rem; color: var(--gws-text-soft); text-align: center; }
 .gws-command-dialog > footer { padding: .55rem 1rem; border-top: 1px solid var(--gws-panel-border); color: var(--gws-text-soft); font-size: .75rem; }
+
+/* Palette 2.0 (tech-forward T1): section headings, the matched text, results that run an action
+   (buttons rather than links), and the j/k row cursor and shortcut sheet that share its keys. */
+.gws-command-group { padding: .6rem .75rem .25rem; color: var(--gws-text-soft); font-size: .6875rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.gws-command-group:first-child { padding-top: .25rem; }
+.gws-command-result mark { padding: 0; border-radius: 2px; background: color-mix(in srgb, var(--gws-status-info-fill) 28%, transparent); color: inherit; }
+button.gws-command-result { width: 100%; border: 0; background: none; font: inherit; text-align: start; }
+.gws-command-ai-status { padding: .35rem .75rem .65rem; color: var(--gws-text-soft); font-size: .8125rem; }
+
+/* Previews (tech-forward T2): the hover card over data-preview triggers, and the palette's side
+   pane for the highlighted record, which widens the dialog on screens 1024px and up. */
+.gws-command-body { display: flex; flex: 1 1 auto; min-height: 0; }
+.gws-command-body > .gws-command-results { flex: 1 1 auto; min-width: 0; }
+.gws-command-preview { flex: 0 0 280px; overflow-y: auto; padding: var(--gws-step-4); border-left: 1px solid var(--gws-panel-border); }
+.gws-command-preview[hidden] { display: none; }
+@media (min-width: 1024px) {
+    .gws-command-dialog.has-preview { width: min(920px, 100%); }
+}
+.gws-preview-card {
+    position: fixed;
+    z-index: 1060;
+    width: min(320px, calc(100vw - 16px));
+    padding: var(--gws-step-4);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md);
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+    box-shadow: var(--gws-shadow-md);
+    font-size: .8125rem;
+}
+.gws-preview-card[hidden] { display: none; }
+.gws-preview-title { display: block; margin: var(--gws-step-2) 0; font-size: .9375rem; line-height: 1.3; }
+.gws-preview-card > .gws-preview-title:first-child,
+.gws-command-preview > .gws-preview-title:first-child { margin-top: 0; }
+.gws-preview-facts { display: grid; grid-template-columns: auto 1fr; gap: var(--gws-step-1) var(--gws-step-3); margin: 0 0 var(--gws-step-3); }
+.gws-preview-facts dt { color: var(--gws-text-soft); font-weight: 400; }
+.gws-preview-facts dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.gws-preview-actions { display: flex; flex-wrap: wrap; gap: var(--gws-step-2); }
+.gws-command-dialog > footer kbd { padding: .05rem .3rem; font-size: .6875rem; }
+
+.gws-row-cursor,
+.gws-row-cursor > td { box-shadow: inset 0 0 0 2px var(--gws-status-info-fill) !important; }
+.gws-row-cursor { position: relative; z-index: 1; }
+
+.gws-shortcuts-layer { position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 1rem; }
+.gws-shortcuts-layer[hidden] { display: none; }
+.gws-shortcuts-dialog {
+    position: relative;
+    width: min(520px, 100%);
+    max-height: calc(100dvh - 2rem);
+    overflow-y: auto;
+    padding: var(--gws-step-4) var(--gws-step-6) var(--gws-step-6);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md);
+    background: var(--gws-panel-bg);
+    box-shadow: var(--gws-shadow-md);
+}
+.gws-shortcuts-dialog > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--gws-step-3); }
+.gws-shortcuts-dialog h2 { margin: 0; font-size: 1rem; font-weight: 700; }
+.gws-shortcuts-close { width: 36px; height: 36px; border: 0; border-radius: var(--gws-radius-sm); background: none; color: var(--gws-text-soft); }
+.gws-shortcuts-close:hover { background: var(--gws-panel-bg-2); color: var(--gws-text-strong); }
+.gws-shortcuts-dialog dl { display: grid; grid-template-columns: minmax(8rem, auto) 1fr; gap: var(--gws-step-2) var(--gws-step-4); margin: 0 0 var(--gws-step-4); font-size: .875rem; }
+.gws-shortcuts-dialog dt { font-weight: 400; white-space: nowrap; color: var(--gws-text-soft); }
+.gws-shortcuts-dialog dd { margin: 0; }
+.gws-shortcuts-dialog kbd {
+    display: inline-block;
+    min-width: 1.5rem;
+    padding: .1rem .35rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: 4px;
+    background: var(--gws-panel-bg-2);
+    color: var(--gws-text-strong);
+    font-family: var(--gws-font-mono);
+    font-size: .75rem;
+    text-align: center;
+}
+.gws-shortcuts-dialog p { margin: 0; color: var(--gws-text-soft); font-size: .8125rem; }
 
 /* ── Bootstrap component dark-mode overrides ───────────────
    Bootstrap 5's own component CSS (tables, modals, dropdowns, alerts,

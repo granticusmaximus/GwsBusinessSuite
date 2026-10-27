@@ -8441,6 +8441,55 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("TimeEntries");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.UserNotificationState", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("DoneAtUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("SnoozedAtUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("SnoozedUntilUnix")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username", "Kind", "ItemId")
+                        .IsUnique();
+
+                    b.ToTable("UserNotificationStates");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.UserPreference", b =>
                 {
                     b.Property<Guid>("Id")

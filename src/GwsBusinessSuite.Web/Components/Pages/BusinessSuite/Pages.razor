@@ -210,6 +210,18 @@ else
     // re-walking ancestors on every call (it's invoked 2-3x per row per render).
     private readonly Dictionary<Guid, int> _pageDepths = new();
 
+    // ⌘K's "New page" (tech-forward T1) arrives as ?new=1: open the new-page dialog once loaded.
+    [SupplyParameterFromQuery(Name = "new")] public string? NewQuery { get; set; }
+    private bool _newHandled;
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (NewQuery != "1" || _newHandled || IsLoading || CurrentSite is null) return;
+        _newHandled = true;
+        ShowCreatePage = true;
+        StateHasChanged();
+    }
+
     protected override async Task OnInitializedAsync()
     {
         IsLoading = true;
