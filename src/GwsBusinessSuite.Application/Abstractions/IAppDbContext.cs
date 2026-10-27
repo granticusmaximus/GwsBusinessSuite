@@ -13,6 +13,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<Invoice> Invoices { get; }
     DbSet<TimeEntry> TimeEntries { get; }
     DbSet<InvoiceLineItem> InvoiceLineItems { get; }
+    DbSet<BillingSettings> BillingSettings { get; }
     DbSet<SupportTicket> SupportTickets { get; }
     DbSet<SupportTicketMessage> SupportTicketMessages { get; }
     DbSet<SupportTicketAttachment> SupportTicketAttachments { get; }

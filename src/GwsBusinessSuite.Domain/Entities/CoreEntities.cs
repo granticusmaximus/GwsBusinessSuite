@@ -254,6 +254,17 @@ public sealed class InvoiceLineItem : AuditableEntity
     public Invoice? Invoice { get; set; }
 }
 
+// Who an invoice is from, as its PDF shows it (one row). Address and PaymentNotes keep their line
+// breaks; PaymentNotes is for bank details or terms printed under the total.
+public sealed class BillingSettings : AuditableEntity
+{
+    public string BusinessName { get; set; } = string.Empty;
+    public string? Email { get; set; }
+    public string? Address { get; set; }
+    public string? TaxId { get; set; }
+    public string? PaymentNotes { get; set; }
+}
+
 // Time spent for a contact - from a start/stop timer (EndedAt null while it runs) or entered by
 // hand. Optionally tied to one of the contact's deals or support tickets. Billable entries with no
 // InvoiceId are "unbilled"; billing them adds one line to a Draft invoice and sets InvoiceId, which

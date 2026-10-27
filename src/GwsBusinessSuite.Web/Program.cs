@@ -1186,6 +1186,11 @@ app.MapGet("/admin/api/preview/{kind}/{id:guid}", async (string kind, Guid id, R
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");
 
+// An invoice as a PDF, whatever its status: Billing's list, inspector and editor link here.
+app.MapGet("/admin/billing/invoices/{id:guid}/pdf", async (Guid id, IBillingService billing, CancellationToken cancellationToken) =>
+    await billing.RenderPdfAsync(id, cancellationToken) is { } file ? Results.File(file.Content, "application/pdf", file.FileName) : Results.NotFound())
+    .RequireAuthorization("AdminOnly");
+
 // The shell's status strip (tech-forward T4): app.js polls this every 30 s while the tab shows.
 app.MapGet("/admin/api/shell-status", async (ShellStatusService status, CancellationToken cancellationToken) =>
     Results.Json(await status.GetAsync(cancellationToken)))

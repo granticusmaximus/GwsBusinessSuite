@@ -29,6 +29,9 @@
     <Actions>
         @if (InspectedInvoice is { } actionInvoice)
         {
+            <a class="btn btn-sm btn-outline-secondary" href="@PdfUrl(actionInvoice.Id)" download>
+                <i class="bi bi-file-earmark-pdf me-1" aria-hidden="true"></i>PDF
+            </a>
             @if (actionInvoice.Status == InvoiceStatuses.Draft)
             {
                 <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@IsBusy" @onclick="() => EditFromInspectorAsync(actionInvoice)">
@@ -270,12 +273,51 @@ else
                     <ProfessionalWysiwygEditor @bind-Value="Editor.Notes" Compact="true" MinHeight="100px" AriaLabel="Billing notes" />
                 </div>
 
-                <button type="submit" class="btn btn-primary w-100" disabled="@IsBusy">
-                    <i class="bi bi-save me-1"></i>Save Draft
-                </button>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button type="submit" class="btn btn-primary flex-grow-1" disabled="@IsBusy">
+                        <i class="bi bi-save me-1"></i>Save Draft
+                    </button>
+                    @* The PDF is drawn from what's saved, so this saves first (tech-forward follow-up, 27-10-26). *@
+                    <button type="button" class="btn btn-outline-secondary" disabled="@IsBusy" @onclick="() => SaveAsync(downloadPdf: true)">
+                        <i class="bi bi-file-earmark-pdf me-1" aria-hidden="true"></i>Save &amp; download PDF
+                    </button>
+                </div>
                 </EditForm>
             </div>
         </div>
+
+        @* Who invoices are from, printed at the top of every PDF. Open until it's filled in. *@
+        <details class="card border-0 shadow-sm mt-4 gws-invoice-issuer" open="@_issuer.IsEmpty">
+            <summary class="card-header bg-white border-bottom py-3 fw-semibold">
+                Your details on invoices
+                @if (_issuer.IsEmpty) { <span class="small text-secondary fw-normal ms-2">Not set: PDFs print without a From block</span> }
+            </summary>
+            <div class="card-body">
+                <div class="mb-2">
+                    <label class="form-label fw-semibold small" for="issuer-name">Business name</label>
+                    <input id="issuer-name" class="form-control" @bind="_issuerForm.BusinessName" @bind:event="oninput" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label fw-semibold small" for="issuer-email">Email</label>
+                    <input id="issuer-email" type="email" class="form-control" @bind="_issuerForm.Email" />
+                </div>
+                <div class="mb-2">
+                    <label class="form-label fw-semibold small" for="issuer-address">Address</label>
+                    <textarea id="issuer-address" class="form-control" rows="3" @bind="_issuerForm.Address"></textarea>
+                </div>
+                <div class="mb-2">
+                    <label class="form-label fw-semibold small" for="issuer-tax">Tax ID (optional)</label>
+                    <input id="issuer-tax" class="form-control" @bind="_issuerForm.TaxId" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-semibold small" for="issuer-payment">Payment details (optional)</label>
+                    <textarea id="issuer-payment" class="form-control" rows="3" placeholder="Bank details or terms, printed under the total" @bind="_issuerForm.PaymentNotes"></textarea>
+                </div>
+                <button type="button" class="btn btn-outline-primary" disabled="@(IsBusy || string.IsNullOrWhiteSpace(_issuerForm.BusinessName))" @onclick="SaveIssuerAsync">
+                    <i class="bi bi-check2 me-1" aria-hidden="true"></i>Save details
+                </button>
+            </div>
+        </details>
     </div>
 
     <div class="col-lg-7">
@@ -358,6 +400,7 @@ else
                                 }
                                 @if (InvoiceColumnVisible("status")) { <td><StatusPill Tone="StatusTones.ForInvoice(invoice.Status)">@invoice.Status</StatusPill></td> }
                                 <td><div class="d-flex gap-1 justify-content-end">
+                                        <a class="btn btn-sm btn-outline-secondary" href="@PdfUrl(invoice.Id)" download title="Download PDF" aria-label="Download @invoice.Title as a PDF"><i class="bi bi-file-earmark-pdf" aria-hidden="true"></i></a>
                                         @if (invoice.Status == InvoiceStatuses.Draft)
                                         {
                                             <button class="btn btn-sm btn-outline-secondary" title="Edit" @onclick="() => LoadIntoEditorAsync(invoice)" disabled="@IsBusy"><i class="bi bi-pencil"></i></button>
@@ -451,12 +494,48 @@ else
         set => Editor.DueDate = value is { } date ? new DateTimeOffset(date, TimeSpan.Zero) : null;
     }
 
+    private BillingIssuer _issuer = BillingIssuer.Empty;
+    private readonly IssuerForm _issuerForm = new();
+
+    private sealed class IssuerForm
+    {
+        public string BusinessName { get; set; } = string.Empty;
+        public string? Email { get; set; }
+        public string? Address { get; set; }
+        public string? TaxId { get; set; }
+        public string? PaymentNotes { get; set; }
+    }
+
+    private void FillIssuerForm()
+    {
+        (_issuerForm.BusinessName, _issuerForm.Email, _issuerForm.Address, _issuerForm.TaxId, _issuerForm.PaymentNotes) =
+            (_issuer.BusinessName, _issuer.Email, _issuer.Address, _issuer.TaxId, _issuer.PaymentNotes);
+    }
+
+    private async Task SaveIssuerAsync()
+    {
+        IsBusy = true;
+        try
+        {
+            await BillingService.SaveIssuerAsync(new BillingIssuer(_issuerForm.BusinessName, _issuerForm.Email, _issuerForm.Address, _issuerForm.TaxId, _issuerForm.PaymentNotes));
+            _issuer = await BillingService.GetIssuerAsync();
+            FillIssuerForm();
+            Toasts.Show("Saved. Every invoice PDF now shows these details.", tone: StatusTone.Success);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
     protected override async Task OnInitializedAsync()
     {
         IsLoading = true;
         try
         {
             Contacts = (await CrmService.ListContactsAsync()).ToList();
+            _issuer = await BillingService.GetIssuerAsync();
+            FillIssuerForm();
             await RefreshInvoicesAsync();
         }
         finally
@@ -665,7 +744,11 @@ else
         ErrorMessage = string.Empty;
     }
 
-    private async Task SaveDraftAsync()
+    private Task SaveDraftAsync() => SaveAsync(downloadPdf: false);
+
+    private static string PdfUrl(Guid invoiceId) => $"/admin/billing/invoices/{invoiceId}/pdf";
+
+    private async Task SaveAsync(bool downloadPdf)
     {
         ErrorMessage = string.Empty;
         StatusMessage = string.Empty;
@@ -678,10 +761,11 @@ else
         IsBusy = true;
         try
         {
-            await BillingService.SaveDraftAsync(Editor);
-            StatusMessage = "Draft saved.";
+            var saved = await BillingService.SaveDraftAsync(Editor);
+            StatusMessage = downloadPdf ? "Draft saved. Its PDF is downloading." : "Draft saved.";
             ResetEditor();
             await RefreshInvoicesAsync();
+            if (downloadPdf) await JS.InvokeVoidAsync("gwsDownload.url", PdfUrl(saved.Id));
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
         {

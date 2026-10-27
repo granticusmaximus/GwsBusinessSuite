@@ -1,0 +1,339 @@
+@page "/admin/boards/{DatabaseId:guid}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@implements IAsyncDisposable
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Domain.Entities
+@inject IKanbanBoardService BoardService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject ILogger<Board> Logger
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
+
+<PageTitle>@(_board?.Title ?? "Board")</PageTitle>
+
+@if (_loading)
+{
+    <ListSkeleton Message="Loading the board…" Grid="true" Rows="4" CssClass="px-0" />
+}
+else if (_board is null)
+{
+    <EmptyState Icon="bi-kanban" Title="That board isn't here" Message="It may have been trashed in Sentinel, or it no longer has a Status property to make columns from.">
+        <a class="btn btn-sm btn-primary mt-2" href="admin/boards">All boards</a>
+    </EmptyState>
+}
+else
+{
+    @* data-gws-no-shortcuts: the board has its own keys (kanban-board.js), so app.js's list keys stay off. *@
+    <div class="kb" @ref="_root" data-gws-no-shortcuts>
+        <header class="kb-header">
+            <a class="kb-back" href="admin/boards" title="All boards"><i class="bi bi-arrow-left" aria-hidden="true"></i><span class="visually-hidden">All boards</span></a>
+            <span class="kb-icon" aria-hidden="true">@(string.IsNullOrWhiteSpace(_board.Icon) ? "🗂️" : _board.Icon)</span>
+            <h1 class="kb-title">@_board.Title</h1>
+            <span class="kb-summary">@OpenCount open · @TotalCount @(TotalCount == 1 ? "card" : "cards")</span>
+            <div class="kb-tools">
+                <label class="visually-hidden" for="kb-filter">Filter cards</label>
+                <input id="kb-filter" type="search" class="form-control form-control-sm kb-filter" placeholder="Filter cards" @bind="_filter" @bind:event="oninput" />
+                <a class="btn btn-sm btn-outline-secondary" href="admin/sentinel?database=@_board.DatabaseId" title="The same board in Sentinel, with table, calendar and timeline views">
+                    <i class="bi bi-journal-bookmark me-1" aria-hidden="true"></i>Sentinel
+                </a>
+            </div>
+        </header>
+
+        <div class="kb-columns" data-kb-scroller>
+            @foreach (var column in _columns)
+            {
+                var cards = Visible(column);
+                <section class="kb-column" @key="column.Key" data-kb-column="@column.Key" style="--column-color: @column.Color" aria-label="@column.Label, @cards.Count @(cards.Count == 1 ? "card" : "cards")">
+                    <header class="kb-column-head">
+                        <span class="kb-column-dot" aria-hidden="true"></span>
+                        <h2 class="kb-column-title">@column.Label</h2>
+                        <span class="kb-column-count">@cards.Count</span>
+                        <button type="button" class="kb-column-add" title="Add a card to @column.Label" aria-label="Add a card to @column.Label" @onclick="() => OpenQuickAdd(column)">
+                            <i class="bi bi-plus-lg" aria-hidden="true"></i>
+                        </button>
+                    </header>
+                    @if (_quickAddKey == column.Key)
+                    {
+                        <form class="kb-quick-add" @onsubmit="() => AddCardAsync(column)" @onsubmit:preventDefault>
+                            <label class="visually-hidden" for="kb-quick-add">New card in @column.Label</label>
+                            <input id="kb-quick-add" class="form-control form-control-sm" placeholder="Card title, then Enter" autocomplete="off" maxlength="300"
+                                   @ref="_quickAddInput" @bind="_newTitle" @bind:event="oninput" @onkeydown="QuickAddKey" />
+                            <span class="kb-quick-add-hint">Enter adds · Esc closes</span>
+                        </form>
+                    }
+                    @if (cards.Count == 0 && _quickAddKey != column.Key)
+                    {
+                        <button type="button" class="kb-empty" @onclick="() => OpenQuickAdd(column)">
+                            @(string.IsNullOrWhiteSpace(_filter) ? "Drop a card here, or add one" : "No cards match")
+                        </button>
+                    }
+                    <ol class="kb-cards" data-kb-cards>
+                        @foreach (var card in cards)
+                        {
+                            <li class="kb-card @(IsOverdue(card, column) ? "is-overdue" : "")" @key="card.RowId" data-kb-card="@card.RowId" tabindex="0"
+                                aria-label="@CardLabel(card)" @onclick="() => OpenCard(card)">
+                                <span class="kb-grip" data-kb-grip aria-hidden="true"><i class="bi bi-grip-vertical"></i></span>
+                                @if (!string.IsNullOrWhiteSpace(card.CoverImageUrl))
+                                {
+                                    <img class="kb-card-cover" src="@card.CoverImageUrl" alt="" loading="lazy" />
+                                }
+                                @if (card.Key is not null || card.Priority is not null)
+                                {
+                                    <div class="kb-card-top">
+                                        @if (card.Key is not null) { <span class="kb-card-key">@card.Key</span> }
+                                        @if (card.Priority is { } priority)
+                                        {
+                                            <span class="kb-priority" style="--tone: @priority.Color" title="@priority.Label priority"><i class="bi @PriorityIcon(priority.Label)" aria-hidden="true"></i></span>
+                                        }
+                                    </div>
+                                }
+                                <p class="kb-card-title">@if (!string.IsNullOrWhiteSpace(card.Icon)) { <span class="me-1" aria-hidden="true">@card.Icon</span> }@card.Title</p>
+                                @if (card.Labels.Count > 0)
+                                {
+                                    <div class="kb-labels">
+                                        @foreach (var label in card.Labels) { <span class="kb-label" style="--tone: @label.Color">@label.Label</span> }
+                                    </div>
+                                }
+                                @if (HasFooter(card))
+                                {
+                                    <div class="kb-card-foot">
+                                        @if (card.Due is { } due)
+                                        {
+                                            <span class="kb-meta @DueClass(card, column)" title="Due @due.ToLocalGwsDate()"><i class="bi bi-calendar-event" aria-hidden="true"></i>@due.ToLocalGwsDate()</span>
+                                        }
+                                        @if (card.ChecklistTotal > 0)
+                                        {
+                                            <span class="kb-meta @(card.ChecklistDone == card.ChecklistTotal ? "is-done" : "")" title="Checklist"><i class="bi bi-check2-square" aria-hidden="true"></i>@card.ChecklistDone/@card.ChecklistTotal</span>
+                                        }
+                                        @if (card.SubItemCount > 0)
+                                        {
+                                            <span class="kb-meta" title="Sub-items"><i class="bi bi-diagram-3" aria-hidden="true"></i>@card.SubItemCount</span>
+                                        }
+                                        @if (card.Estimate is { } estimate)
+                                        {
+                                            <span class="kb-meta kb-estimate" title="Estimate">@estimate.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)</span>
+                                        }
+                                        @if (card.Assignees.Count > 0)
+                                        {
+                                            <span class="kb-assignees">
+                                                @foreach (var person in card.Assignees.Take(3))
+                                                {
+                                                    <span class="kb-avatar" style="--hue: @Hue(person)" title="@person">@Initials(person)</span>
+                                                }
+                                            </span>
+                                        }
+                                    </div>
+                                }
+                            </li>
+                        }
+                    </ol>
+                </section>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid DatabaseId { get; set; }
+
+    private KanbanBoard? _board;
+    private List<ColumnState> _columns = [];
+    private bool _loading = true;
+    private string _filter = string.Empty;
+    private string? _quickAddKey;
+    private string _newTitle = string.Empty;
+    private bool _focusQuickAdd;
+    private ElementReference _root;
+    private ElementReference _quickAddInput;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _handle;
+    private DotNetObjectReference<Board>? _self;
+
+    // The board as shown: columns hold their cards in order, and a move changes this at once,
+    // before the save (the save's failure reloads the board).
+    private sealed class ColumnState(KanbanColumn column)
+    {
+        public string? OptionId { get; } = column.OptionId;
+        public string Key { get; } = column.OptionId ?? string.Empty;
+        public string Label { get; } = column.Label;
+        public string Color { get; } = column.Color;
+        public bool IsComplete { get; } = column.Group == WikiDatabaseStatusGroups.Complete;
+        public List<KanbanCard> Cards { get; } = column.Cards.ToList();
+    }
+
+    private int TotalCount => _columns.Sum(column => column.Cards.Count);
+    private int OpenCount => _columns.Where(column => !column.IsComplete).Sum(column => column.Cards.Count);
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _board = await BoardService.GetBoardAsync(DatabaseId);
+            _columns = _board?.Columns.Select(column => new ColumnState(column)).ToList() ?? [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Loading board {DatabaseId} failed.", DatabaseId);
+            _board = null;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_board is not null && _handle is null)
+        {
+            _self ??= DotNetObjectReference.Create(this);
+            _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/kanban-board.js");
+            _handle = await _module.InvokeAsync<IJSObjectReference>("init", _root, _self);
+        }
+        if (_focusQuickAdd)
+        {
+            _focusQuickAdd = false;
+            await _quickAddInput.FocusAsync();
+        }
+    }
+
+    private IReadOnlyList<KanbanCard> Visible(ColumnState column)
+    {
+        var filter = _filter.Trim();
+        if (filter.Length == 0) return column.Cards;
+        return column.Cards.Where(card => card.Title.Contains(filter, StringComparison.CurrentCultureIgnoreCase)
+            || card.Key?.Contains(filter, StringComparison.OrdinalIgnoreCase) == true
+            || card.Labels.Any(label => label.Label.Contains(filter, StringComparison.CurrentCultureIgnoreCase))
+            || card.Assignees.Any(person => person.Contains(filter, StringComparison.CurrentCultureIgnoreCase))).ToList();
+    }
+
+    // A drop or a keyboard move from kanban-board.js: the card moves on screen straight away, then
+    // saves; Undo puts it back where it was.
+    [JSInvokable]
+    public async Task MoveCard(string rowId, string columnKey, string beforeRowId)
+    {
+        if (!Guid.TryParse(rowId, out var id)) return;
+        var from = _columns.FirstOrDefault(column => column.Cards.Any(card => card.RowId == id));
+        var to = _columns.FirstOrDefault(column => column.Key == columnKey);
+        if (from is null || to is null) return;
+        var card = from.Cards.First(item => item.RowId == id);
+        var fromIndex = from.Cards.IndexOf(card);
+        Guid? previousBefore = fromIndex + 1 < from.Cards.Count ? from.Cards[fromIndex + 1].RowId : null;
+        Guid? before = Guid.TryParse(beforeRowId, out var anchor) ? anchor : null;
+
+        from.Cards.Remove(card);
+        var at = before is { } target ? to.Cards.FindIndex(item => item.RowId == target) : -1;
+        to.Cards.Insert(at < 0 ? to.Cards.Count : at, card);
+        StateHasChanged();
+
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await BoardService.MoveCardAsync(DatabaseId, id, to.OptionId, before, performedBy);
+            if (from != to)
+            {
+                Toasts.Show($"{card.Key ?? card.Title} moved to {to.Label}.", async () =>
+                {
+                    await BoardService.MoveCardAsync(DatabaseId, id, from.OptionId, previousBefore, performedBy);
+                    await LoadAsync();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException or ArgumentException)
+        {
+            Logger.LogWarning(ex, "Moving card {RowId} failed.", id);
+            await LoadAsync();
+            Toasts.Show($"Couldn't move that card. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
+    private void OpenQuickAdd(ColumnState column)
+    {
+        _quickAddKey = column.Key;
+        _newTitle = string.Empty;
+        _focusQuickAdd = true;
+    }
+
+    private void QuickAddKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") _quickAddKey = null;
+    }
+
+    // Enter adds and keeps the box open for the next card, at the top of the column.
+    private async Task AddCardAsync(ColumnState column)
+    {
+        var title = _newTitle.Trim();
+        if (title.Length == 0) return;
+        _newTitle = string.Empty;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await BoardService.AddCardAsync(DatabaseId, column.OptionId, title, performedBy);
+            await LoadAsync();
+            _focusQuickAdd = true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _newTitle = title;
+            Toasts.Show($"Couldn't add that card. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
+    // The card's own page, in Sentinel (a drawer on the board comes in K2).
+    private void OpenCard(KanbanCard card) => Navigation.NavigateTo($"admin/sentinel?database={DatabaseId}&row={card.RowId}");
+
+    private static bool HasFooter(KanbanCard card) =>
+        card.Due is not null || card.ChecklistTotal > 0 || card.SubItemCount > 0 || card.Estimate is not null || card.Assignees.Count > 0;
+
+    private static bool IsOverdue(KanbanCard card, ColumnState column) =>
+        !column.IsComplete && card.Due is { } due && due.ToLocalTime().Date < DateTime.Today;
+
+    private static string DueClass(KanbanCard card, ColumnState column)
+    {
+        if (column.IsComplete || card.Due is not { } due) return string.Empty;
+        var days = (due.ToLocalTime().Date - DateTime.Today).TotalDays;
+        return days < 0 ? "is-overdue" : days <= 2 ? "is-soon" : string.Empty;
+    }
+
+    private static string PriorityIcon(string label) => label.Trim().ToLowerInvariant() switch
+    {
+        "urgent" => "bi-exclamation-square-fill",
+        "high" => "bi-reception-4",
+        "medium" => "bi-reception-3",
+        "low" => "bi-reception-1",
+        _ => "bi-flag-fill"
+    };
+
+    private static string Initials(string name)
+    {
+        var parts = name.Split([' ', '.', '_', '-', '@'], StringSplitOptions.RemoveEmptyEntries);
+        return (parts.Length >= 2 ? $"{parts[0][0]}{parts[1][0]}" : name[..Math.Min(2, name.Length)]).ToUpperInvariant();
+    }
+
+    // A steady colour per person, from their name.
+    private static int Hue(string name) => (int)((uint)name.Aggregate(17, (hash, c) => hash * 31 + c) % 360);
+
+    private static string CardLabel(KanbanCard card) => string.Join(", ", new[]
+    {
+        card.Key, card.Title, card.Priority is { } p ? $"{p.Label} priority" : null,
+        card.Due is { } due ? $"due {due.ToLocalGwsDate()}" : null,
+        card.ChecklistTotal > 0 ? $"checklist {card.ChecklistDone} of {card.ChecklistTotal}" : null
+    }.Where(part => !string.IsNullOrEmpty(part)));
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_handle is not null) await _handle.InvokeVoidAsync("dispose");
+            if (_handle is not null) await _handle.DisposeAsync();
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { /* the page is already gone */ }
+        _self?.Dispose();
+    }
+}

@@ -39,6 +39,18 @@ public static class InvoiceCurrencies
     }
 }
 
+// The business an invoice is from. Address and PaymentNotes keep their line breaks.
+public sealed record BillingIssuer(string BusinessName, string? Email, string? Address, string? TaxId, string? PaymentNotes)
+{
+    public static readonly BillingIssuer Empty = new(string.Empty, null, null, null, null);
+    public bool IsEmpty => string.IsNullOrWhiteSpace(BusinessName);
+}
+
+// What an invoice PDF is drawn from: the invoice, who it's from, and who it's to.
+public sealed record InvoicePdfData(InvoiceView Invoice, BillingIssuer Issuer, string ClientName, string? ClientCompany, string? ClientEmail);
+
+public sealed record InvoicePdfFile(string FileName, byte[] Content);
+
 public static class InvoiceReminders
 {
     // Automatic reminders per invoice: a day after the due date, then weekly, this many at most.
@@ -122,6 +134,13 @@ public interface IBillingService
     // Turns automatic reminders on or off for the Draft and Sent invoices listed (Paid and Void
     // ones have nothing to remind about) and returns the ids it changed, so Undo flips just those.
     Task<IReadOnlyList<Guid>> SetAutoRemindAsync(IReadOnlyCollection<Guid> invoiceIds, bool autoRemind, string? actor = null, CancellationToken cancellationToken = default);
+
+    // Who invoices are from, as their PDFs show it. Empty until set on the Billing page.
+    Task<BillingIssuer> GetIssuerAsync(CancellationToken cancellationToken = default);
+    Task SaveIssuerAsync(BillingIssuer issuer, string? actor = null, CancellationToken cancellationToken = default);
+
+    // Any invoice, whatever its status, as a PDF to download; null when there's no such invoice.
+    Task<InvoicePdfFile?> RenderPdfAsync(Guid invoiceId, CancellationToken cancellationToken = default);
 
     // Lazily creates (and reuses) a Stripe Customer for the invoice's contact, then creates and
     // sends a Stripe-hosted invoice for the current line items. Throws InvalidOperationException

@@ -1784,6 +1784,46 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("BiReportSubscriptions");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.BillingSettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Address")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BusinessName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PaymentNotes")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TaxId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("BillingSettings");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.Booking", b =>
                 {
                     b.Property<Guid>("Id")

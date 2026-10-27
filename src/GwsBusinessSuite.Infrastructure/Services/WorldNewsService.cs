@@ -24,11 +24,14 @@ public sealed class WorldNewsService : IDisposable
     // The last finished read is kept in the news database, so a restart doesn't show "Not read yet".
     private const string LastReadKey = "world-news:last-read";
     public static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
+    // The most events a list holds; the page shows them a page at a time.
+    public const int MaxEvents = 300;
 
     private readonly SemaphoreSlim _running = new(1, 1);
     private readonly OllamaClient _ollama;
     private readonly WorldNewsPipeline _pipeline;
     private readonly EventSummarizer _summarizer;
+    private readonly EventListCache _eventLists;
     private readonly ILogger<WorldNewsService> _logger;
 
     public WorldNewsService(IConfiguration configuration, IOptions<ContentStudioOptions> ollamaOptions,
@@ -54,7 +57,19 @@ public sealed class WorldNewsService : IDisposable
             new SummaryOptions { PerRun = configuration.GetValue("WorldNews:SummariesPerRead", 3) });
         LastRefreshed = Store.LastFetched(LastReadKey);
         if (LastRefreshed is not null) Status = string.Empty;
+        _eventLists = new EventListCache(since => Store.TopEvents(since, MaxEvents), TimeProvider.System, Interval);
+        // Built at startup, so the first visit after a deploy doesn't wait for it.
+        WarmEventLists();
     }
+
+    // The busiest events in the last rangeHours, from memory unless a read has changed them.
+    public IReadOnlyList<EventOverview> TopEvents(int rangeHours) => _eventLists.Get(rangeHours);
+
+    private void WarmEventLists() => _ = Task.Run(() =>
+    {
+        try { _eventLists.Get(24); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Building the world news event list failed"); }
+    });
 
     public WorldNewsStore Store { get; }
     public string Status { get; private set; } = "Not read yet.";
@@ -74,6 +89,7 @@ public sealed class WorldNewsService : IDisposable
             var report = await Task.Run(() => _pipeline.RunCycleAsync(ct), ct);
             LastRefreshed = DateTimeOffset.UtcNow;
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
+            _eventLists.Clear();
             Status = "Summarizing the biggest events...";
             Changed?.Invoke();
             var summaries = await Task.Run(() => _summarizer.RunAsync(ct), ct);
@@ -96,6 +112,8 @@ public sealed class WorldNewsService : IDisposable
         finally
         {
             _running.Release();
+            // Summaries add English headlines, so the lists are rebuilt once more.
+            _eventLists.Clear();
             Changed?.Invoke();
         }
     }

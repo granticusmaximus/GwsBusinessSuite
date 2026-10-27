@@ -1071,6 +1071,8 @@ public static class DependencyInjection
         services.AddScoped<IDailyNoteService, DailyNoteService>();
         services.AddScoped<ISentinelWebClipService, SentinelWebClipService>();
         services.AddScoped<IWikiDatabaseService, WikiDatabaseService>();
+        // Boards (Kanban) over Sentinel databases - .claude/plans/kanban-boards-2026-10.md.
+        services.AddScoped<GwsBusinessSuite.Application.Boards.IKanbanBoardService, KanbanBoardService>();
         services.AddScoped<IWikiDatabaseRecurrenceService, WikiDatabaseRecurrenceService>();
         services.AddScoped<ISentinelTemplateService, SentinelTemplateService>();
         services.AddScoped<ISentinelWorkspaceImportService, SentinelWorkspaceImportService>();

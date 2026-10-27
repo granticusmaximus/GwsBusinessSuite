@@ -1006,6 +1006,19 @@ h1:focus { outline: none; }
 .gws-status-build { margin-inline-start: auto; font-family: var(--gws-font-mono); }
 @media print { .gws-status-strip { display: none; } }
 
+/* Boards: where a dragged card will land (kanban-board.js adds it to <body>, outside the board's
+   scoped styles). */
+.kb-drop-line {
+    position: fixed;
+    z-index: 1999;
+    display: none;
+    height: 3px;
+    border-radius: 3px;
+    background: var(--gws-sidebar-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--gws-sidebar-accent) 25%, transparent);
+    pointer-events: none;
+}
+
 /* ── Page header ─────────────────────────────────────────── */
 .page-header {
     margin-bottom: 1.75rem;

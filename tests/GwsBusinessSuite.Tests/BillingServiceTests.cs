@@ -247,6 +247,27 @@ public sealed class BillingServiceTests
         (await fixture.Service.SetAutoRemindAsync(changed, autoRemind: false)).Should().Equal([off.Id], "Undo flips back just what changed");
     }
 
+    [Fact]
+    public async Task Issuer_ShouldSaveTrimmed_AndRenderPdfShouldUseIt()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        (await fixture.Service.GetIssuerAsync()).IsEmpty.Should().BeTrue();
+
+        await fixture.Service.SaveIssuerAsync(new BillingIssuer("  GWS Studio ", " ", "1 Main Street\r\nSpringfield", null, null));
+        await fixture.Service.SaveIssuerAsync(new BillingIssuer("GWS Studio", "billing@example.com", "1 Main Street\r\nSpringfield", null, null));
+
+        var issuer = await fixture.Service.GetIssuerAsync();
+        issuer.Should().Be(new BillingIssuer("GWS Studio", "billing@example.com", "1 Main Street\nSpringfield", null, null), "saving again updates the one row");
+        fixture.Db.BillingSettings.Count().Should().Be(1);
+
+        var contact = await fixture.AddContactAsync("Jamie Rivera", "jamie@example.com");
+        var draft = await fixture.Service.SaveDraftAsync(new InvoiceEditorModel { ContactId = contact.Id, Title = "October retainer" });
+        var file = await fixture.Service.RenderPdfAsync(draft.Id);
+        file!.FileName.Should().EndWith("-october-retainer.pdf");
+        file.Content.Should().NotBeEmpty();
+        (await fixture.Service.RenderPdfAsync(Guid.NewGuid())).Should().BeNull();
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;

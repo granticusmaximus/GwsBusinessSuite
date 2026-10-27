@@ -25,6 +25,13 @@
     padding-right: .25rem;
 }
 
+.world-news-more {
+    flex-shrink: 0;
+    align-self: center;
+    min-height: 44px;
+    margin: .5rem 0;
+}
+
 .world-news-event {
     /* The list scrolls at a fixed height; without this the items shrink and overlap. */
     flex-shrink: 0;

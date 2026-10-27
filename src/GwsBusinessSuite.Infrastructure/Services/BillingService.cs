@@ -212,6 +212,45 @@ public sealed class BillingService(
         return invoices.Select(invoice => invoice.Id).ToList();
     }
 
+    public async Task<BillingIssuer> GetIssuerAsync(CancellationToken cancellationToken = default)
+    {
+        var row = await db.BillingSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        return row is null ? BillingIssuer.Empty : new BillingIssuer(row.BusinessName, row.Email, row.Address, row.TaxId, row.PaymentNotes);
+    }
+
+    public async Task SaveIssuerAsync(BillingIssuer issuer, string? actor = null, CancellationToken cancellationToken = default)
+    {
+        var now = timeProvider.GetUtcNow();
+        var row = await db.BillingSettings.FirstOrDefaultAsync(cancellationToken);
+        if (row is null)
+        {
+            row = new BillingSettings { CreatedAt = now, CreatedBy = actor ?? "system" };
+            db.BillingSettings.Add(row);
+        }
+        static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Replace("\r\n", "\n").Trim();
+        row.BusinessName = issuer.BusinessName.Trim();
+        row.Email = Clean(issuer.Email);
+        row.Address = Clean(issuer.Address);
+        row.TaxId = Clean(issuer.TaxId);
+        row.PaymentNotes = Clean(issuer.PaymentNotes);
+        row.UpdatedAt = now;
+        row.UpdatedBy = actor ?? "system";
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<InvoicePdfFile?> RenderPdfAsync(Guid invoiceId, CancellationToken cancellationToken = default)
+    {
+        var invoice = await GetInvoiceAsync(invoiceId, cancellationToken);
+        if (invoice is null) return null;
+        var client = await db.Contacts.AsNoTracking()
+            .Where(contact => contact.Id == invoice.ContactId)
+            .Select(contact => new { contact.FullName, contact.Company, contact.Email })
+            .FirstOrDefaultAsync(cancellationToken);
+        var data = new InvoicePdfData(invoice, await GetIssuerAsync(cancellationToken),
+            client?.FullName ?? invoice.ContactName, client?.Company, client?.Email);
+        return new InvoicePdfFile(InvoicePdf.FileName(invoice), InvoicePdf.Render(data));
+    }
+
     // Time billed on an invoice that's deleted or voided goes back to unbilled, so it can be billed
     // again (TimeTrackingService.BillUnbilledAsync).
     private async Task ReleaseTimeEntriesAsync(Guid invoiceId, CancellationToken cancellationToken)

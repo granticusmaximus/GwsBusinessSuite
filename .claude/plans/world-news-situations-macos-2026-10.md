@@ -235,3 +235,21 @@ Each phase is a finished, verified unit (`./scripts/verify-release.sh`).
 2. **Mac only, or also on the web?** Should situations also appear in News Intelligence on the
    web, synced up from the Mac?
 3. **How wide:** every country GDELT covers, or a chosen list of countries and topics.
+
+## Load speed (27-10-26)
+
+Grant asked for World News to load faster. Locally the page was quick once warm (~120 ms to events,
+the overview query 80-95 ms over 7 days on a 28.5k-report / 8.7k-event database) but the first load
+after a start took 1.1 s, and each load ran the overview aggregate twice (prerender, then the live
+render) and rendered all 300 events into a 168 KB page that the live render sent again. On the
+droplet's small CPU, shared with Ollama's embedding and summaries during every read, that's where
+the time goes.
+- `EventListCache` (WorldNewsKit): the event list per range, built once and shared by every page;
+  cleared after a read's pipeline and again after its summaries (headlines change), rebuilt past
+  15 minutes so the cutoff moves. A generation stamp keeps a list built during a read from being
+  stored as fresh. `WorldNewsService.TopEvents(rangeHours)` serves it and warms the 24-hour list
+  at startup.
+- The page shows 60 events with "Show 60 more"; the filter still searches all 300.
+- Measured locally, same data: first load after a start 1.1 s -> 66 ms to first byte (215 ms to
+  events), warm loads 120 -> 60-100 ms, enhanced navigation 188 -> 42 ms, page HTML 168 -> 66 KB.
+  Tests: `WorldNewsEventListCacheTests`.

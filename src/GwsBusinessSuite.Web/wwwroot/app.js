@@ -1055,6 +1055,15 @@
 			link.click();
 			link.remove();
 			window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+		},
+		// A file the server makes (an invoice PDF): a download link Blazor's navigation leaves alone.
+		url: function (url) {
+			var link = document.createElement('a');
+			link.href = url;
+			link.download = '';
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
 		}
 	};
 

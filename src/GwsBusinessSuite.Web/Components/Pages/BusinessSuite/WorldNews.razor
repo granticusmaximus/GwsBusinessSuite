@@ -21,8 +21,8 @@
     </Actions>
     <Filters>
         <input type="search" class="form-control world-news-search" placeholder="Filter events" aria-label="Filter events"
-               @bind="_filter" @bind:event="oninput" />
-        <select class="form-select world-news-range" aria-label="Time range" @bind="_rangeHours" @bind:after="LoadAsync">
+               @bind="_filter" @bind:event="oninput" @bind:after="() => _shown = PageSize" />
+        <select class="form-select world-news-range" aria-label="Time range" @bind="_rangeHours" @bind:after="ChangeRangeAsync">
             <option value="24">Last 24 hours</option>
             <option value="72">Last 3 days</option>
             <option value="168">Last 7 days</option>
@@ -51,12 +51,19 @@ else
             {
                 <EmptyState Icon="bi-search" Message="No events match that filter." />
             }
-            @foreach (var e in VisibleEvents)
+            @foreach (var e in VisibleEvents.Take(_shown))
             {
                 <button type="button" class="world-news-event @(e.Id == _selected?.Id ? "is-selected" : "")"
                         aria-pressed="@(e.Id == _selected?.Id ? "true" : "false")" @onclick="() => SelectAsync(e)">
                     <span class="world-news-event-title">@(e.Headline ?? e.Title)</span>
                     <span class="world-news-event-meta">@Summary(e)</span>
+                </button>
+            }
+            @* A page of events at a time: all 300 made a 170 KB page, sent again by the live render. *@
+            @if (VisibleEvents.Count > _shown)
+            {
+                <button type="button" class="btn btn-sm btn-outline-secondary world-news-more" @onclick="() => _shown += PageSize">
+                    Show @Math.Min(PageSize, VisibleEvents.Count - _shown) more of @(VisibleEvents.Count - _shown)
                 </button>
             }
         </div>
@@ -124,6 +131,8 @@ else
     private EventSummary? _summary;
     private string _filter = string.Empty;
     private int _rangeHours = 24;
+    private const int PageSize = 60;
+    private int _shown = PageSize;
 
     private IReadOnlyList<EventOverview> VisibleEvents => string.IsNullOrWhiteSpace(_filter)
         ? _events ?? []
@@ -146,10 +155,15 @@ else
 
     private async Task LoadAsync()
     {
-        var since = DateTimeOffset.UtcNow.AddHours(-_rangeHours);
-        _events = await Task.Run(() => News.Store.TopEvents(since, 300));
+        _events = await Task.Run(() => News.TopEvents(_rangeHours));
         if (_selected is not null) _selected = _events.FirstOrDefault(e => e.Id == _selected.Id);
         if (_selected is not null) _summary = await Task.Run(() => News.Store.LatestSummary(_selected.Id));
+    }
+
+    private Task ChangeRangeAsync()
+    {
+        _shown = PageSize;
+        return LoadAsync();
     }
 
     private async Task SelectAsync(EventOverview e)

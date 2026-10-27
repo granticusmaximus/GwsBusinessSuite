@@ -1,0 +1,135 @@
+@page "/admin/boards"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.Boards
+@inject IKanbanBoardService BoardService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject ILogger<Boards> Logger
+
+<PageTitle>Boards</PageTitle>
+
+<PageHeader Title="Boards" Icon="bi-kanban-fill" Description="Kanban and sprint boards for your work. Every board is a Sentinel database and every card a Sentinel page, so nothing lives in two places.">
+    <Actions>
+        <button type="button" class="btn btn-primary" @onclick="() => _creating = !_creating" aria-expanded="@(_creating ? "true" : "false")">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New board
+        </button>
+    </Actions>
+</PageHeader>
+
+@if (_creating)
+{
+    <section class="boards-new card border-0 shadow-sm mb-4" aria-labelledby="boards-new-title">
+        <div class="card-body">
+            <h2 id="boards-new-title" class="h6 fw-semibold mb-3">Start from a template</h2>
+            <div class="boards-templates" role="radiogroup" aria-label="Board template">
+                @foreach (var template in KanbanTemplates.All)
+                {
+                    var selected = template.Key == _templateKey;
+                    <button type="button" class="boards-template @(selected ? "is-selected" : "")" role="radio" aria-checked="@(selected ? "true" : "false")"
+                            @onclick="() => _templateKey = template.Key">
+                        <span class="boards-template-head"><span aria-hidden="true">@template.Icon</span> @template.Name</span>
+                        <span class="boards-template-desc">@template.Description</span>
+                        <span class="boards-template-columns" aria-label="Columns">
+                            @foreach (var column in template.Columns)
+                            {
+                                <span class="boards-template-column" style="--column-color: @column.Color">@column.Label</span>
+                            }
+                        </span>
+                    </button>
+                }
+            </div>
+            <form class="boards-new-form" @onsubmit="CreateAsync" @onsubmit:preventDefault>
+                <label class="visually-hidden" for="board-title">Board name</label>
+                <input id="board-title" class="form-control" placeholder="@(KanbanTemplates.Find(_templateKey)?.Name ?? "Board name")"
+                       @bind="_title" @bind:event="oninput" maxlength="120" />
+                <button type="submit" class="btn btn-primary" disabled="@_busy">Create board</button>
+            </form>
+        </div>
+    </section>
+}
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger" role="alert">@_error</div>
+}
+
+@if (_boards is null)
+{
+    <ListSkeleton Message="Loading boards…" Grid="true" Rows="6" CssClass="px-0" />
+}
+else if (_boards.Count == 0)
+{
+    <EmptyState Icon="bi-kanban" Title="No boards yet" Message="Make one from a template: Personal Kanban, a sprint board, bug triage or a content pipeline.">
+        <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="() => _creating = true">
+            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New board
+        </button>
+    </EmptyState>
+}
+else
+{
+    <div class="boards-grid">
+        @foreach (var board in _boards)
+        {
+            <a class="boards-tile" href="admin/boards/@board.DatabaseId">
+                <span class="boards-tile-icon" aria-hidden="true">@(string.IsNullOrWhiteSpace(board.Icon) ? "🗂️" : board.Icon)</span>
+                <span class="boards-tile-title">@board.Title</span>
+                <span class="boards-tile-meta">@board.OpenCount open · @board.CardCount @(board.CardCount == 1 ? "card" : "cards")</span>
+                <span class="boards-tile-meta">Active @board.LastActivity.ToLocalGwsDateTime()</span>
+                @if (board.CardCount > 0)
+                {
+                    <span class="boards-tile-progress" role="img" aria-label="@(board.CardCount - board.OpenCount) of @board.CardCount done">
+                        <span style="width: @((100 * (board.CardCount - board.OpenCount) / board.CardCount).ToString(System.Globalization.CultureInfo.InvariantCulture))%"></span>
+                    </span>
+                }
+            </a>
+        }
+    </div>
+}
+
+@code {
+    private IReadOnlyList<KanbanBoardSummary>? _boards;
+    private bool _creating;
+    private bool _busy;
+    private string _templateKey = KanbanTemplates.All[0].Key;
+    private string _title = string.Empty;
+    private string? _error;
+
+    // ⌘K's "New board" arrives as ?new=1.
+    [SupplyParameterFromQuery(Name = "new")] public string? NewQuery { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _creating = NewQuery == "1";
+        try
+        {
+            _boards = await BoardService.ListBoardsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Listing boards failed.");
+            _error = "Couldn't load your boards. " + ex.Message;
+            _boards = [];
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var id = await BoardService.CreateBoardAsync(_title, _templateKey, performedBy);
+            Navigation.NavigateTo($"admin/boards/{id}");
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}
