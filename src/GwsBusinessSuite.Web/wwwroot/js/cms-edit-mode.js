@@ -545,9 +545,13 @@
 
   function applyFormat(cmd) {
     if (cmd === 'link') {
-      var url = window.prompt('Link URL');
-      if (url === null) return;
-      document.execCommand(url ? 'createLink' : 'unlink', false, url || undefined);
+      // gwsPrompt, not window.prompt: Cancel on a prompt() crashed the Mac app (gws-prompt.js).
+      window.gwsPrompt.askKeepingSelection('Link URL').then(function (url) {
+        if (url === null) return;
+        document.execCommand(url ? 'createLink' : 'unlink', false, url || undefined);
+        syncFormatBarState();
+      });
+      return;
     } else {
       document.execCommand(cmd, false);
     }

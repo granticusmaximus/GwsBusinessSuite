@@ -352,7 +352,7 @@ else
 
     private async Task ShowResizePrompt()
     {
-        var newSize = await JS.InvokeAsync<string?>("prompt",
+        var newSize = await JS.InvokeAsync<string?>("gwsPrompt.ask",
             "Enter the target DigitalOcean size slug (e.g. s-2vcpu-4gb). Disk-size changes require the droplet to be powered off; CPU/RAM-only resizes can be applied live.");
         if (string.IsNullOrWhiteSpace(newSize)) return;
 
@@ -378,7 +378,7 @@ else
 
     private async Task ShowSnapshotPrompt()
     {
-        var name = await JS.InvokeAsync<string?>("prompt", "Snapshot name:", $"gwssuite-{DateTime.UtcNow:yyyyMMdd-HHmm}");
+        var name = await JS.InvokeAsync<string?>("gwsPrompt.ask", "Snapshot name:", $"gwssuite-{DateTime.UtcNow:yyyyMMdd-HHmm}");
         if (string.IsNullOrWhiteSpace(name)) return;
 
         var confirmed = await JS.InvokeAsync<bool>("confirm",

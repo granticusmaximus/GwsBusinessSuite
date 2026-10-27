@@ -7,6 +7,8 @@
 @inject ICrmService CrmService
 @inject NavigationManager Navigation
 @inject ILogger<Crm> Logger
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
+@inject IJSRuntime JS
 
 <PageTitle>CRM</PageTitle>
 
@@ -146,7 +148,7 @@ else
                 }
                 else
                 {
-                    <div class="p-2 border-bottom d-flex gap-2">
+                    <div class="p-2 border-bottom d-flex gap-2 gws-list-filters">
                         <input type="search" class="form-control form-control-sm" placeholder="Search name, email, company..."
                                value="@SearchText" @oninput="e => SearchText = e.Value?.ToString() ?? string.Empty" />
                         <select class="form-select form-select-sm" style="max-width:9rem;" value="@StatusFilter"
@@ -178,9 +180,25 @@ else
                     }
                     else
                     {
+                        @if (SelectedShown.Count > 0)
+                        {
+                            @* Bulk actions for the checked rows (tech-forward T3). *@
+                            <div class="gws-bulk-bar" role="region" aria-label="Actions for the selected contacts">
+                                <span class="gws-bulk-count"><strong>@SelectedShown.Count</strong> selected</span>
+                                <select class="form-select form-select-sm w-auto" aria-label="Set status for the selected contacts" @key="_bulkStatusKey" @onchange="BulkStatusAsync">
+                                    <option value="">Set status…</option>
+                                    @foreach (var status in ContactStatuses.All) { <option value="@status">@status</option> }
+                                </select>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ExportSelectedAsync"><i class="bi bi-download me-1" aria-hidden="true"></i>Export CSV</button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" @onclick="BulkTrashAsync"><i class="bi bi-trash3 me-1" aria-hidden="true"></i>Move to Trash</button>
+                                <button type="button" class="btn btn-sm btn-link ms-auto" @onclick="_selection.Clear">Clear</button>
+                            </div>
+                        }
                         <div class="table-responsive gws-list-table-wrap">
                             <table class="table table-hover align-middle mb-0 gws-list-table">
                                 <thead><tr>
+                                    <th class="gws-select-cell"><input type="checkbox" class="form-check-input" aria-label="Select all shown contacts"
+                                        checked="@_selection.AllSelected(ShownContactIds)" @onchange="e => _selection.SetAll(ShownContactIds, e.Value is true)" /></th>
                                     <th>Name</th>
                                     @if (ContactColumnVisible("company")) { <th>Company</th> }
                                     @if (ContactColumnVisible("email")) { <th>Email</th> }
@@ -189,11 +207,20 @@ else
                                 <tbody>
                                 @foreach (var contact in VisibleContacts)
                                 {
-                                    <tr class="@(contact.Id == _inspectedContactId ? "gws-row-selected" : string.Empty) @StatusTones.Stripe(_dueFollowUpIds.Contains(contact.Id) ? StatusTone.Warning : null)">
+                                    <tr class="@(contact.Id == _inspectedContactId ? "gws-row-selected" : string.Empty) @(_selection.IsSelected(contact.Id) ? "gws-row-checked" : string.Empty) @StatusTones.Stripe(_dueFollowUpIds.Contains(contact.Id) ? StatusTone.Warning : null)">
+                                        <td class="gws-select-cell"><input type="checkbox" class="form-check-input" data-row-select aria-label="Select @contact.FullName"
+                                            checked="@_selection.IsSelected(contact.Id)" @onclick="e => _selection.Toggle(contact.Id, e.ShiftKey, ShownContactIds)" /></td>
                                         <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" data-preview="contact:@contact.Id" aria-pressed="@(contact.Id == _inspectedContactId ? "true" : "false")" @onclick="() => _inspectedContactId = contact.Id">@contact.FullName</button>@if (_dueFollowUpIds.Contains(contact.Id)) { <StatusPill Tone="StatusTone.Warning" CssClass="ms-2">Follow-up due</StatusPill> }</td>
                                         @if (ContactColumnVisible("company")) { <td>@(string.IsNullOrWhiteSpace(contact.Company) ? "—" : contact.Company)</td> }
                                         @if (ContactColumnVisible("email")) { <td>@(string.IsNullOrWhiteSpace(contact.Email) ? "—" : contact.Email)</td> }
-                                        @if (ContactColumnVisible("status")) { <td><StatusPill Tone="StatusTones.ForContact(contact.Status)">@contact.Status</StatusPill></td> }
+                                        @if (ContactColumnVisible("status"))
+                                        {
+                                            @* Inline status (tech-forward T3): a select styled as the status pill. *@
+                                            <td><select class="gws-inline-select gws-pill gws-pill-@StatusTones.CssName(StatusTones.ForContact(contact.Status))" aria-label="Status of @contact.FullName"
+                                                        value="@contact.Status" @onchange="e => SetStatusAsync(contact, e.Value as string)">
+                                                @foreach (var status in ContactStatuses.All) { <option value="@status">@status</option> }
+                                            </select></td>
+                                        }
                                     </tr>
                                 }
                                 </tbody>
@@ -338,6 +365,12 @@ else
 
 @code {
     private List<Contact> Contacts { get; set; } = new();
+    private readonly ListSelection<Guid> _selection = new();
+    private int _bulkStatusKey;
+    private IReadOnlyList<Guid> ShownContactIds => VisibleContacts.Select(contact => contact.Id).ToList();
+    // Bulk actions reach only checked rows that are on show: a search that hides a checked contact
+    // can't send it to Trash unseen.
+    private List<Contact> SelectedShown => VisibleContacts.Where(contact => _selection.IsSelected(contact.Id)).ToList();
     private List<Contact> TrashedContacts { get; set; } = new();
     private List<Contact> DueFollowUps { get; set; } = new();
     // Rows for these contacts get a warning stripe and a "Follow-up due" pill (R5).
@@ -582,6 +615,97 @@ else
         CreateNewDeal();
     }
 
+    // Inline status (tech-forward T3): the pill changes at once; Undo puts the old status back,
+    // and a refusal does it straight away.
+    private async Task SetStatusAsync(Contact contact, string? status)
+    {
+        var previous = contact.Status;
+        if (status is null || status == previous) return;
+        contact.Status = status;
+        try
+        {
+            await CrmService.SetContactStatusAsync(contact.Id, status);
+            Toasts.Show($"{contact.FullName} is now {status}.", async () =>
+            {
+                await CrmService.SetContactStatusAsync(contact.Id, previous);
+                contact.Status = previous;
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex)
+        {
+            contact.Status = previous;
+            Logger.LogWarning(ex, "Changing contact {ContactId}'s status failed.", contact.Id);
+            Toasts.Show($"Couldn't change {contact.FullName}'s status. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
+    private async Task BulkStatusAsync(ChangeEventArgs e)
+    {
+        _bulkStatusKey++;
+        if (e.Value is not string status || status.Length == 0) return;
+        var targets = SelectedShown.Where(contact => contact.Status != status).ToList();
+        if (targets.Count == 0) return;
+        var previous = targets.ToDictionary(contact => contact.Id, contact => contact.Status);
+        try
+        {
+            foreach (var contact in targets)
+            {
+                await CrmService.SetContactStatusAsync(contact.Id, status);
+                contact.Status = status;
+            }
+            Toasts.Show($"{targets.Count} contact{(targets.Count == 1 ? "" : "s")} set to {status}.", async () =>
+            {
+                foreach (var contact in targets)
+                {
+                    await CrmService.SetContactStatusAsync(contact.Id, previous[contact.Id]);
+                    contact.Status = previous[contact.Id];
+                }
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "A bulk status change failed part way.");
+            await LoadDashboardAsync();
+            Toasts.Show($"Some statuses didn't change. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
+    private async Task BulkTrashAsync()
+    {
+        var targets = SelectedShown;
+        if (targets.Count == 0) return;
+        try
+        {
+            foreach (var contact in targets) await CrmService.TrashContactAsync(contact.Id);
+            Contacts.RemoveAll(contact => targets.Contains(contact));
+            _selection.Clear();
+            Toasts.Show($"Moved {targets.Count} contact{(targets.Count == 1 ? "" : "s")} to Trash.", async () =>
+            {
+                foreach (var contact in targets) await CrmService.RestoreContactAsync(contact.Id);
+                await LoadDashboardAsync();
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "A bulk trash failed part way.");
+            await LoadDashboardAsync();
+            Toasts.Show($"Some contacts weren't moved to Trash. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
+    // A file to open in a spreadsheet, so dates are ISO (yyyy-MM-dd) rather than the dd-MM-yy
+    // shown on screen.
+    private async Task ExportSelectedAsync()
+    {
+        var rows = SelectedShown.Select(contact => (IReadOnlyList<string?>)[contact.FullName, contact.Company, contact.Email, contact.Status,
+                contact.FollowUpDate?.ToLocalTime().ToString("yyyy-MM-dd")]);
+        var csv = CsvExport.Build(["Name", "Company", "Email", "Status", "Follow-up"], rows);
+        await JS.InvokeVoidAsync("gwsDownload.text", $"contacts-{DateTime.Now:yyyy-MM-dd-HHmm}.csv", csv, "text/csv");
+    }
+
     private async Task LoadDashboardAsync()
     {
         IsLoading = true;
@@ -589,6 +713,7 @@ else
         {
             var dashboard = await CrmService.GetDashboardAsync();
             Contacts = dashboard.Contacts.ToList();
+            _selection.Retain(Contacts.Select(contact => contact.Id));
             DueFollowUps = dashboard.DueFollowUps.ToList();
             _dueFollowUpIds = DueFollowUps.Select(contact => contact.Id).ToHashSet();
             Deals = dashboard.OpenDeals.ToList();

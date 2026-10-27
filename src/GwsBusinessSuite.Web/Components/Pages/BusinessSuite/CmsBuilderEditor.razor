@@ -3550,7 +3550,7 @@ else
         try
         {
             var suggestedName = GetWidgetLayerSummary(widget);
-            var name = await JS.InvokeAsync<string?>("prompt", "Global widget name:", suggestedName);
+            var name = await JS.InvokeAsync<string?>("gwsPrompt.ask", "Global widget name:", suggestedName);
             if (string.IsNullOrWhiteSpace(name)) return;
 
             var globalBlock = await GlobalBlockService.CreateWidgetAsync(_page.SiteId, name, widget);
@@ -3576,7 +3576,7 @@ else
         try
         {
             var suggestedName = string.IsNullOrWhiteSpace(section.Label) ? "Section" : section.Label;
-            var name = await JS.InvokeAsync<string?>("prompt", "Global section name:", suggestedName);
+            var name = await JS.InvokeAsync<string?>("gwsPrompt.ask", "Global section name:", suggestedName);
             if (string.IsNullOrWhiteSpace(name)) return;
 
             var globalBlock = await GlobalBlockService.CreateSectionAsync(_page.SiteId, name, section);
@@ -3654,7 +3654,7 @@ else
 
         try
         {
-            var name = await JS.InvokeAsync<string?>("prompt", "Rename global block:", globalBlock.Name);
+            var name = await JS.InvokeAsync<string?>("gwsPrompt.ask", "Rename global block:", globalBlock.Name);
             if (string.IsNullOrWhiteSpace(name) || name.Trim() == globalBlock.Name) return;
 
             await GlobalBlockService.RenameAsync(_page.SiteId, globalBlock.Id, name);

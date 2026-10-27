@@ -203,8 +203,12 @@ window.gwsProfessionalEditor = (() => {
         } else if (command === "code") {
             document.execCommand("formatBlock", false, "pre");
         } else if (command === "link") {
-            const href = window.prompt("Link address (https://…)");
-            if (href && /^(https?:\/\/|mailto:|\/|#)/i.test(href)) document.execCommand("createLink", false, href);
+            // gwsPrompt, not window.prompt: Cancel on a prompt() crashed the Mac app (gws-prompt.js).
+            window.gwsPrompt.askKeepingSelection("Link address (https://…)").then(function (href) {
+                if (href && /^(https?:\/\/|mailto:|\/|#)/i.test(href)) document.execCommand("createLink", false, href);
+                notify(instance);
+            });
+            return;
         } else {
             document.execCommand(command, false);
         }

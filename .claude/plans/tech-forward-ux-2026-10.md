@@ -160,6 +160,35 @@ for primary actions.
   keys): Assign, Status, Export CSV, Trash, each with undo where the action has one.
 - Shared pieces in a `ListSelection` helper so pages don't each reimplement selection.
 
+Built in two units: T3a CRM contacts, T3b Support and Billing.
+
+**T3a done 27-10-26 (CRM contacts).**
+- `ListSelection<TKey>` (Web/Components): click toggles, shift-click selects the range from the
+  last clicked row in the list's current order (taking that row's state, so it can also clear a
+  range), select-all over the rows on show, `Retain` after a reload. `CsvExport.Build`: quotes
+  fields with commas/quotes/line breaks, and prefixes =, +, - and @ with ' so a spreadsheet never
+  runs a cell as a formula.
+- `ICrmService.SetContactStatusAsync` (status only, checked against `ContactStatuses.All`), so a
+  list edit can't overwrite a field changed on the contact's page meanwhile.
+  `AutomationWorkflowTests.FakeCrmService` implements it.
+- CRM contacts: a checkbox column (with select-all), checked rows tinted; a bulk bar above the list
+  (count, Set status with Undo restoring each contact's own status, Export CSV with ISO dates via
+  `gwsDownload.text`, Move to Trash with Undo restoring them, Clear). Bulk actions reach only
+  checked rows that are on show, so a search hiding a checked contact can't trash it unseen. The
+  Status cell is a select dressed as the status pill (changes at once, Undo, a refusal reverts);
+  44px on touch. `x` checks the row under the j/k cursor (shift+x extends the range).
+- **Fixed along the way:** CRM's and Billing's search-and-filter row (R3b) pushed the status filter
+  off a 390px screen - the content panel scrolled sideways (right edge 521px). The rows wrap now
+  (`gws-list-filters`). The responsive audit didn't catch it because it measures the document,
+  not the content panel, which scrolls on its own; a sweep of all 50 admin routes found five more
+  pages like it (Menus, Builder Reference, Government Intelligence, Growth, Pages > All) - see the
+  next unit.
+- Tests: `TablePowerTests` (5: toggle and range, range direction and anchor state, select-all and
+  retain, CSV quoting and formula guard, the status-only update and its refusals).
+- Checked live: shift-click range (3 selected), bulk status (only the 2 that differed) and Undo,
+  CSV download, Clear, inline status with the pill's tone and Undo, bulk trash and Undo, `j` `x`,
+  phone select 44px and no overflow, no console errors.
+
 ## T4. Live presence (areas 3, 7)
 
 - A slim status strip in the shell: circuit connection, background jobs running, SentinelGPT

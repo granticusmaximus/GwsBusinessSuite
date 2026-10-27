@@ -175,6 +175,19 @@ public sealed class CrmService(
         return contact;
     }
 
+    public async Task SetContactStatusAsync(Guid contactId, string status, CancellationToken cancellationToken = default)
+    {
+        if (!ContactStatuses.All.Contains(status)) throw new ArgumentException($"'{status}' is not a contact status.", nameof(status));
+        var contact = await dbContext.Contacts.FirstOrDefaultAsync(item => item.Id == contactId && item.TrashedAt == null, cancellationToken)
+            ?? throw new InvalidOperationException("That contact no longer exists.");
+        if (contact.Status == status) return;
+        contact.Status = status;
+        contact.UpdatedAt = DateTimeOffset.UtcNow;
+        contact.UpdatedBy = await _currentUserAccessor.GetCurrentUsernameAsync(cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        _cache.Remove(DashboardCacheKey);
+    }
+
     public async Task TrashContactAsync(Guid contactId, CancellationToken cancellationToken = default)
     {
         var contact = await dbContext.Contacts.FirstOrDefaultAsync(item => item.Id == contactId, cancellationToken);

@@ -32,6 +32,8 @@
     <Routes />
     <ReconnectModal />
     <script src="@Assets["lib/bootstrap/dist/js/bootstrap.bundle.min.js"]"></script>
+    @* Before app.js and the editors: gwsPrompt replaces window.prompt, whose Cancel crashed the Mac app. *@
+    <script src="@Assets["js/gws-prompt.js"]"></script>
     <script src="@Assets["app.js"]"></script>
     <script src="@Assets["js/responsive-tables.js"]" defer></script>
     <script src="@Assets["lib/signalr/signalr.min.js"]"></script>

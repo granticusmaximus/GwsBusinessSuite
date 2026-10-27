@@ -361,6 +361,7 @@ public static class CmsBlockHtmlRenderer
           }
           .gws-editable:hover .gws-freeform-resize, .gws-editor-selected .gws-freeform-resize { opacity: 1; }
         </style>
+        <script src="/js/gws-prompt.js" defer></script>
         <script src="/js/cms-edit-mode.js" defer></script>
         """;
 

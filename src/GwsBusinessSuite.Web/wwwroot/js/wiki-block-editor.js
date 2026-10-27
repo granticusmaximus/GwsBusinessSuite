@@ -3095,9 +3095,11 @@ function onContentKeyDown(state, content, event) {
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        const url = window.prompt('Link URL');
-        const safeUrl = safeRichTextHref(url);
-        if (safeUrl) { toggleInlineTag('a', { href: safeUrl }); scheduleNotify(state); }
+        // gwsPrompt, not window.prompt: Cancel on a prompt() crashed the Mac app (gws-prompt.js).
+        window.gwsPrompt.askKeepingSelection('Link URL').then(url => {
+            const safeUrl = safeRichTextHref(url);
+            if (safeUrl) { toggleInlineTag('a', { href: safeUrl }); scheduleNotify(state); }
+        });
         return;
     }
 }
@@ -4921,12 +4923,13 @@ function showInlineToolbar(state) {
     linkButton.setAttribute('aria-label', 'Link');
     linkButton.addEventListener('mousedown', event => event.preventDefault());
     linkButton.addEventListener('click', () => {
-        const url = window.prompt('Link URL');
-        const safeUrl = safeRichTextHref(url);
-        if (safeUrl) {
-            toggleInlineTag('a', { href: safeUrl });
-            scheduleNotify(state);
-        }
+        window.gwsPrompt.askKeepingSelection('Link URL').then(url => {
+            const safeUrl = safeRichTextHref(url);
+            if (safeUrl) {
+                toggleInlineTag('a', { href: safeUrl });
+                scheduleNotify(state);
+            }
+        });
     });
     toolbar.appendChild(linkButton);
 

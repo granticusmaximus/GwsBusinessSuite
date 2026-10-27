@@ -28,6 +28,10 @@ public interface ICrmService
     // being lost outright - see RestoreContactAsync/DeleteContactPermanentlyAsync.
     Task TrashContactAsync(Guid contactId, CancellationToken cancellationToken = default);
 
+    // Only the status (tech-forward T3: inline and bulk edits), so a list edit never overwrites a
+    // field someone changed on the contact's page meanwhile.
+    Task SetContactStatusAsync(Guid contactId, string status, CancellationToken cancellationToken = default);
+
     Task RestoreContactAsync(Guid contactId, CancellationToken cancellationToken = default);
 
     Task DeleteContactPermanentlyAsync(Guid contactId, CancellationToken cancellationToken = default);

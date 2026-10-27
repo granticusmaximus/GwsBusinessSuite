@@ -741,6 +741,15 @@
 			return;
 		}
 		if (key === 'j' || key === 'k') { event.preventDefault(); moveRowCursor(key === 'j' ? 1 : -1); return; }
+		// x checks the row under the cursor (shift+x extends the range), for the bulk bar.
+		if ((key === 'x' || key === 'X') && rowCursor && document.contains(rowCursor)) {
+			var check = rowCursor.querySelector('input[data-row-select]');
+			if (check) {
+				event.preventDefault();
+				check.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, shiftKey: event.shiftKey }));
+			}
+			return;
+		}
 		if (key === 'Enter' && rowCursor && document.contains(rowCursor)) {
 			var open = rowCursor.querySelector('a[href], button.btn-link, button');
 			if (open) { event.preventDefault(); open.click(); }
@@ -952,6 +961,20 @@
 
 	// Pages opened by ⌘K's create actions (?new=1) focus their form's first field through this.
 	window.gwsFocus = { field: focusField };
+
+	// A file made in the page (a list's Export CSV, tech-forward T3) handed to the browser.
+	window.gwsDownload = {
+		text: function (filename, content, type) {
+			var url = URL.createObjectURL(new Blob([content], { type: (type || 'text/plain') + ';charset=utf-8' }));
+			var link = document.createElement('a');
+			link.href = url;
+			link.download = filename;
+			document.body.appendChild(link);
+			link.click();
+			link.remove();
+			window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+		}
+	};
 
 	// The account menu's density switch (DensityToggle) saves the choice, then swaps the class the
 	// layout rendered, so the change shows without a reload.

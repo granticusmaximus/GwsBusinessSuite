@@ -2994,6 +2994,8 @@ public sealed class AutomationWorkflowTests
 
     private sealed class FakeCrmService : ICrmService
     {
+        public Task SetContactStatusAsync(Guid contactId, string status, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
         public List<(Guid DealId, string Stage)> StagedDeals { get; } = [];
         public List<ContactEditorModel> SavedContacts { get; } = [];
 
