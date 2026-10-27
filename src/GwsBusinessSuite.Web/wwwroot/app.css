@@ -1310,6 +1310,11 @@ button.gws-command-result { width: 100%; border: 0; background: none; font: inhe
 /* Table power (tech-forward T3): the checkbox column, checked rows, the bulk bar above the list,
    and a status cell that is a select dressed as its status pill (selects can't draw the pill's
    dot, so a chevron says it opens). */
+/* A row of fields and buttons that wraps on a narrow screen instead of running past its edge
+   (menu item rows, the builder reference's search). */
+.gws-wrap-row { flex-wrap: wrap; }
+.gws-wrap-row > :is(input, select, .form-control, .form-select) { flex: 1 1 10rem; min-width: 0; }
+
 /* A list's search and filter row wraps instead of pushing the filter off a phone screen (the
    search box's intrinsic width plus the filter overflowed CRM's and Billing's at 390px). */
 .gws-list-filters { flex-wrap: wrap; }

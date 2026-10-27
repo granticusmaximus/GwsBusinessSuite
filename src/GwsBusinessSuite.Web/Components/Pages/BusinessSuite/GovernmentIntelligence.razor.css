@@ -204,6 +204,8 @@
     .signal-card small { white-space: normal; }
     .scope-nav { display: flex; overflow-x: auto; padding-bottom: .2rem; scroll-snap-type: x mandatory; }
     .scope-nav button { min-width: 240px; scroll-snap-align: start; }
+    /* A long document title wraps instead of pushing the panel sideways (650px at 390px). */
+    .hearing-link { flex-shrink: 1; min-width: 0; max-width: 100%; border-radius: .8rem; white-space: normal; }
     .section-intro { grid-template-columns: 1fr; gap: .35rem; }
     .community-grid, .state-lead-grid, .chamber-grid { grid-template-columns: 1fr; }
     .community-grid > :first-child { grid-column: auto; }

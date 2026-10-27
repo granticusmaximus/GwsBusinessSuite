@@ -111,18 +111,26 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
             const r = el.getBoundingClientRect();
             return r.width > 0 && r.height > 0;
           };
+          // The admin's content panel (.gws-content) scrolls on its own, so a page can scroll sideways
+          // inside it while the document itself never overflows - which the document check alone
+          // missed (CRM's, Billing's and five other pages' phone layouts, 27-10-26). Its overflow
+          // counts too, and its own scrolling doesn't excuse what spills past its edge.
+          const panel = document.querySelector('.gws-content');
+          const panelOverflow = panel ? panel.scrollWidth - panel.clientWidth : 0;
           const inScroller = el => {
-            for (let p = el.parentElement; p && p !== document.body && p !== de; p = p.parentElement) {
+            for (let p = el.parentElement; p && p !== document.body && p !== de && p !== panel; p = p.parentElement) {
               if (/(auto|scroll|hidden|clip)/.test(getComputedStyle(p).overflowX)) return true;
             }
             return false;
           };
-          const result = { overflowX: Math.max(de.scrollWidth, document.body ? document.body.scrollWidth : 0) - vw, overflowers: [], smallTargets: [], smallTargetCount: 0, tinyText: [], tinyTextCount: 0, covered: [], coveredCount: 0 };
+          const documentOverflow = Math.max(de.scrollWidth, document.body ? document.body.scrollWidth : 0) - vw;
+          const result = { overflowX: Math.max(documentOverflow, panelOverflow), overflowers: [], smallTargets: [], smallTargetCount: 0, tinyText: [], tinyTextCount: 0, covered: [], coveredCount: 0 };
 
           if (result.overflowX > 1) {
+            const limit = panelOverflow > documentOverflow && panel ? panel.getBoundingClientRect().right : vw;
             for (const el of document.body.querySelectorAll('*')) {
               const r = el.getBoundingClientRect();
-              if (r.width && r.right > vw + 1 && visible(el) && !inScroller(el)) {
+              if (r.width && r.right > limit + 1 && visible(el) && !inScroller(el)) {
                 result.overflowers.push(desc(el) + ' (right ' + Math.round(r.right) + 'px)');
                 if (result.overflowers.length >= 6) break;
               }
@@ -179,6 +187,33 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
           return JSON.stringify(result);
         }
         """;
+
+    // The admin's content panel scrolls on its own, so a page could scroll sideways inside it while
+    // the document never overflowed - the audit missed CRM's, Billing's and five more pages' phone
+    // layouts until it measured the panel too (27-10-26). Content in its own scroller stays excused.
+    [Fact]
+    public async Task Checks_ShouldCountOverflowInsideTheContentPanel_ButNotInsideItsOwnScroller()
+    {
+        await using var context = await fixture.Browser.NewContextAsync(new() { ViewportSize = new() { Width = 390, Height = 800 } });
+        await using var page = await context.NewPageAsync();
+        await page.SetContentAsync("""
+            <style>
+              body { margin: 0; }
+              .gws-content { width: 390px; height: 800px; overflow: auto; box-sizing: border-box; padding: 12px; }
+              .wide { width: 640px; white-space: nowrap; }
+              .table-responsive { overflow-x: auto; }
+            </style>
+            <main class="gws-content"><div id="spill" class="wide">An unbreakable line far wider than a phone</div></main>
+            """);
+
+        using var spilled = JsonDocument.Parse(await page.EvaluateAsync<string>(ChecksScript, true));
+        Assert.True(spilled.RootElement.GetProperty("overflowX").GetInt32() > 200, spilled.RootElement.ToString());
+        Assert.Contains(spilled.RootElement.GetProperty("overflowers").EnumerateArray(), item => item.GetString()!.StartsWith("div#spill", StringComparison.Ordinal));
+
+        await page.EvaluateAsync("() => { const wrap = document.createElement('div'); wrap.className = 'table-responsive'; const spill = document.getElementById('spill'); spill.replaceWith(wrap); wrap.appendChild(spill); }");
+        using var contained = JsonDocument.Parse(await page.EvaluateAsync<string>(ChecksScript, true));
+        Assert.True(contained.RootElement.GetProperty("overflowX").GetInt32() <= 1, contained.RootElement.ToString());
+    }
 
     [Fact]
     public async Task TouchControls_ShouldRemainReachableWithoutCoveringEditorContent()

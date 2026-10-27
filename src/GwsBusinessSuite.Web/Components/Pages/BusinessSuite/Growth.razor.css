@@ -55,7 +55,7 @@
 .section-toolbar { align-items: flex-start; margin-bottom: 1.25rem; }
 .section-toolbar h2 { font-size: 1.2rem; margin: 0 0 .25rem; }
 .section-toolbar p { font-size: .85rem; }
-.analytics-actions { display: flex; align-items: center; gap: .55rem; }
+.analytics-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; }
 .range-picker { display: flex; border: 1px solid var(--growth-line); padding: .2rem; border-radius: .65rem; }
 .range-picker button { color: var(--growth-muted); background: transparent; border: 0; border-radius: .45rem; padding: .4rem .7rem; font-size: .75rem; }
 .range-picker button.active { color: #17130c; background: var(--growth-accent); font-weight: 800; }

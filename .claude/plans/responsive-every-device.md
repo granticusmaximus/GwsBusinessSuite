@@ -37,6 +37,22 @@ Definition of done per page: no sideways scroll at 360px; every action reachable
 targets on coarse pointers); nothing under the notch/home bar; readable at 200% text size; no
 stretched lines on large screens.
 
+## Audit blind spot: overflow inside the content panel (27-10-26)
+
+The admin's `.gws-content` panel scrolls on its own, so a page could scroll sideways inside it
+while the document never overflowed; the audit only measured the document and reported these
+clean. Found by a sweep of all 50 admin routes at 390px measuring the panel:
+- CRM and Billing: the search-and-filter row pushed the status filter off screen (fixed in T3a with
+  `gws-list-filters`).
+- Site design > Menus: menu item rows (label, address, new-tab, buttons) - now `gws-wrap-row`.
+- Builder Reference: the search row - `gws-wrap-row`.
+- Government Intelligence: a hearing link's long title never wrapped (650px) - wraps under 728px.
+- Growth: the analytics actions row (range picker) - wraps.
+- Pages > All: each row's five actions sat beside the title - they drop under it under 576px.
+ChecksScript now counts the panel's overflow and finds culprits up to the panel's edge (content in
+its own scroller, such as tables or the scope strip, stays excused); a static negative-control
+test keeps it honest.
+
 ## Queued after Phase 2 (Grant, 2026-10-03)
 
 Investigate https://github.com/0xh3xa/awesome-cyber-security-tools and propose what can be added to

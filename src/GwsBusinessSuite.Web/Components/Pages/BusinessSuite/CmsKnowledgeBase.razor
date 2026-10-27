@@ -46,7 +46,7 @@ else
         <span class="fw-semibold">Try a search</span>
     </div>
     <div class="card-body">
-        <div class="d-flex gap-2 mb-3">
+        <div class="d-flex gap-2 mb-3 gws-wrap-row">
             <input class="form-control" placeholder="e.g. responsive style, revision workflow, template routing..."
                    value="@SearchQuery" @oninput="e => SearchQuery = e.Value?.ToString() ?? string.Empty" />
             <button class="btn btn-primary flex-shrink-0" @onclick="RunSearchAsync" disabled="@string.IsNullOrWhiteSpace(SearchQuery)">Search</button>

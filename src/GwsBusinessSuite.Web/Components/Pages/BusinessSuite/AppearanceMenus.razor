@@ -63,7 +63,7 @@
             {
                 var index = i;
                 var item = activeNavItems[index];
-                <div class="d-flex gap-2 align-items-center mb-2">
+                <div class="d-flex gap-2 align-items-center mb-2 gws-wrap-row">
                     <input class="form-control form-control-sm" placeholder="Label" aria-label="Label" value="@item.Label"
                            @oninput="(e) => UpdateNavItem(activeNavItems, index, item with { Label = e.Value?.ToString() ?? string.Empty })" />
                     <input class="form-control form-control-sm font-monospace" placeholder="@(item.HasChildren ? "/path (optional)" : "/path")" aria-label="Link" value="@item.Href"
@@ -99,7 +99,7 @@
                     {
                         var childIndex = c;
                         var child = children[childIndex];
-                        <div class="d-flex gap-2 align-items-center mb-2 ps-4">
+                        <div class="d-flex gap-2 align-items-center mb-2 ps-4 gws-wrap-row">
                             <i class="bi bi-arrow-return-right text-secondary flex-shrink-0" aria-hidden="true"></i>
                             <input class="form-control form-control-sm" placeholder="Sub-link label" aria-label="Sub-link label" value="@child.Label"
                                    @oninput="(e) => UpdateChild(activeNavItems, index, childIndex, child with { Label = e.Value?.ToString() ?? string.Empty })" />
