@@ -10,6 +10,8 @@
     function showBanner() {
         if (shown) return;
         shown = true;
+        // The shell's status strip (app.js) shows Offline too.
+        document.dispatchEvent(new CustomEvent('gws:connection', { detail: { state: 'failed' } }));
         var banner = document.createElement('div');
         banner.className = 'gws-connection-banner';
         banner.setAttribute('role', 'alert');

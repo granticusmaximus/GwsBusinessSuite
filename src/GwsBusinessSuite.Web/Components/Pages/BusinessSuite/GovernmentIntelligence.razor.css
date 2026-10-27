@@ -99,7 +99,9 @@
 .hearing-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .7rem; padding: .65rem 0; border-top: 1px solid var(--civic-line); }
 .hearing-row:first-child { padding-top: 0; border-top: 0; }
 .hearing-status { font-style: normal; color: var(--civic-accent-strong); font-weight: 700; }
-.hearing-link { flex-shrink: 0; display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .65rem; border: 1px solid var(--civic-line); border-radius: 999px; color: var(--civic-ink); font-size: .75rem; font-weight: 700; text-decoration: none; white-space: nowrap; }
+/* A long document title wraps inside the pill rather than running past the panel (650px at a
+   phone's width, 149px over at 1280 - found once the audit measured the content panel). */
+.hearing-link { flex-shrink: 1; min-width: 0; max-width: 100%; display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .65rem; border: 1px solid var(--civic-line); border-radius: 1rem; color: var(--civic-ink); font-size: .75rem; font-weight: 700; text-decoration: none; }
 .hearing-link:hover { border-color: var(--civic-accent-strong); color: var(--civic-accent-strong); }
 .hearing-link i { font-size: .75rem; }
 
@@ -188,6 +190,7 @@
 /* Pill links (hearing "Watch", election documents) are 30px for mouse use; touch needs 44px. */
 @media (pointer: coarse) {
     .hearing-link { min-height: 44px; }
+    .doc-head a { display: inline-flex; align-items: center; min-height: 44px; padding-inline: .5rem; }
 }
 
 @container gws-main (max-width: 796px) {
@@ -204,8 +207,6 @@
     .signal-card small { white-space: normal; }
     .scope-nav { display: flex; overflow-x: auto; padding-bottom: .2rem; scroll-snap-type: x mandatory; }
     .scope-nav button { min-width: 240px; scroll-snap-align: start; }
-    /* A long document title wraps instead of pushing the panel sideways (650px at 390px). */
-    .hearing-link { flex-shrink: 1; min-width: 0; max-width: 100%; border-radius: .8rem; white-space: normal; }
     .section-intro { grid-template-columns: 1fr; gap: .35rem; }
     .community-grid, .state-lead-grid, .chamber-grid { grid-template-columns: 1fr; }
     .community-grid > :first-child { grid-column: auto; }

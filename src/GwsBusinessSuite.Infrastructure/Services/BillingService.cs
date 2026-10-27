@@ -171,6 +171,47 @@ public sealed class BillingService(
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<InvoiceView> SetDraftDueDateAsync(Guid invoiceId, DateTime? dueDate, string? actor = null, CancellationToken cancellationToken = default)
+    {
+        var invoice = await db.Invoices.Include(item => item.LineItems)
+            .FirstOrDefaultAsync(item => item.Id == invoiceId, cancellationToken)
+            ?? throw new InvalidOperationException($"Invoice {invoiceId} was not found.");
+        if (invoice.Status != InvoiceStatuses.Draft)
+        {
+            throw new InvalidOperationException("Only a Draft invoice's due date can be changed - Stripe holds a sent invoice's.");
+        }
+
+        // Stored as SaveDraftAsync stores it: the date at UTC midnight.
+        invoice.DueDate = dueDate is { } date ? new DateTimeOffset(date.Date, TimeSpan.Zero) : null;
+        invoice.UpdatedAt = timeProvider.GetUtcNow();
+        invoice.UpdatedBy = actor ?? "system";
+        await db.SaveChangesAsync(cancellationToken);
+
+        var contactName = await db.Contacts.AsNoTracking()
+            .Where(contact => contact.Id == invoice.ContactId)
+            .Select(contact => contact.FullName)
+            .FirstOrDefaultAsync(cancellationToken) ?? "Unknown contact";
+        return ToView(invoice, contactName);
+    }
+
+    public async Task<IReadOnlyList<Guid>> SetAutoRemindAsync(IReadOnlyCollection<Guid> invoiceIds, bool autoRemind, string? actor = null, CancellationToken cancellationToken = default)
+    {
+        var ids = invoiceIds.Distinct().ToList();
+        var invoices = await db.Invoices
+            .Where(invoice => ids.Contains(invoice.Id) && invoice.AutoRemind != autoRemind
+                && (invoice.Status == InvoiceStatuses.Draft || invoice.Status == InvoiceStatuses.Sent))
+            .ToListAsync(cancellationToken);
+        var now = timeProvider.GetUtcNow();
+        foreach (var invoice in invoices)
+        {
+            invoice.AutoRemind = autoRemind;
+            invoice.UpdatedAt = now;
+            invoice.UpdatedBy = actor ?? "system";
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return invoices.Select(invoice => invoice.Id).ToList();
+    }
+
     // Time billed on an invoice that's deleted or voided goes back to unbilled, so it can be billed
     // again (TimeTrackingService.BillUnbilledAsync).
     private async Task ReleaseTimeEntriesAsync(Guid invoiceId, CancellationToken cancellationToken)

@@ -944,13 +944,95 @@
 		document.addEventListener('pointercancel', endModalDrag);
 	}
 
+	// The shell's status strip (tech-forward T4): the live connection from Blazor's reconnect events
+	// (and connection-check.js when the connection can't start at all), the rest from
+	// /admin/api/shell-status every 30 s while the tab shows. A signed-out answer stops the polling.
+	// Bound once; it reads the strip on each update, since a page without the shell has none.
+	var statusStripBound = false;
+	var statusStripStopped = false;
+	var connectionStates = {
+		show: ['Reconnecting…', 'warning'], retrying: ['Reconnecting…', 'warning'], hide: ['Live', 'success'],
+		paused: ['Paused', 'neutral'], failed: ['Offline', 'danger'], rejected: ['Offline', 'danger'], 'resume-failed': ['Offline', 'danger']
+	};
+
+	function setStatusItem(name, text, tone) {
+		var item = document.querySelector('[data-gws-status-strip] [data-status="' + name + '"]');
+		if (!item) return;
+		item.querySelector('[data-status-text]').textContent = text;
+		if (tone) item.setAttribute('data-tone', tone); else item.removeAttribute('data-tone');
+	}
+
+	// dd-MM-yy HH:mm in the browser's time, like every date the app shows.
+	function shortStamp(ms) {
+		var date = new Date(ms);
+		var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+		return pad(date.getDate()) + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getFullYear() % 100) + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+	}
+
+	function refreshStatusStrip() {
+		if (statusStripStopped || document.hidden || !document.querySelector('[data-gws-status-strip]')) return;
+		fetch('/admin/api/shell-status', { credentials: 'same-origin', headers: { Accept: 'application/json' }, redirect: 'manual' })
+			.then(function (response) {
+				if (response.type === 'opaqueredirect' || response.status === 401 || response.status === 403) {
+					statusStripStopped = true;
+					return null;
+				}
+				return response.ok ? response.json() : null;
+			})
+			.then(function (status) {
+				if (!status) return;
+				var jobs = status.jobsRunning;
+				setStatusItem('jobs', jobs === 0 ? 'No jobs running' : jobs + (jobs === 1 ? ' job running' : ' jobs running'), jobs > 0 ? 'info' : null);
+				setStatusItem('ai', status.aiBusy ? 'SentinelGPT busy' + (status.aiWaiting > 0 ? ' · ' + status.aiWaiting + ' queued' : '') : 'SentinelGPT idle', status.aiBusy ? 'info' : null);
+				setStatusItem('build', 'Built ' + shortStamp(status.builtAtMs) + (status.commit ? ' · ' + status.commit : ''));
+			})
+			.catch(function () { /* the connection item says when the server is out of reach */ });
+	}
+
+	function bindStatusStripOnce() {
+		if (statusStripBound || !document.querySelector('[data-gws-status-strip]')) return;
+		statusStripBound = true;
+		var reconnectModal = document.getElementById('components-reconnect-modal');
+		if (reconnectModal) {
+			reconnectModal.addEventListener('components-reconnect-state-changed', function (event) {
+				var state = connectionStates[event.detail && event.detail.state];
+				if (state) setStatusItem('connection', state[0], state[1]);
+			});
+		}
+		document.addEventListener('gws:connection', function () { setStatusItem('connection', 'Offline', 'danger'); });
+		document.addEventListener('visibilitychange', refreshStatusStrip);
+		window.setInterval(refreshStatusStrip, 30000);
+		refreshStatusStrip();
+	}
+
+	// Enhanced navigation re-syncs <body>'s attributes from the new page, which drops the scroll
+	// lock an open palette put there (the palette itself stays open across it).
+	function restoreScrollLock() {
+		var layer = document.querySelector('[data-gws-command-layer]');
+		if (layer && !layer.hidden) document.body.classList.add('gws-no-scroll');
+	}
+
+	// The theme theme-init.js put on <html> before the first paint. An enhanced navigation's merge
+	// re-syncs <html>'s attributes from the server's markup, which has none, so light reverted to
+	// dark on every page change until this ran after it (27-10-26).
+	function applyStoredTheme() {
+		try {
+			var stored = localStorage.getItem('gwsTheme');
+			if (stored === 'light' || stored === 'dark') document.documentElement.setAttribute('data-theme', stored);
+		} catch (e) { /* storage unavailable - the default dark stays */ }
+	}
+
 	function initializeAdminShell() {
+		applyStoredTheme();
 		bindShellEventsOnce();
 		bindDraggableModalsOnce();
+		bindStatusStripOnce();
 		applySidebarState();
 		rowCursor = null;
 		previewCache.clear();
 		hidePreview();
+		// Last: applySidebarState's closeMobileNavigation clears the lock.
+		restoreScrollLock();
 	}
 
 	// Quick Note uses browser-local pointer movement instead of sending each mousemove over
@@ -1071,7 +1153,17 @@
 	};
 
 	document.addEventListener('DOMContentLoaded', initializeAdminShell);
-	document.addEventListener('blazor:enhancedload', initializeAdminShell);
+	// After an enhanced navigation too: its DOM merge re-syncs the layout's classes from the server's
+	// markup (dropping a collapsed sidebar) and swaps the list rows under the j/k cursor. Blazor has
+	// no DOM event for this - a 'blazor:enhancedload' listener here never fired, so a collapsed
+	// sidebar re-expanded on every page change (27-10-26) - only Blazor.addEventListener, available
+	// once blazor.web.js (after this file) has run.
+	function bindEnhancedLoad() {
+		if (!window.Blazor || typeof window.Blazor.addEventListener !== 'function') return false;
+		window.Blazor.addEventListener('enhancedload', initializeAdminShell);
+		return true;
+	}
+	if (!bindEnhancedLoad()) document.addEventListener('DOMContentLoaded', bindEnhancedLoad);
 
 	window.gwsTooltips = {
 		init: function (selector) {

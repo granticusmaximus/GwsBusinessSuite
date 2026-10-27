@@ -435,6 +435,65 @@ public sealed class SupportTicketServiceTests
         cleared.AssignedToUsername.Should().BeNull();
     }
 
+    // List edits (tech-forward T3).
+    [Fact]
+    public async Task ApplyTriageAsync_ShouldChangeEveryListedTicket_AndSkipThoseAlreadyAsAsked()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var first = await fixture.Service.CreateTicketAsync(contact.Id, "One", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+        var second = await fixture.Service.CreateTicketAsync(contact.Id, "Two", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+        await fixture.Service.SetPriorityAsync(second.Id, SupportTicketPriorities.High, "staff");
+
+        var before = await fixture.Service.ApplyTriageAsync([first.Id, second.Id], SupportTicketTriageChange.ToPriority(SupportTicketPriorities.High), "staff");
+
+        before.Should().ContainSingle(snapshot => snapshot.TicketId == first.Id, "the second ticket was already High");
+        (await fixture.Service.GetTicketAsync(first.Id))!.Priority.Should().Be(SupportTicketPriorities.High);
+
+        await fixture.Service.ApplyTriageAsync([first.Id, second.Id], SupportTicketTriageChange.AssignTo("  grant "), "staff");
+        (await fixture.Service.ListTicketsAsync()).Should().OnlyContain(ticket => ticket.AssignedToUsername == "grant");
+        await fixture.Service.ApplyTriageAsync([first.Id], SupportTicketTriageChange.AssignTo(""), "staff");
+        (await fixture.Service.GetTicketAsync(first.Id))!.AssignedToUsername.Should().BeNull("an empty assignee unassigns");
+    }
+
+    [Fact]
+    public async Task ApplyTriageAsync_ShouldChangeNothing_WhenAValueOrATicketIsUnknown()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var ticket = await fixture.Service.CreateTicketAsync(contact.Id, "One", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+
+        await fixture.Service.Invoking(service => service.ApplyTriageAsync([ticket.Id], SupportTicketTriageChange.ToStatus("Snoozed"), "staff"))
+            .Should().ThrowAsync<ArgumentException>();
+        await fixture.Service.Invoking(service => service.ApplyTriageAsync([ticket.Id, Guid.NewGuid()], SupportTicketTriageChange.ToStatus(SupportTicketStatuses.Closed), "staff"))
+            .Should().ThrowAsync<InvalidOperationException>();
+
+        (await fixture.Service.GetTicketAsync(ticket.Id))!.Status.Should().Be(SupportTicketStatuses.Open, "a batch with an unknown ticket changes none");
+    }
+
+    [Fact]
+    public async Task RestoreTriageAsync_ShouldUndoAResolve_WithoutRestartingTheSlaClock()
+    {
+        var opened = new DateTimeOffset(2026, 10, 27, 9, 0, 0, TimeSpan.Zero);
+        await using var fixture = await Fixture.CreateAsync(opened);
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var ticket = await fixture.Service.CreateTicketAsync(contact.Id, "Down", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
+
+        fixture.Clock.Now = opened.AddHours(100);
+        var before = await fixture.Service.ApplyTriageAsync([ticket.Id], SupportTicketTriageChange.ToStatus(SupportTicketStatuses.Resolved), "staff");
+        (await fixture.Service.GetTicketAsync(ticket.Id))!.ResolvedAt.Should().Be(opened.AddHours(100));
+
+        fixture.Clock.Now = opened.AddHours(101);
+        await fixture.Service.RestoreTriageAsync(before, "staff");
+
+        var restored = (await fixture.Service.GetTicketAsync(ticket.Id))!;
+        restored.Status.Should().Be(SupportTicketStatuses.Open);
+        restored.ResolvedAt.Should().BeNull();
+        restored.FirstResponseDueAt.Should().Be(ticket.FirstResponseDueAt, "Undo keeps the original deadline, which has already passed");
+        restored.ResolutionDueAt.Should().Be(ticket.ResolutionDueAt);
+        restored.ResolutionDueAt.Should().BeBefore(fixture.Clock.Now);
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -446,9 +505,10 @@ public sealed class SupportTicketServiceTests
             AdminSender = new CapturingAdminSender();
             ContactSender = new CapturingContactSender();
             AutomationTriggers = new RecordingAutomationTriggerService();
+            Clock = new FixedTimeProvider(now);
             Service = new SupportTicketService(
                 db,
-                new FixedTimeProvider(now),
+                Clock,
                 AdminSender,
                 ContactSender,
                 Options.Create(new SupportNotificationOptions { NotifyEmail = "grant@gwsapp.net", AdminBaseUrl = "https://admin.example.test" }),
@@ -461,6 +521,7 @@ public sealed class SupportTicketServiceTests
         public CapturingAdminSender AdminSender { get; }
         public CapturingContactSender ContactSender { get; }
         public RecordingAutomationTriggerService AutomationTriggers { get; }
+        public FixedTimeProvider Clock { get; }
 
         public static async Task<Fixture> CreateAsync(DateTimeOffset? now = null)
         {
@@ -488,7 +549,8 @@ public sealed class SupportTicketServiceTests
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
     {
-        public override DateTimeOffset GetUtcNow() => now;
+        public DateTimeOffset Now { get; set; } = now;
+        public override DateTimeOffset GetUtcNow() => Now;
     }
 
     private sealed class CapturingAdminSender : IGrowthReportEmailSender

@@ -189,6 +189,36 @@ Built in two units: T3a CRM contacts, T3b Support and Billing.
   CSV download, Clear, inline status with the pill's tone and Undo, bulk trash and Undo, `j` `x`,
   phone select 44px and no overflow, no console errors.
 
+**T3b done 27-10-26 (Support and Billing).**
+- `ISupportTicketService.ApplyTriageAsync` (one status, priority or assignee change across tickets
+  in one save; all or nothing; returns snapshots of what changed) and `RestoreTriageAsync` (Undo).
+  Undo restores a snapshot rather than setting the old status again: that would restart the SLA
+  clock, so undoing an accidental Resolve would hand the ticket a fresh deadline and hide a breach.
+  `SetStatusAsync` and list edits share one `ApplyStatus` rule.
+- Support list: checkbox column, bulk bar (Status…, Priority…, Assign to me, Unassign, Export
+  CSV, Clear), Priority and Status cells as pill selects, an optional Assignee column with a
+  select (everyone already holding a ticket, plus you). A refused edit bumps an `@key` so the
+  select re-draws: Blazor otherwise leaves the refused choice showing, since the value it rendered
+  didn't change. **Found live in T3a's CRM status** (trash a contact in one tab, change its status
+  in another: the toast said no, the pill still showed the new status); fixed the same way, and
+  `TablePowerTests` now fails any inline control without an `@key`.
+- `IBillingService.SetDraftDueDateAsync` (Draft only; Stripe holds a sent invoice's date) and
+  `SetAutoRemindAsync` (Draft and Sent only; returns the ids it changed so Undo flips just those).
+- Billing list: checkbox column, bulk bar (Auto-remind on/off with Undo, Export CSV with plain
+  totals and ISO dates, Delete N drafts behind a confirm, Clear), a bell on auto-reminding
+  invoices, and a draft's Due cell as a date box (read as the UTC date it's stored as) with Undo.
+  Invoice status isn't editable in the list - Stripe moves Sent to Paid - and bulk Send, Void and
+  Remind are left out on purpose: they reach the client or Stripe and can't be undone.
+- Tests: `SupportTicketServiceTests` +3 (bulk change skipping tickets already as asked, assignee
+  trim and unassign; nothing changes on an unknown value or ticket; Undo of a Resolve keeps the
+  original, already-passed SLA deadlines), `BillingServiceTests` +2 (draft due date stored as UTC
+  midnight and refused once sent; auto-remind skips void invoices and returns only what changed).
+- Checked live: Support shift-click (2), bulk status (1 of 2 changed, toast names it) and Undo,
+  bulk priority and Undo, Assign to me and Undo, CSV, inline status with the pill's tone and Undo;
+  Billing select-all, auto-remind on (2 of 3; the paid one skipped) and Undo, CSV, the delete
+  confirm's text, inline due date and Undo; phone: no panel overflow, inline controls 44px, bulk
+  bar within the screen; no console errors. User guides: CRM (Billing section) and Support.
+
 ## T4. Live presence (areas 3, 7)
 
 - A slim status strip in the shell: circuit connection, background jobs running, SentinelGPT
@@ -197,6 +227,46 @@ Built in two units: T3a CRM contacts, T3b Support and Billing.
   the row updates in place with a 1.5s highlight instead of needing a refresh.
 - Presence: avatars of other signed-in staff viewing the same record (community users exist), via a
   scoped presence service over the existing hub pattern.
+
+Built in three units: T4a status strip, T4b live list rows, T4c presence.
+
+**T4a done 27-10-26 (status strip).**
+- `MainLayout`: a `<footer class="gws-status-strip" data-permanent>` after the content, sticky to
+  the window's bottom, hidden below 768px (the phone bar's place; `--gws-status-strip-height`
+  drops to 0 there) and in print. The toast now floats above it. One link to `/admin`, where the
+  Mission Control cards live.
+- `ShellStatusService` (Web/Services, DbContext per call) behind `GET /admin/api/shell-status`
+  (AdminOnly, public-read rate limit): automation executions Running with a heartbeat inside
+  `AutomationExecutionService.OrphanThresholdSeconds` (now public; a quieter one crashed),
+  `OllamaWorkloadScheduler.Activity` (holding the model, and how many wait), and a `BuildStamp`:
+  the web assembly's write time and the commit the SDK appends to the informational version. The
+  Docker image is built without .git, so production shows the time alone - passing the sha as a
+  build arg in deploy.yml would add it, left alone since it touches the deploy.
+- app.js `bindStatusStripOnce`: fetches now, every 30 s and when the tab shows again (none while
+  hidden; a sign-in redirect or 401/403 stops it); connection state from Blazor's
+  `components-reconnect-state-changed` on the reconnect dialog, and connection-check.js now
+  dispatches `gws:connection` when the circuit can't start, so the strip says Offline too.
+  Dates dd-MM-yy HH:mm in the browser's time.
+- `data-permanent` keeps the strip's children (what app.js wrote) across enhanced navigation, but
+  Blazor re-syncs the element's own attributes - checked: a marker attribute on the strip and on
+  the palette layer is dropped, the strip's text isn't. Keep state in children, not on the root.
+- Tests: `ShellStatusTests` (live vs crashed/finished/waiting executions, scheduler activity
+  through a hand-over, commit parsing x5).
+- Checked live: API JSON, strip text (Live, No jobs running, SentinelGPT busy · 1 queued from the
+  fresh instance's own background AI work, build time and commit), pinned at the bottom while
+  scrolling, toast above it, click opens the dashboard, kept across enhanced navigation, hidden on
+  a phone, server stopped -> amber Reconnecting….
+- **Fixed along the way (enhanced navigation, found checking the strip):** Blazor's merge keeps a
+  `data-permanent` element's children but re-syncs its own attributes, and re-syncs `<html>`,
+  `<body>` and the layout's classes. So (1) the ⌘K palette and shortcut sheet still closed when a
+  navigation finished (T1's fix put `data-permanent` on the element whose `hidden` app.js toggles)
+  - the palette, sheet and preview card now sit inside `data-permanent` wrappers; (2) app.js's
+  after-navigation setup listened for a `blazor:enhancedload` DOM event Blazor never raises, so it
+  never re-ran: a collapsed sidebar re-expanded and light theme went back to dark on every page
+  change (both older than this plan), and the j/k cursor and preview cache went stale. It now
+  uses `Blazor.addEventListener('enhancedload', ...)`, re-applies the stored theme, and restores
+  the palette's scroll lock. Checked live before and after each; `EnhancedNavigationGuardTests`
+  fails a permanent element carrying `hidden` or the dead event name.
 
 ## T5. Density and charts (areas 2, 15)
 

@@ -22,6 +22,19 @@ public sealed class OllamaWorkloadScheduler
     public OllamaWorkloadPriority CurrentPriority =>
         _ambientPriority.Value ?? OllamaWorkloadPriority.Interactive;
 
+    // For the shell's status strip (tech-forward T4): whether a generation holds the model, and
+    // how many more are queued behind it.
+    public (bool Busy, int Waiting) Activity
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return (_held, _interactiveWaiters.Count + _backgroundWaiters.Count);
+            }
+        }
+    }
+
     public IDisposable UseBackgroundPriority()
     {
         var previous = _ambientPriority.Value;

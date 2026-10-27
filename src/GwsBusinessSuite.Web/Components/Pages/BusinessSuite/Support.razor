@@ -15,6 +15,8 @@
 @inject GwsBusinessSuite.Web.Services.AssistantContext Assistant
 @using GwsBusinessSuite.Application.Assistant
 @inject IJSRuntime JS
+@inject ILogger<Support> Logger
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
 @using GwsBusinessSuite.Application.Abstractions
 
 <PageTitle>Support</PageTitle>
@@ -131,25 +133,68 @@ else
                 }
                 else
                 {
+                    @if (SelectedShown.Count > 0)
+                    {
+                        @* Bulk actions for the checked rows (tech-forward T3). *@
+                        <div class="gws-bulk-bar" role="region" aria-label="Actions for the selected tickets">
+                            <span class="gws-bulk-count"><strong>@SelectedShown.Count</strong> selected</span>
+                            <select class="form-select form-select-sm w-auto" aria-label="Set status for the selected tickets" @key="@($"status-{_bulkKey}")" @onchange="BulkStatusAsync">
+                                <option value="">Status…</option>
+                                @foreach (var status in SupportTicketStatuses.All) { <option value="@status">@status</option> }
+                            </select>
+                            <select class="form-select form-select-sm w-auto" aria-label="Set priority for the selected tickets" @key="@($"priority-{_bulkKey}")" @onchange="BulkPriorityAsync">
+                                <option value="">Priority…</option>
+                                @foreach (var priority in SupportTicketPriorities.All) { <option value="@priority">@priority</option> }
+                            </select>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => BulkAssignAsync(_me)"><i class="bi bi-person-check me-1" aria-hidden="true"></i>Assign to me</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => BulkAssignAsync(null)">Unassign</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ExportSelectedAsync"><i class="bi bi-download me-1" aria-hidden="true"></i>Export CSV</button>
+                            <button type="button" class="btn btn-sm btn-link ms-auto" @onclick="_selection.Clear">Clear</button>
+                        </div>
+                    }
                     <div class="table-responsive gws-list-table-wrap">
                         <table class="table table-hover align-middle mb-0 gws-list-table">
                             <thead><tr>
+                                <th class="gws-select-cell"><input type="checkbox" class="form-check-input" aria-label="Select all shown tickets"
+                                    checked="@_selection.AllSelected(ShownTicketIds)" @onchange="e => _selection.SetAll(ShownTicketIds, e.Value is true)" /></th>
                                 <th>Subject</th>
                                 @if (TicketColumnVisible("contact")) { <th>Contact</th> }
                                 @if (TicketColumnVisible("priority")) { <th>Priority</th> }
                                 @if (TicketColumnVisible("status")) { <th>Status</th> }
+                                @if (TicketColumnVisible("assignee")) { <th>Assignee</th> }
                                 @if (TicketColumnVisible("tags")) { <th>Tags</th> }
                             </tr></thead>
                             <tbody>
                             @foreach (var ticket in Tickets)
                             {
-                                <tr class="@(SelectedTicketId == ticket.Id ? "gws-row-selected" : "") @StatusTones.Stripe(IsSlaBreached(ticket) ? StatusTone.Danger : null)">
+                                <tr class="@(SelectedTicketId == ticket.Id ? "gws-row-selected" : "") @(_selection.IsSelected(ticket.Id) ? "gws-row-checked" : "") @StatusTones.Stripe(IsSlaBreached(ticket) ? StatusTone.Danger : null)">
+                                    <td class="gws-select-cell"><input type="checkbox" class="form-check-input" data-row-select aria-label="Select @ticket.Subject"
+                                        checked="@_selection.IsSelected(ticket.Id)" @onclick="e => _selection.Toggle(ticket.Id, e.ShiftKey, ShownTicketIds)" /></td>
                                     <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" @onclick="() => SelectTicketAsync(ticket.Id)" data-preview="ticket:@ticket.Id">@ticket.Subject</button>@if (IsSlaBreached(ticket)) { <StatusPill Tone="StatusTone.Danger" CssClass="ms-2">SLA overdue</StatusPill> }</td>
                                     @if (TicketColumnVisible("contact")) { <td>@ticket.ContactName</td> }
-                                    @if (TicketColumnVisible("priority")) { <td><StatusPill Tone="StatusTones.ForTicketPriority(ticket.Priority)">@ticket.Priority</StatusPill></td> }
+                                    @* Inline triage (tech-forward T3): selects dressed as the pills. @key re-draws them
+                                       after a refusal, which would otherwise leave the refused choice showing. *@
+                                    @if (TicketColumnVisible("priority"))
+                                    {
+                                        <td><select class="gws-inline-select gws-pill gws-pill-@StatusTones.CssName(StatusTones.ForTicketPriority(ticket.Priority))" aria-label="Priority of @ticket.Subject"
+                                                    @key="_inlineRevision" value="@ticket.Priority" @onchange="e => SetTriageAsync(ticket, e.Value as string, SupportTicketTriageChange.ToPriority)">
+                                            @foreach (var priority in SupportTicketPriorities.All) { <option value="@priority">@priority</option> }
+                                        </select></td>
+                                    }
                                     @if (TicketColumnVisible("status"))
                                     {
-                                        <td><StatusPill Tone="StatusTones.ForTicket(ticket.Status)">@ticket.Status</StatusPill></td>
+                                        <td><select class="gws-inline-select gws-pill gws-pill-@StatusTones.CssName(StatusTones.ForTicket(ticket.Status))" aria-label="Status of @ticket.Subject"
+                                                    @key="_inlineRevision" value="@ticket.Status" @onchange="e => SetTriageAsync(ticket, e.Value as string, SupportTicketTriageChange.ToStatus)">
+                                            @foreach (var status in SupportTicketStatuses.All) { <option value="@status">@status</option> }
+                                        </select></td>
+                                    }
+                                    @if (TicketColumnVisible("assignee"))
+                                    {
+                                        <td><select class="form-select form-select-sm gws-inline-assignee" aria-label="Assignee of @ticket.Subject"
+                                                    @key="_inlineRevision" value="@(ticket.AssignedToUsername ?? "")" @onchange="e => SetTriageAsync(ticket, e.Value as string ?? string.Empty, SupportTicketTriageChange.AssignTo)">
+                                            <option value="">Unassigned</option>
+                                            @foreach (var name in KnownAssignees) { <option value="@name">@name</option> }
+                                        </select></td>
                                     }
                                     @if (TicketColumnVisible("tags")) { <td>@(string.IsNullOrWhiteSpace(ticket.TagsCsv) ? "—" : ticket.TagsCsv)</td> }
                                 </tr>
@@ -349,8 +394,22 @@ else
     private static readonly IReadOnlyList<ListColumnOption> TicketColumns =
     [
         new("subject", "Subject", true), new("contact", "Contact"), new("priority", "Priority"),
-        new("status", "Status"), new("tags", "Tags")
+        new("status", "Status"), new("assignee", "Assignee"), new("tags", "Tags")
     ];
+    private readonly ListSelection<Guid> _selection = new();
+    private int _bulkKey;
+    private int _inlineRevision;
+    private string _me = string.Empty;
+    private IReadOnlyList<Guid> ShownTicketIds => Tickets.Select(ticket => ticket.Id).ToList();
+    // Bulk actions reach only checked rows that are on show (a status filter can hide some).
+    private List<SupportTicketView> SelectedShown => Tickets.Where(ticket => _selection.IsSelected(ticket.Id)).ToList();
+    // The assignee picker offers whoever already holds a ticket, plus you.
+    private IEnumerable<string> KnownAssignees => Tickets.Select(ticket => ticket.AssignedToUsername)
+        .Append(_me)
+        .Where(name => !string.IsNullOrWhiteSpace(name))
+        .Select(name => name!)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Order(StringComparer.OrdinalIgnoreCase);
     private IReadOnlySet<string> _visibleTicketColumns = new HashSet<string>(["subject", "contact", "priority", "status", "tags"], StringComparer.Ordinal);
     private string TicketFilterJson => JsonSerializer.Serialize(new TicketViewFilter(StatusFilter));
     private string ErrorMessage { get; set; } = string.Empty;
@@ -416,6 +475,7 @@ else
         try
         {
             Contacts = (await CrmService.ListContactsAsync()).ToList();
+            _me = await CurrentUserAccessor.GetCurrentUsernameAsync();
             await RefreshTicketsAsync();
             await RefreshCannedResponsesAsync();
         }
@@ -558,6 +618,7 @@ else
     private async Task RefreshTicketsAsync()
     {
         Tickets = await TicketService.ListTicketsAsync(string.IsNullOrWhiteSpace(StatusFilter) ? null : StatusFilter);
+        _selection.Retain(Tickets.Select(ticket => ticket.Id));
         if (SelectedTicketId is { } id)
         {
             SelectedTicket = Tickets.FirstOrDefault(ticket => ticket.Id == id);
@@ -711,6 +772,65 @@ else
         await TicketService.AssignAsync(ticketId, e.Value as string, performedBy);
         await RefreshTicketsAsync();
         await SelectTicketAsync(ticketId);
+    }
+
+    // Inline triage (tech-forward T3): saves at once, Undo restores the ticket exactly (SLA clock
+    // included), and a refusal re-draws the old value.
+    private Task SetTriageAsync(SupportTicketView ticket, string? value, Func<string, SupportTicketTriageChange> change) =>
+        value is null ? Task.CompletedTask : ApplyTriageAsync([ticket], change(value));
+
+    private async Task BulkStatusAsync(ChangeEventArgs e)
+    {
+        _bulkKey++;
+        if (e.Value is string status && status.Length > 0) await ApplyTriageAsync(SelectedShown, SupportTicketTriageChange.ToStatus(status));
+    }
+
+    private async Task BulkPriorityAsync(ChangeEventArgs e)
+    {
+        _bulkKey++;
+        if (e.Value is string priority && priority.Length > 0) await ApplyTriageAsync(SelectedShown, SupportTicketTriageChange.ToPriority(priority));
+    }
+
+    private Task BulkAssignAsync(string? username) => ApplyTriageAsync(SelectedShown, SupportTicketTriageChange.AssignTo(username));
+
+    private async Task ApplyTriageAsync(IReadOnlyList<SupportTicketView> targets, SupportTicketTriageChange change)
+    {
+        if (targets.Count == 0) return;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var before = await TicketService.ApplyTriageAsync(targets.Select(ticket => ticket.Id).ToList(), change, performedBy);
+            await RefreshTicketsAsync();
+            if (before.Count == 0) return;
+            var now = change.Status ?? (change.Priority is { } priority ? $"{priority} priority"
+                : string.IsNullOrWhiteSpace(change.AssignedToUsername) ? "unassigned" : $"assigned to {change.AssignedToUsername.Trim()}");
+            var message = before.Count == 1
+                ? $"\"{targets.First(ticket => ticket.Id == before[0].TicketId).Subject}\" is now {now}."
+                : $"{before.Count} tickets are now {now}.";
+            Toasts.Show(message, async () =>
+            {
+                await TicketService.RestoreTriageAsync(before, performedBy);
+                await RefreshTicketsAsync();
+                StateHasChanged();
+            });
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            Logger.LogWarning(ex, "A ticket list edit was refused.");
+            _inlineRevision++;
+            await RefreshTicketsAsync();
+            Toasts.Show($"Couldn't update {(targets.Count == 1 ? "that ticket" : "those tickets")}. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
+    // A file to open in a spreadsheet, so dates are ISO rather than the dd-MM-yy shown on screen.
+    private async Task ExportSelectedAsync()
+    {
+        var rows = SelectedShown.Select(ticket => (IReadOnlyList<string?>)[ticket.Subject, ticket.ContactName, ticket.Status, ticket.Priority,
+            ticket.AssignedToUsername, ticket.TagsCsv, ticket.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd"),
+            ticket.LastRepliedAt?.ToLocalTime().ToString("yyyy-MM-dd")]);
+        var csv = CsvExport.Build(["Subject", "Contact", "Status", "Priority", "Assignee", "Tags", "Opened", "Last reply"], rows);
+        await JS.InvokeVoidAsync("gwsDownload.text", $"tickets-{DateTime.Now:yyyy-MM-dd-HHmm}.csv", csv, "text/csv");
     }
 
     // Only Open/Pending tickets can be "overdue" - a Resolved/Closed ticket's due dates are

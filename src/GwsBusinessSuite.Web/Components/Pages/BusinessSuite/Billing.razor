@@ -7,9 +7,12 @@
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Application.AdminPortal
 @using System.Text.Json
+@using System.Globalization
 @inject IBillingService BillingService
 @inject ICrmService CrmService
 @inject IJSRuntime JS
+@inject ILogger<Billing> Logger
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
 
 <PageTitle>Billing</PageTitle>
 
@@ -303,9 +306,29 @@ else
                 }
                 else
                 {
+                    @if (SelectedShown.Count > 0)
+                    {
+                        @* Bulk actions for the checked rows (tech-forward T3). Status isn't one: Stripe moves an
+                           invoice from Sent to Paid, and voiding or reminding reaches the client, so those stay
+                           one invoice at a time. *@
+                        <div class="gws-bulk-bar" role="region" aria-label="Actions for the selected invoices">
+                            <span class="gws-bulk-count"><strong>@SelectedShown.Count</strong> selected</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@IsBusy" @onclick="() => BulkAutoRemindAsync(true)"><i class="bi bi-bell me-1" aria-hidden="true"></i>Auto-remind on</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@IsBusy" @onclick="() => BulkAutoRemindAsync(false)"><i class="bi bi-bell-slash me-1" aria-hidden="true"></i>Off</button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ExportSelectedAsync"><i class="bi bi-download me-1" aria-hidden="true"></i>Export CSV</button>
+                            @if (SelectedDrafts.Count > 0)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@IsBusy" @onclick="() => _pendingBulkDelete = SelectedDrafts"><i class="bi bi-trash3 me-1" aria-hidden="true"></i>Delete @SelectedDrafts.Count draft@(SelectedDrafts.Count == 1 ? "" : "s")</button>
+                            }
+                            <button type="button" class="btn btn-sm btn-link ms-auto" @onclick="_selection.Clear">Clear</button>
+                        </div>
+                    }
                     <div class="table-responsive gws-list-table-wrap">
                     <table class="table table-hover align-middle mb-0 gws-list-table">
-                        <thead><tr><th>Invoice</th>
+                        <thead><tr>
+                            <th class="gws-select-cell"><input type="checkbox" class="form-check-input" aria-label="Select all shown invoices"
+                                checked="@_selection.AllSelected(ShownInvoiceIds)" @onchange="e => _selection.SetAll(ShownInvoiceIds, e.Value is true)" /></th>
+                            <th>Invoice</th>
                             @if (InvoiceColumnVisible("client")) { <th>Client</th> }
                             @if (InvoiceColumnVisible("total")) { <th class="text-end">Total</th> }
                             @if (InvoiceColumnVisible("due")) { <th>Due</th> }
@@ -314,11 +337,25 @@ else
                         </tr></thead><tbody>
                         @foreach (var invoice in VisibleInvoices)
                         {
-                            <tr class="@(invoice.Id == _inspectedInvoiceId ? "gws-row-selected" : string.Empty) @StatusTones.Stripe(invoice.IsOverdue(DateTimeOffset.UtcNow) ? StatusTone.Warning : null)" id="invoice-@invoice.Id">
-                                <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" title="Open this invoice beside the list" data-preview="invoice:@invoice.Id" aria-pressed="@(invoice.Id == _inspectedInvoiceId ? "true" : "false")" @onclick="() => _inspectedInvoiceId = invoice.Id">@invoice.Title</button>@if (invoice.IsOverdue(DateTimeOffset.UtcNow)) { <StatusPill Tone="StatusTone.Warning" CssClass="ms-2">Overdue</StatusPill> }</td>
+                            <tr class="@(invoice.Id == _inspectedInvoiceId ? "gws-row-selected" : string.Empty) @(_selection.IsSelected(invoice.Id) ? "gws-row-checked" : string.Empty) @StatusTones.Stripe(invoice.IsOverdue(DateTimeOffset.UtcNow) ? StatusTone.Warning : null)" id="invoice-@invoice.Id">
+                                <td class="gws-select-cell"><input type="checkbox" class="form-check-input" data-row-select aria-label="Select @invoice.Title"
+                                    checked="@_selection.IsSelected(invoice.Id)" @onclick="e => _selection.Toggle(invoice.Id, e.ShiftKey, ShownInvoiceIds)" /></td>
+                                <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" title="Open this invoice beside the list" data-preview="invoice:@invoice.Id" aria-pressed="@(invoice.Id == _inspectedInvoiceId ? "true" : "false")" @onclick="() => _inspectedInvoiceId = invoice.Id">@invoice.Title</button>@if (invoice.AutoRemind && invoice.Status is InvoiceStatuses.Draft or InvoiceStatuses.Sent) { <i class="bi bi-bell ms-2 text-secondary" title="Reminds the client automatically when overdue" aria-hidden="true"></i><span class="visually-hidden">(auto-remind on)</span> }@if (invoice.IsOverdue(DateTimeOffset.UtcNow)) { <StatusPill Tone="StatusTone.Warning" CssClass="ms-2">Overdue</StatusPill> }</td>
                                 @if (InvoiceColumnVisible("client")) { <td><RelationshipChip ContactId="invoice.ContactId" ContactName="@invoice.ContactName" /></td> }
                                 @if (InvoiceColumnVisible("total")) { <td class="gws-num text-end">@invoice.TotalText</td> }
-                                @if (InvoiceColumnVisible("due")) { <td class="gws-num">@(invoice.DueDate?.ToLocalTime().ToString("dd-MM-yy") ?? "—")</td> }
+                                @if (InvoiceColumnVisible("due"))
+                                {
+                                    @* A draft's due date edits in place (tech-forward T3); once sent, Stripe holds it. *@
+                                    @if (invoice.Status == InvoiceStatuses.Draft)
+                                    {
+                                        <td><input type="date" class="form-control form-control-sm gws-inline-date" aria-label="Due date of @invoice.Title" @key="_inlineRevision"
+                                                   value="@(invoice.DueDate?.UtcDateTime.ToString("yyyy-MM-dd"))" @onchange="e => SetDueDateAsync(invoice, e.Value as string)" /></td>
+                                    }
+                                    else
+                                    {
+                                        <td class="gws-num">@(invoice.DueDate?.ToLocalTime().ToString("dd-MM-yy") ?? "—")</td>
+                                    }
+                                }
                                 @if (InvoiceColumnVisible("status")) { <td><StatusPill Tone="StatusTones.ForInvoice(invoice.Status)">@invoice.Status</StatusPill></td> }
                                 <td><div class="d-flex gap-1 justify-content-end">
                                         @if (invoice.Status == InvoiceStatuses.Draft)
@@ -362,6 +399,9 @@ else
 
 }
 
+<ConfirmModal Show="_pendingBulkDelete.Count > 0" Title="Delete draft invoices"
+              Message="@($"Permanently delete {_pendingBulkDelete.Count} draft invoice{(_pendingBulkDelete.Count == 1 ? "" : "s")}? This cannot be undone. Other invoices you selected are left alone.")"
+              ConfirmText="Delete" Busy="IsBusy" OnConfirm="ConfirmBulkDeleteAsync" OnCancel="() => _pendingBulkDelete = []" />
 <ConfirmModal Show="PendingDeleteDraftId.HasValue" Title="Delete draft invoice" Message="Permanently delete this draft invoice? This cannot be undone."
               ConfirmText="Delete" Busy="IsBusy" OnConfirm="ConfirmDeleteDraftAsync" OnCancel="() => PendingDeleteDraftId = null" />
 
@@ -385,6 +425,13 @@ else
     ];
     private IReadOnlySet<string> _visibleInvoiceColumns = new HashSet<string>(["invoice", "client", "total", "due", "status"], StringComparer.Ordinal);
     private string InvoiceFilterJson => JsonSerializer.Serialize(new InvoiceViewFilter(InvoiceSearch, InvoiceStatusFilter));
+    private readonly ListSelection<Guid> _selection = new();
+    private int _inlineRevision;
+    private List<InvoiceView> _pendingBulkDelete = [];
+    private IReadOnlyList<Guid> ShownInvoiceIds => VisibleInvoices.Select(invoice => invoice.Id).ToList();
+    // Bulk actions reach only checked rows that are on show, so a search hiding one can't touch it.
+    private List<InvoiceView> SelectedShown => VisibleInvoices.Where(invoice => _selection.IsSelected(invoice.Id)).ToList();
+    private List<InvoiceView> SelectedDrafts => SelectedShown.Where(invoice => invoice.Status == InvoiceStatuses.Draft).ToList();
     private IReadOnlyList<InvoiceView> VisibleInvoices => Invoices
         .Where(invoice => string.IsNullOrWhiteSpace(InvoiceStatusFilter) || invoice.Status == InvoiceStatusFilter)
         .Where(invoice => string.IsNullOrWhiteSpace(InvoiceSearch)
@@ -465,6 +512,84 @@ else
     private async Task RefreshInvoicesAsync()
     {
         Invoices = await BillingService.ListInvoicesAsync();
+        _selection.Retain(Invoices.Select(invoice => invoice.Id));
+    }
+
+    // Inline due date (tech-forward T3): saves at once, Undo puts the old date back, and a refusal
+    // (the draft was sent meanwhile) re-draws the list.
+    private async Task SetDueDateAsync(InvoiceView invoice, string? value)
+    {
+        DateTime? due = DateTime.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed) ? parsed : null;
+        var previous = invoice.DueDate?.UtcDateTime.Date;
+        if (due == previous) return;
+        try
+        {
+            await BillingService.SetDraftDueDateAsync(invoice.Id, due);
+            await RefreshInvoicesAsync();
+            Toasts.Show(due is { } date ? $"\"{invoice.Title}\" is due {date:dd-MM-yy}." : $"\"{invoice.Title}\" has no due date.", async () =>
+            {
+                await BillingService.SetDraftDueDateAsync(invoice.Id, previous);
+                await RefreshInvoicesAsync();
+                StateHasChanged();
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            Logger.LogWarning(ex, "Changing invoice {InvoiceId}'s due date was refused.", invoice.Id);
+            _inlineRevision++;
+            await RefreshInvoicesAsync();
+            Toasts.Show($"Couldn't change the due date. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
+    private async Task BulkAutoRemindAsync(bool autoRemind)
+    {
+        var changed = await BillingService.SetAutoRemindAsync(SelectedShown.Select(invoice => invoice.Id).ToList(), autoRemind);
+        await RefreshInvoicesAsync();
+        if (changed.Count == 0)
+        {
+            Toasts.Show(autoRemind ? "Those invoices already remind automatically, or can't (paid or void)." : "None of those invoices were set to remind.");
+            return;
+        }
+        Toasts.Show($"Auto-remind {(autoRemind ? "on" : "off")} for {changed.Count} invoice{(changed.Count == 1 ? "" : "s")}.", async () =>
+        {
+            await BillingService.SetAutoRemindAsync(changed, !autoRemind);
+            await RefreshInvoicesAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task ConfirmBulkDeleteAsync()
+    {
+        var targets = _pendingBulkDelete;
+        _pendingBulkDelete = [];
+        IsBusy = true;
+        try
+        {
+            foreach (var invoice in targets) await BillingService.DeleteDraftAsync(invoice.Id);
+            Toasts.Show($"Deleted {targets.Count} draft{(targets.Count == 1 ? "" : "s")}.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            Logger.LogWarning(ex, "A bulk draft delete stopped part way.");
+            Toasts.Show($"Some drafts weren't deleted. {ex.Message}", tone: StatusTone.Danger);
+        }
+        finally
+        {
+            await RefreshInvoicesAsync();
+            IsBusy = false;
+        }
+    }
+
+    // A file to open in a spreadsheet: ISO dates and plain numbers, not the screen's dd-MM-yy and
+    // currency text.
+    private async Task ExportSelectedAsync()
+    {
+        var rows = SelectedShown.Select(invoice => (IReadOnlyList<string?>)[invoice.Title, invoice.ContactName, invoice.Status, invoice.Currency,
+            invoice.TotalUsd.ToString("0.00", CultureInfo.InvariantCulture), invoice.DueDate?.ToLocalTime().ToString("yyyy-MM-dd"),
+            invoice.SentAt?.ToLocalTime().ToString("yyyy-MM-dd"), invoice.PaidAt?.ToLocalTime().ToString("yyyy-MM-dd"), invoice.AutoRemind ? "Yes" : "No"]);
+        var csv = CsvExport.Build(["Invoice", "Client", "Status", "Currency", "Total", "Due", "Sent", "Paid", "Auto-remind"], rows);
+        await JS.InvokeVoidAsync("gwsDownload.text", $"invoices-{DateTime.Now:yyyy-MM-dd-HHmm}.csv", csv, "text/csv");
     }
 
     private bool InvoiceColumnVisible(string key) => _visibleInvoiceColumns.Contains(key);

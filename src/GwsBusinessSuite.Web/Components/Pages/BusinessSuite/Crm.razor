@@ -215,9 +215,10 @@ else
                                         @if (ContactColumnVisible("email")) { <td>@(string.IsNullOrWhiteSpace(contact.Email) ? "—" : contact.Email)</td> }
                                         @if (ContactColumnVisible("status"))
                                         {
-                                            @* Inline status (tech-forward T3): a select styled as the status pill. *@
+                                            @* Inline status (tech-forward T3): a select styled as the status pill. @key re-draws
+                                               it after a refusal, which would otherwise leave the refused choice showing. *@
                                             <td><select class="gws-inline-select gws-pill gws-pill-@StatusTones.CssName(StatusTones.ForContact(contact.Status))" aria-label="Status of @contact.FullName"
-                                                        value="@contact.Status" @onchange="e => SetStatusAsync(contact, e.Value as string)">
+                                                        @key="_inlineRevision" value="@contact.Status" @onchange="e => SetStatusAsync(contact, e.Value as string)">
                                                 @foreach (var status in ContactStatuses.All) { <option value="@status">@status</option> }
                                             </select></td>
                                         }
@@ -367,6 +368,7 @@ else
     private List<Contact> Contacts { get; set; } = new();
     private readonly ListSelection<Guid> _selection = new();
     private int _bulkStatusKey;
+    private int _inlineRevision;
     private IReadOnlyList<Guid> ShownContactIds => VisibleContacts.Select(contact => contact.Id).ToList();
     // Bulk actions reach only checked rows that are on show: a search that hides a checked contact
     // can't send it to Trash unseen.
@@ -635,6 +637,7 @@ else
         catch (Exception ex)
         {
             contact.Status = previous;
+            _inlineRevision++;
             Logger.LogWarning(ex, "Changing contact {ContactId}'s status failed.", contact.Id);
             Toasts.Show($"Couldn't change {contact.FullName}'s status. {ex.Message}", tone: StatusTone.Danger);
         }

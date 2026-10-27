@@ -8,9 +8,9 @@
 // (Program.cs) is script-src 'self' https://cdn.jsdelivr.net; with no 'unsafe-inline' and no
 // nonce mechanism, so a literal inline <script> here is silently blocked by the browser and
 // never runs at all - confirmed live (a fresh page load, or any real page.goto()/reload, always
-// reverted to the dark default even with a stored "light" preference; only the SPA-style
-// enhanced navigation between clicks inside one already-loaded session preserved it, since that
-// never tears down <html> at all). A plain <script src="..."> with no defer/async still blocks
+// reverted to the dark default even with a stored "light" preference). Enhanced navigation keeps
+// <html> but re-syncs its attributes from the server's markup, dropping the theme, so app.js
+// (applyStoredTheme) puts it back after each one. A plain <script src="..."> with no defer/async still blocks
 // parsing and runs before first paint exactly like the inline version would have, and is allowed
 // by 'self'.
 (function () {

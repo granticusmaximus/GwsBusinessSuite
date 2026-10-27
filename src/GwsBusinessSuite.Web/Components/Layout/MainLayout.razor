@@ -80,6 +80,23 @@
                     <main class="gws-content @(IsChromelessRoute ? "gws-content-builder" : "")">
                         @Body
                     </main>
+                    @if (!IsChromelessRoute)
+                    {
+                        @* The status strip (tech-forward T4): the live connection, automation jobs running,
+                           SentinelGPT and the build, filled in by app.js (gwsStatusStrip) from
+                           /admin/api/shell-status. data-permanent keeps what it shows across enhanced
+                           navigation (its children; the root's own attributes are re-synced, so none
+                           of its state lives there).
+                           Hidden below 768px, where the phone bar sits. *@
+                        <footer class="gws-status-strip" data-gws-status-strip data-permanent aria-label="System status">
+                            <a href="/admin" class="gws-status-strip-link" title="Open the dashboard">
+                                <span class="gws-status-item" data-status="connection" data-tone="success"><span class="gws-status-dot" aria-hidden="true"></span><span data-status-text>Live</span></span>
+                                <span class="gws-status-item" data-status="jobs"><i class="bi bi-diagram-3" aria-hidden="true"></i><span data-status-text>Jobs …</span></span>
+                                <span class="gws-status-item" data-status="ai"><i class="bi bi-stars" aria-hidden="true"></i><span data-status-text>SentinelGPT …</span></span>
+                                <span class="gws-status-item gws-status-build" data-status="build"><span data-status-text></span></span>
+                            </a>
+                        </footer>
+                    }
                 </div>
             </div>
 
@@ -106,9 +123,12 @@
 
                 <ToastHost @rendermode="InteractiveServer" />
 
-                @* data-permanent: an enhanced navigation finishing while the palette is open must not
-                   reset it to this markup (it closed the palette and cleared the search mid-word). *@
-                <div class="gws-command-layer" data-gws-command-layer data-permanent hidden>
+                @* An enhanced navigation finishing while the palette is open must not reset it to this
+                   markup (it closed the palette and cleared the search mid-word). data-permanent keeps
+                   an element's children but still re-syncs its own attributes - `hidden` included - so
+                   it sits on a wrapper and the palette's open state on the child (27-10-26). *@
+                <div data-permanent="command-layer">
+                <div class="gws-command-layer" data-gws-command-layer hidden>
                     <button type="button" class="gws-command-backdrop" data-gws-command-close
                             aria-label="Close search"></button>
                     <section class="gws-command-dialog" role="dialog" aria-modal="true"
@@ -128,14 +148,17 @@
                         <footer>Type to filter · <kbd>t:ticket</kbd> <kbd>t:invoice</kbd>… for one kind · ↑ ↓ to move · Enter to open</footer>
                     </section>
                 </div>
+                </div>
 
                 @* The hover preview card (tech-forward T2), filled and placed by app.js over anything with
                    data-preview="kind:id". Supplementary (the trigger itself opens the record), so
-                   it's hidden from assistive tech. *@
-                <div class="gws-preview-card" data-gws-preview-card data-permanent hidden aria-hidden="true"></div>
+                   it's hidden from assistive tech. On a permanent wrapper like the palette's. *@
+                <div data-permanent="preview-card"><div class="gws-preview-card" data-gws-preview-card hidden aria-hidden="true"></div></div>
 
-                @* The keyboard shortcut sheet (tech-forward T1): ? opens it; app.js handles the keys. *@
-                <div class="gws-shortcuts-layer" data-gws-shortcuts-layer data-permanent hidden>
+                @* The keyboard shortcut sheet (tech-forward T1): ? opens it; app.js handles the keys. On a
+                   permanent wrapper like the palette's, so a navigation doesn't close it. *@
+                <div data-permanent="shortcuts-layer">
+                <div class="gws-shortcuts-layer" data-gws-shortcuts-layer hidden>
                     <button type="button" class="gws-command-backdrop" data-gws-shortcuts-close
                             aria-label="Close keyboard shortcuts"></button>
                     <section class="gws-shortcuts-dialog" role="dialog" aria-modal="true" aria-labelledby="gws-shortcuts-title">
@@ -157,6 +180,7 @@
                         </dl>
                         <p>Keys stay off while you type, and on pages with their own (Sentinel, Overwatch, the page editor).</p>
                     </section>
+                </div>
                 </div>
             }
         </div>

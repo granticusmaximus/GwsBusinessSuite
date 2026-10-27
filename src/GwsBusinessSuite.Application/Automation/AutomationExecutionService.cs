@@ -25,7 +25,7 @@ public sealed class AutomationExecutionService(
     // crashing the process. The threshold must clear the longest a legitimate node can run —
     // the per-node TimeoutMs cap below (600_000ms) plus slack — or the resume sweep will treat
     // a merely-slow execution as orphaned and run its remaining frontier a second time.
-    internal const long OrphanThresholdSeconds = 900;
+    public const long OrphanThresholdSeconds = 900;
 
     public async Task<AutomationExecutionView> ExecuteAsync(
         Guid workflowId,

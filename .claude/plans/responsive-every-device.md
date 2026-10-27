@@ -53,6 +53,14 @@ ChecksScript now counts the panel's overflow and finds culprits up to the panel'
 its own scroller, such as tables or the scope strip, stays excused); a static negative-control
 test keeps it honest.
 
+The full re-audit (phone-360, phone-390, tablet-768, laptop-1280; 50 routes, 1 h 11 m on a loaded
+machine) then caught one more: Government Intelligence's hearing link overflowed by 149px at 1280
+too, so it now wraps at every width. With seeded records it also flagged touch targets the empty
+lists had hidden, now 44px on coarse pointers: RelationshipChip (Billing and everywhere a contact
+chip shows), the Comments article link (`gws-touch-link`), and Government Intelligence's PDF links.
+Re-audit of the eight affected pages on phone/tablet/laptop: no overflow, small targets or
+failures; two rows of the known control-under-the-bottom-bar-at-load pattern.
+
 ## Queued after Phase 2 (Grant, 2026-10-03)
 
 Investigate https://github.com/0xh3xa/awesome-cyber-security-tools and propose what can be added to

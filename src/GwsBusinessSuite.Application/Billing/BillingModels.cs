@@ -116,6 +116,13 @@ public interface IBillingService
     Task<InvoiceView> SaveDraftAsync(InvoiceEditorModel editor, string? actor = null, CancellationToken cancellationToken = default);
     Task DeleteDraftAsync(Guid invoiceId, string? actor = null, CancellationToken cancellationToken = default);
 
+    // List edits (tech-forward T3). A due date changes only on a Draft: once sent, Stripe has it.
+    Task<InvoiceView> SetDraftDueDateAsync(Guid invoiceId, DateTime? dueDate, string? actor = null, CancellationToken cancellationToken = default);
+
+    // Turns automatic reminders on or off for the Draft and Sent invoices listed (Paid and Void
+    // ones have nothing to remind about) and returns the ids it changed, so Undo flips just those.
+    Task<IReadOnlyList<Guid>> SetAutoRemindAsync(IReadOnlyCollection<Guid> invoiceIds, bool autoRemind, string? actor = null, CancellationToken cancellationToken = default);
+
     // Lazily creates (and reuses) a Stripe Customer for the invoice's contact, then creates and
     // sends a Stripe-hosted invoice for the current line items. Throws InvalidOperationException
     // if IsStripeConfigured is false, or if the invoice has no line items.

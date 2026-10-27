@@ -197,6 +197,56 @@ public sealed class BillingServiceTests
         (await fixture.Service.ListInvoicesForContactAsync(contact.Id)).Should().ContainSingle(item => item.Id == sent.Id);
     }
 
+    // List edits (tech-forward T3).
+    [Fact]
+    public async Task SetDraftDueDateAsync_ShouldChangeADraftsDate_AndRefuseASentInvoice()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        var draft = await fixture.Service.SaveDraftAsync(new InvoiceEditorModel
+        {
+            ContactId = contact.Id,
+            Title = "October retainer",
+            LineItems = [new InvoiceLineItemEditorModel { Description = "Consulting", Quantity = 1, UnitPriceUsd = 500m }]
+        });
+
+        var dated = await fixture.Service.SetDraftDueDateAsync(draft.Id, new DateTime(2026, 11, 10, 15, 30, 0));
+        dated.DueDate.Should().Be(new DateTimeOffset(2026, 11, 10, 0, 0, 0, TimeSpan.Zero), "stored as the date at UTC midnight, like the editor");
+        (await fixture.Service.SetDraftDueDateAsync(draft.Id, null)).DueDate.Should().BeNull();
+
+        fixture.Stripe.IsConfigured = true;
+        await fixture.Service.SendInvoiceAsync(draft.Id);
+        await fixture.Service.Invoking(service => service.SetDraftDueDateAsync(draft.Id, new DateTime(2026, 12, 1)))
+            .Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task SetAutoRemindAsync_ShouldReturnOnlyTheInvoicesItChanged()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var contact = await fixture.AddContactAsync("Jamie Rivera");
+        async Task<InvoiceView> DraftAsync(string title, bool autoRemind) => await fixture.Service.SaveDraftAsync(new InvoiceEditorModel
+        {
+            ContactId = contact.Id,
+            Title = title,
+            AutoRemind = autoRemind,
+            LineItems = [new InvoiceLineItemEditorModel { Description = "Consulting", Quantity = 1, UnitPriceUsd = 500m }]
+        });
+        var off = await DraftAsync("Off", autoRemind: false);
+        var on = await DraftAsync("On", autoRemind: true);
+        var voided = await DraftAsync("Voided", autoRemind: false);
+        fixture.Stripe.IsConfigured = true;
+        await fixture.Service.SendInvoiceAsync(voided.Id);
+        await fixture.Service.VoidInvoiceAsync(voided.Id);
+
+        var changed = await fixture.Service.SetAutoRemindAsync([off.Id, on.Id, voided.Id], autoRemind: true);
+
+        changed.Should().Equal(off.Id);
+        (await fixture.Service.GetInvoiceAsync(off.Id))!.AutoRemind.Should().BeTrue();
+        (await fixture.Service.GetInvoiceAsync(voided.Id))!.AutoRemind.Should().BeFalse("a void invoice has nothing to remind about");
+        (await fixture.Service.SetAutoRemindAsync(changed, autoRemind: false)).Should().Equal([off.Id], "Undo flips back just what changed");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;

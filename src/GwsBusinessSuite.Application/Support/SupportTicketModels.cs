@@ -108,7 +108,32 @@ public interface ISupportTicketService
     // Detects newly overdue first-response/resolution targets, marks each breach once, and
     // dispatches the corresponding automation trigger. Returns breach events detected.
     Task<int> ProcessSlaBreachesAsync(CancellationToken cancellationToken = default);
+
+    // List edits (tech-forward T3): one change to every ticket listed, in one save - all or
+    // nothing, so an unknown ticket or value changes none. Returns each changed ticket's triage
+    // from before, for Undo; a ticket already as asked is left out (and untouched).
+    Task<IReadOnlyList<SupportTicketTriageSnapshot>> ApplyTriageAsync(
+        IReadOnlyCollection<Guid> ticketIds, SupportTicketTriageChange change, string performedBy, CancellationToken cancellationToken = default);
+
+    // Undo for ApplyTriageAsync: puts each ticket's triage back exactly, SLA clock included.
+    Task RestoreTriageAsync(
+        IReadOnlyCollection<SupportTicketTriageSnapshot> snapshots, string performedBy, CancellationToken cancellationToken = default);
 }
+
+// What a list edit changes: a status, a priority or the assignee. Only the one it names.
+public sealed record SupportTicketTriageChange(string? Status = null, string? Priority = null, bool Reassign = false, string? AssignedToUsername = null)
+{
+    public static SupportTicketTriageChange ToStatus(string status) => new(Status: status);
+    public static SupportTicketTriageChange ToPriority(string priority) => new(Priority: priority);
+    public static SupportTicketTriageChange AssignTo(string? username) => new(Reassign: true, AssignedToUsername: username);
+}
+
+// A ticket's triage before a list edit. Undo restores this rather than setting the old status
+// again, which would restart the SLA clock after undoing an accidental Resolve.
+public sealed record SupportTicketTriageSnapshot(
+    Guid TicketId, string Status, string Priority, string? AssignedToUsername, DateTimeOffset? ResolvedAt,
+    DateTimeOffset? FirstResponseDueAt, DateTimeOffset? ResolutionDueAt,
+    DateTimeOffset? FirstResponseBreachNotifiedAt, DateTimeOffset? ResolutionBreachNotifiedAt);
 
 // A standalone macro library staff insert into the reply composer verbatim - admin-only CRUD,
 // not tied to any one ticket.

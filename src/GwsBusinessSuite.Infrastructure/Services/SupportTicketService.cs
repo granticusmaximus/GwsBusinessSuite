@@ -329,13 +329,7 @@ public sealed class SupportTicketService(
             ?? throw new InvalidOperationException($"Ticket {ticketId} was not found.");
 
         var now = timeProvider.GetUtcNow();
-        var wasTerminal = SupportTicketStatuses.Terminal.Contains(ticket.Status);
-        ticket.Status = status;
-        ticket.ResolvedAt = status == SupportTicketStatuses.Resolved ? now : null;
-        if (wasTerminal && !SupportTicketStatuses.Terminal.Contains(status))
-        {
-            ReopenSlaClock(ticket, now);
-        }
+        ApplyStatus(ticket, status, now);
         ticket.UpdatedAt = now;
         ticket.UpdatedBy = performedBy;
         await db.SaveChangesAsync(cancellationToken);
@@ -386,6 +380,87 @@ public sealed class SupportTicketService(
             .Select(contact => contact.FullName)
             .FirstOrDefaultAsync(cancellationToken) ?? "Unknown contact";
         return ToView(ticket, contactName);
+    }
+
+    public async Task<IReadOnlyList<SupportTicketTriageSnapshot>> ApplyTriageAsync(
+        IReadOnlyCollection<Guid> ticketIds, SupportTicketTriageChange change, string performedBy, CancellationToken cancellationToken = default)
+    {
+        if (change.Status is { } status && !SupportTicketStatuses.All.Contains(status))
+        {
+            throw new ArgumentException($"'{status}' is not a valid ticket status.", nameof(change));
+        }
+        if (change.Priority is { } priority && !SupportTicketPriorities.All.Contains(priority))
+        {
+            throw new ArgumentException($"'{priority}' is not a valid ticket priority.", nameof(change));
+        }
+
+        var ids = ticketIds.Distinct().ToList();
+        var tickets = await db.SupportTickets.Where(ticket => ids.Contains(ticket.Id)).ToListAsync(cancellationToken);
+        if (tickets.Count != ids.Count)
+        {
+            throw new InvalidOperationException("Some of those tickets were not found.");
+        }
+
+        var now = timeProvider.GetUtcNow();
+        var assignee = string.IsNullOrWhiteSpace(change.AssignedToUsername) ? null : change.AssignedToUsername.Trim();
+        var before = new List<SupportTicketTriageSnapshot>();
+        foreach (var ticket in tickets)
+        {
+            var changesStatus = change.Status is { } newStatus && ticket.Status != newStatus;
+            var changesPriority = change.Priority is { } newPriority && ticket.Priority != newPriority;
+            var changesAssignee = change.Reassign && ticket.AssignedToUsername != assignee;
+            if (!changesStatus && !changesPriority && !changesAssignee) continue;
+
+            before.Add(Snapshot(ticket));
+            if (changesStatus) ApplyStatus(ticket, change.Status!, now);
+            if (changesPriority) ticket.Priority = change.Priority!;
+            if (changesAssignee) ticket.AssignedToUsername = assignee;
+            ticket.UpdatedAt = now;
+            ticket.UpdatedBy = performedBy;
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return before;
+    }
+
+    public async Task RestoreTriageAsync(
+        IReadOnlyCollection<SupportTicketTriageSnapshot> snapshots, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var byId = snapshots.ToDictionary(snapshot => snapshot.TicketId);
+        var ids = byId.Keys.ToList();
+        var tickets = await db.SupportTickets.Where(ticket => ids.Contains(ticket.Id)).ToListAsync(cancellationToken);
+        var now = timeProvider.GetUtcNow();
+        foreach (var ticket in tickets)
+        {
+            var snapshot = byId[ticket.Id];
+            ticket.Status = snapshot.Status;
+            ticket.Priority = snapshot.Priority;
+            ticket.AssignedToUsername = snapshot.AssignedToUsername;
+            ticket.ResolvedAt = snapshot.ResolvedAt;
+            ticket.FirstResponseDueAt = snapshot.FirstResponseDueAt;
+            ticket.ResolutionDueAt = snapshot.ResolutionDueAt;
+            ticket.FirstResponseBreachNotifiedAt = snapshot.FirstResponseBreachNotifiedAt;
+            ticket.ResolutionBreachNotifiedAt = snapshot.ResolutionBreachNotifiedAt;
+            ticket.UpdatedAt = now;
+            ticket.UpdatedBy = performedBy;
+        }
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static SupportTicketTriageSnapshot Snapshot(SupportTicket ticket) => new(
+        ticket.Id, ticket.Status, ticket.Priority, ticket.AssignedToUsername, ticket.ResolvedAt,
+        ticket.FirstResponseDueAt, ticket.ResolutionDueAt, ticket.FirstResponseBreachNotifiedAt, ticket.ResolutionBreachNotifiedAt);
+
+    // Shared by SetStatusAsync and list edits: Resolved stamps ResolvedAt, and leaving
+    // Resolved/Closed restarts the SLA clock (see ReopenSlaClock).
+    private static void ApplyStatus(SupportTicket ticket, string status, DateTimeOffset now)
+    {
+        var wasTerminal = SupportTicketStatuses.Terminal.Contains(ticket.Status);
+        ticket.Status = status;
+        ticket.ResolvedAt = status == SupportTicketStatuses.Resolved ? now : null;
+        if (wasTerminal && !SupportTicketStatuses.Terminal.Contains(status))
+        {
+            ReopenSlaClock(ticket, now);
+        }
     }
 
     public async Task<SupportTicketView> SetTagsAsync(Guid ticketId, string tagsCsv, string performedBy, CancellationToken cancellationToken = default)

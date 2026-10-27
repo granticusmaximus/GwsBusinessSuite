@@ -13,6 +13,7 @@
     --gws-sidebar-width: 272px;
     --gws-sidebar-collapsed-width: var(--gws-rail-width);
     --gws-bottom-bar-height: 0px;
+    --gws-status-strip-height: 1.75rem;
     --gws-sidebar-accent: #f59e0b;
     --gws-sidebar-accent-hover: #d97706;
     /* Text drawn on top of the accent (primary buttons, accent chips). The site theme overrides
@@ -282,7 +283,7 @@ tr.gws-stripe > :first-child {
 .gws-toast-region {
     position: fixed;
     left: 50%;
-    bottom: calc(var(--gws-bottom-bar-height) + var(--gws-step-4));
+    bottom: calc(var(--gws-bottom-bar-height) + var(--gws-status-strip-height) + var(--gws-step-4));
     z-index: 1070;
     width: max-content;
     max-width: calc(100vw - 2 * var(--gws-step-4));
@@ -968,6 +969,43 @@ h1:focus { outline: none; }
 /* The phone bar (MainLayout's .gws-bottom-bar) shows below 768px only. */
 .gws-bottom-bar { display: none; }
 
+/* The status strip (tech-forward T4): pinned to the bottom of the window under the content, in
+   its place the phone bar below 768px. app.js fills it in and sets each item's data-tone. */
+.gws-status-strip {
+    position: sticky;
+    bottom: 0;
+    z-index: 15;
+    height: var(--gws-status-strip-height);
+    border-top: 1px solid var(--gws-panel-border);
+    background: var(--gws-panel-bg);
+    font-size: .75rem;
+}
+.gws-status-strip-link {
+    display: flex;
+    align-items: center;
+    gap: var(--gws-step-5);
+    height: 100%;
+    padding-inline: var(--gws-content-pad-x);
+    overflow: hidden;
+    color: var(--gws-text-soft);
+    text-decoration: none;
+    white-space: nowrap;
+}
+.gws-status-strip-link:hover,
+.gws-status-strip-link:focus-visible { color: var(--gws-text-strong); }
+.gws-status-item { display: inline-flex; align-items: center; gap: var(--gws-step-1); font-variant-numeric: tabular-nums; }
+.gws-status-item[data-tone] { color: var(--gws-status-neutral-text); }
+.gws-status-item[data-tone="success"] { color: var(--gws-status-success-text); }
+.gws-status-item[data-tone="warning"] { color: var(--gws-status-warning-text); }
+.gws-status-item[data-tone="danger"] { color: var(--gws-status-danger-text); }
+.gws-status-item[data-tone="info"] { color: var(--gws-status-info-text); }
+.gws-status-dot { width: .5rem; height: .5rem; border-radius: 50%; background: currentColor; }
+.gws-status-item[data-tone="warning"] .gws-status-dot { animation: gws-status-pulse 1.2s ease-in-out infinite; }
+@keyframes gws-status-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .gws-status-item .gws-status-dot { animation: none; } }
+.gws-status-build { margin-inline-start: auto; font-family: var(--gws-font-mono); }
+@media print { .gws-status-strip { display: none; } }
+
 /* ── Page header ─────────────────────────────────────────── */
 .page-header {
     margin-bottom: 1.75rem;
@@ -1310,6 +1348,11 @@ button.gws-command-result { width: 100%; border: 0; background: none; font: inhe
 /* Table power (tech-forward T3): the checkbox column, checked rows, the bulk bar above the list,
    and a status cell that is a select dressed as its status pill (selects can't draw the pill's
    dot, so a chevron says it opens). */
+/* A link that stands on its own (not inside a sentence) gets a full touch target. */
+@media (pointer: coarse) {
+    .gws-touch-link { display: inline-flex; align-items: center; min-height: 44px; }
+}
+
 /* A row of fields and buttons that wraps on a narrow screen instead of running past its edge
    (menu item rows, the builder reference's search). */
 .gws-wrap-row { flex-wrap: wrap; }
@@ -1343,8 +1386,13 @@ button.gws-command-result { width: 100%; border: 0; background: none; font: inhe
     background-size: .8em;
 }
 .gws-inline-select option { background: var(--gws-panel-bg); color: var(--gws-text-strong); }
+/* A draft's due date and a ticket's assignee, edited in the row. */
+.gws-inline-date { width: auto; min-width: 9.5rem; font-variant-numeric: tabular-nums; }
+.gws-inline-assignee { width: auto; min-width: 8rem; }
 @media (pointer: coarse) {
-    .gws-inline-select.gws-pill { min-height: 44px; }
+    .gws-inline-select.gws-pill,
+    .gws-inline-date,
+    .gws-inline-assignee { min-height: 44px; }
 }
 .gws-command-dialog > footer kbd { padding: .05rem .3rem; font-size: .6875rem; }
 
@@ -1953,7 +2001,8 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
     .gws-sidebar-toggle-mobile { display: inline-block; font-size: 1.25rem; }
     /* The phone bar holds Menu, Search and SentinelGPT, so the top bar drops its copies. */
     .gws-layout:has(.gws-bottom-bar) .gws-admin-bar :is(.gws-sidebar-toggle, .gws-command-trigger, .gws-assistant-toggle) { display: none !important; }
-    :root { --gws-bottom-bar-height: calc(3.75rem + var(--gws-safe-bottom, 0px)); }
+    :root { --gws-bottom-bar-height: calc(3.75rem + var(--gws-safe-bottom, 0px)); --gws-status-strip-height: 0px; }
+    .gws-status-strip { display: none; }
     .gws-bottom-bar {
         position: fixed;
         inset: auto 0 0;

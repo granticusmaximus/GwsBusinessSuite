@@ -5,6 +5,7 @@ using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Web.Components;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using System.Text.RegularExpressions;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -63,6 +64,26 @@ public sealed class TablePowerTests
         csv.Should().Contain("\"Rivers, Dana\",\"said \"\"hi\"\"\"");
         csv.Should().Contain("\"'=HYPERLINK(\"\"x\"\")\",");
         csv.Should().Contain("Plain,\"two\nlines\"");
+    }
+
+    // A refused inline edit has to re-draw its control: Blazor keeps showing the refused choice,
+    // since the value it rendered didn't change (found live in CRM, 27-10-26). Each inline control
+    // carries an @key its page bumps on a refusal.
+    [Fact]
+    public void InlineEditControls_ShouldCarryAnAtKey()
+    {
+        var components = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../src/GwsBusinessSuite.Web/Components"));
+        // A tag runs to the first '>' that isn't part of a lambda's "=>".
+        var tag = new Regex(@"<(?:select|input)\b(?:=>|[^>])*>", RegexOptions.Singleline);
+        var controls = Directory.EnumerateFiles(components, "*.razor", SearchOption.AllDirectories)
+            .SelectMany(path => tag.Matches(File.ReadAllText(path))
+                .Where(match => match.Value.Contains("gws-inline-", StringComparison.Ordinal))
+                .Select(match => (File: Path.GetFileName(path), Tag: match.Value)))
+            .ToList();
+
+        controls.Should().HaveCountGreaterThanOrEqualTo(5, "CRM status, Support priority/status/assignee and Billing due date");
+        controls.Where(control => !control.Tag.Contains("@key=", StringComparison.Ordinal)).Select(control => control.File)
+            .Should().BeEmpty("bump an @key on refusal so the control shows the saved value again");
     }
 
     [Fact]

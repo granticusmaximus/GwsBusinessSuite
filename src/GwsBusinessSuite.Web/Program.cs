@@ -116,6 +116,8 @@ builder.Services.AddScoped<AssistantContext>();
 builder.Services.AddScoped<ShortcutsState>();
 builder.Services.AddScoped<ToastState>();
 builder.Services.AddScoped<RecordPreviewService>();
+builder.Services.AddSingleton(BuildStamp.For(typeof(Program).Assembly));
+builder.Services.AddScoped<ShellStatusService>();
 builder.Services.AddScoped<RightPanelState>();
 builder.Services.AddOptions<LiveShowIceOptions>()
     .Bind(builder.Configuration.GetSection("LiveShow:Ice"));
@@ -1181,6 +1183,12 @@ app.MapGet("/admin/api/suite-search/ask", async (
 // Hover previews (tech-forward T2): a contact, ticket or invoice summarised for the card.
 app.MapGet("/admin/api/preview/{kind}/{id:guid}", async (string kind, Guid id, RecordPreviewService previews, CancellationToken cancellationToken) =>
     await previews.GetAsync(kind, id, cancellationToken) is { } preview ? Results.Json(preview) : Results.NotFound())
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("public-read");
+
+// The shell's status strip (tech-forward T4): app.js polls this every 30 s while the tab shows.
+app.MapGet("/admin/api/shell-status", async (ShellStatusService status, CancellationToken cancellationToken) =>
+    Results.Json(await status.GetAsync(cancellationToken)))
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");
 
