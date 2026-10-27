@@ -1,0 +1,354 @@
+@using System.Globalization
+@using System.Text
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Domain.Entities
+@implements IAsyncDisposable
+@inject IKanbanBoardService BoardService
+@inject IJSRuntime JS
+
+@* A board's flow (Boards K5): how long work takes, how much finishes each week, where it piles
+   up, and what has sat too long - all from the board's column-change log. Charts are drawn here as
+   SVG; kanban-insights.js adds the hover read-outs. Every chart has its numbers in a table too. *@
+<div class="kbi" @ref="_root">
+    <div class="kbi-range" role="group" aria-label="Period">
+        @foreach (var days in new[] { 30, 90, 180 })
+        {
+            <button type="button" class="kbi-range-btn @(_days == days ? "is-on" : "")" aria-pressed="@(_days == days ? "true" : "false")" @onclick="() => SetDaysAsync(days)">Last @days days</button>
+        }
+        @if (_insights is { HistoryStarts: { } since } && since > _insights.From)
+        {
+            <span class="kbi-note"><i class="bi bi-info-circle" aria-hidden="true"></i>Moves are recorded from @since.ToGwsDate(); before that, cards count in the column they're in now.</span>
+        }
+    </div>
+
+    @if (_insights is null)
+    {
+        <ListSkeleton Message="Working out the board's flow…" Rows="4" CssClass="px-0" />
+    }
+    else
+    {
+        var insights = _insights;
+        <div class="kbi-tiles">
+            <div class="kbi-tile">
+                <span class="kbi-tile-label">Typical cycle time</span>
+                <span class="kbi-tile-value">@Days(insights.MedianCycleDays)</span>
+                <span class="kbi-tile-sub">half of cards finish within this</span>
+            </div>
+            <div class="kbi-tile">
+                <span class="kbi-tile-label">85% finish within</span>
+                <span class="kbi-tile-value">@Days(insights.P85CycleDays)</span>
+                <span class="kbi-tile-sub">a fair promise for a new card</span>
+            </div>
+            <div class="kbi-tile">
+                <span class="kbi-tile-label">Throughput</span>
+                <span class="kbi-tile-value">@PerWeek(insights)</span>
+                <span class="kbi-tile-sub">@insights.Cycles.Count finished in @insights.Days days</span>
+            </div>
+            <div class="kbi-tile">
+                <span class="kbi-tile-label">In progress now</span>
+                <span class="kbi-tile-value">@insights.WorkInProgress</span>
+                <span class="kbi-tile-sub">@(insights.Aging.FirstOrDefault() is { } oldest ? $"oldest {Num(oldest.Days)} days" : "nothing in progress")</span>
+            </div>
+        </div>
+
+        <section class="kbi-card kbi-wide" aria-labelledby="kbi-flow-title">
+            <header class="kbi-card-head">
+                <h3 id="kbi-flow-title">Cumulative flow</h3>
+                <p>Cards in each column at the end of each day. A band that widens is where work is piling up.</p>
+            </header>
+            <ul class="kbi-legend" aria-label="Columns">
+                @foreach (var column in insights.FlowColumns.AsEnumerable().Reverse())
+                {
+                    <li><span class="kbi-swatch" style="--tone: @column.Color" aria-hidden="true"></span>@column.Label</li>
+                }
+            </ul>
+            <div class="kbi-scroll">@FlowChart(insights)</div>
+            <details class="kbi-data">
+                <summary>Data</summary>
+                <div class="kbi-scroll">
+                    <table class="table table-sm">
+                        <thead><tr><th>Day</th>@foreach (var column in insights.FlowColumns.AsEnumerable().Reverse()) { <th class="text-end">@column.Label</th> }</tr></thead>
+                        <tbody>
+                            @foreach (var day in insights.Flow.AsEnumerable().Reverse())
+                            {
+                                <tr><td>@day.Day.ToGwsDate()</td>@for (var i = insights.FlowColumns.Count - 1; i >= 0; i--) { <td class="text-end">@day.Counts[i]</td> }</tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+        </section>
+
+        <div class="kbi-pair">
+            <section class="kbi-card" aria-labelledby="kbi-throughput-title">
+                <header class="kbi-card-head">
+                    <h3 id="kbi-throughput-title">Finished each week</h3>
+                    <p>Cards that reached a done column, by week (from Monday).</p>
+                </header>
+                <div class="kbi-scroll">@ThroughputChart(insights)</div>
+                <details class="kbi-data">
+                    <summary>Data</summary>
+                    <table class="table table-sm">
+                        <thead><tr><th>Week of</th><th class="text-end">Finished</th></tr></thead>
+                        <tbody>@foreach (var week in insights.Throughput) { <tr><td>@week.Start.ToGwsDate()</td><td class="text-end">@week.Finished</td></tr> }</tbody>
+                    </table>
+                </details>
+            </section>
+
+            <section class="kbi-card" aria-labelledby="kbi-cycle-title">
+                <header class="kbi-card-head">
+                    <h3 id="kbi-cycle-title">Cycle time</h3>
+                    <p>Each dot is a finished card: when it finished, and how many days it took from being started.</p>
+                </header>
+                @if (insights.Cycles.Count == 0)
+                {
+                    <p class="kbi-empty">No cards finished in this period yet.</p>
+                }
+                else
+                {
+                    <div class="kbi-scroll">@CycleChart(insights)</div>
+                    <details class="kbi-data">
+                        <summary>Data</summary>
+                        <table class="table table-sm">
+                            <thead><tr><th>Card</th><th>Finished</th><th class="text-end">Days</th></tr></thead>
+                            <tbody>@foreach (var cycle in insights.Cycles.AsEnumerable().Reverse()) { <tr><td>@(cycle.Key is null ? "" : cycle.Key + " ")@cycle.Title</td><td>@cycle.Finished.ToGwsDate()</td><td class="text-end">@Num(cycle.Days)</td></tr> }</tbody>
+                        </table>
+                    </details>
+                }
+            </section>
+        </div>
+
+        <section class="kbi-card kbi-wide" aria-labelledby="kbi-aging-title">
+            <header class="kbi-card-head">
+                <h3 id="kbi-aging-title">Work in progress, oldest first</h3>
+                <p>@AgingNote(insights)</p>
+            </header>
+            @if (insights.Aging.Count == 0)
+            {
+                <p class="kbi-empty">Nothing is in progress.</p>
+            }
+            else
+            {
+                var max = Math.Max(insights.Aging.Max(item => item.Days), insights.P85CycleDays ?? 0) * 1.08;
+                <ol class="kbi-aging">
+                    @foreach (var item in insights.Aging.Take(12))
+                    {
+                        var late = insights.P85CycleDays is { } limit && item.Days > limit;
+                        <li>
+                            <button type="button" class="kbi-aging-card" @onclick="() => OnOpenCard.InvokeAsync(item.RowId)">
+                                @if (item.Key is not null) { <span class="kbi-key">@item.Key</span> }
+                                <span class="kbi-aging-title">@item.Title</span>
+                                <span class="kbi-aging-column"><span class="kbi-swatch" style="--tone: @item.Color" aria-hidden="true"></span>@item.Column</span>
+                            </button>
+                            <span class="kbi-aging-track">
+                                <span class="kbi-aging-bar @(late ? "is-late" : "")" style="width: @Pct(item.Days, max)%"></span>
+                                @if (insights.P85CycleDays is { } line) { <span class="kbi-aging-p85" style="left: @Pct(line, max)%" aria-hidden="true"></span> }
+                            </span>
+                            <span class="kbi-aging-days">@Num(item.Days)d</span>
+                            @if (late) { <span class="kbi-late"><i class="bi bi-exclamation-triangle-fill" aria-hidden="true"></i>Past 85%</span> }
+                        </li>
+                    }
+                </ol>
+            }
+        </section>
+    }
+    <div class="kbi-tip" data-kbi-tip hidden></div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid DatabaseId { get; set; }
+    [Parameter] public EventCallback<Guid> OnOpenCard { get; set; }
+
+    private KanbanInsights? _insights;
+    private int _days = 30;
+    private ElementReference _root;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _handle;
+
+    protected override async Task OnParametersSetAsync() => _insights = await BoardService.GetInsightsAsync(DatabaseId, _days);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_handle is not null || _insights is null) return;
+        _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/kanban-insights.js");
+        _handle = await _module.InvokeAsync<IJSObjectReference>("init", _root);
+    }
+
+    private async Task SetDaysAsync(int days)
+    {
+        _days = days;
+        _insights = await BoardService.GetInsightsAsync(DatabaseId, days);
+    }
+
+    private static string Num(double value) => value.ToString(value >= 10 ? "0" : "0.#", CultureInfo.InvariantCulture);
+    private static string Days(double? value) => value is { } days ? $"{Num(days)} {(days == 1 ? "day" : "days")}" : "–";
+    private static string Pct(double part, double whole) => (whole <= 0 ? 0 : Math.Clamp(part * 100 / whole, 0, 100)).ToString("0.##", CultureInfo.InvariantCulture);
+    private static string F(double value) => value.ToString("0.#", CultureInfo.InvariantCulture);
+
+    // SVG <text> written as markup: Razor reserves <text> as its own pseudo-tag, so the element can't
+    // be written in the template. Content is HTML-encoded (column names come from people). These
+    // carry no scope attribute, so their styles use ::deep.
+    private static MarkupString SvgText(string cssClass, double x, double y, string anchor, string content) =>
+        new($"<text class=\"{cssClass}\" x=\"{F(x)}\" y=\"{F(y)}\" text-anchor=\"{anchor}\">{System.Net.WebUtility.HtmlEncode(content)}</text>");
+
+    // ("column@(" would read to Razor as an email address, so the sentence is built here.)
+    private static string AgingNote(KanbanInsights insights) => insights.P85CycleDays is { } p85
+        ? $"How long each card has been in its column. The line marks {Num(p85)} days: past it, a card is slower than 85% of finished ones."
+        : "How long each card has been in its column.";
+
+    private static string PerWeek(KanbanInsights insights)
+    {
+        var weeks = Math.Max(1, insights.Days / 7d);
+        return $"{(insights.Cycles.Count / weeks).ToString("0.#", CultureInfo.InvariantCulture)} / week";
+    }
+
+    // A clean axis top and 3-4 ticks: 0 / 5 / 10 / 15 rather than 0 / 3.67 / 7.33.
+    private static (double Top, double Step) NiceAxis(double max)
+    {
+        if (max <= 0) return (4, 1);
+        var rough = max / 4;
+        var magnitude = Math.Pow(10, Math.Floor(Math.Log10(rough)));
+        var step = new[] { 1, 2, 2.5, 5, 10 }.Select(m => m * magnitude).First(s => s >= rough);
+        if (step < 1) step = 1;
+        return (Math.Ceiling(max / step) * step, step);
+    }
+
+    private RenderFragment FlowChart(KanbanInsights insights) => __builder =>
+    {
+        const double width = 820, height = 250, left = 34, right = 104, top = 10, bottom = 26;
+        var plotW = width - left - right;
+        var plotH = height - top - bottom;
+        var n = insights.Flow.Count;
+        var (axisTop, step) = NiceAxis(insights.Flow.Max(day => day.Counts.Sum()));
+        double X(int i) => left + (n <= 1 ? plotW / 2 : i * plotW / (n - 1));
+        double Y(double v) => top + plotH * (1 - v / axisTop);
+        <svg class="kbi-svg" viewBox="0 0 @F(width) @F(height)" width="@F(width)" height="@F(height)" role="img" aria-labelledby="kbi-flow-title" data-kbi-chart>
+            @for (var tick = 0d; tick <= axisTop + 0.001; tick += step)
+            {
+                <line class="kbi-grid" x1="@F(left)" x2="@F(left + plotW)" y1="@F(Y(tick))" y2="@F(Y(tick))" />
+                @SvgText("kbi-axis", left - 6, Y(tick) + 4, "end", tick.ToString("0", CultureInfo.InvariantCulture))
+            }
+            @for (var band = 0; band < insights.FlowColumns.Count; band++)
+            {
+                var b = band;
+                var lower = insights.Flow.Select(day => day.Counts.Take(b).Sum()).ToList();
+                var upper = insights.Flow.Select(day => day.Counts.Take(b + 1).Sum()).ToList();
+                var path = new StringBuilder();
+                for (var i = 0; i < n; i++) path.Append(i == 0 ? "M" : "L").Append(F(X(i))).Append(',').Append(F(Y(upper[i])));
+                for (var i = n - 1; i >= 0; i--) path.Append('L').Append(F(X(i))).Append(',').Append(F(Y(lower[i])));
+                path.Append('Z');
+                var edge = string.Join(" ", Enumerable.Range(0, n).Select(i => $"{F(X(i))},{F(Y(upper[i]))}"));
+                var column = insights.FlowColumns[b];
+                <path class="kbi-band" style="--tone: @column.Color" d="@path.ToString()" />
+                <polyline class="kbi-band-edge" style="--tone: @column.Color" points="@edge" />
+                @if (Y(lower[^1]) - Y(upper[^1]) >= 14)
+                {
+                    @SvgText("kbi-direct", left + plotW + 8, (Y(lower[^1]) + Y(upper[^1])) / 2 + 4, "start", $"{column.Label} · {upper[^1] - lower[^1]}")
+                }
+            }
+            <line class="kbi-crosshair" x1="0" x2="0" y1="@F(top)" y2="@F(top + plotH)" data-kbi-crosshair visibility="hidden" />
+            @foreach (var (label, i) in new[] { (insights.Flow[0].Day, 0), (insights.Flow[n / 2].Day, n / 2), (insights.Flow[^1].Day, n - 1) }.Distinct())
+            {
+                @SvgText("kbi-axis", X(i), height - 6, i == 0 ? "start" : i == n - 1 ? "end" : "middle", label.ToString("dd-MM", CultureInfo.InvariantCulture))
+            }
+            @for (var i = 0; i < n; i++)
+            {
+                var day = insights.Flow[i];
+                var slot = n <= 1 ? plotW : plotW / (n - 1);
+                var tip = new StringBuilder(day.Day.ToGwsDate());
+                for (var c = insights.FlowColumns.Count - 1; c >= 0; c--) tip.Append('\n').Append(day.Counts[c]).Append('\t').Append(insights.FlowColumns[c].Label).Append('\t').Append(insights.FlowColumns[c].Color);
+                <rect class="kbi-hit" x="@F(Math.Max(left, X(i) - slot / 2))" width="@F(Math.Min(slot, plotW))" y="@F(top)" height="@F(plotH)" data-kbi-tip-text="@tip.ToString()" data-kbi-x="@F(X(i))" />
+            }
+        </svg>
+    };
+
+    private RenderFragment ThroughputChart(KanbanInsights insights) => __builder =>
+    {
+        const double width = 420, height = 210, left = 30, right = 12, top = 18, bottom = 26;
+        var plotW = width - left - right;
+        var plotH = height - top - bottom;
+        var weeks = insights.Throughput;
+        var (axisTop, step) = NiceAxis(weeks.Count == 0 ? 0 : weeks.Max(week => week.Finished));
+        var slot = plotW / Math.Max(1, weeks.Count);
+        var barW = Math.Min(24, slot * 0.62);
+        double Y(double v) => top + plotH * (1 - v / axisTop);
+        <svg class="kbi-svg" viewBox="0 0 @F(width) @F(height)" width="@F(width)" height="@F(height)" role="img" aria-labelledby="kbi-throughput-title" data-kbi-chart>
+            @for (var tick = 0d; tick <= axisTop + 0.001; tick += step)
+            {
+                <line class="kbi-grid" x1="@F(left)" x2="@F(left + plotW)" y1="@F(Y(tick))" y2="@F(Y(tick))" />
+                @SvgText("kbi-axis", left - 6, Y(tick) + 4, "end", tick.ToString("0", CultureInfo.InvariantCulture))
+            }
+            @for (var i = 0; i < weeks.Count; i++)
+            {
+                var week = weeks[i];
+                var x = left + i * slot + (slot - barW) / 2;
+                var y = Y(week.Finished);
+                var h = top + plotH - y;
+                var r = Math.Min(4, Math.Min(barW / 2, h));
+                @if (week.Finished > 0)
+                {
+                    @* Built in C#: "M@F(x)" in the template reads as an email address and is never evaluated. *@
+                    var bar = $"M{F(x)},{F(top + plotH)} V{F(y + r)} Q{F(x)},{F(y)} {F(x + r)},{F(y)} H{F(x + barW - r)} Q{F(x + barW)},{F(y)} {F(x + barW)},{F(y + r)} V{F(top + plotH)} Z";
+                    <path class="kbi-bar" d="@bar" />
+                }
+                @if (i == weeks.Count - 1)
+                {
+                    @SvgText("kbi-value", x + barW / 2, y - 5, "middle", week.Finished.ToString(CultureInfo.InvariantCulture))
+                }
+                <rect class="kbi-hit" x="@F(left + i * slot)" width="@F(slot)" y="@F(top)" height="@F(plotH)"
+                      data-kbi-tip-text="@($"Week of {week.Start.ToGwsDate()}\n{week.Finished}\t{(week.Finished == 1 ? "card finished" : "cards finished")}\t")" />
+            }
+            @if (weeks.Count > 0)
+            {
+                @SvgText("kbi-axis", left, height - 6, "start", weeks[0].Start.ToString("dd-MM", CultureInfo.InvariantCulture))
+                @SvgText("kbi-axis", left + plotW, height - 6, "end", weeks[^1].Start.ToString("dd-MM", CultureInfo.InvariantCulture))
+            }
+        </svg>
+    };
+
+    private RenderFragment CycleChart(KanbanInsights insights) => __builder =>
+    {
+        const double width = 420, height = 210, left = 30, right = 66, top = 12, bottom = 26;
+        var plotW = width - left - right;
+        var plotH = height - top - bottom;
+        var span = Math.Max(1, insights.Days - 1);
+        var (axisTop, step) = NiceAxis(Math.Max(insights.Cycles.Max(cycle => cycle.Days), (insights.P85CycleDays ?? 0) * 1.15));
+        double X(DateOnly day) => left + (day.DayNumber - insights.From.DayNumber) * plotW / span;
+        double Y(double v) => top + plotH * (1 - v / axisTop);
+        <svg class="kbi-svg" viewBox="0 0 @F(width) @F(height)" width="@F(width)" height="@F(height)" role="img" aria-labelledby="kbi-cycle-title" data-kbi-chart>
+            @for (var tick = 0d; tick <= axisTop + 0.001; tick += step)
+            {
+                <line class="kbi-grid" x1="@F(left)" x2="@F(left + plotW)" y1="@F(Y(tick))" y2="@F(Y(tick))" />
+                @SvgText("kbi-axis", left - 6, Y(tick) + 4, "end", tick.ToString("0", CultureInfo.InvariantCulture))
+            }
+            @foreach (var (value, label) in new[] { (insights.MedianCycleDays, "50%"), (insights.P85CycleDays, "85%") })
+            {
+                @if (value is { } days)
+                {
+                    <line class="kbi-ref" x1="@F(left)" x2="@F(left + plotW)" y1="@F(Y(days))" y2="@F(Y(days))" />
+                    @SvgText("kbi-ref-label", left + plotW + 6, Y(days) + 4, "start", $"{label} · {Num(days)}d")
+                }
+            }
+            @foreach (var cycle in insights.Cycles)
+            {
+                <circle class="kbi-dot" cx="@F(X(cycle.Finished))" cy="@F(Y(cycle.Days))" r="4" />
+                <circle class="kbi-hit kbi-hit-dot" cx="@F(X(cycle.Finished))" cy="@F(Y(cycle.Days))" r="12" role="button" tabindex="0"
+                        aria-label="@($"{cycle.Key} {cycle.Title}: {Num(cycle.Days)} days, finished {cycle.Finished.ToGwsDate()}")"
+                        data-kbi-tip-text="@($"{(cycle.Key is null ? "" : cycle.Key + " ")}{cycle.Title}\n{Num(cycle.Days)} days\tfinished {cycle.Finished.ToGwsDate()}\t")"
+                        @onclick="() => OnOpenCard.InvokeAsync(cycle.RowId)" />
+            }
+            @SvgText("kbi-axis", left, height - 6, "start", insights.From.ToString("dd-MM", CultureInfo.InvariantCulture))
+            @SvgText("kbi-axis", left + plotW, height - 6, "end", "today")
+        </svg>
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_handle is not null) { await _handle.InvokeVoidAsync("dispose"); await _handle.DisposeAsync(); }
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException) { /* the page is already gone */ }
+    }
+}

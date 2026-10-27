@@ -27,9 +27,24 @@ public static class UserPreferenceRules
         [UserPreferenceKeys.Density] = [Densities.Comfortable, Densities.Compact]
     };
 
-    public static string DefaultFor(string key) => ValuesFor(key)[0];
+    // A family of keys whose values can't be listed: each board's filters (Boards K3), a small JSON
+    // object per board, defaulting to "{}".
+    private const string BoardFiltersPrefix = "boards:filters:";
+    private const int MaxBoardFiltersLength = 2000;
 
-    public static bool IsAllowed(string key, string value) => ValuesFor(key).Contains(value, StringComparer.Ordinal);
+    public static string BoardFilters(Guid databaseId) => BoardFiltersPrefix + databaseId.ToString("N");
+
+    public static string DefaultFor(string key) => key.StartsWith(BoardFiltersPrefix, StringComparison.Ordinal) ? "{}" : ValuesFor(key)[0];
+
+    public static bool IsAllowed(string key, string value) => key.StartsWith(BoardFiltersPrefix, StringComparison.Ordinal)
+        ? value.Length <= MaxBoardFiltersLength && IsJsonObject(value)
+        : ValuesFor(key).Contains(value, StringComparer.Ordinal);
+
+    private static bool IsJsonObject(string value)
+    {
+        try { return System.Text.Json.Nodes.JsonNode.Parse(value) is System.Text.Json.Nodes.JsonObject; }
+        catch (System.Text.Json.JsonException) { return false; }
+    }
 
     private static string[] ValuesFor(string key) =>
         Values.TryGetValue(key, out var values) ? values : throw new ArgumentException($"Unknown preference '{key}'.");

@@ -144,15 +144,102 @@ Route: `/admin/boards` (your boards, new board from a template) and `/admin/boar
 - Filter bar: search, labels, assignee, priority, due (overdue / this week), "My cards"; saved
   per person (view personalization).
 
+**K3 done 27-10-26.**
+- New tables (migration AddKanbanFlow): `WikiDatabaseRowStatusChanges` - written by
+  `ApplicationDbContext.RecordStatusChanges` on every save for any Status/Select value a row gains,
+  loses or changes, whichever path wrote it (a page-only save writes none) - and
+  `KanbanBoardSettings` (one row per board, `KanbanSettings` JSON: WIP limits by option id,
+  SwimlaneBy, AgingDays, and K7's Background / Accent / CardSize).
+- WIP: a column's "n / limit" pill, amber at it, red over it with a red outline; set from the
+  column's ⋯ menu. Counts every card in the column, whatever the filters hide.
+- Card age: days since the card last moved into its current column (that column's latest log
+  entry; creation for rows from before the log) on in-progress cards; fades in three steps (half,
+  1x, 2x the board's AgingDays, default 5) with a warm edge; set in the board settings popover.
+  A move resets it on screen at once.
+- Blocked: Checkbox "Blocked" + Text "Blocked reason" (templates create them; `SetBlockedAsync`
+  adds them to a board without), a red edge and pill with the reason as its tooltip, `b`, and a
+  toggle + reason in the drawer.
+- Filters: My cards, Blocked, Priority (incl. none), Label, Assignee (incl. unassigned), Due
+  (overdue / within 7 days / none), Clear. Saved per person per board through
+  `IUserPreferenceService` under `boards:filters:{id}` - `UserPreferenceRules` gained that key
+  family (a JSON object up to 2,000 characters).
+- Swimlanes by Priority, Assignee or Sprint (shared board setting): a sticky row of column heads,
+  then one collapsible lane per value (priority and sprint show every option, assignee shows who
+  holds cards, you and Unassigned). Drop targets are found in 2D (kanban-board.js), the drop sends
+  its lane, and a card dropped in another lane takes that value (assignee lanes replace the
+  assignees); Undo restores both. Sideways keys stay in the lane.
+- **Fixed:** JS-invoked handlers get no automatic render. A cross-lane drop saved but kept
+  drawing the card in its old lane until the next redraw - `MoveCard` (and `ApplyAsync`'s failure
+  path) now call StateHasChanged after reloading. Also the admin bar's "GWS Business Suite" text
+  was fixed white and vanished on the light theme; it follows the theme now.
+- Tests: `KanbanBoardServiceTests` +6 (settings round trip, limits on columns, refusals and colour
+  cleaning; blocking adds fields once and carries the reason; entered-column time from the log and
+  from creation; a move then a lane value both stick; the status-change log; filter preference
+  rules).
+- Checked live: WIP at and over the limit, `b` + reason, filters (and after reload), lanes by
+  priority, a cross-lane drag landing with the new priority on screen and after reload, Undo, lanes
+  off, ages at all three levels.
+
 ### K4 - Sprints
 - Sprint planning: backlog beside the sprint; drag in, see the estimate total against capacity.
 - Start / complete a sprint; complete moves unfinished cards to the next sprint (rollover), with
   a summary. Sprint goal on the board header; burndown (estimate or card count) in the header.
 
+**K4 done 27-10-26.**
+- A sprint is an option of the board's Sprint property (Select "Sprint"/"Cycle"/"Iteration";
+  `CreateSprintAsync` adds the property to a board without one - also the settings popover's "Use
+  sprints") plus a `KanbanSprint` entry in `KanbanSettings.Sprints`: goal, start/end, state
+  (planned / active / done), capacity, and at completion the done cards and points.
+- `ListSprintsAsync`: counts, points (estimates when the sprint's cards carry any, else one per
+  card) and a burndown - points left at the end of each day from the start to today/end, a card
+  dropping out on the day it last reached a Complete column (status-change log; from the start
+  for one finished before the log). Scope is the sprint's cards now.
+- `StartSprintAsync` (one running at a time; end after start), `UpdateSprintAsync` (goal,
+  capacity), `CompleteSprintAsync` (done figures recorded; unfinished cards to another open
+  sprint, the backlog, or a new sprint). Settings changes re-read what's stored first.
+- `KanbanSprintBar` (own component): the running sprint's name, goal, "Day n of m", progress and a
+  burndown sparkline against the ideal line, Plan / Complete sprint; otherwise "No sprint running"
+  and the last sprint's result. Planner: pick or make a sprint, goal, capacity, start date and
+  1-4 weeks, recent velocity, backlog (unsprinted first, by priority) beside the sprint with
+  + / -, a red total over capacity, Start. Complete: done summary and where the rest go.
+  Board: a "Sprint n" filter chip shows only the running sprint's cards.
+- Tests: `KanbanBoardServiceTests` +4 (create adds the field and refuses a duplicate; one running;
+  complete records and rolls over to a new sprint; burndown by finish day). 18 board tests.
+- Checked live: plan (goal, capacity 12, four cards = 11 pts, a start three days back), start,
+  the bar (Day 4 of 14, 1 / 11 pts, sparkline), the sprint filter, complete with 3 moved to a new
+  Sprint 2, the bar afterwards; no console errors.
+
 ### K5 - Flow metrics
 - Status-change log (new table): every column change on a board card, with time and who.
 - Insights panel: cycle time (median, 85th percentile, scatter), throughput per week, cumulative
   flow diagram, aging WIP; per card, its time in each column.
+
+**K5 done 27-10-26.**
+- `GetInsightsAsync(databaseId, 30|90|180)` from the status-change log: cycle time per card now
+  complete (first entry into an in-progress column - or its creation - to its last entry into a
+  complete one), median and 85th percentile (nearest rank), throughput by Monday-start week,
+  cumulative flow (each card's column at the end of each day from its last logged move; a card
+  with no log sits in its current column from its creation; complete columns are the bottom
+  band), work-in-progress age oldest first, and where the log starts (`HistoryStarts`).
+- `KanbanInsightsView` (Board / Insights switch, `?view=insights`; opening a card keeps the view):
+  period presets, four stat tiles, cumulative flow (legend, direct labels on bands >= 14px, a
+  crosshair tooltip listing every column), weekly throughput (<= 24px columns, rounded tops,
+  value on the last), cycle-time scatter (8px dots with a surface ring, 24px hit areas, 50% / 85%
+  lines, click opens the card), aging bars against the 85% line with a "Past 85%" status pill;
+  every chart has a Data table. kanban-insights.js: one tooltip, values first, line keys, all
+  text via textContent. Charts keep their drawn size and scroll sideways on a narrow screen.
+- Palette: the columns' own colours (colour follows the column). The validator passes them on
+  CVD, normal-vision and contrast in both themes; Backlog/Triage grey fails the chroma floor by
+  design ("not started"), so bands always carry a legend and direct labels.
+- **Razor traps found:** SVG `<text>` is Razor's reserved pseudo-tag (it cut the @code block
+  short; errors pointed at the @code members) - labels are written by `SvgText` as encoded
+  markup and styled through ::deep; and `M@F(x)` / `column@(` read as email addresses, never
+  evaluated - those strings are built in C#.
+- Tests: `KanbanBoardServiceTests` +1 (cycle times 2/4/6 days, median 4, p85 6, Monday weeks,
+  WIP and age, flow bands bottom-up and a past day's count, 45 days refused). 19 board tests.
+- Checked live on a seeded "Support ops" board (16 cards over six weeks): tiles, flow with
+  tooltip and crosshair, bars, dots and their tooltip, dot opens the card in the Insights view,
+  90 days, phone without overflow, no console errors.
 
 ### K6 - Automation and polish
 - Rules: when a card enters a column -> set a property (e.g. Completed date), tick its checklist,

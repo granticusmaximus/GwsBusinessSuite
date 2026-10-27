@@ -98,12 +98,15 @@ public static class DependencyInjection
         services.AddSingleton<SemanticIndexQueue>();
         services.AddSingleton<SemanticIndexSaveChangesInterceptor>();
         services.AddSingleton<ActivityFeedSaveChangesInterceptor>();
+        services.AddSingleton<WikiDatabaseChangeNotifier>();
+        services.AddSingleton<WikiDatabaseChangeInterceptor>();
         services.AddDbContextFactory<ApplicationDbContext>((serviceProvider, options) => options
             .UseSqlite(connectionString)
             .AddInterceptors(
                 serviceProvider.GetRequiredService<ActivityFeedSaveChangesInterceptor>(),
                 serviceProvider.GetRequiredService<PublicContentCacheInvalidationInterceptor>(),
-                serviceProvider.GetRequiredService<SemanticIndexSaveChangesInterceptor>()));
+                serviceProvider.GetRequiredService<SemanticIndexSaveChangesInterceptor>(),
+                serviceProvider.GetRequiredService<WikiDatabaseChangeInterceptor>()));
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
         services.AddScoped<IAppDbContextFactory, AppDbContextFactory>();
         services.AddScoped<IAdminPortalSummaryService, AdminPortalSummaryService>();

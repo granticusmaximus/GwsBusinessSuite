@@ -43,7 +43,8 @@ public interface IWikiDatabaseService
     Task<WikiDatabaseCsvImportResult> ImportCsvAsync(Guid wikiDatabaseId, string csv, string performedBy, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<WikiDatabaseRowTemplate>> ListRowTemplatesAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default);
     Task<WikiDatabaseRowTemplate> CreateRowTemplateFromRowAsync(Guid wikiDatabaseId, Guid sourceRowId, string name, string performedBy, CancellationToken cancellationToken = default);
-    Task<WikiDatabaseRow> CreateRowFromTemplateAsync(Guid wikiDatabaseId, Guid templateId, Guid? parentRowId, string performedBy, CancellationToken cancellationToken = default);
+    // A template leaves the title empty; `title` names the new row (a board card, a recurring row).
+    Task<WikiDatabaseRow> CreateRowFromTemplateAsync(Guid wikiDatabaseId, Guid templateId, Guid? parentRowId, string performedBy, string? title = null, CancellationToken cancellationToken = default);
     Task DeleteRowTemplateAsync(Guid wikiDatabaseId, Guid templateId, CancellationToken cancellationToken = default);
 
     // Row-level soft-delete, independent of TrashDatabaseAsync - for trashing a single row

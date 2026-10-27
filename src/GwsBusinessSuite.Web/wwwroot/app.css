@@ -460,7 +460,8 @@ h1:focus { outline: none; }
     align-items: center;
     gap: .5rem;
     font-weight: 700;
-    color: #fff;
+    /* The theme's text colour: a fixed white vanished on the light theme's bar. */
+    color: var(--gws-text-strong);
 }
 
 .gws-admin-bar-icon {
@@ -1018,6 +1019,43 @@ h1:focus { outline: none; }
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--gws-sidebar-accent) 25%, transparent);
     pointer-events: none;
 }
+
+/* Boards' dialogs (the sprint planner, Automate): shared by components with their own scoped CSS. */
+.kb-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1050;
+    border: 0;
+    background: rgba(0, 0, 0, .55);
+}
+
+.kb-modal {
+    position: fixed;
+    /* Centred in the space above the phone bar (0 elsewhere). */
+    top: calc(50% - var(--gws-bottom-bar-height) / 2);
+    left: 50%;
+    z-index: 1055;
+    display: flex;
+    flex-direction: column;
+    gap: var(--gws-step-3);
+    width: min(64rem, calc(100vw - 2rem));
+    max-height: calc(100dvh - 3rem - var(--gws-bottom-bar-height));
+    padding: var(--gws-step-4) var(--gws-step-5);
+    overflow: auto;
+    transform: translate(-50%, -50%);
+    color: var(--gws-text-strong);
+    background: var(--gws-panel-bg);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-lg, 14px);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, .45);
+}
+
+.kb-modal:focus { outline: none; }
+.kb-modal-head { display: flex; align-items: center; justify-content: space-between; gap: var(--gws-step-3); }
+.kb-modal-head h2 { margin: 0; font-size: 1.125rem; font-weight: 700; }
+.kb-modal-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--gws-step-2); }
+.kb-modal p { margin: 0; }
+
 
 /* ── Page header ─────────────────────────────────────────── */
 .page-header {

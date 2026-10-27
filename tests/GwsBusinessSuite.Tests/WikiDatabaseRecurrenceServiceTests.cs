@@ -34,11 +34,37 @@ public sealed class WikiDatabaseRecurrenceServiceTests
     }
 
     [Fact]
+    public async Task Schedules_ShouldRunOnTheAppsLocalClock_AndNameRowsAfterTheirTemplate()
+    {
+        // Boards K6: "every Monday at 09:00" is 09:00 where the app shows its times, not 09:00 UTC,
+        // and a recurring card is called what its template is called.
+        await using var db = await CreateDbAsync();
+        var wikiDatabaseService = new WikiDatabaseService(db);
+        var time = new FakeTimeProvider
+        {
+            UtcNow = new DateTimeOffset(2026, 9, 10, 8, 0, 0, TimeSpan.Zero),
+            Zone = TimeZoneInfo.CreateCustomTimeZone("Test-4", TimeSpan.FromHours(-4), "Test-4", "Test-4")
+        };
+        var service = new WikiDatabaseRecurrenceService(db, wikiDatabaseService, time);
+        var database = await wikiDatabaseService.CreateDatabaseAsync("Reports", null, "u");
+        var template = await CreateTemplateAsync(wikiDatabaseService, database.Id);
+
+        var recurrence = await service.CreateAsync(database.Id, template.Id, "0 9 * * 1", "u");
+        recurrence.NextRunAt.Should().Be(new DateTimeOffset(2026, 9, 14, 13, 0, 0, TimeSpan.Zero), "09:00 at UTC-4");
+
+        time.UtcNow = new DateTimeOffset(2026, 9, 14, 13, 0, 30, TimeSpan.Zero);
+        (await service.RunDueAsync()).Should().Be(1);
+        var title = (await wikiDatabaseService.GetDatabaseAsync(database.Id))!.Properties.Single(property => property.Type == WikiDatabasePropertyTypes.Title);
+        var newest = await db.WikiDatabaseRows.AsNoTracking().OrderByDescending(row => row.SortOrder).FirstAsync(row => row.CreatedBy == "recurrence-scheduler");
+        WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(newest.PropertyValuesJson), title.Id).Should().Be(template.Name);
+    }
+
+    [Fact]
     public async Task CreateAsync_ShouldRejectAMalformedCronExpression()
     {
         await using var db = await CreateDbAsync();
         var wikiDatabaseService = new WikiDatabaseService(db);
-        var service = new WikiDatabaseRecurrenceService(db, wikiDatabaseService, TimeProvider.System);
+        var service = new WikiDatabaseRecurrenceService(db, wikiDatabaseService, new FakeTimeProvider());
         var database = await wikiDatabaseService.CreateDatabaseAsync("Reports", null, "u");
         var template = await CreateTemplateAsync(wikiDatabaseService, database.Id);
 
@@ -173,6 +199,9 @@ public sealed class WikiDatabaseRecurrenceServiceTests
     private sealed class FakeTimeProvider : TimeProvider
     {
         public DateTimeOffset UtcNow { get; set; } = DateTimeOffset.UtcNow;
+        // Schedules run on the app's local clock; UTC unless a test says otherwise.
+        public TimeZoneInfo Zone { get; set; } = TimeZoneInfo.Utc;
         public override DateTimeOffset GetUtcNow() => UtcNow;
+        public override TimeZoneInfo LocalTimeZone => Zone;
     }
 }

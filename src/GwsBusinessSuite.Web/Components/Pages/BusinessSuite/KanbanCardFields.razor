@@ -4,6 +4,7 @@
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
 @inject IKanbanBoardService BoardService
+@inject IWikiDatabaseService Databases
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject GwsBusinessSuite.Web.Services.ToastState Toasts
 
@@ -77,6 +78,17 @@
             </dd>
         }
 
+        <dt><i class="bi bi-slash-circle" aria-hidden="true"></i>Blocked</dt>
+        <dd class="kb-fields-inline">
+            <input type="checkbox" class="form-check-input kb-fields-blocked" aria-label="Blocked" checked="@IsBlocked" @key="@($"blocked-{_revision}")"
+                   @onchange="e => SetBlockedAsync(e.Value is true, BlockedReason)" />
+            @if (IsBlocked)
+            {
+                <input class="form-control form-control-sm" aria-label="What it's waiting on" placeholder="What's it waiting on?" maxlength="300" @key="@($"reason-{_revision}")"
+                       value="@BlockedReason" @onchange="e => SetBlockedAsync(true, e.Value as string)" />
+            }
+        </dd>
+
         @foreach (var other in OtherSelects)
         {
             <dt><i class="bi bi-list-ul" aria-hidden="true"></i>@other.Name</dt>
@@ -114,6 +126,14 @@
         </form>
     </div>
 
+    @* Card templates (K6): this card's fields and page, to make again from a column's menu or on a
+       schedule (Automate). *@
+    <div class="kb-fields-actions">
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_savingTemplate" @onclick="SaveAsTemplateAsync">
+            <i class="bi bi-files me-1" aria-hidden="true"></i>Save as template
+        </button>
+    </div>
+
     <p class="kb-fields-meta">
         Created @Row.CreatedAt.ToLocalGwsDateTime()@(string.IsNullOrWhiteSpace(Row.CreatedBy) ? "" : $" by {Row.CreatedBy}")
         @if (Row.UpdatedAt is { } updated) { <span> · Updated @updated.ToLocalGwsDateTime()</span> }
@@ -145,6 +165,29 @@
             && property.Id != Board.Fields.StatusPropertyId && property.Id != Board.Fields.PriorityPropertyId)
         .OrderBy(property => property.SortOrder);
 
+    private bool _savingTemplate;
+
+    private async Task SaveAsTemplateAsync()
+    {
+        _savingTemplate = true;
+        try
+        {
+            var name = string.IsNullOrWhiteSpace(Title) ? "Untitled card" : Title.Trim();
+            var me = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var template = await Databases.CreateRowTemplateFromRowAsync(Database.Id, Row.Id, name.Length > 120 ? name[..120] : name, me);
+            await OnChanged.InvokeAsync();
+            Toasts.Show($"Saved \u201c{template.Name}\u201d as a template. Make cards from it in a column's menu, or set it to repeat under Automate.", tone: StatusTone.Success);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException or ArgumentException)
+        {
+            Toasts.Show($"Couldn't save the template. {ex.Message}", tone: StatusTone.Danger);
+        }
+        finally
+        {
+            _savingTemplate = false;
+        }
+    }
+
     protected override async Task OnParametersSetAsync()
     {
         if (_loadedFor == Row.Id) return;
@@ -164,6 +207,24 @@
     // A date as written (Sentinel stores a picked date at UTC midnight), not shifted to local time.
     private DateOnly? Date(Guid propertyId) => WikiPropertyValues.GetDate(Values, propertyId) is { } date ? DateOnly.FromDateTime(date.Date) : null;
     private static string Color(string? color) => color is not null && System.Text.RegularExpressions.Regex.IsMatch(color, "^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{3,20})$") ? color : "#78716c";
+
+    private bool IsBlocked => Board.Fields.BlockedPropertyId is { } id && WikiPropertyValues.GetCheckbox(Values, id);
+    private string? BlockedReason => Board.Fields.BlockedReasonPropertyId is { } id ? WikiPropertyValues.GetText(Values, id) : null;
+
+    // Through the board service, which adds Blocked / Blocked reason to a board that lacks them.
+    private async Task SetBlockedAsync(bool blocked, string? reason)
+    {
+        try
+        {
+            await BoardService.SetBlockedAsync(Database.Id, Row.Id, blocked, reason, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await OnChanged.InvokeAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _revision++;
+            Toasts.Show($"Couldn't change that. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
 
     private Task SetAsync(Guid propertyId, string? text) => ChangeAsync(propertyId, _ => text is null ? null : JsonValue.Create(text));
 

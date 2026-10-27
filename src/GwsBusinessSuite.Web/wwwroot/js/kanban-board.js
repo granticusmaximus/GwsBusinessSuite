@@ -59,17 +59,17 @@ export function init(root, dotnet) {
         drag.frame = requestAnimationFrame(autoScroll);
     }
 
-    // The column under the pointer (or the nearest), and the card the drop would land before.
+    // The drop target under the pointer - a column, or with swimlanes a lane's cell - or the nearest
+    // one; and the card the drop would land before.
     function locate() {
-        const all = columns();
+        const all = columns().filter(c => { const r = c.getBoundingClientRect(); return r.width > 0 && r.height > 0; });
         if (all.length === 0) return;
-        let column = all.find(c => { const r = c.getBoundingClientRect(); return drag.x >= r.left && drag.x <= r.right; });
-        if (!column) {
-            column = all.reduce((best, c) => {
-                const r = c.getBoundingClientRect();
-                const d = Math.min(Math.abs(drag.x - r.left), Math.abs(drag.x - r.right));
-                return !best || d < best.d ? { c, d } : best;
-            }, null).c;
+        const distance = r => Math.hypot(Math.max(r.left - drag.x, 0, drag.x - r.right), Math.max(r.top - drag.y, 0, drag.y - r.bottom));
+        let column = all[0];
+        let best = Infinity;
+        for (const c of all) {
+            const d = distance(c.getBoundingClientRect());
+            if (d < best) { best = d; column = c; }
         }
         const others = cardsIn(column).filter(c => c !== drag.card);
         const before = others.find(c => { const r = c.getBoundingClientRect(); return drag.y < r.top + r.height / 2; }) || null;
@@ -127,7 +127,7 @@ export function init(root, dotnet) {
 
     function move(card, column, before) {
         const id = card.getAttribute('data-kb-card');
-        return dotnet.invokeMethodAsync('MoveCard', id, column.getAttribute('data-kb-column'), before ? before.getAttribute('data-kb-card') : '')
+        return dotnet.invokeMethodAsync('MoveCard', id, column.getAttribute('data-kb-column'), before ? before.getAttribute('data-kb-card') : '', column.getAttribute('data-kb-lane'))
             .then(() => refocus(id))
             .catch(() => { /* .NET reports a failed move itself */ });
     }
@@ -173,13 +173,16 @@ export function init(root, dotnet) {
         const id = card.getAttribute('data-kb-card');
         if (event.key === 'e') { event.preventDefault(); dotnet.invokeMethodAsync('OpenCardFromKeys', id, true); return; }
         if (event.key === 'x') { event.preventDefault(); dotnet.invokeMethodAsync('ToggleSelect', id, event.shiftKey); return; }
+        if (event.key === 'b') { event.preventDefault(); dotnet.invokeMethodAsync('ToggleBlocked', id).then(() => refocus(id)); return; }
         if (/^[0-4]$/.test(event.key) && !event.altKey) {
             event.preventDefault();
             dotnet.invokeMethodAsync('SetPriorityByNumber', id, Number(event.key)).then(() => refocus(id));
             return;
         }
         const column = card.closest('[data-kb-column]');
-        const all = columns();
+        // With swimlanes, sideways moves stay in the card's own lane.
+        const lane = column.getAttribute('data-kb-lane');
+        const all = columns().filter(c => c.getAttribute('data-kb-lane') === lane);
         const here = cardsIn(column);
         const index = here.indexOf(card);
         const at = all.indexOf(column);
@@ -218,6 +221,8 @@ export function init(root, dotnet) {
     document.addEventListener('keydown', onKeyDown);
 
     return {
+        // Live updates (K6) wait for a drag to finish before the board re-renders.
+        isDragging() { return drag !== null; },
         dispose() {
             end(false);
             root.removeEventListener('pointerdown', onPointerDown);

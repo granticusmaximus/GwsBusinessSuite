@@ -51,7 +51,7 @@ public sealed class WikiDatabaseRecurrenceService(
             ?? throw new InvalidOperationException("The selected row template no longer exists in this database.");
 
         var now = timeProvider.GetUtcNow();
-        var nextRunAt = CronSchedule.GetNextOccurrence(trimmedExpression, now);
+        var nextRunAt = CronSchedule.GetNextOccurrence(trimmedExpression, now, timeProvider.LocalTimeZone);
         var recurrence = new WikiDatabaseRowRecurrence
         {
             WikiDatabaseId = wikiDatabaseId,
@@ -91,7 +91,7 @@ public sealed class WikiDatabaseRecurrenceService(
             // Re-enabling recomputes from "now" rather than resuming a stale NextRunAt that may
             // be long past - the same choice AutomationWorkflowService makes when a schedule
             // trigger node's parameters change on publish, not "catch up" on every missed tick.
-            var nextRunAt = CronSchedule.GetNextOccurrence(recurrence.CronExpression, now);
+            var nextRunAt = CronSchedule.GetNextOccurrence(recurrence.CronExpression, now, timeProvider.LocalTimeZone);
             recurrence.NextRunAt = nextRunAt;
             recurrence.NextRunAtUnixSeconds = nextRunAt.ToUnixTimeSeconds();
         }
@@ -131,7 +131,7 @@ public sealed class WikiDatabaseRecurrenceService(
         // pointing at a past NextRunAt that the very next tick would fire again.
         foreach (var recurrence in due)
         {
-            var nextRunAt = CronSchedule.GetNextOccurrence(recurrence.CronExpression, now);
+            var nextRunAt = CronSchedule.GetNextOccurrence(recurrence.CronExpression, now, timeProvider.LocalTimeZone);
             recurrence.NextRunAt = nextRunAt;
             recurrence.NextRunAtUnixSeconds = nextRunAt.ToUnixTimeSeconds();
             recurrence.LastRunAt = now;
@@ -140,6 +140,12 @@ public sealed class WikiDatabaseRecurrenceService(
         }
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        // Each row is named after its template ("Weekly report"), not left untitled.
+        var templateIds = due.Select(item => item.WikiDatabaseRowTemplateId).Distinct().ToList();
+        var templateNames = await dbContext.WikiDatabaseRowTemplates.AsNoTracking()
+            .Where(item => templateIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, item => item.Name, cancellationToken);
+
         var created = 0;
         foreach (var recurrence in due)
         {
@@ -147,7 +153,7 @@ public sealed class WikiDatabaseRecurrenceService(
             {
                 await wikiDatabaseService.CreateRowFromTemplateAsync(
                     recurrence.WikiDatabaseId, recurrence.WikiDatabaseRowTemplateId, parentRowId: null,
-                    performedBy: "recurrence-scheduler", cancellationToken);
+                    performedBy: "recurrence-scheduler", title: templateNames.GetValueOrDefault(recurrence.WikiDatabaseRowTemplateId), cancellationToken);
                 created++;
             }
             catch (Exception ex)

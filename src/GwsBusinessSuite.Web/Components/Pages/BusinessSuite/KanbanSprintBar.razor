@@ -1,0 +1,344 @@
+@using System.Globalization
+@using System.Text.Json.Nodes
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Domain.Entities
+@inject IKanbanBoardService BoardService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
+
+@* Sprints on a board (Boards K4): the running sprint's goal, day, progress and burndown; planning
+   (backlog beside the sprint, against its capacity); and completing it with the unfinished cards
+   moved on. Sprints are options of the board's Sprint property, with their dates and goal kept in
+   the board's settings. *@
+<section class="kb-sprint" aria-label="Sprint">
+    @if (Active is { } sprint)
+    {
+        <span class="kb-sprint-name" style="--tone: @sprint.Color"><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i>@sprint.Name</span>
+        @if (!string.IsNullOrWhiteSpace(sprint.Goal)) { <span class="kb-sprint-goal" title="Sprint goal">@sprint.Goal</span> }
+        @if (sprint.Start is { } start && sprint.End is { } end)
+        {
+            var length = end.DayNumber - start.DayNumber + 1;
+            var day = Math.Clamp(Today.DayNumber - start.DayNumber + 1, 1, length);
+            <span class="kb-sprint-days" title="@start.ToGwsDate() to @end.ToGwsDate()">Day @day of @length · ends @end.ToGwsDate()</span>
+        }
+        <span class="kb-sprint-progress" title="@Points(sprint.DonePoints) of @Points(sprint.Points) @Unit(sprint) done">
+            <span class="kb-sprint-bar"><span style="width: @Percent(sprint.DonePoints, sprint.Points)%"></span></span>
+            @Points(sprint.DonePoints) / @Points(sprint.Points) @Unit(sprint, sprint.Points)
+        </span>
+        @if (sprint.Burndown.Count > 1 && sprint.Start is not null && sprint.End is not null)
+        {
+            @Sparkline(sprint)
+        }
+        <span class="kb-sprint-actions">
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenPlanner(null)">Plan</button>
+            <button type="button" class="btn btn-sm btn-primary" @onclick="() => _completing = true">Complete sprint</button>
+        </span>
+    }
+    else
+    {
+        <span class="kb-sprint-none"><i class="bi bi-lightning-charge" aria-hidden="true"></i>No sprint running.</span>
+        <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenPlanner(null)">Plan a sprint</button>
+        @if (Sprints.LastOrDefault(item => item.State == KanbanSprintStates.Done) is { } last)
+        {
+            <span class="kb-sprint-none">Last: @last.Name, @Points(last.DonePoints) @Unit(last, last.DonePoints) done.</span>
+        }
+    }
+</section>
+
+@if (_planning)
+{
+    <div class="kb-modal-backdrop" @onclick="() => _planning = false"></div>
+    <section class="kb-modal kb-plan" role="dialog" aria-modal="true" aria-labelledby="kb-plan-title" tabindex="-1" @ref="_dialog" @onkeydown="CloseOnEscape">
+        <header class="kb-modal-head">
+            <h2 id="kb-plan-title">Plan a sprint</h2>
+            <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Close" @onclick="() => _planning = false"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+        </header>
+        <div class="kb-plan-pick">
+            <label for="kb-plan-sprint">Sprint</label>
+            <select id="kb-plan-sprint" class="form-select form-select-sm" value="@_planId" @onchange="e => _planId = e.Value as string">
+                @foreach (var item in Open) { <option value="@item.OptionId">@(item.State == KanbanSprintStates.Active ? $"{item.Name} (running)" : item.Name)</option> }
+            </select>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="NewSprintAsync"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New sprint</button>
+        </div>
+        @if (Planned is { } plan)
+        {
+            var sprintCards = Cards.Where(card => card.Card.SprintOptionId == plan.OptionId).ToList();
+            var backlog = Cards.Where(card => !card.Done && card.Card.SprintOptionId != plan.OptionId)
+                .OrderBy(card => card.Card.SprintOptionId is null ? 0 : 1).ThenBy(card => PriorityRank(card.Card)).ToList();
+            var planned = sprintCards.Sum(card => PointsOf(card.Card, plan));
+            <div class="kb-plan-fields">
+                <label for="kb-plan-goal">Goal</label>
+                <input id="kb-plan-goal" class="form-control form-control-sm" placeholder="What should this sprint achieve?" maxlength="200" value="@plan.Goal"
+                       @onchange="e => UpdateAsync(plan, e.Value as string ?? string.Empty, plan.Capacity)" />
+                <label for="kb-plan-capacity">Capacity</label>
+                <span class="kb-plan-inline">
+                    <input id="kb-plan-capacity" type="number" min="0" step="1" class="form-control form-control-sm" value="@(plan.Capacity?.ToString("0.#", CultureInfo.InvariantCulture))"
+                           @onchange="e => SetCapacityAsync(plan, e.Value as string)" />
+                    <span>@Unit(plan)</span>
+                </span>
+                @if (plan.State == KanbanSprintStates.Planned)
+                {
+                    <label for="kb-plan-start">Starts</label>
+                    <span class="kb-plan-inline">
+                        <input id="kb-plan-start" type="date" class="form-control form-control-sm" value="@_start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)"
+                               @onchange="e => SetStart(e.Value as string)" />
+                        <select class="form-select form-select-sm" aria-label="Length" value="@_weeks" @onchange="e => SetWeeks(e.Value as string)">
+                            @for (var w = 1; w <= 4; w++) { <option value="@w">@w @(w == 1 ? "week" : "weeks")</option> }
+                        </select>
+                    </span>
+                }
+            </div>
+            @if (Velocity is { } velocity)
+            {
+                <p class="kb-plan-hint">Recent sprints finished @velocity.</p>
+            }
+            <div class="kb-plan-lists">
+                <section aria-labelledby="kb-plan-backlog">
+                    <h3 id="kb-plan-backlog">Backlog <span>@backlog.Count · @Points(backlog.Sum(card => PointsOf(card.Card, plan))) @Unit(plan, backlog.Sum(card => PointsOf(card.Card, plan)))</span></h3>
+                    <ul>
+                        @foreach (var item in backlog)
+                        {
+                            <li>
+                                <button type="button" class="kb-plan-move" disabled="@_busy" title="Add to @plan.Name" aria-label="Add @item.Card.Title to @plan.Name"
+                                        @onclick="() => AssignAsync(item.Card, plan.OptionId)"><i class="bi bi-plus-lg" aria-hidden="true"></i></button>
+                                @PlanCard(item.Card, plan)
+                            </li>
+                        }
+                        @if (backlog.Count == 0) { <li class="kb-plan-empty">Nothing left to plan.</li> }
+                    </ul>
+                </section>
+                <section aria-labelledby="kb-plan-sprint-list">
+                    <h3 id="kb-plan-sprint-list">@plan.Name
+                        <span class="@(plan.Capacity is { } cap && planned > cap ? "is-over" : "")">@sprintCards.Count · @Points(planned)@(plan.Capacity is { } capacity ? $" / {Points(capacity)}" : "") @Unit(plan)</span>
+                    </h3>
+                    <ul>
+                        @foreach (var item in sprintCards)
+                        {
+                            <li class="@(item.Done ? "is-done" : "")">
+                                <button type="button" class="kb-plan-move" disabled="@_busy" title="Back to the backlog" aria-label="Take @item.Card.Title out of @plan.Name"
+                                        @onclick="() => AssignAsync(item.Card, null)"><i class="bi bi-dash-lg" aria-hidden="true"></i></button>
+                                @PlanCard(item.Card, plan)
+                            </li>
+                        }
+                        @if (sprintCards.Count == 0) { <li class="kb-plan-empty">Add cards from the backlog.</li> }
+                    </ul>
+                </section>
+            </div>
+            @if (plan.State == KanbanSprintStates.Planned)
+            {
+                <footer class="kb-modal-foot">
+                    @if (Active is { } running) { <span class="kb-plan-hint">@running.Name is still running; complete it before starting this one.</span> }
+                    <button type="button" class="btn btn-primary" disabled="@(_busy || Active is not null || sprintCards.Count == 0)" @onclick="() => StartAsync(plan)">
+                        Start @plan.Name
+                    </button>
+                </footer>
+            }
+        }
+    </section>
+}
+
+@if (_completing && Active is { } finishing)
+{
+    var unfinished = Cards.Count(card => card.Card.SprintOptionId == finishing.OptionId && !card.Done);
+    <div class="kb-modal-backdrop" @onclick="() => _completing = false"></div>
+    <section class="kb-modal kb-complete" role="dialog" aria-modal="true" aria-labelledby="kb-complete-title" tabindex="-1" @ref="_dialog" @onkeydown="CloseOnEscape">
+        <header class="kb-modal-head">
+            <h2 id="kb-complete-title">Complete @finishing.Name</h2>
+            <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Close" @onclick="() => _completing = false"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+        </header>
+        <p>@finishing.DoneCount of @finishing.CardCount @(finishing.CardCount == 1 ? "card" : "cards") done (@Points(finishing.DonePoints) of @Points(finishing.Points) @Unit(finishing, finishing.Points)).</p>
+        @if (unfinished > 0)
+        {
+            <fieldset class="kb-complete-move">
+                <legend>Move the @unfinished unfinished @(unfinished == 1 ? "card" : "cards") to</legend>
+                @foreach (var next in Open.Where(item => item.OptionId != finishing.OptionId))
+                {
+                    <label><input type="radio" name="kb-move" value="@next.OptionId" checked="@(_moveTo == next.OptionId)" @onchange="() => _moveTo = next.OptionId" /> @next.Name</label>
+                }
+                <label><input type="radio" name="kb-move" value="new" checked="@(_moveTo == NewSprint)" @onchange="() => _moveTo = NewSprint" /> A new sprint</label>
+                <label><input type="radio" name="kb-move" value="" checked="@(_moveTo == string.Empty)" @onchange="() => _moveTo = string.Empty" /> The backlog</label>
+            </fieldset>
+        }
+        <footer class="kb-modal-foot">
+            <button type="button" class="btn btn-outline-secondary" @onclick="() => _completing = false">Not yet</button>
+            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="() => CompleteAsync(finishing)">Complete sprint</button>
+        </footer>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public required KanbanBoard Board { get; set; }
+    [Parameter, EditorRequired] public required IReadOnlyList<KanbanSprintView> Sprints { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private const string NewSprint = "__new";
+    private bool _planning;
+    private bool _completing;
+    private ElementReference _dialog;
+    private bool _dialogFocused;
+
+    // A dialog takes focus as it opens, so Escape reaches it: Safari (the Mac app's WebKit)
+    // doesn't focus a button on click, so focus would otherwise stay on the page behind.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!(_planning || _completing))
+        {
+            _dialogFocused = false;
+            return;
+        }
+        if (_dialogFocused) return;
+        _dialogFocused = true;
+        await _dialog.FocusAsync();
+    }
+    private bool _busy;
+    private string? _planId;
+    private string? _moveTo;
+    private DateOnly _start = DateOnly.FromDateTime(DateTime.Today);
+    private int _weeks = 2;
+
+    private sealed record PlanItem(KanbanCard Card, bool Done);
+
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
+    private KanbanSprintView? Active => Sprints.FirstOrDefault(sprint => sprint.State == KanbanSprintStates.Active);
+    private IEnumerable<KanbanSprintView> Open => Sprints.Where(sprint => sprint.State != KanbanSprintStates.Done);
+    private KanbanSprintView? Planned => Open.FirstOrDefault(sprint => sprint.OptionId == _planId) ?? Open.FirstOrDefault();
+    private IReadOnlyList<PlanItem> Cards => Board.Columns.SelectMany(column => column.Cards.Select(card => new PlanItem(card, column.Group == WikiDatabaseStatusGroups.Complete))).ToList();
+
+    protected override void OnParametersSet()
+    {
+        // Unfinished cards default to the next planned sprint, else a new one.
+        if (_moveTo is null || (_moveTo is { Length: > 0 } id && id != NewSprint && Open.All(sprint => sprint.OptionId != id)))
+            _moveTo = Open.FirstOrDefault(sprint => sprint.State == KanbanSprintStates.Planned)?.OptionId ?? NewSprint;
+    }
+
+    // "21 and 18 points (about 20)": what the last three completed sprints finished.
+    private string? Velocity
+    {
+        get
+        {
+            var done = Sprints.Where(sprint => sprint.State == KanbanSprintStates.Done).TakeLast(3).ToList();
+            if (done.Count == 0) return null;
+            var unit = Unit(done[0]);
+            var each = string.Join(", ", done.Select(sprint => Points(sprint.DonePoints)));
+            return done.Count == 1 ? $"{each} {Unit(done[0], done[0].DonePoints)}" : $"{each} {unit} (about {Points(done.Average(sprint => sprint.DonePoints))})";
+        }
+    }
+
+    private static string Unit(KanbanSprintView sprint) => sprint.UsesEstimates ? "pts" : "cards";
+    // Singular for exactly one: "1 pt", "1 card".
+    private static string Unit(KanbanSprintView sprint, decimal value) => value == 1 ? (sprint.UsesEstimates ? "pt" : "card") : Unit(sprint);
+    private static string Points(decimal value) => value.ToString("0.#", CultureInfo.InvariantCulture);
+    private static string Percent(decimal part, decimal whole) => whole <= 0 ? "0" : Math.Clamp(part * 100 / whole, 0, 100).ToString("0.#", CultureInfo.InvariantCulture);
+    private static decimal PointsOf(KanbanCard card, KanbanSprintView sprint) => sprint.UsesEstimates ? card.Estimate ?? 0 : 1;
+    private int PriorityRank(KanbanCard card) => card.PriorityOptionId is { } id && Board.PriorityOptions.Select(option => option.Id).ToList().IndexOf(id) is >= 0 and var rank ? rank : int.MaxValue;
+
+    private void OpenPlanner(string? sprintId)
+    {
+        _planId = sprintId ?? Open.FirstOrDefault(sprint => sprint.State == KanbanSprintStates.Planned)?.OptionId ?? Active?.OptionId;
+        _start = Today;
+        _planning = true;
+    }
+
+    private void CloseOnEscape(KeyboardEventArgs e)
+    {
+        if (e.Key != "Escape") return;
+        _planning = false;
+        _completing = false;
+    }
+
+    // A card's line in the planner: its ID, title, estimate and current sprint elsewhere.
+    private RenderFragment PlanCard(KanbanCard card, KanbanSprintView plan) => @<span class="kb-plan-card">
+        @if (card.Key is not null) { <span class="kb-card-key">@card.Key</span> }
+        @if (card.Priority is { } priority) { <span class="kb-plan-dot" style="--tone: @priority.Color" title="@priority.Label priority"></span> }
+        <span class="kb-plan-title">@card.Title</span>
+        @if (card.Sprint is { } other && card.SprintOptionId != plan.OptionId) { <span class="kb-plan-other">@other.Label</span> }
+        @if (plan.UsesEstimates) { <span class="kb-plan-points">@(card.Estimate is { } e ? Points(e) : "–")</span> }
+    </span>;
+
+    // Remaining points per day against the straight line from full to empty over the sprint.
+    private RenderFragment Sparkline(KanbanSprintView sprint) => __builder =>
+    {
+        const double width = 132, height = 30;
+        var length = Math.Max(1, sprint.End!.Value.DayNumber - sprint.Start!.Value.DayNumber);
+        var top = (double)Math.Max(1, sprint.Burndown.Max(point => point.Remaining));
+        string X(DateOnly day) => ((day.DayNumber - sprint.Start.Value.DayNumber) * width / length).ToString("0.#", CultureInfo.InvariantCulture);
+        string Y(decimal remaining) => (2 + (height - 4) * (1 - (double)remaining / top)).ToString("0.#", CultureInfo.InvariantCulture);
+        var line = string.Join(" ", sprint.Burndown.Select(point => $"{X(point.Day)},{Y(point.Remaining)}"));
+        var last = sprint.Burndown[^1];
+        <svg class="kb-sprint-burn" viewBox="0 0 @width.ToString(CultureInfo.InvariantCulture) @height.ToString(CultureInfo.InvariantCulture)" width="@width" height="@height" role="img"
+             aria-label="Burndown: @Points(last.Remaining) @Unit(sprint) left of @Points(sprint.Burndown[0].Remaining)">
+            <line class="kb-burn-ideal" x1="0" y1="@Y(sprint.Burndown[0].Remaining)" x2="@width.ToString(CultureInfo.InvariantCulture)" y2="@Y(0)" />
+            <polyline class="kb-burn-actual" points="@line" />
+            <circle class="kb-burn-now" cx="@X(last.Day)" cy="@Y(last.Remaining)" r="2.5" />
+        </svg>
+    };
+
+    private async Task<string> MeAsync() => await CurrentUserAccessor.GetCurrentUsernameAsync();
+
+    private async Task RunAsync(Func<string, Task> action, string? done = null)
+    {
+        _busy = true;
+        try
+        {
+            await action(await MeAsync());
+            await OnChanged.InvokeAsync();
+            if (done is not null) Toasts.Show(done, tone: StatusTone.Success);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            Toasts.Show($"Couldn't do that. {ex.Message}", tone: StatusTone.Danger);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task NewSprintAsync() => RunAsync(async me => _planId = await BoardService.CreateSprintAsync(Board.DatabaseId, string.Empty, me));
+
+    private Task SetCapacityAsync(KanbanSprintView sprint, string? value) =>
+        UpdateAsync(sprint, sprint.Goal, decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var capacity) ? capacity : null);
+
+    private void SetStart(string? value)
+    {
+        if (DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var start)) _start = start;
+    }
+
+    private void SetWeeks(string? value) => _weeks = int.TryParse(value, out var weeks) && weeks is >= 1 and <= 4 ? weeks : 2;
+
+    private Task UpdateAsync(KanbanSprintView sprint, string goal, decimal? capacity) =>
+        RunAsync(me => BoardService.UpdateSprintAsync(Board.DatabaseId, sprint.OptionId, goal, capacity, me));
+
+    private Task AssignAsync(KanbanCard card, string? sprintId) =>
+        Board.Fields.SprintPropertyId is not { } sprintProperty ? Task.CompletedTask
+            : RunAsync(me => BoardService.SetCardsValueAsync(Board.DatabaseId, [card.RowId], sprintProperty, _ => sprintId is null ? null : JsonValue.Create(sprintId), me));
+
+    private Task StartAsync(KanbanSprintView sprint) => RunAsync(async me =>
+    {
+        await BoardService.StartSprintAsync(Board.DatabaseId, sprint.OptionId, _start, _start.AddDays(_weeks * 7 - 1), me);
+        _planning = false;
+    }, $"{sprint.Name} started.");
+
+    private async Task CompleteAsync(KanbanSprintView sprint)
+    {
+        _busy = true;
+        try
+        {
+            var moveTo = _moveTo == NewSprint ? null : _moveTo;
+            var summary = await BoardService.CompleteSprintAsync(Board.DatabaseId, sprint.OptionId, moveTo, await MeAsync());
+            _completing = false;
+            await OnChanged.InvokeAsync();
+            var moved = summary.MovedCount == 0 ? string.Empty
+                : $" {summary.MovedCount} unfinished {(summary.MovedCount == 1 ? "card" : "cards")} moved to {summary.MovedTo ?? "the backlog"}.";
+            Toasts.Show($"{summary.Name} complete: {summary.DoneCount} {(summary.DoneCount == 1 ? "card" : "cards")} done.{moved}", tone: StatusTone.Success);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            Toasts.Show($"Couldn't complete the sprint. {ex.Message}", tone: StatusTone.Danger);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

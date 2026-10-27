@@ -80,6 +80,7 @@
 .kb-fields-subitems li button { color: var(--gws-text-strong); text-decoration: none; }
 .kb-fields-subitems li button:hover, .kb-fields-subitems li button:focus-visible { text-decoration: underline; }
 .kb-fields-subitems li.is-done button { text-decoration: line-through; color: var(--gws-text-soft); }
+.kb-fields-actions { display: flex; flex-wrap: wrap; gap: var(--gws-step-2); }
 .kb-fields-meta { margin: 0; font-size: .75rem; color: var(--gws-text-soft); }
 
 @media (pointer: coarse) {

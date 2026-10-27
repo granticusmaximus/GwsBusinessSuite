@@ -19,6 +19,10 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
     private static readonly string[] DueNames = ["Due", "Due date", "Deadline"];
     private static readonly string[] AssigneeNames = ["Assignee", "Assignees", "Owner"];
     private static readonly string[] EstimateNames = ["Estimate", "Points", "Story points"];
+    private static readonly string[] SprintNames = ["Sprint", "Cycle", "Iteration"];
+    private const string BlockedName = "Blocked";
+    private const string BlockedReasonName = "Blocked reason";
+    private static readonly System.Text.Json.JsonSerializerOptions SettingsJson = new(System.Text.Json.JsonSerializerDefaults.Web);
 
     public async Task<IReadOnlyList<KanbanBoardSummary>> ListBoardsAsync(CancellationToken cancellationToken = default)
     {
@@ -81,6 +85,8 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         {
             await AddAsync("Sprint", WikiDatabasePropertyTypes.Select, [Option("Sprint 1", "#2563eb")]);
         }
+        await AddAsync(BlockedName, WikiDatabasePropertyTypes.Checkbox);
+        await AddAsync(BlockedReasonName, WikiDatabasePropertyTypes.Text);
         await AddAsync("ID", WikiDatabasePropertyTypes.UniqueId, prefix: KeyPrefix(name));
 
         // The database opens as this board in Sentinel too, with a table of every card beside it.
@@ -107,21 +113,42 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             Find(properties, WikiDatabasePropertyTypes.Date, DueNames)?.Id,
             (Find(properties, WikiDatabasePropertyTypes.Person, AssigneeNames) ?? properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.Person))?.Id,
             Find(properties, WikiDatabasePropertyTypes.Number, EstimateNames)?.Id,
-            properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.UniqueId)?.Id);
+            properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.UniqueId)?.Id,
+            Find(properties, WikiDatabasePropertyTypes.Select, SprintNames)?.Id,
+            Find(properties, WikiDatabasePropertyTypes.Checkbox, [BlockedName])?.Id,
+            Find(properties, WikiDatabasePropertyTypes.Text, [BlockedReasonName])?.Id);
+        var settings = await GetSettingsAsync(databaseId, cancellationToken);
+
+        // When each card last moved into the column it's in now; a row from before the log, or
+        // never logged into it, counts from its creation.
+        var entries = (await db.WikiDatabaseRowStatusChanges.AsNoTracking()
+                .Where(change => change.WikiDatabaseId == databaseId && change.PropertyId == status.Id && change.ToOptionId != null)
+                .Select(change => new { change.RowId, change.ToOptionId, change.AtUnixSeconds })
+                .ToListAsync(cancellationToken))
+            .GroupBy(change => (change.RowId, change.ToOptionId!))
+            .ToDictionary(group => group.Key, group => group.Max(change => change.AtUnixSeconds));
 
         var titleProperty = properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.Title);
         var subItems = database.Rows.Where(row => row.ParentRowId is not null).GroupBy(row => row.ParentRowId!.Value).ToDictionary(group => group.Key, group => group.Count());
         var cards = database.Rows
             .Where(row => row.ParentRowId is null)
             .OrderBy(row => row.SortOrder)
-            .Select(row => (Status: WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), status.Id), Card: ToCard(row, properties, titleProperty, fields, subItems)))
+            .Select(row =>
+            {
+                var current = WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), status.Id);
+                var entered = current is not null && entries.TryGetValue((row.Id, current), out var at)
+                    ? DateTimeOffset.FromUnixTimeSeconds(at)
+                    : row.CreatedAt;
+                return (Status: current, Card: ToCard(row, properties, titleProperty, fields, subItems) with { EnteredColumnAt = entered });
+            })
             .ToList();
 
         var options = ColumnOrder(status);
         var known = options.Select(option => option.Id).ToHashSet();
         var columns = options
             .Select(option => new KanbanColumn(option.Id, option.Label, SafeColor(option.Color), option.Group,
-                cards.Where(card => card.Status == option.Id).Select(card => card.Card).ToList()))
+                cards.Where(card => card.Status == option.Id).Select(card => card.Card).ToList(),
+                settings.WipLimits.TryGetValue(option.Id, out var limit) && limit > 0 ? limit : null))
             .ToList();
         var unsorted = cards.Where(card => card.Status is null || !known.Contains(card.Status)).Select(card => card.Card).ToList();
         if (unsorted.Count > 0)
@@ -131,7 +158,8 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         IReadOnlyList<KanbanOption> OptionsOf(Guid? propertyId) => properties.FirstOrDefault(property => property.Id == propertyId) is { } property
             ? WikiDatabasePropertyConfig.GetOptions(property).Select(option => new KanbanOption(option.Id, option.Label, SafeColor(option.Color))).ToList()
             : [];
-        return new KanbanBoard(database.Id, database.Title, database.Icon, fields, columns, OptionsOf(fields.PriorityPropertyId), OptionsOf(fields.LabelsPropertyId));
+        return new KanbanBoard(database.Id, database.Title, database.Icon, fields, columns, OptionsOf(fields.PriorityPropertyId), OptionsOf(fields.LabelsPropertyId),
+            settings, OptionsOf(fields.SprintPropertyId));
     }
 
     public async Task MoveCardAsync(Guid databaseId, Guid rowId, string? optionId, Guid? beforeRowId, string performedBy, CancellationToken cancellationToken = default)
@@ -245,6 +273,332 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         await SetCardsValueAsync(databaseId, [rowId], status.Id, _ => JsonValue.Create(target.Id), performedBy, cancellationToken);
     }
 
+    public async Task<KanbanSettings> GetSettingsAsync(Guid databaseId, CancellationToken cancellationToken = default)
+    {
+        var json = await db.KanbanBoardSettings.AsNoTracking()
+            .Where(row => row.WikiDatabaseId == databaseId)
+            .Select(row => row.SettingsJson)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (string.IsNullOrWhiteSpace(json)) return KanbanSettings.Default;
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<KanbanSettings>(json, SettingsJson) ?? KanbanSettings.Default;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return KanbanSettings.Default;
+        }
+    }
+
+    public async Task SaveSettingsAsync(Guid databaseId, KanbanSettings settings, string performedBy, CancellationToken cancellationToken = default)
+    {
+        if (settings.SwimlaneBy is { } lane && !KanbanSwimlanes.All.Contains(lane))
+            throw new ArgumentException($"'{lane}' isn't a swimlane choice.", nameof(settings));
+        if (settings.WipLimits.Values.Any(limit => limit < 1 || limit > 999))
+            throw new ArgumentException("A WIP limit is a number from 1 to 999.", nameof(settings));
+        if (settings.AgingDays is < 1 or > 365)
+            throw new ArgumentException("Card age is shown after 1 to 365 days.", nameof(settings));
+        var clean = settings with
+        {
+            CardSize = KanbanCardSizes.All.Contains(settings.CardSize) ? settings.CardSize : KanbanCardSizes.Comfortable,
+            Accent = settings.Accent is null ? null : SafeColor(settings.Accent)
+        };
+
+        var now = DateTimeOffset.UtcNow;
+        var row = await db.KanbanBoardSettings.FirstOrDefaultAsync(item => item.WikiDatabaseId == databaseId, cancellationToken);
+        if (row is null)
+        {
+            row = new KanbanBoardSettings { WikiDatabaseId = databaseId, CreatedAt = now, CreatedBy = performedBy };
+            db.KanbanBoardSettings.Add(row);
+        }
+        row.SettingsJson = System.Text.Json.JsonSerializer.Serialize(clean, SettingsJson);
+        row.UpdatedAt = now;
+        row.UpdatedBy = performedBy;
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task SetBlockedAsync(Guid databaseId, Guid rowId, bool blocked, string? reason, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var properties = await db.WikiDatabaseProperties.AsNoTracking().Where(property => property.WikiDatabaseId == databaseId).ToListAsync(cancellationToken);
+        async Task<Guid> EnsureAsync(string name, string type) =>
+            Find(properties, type, [name])?.Id
+            ?? (await databases.SavePropertyAsync(databaseId, new WikiDatabasePropertyEditor { Name = name, Type = type }, performedBy, cancellationToken)).Id;
+        var flag = await EnsureAsync(BlockedName, WikiDatabasePropertyTypes.Checkbox);
+        var why = await EnsureAsync(BlockedReasonName, WikiDatabasePropertyTypes.Text);
+        await SetCardsValueAsync(databaseId, [rowId], flag, _ => JsonValue.Create(blocked), performedBy, cancellationToken);
+        var text = blocked && !string.IsNullOrWhiteSpace(reason) ? reason.Trim() : null;
+        await SetCardsValueAsync(databaseId, [rowId], why, _ => text is null ? null : JsonValue.Create(text), performedBy, cancellationToken);
+    }
+
+    // ---- Flow metrics (K5) ----
+
+    public async Task<KanbanInsights?> GetInsightsAsync(Guid databaseId, int days, CancellationToken cancellationToken = default)
+    {
+        if (days is not (30 or 90 or 180)) throw new ArgumentException("Insights cover 30, 90 or 180 days.", nameof(days));
+        var board = await GetBoardAsync(databaseId, cancellationToken);
+        if (board is null) return null;
+        var status = board.Fields.StatusPropertyId;
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var from = today.AddDays(-(days - 1));
+        var groups = board.Columns.Where(column => column.OptionId is not null).ToDictionary(column => column.OptionId!, column => column.Group);
+        bool Is(string? optionId, string group) => optionId is not null && groups.GetValueOrDefault(optionId) == group;
+
+        var log = (await db.WikiDatabaseRowStatusChanges.AsNoTracking()
+                .Where(change => change.WikiDatabaseId == databaseId && change.PropertyId == status)
+                .Select(change => new { change.RowId, change.ToOptionId, change.AtUnixSeconds })
+                .ToListAsync(cancellationToken))
+            .OrderBy(change => change.AtUnixSeconds)
+            .ToList();
+        var byRow = log.GroupBy(change => change.RowId).ToDictionary(group => group.Key, group => group.ToList());
+        DateTimeOffset At(long seconds) => DateTimeOffset.FromUnixTimeSeconds(seconds);
+        DateOnly Day(DateTimeOffset at) => DateOnly.FromDateTime(at.LocalDateTime);
+
+        var cards = board.Columns.SelectMany(column => column.Cards.Select(card => (Card: card, Column: column))).ToList();
+
+        // Cycle time for cards now complete whose finish falls in the window.
+        var cycles = new List<KanbanCycle>();
+        foreach (var (card, column) in cards.Where(entry => entry.Column.Group == WikiDatabaseStatusGroups.Complete))
+        {
+            if (!byRow.TryGetValue(card.RowId, out var changes)) continue;
+            var finish = changes.LastOrDefault(change => Is(change.ToOptionId, WikiDatabaseStatusGroups.Complete));
+            if (finish is null || Day(At(finish.AtUnixSeconds)) < from) continue;
+            var started = changes.FirstOrDefault(change => Is(change.ToOptionId, WikiDatabaseStatusGroups.InProgress) && change.AtUnixSeconds <= finish.AtUnixSeconds)?.AtUnixSeconds
+                ?? card.CreatedAt.ToUnixTimeSeconds();
+            cycles.Add(new KanbanCycle(card.RowId, card.Key, card.Title, Day(At(finish.AtUnixSeconds)), Math.Max(0, (finish.AtUnixSeconds - started) / 86400d)));
+        }
+        cycles = cycles.OrderBy(cycle => cycle.Finished).ToList();
+        double? Percentile(double p)
+        {
+            if (cycles.Count == 0) return null;
+            var sorted = cycles.Select(cycle => cycle.Days).Order().ToList();
+            return sorted[Math.Clamp((int)Math.Ceiling(p * sorted.Count) - 1, 0, sorted.Count - 1)];
+        }
+
+        // Weeks start on Monday; the first is the one the window opens in.
+        var firstWeek = from.AddDays(-(((int)from.DayOfWeek + 6) % 7));
+        var throughput = new List<KanbanWeek>();
+        for (var week = firstWeek; week <= today; week = week.AddDays(7))
+        {
+            var end = week.AddDays(7);
+            throughput.Add(new KanbanWeek(week, cycles.Count(cycle => cycle.Finished >= week && cycle.Finished < end)));
+        }
+
+        // Cumulative flow: each card's column at the end of each day, from its last logged move by
+        // then; a card with no log (from before logging) sits in its column now from its creation.
+        var flowColumns = board.Columns.Where(column => column.OptionId is not null)
+            .OrderBy(column => column.Group switch { WikiDatabaseStatusGroups.Complete => 0, WikiDatabaseStatusGroups.InProgress => 1, _ => 2 })
+            .ThenByDescending(column => board.Columns.ToList().IndexOf(column))
+            .Select(column => new KanbanFlowColumn(column.OptionId!, column.Label, column.Color, column.Group))
+            .ToList();
+        var index = flowColumns.Select((column, i) => (column.OptionId, i)).ToDictionary(entry => entry.OptionId, entry => entry.i);
+        var flow = new List<KanbanFlowDay>();
+        for (var day = from; day <= today; day = day.AddDays(1))
+        {
+            var endOfDay = new DateTimeOffset(day.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeZoneInfo.Local.GetUtcOffset(day.ToDateTime(TimeOnly.MinValue))).ToUnixTimeSeconds();
+            var counts = new int[flowColumns.Count];
+            foreach (var (card, column) in cards)
+            {
+                string? where;
+                if (byRow.TryGetValue(card.RowId, out var changes))
+                    where = changes.LastOrDefault(change => change.AtUnixSeconds < endOfDay)?.ToOptionId;
+                else
+                    where = card.CreatedAt.ToUnixTimeSeconds() < endOfDay ? column.OptionId : null;
+                if (where is not null && index.TryGetValue(where, out var i)) counts[i]++;
+            }
+            flow.Add(new KanbanFlowDay(day, counts));
+        }
+
+        var aging = cards.Where(entry => entry.Column.Group == WikiDatabaseStatusGroups.InProgress && entry.Card.EnteredColumnAt is not null)
+            .Select(entry => new KanbanAging(entry.Card.RowId, entry.Card.Key, entry.Card.Title, entry.Column.Label, entry.Column.Color,
+                Math.Max(0, (DateTimeOffset.UtcNow - entry.Card.EnteredColumnAt!.Value).TotalDays)))
+            .OrderByDescending(item => item.Days)
+            .ToList();
+
+        return new KanbanInsights(days, from, log.Count == 0 ? null : Day(At(log[0].AtUnixSeconds)), cycles, Percentile(0.5), Percentile(0.85),
+            throughput, flowColumns, flow, aging, cards.Count(entry => entry.Column.Group == WikiDatabaseStatusGroups.InProgress));
+    }
+
+    // ---- Sprints (K4) ----
+
+    private static readonly string[] SprintColors = ["#2563eb", "#7c3aed", "#0891b2", "#d97706", "#15803d", "#db2777"];
+
+    public async Task<IReadOnlyList<KanbanSprintView>> ListSprintsAsync(Guid databaseId, CancellationToken cancellationToken = default)
+    {
+        var database = await databases.GetDatabaseAsync(databaseId, cancellationToken);
+        if (database is null || StatusProperty(database) is not { } status) return [];
+        var properties = database.Properties.ToList();
+        if (Find(properties, WikiDatabasePropertyTypes.Select, SprintNames) is not { } sprintProperty) return [];
+        var estimate = Find(properties, WikiDatabasePropertyTypes.Number, EstimateNames);
+        var complete = CompleteOptionIds(status);
+        var settings = await GetSettingsAsync(databaseId, cancellationToken);
+        var cards = database.Rows.Where(row => row.ParentRowId is null).Select(row =>
+        {
+            var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            return new SprintCard(row.Id, WikiPropertyValues.GetText(values, sprintProperty.Id),
+                WikiPropertyValues.GetText(values, status.Id) is { } option && complete.Contains(option),
+                estimate is null ? null : WikiPropertyValues.GetNumber(values, estimate.Id));
+        }).ToList();
+        // When each finished card last moved into a Complete column.
+        var finishedAt = (await db.WikiDatabaseRowStatusChanges.AsNoTracking()
+                .Where(change => change.WikiDatabaseId == databaseId && change.PropertyId == status.Id && change.ToOptionId != null)
+                .Select(change => new { change.RowId, change.ToOptionId, change.AtUnixSeconds })
+                .ToListAsync(cancellationToken))
+            .Where(change => complete.Contains(change.ToOptionId!))
+            .GroupBy(change => change.RowId)
+            .ToDictionary(group => group.Key, group => DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeSeconds(group.Max(change => change.AtUnixSeconds)).LocalDateTime));
+        var today = DateOnly.FromDateTime(DateTime.Now);
+
+        return WikiDatabasePropertyConfig.GetOptions(sprintProperty).Select(option =>
+        {
+            var sprint = settings.Sprints.FirstOrDefault(item => item.OptionId == option.Id) ?? new KanbanSprint { OptionId = option.Id };
+            // Points when the sprint's cards carry estimates; otherwise each card counts one.
+            var raw = cards.Where(card => card.Sprint == option.Id).ToList();
+            var usesEstimates = raw.Any(card => card.Estimate is not null);
+            var inSprint = raw.Select(card => new SprintPoints(card.RowId, card.Done, usesEstimates ? card.Estimate ?? 0m : 1m)).ToList();
+            return new KanbanSprintView(option.Id, option.Label, SafeColor(option.Color), sprint.Goal, sprint.Start, sprint.End, sprint.State, sprint.Capacity,
+                inSprint.Count, inSprint.Count(card => card.Done), inSprint.Sum(card => card.Points), inSprint.Where(card => card.Done).Sum(card => card.Points),
+                usesEstimates, Burndown(sprint, inSprint, finishedAt, today), sprint.CompletedAt);
+        }).ToList();
+    }
+
+    private sealed record SprintCard(Guid RowId, string? Sprint, bool Done, decimal? Estimate);
+    private sealed record SprintPoints(Guid RowId, bool Done, decimal Points);
+
+    // Points left at the end of each day from the sprint's start to today (or its end): the scope
+    // is the sprint's cards now; a finished card counts from the day it last reached a Complete
+    // column (from the start, for one finished before the log).
+    private static IReadOnlyList<KanbanBurnPoint> Burndown(KanbanSprint sprint, IReadOnlyList<SprintPoints> cards, IReadOnlyDictionary<Guid, DateOnly> finishedAt, DateOnly today)
+    {
+        if (sprint.Start is not { } start) return [];
+        var last = sprint.State == KanbanSprintStates.Done && sprint.CompletedAt is { } completed ? DateOnly.FromDateTime(completed.LocalDateTime) : today;
+        if (sprint.End is { } end && end < last) last = end;
+        if (last < start) return [];
+        var total = cards.Sum(card => card.Points);
+        var points = new List<KanbanBurnPoint>();
+        for (var day = start; day <= last; day = day.AddDays(1))
+        {
+            var finished = cards.Where(card => card.Done && finishedAt.GetValueOrDefault(card.RowId, start) <= day).Sum(card => card.Points);
+            points.Add(new KanbanBurnPoint(day, total - finished));
+        }
+        return points;
+    }
+
+    public async Task<string> CreateSprintAsync(Guid databaseId, string name, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var properties = await db.WikiDatabaseProperties.AsNoTracking().Where(property => property.WikiDatabaseId == databaseId).ToListAsync(cancellationToken);
+        var sprintProperty = Find(properties, WikiDatabasePropertyTypes.Select, SprintNames);
+        var existing = sprintProperty is null ? [] : WikiDatabasePropertyConfig.GetOptions(sprintProperty);
+        var label = string.IsNullOrWhiteSpace(name) ? $"Sprint {existing.Count + 1}" : name.Trim();
+        if (existing.Any(option => string.Equals(option.Label, label, StringComparison.OrdinalIgnoreCase)))
+            throw new ArgumentException($"There's already a sprint called {label}.", nameof(name));
+        var option = new WikiDatabasePropertyOption(Guid.NewGuid().ToString(), label, SprintColors[existing.Count % SprintColors.Length]);
+        await databases.SavePropertyAsync(databaseId, new WikiDatabasePropertyEditor
+        {
+            Id = sprintProperty?.Id,
+            Name = sprintProperty?.Name ?? "Sprint",
+            Type = WikiDatabasePropertyTypes.Select,
+            Options = [.. existing, option]
+        }, performedBy, cancellationToken);
+        await UpdateSettingsAsync(databaseId, settings => settings with
+        {
+            Sprints = [.. settings.Sprints, new KanbanSprint { OptionId = option.Id }]
+        }, performedBy, cancellationToken);
+        return option.Id;
+    }
+
+    public Task UpdateSprintAsync(Guid databaseId, string optionId, string goal, decimal? capacity, string performedBy, CancellationToken cancellationToken = default)
+    {
+        if (capacity is < 0) throw new ArgumentException("Capacity can't be negative.", nameof(capacity));
+        return UpdateSprintEntryAsync(databaseId, optionId, sprint => sprint with { Goal = goal.Trim(), Capacity = capacity }, performedBy, cancellationToken);
+    }
+
+    public async Task StartSprintAsync(Guid databaseId, string optionId, DateOnly start, DateOnly end, string performedBy, CancellationToken cancellationToken = default)
+    {
+        if (end < start) throw new ArgumentException("A sprint ends after it starts.", nameof(end));
+        var settings = await GetSettingsAsync(databaseId, cancellationToken);
+        if (settings.Sprints.Any(sprint => sprint.State == KanbanSprintStates.Active && sprint.OptionId != optionId))
+            throw new InvalidOperationException("Another sprint is running. Complete it first.");
+        await UpdateSprintEntryAsync(databaseId, optionId, sprint => sprint.State == KanbanSprintStates.Done
+            ? throw new InvalidOperationException("That sprint is already complete.")
+            : sprint with { State = KanbanSprintStates.Active, Start = start, End = end }, performedBy, cancellationToken);
+    }
+
+    public async Task<KanbanSprintSummary> CompleteSprintAsync(Guid databaseId, string optionId, string? moveTo, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var sprints = await ListSprintsAsync(databaseId, cancellationToken);
+        var sprint = sprints.FirstOrDefault(item => item.OptionId == optionId) ?? throw new InvalidOperationException("That sprint no longer exists.");
+        if (sprint.State == KanbanSprintStates.Done) throw new InvalidOperationException("That sprint is already complete.");
+        if (moveTo is { Length: > 0 } && (moveTo == optionId || sprints.All(item => item.OptionId != moveTo || item.State == KanbanSprintStates.Done)))
+            throw new ArgumentException("Unfinished cards can only move to a sprint that isn't complete.", nameof(moveTo));
+
+        var target = moveTo ?? await CreateSprintAsync(databaseId, string.Empty, performedBy, cancellationToken);
+        var properties = await db.WikiDatabaseProperties.AsNoTracking().Where(property => property.WikiDatabaseId == databaseId).ToListAsync(cancellationToken);
+        var sprintProperty = Find(properties, WikiDatabasePropertyTypes.Select, SprintNames)!;
+        var status = await StatusPropertyAsync(databaseId, cancellationToken);
+        var complete = CompleteOptionIds(status);
+        var unfinished = (await db.WikiDatabaseRows.AsNoTracking()
+                .Where(row => row.WikiDatabaseId == databaseId && row.TrashedAt == null && row.ParentRowId == null)
+                .Select(row => new { row.Id, row.PropertyValuesJson })
+                .ToListAsync(cancellationToken))
+            .Where(row =>
+            {
+                var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+                return WikiPropertyValues.GetText(values, sprintProperty.Id) == optionId
+                    && !(WikiPropertyValues.GetText(values, status.Id) is { } column && complete.Contains(column));
+            })
+            .Select(row => row.Id)
+            .ToList();
+        await SetCardsValueAsync(databaseId, unfinished, sprintProperty.Id, _ => target.Length == 0 ? null : JsonValue.Create(target), performedBy, cancellationToken);
+        await UpdateSprintEntryAsync(databaseId, optionId, entry => entry with
+        {
+            State = KanbanSprintStates.Done,
+            CompletedAt = DateTimeOffset.UtcNow,
+            DoneCards = sprint.DoneCount,
+            DonePoints = sprint.DonePoints
+        }, performedBy, cancellationToken);
+        var movedTo = target.Length == 0 ? null : WikiDatabasePropertyConfig.GetOptions(sprintProperty).FirstOrDefault(option => option.Id == target)?.Label
+            ?? (await ListSprintsAsync(databaseId, cancellationToken)).FirstOrDefault(item => item.OptionId == target)?.Name;
+        return new KanbanSprintSummary(sprint.Name, sprint.DoneCount, sprint.DonePoints, unfinished.Count, movedTo);
+    }
+
+    private Task UpdateSprintEntryAsync(Guid databaseId, string optionId, Func<KanbanSprint, KanbanSprint> change, string performedBy, CancellationToken cancellationToken) =>
+        UpdateSettingsAsync(databaseId, settings =>
+        {
+            var current = settings.Sprints.FirstOrDefault(sprint => sprint.OptionId == optionId) ?? new KanbanSprint { OptionId = optionId };
+            return settings with { Sprints = [.. settings.Sprints.Where(sprint => sprint.OptionId != optionId), change(current)] };
+        }, performedBy, cancellationToken);
+
+    // Settings changed from what's stored now, not from a copy read earlier.
+    private async Task UpdateSettingsAsync(Guid databaseId, Func<KanbanSettings, KanbanSettings> change, string performedBy, CancellationToken cancellationToken) =>
+        await SaveSettingsAsync(databaseId, change(await GetSettingsAsync(databaseId, cancellationToken)), performedBy, cancellationToken);
+
+    public async Task<int> CompleteSubItemsAsync(Guid databaseId, Guid parentRowId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var open = (await ListSubItemsAsync(databaseId, parentRowId, cancellationToken)).Where(item => !item.Done).ToList();
+        foreach (var item in open) await SetSubItemDoneAsync(databaseId, item.RowId, true, performedBy, cancellationToken);
+        return open.Count;
+    }
+
+    public async Task<Guid> AddCardFromTemplateAsync(Guid databaseId, Guid templateId, string? optionId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var name = await db.WikiDatabaseRowTemplates.AsNoTracking()
+            .Where(template => template.Id == templateId && template.WikiDatabaseId == databaseId)
+            .Select(template => template.Name)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("That card template no longer exists.");
+        var row = await databases.CreateRowFromTemplateAsync(databaseId, templateId, null, performedBy, name, cancellationToken);
+        var status = await StatusPropertyAsync(databaseId, cancellationToken);
+        var target = optionId ?? WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), status.Id);
+        var top = await db.WikiDatabaseRows.AsNoTracking()
+            .Where(item => item.WikiDatabaseId == databaseId && item.Id != row.Id && item.ParentRowId == null && item.TrashedAt == null)
+            .OrderBy(item => item.SortOrder)
+            .Select(item => new { item.Id, item.PropertyValuesJson })
+            .ToListAsync(cancellationToken);
+        var first = top.FirstOrDefault(item => (WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(item.PropertyValuesJson), status.Id) ?? string.Empty) == (target ?? string.Empty));
+        await MoveCardAsync(databaseId, row.Id, target, first?.Id, performedBy, cancellationToken);
+        return row.Id;
+    }
+
     public async Task TrashCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default)
     {
         foreach (var rowId in rowIds.Distinct()) await databases.TrashRowAsync(databaseId, rowId, performedBy, cancellationToken);
@@ -341,6 +695,15 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
                 ? new KanbanLabel(option.Label, SafeColor(option.Color)) : null;
         }
 
+        KanbanLabel? sprint = null;
+        string? sprintId = null;
+        if (Property(fields.SprintPropertyId) is { } sprintProperty && WikiPropertyValues.GetText(values, sprintProperty.Id) is { } chosenSprint)
+        {
+            sprintId = chosenSprint;
+            sprint = WikiDatabasePropertyConfig.GetOptions(sprintProperty).FirstOrDefault(option => option.Id == chosenSprint) is { } sprintOption
+                ? new KanbanLabel(sprintOption.Label, SafeColor(sprintOption.Color)) : null;
+        }
+
         var checklist = WikiBlockJson.ParseBlocks(row.BlocksJson).Where(block => block.Type == WikiBlockTypes.ToDo && block.PlainText.Trim().Length > 0).ToList();
         return new KanbanCard(
             row.Id,
@@ -357,7 +720,12 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             checklist.Count,
             subItems.GetValueOrDefault(row.Id),
             row.CreatedAt,
-            row.UpdatedAt ?? row.CreatedAt);
+            row.UpdatedAt ?? row.CreatedAt,
+            fields.PriorityPropertyId is { } priorityField ? WikiPropertyValues.GetText(values, priorityField) : null,
+            sprint,
+            sprintId,
+            fields.BlockedPropertyId is { } blockedId && WikiPropertyValues.GetCheckbox(values, blockedId),
+            fields.BlockedReasonPropertyId is { } reasonId ? WikiPropertyValues.GetText(values, reasonId) : null);
     }
 
     // Option colours are typed by people in Sentinel and end up in style attributes, so only a hex

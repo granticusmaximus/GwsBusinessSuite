@@ -1,0 +1,122 @@
+/* Sprints on a board (Boards K4). */
+.kb-sprint {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--gws-step-2) var(--gws-step-4);
+    padding: var(--gws-step-2) var(--gws-step-3);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md, 10px);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--gws-sidebar-accent) 8%, var(--gws-panel-bg)), var(--gws-panel-bg) 60%);
+    font-size: .8125rem;
+}
+
+.kb-sprint-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-weight: 700;
+    color: color-mix(in srgb, var(--tone) 75%, var(--gws-text-strong));
+    background: color-mix(in srgb, var(--tone) 18%, transparent);
+}
+
+.kb-sprint-goal { color: var(--gws-text-strong); font-weight: 500; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-sprint-days, .kb-sprint-none { color: var(--gws-text-soft); font-variant-numeric: tabular-nums; }
+.kb-sprint-none { display: inline-flex; align-items: center; gap: 6px; }
+.kb-sprint-progress { display: inline-flex; align-items: center; gap: var(--gws-step-2); font-variant-numeric: tabular-nums; color: var(--gws-text-soft); }
+.kb-sprint-bar { width: 6rem; height: 6px; overflow: hidden; border-radius: 999px; background: var(--gws-panel-border); }
+.kb-sprint-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--gws-status-success-fill); }
+.kb-sprint-actions { display: inline-flex; gap: var(--gws-step-2); margin-inline-start: auto; }
+
+.kb-sprint-burn { display: block; overflow: visible; }
+.kb-burn-ideal { stroke: var(--gws-text-soft); stroke-width: 1; stroke-dasharray: 3 3; opacity: .6; }
+.kb-burn-actual { fill: none; stroke: var(--gws-sidebar-accent); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.kb-burn-now { fill: var(--gws-sidebar-accent); }
+
+/* The planner and the complete dialog (their frame, .kb-modal, is in app.css). */
+.kb-complete { width: min(30rem, calc(100vw - 2rem)); }
+.kb-plan-pick { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gws-step-2); }
+.kb-plan-pick select { width: auto; min-width: 12rem; }
+
+.kb-plan-fields {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--gws-step-2) var(--gws-step-3);
+    align-items: center;
+    font-size: .875rem;
+}
+
+.kb-plan-fields label { color: var(--gws-text-soft); }
+.kb-plan-inline { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gws-step-2); }
+.kb-plan-inline > input, .kb-plan-inline > select { width: auto; }
+.kb-plan-hint { font-size: .8125rem; color: var(--gws-text-soft); }
+
+.kb-plan-lists { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gws-step-4); min-height: 0; }
+
+.kb-plan-lists h3 {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--gws-step-2);
+    margin: 0 0 var(--gws-step-2);
+    font-size: .875rem;
+    font-weight: 700;
+}
+
+.kb-plan-lists h3 span { font-weight: 500; color: var(--gws-text-soft); font-variant-numeric: tabular-nums; }
+.kb-plan-lists h3 span.is-over { color: var(--gws-status-danger-text); font-weight: 700; }
+
+.kb-plan-lists ul {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 46dvh;
+    margin: 0;
+    padding: var(--gws-step-2);
+    overflow-y: auto;
+    list-style: none;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md, 10px);
+    background: var(--gws-panel-bg-2);
+}
+
+.kb-plan-lists li { display: flex; align-items: center; gap: var(--gws-step-2); min-width: 0; padding: 4px 6px; border-radius: 6px; }
+.kb-plan-lists li:hover { background: color-mix(in srgb, var(--gws-panel-border) 40%, transparent); }
+.kb-plan-lists li.is-done .kb-plan-title { text-decoration: line-through; color: var(--gws-text-soft); }
+.kb-plan-empty { color: var(--gws-text-soft); font-size: .8125rem; }
+
+.kb-plan-move {
+    display: inline-grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 1.75rem;
+    height: 1.75rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: 6px;
+    color: var(--gws-text-strong);
+    background: transparent;
+}
+
+.kb-plan-move:hover:not(:disabled) { border-color: var(--gws-sidebar-accent); color: var(--gws-sidebar-accent); }
+.kb-plan-card { display: flex; align-items: center; gap: var(--gws-step-2); min-width: 0; flex: 1; font-size: .875rem; }
+.kb-plan-card .kb-card-key { font-family: var(--gws-font-mono); font-size: .6875rem; color: var(--gws-text-soft); }
+.kb-plan-dot { flex: 0 0 auto; width: .5rem; height: .5rem; border-radius: 50%; background: var(--tone); }
+.kb-plan-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-plan-other { flex: 0 0 auto; padding: 0 6px; border-radius: 999px; font-size: .6875rem; color: var(--gws-text-soft); background: var(--gws-panel-bg); }
+.kb-plan-points { margin-inline-start: auto; font-variant-numeric: tabular-nums; color: var(--gws-text-soft); }
+
+.kb-complete-move { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; font-size: .875rem; }
+.kb-complete-move legend { margin-bottom: 4px; font-size: .875rem; font-weight: 600; }
+.kb-complete-move label { display: flex; align-items: center; gap: var(--gws-step-2); }
+
+@container gws-main (max-width: 767.98px) {
+    .kb-plan-lists { grid-template-columns: minmax(0, 1fr); }
+    .kb-sprint-actions { margin-inline-start: 0; }
+}
+
+@media (pointer: coarse) {
+    .kb-plan-move { width: 44px; height: 44px; }
+    .kb-complete-move label { min-height: 44px; }
+}

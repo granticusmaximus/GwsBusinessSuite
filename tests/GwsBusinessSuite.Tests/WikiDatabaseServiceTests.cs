@@ -1853,7 +1853,6 @@ public sealed class WikiDatabaseServiceTests
 
     [Theory]
     [InlineData(WikiDatabasePropertyTypes.Relation)]
-    [InlineData(WikiDatabasePropertyTypes.Person)]
     [InlineData(WikiDatabasePropertyTypes.Files)]
     public async Task SaveInlineCellAsync_ShouldRejectArrayShapedPropertyTypes(string propertyType)
     {
@@ -1884,6 +1883,23 @@ public sealed class WikiDatabaseServiceTests
         await action.Should().ThrowAsync<InvalidOperationException>();
         var reloaded = await service.GetDatabaseAsync(database.Id);
         reloaded!.Rows.Single().PropertyValuesJson.Should().NotContain("some-scalar-value");
+    }
+
+    [Fact]
+    public async Task SaveInlineCellAsync_ShouldSavePeopleAsTheArrayTheyAreReadBackAs()
+    {
+        // Person is the one array-shaped type this takes (board rules assign people): usernames,
+        // comma-separated, saved as an array - never the plain string the guard above prevents.
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var database = await service.CreateDatabaseAsync("Tasks", null, "u");
+        var owner = await service.SavePropertyAsync(database.Id, new WikiDatabasePropertyEditor { Name = "Owner", Type = WikiDatabasePropertyTypes.Person }, "u");
+        var row = await service.SaveRowAsync(database.Id, new WikiDatabaseRowEditor(), "u");
+
+        await service.SaveInlineCellAsync(database.Id, row.Id, owner.Id, "grant, sam ,grant", "editor");
+
+        var values = WikiPropertyValues.ParseObject((await service.GetDatabaseAsync(database.Id))!.Rows.Single().PropertyValuesJson);
+        values[owner.Id.ToString()]!.AsArray().Select(name => name!.GetValue<string>()).Should().Equal("grant", "sam");
     }
 
     [Fact]

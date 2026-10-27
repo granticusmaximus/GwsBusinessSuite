@@ -1,0 +1,158 @@
+/* A board's flow (Boards K5): thin marks, hairline grid, text in text colours, numbers tabular. */
+.kbi {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--gws-step-4);
+    padding-bottom: var(--gws-step-5);
+    --kbi-accent: var(--gws-sidebar-accent);
+    --kbi-grid: color-mix(in srgb, var(--gws-panel-border) 70%, transparent);
+}
+
+.kbi-range { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gws-step-2); }
+
+.kbi-range-btn {
+    padding: 4px 12px;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: 999px;
+    font-size: .8125rem;
+    color: var(--gws-text-soft);
+    background: transparent;
+}
+
+.kbi-range-btn.is-on { color: var(--gws-text-strong); border-color: var(--kbi-accent); background: color-mix(in srgb, var(--kbi-accent) 14%, transparent); }
+.kbi-note { display: inline-flex; align-items: center; gap: 6px; font-size: .75rem; color: var(--gws-text-soft); }
+
+.kbi-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--gws-step-3); }
+
+.kbi-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--gws-step-3) var(--gws-step-4);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md, 10px);
+    background: var(--gws-panel-bg);
+}
+
+.kbi-tile-label { font-size: .8125rem; color: var(--gws-text-soft); }
+.kbi-tile-value { font-size: 1.625rem; font-weight: 650; color: var(--gws-text-strong); font-variant-numeric: tabular-nums; }
+.kbi-tile-sub { font-size: .75rem; color: var(--gws-text-soft); }
+
+.kbi-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gws-step-2);
+    min-width: 0;
+    padding: var(--gws-step-3) var(--gws-step-4);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md, 10px);
+    background: var(--gws-panel-bg);
+}
+
+.kbi-card-head h3 { margin: 0; font-size: .9375rem; font-weight: 650; color: var(--gws-text-strong); }
+.kbi-card-head p { margin: 2px 0 0; font-size: .8125rem; color: var(--gws-text-soft); }
+.kbi-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--gws-step-4); }
+.kbi-empty { margin: var(--gws-step-3) 0; font-size: .875rem; color: var(--gws-text-soft); }
+
+/* A chart keeps its drawn size; a narrow screen scrolls it sideways instead of shrinking its text. */
+.kbi-scroll { overflow-x: auto; }
+.kbi-svg { display: block; width: 100%; min-width: 26rem; height: auto; overflow: visible; }
+.kbi-wide .kbi-svg { min-width: 36rem; }
+
+.kbi-grid { stroke: var(--kbi-grid); stroke-width: 1; }
+/* Chart text is written as markup (see SvgText), so it's reached with ::deep. */
+.kbi ::deep .kbi-axis { font-size: 11px; fill: var(--gws-text-soft); font-variant-numeric: tabular-nums; }
+.kbi ::deep :is(.kbi-value, .kbi-direct, .kbi-ref-label) { font-size: 11px; font-weight: 600; fill: var(--gws-text-strong); font-variant-numeric: tabular-nums; }
+.kbi ::deep .kbi-ref-label { font-weight: 500; fill: var(--gws-text-soft); }
+
+.kbi-band { fill: color-mix(in srgb, var(--tone) 30%, transparent); }
+.kbi-band-edge { fill: none; stroke: var(--tone); stroke-width: 2; stroke-linejoin: round; }
+.kbi-crosshair { stroke: var(--gws-text-soft); stroke-width: 1; pointer-events: none; }
+.kbi-bar { fill: var(--kbi-accent); }
+.kbi-ref { stroke: var(--gws-text-soft); stroke-width: 1; opacity: .7; }
+.kbi-dot { fill: var(--kbi-accent); stroke: var(--gws-panel-bg); stroke-width: 2; pointer-events: none; }
+
+.kbi-hit { fill: transparent; cursor: default; }
+.kbi-hit-dot { cursor: pointer; }
+.kbi-hit-dot:focus-visible { outline: none; stroke: var(--kbi-accent); stroke-width: 2; }
+rect.kbi-hit.is-hover { fill: color-mix(in srgb, var(--gws-text-soft) 8%, transparent); }
+
+.kbi-legend { display: flex; flex-wrap: wrap; gap: 4px var(--gws-step-4); margin: 0; padding: 0; list-style: none; font-size: .8125rem; color: var(--gws-text-soft); }
+.kbi-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.kbi-swatch { display: inline-block; width: .75rem; height: .75rem; border-radius: 3px; background: var(--tone); }
+
+.kbi-data summary { font-size: .75rem; color: var(--gws-text-soft); cursor: pointer; }
+.kbi-data table { margin: var(--gws-step-2) 0 0; font-size: .8125rem; font-variant-numeric: tabular-nums; }
+
+.kbi-aging { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+
+.kbi-aging li {
+    display: grid;
+    grid-template-columns: minmax(0, 22rem) minmax(6rem, 1fr) 3.5rem auto;
+    align-items: center;
+    gap: var(--gws-step-3);
+}
+
+.kbi-aging-card {
+    display: flex;
+    align-items: center;
+    gap: var(--gws-step-2);
+    min-width: 0;
+    padding: 2px 0;
+    text-align: left;
+    color: var(--gws-text-strong);
+    background: transparent;
+    border: 0;
+}
+
+.kbi-aging-card:hover .kbi-aging-title, .kbi-aging-card:focus-visible .kbi-aging-title { text-decoration: underline; }
+.kbi-key { flex: 0 0 auto; font-family: var(--gws-font-mono); font-size: .6875rem; color: var(--gws-text-soft); }
+.kbi-aging-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; }
+.kbi-aging-column { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; font-size: .75rem; color: var(--gws-text-soft); }
+.kbi-aging-column .kbi-swatch { width: .5rem; height: .5rem; border-radius: 50%; }
+.kbi-aging-track { position: relative; height: 10px; border-radius: 999px; background: color-mix(in srgb, var(--gws-panel-border) 50%, transparent); }
+.kbi-aging-bar { display: block; height: 100%; border-radius: 999px; background: var(--kbi-accent); }
+.kbi-aging-bar.is-late { background: var(--gws-status-warning-fill); }
+.kbi-aging-p85 { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--gws-text-soft); }
+.kbi-aging-days { font-size: .8125rem; font-weight: 600; color: var(--gws-text-strong); font-variant-numeric: tabular-nums; text-align: right; }
+
+.kbi-late {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: .6875rem;
+    font-weight: 700;
+    color: var(--gws-status-warning-text);
+    background: color-mix(in srgb, var(--gws-status-warning-fill) 18%, transparent);
+}
+
+.kbi-tip {
+    position: absolute;
+    z-index: 20;
+    min-width: 9rem;
+    padding: 8px 10px;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: 8px;
+    background: var(--gws-panel-bg-2);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .35);
+    pointer-events: none;
+    font-size: .8125rem;
+}
+
+.kbi-tip ::deep .kbi-tip-title { margin-bottom: 4px; font-size: .75rem; color: var(--gws-text-soft); }
+.kbi-tip ::deep .kbi-tip-row { display: flex; align-items: center; gap: 6px; color: var(--gws-text-soft); }
+.kbi-tip ::deep .kbi-tip-row strong { color: var(--gws-text-strong); font-variant-numeric: tabular-nums; }
+.kbi-tip ::deep .kbi-tip-key { width: 12px; height: 2px; border-radius: 1px; background: var(--tone); }
+
+@container gws-main (max-width: 991.98px) {
+    .kbi-pair { grid-template-columns: minmax(0, 1fr); }
+}
+
+@container gws-main (max-width: 575.98px) {
+    .kbi-aging li { grid-template-columns: minmax(0, 1fr) 3rem; }
+    .kbi-aging-track { grid-column: 1 / -1; grid-row: 2; }
+    .kbi-late { grid-column: 1 / -1; justify-self: start; }
+}

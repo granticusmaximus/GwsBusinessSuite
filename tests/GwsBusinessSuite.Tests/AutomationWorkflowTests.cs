@@ -1440,6 +1440,84 @@ public sealed class AutomationWorkflowTests
         (await db.AutomationWorkflows.AnyAsync(workflow => workflow.Id == created.WorkflowId)).Should().BeFalse();
     }
 
+    [Fact]
+    public async Task BoardRules_ShouldRunWhenACardEntersAColumn_NotOnLaterSaves_AndNeverForSubItems()
+    {
+        // Boards K6, end to end through the real engine: a drag (MoveRowAsync) now fires rules, the
+        // changedTo trigger runs a rule once on entry, CardsOnly keeps sub-items out, and the
+        // complete-sub-items and assign-a-person actions write through.
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "user", Role = AppRoles.Admin, IsActive = true });
+        await db.SaveChangesAsync();
+
+        var serviceProvider = new FakeServiceProvider();
+        var registry = new AutomationNodeRegistry(new FakeHttpClient(), dbContextFactory: new FakeAppDbContextFactory(options), serviceProvider: serviceProvider);
+        var workflowService = new AutomationWorkflowService(db, registry, TimeProvider.System);
+        var credentials = new AutomationCredentialService(db, new FakeSecretProtector(), TimeProvider.System);
+        var executionService = new AutomationExecutionService(db, workflowService, registry, credentials, TimeProvider.System);
+        var triggerService = new AutomationTriggerService(db, workflowService, executionService, credentials, TimeProvider.System, NullLogger<AutomationTriggerService>.Instance);
+        var databases = new WikiDatabaseService(db, triggerService);
+        var boards = new KanbanBoardService(db, databases);
+        serviceProvider.Register<IWikiDatabaseService>(databases);
+        serviceProvider.Register<GwsBusinessSuite.Application.Boards.IKanbanBoardService>(boards);
+        var rules = new SentinelDatabaseRuleService(db, workflowService, databases);
+
+        var boardId = await boards.CreateBoardAsync("Work", "personal", "user");
+        var notes = await databases.SavePropertyAsync(boardId, new WikiDatabasePropertyEditor { Name = "Notes", Type = WikiDatabasePropertyTypes.Text }, "user");
+        var board = (await boards.GetBoardAsync(boardId))!;
+        var todo = board.Columns.Single(column => column.Label == "To do").OptionId;
+        var doing = board.Columns.Single(column => column.Label == "Doing").OptionId;
+        var done = board.Columns.Single(column => column.Label == "Done").OptionId;
+        var status = board.Fields.StatusPropertyId;
+        var assignee = board.Fields.AssigneePropertyId!.Value;
+        SentinelDatabaseRule Enters(string? option, string then, Guid? field = null, string? value = null, bool onlyIfEmpty = false) =>
+            new(boardId, SentinelDatabaseRuleKinds.WhenPropertyBecomes, status, option, then, field, value, OnlyIfEmpty: onlyIfEmpty, CardsOnly: true);
+
+        (await rules.CreateAsync(Enters(done, SentinelDatabaseRuleKinds.ThenSetProperty, notes.Id, "moved to done"), "user"))
+            .Summary.Should().Be("When a card enters Done, set Notes to moved to done");
+        (await rules.CreateAsync(Enters(done, SentinelDatabaseRuleKinds.ThenCompleteSubItems), "user"))
+            .Summary.Should().Be("When a card enters Done, complete its sub-items");
+        await rules.CreateAsync(Enters(doing, SentinelDatabaseRuleKinds.ThenSetProperty, assignee, "user", onlyIfEmpty: true), "user");
+        (await rules.ListAsync(boardId)).Where(rule => rule.WhenValue == done)
+            .Should().HaveCount(2).And.OnlyContain(rule => rule.WhenOperator == "changedTo" && rule.WhenPropertyId == status);
+
+        async Task<System.Text.Json.Nodes.JsonObject> ValuesOf(Guid rowId) =>
+            WikiPropertyValues.ParseObject((await db.WikiDatabaseRows.AsNoTracking().SingleAsync(row => row.Id == rowId)).PropertyValuesJson);
+
+        var card = await boards.AddCardAsync(boardId, todo, "Ship it", "user");
+        var subItem = await boards.AddSubItemAsync(boardId, card, "Write the notes", "user");
+        (await ValuesOf(card))[notes.Id.ToString()].Should().BeNull();
+
+        // Into Doing: assigned to the person the rule names.
+        await boards.MoveCardAsync(boardId, card, doing, null, "user");
+        (await ValuesOf(card))[assignee.ToString()]!.AsArray().Select(name => name!.GetValue<string>()).Should().Equal("user");
+
+        // Into Done (a drag): both Done rules run.
+        await boards.MoveCardAsync(boardId, card, done, null, "user");
+        WikiPropertyValues.GetText(await ValuesOf(card), notes.Id).Should().Be("moved to done");
+        WikiPropertyValues.GetText(await ValuesOf(subItem), status).Should().Be(done);
+
+        // Saved again while still in Done: the rule doesn't run again.
+        await boards.SetCardsValueAsync(boardId, [card], notes.Id, _ => System.Text.Json.Nodes.JsonValue.Create("edited by hand"), "user");
+        await boards.SetCardsValueAsync(boardId, [card], board.Fields.EstimatePropertyId!.Value, _ => System.Text.Json.Nodes.JsonValue.Create(3m), "user");
+        WikiPropertyValues.GetText(await ValuesOf(card), notes.Id).Should().Be("edited by hand");
+
+        // A sub-item ticked off is not a card entering Done.
+        var other = await boards.AddCardAsync(boardId, todo, "Later", "user");
+        var otherSub = await boards.AddSubItemAsync(boardId, other, "Step", "user");
+        await boards.SetSubItemDoneAsync(boardId, otherSub, true, "user");
+        (await ValuesOf(otherSub))[notes.Id.ToString()].Should().BeNull();
+
+        // Reordering inside a column changes no value and fires nothing.
+        var executions = await db.AutomationExecutions.CountAsync();
+        await boards.MoveCardAsync(boardId, other, todo, null, "user");
+        (await db.AutomationExecutions.CountAsync()).Should().Be(executions);
+    }
+
     // --- Part 4.2: cross-module triggers (CRM deal stage changed, CMS page published) ---
 
     [Fact]

@@ -28,7 +28,7 @@ public sealed partial class AutomationNodeRegistry(
         new("core.manualTrigger", 1, "Manual Trigger", "Starts when you select Run workflow.", "Triggers", "bi-play-circle-fill", true, ["main"], "{}"),
         new("core.webhookTrigger", 1, "Webhook Trigger", "Starts an active workflow from its public webhook path.", "Triggers", "bi-broadcast-pin", true, ["main"], "{\"path\":\"incoming-event\"}"),
         new("core.scheduleTrigger", 1, "Schedule Trigger", "Starts an active workflow at a recurring minute interval, or on a cron schedule. Set cronExpression (5 fields: minute hour day-of-month month day-of-week - '*', numbers, comma lists, 'N-M' ranges, and '*/S' steps only, e.g. \"0 9 * * 1\" for every Monday at 9am) to use cron instead of intervalMinutes; cronExpression wins if both are set.", "Triggers", "bi-clock-fill", true, ["main"], "{\"intervalMinutes\":60,\"cronExpression\":\"\"}"),
-        new("database.rowChangedTrigger", 1, "Database Row Changed", "Starts an active workflow when a row's properties change in a Sentinel database. Paste the database's id (visible in its Sentinel URL) into wikiDatabaseId. Optionally add a conditions array (each {propertyId, operator: equals|notEquals|contains, value}, ANDed together) so the workflow only starts when the row's new values match - leave conditions empty/absent to fire on any change, as before.", "Triggers", "bi-table", true, ["main"], "{\"wikiDatabaseId\":\"\",\"conditions\":[]}"),
+        new("database.rowChangedTrigger", 1, "Database Row Changed", "Starts an active workflow when a row's properties change in a Sentinel database. Paste the database's id (visible in its Sentinel URL) into wikiDatabaseId. Optionally add a conditions array (each {propertyId, operator: equals|notEquals|contains|changedTo, value}, ANDed together) so the workflow only starts when the row's new values match - changedTo only matches when the value has just become that (a card entering a board column) - leave conditions empty/absent to fire on any change, as before. The trigger's output carries rowId, isNew, values, previousValues and parentRowId (set for a sub-item).", "Triggers", "bi-table", true, ["main"], "{\"wikiDatabaseId\":\"\",\"conditions\":[]}"),
         new("crm.dealStageChangedTrigger", 1, "CRM Deal Stage Changed", "Starts an active workflow when a CRM deal's pipeline stage changes. Leave toStage empty to fire on any stage change, or set it (e.g. \"Won\") to fire only when a deal reaches that stage.", "Triggers", "bi-graph-up-arrow", true, ["main"], "{\"toStage\":\"\"}"),
         new("cms.pagePublishedTrigger", 1, "CMS Page Published", "Starts an active workflow when a CMS page transitions from draft to published.", "Triggers", "bi-file-earmark-richtext", true, ["main"], "{}"),
         new("sentinel.chatPromptSubmittedTrigger", 1, "SentinelGPT Prompt Submitted", "Starts an active workflow immediately after a user sends a chat message to SentinelGPT. Runs in the background at lower priority than the chat itself, so it never delays or blocks that response.", "Triggers", "bi-chat-dots-fill", true, ["main"], "{}"),
@@ -42,6 +42,7 @@ public sealed partial class AutomationNodeRegistry(
         new("wiki.pageChangedTrigger", 1, "Sentinel Page Changed", "Starts an active workflow when a specific Sentinel page's content changes (its blocks - not a metadata-only save like renaming or changing its icon). Paste the page's id (visible in its Sentinel URL) into wikiPageId. Like Database Row Changed, a save performed by this workflow's own wiki.createPage/wiki.appendBlock nodes never re-fires this trigger, so a workflow cannot loop against a page it also writes to.", "Triggers", "bi-file-earmark-text", true, ["main"], "{\"wikiPageId\":\"\"}"),
         new("database.setRowProperty", 1, "Set Database Row Property", "Sets one property on a Sentinel database row. Paste the database, row, and property ids and an optional {{ $json.path }} expression for the value. Never re-triggers a Database Row Changed workflow, so it cannot cause an automation loop - chaining a second workflow off this write is not supported.", "Actions", "bi-pencil-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"rowId\":\"{{ $json.rowId }}\",\"propertyId\":\"\",\"value\":\"\"}", IsIdempotent: false),
         new("database.addRow", 1, "Add Database Row", "Creates a new row in a Sentinel database. propertyValues maps property ids to values (string values support {{ $json.path }} expressions); parentRowId is optional and nests the new row as a sub-item. Like Set Database Row Property, this never re-triggers a Database Row Changed workflow.", "Actions", "bi-plus-square", false, ["main"], "{\"wikiDatabaseId\":\"\",\"parentRowId\":\"\",\"propertyValues\":{}}", IsIdempotent: false),
+        new("database.completeSubItems", 1, "Complete Sub-items", "Marks every open sub-item of a Sentinel database row done - its Status set to the first option in the Complete group, as ticking it on a board does. Used by the board rule \"complete its sub-items\". Like Set Database Row Property, this never re-triggers a Database Row Changed workflow.", "Actions", "bi-check2-all", false, ["main"], "{\"wikiDatabaseId\":\"\",\"rowId\":\"{{ $json.rowId }}\"}", IsIdempotent: false),
         new("wiki.createPage", 1, "Sentinel: Create Page", "Creates a new Sentinel wiki page. title and blocksJson support {{ $json.path }} expressions; parentWikiPageId is optional (omit to create a top-level page) and, when set, requires this workflow's owner to have Edit access to that parent. Never re-triggers a Sentinel Page Changed workflow.", "Actions", "bi-file-earmark-plus", false, ["main"], "{\"title\":\"{{ $json.title }}\",\"parentWikiPageId\":\"\",\"blocksJson\":\"[]\"}", IsIdempotent: false),
         new("wiki.appendBlock", 1, "Sentinel: Append Block", "Appends one paragraph block to an existing Sentinel page. text supports {{ $json.path }} expressions. Requires this workflow's owner to have Edit access to the target page. Like Add Database Row, never re-triggers a Sentinel Page Changed workflow.", "Actions", "bi-file-earmark-text", false, ["main"], "{\"wikiPageId\":\"\",\"text\":\"{{ $json.text }}\"}", IsIdempotent: false),
         new("wiki.updatePage", 1, "Sentinel: Update Page", "Replaces an existing Sentinel page's entire body with new content. blocksJson is the page's complete new block array (the same shape wiki.createPage accepts) and replaces everything currently on the page - use wiki.appendBlock instead if you only want to add to what's already there. title is optional; leave it blank to keep the page's current title. Requires this workflow's owner to have Edit access to the target page. Never re-triggers a Sentinel Page Changed workflow.", "Actions", "bi-file-earmark-arrow-up", false, ["main"], "{\"wikiPageId\":\"\",\"title\":\"\",\"blocksJson\":\"[]\"}", IsIdempotent: false),
@@ -227,6 +228,7 @@ public sealed partial class AutomationNodeRegistry(
             "wiki.pageChangedTrigger" => SingleOutput("main", input),
             "database.setRowProperty" => await ExecuteSetRowPropertyAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "database.addRow" => await ExecuteAddRowAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
+            "database.completeSubItems" => await ExecuteCompleteSubItemsAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "wiki.createPage" => await ExecuteWikiCreatePageAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "wiki.appendBlock" => await ExecuteWikiAppendBlockAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
             "wiki.updatePage" => await ExecuteWikiUpdatePageAsync(node, input, workflowOwnerUsername, nodeOutputsByName, allowDownstreamTriggers, cancellationToken),
@@ -514,6 +516,29 @@ public sealed partial class AutomationNodeRegistry(
             ["rowId"] = rowId.ToString(),
             ["propertyId"] = propertyId.ToString()
         };
+        return SingleOutput("main", JsonSerializer.SerializeToElement(output));
+    }
+
+    private async Task<AutomationNodeRunResult> ExecuteCompleteSubItemsAsync(
+        AutomationNodeSnapshot node,
+        JsonElement input,
+        string? workflowOwnerUsername,
+        IReadOnlyDictionary<string, JsonElement>? nodeOutputsByName,
+        bool allowDownstreamTriggers,
+        CancellationToken cancellationToken)
+    {
+        var boards = serviceProvider?.GetService(typeof(Boards.IKanbanBoardService)) as Boards.IKanbanBoardService
+            ?? throw new InvalidOperationException("Database writes are not available to the automation engine.");
+        var parameters = ParseObject(node.ParametersJson, node.Name);
+        var source = RequireObject(input, node.Name);
+        var wikiDatabaseId = ParseRequiredGuid(parameters["wikiDatabaseId"]?.GetValue<string>(), node.Name, "wikiDatabaseId");
+        var rowId = ParseRequiredGuid(ResolveText(parameters["rowId"]?.GetValue<string>() ?? string.Empty, input, nodeOutputsByName), node.Name, "rowId");
+        // Same access model and actor rule as Set Database Row Property.
+        await EnsureCanEditDatabaseAsync(wikiDatabaseId, workflowOwnerUsername, node.Name, cancellationToken);
+
+        var completed = await boards.CompleteSubItemsAsync(wikiDatabaseId, rowId, ChainingActor(allowDownstreamTriggers), cancellationToken);
+        var output = source.DeepClone().AsObject();
+        output["subItemsCompleted"] = completed;
         return SingleOutput("main", JsonSerializer.SerializeToElement(output));
     }
 
@@ -1219,7 +1244,8 @@ public sealed partial class AutomationNodeRegistry(
             "equals" => string.Equals(left, right, StringComparison.OrdinalIgnoreCase),
             "notequals" => !string.Equals(left, right, StringComparison.OrdinalIgnoreCase),
             "contains" => left.Contains(right, StringComparison.OrdinalIgnoreCase),
-            "exists" => !string.IsNullOrWhiteSpace(left),
+            // An empty list or object (a Person or Multi-select cleared) is as empty as no value.
+            "exists" => !string.IsNullOrWhiteSpace(left) && left.Trim() is not ("[]" or "{}"),
             "greaterthan" => decimal.TryParse(left, out var l) && decimal.TryParse(right, out var r) && l > r,
             "lessthan" => decimal.TryParse(left, out var l) && decimal.TryParse(right, out var r) && l < r,
             _ => throw new InvalidOperationException($"If node operator '{op}' is not supported.")

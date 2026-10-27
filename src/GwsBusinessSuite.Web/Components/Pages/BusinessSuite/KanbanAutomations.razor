@@ -1,0 +1,501 @@
+@using GwsBusinessSuite.Application.Automation
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject IKanbanBoardService BoardService
+@inject ISentinelDatabaseRuleService RuleService
+@inject IAutomationWorkflowService Workflows
+@inject IWikiDatabaseService Databases
+@inject IWikiDatabaseRecurrenceService Recurrences
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
+
+@* Automate a board (Boards K6). Rules: "when a card enters a column, then ..." - Sentinel database
+   rules (each an Automation workflow) built with the changedTo trigger and limited to cards, so a
+   sub-item ticked off doesn't count. Templates: cards saved from the drawer, made again by hand or
+   on a schedule (Sentinel row recurrences). *@
+<div class="kb-modal-backdrop" @onclick="Close"></div>
+<section class="kb-modal kb-auto" role="dialog" aria-modal="true" aria-labelledby="kb-auto-title" tabindex="-1" @ref="_dialog" @onkeydown="CloseOnEscape">
+    <header class="kb-modal-head">
+        <h2 id="kb-auto-title"><i class="bi bi-magic me-2" aria-hidden="true"></i>Automate @Board.Title</h2>
+        <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Close" @onclick="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+    </header>
+    <div class="kb-auto-tabs" role="tablist" aria-label="Automate">
+        <button type="button" role="tab" id="kb-auto-tab-rules" aria-controls="kb-auto-rules" aria-selected="@(_tab == Tab.Rules ? "true" : "false")"
+                class="kb-auto-tab @(_tab == Tab.Rules ? "is-on" : "")" @onclick="() => _tab = Tab.Rules">
+            <i class="bi bi-signpost-split" aria-hidden="true"></i>Rules<span class="kb-auto-count">@Rules.Count</span>
+        </button>
+        <button type="button" role="tab" id="kb-auto-tab-templates" aria-controls="kb-auto-templates" aria-selected="@(_tab == Tab.Templates ? "true" : "false")"
+                class="kb-auto-tab @(_tab == Tab.Templates ? "is-on" : "")" @onclick="() => _tab = Tab.Templates">
+            <i class="bi bi-files" aria-hidden="true"></i>Templates and repeats<span class="kb-auto-count">@Templates.Count</span>
+        </button>
+    </div>
+
+    @if (_database is null)
+    {
+        <p class="kb-auto-hint">Loading…</p>
+    }
+    else if (_tab == Tab.Rules)
+    {
+        <div id="kb-auto-rules" role="tabpanel" aria-labelledby="kb-auto-tab-rules" class="kb-auto-panel">
+            <p class="kb-auto-hint">Rules run by themselves as cards move, from this board, Sentinel or anywhere else. Each one is an Automation workflow, so it can be changed there too.</p>
+            @if (Rules.Count == 0)
+            {
+                <p class="kb-auto-empty">No rules yet.</p>
+            }
+            else
+            {
+                <ul class="kb-auto-list">
+                    @foreach (var rule in Rules)
+                    {
+                        <li @key="rule.WorkflowId">
+                            <i class="bi bi-lightning-charge kb-auto-icon" aria-hidden="true"></i>
+                            <span class="kb-auto-text">@rule.Summary</span>
+                            @if (rule.Status != AutomationWorkflowStatuses.Active) { <span class="kb-auto-off">Off</span> }
+                            <a class="btn btn-sm btn-link" href="@($"admin/automation/{rule.WorkflowId}")" title="Open the rule's workflow in Automation">Edit</a>
+                            @if (_confirmDelete == rule.WorkflowId)
+                            {
+                                <button type="button" class="btn btn-sm btn-danger" disabled="@_busy" @onclick="() => DeleteRuleAsync(rule)">Delete rule</button>
+                                <button type="button" class="btn btn-sm btn-link" @onclick="() => _confirmDelete = null">Keep</button>
+                            }
+                            else
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Delete the rule: @rule.Summary" @onclick="() => _confirmDelete = rule.WorkflowId"><i class="bi bi-trash3" aria-hidden="true"></i></button>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+
+            @if (Suggestions.Count > 0)
+            {
+                <div class="kb-auto-suggest" aria-label="Suggested rules">
+                    <span class="kb-auto-label">Suggested</span>
+                    @foreach (var suggestion in Suggestions)
+                    {
+                        <button type="button" class="kb-auto-chip" disabled="@_busy" @onclick="() => CreateAsync(suggestion)">
+                            <i class="bi bi-plus-lg" aria-hidden="true"></i>@Describe(suggestion)
+                        </button>
+                    }
+                </div>
+            }
+
+            <form class="kb-auto-builder" @onsubmit="() => CreateAsync(Draft)" @onsubmit:preventDefault>
+                <h3>New rule</h3>
+                <div class="kb-auto-row">
+                    <label for="kb-rule-when">When a card</label>
+                    <select id="kb-rule-when" class="form-select form-select-sm" value="@_when" @onchange="e => _when = e.Value as string ?? AddedKey">
+                        @foreach (var column in Board.Columns.Where(column => column.OptionId is not null))
+                        {
+                            <option value="@column.OptionId">enters @column.Label</option>
+                        }
+                        <option value="@AddedKey">is added</option>
+                    </select>
+                </div>
+                <div class="kb-auto-row">
+                    <label for="kb-rule-then">then</label>
+                    <select id="kb-rule-then" class="form-select form-select-sm" value="@_then" @onchange="e => _then = e.Value as string ?? SentinelDatabaseRuleKinds.ThenSetProperty">
+                        <option value="@SentinelDatabaseRuleKinds.ThenSetProperty">set a field</option>
+                        <option value="@SentinelDatabaseRuleKinds.ThenCompleteSubItems">complete its sub-items</option>
+                        <option value="@SentinelDatabaseRuleKinds.ThenEmail">email someone</option>
+                        <option value="@SentinelDatabaseRuleKinds.ThenRunWorkflow">run a workflow</option>
+                    </select>
+                </div>
+                @if (_then == SentinelDatabaseRuleKinds.ThenSetProperty)
+                {
+                    var field = SetField;
+                    <div class="kb-auto-row">
+                        <label for="kb-rule-field">Field</label>
+                        <select id="kb-rule-field" class="form-select form-select-sm" value="@(_fieldId?.ToString() ?? "")" @onchange="ChooseField">
+                            <option value="">Choose a field</option>
+                            @foreach (var property in SettableFields) { <option value="@property.Id">@property.Name</option> }
+                        </select>
+                    </div>
+                    @if (field is not null)
+                    {
+                        <div class="kb-auto-row">
+                            <label for="kb-rule-value">To</label>
+                            @if (field.Type == WikiDatabasePropertyTypes.Date)
+                            {
+                                <span class="kb-auto-fixed" id="kb-rule-value">the moment it happens</span>
+                            }
+                            else if (field.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status)
+                            {
+                                <select id="kb-rule-value" class="form-select form-select-sm" value="@_value" @onchange="e => _value = e.Value as string ?? string.Empty">
+                                    <option value="">Empty</option>
+                                    @foreach (var option in WikiDatabasePropertyConfig.GetOptions(field)) { <option value="@option.Id">@option.Label</option> }
+                                </select>
+                            }
+                            else if (field.Type == WikiDatabasePropertyTypes.Checkbox)
+                            {
+                                <select id="kb-rule-value" class="form-select form-select-sm" value="@_value" @onchange="e => _value = e.Value as string ?? string.Empty">
+                                    <option value="true">ticked</option>
+                                    <option value="false">not ticked</option>
+                                </select>
+                            }
+                            else
+                            {
+                                <span class="kb-auto-inline">
+                                    <input id="kb-rule-value" class="form-control form-control-sm" maxlength="500" @bind="_value" @bind:event="oninput" />
+                                    @if (field.Id == Board.Fields.AssigneePropertyId)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _value = _me">Me</button>
+                                    }
+                                </span>
+                            }
+                        </div>
+                        @if (field.Type != WikiDatabasePropertyTypes.Checkbox)
+                        {
+                            <label class="kb-auto-check"><input type="checkbox" class="form-check-input" checked="@_onlyIfEmpty" @onchange="e => _onlyIfEmpty = e.Value is true" /> Only if it's empty</label>
+                        }
+                    }
+                }
+                else if (_then == SentinelDatabaseRuleKinds.ThenEmail)
+                {
+                    <div class="kb-auto-row">
+                        <label for="kb-rule-email">Email</label>
+                        <input id="kb-rule-email" type="email" class="form-control form-control-sm" placeholder="name@example.com" maxlength="200" @bind="_email" @bind:event="oninput" />
+                    </div>
+                }
+                else if (_then == SentinelDatabaseRuleKinds.ThenRunWorkflow)
+                {
+                    <div class="kb-auto-row">
+                        <label for="kb-rule-workflow">Workflow</label>
+                        <select id="kb-rule-workflow" class="form-select form-select-sm" value="@(_workflowId?.ToString() ?? "")" @onchange="e => _workflowId = Guid.TryParse(e.Value as string, out var id) ? id : null">
+                            <option value="">Choose a workflow</option>
+                            @foreach (var workflow in _workflows) { <option value="@workflow.Id">@workflow.Name</option> }
+                        </select>
+                    </div>
+                    @if (_workflows.Count == 0)
+                    {
+                        <p class="kb-auto-hint">No workflows yet. <a href="admin/automation">Make one in Automation</a>; it gets the card's row id, values and previous values.</p>
+                    }
+                }
+                <footer class="kb-auto-foot">
+                    <span class="kb-auto-preview" aria-live="polite">@(Problem(Draft) ?? Describe(Draft))</span>
+                    <button type="submit" class="btn btn-sm btn-primary" disabled="@(_busy || Problem(Draft) is not null)">
+                        <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add rule
+                    </button>
+                </footer>
+            </form>
+        </div>
+    }
+    else
+    {
+        <div id="kb-auto-templates" role="tabpanel" aria-labelledby="kb-auto-tab-templates" class="kb-auto-panel">
+            <p class="kb-auto-hint">Open any card and choose <strong>Save as template</strong>. A card made from a template starts with its fields and page, in the column it was saved from, and can repeat on a schedule: a weekly report, a monthly invoice run.</p>
+            @if (Templates.Count == 0)
+            {
+                <p class="kb-auto-empty">No card templates yet.</p>
+            }
+            else
+            {
+                <ul class="kb-auto-list kb-auto-templates">
+                    @foreach (var template in Templates)
+                    {
+                        var repeat = _recurrences.FirstOrDefault(item => item.WikiDatabaseRowTemplateId == template.Id);
+                        <li @key="template.Id">
+                            <span class="kb-auto-icon" aria-hidden="true">@(string.IsNullOrWhiteSpace(template.Icon) ? "📄" : template.Icon)</span>
+                            <span class="kb-auto-text">
+                                <strong>@template.Name</strong>
+                                <span class="kb-auto-meta">
+                                    Lands in @ColumnOf(template)
+                                    @if (repeat is not null)
+                                    {
+                                        <span> · @KanbanRepeats.Describe(repeat.CronExpression)</span>
+                                        @if (repeat.IsActive && repeat.NextRunAt is { } next)
+                                        {
+                                            <span> · next @next.ToLocalTime().ToGwsDateTime()</span>
+                                        }
+                                        else
+                                        {
+                                            <span> · paused</span>
+                                        }
+                                    }
+                                </span>
+                            </span>
+                            <span class="kb-auto-actions">
+                                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_busy" @onclick="() => NewCardAsync(template)"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New card</button>
+                                @if (repeat is null)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" aria-expanded="@(_repeatFor == template.Id ? "true" : "false")" @onclick="() => EditRepeat(template.Id)"><i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>Repeat</button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => SetRepeatActiveAsync(repeat, !repeat.IsActive)">@(repeat.IsActive ? "Pause" : "Resume")</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => StopRepeatAsync(repeat)">Stop repeating</button>
+                                }
+                                @if (_confirmTemplate == template.Id)
+                                {
+                                    <button type="button" class="btn btn-sm btn-danger" disabled="@_busy" @onclick="() => DeleteTemplateAsync(template, repeat)">Delete template</button>
+                                    <button type="button" class="btn btn-sm btn-link" @onclick="() => _confirmTemplate = null">Keep</button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Delete the template @template.Name" @onclick="() => _confirmTemplate = template.Id"><i class="bi bi-trash3" aria-hidden="true"></i></button>
+                                }
+                            </span>
+                            @if (_repeatFor == template.Id)
+                            {
+                                <form class="kb-auto-repeat" @onsubmit="() => SaveRepeatAsync(template)" @onsubmit:preventDefault>
+                                    <label class="visually-hidden" for="kb-repeat-often">How often</label>
+                                    <select id="kb-repeat-often" class="form-select form-select-sm" value="@_repeat.Frequency" @onchange="e => _repeat = _repeat with { Frequency = e.Value as string ?? KanbanRepeatFrequencies.Weekly }">
+                                        <option value="@KanbanRepeatFrequencies.Daily">Every day</option>
+                                        <option value="@KanbanRepeatFrequencies.Weekdays">Every weekday</option>
+                                        <option value="@KanbanRepeatFrequencies.Weekly">Every week on</option>
+                                        <option value="@KanbanRepeatFrequencies.Monthly">Every month on the</option>
+                                    </select>
+                                    @if (_repeat.Frequency == KanbanRepeatFrequencies.Weekly)
+                                    {
+                                        <label class="visually-hidden" for="kb-repeat-day">Day</label>
+                                        <select id="kb-repeat-day" class="form-select form-select-sm" value="@_repeat.DayOfWeek" @onchange="e => _repeat = _repeat with { DayOfWeek = int.TryParse(e.Value as string, out var day) ? day : 1 }">
+                                            @foreach (var day in WeekDays) { <option value="@((int)day)">@day</option> }
+                                        </select>
+                                    }
+                                    else if (_repeat.Frequency == KanbanRepeatFrequencies.Monthly)
+                                    {
+                                        <label class="visually-hidden" for="kb-repeat-date">Day of the month</label>
+                                        <select id="kb-repeat-date" class="form-select form-select-sm" value="@_repeat.DayOfMonth" @onchange="e => _repeat = _repeat with { DayOfMonth = int.TryParse(e.Value as string, out var day) ? day : 1 }">
+                                            @for (var day = 1; day <= 28; day++) { <option value="@day">@KanbanRepeats.Ordinal(day)</option> }
+                                        </select>
+                                    }
+                                    <label for="kb-repeat-time">at</label>
+                                    <input id="kb-repeat-time" type="time" class="form-control form-control-sm" value="@($"{_repeat.Hour:00}:{_repeat.Minute:00}")" @onchange="SetRepeatTime" />
+                                    <button type="submit" class="btn btn-sm btn-primary" disabled="@_busy">Repeat</button>
+                                    <button type="button" class="btn btn-sm btn-link" @onclick="() => _repeatFor = null">Cancel</button>
+                                </form>
+                            }
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public KanbanBoard Board { get; set; } = default!;
+    [Parameter] public IReadOnlyList<SentinelDatabaseRuleView> Rules { get; set; } = [];
+    [Parameter] public IReadOnlyList<WikiDatabaseRowTemplate> Templates { get; set; } = [];
+    // The column to start a new rule from (a column's menu opens this with it).
+    [Parameter] public string? Column { get; set; }
+    [Parameter] public bool ShowTemplates { get; set; }
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private enum Tab { Rules, Templates }
+    private const string AddedKey = "__added";
+    private static readonly DayOfWeek[] WeekDays =
+        [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday];
+
+    private Tab _tab;
+    private ElementReference _dialog;
+    private WikiDatabase? _database;
+    private List<AutomationWorkflowSummary> _workflows = [];
+    private List<WikiDatabaseRowRecurrenceView> _recurrences = [];
+    private string _me = string.Empty;
+    private bool _busy;
+    private Guid? _confirmDelete;
+    private Guid? _confirmTemplate;
+
+    private string _when = AddedKey;
+    private string _then = SentinelDatabaseRuleKinds.ThenSetProperty;
+    private Guid? _fieldId;
+    private string _value = string.Empty;
+    private bool _onlyIfEmpty;
+    private string _email = string.Empty;
+    private Guid? _workflowId;
+
+    private Guid? _repeatFor;
+    private KanbanRepeat _repeat = new(KanbanRepeatFrequencies.Weekly, 9, 0);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tab = ShowTemplates ? Tab.Templates : Tab.Rules;
+        _when = Column ?? Board.Columns.FirstOrDefault(column => column.Group == WikiDatabaseStatusGroups.Complete)?.OptionId ?? AddedKey;
+        _me = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        _database = await Databases.GetDatabaseAsync(Board.DatabaseId);
+        // Rules are workflows too; the list here is the workflows a rule can run.
+        _workflows = (await Workflows.ListAsync())
+            .Where(workflow => !workflow.Description.StartsWith(SentinelDatabaseRuleBuilder.RuleMarker, StringComparison.Ordinal))
+            .OrderBy(workflow => workflow.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        _recurrences = (await Recurrences.ListAsync(Board.DatabaseId)).ToList();
+    }
+
+    // Focus moves into the dialog as it opens, so Escape reaches it in Safari too (the Mac app's
+    // WebKit doesn't focus a button on click).
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await _dialog.FocusAsync();
+    }
+
+    private IEnumerable<WikiDatabaseProperty> SettableFields => (_database?.Properties ?? [])
+        .Where(property => property.Id != Board.Fields.StatusPropertyId && SentinelDatabaseRuleBuilder.CanSet(property))
+        .OrderBy(property => property.SortOrder);
+
+    private WikiDatabaseProperty? SetField => _database?.Properties.FirstOrDefault(property => property.Id == _fieldId);
+
+    private void ChooseField(ChangeEventArgs e)
+    {
+        _fieldId = Guid.TryParse(e.Value as string, out var id) ? id : null;
+        _value = SetField?.Type == WikiDatabasePropertyTypes.Checkbox ? "true" : string.Empty;
+        _onlyIfEmpty = SetField?.Type == WikiDatabasePropertyTypes.Date;
+    }
+
+    private SentinelDatabaseRule Draft => Rule(_when, _then, _fieldId, _value, _onlyIfEmpty, _email, _workflowId);
+
+    private SentinelDatabaseRule Rule(string when, string then, Guid? fieldId = null, string? value = null, bool onlyIfEmpty = false, string? email = null, Guid? workflowId = null)
+    {
+        var field = _database?.Properties.FirstOrDefault(property => property.Id == fieldId);
+        var added = when == AddedKey;
+        return new SentinelDatabaseRule(
+            Board.DatabaseId,
+            added ? SentinelDatabaseRuleKinds.WhenRowAdded : SentinelDatabaseRuleKinds.WhenPropertyBecomes,
+            added ? null : Board.Fields.StatusPropertyId,
+            added ? null : when,
+            then,
+            SetPropertyId: then == SentinelDatabaseRuleKinds.ThenSetProperty ? fieldId : null,
+            SetValue: then == SentinelDatabaseRuleKinds.ThenSetProperty && field?.Type != WikiDatabasePropertyTypes.Date ? value : null,
+            SetToNow: then == SentinelDatabaseRuleKinds.ThenSetProperty && field?.Type == WikiDatabasePropertyTypes.Date,
+            OnlyIfEmpty: then == SentinelDatabaseRuleKinds.ThenSetProperty && field?.Type != WikiDatabasePropertyTypes.Checkbox && onlyIfEmpty,
+            EmailTo: then == SentinelDatabaseRuleKinds.ThenEmail ? email?.Trim() : null,
+            RunWorkflowId: then == SentinelDatabaseRuleKinds.ThenRunWorkflow ? workflowId : null,
+            CardsOnly: true);
+    }
+
+    private string? Problem(SentinelDatabaseRule rule) => _database is null ? "Loading" : SentinelDatabaseRuleBuilder.Validate(rule, _database);
+
+    private string Describe(SentinelDatabaseRule rule) =>
+        _database is null ? string.Empty
+            : SentinelDatabaseRuleBuilder.Describe(rule, _database, _workflows.FirstOrDefault(workflow => workflow.Id == rule.RunWorkflowId)?.Name);
+
+    // One-click rules that fit this board and aren't set up yet.
+    private IReadOnlyList<SentinelDatabaseRule> Suggestions
+    {
+        get
+        {
+            if (_database is null) return [];
+            var done = Board.Columns.FirstOrDefault(column => column.Group == WikiDatabaseStatusGroups.Complete)?.OptionId;
+            var doing = Board.Columns.FirstOrDefault(column => column.Group == WikiDatabaseStatusGroups.InProgress)?.OptionId;
+            var list = new List<SentinelDatabaseRule>();
+            if (done is not null)
+            {
+                list.Add(Rule(done, SentinelDatabaseRuleKinds.ThenCompleteSubItems));
+                if (Board.Fields.BlockedPropertyId is { } blocked) list.Add(Rule(done, SentinelDatabaseRuleKinds.ThenSetProperty, blocked, "false"));
+                var completed = _database.Properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Date
+                    && property.Id != Board.Fields.DuePropertyId && property.Name.Contains("complet", StringComparison.OrdinalIgnoreCase));
+                if (completed is not null) list.Add(Rule(done, SentinelDatabaseRuleKinds.ThenSetProperty, completed.Id, onlyIfEmpty: true));
+            }
+            if (doing is not null && Board.Fields.AssigneePropertyId is { } assignee && !string.IsNullOrWhiteSpace(_me))
+            {
+                list.Add(Rule(doing, SentinelDatabaseRuleKinds.ThenSetProperty, assignee, _me, onlyIfEmpty: true));
+            }
+            var existing = Rules.Select(rule => rule.Summary).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            return list.Where(rule => !existing.Contains(Describe(rule))).ToList();
+        }
+    }
+
+    private async Task CreateAsync(SentinelDatabaseRule rule)
+    {
+        if (Problem(rule) is { } problem)
+        {
+            Toasts.Show(problem, tone: StatusTone.Warning);
+            return;
+        }
+        await RunAsync(async () =>
+        {
+            var created = await RuleService.CreateAsync(rule, _me);
+            _fieldId = null;
+            _value = string.Empty;
+            _onlyIfEmpty = false;
+            Toasts.Show($"Rule added: {created.Summary}.", tone: StatusTone.Success);
+        });
+    }
+
+    private Task DeleteRuleAsync(SentinelDatabaseRuleView rule) => RunAsync(async () =>
+    {
+        await RuleService.DeleteAsync(Board.DatabaseId, rule.WorkflowId, _me);
+        _confirmDelete = null;
+        Toasts.Show("Rule deleted.", tone: StatusTone.Success);
+    });
+
+    private string ColumnOf(WikiDatabaseRowTemplate template)
+    {
+        var values = WikiPropertyValues.ParseObject(template.DefaultPropertyValuesJson);
+        var option = WikiPropertyValues.GetText(values, Board.Fields.StatusPropertyId);
+        return Board.Columns.FirstOrDefault(column => column.OptionId == option)?.Label ?? Board.Columns.FirstOrDefault()?.Label ?? "the first column";
+    }
+
+    private Task NewCardAsync(WikiDatabaseRowTemplate template) => RunAsync(async () =>
+    {
+        await BoardService.AddCardFromTemplateAsync(Board.DatabaseId, template.Id, null, _me);
+        Toasts.Show($"New card from {template.Name}, in {ColumnOf(template)}.", tone: StatusTone.Success);
+    });
+
+    private void EditRepeat(Guid templateId)
+    {
+        _repeatFor = _repeatFor == templateId ? null : templateId;
+        _repeat = new KanbanRepeat(KanbanRepeatFrequencies.Weekly, 9, 0);
+    }
+
+    private void SetRepeatTime(ChangeEventArgs e)
+    {
+        if (TimeOnly.TryParse(e.Value as string, System.Globalization.CultureInfo.InvariantCulture, out var time))
+            _repeat = _repeat with { Hour = time.Hour, Minute = time.Minute };
+    }
+
+    private Task SaveRepeatAsync(WikiDatabaseRowTemplate template) => RunAsync(async () =>
+    {
+        var cron = KanbanRepeats.ToCron(_repeat);
+        await Recurrences.CreateAsync(Board.DatabaseId, template.Id, cron, _me);
+        _recurrences = (await Recurrences.ListAsync(Board.DatabaseId)).ToList();
+        _repeatFor = null;
+        Toasts.Show($"{template.Name} repeats {KanbanRepeats.Describe(cron).ToLowerInvariant()}.", tone: StatusTone.Success);
+    });
+
+    private Task SetRepeatActiveAsync(WikiDatabaseRowRecurrenceView repeat, bool active) => RunAsync(async () =>
+    {
+        await Recurrences.SetActiveAsync(repeat.Id, active, _me);
+        _recurrences = (await Recurrences.ListAsync(Board.DatabaseId)).ToList();
+    });
+
+    private Task StopRepeatAsync(WikiDatabaseRowRecurrenceView repeat) => RunAsync(async () =>
+    {
+        await Recurrences.DeleteAsync(repeat.Id);
+        _recurrences = (await Recurrences.ListAsync(Board.DatabaseId)).ToList();
+    });
+
+    private Task DeleteTemplateAsync(WikiDatabaseRowTemplate template, WikiDatabaseRowRecurrenceView? repeat) => RunAsync(async () =>
+    {
+        if (repeat is not null) await Recurrences.DeleteAsync(repeat.Id);
+        await Databases.DeleteRowTemplateAsync(Board.DatabaseId, template.Id);
+        _recurrences = (await Recurrences.ListAsync(Board.DatabaseId)).ToList();
+        _confirmTemplate = null;
+        Toasts.Show($"Deleted the template {template.Name}.", tone: StatusTone.Success);
+    });
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _busy = true;
+        try
+        {
+            await action();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or UnauthorizedAccessException or FormatException or KeyNotFoundException)
+        {
+            Toasts.Show($"Couldn't do that. {ex.Message}", tone: StatusTone.Danger);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task CloseOnEscape(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await Close();
+    }
+}

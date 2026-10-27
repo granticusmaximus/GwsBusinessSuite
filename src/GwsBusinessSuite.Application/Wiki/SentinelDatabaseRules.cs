@@ -13,10 +13,15 @@ public static class SentinelDatabaseRuleKinds
 {
     public const string WhenRowAdded = "rowAdded";
     public const string WhenPropertyEquals = "propertyEquals";
+    // Only when the value has just become WhenValue (the trigger's changedTo operator): a card
+    // entering a board column, not every later save of a card already in it.
+    public const string WhenPropertyBecomes = "propertyBecomes";
 
     public const string ThenSetProperty = "setProperty";
     public const string ThenEmail = "email";
     public const string ThenRunWorkflow = "runWorkflow";
+    // Boards K6: mark the row's sub-items done (database.completeSubItems).
+    public const string ThenCompleteSubItems = "completeSubItems";
 }
 
 public sealed record SentinelDatabaseRule(
@@ -32,9 +37,15 @@ public sealed record SentinelDatabaseRule(
     // Leave a value someone already filled in alone, e.g. keep the first "Completed" date.
     bool OnlyIfEmpty = false,
     string? EmailTo = null,
-    Guid? RunWorkflowId = null);
+    Guid? RunWorkflowId = null,
+    // Board rules: sub-items share their card's Status, so this keeps a sub-item ticked off
+    // from counting as a card entering Done.
+    bool CardsOnly = false);
 
-public sealed record SentinelDatabaseRuleView(Guid WorkflowId, string Summary, string Status);
+// WhenPropertyId/WhenValue/WhenOperator come from the rule's trigger condition (null for
+// "when a row is added"), so a board can show each column's rules.
+public sealed record SentinelDatabaseRuleView(Guid WorkflowId, string Summary, string Status,
+    Guid? WhenPropertyId = null, string? WhenValue = null, string? WhenOperator = null);
 
 public sealed record SentinelDatabaseRuleGraph(
     string Name,
@@ -78,16 +89,24 @@ public static class SentinelDatabaseRuleBuilder
             return option?.Label ?? (string.IsNullOrEmpty(value) ? "empty" : value);
         }
 
-        var when = rule.When == SentinelDatabaseRuleKinds.WhenRowAdded
-            ? "When a row is added"
-            : $"When {PropertyName(rule.WhenPropertyId)} is {ValueLabel(rule.WhenPropertyId, rule.WhenValue)}";
+        var when = rule.When switch
+        {
+            SentinelDatabaseRuleKinds.WhenRowAdded => rule.CardsOnly ? "When a card is added" : "When a row is added",
+            SentinelDatabaseRuleKinds.WhenPropertyBecomes when rule.CardsOnly => $"When a card enters {ValueLabel(rule.WhenPropertyId, rule.WhenValue)}",
+            SentinelDatabaseRuleKinds.WhenPropertyBecomes => $"When {PropertyName(rule.WhenPropertyId)} becomes {ValueLabel(rule.WhenPropertyId, rule.WhenValue)}",
+            _ => $"When {PropertyName(rule.WhenPropertyId)} is {ValueLabel(rule.WhenPropertyId, rule.WhenValue)}"
+        };
+        var setCheckbox = database.Properties.FirstOrDefault(property => property.Id == rule.SetPropertyId)?.Type == WikiDatabasePropertyTypes.Checkbox;
         var then = rule.Then switch
         {
+            SentinelDatabaseRuleKinds.ThenSetProperty when setCheckbox =>
+                $"{(bool.TryParse(rule.SetValue, out var tick) && tick ? "tick" : "untick")} {PropertyName(rule.SetPropertyId)}",
             SentinelDatabaseRuleKinds.ThenSetProperty =>
                 $"set {PropertyName(rule.SetPropertyId)} to {(rule.SetToNow ? "now" : ValueLabel(rule.SetPropertyId, rule.SetValue))}"
                 + (rule.OnlyIfEmpty ? " (only if empty)" : string.Empty),
             SentinelDatabaseRuleKinds.ThenEmail => $"email {rule.EmailTo}",
             SentinelDatabaseRuleKinds.ThenRunWorkflow => $"run {workflowName ?? "a workflow"}",
+            SentinelDatabaseRuleKinds.ThenCompleteSubItems => "complete its sub-items",
             _ => "do nothing"
         };
         return $"{when}, {then}";
@@ -98,7 +117,7 @@ public static class SentinelDatabaseRuleBuilder
     {
         WikiDatabaseProperty? Find(Guid? id) => database.Properties.FirstOrDefault(property => property.Id == id);
 
-        if (rule.When == SentinelDatabaseRuleKinds.WhenPropertyEquals)
+        if (rule.When is SentinelDatabaseRuleKinds.WhenPropertyEquals or SentinelDatabaseRuleKinds.WhenPropertyBecomes)
         {
             if (Find(rule.WhenPropertyId) is not { } whenProperty) return "Choose the property the rule watches.";
             if (!CanWatch(whenProperty)) return $"Rules can't watch a {whenProperty.Type} property.";
@@ -121,6 +140,10 @@ public static class SentinelDatabaseRuleBuilder
             case SentinelDatabaseRuleKinds.ThenRunWorkflow:
                 if (rule.RunWorkflowId is null) return "Choose the workflow to run.";
                 break;
+            case SentinelDatabaseRuleKinds.ThenCompleteSubItems:
+                if (!database.Properties.Any(property => property.Type == WikiDatabasePropertyTypes.Status))
+                    return "Sub-items are marked done through a Status property, and this database has none.";
+                break;
             default:
                 return "Choose what the rule does.";
         }
@@ -137,7 +160,8 @@ public static class SentinelDatabaseRuleBuilder
     public static bool CanSet(WikiDatabaseProperty property) => property.Type is
         WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.Status or WikiDatabasePropertyTypes.Checkbox
         or WikiDatabasePropertyTypes.Text or WikiDatabasePropertyTypes.Number or WikiDatabasePropertyTypes.Url
-        or WikiDatabasePropertyTypes.Email or WikiDatabasePropertyTypes.Phone or WikiDatabasePropertyTypes.Date;
+        or WikiDatabasePropertyTypes.Email or WikiDatabasePropertyTypes.Phone or WikiDatabasePropertyTypes.Date
+        or WikiDatabasePropertyTypes.Person;
 
     public static SentinelDatabaseRuleGraph Build(SentinelDatabaseRule rule, WikiDatabase database, string? workflowName = null)
     {
@@ -161,12 +185,12 @@ public static class SentinelDatabaseRuleBuilder
         }
 
         var conditions = new JsonArray();
-        if (rule.When == SentinelDatabaseRuleKinds.WhenPropertyEquals)
+        if (rule.When is SentinelDatabaseRuleKinds.WhenPropertyEquals or SentinelDatabaseRuleKinds.WhenPropertyBecomes)
         {
             conditions.Add(new JsonObject
             {
                 ["propertyId"] = rule.WhenPropertyId.ToString(),
-                ["operator"] = "equals",
+                ["operator"] = rule.When == SentinelDatabaseRuleKinds.WhenPropertyBecomes ? "changedTo" : "equals",
                 ["value"] = rule.WhenValue ?? string.Empty
             });
         }
@@ -184,6 +208,17 @@ public static class SentinelDatabaseRuleBuilder
                 ["operator"] = "equals",
                 ["right"] = "true"
             }, output: "true");
+        }
+
+        if (rule.CardsOnly)
+        {
+            // parentRowId is set only for a sub-item; the false branch continues.
+            Add("Only cards", "core.if", new JsonObject
+            {
+                ["left"] = "{{ $json.parentRowId }}",
+                ["operator"] = "exists",
+                ["right"] = string.Empty
+            }, output: "false");
         }
 
         switch (rule.Then)
@@ -221,6 +256,13 @@ public static class SentinelDatabaseRuleBuilder
                 break;
             case SentinelDatabaseRuleKinds.ThenRunWorkflow:
                 Add("Run workflow", "automation.subWorkflow", new JsonObject { ["workflowId"] = rule.RunWorkflowId.ToString() });
+                break;
+            case SentinelDatabaseRuleKinds.ThenCompleteSubItems:
+                Add("Complete sub-items", "database.completeSubItems", new JsonObject
+                {
+                    ["wikiDatabaseId"] = database.Id.ToString(),
+                    ["rowId"] = "{{ $json.rowId }}"
+                });
                 break;
         }
 

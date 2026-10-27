@@ -1340,7 +1340,7 @@ public sealed class WikiDatabaseService(
         // default over building real recursion-depth tracking for a narrower guarantee.
         if (propertyValuesChanged && automationTriggerService is not null && performedBy != "automation-engine")
         {
-            var triggerPayload = JsonSerializer.Serialize(new { wikiDatabaseId, rowId = row.Id, isNew, values });
+            var triggerPayload = JsonSerializer.Serialize(new { wikiDatabaseId, rowId = row.Id, isNew, values, previousValues, parentRowId = row.ParentRowId });
             await automationTriggerService.TriggerDatabaseRowChangedAsync(wikiDatabaseId, triggerPayload, cancellationToken);
         }
 
@@ -2098,6 +2098,7 @@ public sealed class WikiDatabaseService(
         Guid templateId,
         Guid? parentRowId,
         string performedBy,
+        string? title = null,
         CancellationToken cancellationToken = default)
     {
         var template = await dbContext.WikiDatabaseRowTemplates.AsNoTracking()
@@ -2105,10 +2106,11 @@ public sealed class WikiDatabaseService(
                 item => item.Id == templateId && item.WikiDatabaseId == wikiDatabaseId,
                 cancellationToken)
             ?? throw new InvalidOperationException("The selected row template no longer exists in this database.");
-        var reusablePropertyIds = (await dbContext.WikiDatabaseProperties.AsNoTracking()
-                .Where(property => property.WikiDatabaseId == wikiDatabaseId)
-                .Select(property => new { property.Id, property.Type })
-                .ToListAsync(cancellationToken))
+        var properties = await dbContext.WikiDatabaseProperties.AsNoTracking()
+            .Where(property => property.WikiDatabaseId == wikiDatabaseId)
+            .Select(property => new { property.Id, property.Type })
+            .ToListAsync(cancellationToken);
+        var reusablePropertyIds = properties
             .Where(property => IsReusableTemplateProperty(property.Type))
             .Select(property => property.Id.ToString())
             .ToHashSet(StringComparer.Ordinal);
@@ -2120,6 +2122,10 @@ public sealed class WikiDatabaseService(
             {
                 values[propertyId] = value.DeepClone();
             }
+        }
+        if (!string.IsNullOrWhiteSpace(title) && properties.FirstOrDefault(property => property.Type == WikiDatabasePropertyTypes.Title) is { } titleProperty)
+        {
+            WikiPropertyValues.SetText(values, titleProperty.Id, title.Trim());
         }
         var blocks = WikiBlockJson.ParseBlocks(template.BlocksJson)
             .Select(block => block with { Id = Guid.NewGuid() })
@@ -2513,8 +2519,9 @@ public sealed class WikiDatabaseService(
         // no error, no visible sign the edit did nothing real. The inline embed's cell editor
         // (wiki-block-editor.js) no longer offers an editable control for these three types for
         // the same reason; this is the server-side half of that fix, in case anything else ever
-        // calls this method directly.
-        if (property.Type is WikiDatabasePropertyTypes.Relation or WikiDatabasePropertyTypes.Person or WikiDatabasePropertyTypes.Files)
+        // calls this method directly. Person is the exception (board rules assign people, Boards
+        // K6): its value is usernames, comma-separated, saved as the array it's read back as.
+        if (property.Type is WikiDatabasePropertyTypes.Relation or WikiDatabasePropertyTypes.Files)
         {
             throw new InvalidOperationException(
                 $"{property.Type} properties can't be edited from this inline view yet - open the row to edit it.");
@@ -2548,6 +2555,13 @@ public sealed class WikiDatabaseService(
                 var selectedId = WikiDatabasePropertyConfig.GetOptions(property)
                     .Any(option => option.Id == value) ? value : null;
                 WikiPropertyValues.SetText(values, property.Id, selectedId);
+                break;
+            case WikiDatabasePropertyTypes.Person:
+                values[property.Id.ToString()] = new JsonArray((value ?? string.Empty)
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(name => (JsonNode)name)
+                    .ToArray());
                 break;
             case WikiDatabasePropertyTypes.Verification:
                 WikiPropertyValues.SetVerification(values, property.Id, value == WikiVerificationState.Verified
@@ -2613,6 +2627,7 @@ public sealed class WikiDatabaseService(
         var trackedRow = await dbContext.WikiDatabaseRows.FirstOrDefaultAsync(item => item.Id == rowId, cancellationToken)
             ?? throw new KeyNotFoundException("The database row no longer exists.");
         var values = WikiPropertyValues.ParseObject(trackedRow.PropertyValuesJson);
+        var previousValues = (JsonObject)values.DeepClone();
         WikiPropertyValues.SetText(values, propertyId, generated);
         trackedRow.PropertyValuesJson = WikiPropertyValues.Serialize(values);
         var now = DateTimeOffset.UtcNow;
@@ -2624,7 +2639,7 @@ public sealed class WikiDatabaseService(
         // see its own comment on why "automation-engine" is excluded.
         if (automationTriggerService is not null && performedBy != "automation-engine")
         {
-            var triggerPayload = JsonSerializer.Serialize(new { wikiDatabaseId, rowId, isNew = false, values });
+            var triggerPayload = JsonSerializer.Serialize(new { wikiDatabaseId, rowId, isNew = false, values, previousValues, parentRowId = trackedRow.ParentRowId });
             await automationTriggerService.TriggerDatabaseRowChangedAsync(wikiDatabaseId, triggerPayload, cancellationToken);
         }
 
@@ -2681,9 +2696,11 @@ public sealed class WikiDatabaseService(
         var rowIds = values.Keys.ToList();
         var rows = await dbContext.WikiDatabaseRows.Where(row => row.WikiDatabaseId == wikiDatabaseId && rowIds.Contains(row.Id)).ToListAsync(cancellationToken);
         var now = DateTimeOffset.UtcNow;
+        var previousByRow = new Dictionary<Guid, JsonObject>();
         foreach (var row in rows)
         {
             var cells = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+            previousByRow[row.Id] = (JsonObject)cells.DeepClone();
             WikiPropertyValues.SetText(cells, propertyId, values[row.Id].Trim());
             row.PropertyValuesJson = WikiPropertyValues.Serialize(cells);
             row.UpdatedAt = now;
@@ -2694,7 +2711,11 @@ public sealed class WikiDatabaseService(
         {
             foreach (var row in rows)
             {
-                var payload = JsonSerializer.Serialize(new { wikiDatabaseId, rowId = row.Id, isNew = false, values = WikiPropertyValues.ParseObject(row.PropertyValuesJson) });
+                var payload = JsonSerializer.Serialize(new
+                {
+                    wikiDatabaseId, rowId = row.Id, isNew = false, values = WikiPropertyValues.ParseObject(row.PropertyValuesJson),
+                    previousValues = previousByRow[row.Id], parentRowId = row.ParentRowId
+                });
                 await automationTriggerService.TriggerDatabaseRowChangedAsync(wikiDatabaseId, payload, cancellationToken);
             }
         }
@@ -2743,6 +2764,8 @@ public sealed class WikiDatabaseService(
         siblingsInTargetGroup.Insert(Math.Clamp(newSortOrder, 0, siblingsInTargetGroup.Count), row);
 
         var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+        var previousValues = (JsonObject)values.DeepClone();
+        var groupChanged = (WikiPropertyValues.GetText(values, groupByPropertyId) ?? string.Empty) != normalizedTarget;
         WikiPropertyValues.SetText(values, groupByPropertyId, newGroupOptionId);
         row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
 
@@ -2755,6 +2778,15 @@ public sealed class WikiDatabaseService(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        // A drag into another column is a property change like any other, so database rules and
+        // row-changed workflows hear about it (same automation-engine loop guard as SaveRowAsync).
+        // Reordering within a column changes no value and fires nothing.
+        if (groupChanged && automationTriggerService is not null && performedBy != "automation-engine")
+        {
+            var triggerPayload = JsonSerializer.Serialize(new { wikiDatabaseId, rowId, isNew = false, values, previousValues, parentRowId = row.ParentRowId });
+            await automationTriggerService.TriggerDatabaseRowChangedAsync(wikiDatabaseId, triggerPayload, cancellationToken);
+        }
     }
 
     public async Task<WikiDatabaseView> SaveViewAsync(

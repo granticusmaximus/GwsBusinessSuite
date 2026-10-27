@@ -227,6 +227,245 @@ public sealed class KanbanBoardServiceTests : IAsyncLifetime
         log.Should().OnlyContain(change => change.WikiDatabaseId == id && change.AtUnixSeconds > 0 && change.CreatedBy == "grant");
     }
 
+    // K3: board settings, blocked cards, and when a card entered its column.
+    [Fact]
+    public async Task Settings_ShouldRoundTrip_PutLimitsOnColumns_AndRefuseNonsense()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        board.Settings.Should().Be(KanbanSettings.Default);
+
+        await _boards.SaveSettingsAsync(id, KanbanSettings.Default with
+        {
+            WipLimits = new() { [OptionId(board, "Doing")] = 3 },
+            SwimlaneBy = KanbanSwimlanes.Priority,
+            AgingDays = 4,
+            Accent = "red;background:url(x)"
+        }, "grant");
+
+        board = (await _boards.GetBoardAsync(id))!;
+        board.Columns.Single(c => c.Label == "Doing").WipLimit.Should().Be(3);
+        board.Columns.Single(c => c.Label == "To do").WipLimit.Should().BeNull();
+        board.Settings!.SwimlaneBy.Should().Be(KanbanSwimlanes.Priority);
+        board.Settings.AgingDays.Should().Be(4);
+        board.Settings.Accent.Should().Be("#78716c", "a colour that isn't one is replaced");
+        await _boards.Invoking(service => service.SaveSettingsAsync(id, KanbanSettings.Default with { SwimlaneBy = "mood" }, "grant")).Should().ThrowAsync<ArgumentException>();
+        await _boards.Invoking(service => service.SaveSettingsAsync(id, KanbanSettings.Default with { WipLimits = new() { ["x"] = 0 } }, "grant")).Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task Blocking_ShouldAddTheFieldsToABoardWithoutThem_AndCarryTheReason()
+    {
+        var tasks = await _databases.CreateDatabaseAsync("Tasks", null, "grant");
+        await _databases.SavePropertyAsync(tasks.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status",
+            Type = WikiDatabasePropertyTypes.Status,
+            Options = [new("todo", "Open", "#2563eb", WikiDatabaseStatusGroups.ToDo), new("done", "Closed", "#15803d", WikiDatabaseStatusGroups.Complete)]
+        }, "grant");
+        var card = await _boards.AddCardAsync(tasks.Id, "todo", "Waiting on legal", "grant");
+
+        await _boards.SetBlockedAsync(tasks.Id, card, true, "  Contract review  ", "grant");
+        var blocked = (await _boards.GetBoardAsync(tasks.Id))!.Columns.SelectMany(c => c.Cards).Single();
+        (blocked.Blocked, blocked.BlockedReason).Should().Be((true, "Contract review"));
+
+        await _boards.SetBlockedAsync(tasks.Id, card, false, "ignored", "grant");
+        var clear = (await _boards.GetBoardAsync(tasks.Id))!.Columns.SelectMany(c => c.Cards).Single();
+        (clear.Blocked, clear.BlockedReason).Should().Be((false, null));
+        (await _databases.GetDatabaseAsync(tasks.Id))!.Properties.Count(p => p.Name is "Blocked" or "Blocked reason").Should().Be(2, "added once, then reused");
+    }
+
+    [Fact]
+    public async Task EnteredColumnAt_ShouldBeTheLatestMoveIntoTheColumn_OrCreationBeforeTheLog()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        var card = await _boards.AddCardAsync(id, OptionId(board, "To do"), "Ship it", "grant");
+        await _boards.MoveCardAsync(id, card, OptionId(board, "Doing"), null, "grant");
+        var moved = await _db.WikiDatabaseRowStatusChanges.Where(change => change.RowId == card && change.ToOptionId == OptionId(board, "Doing")).SingleAsync();
+        moved.AtUnixSeconds -= 3 * 86400; // as if it moved three days ago
+        await _db.SaveChangesAsync();
+
+        var entered = (await _boards.GetBoardAsync(id))!.Columns.Single(c => c.Label == "Doing").Cards.Single().EnteredColumnAt!.Value;
+        (DateTimeOffset.UtcNow - entered).TotalDays.Should().BeApproximately(3, 0.01);
+
+        _db.WikiDatabaseRowStatusChanges.RemoveRange(_db.WikiDatabaseRowStatusChanges);
+        await _db.SaveChangesAsync();
+        var row = (await _databases.GetDatabaseAsync(id))!.Rows.Single(r => r.Id == card);
+        (await _boards.GetBoardAsync(id))!.Columns.Single(c => c.Label == "Doing").Cards.Single().EnteredColumnAt.Should().Be(row.CreatedAt, "no log: its creation");
+    }
+
+    // A drop in another swimlane: the move, then the lane's value, through one shared context.
+    [Fact]
+    public async Task AMoveThenALaneValue_ShouldBothStick()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        var card = await _boards.AddCardAsync(id, OptionId(board, "To do"), "Ship it", "grant");
+        await _boards.SetCardsValueAsync(id, [card], board.Fields.PriorityPropertyId!.Value, _ => JsonValue.Create(board.PriorityOptions[2].Id), "grant");
+
+        await _boards.MoveCardAsync(id, card, OptionId(board, "Doing"), null, "grant");
+        await _boards.SetCardsValueAsync(id, [card], board.Fields.PriorityPropertyId!.Value, _ => JsonValue.Create(board.PriorityOptions[0].Id), "grant");
+
+        var moved = (await _boards.GetBoardAsync(id))!.Columns.Single(c => c.Label == "Doing").Cards.Single();
+        moved.Priority!.Label.Should().Be("Urgent");
+    }
+
+    // K4: sprints.
+    [Fact]
+    public async Task CreateSprint_ShouldAddTheSprintField_ToABoardWithout_AndRefuseADuplicateName()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        (await _boards.ListSprintsAsync(id)).Should().BeEmpty();
+
+        var first = await _boards.CreateSprintAsync(id, "", "grant");
+        await _boards.CreateSprintAsync(id, "Launch week", "grant");
+
+        var sprints = await _boards.ListSprintsAsync(id);
+        sprints.Select(s => (s.Name, s.State)).Should().Equal(("Sprint 1", KanbanSprintStates.Planned), ("Launch week", KanbanSprintStates.Planned));
+        sprints[0].OptionId.Should().Be(first);
+        (await _boards.GetBoardAsync(id))!.Fields.SprintPropertyId.Should().NotBeNull();
+        await _boards.Invoking(service => service.CreateSprintAsync(id, "sprint 1", "grant")).Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task StartSprint_ShouldAllowOneRunningAtATime()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "sprint", "grant");
+        var one = (await _boards.ListSprintsAsync(id)).Single().OptionId;
+        var two = await _boards.CreateSprintAsync(id, "", "grant");
+        var today = DateOnly.FromDateTime(DateTime.Today);
+
+        await _boards.Invoking(service => service.StartSprintAsync(id, one, today, today.AddDays(-1), "grant")).Should().ThrowAsync<ArgumentException>();
+        await _boards.StartSprintAsync(id, one, today, today.AddDays(13), "grant");
+        await _boards.Invoking(service => service.StartSprintAsync(id, two, today, today.AddDays(13), "grant")).Should().ThrowAsync<InvalidOperationException>();
+
+        var running = (await _boards.ListSprintsAsync(id)).Single(s => s.OptionId == one);
+        (running.State, running.Start, running.End).Should().Be((KanbanSprintStates.Active, today, today.AddDays(13)));
+    }
+
+    [Fact]
+    public async Task CompleteSprint_ShouldRecordWhatGotDone_AndMoveTheRestOn()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "sprint", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        var sprint = (await _boards.ListSprintsAsync(id)).Single().OptionId;
+        var sprintField = board.Fields.SprintPropertyId!.Value;
+        var estimate = board.Fields.EstimatePropertyId!.Value;
+        async Task<Guid> Card(string title, string column, decimal points)
+        {
+            var card = await _boards.AddCardAsync(id, OptionId(board, column), title, "grant");
+            await _boards.SetCardsValueAsync(id, [card], sprintField, _ => JsonValue.Create(sprint), "grant");
+            await _boards.SetCardsValueAsync(id, [card], estimate, _ => JsonValue.Create(points), "grant");
+            return card;
+        }
+        await Card("Done one", "Done", 3);
+        var open = await Card("Still open", "In progress", 5);
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        await _boards.StartSprintAsync(id, sprint, today, today.AddDays(13), "grant");
+
+        var view = (await _boards.ListSprintsAsync(id)).Single();
+        (view.CardCount, view.DoneCount, view.Points, view.DonePoints, view.UsesEstimates).Should().Be((2, 1, 8m, 3m, true));
+        view.Burndown.Should().ContainSingle().Which.Remaining.Should().Be(5, "the finished card's 3 points are off today");
+
+        var summary = await _boards.CompleteSprintAsync(id, sprint, null, "grant");
+
+        summary.Should().Be(new KanbanSprintSummary("Sprint 1", 1, 3m, 1, "Sprint 2"));
+        var sprints = await _boards.ListSprintsAsync(id);
+        sprints.Single(s => s.Name == "Sprint 1").State.Should().Be(KanbanSprintStates.Done);
+        var next = sprints.Single(s => s.Name == "Sprint 2");
+        (await _boards.GetBoardAsync(id))!.Columns.SelectMany(c => c.Cards).Single(c => c.RowId == open).SprintOptionId.Should().Be(next.OptionId);
+        await _boards.Invoking(service => service.CompleteSprintAsync(id, sprint, "", "grant")).Should().ThrowAsync<InvalidOperationException>("it's already complete");
+        (await _boards.GetSettingsAsync(id)).Sprints.Single(s => s.OptionId == sprint).DonePoints.Should().Be(3m);
+    }
+
+    [Fact]
+    public async Task Burndown_ShouldDropOnTheDayEachCardFinished()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "sprint", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        var sprint = (await _boards.ListSprintsAsync(id)).Single().OptionId;
+        var cards = new List<Guid>();
+        foreach (var title in new[] { "A", "B", "C" })
+        {
+            var card = await _boards.AddCardAsync(id, OptionId(board, "In progress"), title, "grant");
+            await _boards.SetCardsValueAsync(id, [card], board.Fields.SprintPropertyId!.Value, _ => JsonValue.Create(sprint), "grant");
+            cards.Add(card);
+        }
+        await _boards.MoveCardAsync(id, cards[0], OptionId(board, "Done"), null, "grant");
+        await _boards.MoveCardAsync(id, cards[1], OptionId(board, "Done"), null, "grant");
+        // A finished two days ago, B yesterday; the sprint started three days ago.
+        foreach (var (card, daysAgo) in new[] { (cards[0], 2), (cards[1], 1) })
+        {
+            var change = await _db.WikiDatabaseRowStatusChanges.SingleAsync(c => c.RowId == card && c.ToOptionId == OptionId(board, "Done"));
+            change.AtUnixSeconds -= daysAgo * 86400;
+        }
+        await _db.SaveChangesAsync();
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        await _boards.StartSprintAsync(id, sprint, today.AddDays(-3), today.AddDays(10), "grant");
+
+        var burndown = (await _boards.ListSprintsAsync(id)).Single().Burndown;
+        burndown.Select(point => point.Remaining).Should().Equal(3m, 2m, 1m, 1m);
+        burndown[0].Day.Should().Be(today.AddDays(-3));
+    }
+
+    // K5: flow metrics from the change log.
+    [Fact]
+    public async Task Insights_ShouldMeasureCycleTimeThroughputFlowAndAge()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        string Column(string label) => OptionId(board, label);
+        // Three cards started and finished at known times, one still in progress.
+        var now = DateTimeOffset.UtcNow;
+        async Task<Guid> Card(string title, int startedDaysAgo, int? finishedDaysAgo)
+        {
+            var card = await _boards.AddCardAsync(id, Column("To do"), title, "grant");
+            await _boards.MoveCardAsync(id, card, Column("Doing"), null, "grant");
+            if (finishedDaysAgo is not null) await _boards.MoveCardAsync(id, card, Column("Done"), null, "grant");
+            foreach (var change in await _db.WikiDatabaseRowStatusChanges.Where(c => c.RowId == card).ToListAsync())
+            {
+                change.AtUnixSeconds = (change.ToOptionId == Column("Done") ? now.AddDays(-finishedDaysAgo!.Value) : now.AddDays(-startedDaysAgo)).ToUnixTimeSeconds()
+                    - (change.ToOptionId == Column("To do") ? 3600 : 0);
+            }
+            await _db.SaveChangesAsync();
+            return card;
+        }
+        await Card("Two days", 10, 8);
+        await Card("Four days", 9, 5);
+        await Card("Six days", 7, 1);
+        await Card("Still going", 3, null);
+
+        var insights = (await _boards.GetInsightsAsync(id, 30))!;
+
+        insights.Cycles.Select(c => (c.Title, Math.Round(c.Days))).Should().Equal(("Two days", 2d), ("Four days", 4d), ("Six days", 6d));
+        insights.MedianCycleDays.Should().BeApproximately(4, 0.01);
+        insights.P85CycleDays.Should().BeApproximately(6, 0.01);
+        insights.Throughput.Sum(w => w.Finished).Should().Be(3);
+        insights.Throughput.Should().OnlyContain(w => w.Start.DayOfWeek == DayOfWeek.Monday);
+        insights.WorkInProgress.Should().Be(1);
+        insights.Aging.Should().ContainSingle().Which.Days.Should().BeApproximately(3, 0.05);
+
+        var doneIndex = insights.FlowColumns.ToList().FindIndex(c => c.Label == "Done");
+        var doingIndex = insights.FlowColumns.ToList().FindIndex(c => c.Label == "Doing");
+        doneIndex.Should().Be(0, "complete columns are the bottom band");
+        insights.Flow[^1].Counts[doneIndex].Should().Be(3);
+        insights.Flow[^1].Counts[doingIndex].Should().Be(1);
+        insights.Flow.Single(day => day.Day == DateOnly.FromDateTime(DateTime.Now.AddDays(-6))).Counts[doneIndex].Should().Be(1, "only the first had finished six days ago");
+        await _boards.Invoking(service => service.GetInsightsAsync(id, 45)).Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public void BoardFilterPreferences_ShouldTakeASmallJsonObject_AndNothingElse()
+    {
+        var key = GwsBusinessSuite.Application.AdminPortal.UserPreferenceRules.BoardFilters(Guid.NewGuid());
+        GwsBusinessSuite.Application.AdminPortal.UserPreferenceRules.DefaultFor(key).Should().Be("{}");
+        GwsBusinessSuite.Application.AdminPortal.UserPreferenceRules.IsAllowed(key, "{\"mine\":true}").Should().BeTrue();
+        GwsBusinessSuite.Application.AdminPortal.UserPreferenceRules.IsAllowed(key, "[1]").Should().BeFalse();
+        GwsBusinessSuite.Application.AdminPortal.UserPreferenceRules.IsAllowed(key, "{not json").Should().BeFalse();
+        GwsBusinessSuite.Application.AdminPortal.UserPreferenceRules.IsAllowed(key, "{\"x\":\"" + new string('a', 2100) + "\"}").Should().BeFalse();
+    }
+
     [Fact]
     public async Task AnySentinelDatabaseWithAStatus_ShouldOpenAsABoard_AndOneWithoutShouldNot()
     {
@@ -243,5 +482,29 @@ public sealed class KanbanBoardServiceTests : IAsyncLifetime
         (await _boards.GetBoardAsync(plain.Id)).Should().BeNull();
         var board = (await _boards.GetBoardAsync(tasks.Id))!;
         board.Columns.Select(c => c.Color).Should().Equal(["#2563eb", "#78716c"], "a colour that isn't one never reaches a style attribute");
+    }
+
+    [Fact]
+    public async Task CardTemplates_ShouldMakeNamedCards_AtTheTopOfTheChosenColumn()
+    {
+        // K6: a template keeps a card's fields (Sentinel leaves the title out); a card made from it
+        // on the board is named after the template and goes where it's asked, or where it was saved.
+        var boardId = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(boardId))!;
+        var source = await _boards.AddCardAsync(boardId, OptionId(board, "Review"), "Weekly report", "grant");
+        await _boards.AddCardAsync(boardId, OptionId(board, "To do"), "Already here", "grant");
+        await _boards.SetCardsValueAsync(boardId, [source], board.Fields.EstimatePropertyId!.Value, _ => System.Text.Json.Nodes.JsonValue.Create(2m), "grant");
+        var template = await _databases.CreateRowTemplateFromRowAsync(boardId, source, "Weekly report", "grant");
+
+        var inToDo = await _boards.AddCardFromTemplateAsync(boardId, template.Id, OptionId(board, "To do"), "grant");
+        var asSaved = await _boards.AddCardFromTemplateAsync(boardId, template.Id, null, "grant");
+
+        board = (await _boards.GetBoardAsync(boardId))!;
+        Titles(board, "To do").Should().Equal("Weekly report", "Already here");
+        Titles(board, "Review").Should().Equal("Weekly report", "Weekly report");
+        board.Columns.SelectMany(column => column.Cards).Single(card => card.RowId == inToDo).Estimate.Should().Be(2m);
+        board.Columns.Single(column => column.Label == "Review").Cards[0].RowId.Should().Be(asSaved);
+        var missing = () => _boards.AddCardFromTemplateAsync(boardId, Guid.NewGuid(), null, "grant");
+        await missing.Should().ThrowAsync<InvalidOperationException>();
     }
 }

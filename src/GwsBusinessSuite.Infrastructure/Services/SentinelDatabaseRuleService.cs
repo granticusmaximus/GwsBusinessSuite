@@ -2,6 +2,8 @@ using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
@@ -11,13 +13,43 @@ public sealed class SentinelDatabaseRuleService(
     IAutomationWorkflowService workflows,
     IWikiDatabaseService databases) : ISentinelDatabaseRuleService
 {
-    public async Task<IReadOnlyList<SentinelDatabaseRuleView>> ListAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default) =>
-        (await workflows.ListAsync(cancellationToken))
+    public async Task<IReadOnlyList<SentinelDatabaseRuleView>> ListAsync(Guid wikiDatabaseId, CancellationToken cancellationToken = default)
+    {
+        var rules = (await workflows.ListAsync(cancellationToken))
             .Select(workflow => SentinelDatabaseRuleBuilder.SummaryFromDescription(workflow.Description, wikiDatabaseId) is { } summary
                 ? new SentinelDatabaseRuleView(workflow.Id, summary, workflow.Status)
                 : null)
             .OfType<SentinelDatabaseRuleView>()
             .ToList();
+        if (rules.Count == 0) return rules;
+
+        // What each rule watches, from its trigger's first condition.
+        var ids = rules.Select(rule => rule.WorkflowId).ToList();
+        var triggers = (await dbContext.AutomationNodes.AsNoTracking()
+                .Where(node => ids.Contains(node.WorkflowId) && node.TypeKey == "database.rowChangedTrigger")
+                .Select(node => new { node.WorkflowId, node.ParametersJson })
+                .ToListAsync(cancellationToken))
+            .GroupBy(node => node.WorkflowId)
+            .ToDictionary(group => group.Key, group => group.First().ParametersJson);
+        return rules.Select(rule =>
+        {
+            if (!triggers.TryGetValue(rule.WorkflowId, out var json)) return rule;
+            try
+            {
+                if (JsonNode.Parse(json)?["conditions"] is not JsonArray { Count: > 0 } conditions || conditions[0] is not JsonObject first) return rule;
+                return rule with
+                {
+                    WhenPropertyId = Guid.TryParse(first["propertyId"]?.GetValue<string>(), out var propertyId) ? propertyId : null,
+                    WhenValue = first["value"]?.GetValue<string>(),
+                    WhenOperator = first["operator"]?.GetValue<string>()
+                };
+            }
+            catch (Exception exception) when (exception is JsonException or InvalidOperationException)
+            {
+                return rule;
+            }
+        }).ToList();
+    }
 
     public async Task<SentinelDatabaseRuleView> CreateAsync(SentinelDatabaseRule rule, string performedBy, CancellationToken cancellationToken = default)
     {
@@ -47,7 +79,11 @@ public sealed class SentinelDatabaseRuleService(
             throw;
         }
 
-        return new SentinelDatabaseRuleView(created.Id, SentinelDatabaseRuleBuilder.Describe(rule, database, workflowName), AutomationWorkflowStatuses.Active);
+        var watches = rule.When != SentinelDatabaseRuleKinds.WhenRowAdded;
+        return new SentinelDatabaseRuleView(created.Id, SentinelDatabaseRuleBuilder.Describe(rule, database, workflowName), AutomationWorkflowStatuses.Active,
+            watches ? rule.WhenPropertyId : null,
+            watches ? rule.WhenValue : null,
+            watches ? (rule.When == SentinelDatabaseRuleKinds.WhenPropertyBecomes ? "changedTo" : "equals") : null);
     }
 
     public async Task DeleteAsync(Guid wikiDatabaseId, Guid workflowId, string performedBy, CancellationToken cancellationToken = default)

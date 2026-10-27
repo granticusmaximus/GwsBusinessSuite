@@ -45,6 +45,18 @@ public static class CronSchedule
         throw new InvalidOperationException($"Cron expression '{expression}' has no matching occurrence within 4 years.");
     }
 
+    // The same, matched against the wall clock in `zone` - the zone the app shows its times in, so
+    // "0 9 * * 1" is 09:00 there, not 09:00 UTC - and returned as UTC. The walk above keeps the
+    // starting offset, so the match's wall-clock time is read again in the zone (daylight saving
+    // may have changed the offset by then); a time the clocks skip moves an hour later.
+    public static DateTimeOffset GetNextOccurrence(string expression, DateTimeOffset after, TimeZoneInfo zone)
+    {
+        var next = GetNextOccurrence(expression, TimeZoneInfo.ConvertTime(after, zone));
+        var wallClock = next.DateTime;
+        if (zone.IsInvalidTime(wallClock)) wallClock = wallClock.AddHours(1);
+        return new DateTimeOffset(wallClock, zone.GetUtcOffset(wallClock)).ToUniversalTime();
+    }
+
     private static bool Matches(HashSet<int>[] fields, DateTimeOffset value) =>
         fields[0].Contains(value.Minute)
         && fields[1].Contains(value.Hour)
