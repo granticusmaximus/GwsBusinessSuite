@@ -64,23 +64,25 @@ else
             <div class="kb-tools">
                 <label class="visually-hidden" for="kb-filter">Filter cards</label>
                 <input id="kb-filter" type="search" class="form-control form-control-sm kb-filter" placeholder="Filter cards" @bind="_filter" @bind:event="oninput" />
-                <button type="button" class="btn btn-sm btn-outline-secondary" title="A standup, and what's stuck - written by the AI on this computer" @onclick="() => _asking = true">
-                    <i class="bi bi-stars me-1" aria-hidden="true"></i>Ask
+                <button type="button" class="btn btn-sm btn-primary kb-add-primary" @onclick="AddToFirstColumn">
+                    <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add card
                 </button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" title="Rules, card templates and repeating cards" @onclick="() => OpenAutomate(null)">
-                    <i class="bi bi-magic me-1" aria-hidden="true"></i>Automate
-                </button>
-                <a class="btn btn-sm btn-outline-secondary" href="admin/sentinel?database=@_board.DatabaseId" title="The same board in Sentinel, with table, calendar and timeline views">
-                    <i class="bi bi-journal-bookmark me-1" aria-hidden="true"></i>Sentinel
-                </a>
-                <button type="button" class="btn btn-sm btn-outline-secondary @(_zoomed ? "active" : "")" title="@(_zoomed ? "Back to full size" : "Zoom out to see the whole board")"
-                        aria-pressed="@(_zoomed ? "true" : "false")" @onclick="() => _zoomed = !_zoomed">
-                    <i class="bi @(_zoomed ? "bi-zoom-in" : "bi-zoom-out")" aria-hidden="true"></i><span class="visually-hidden">Zoom out</span>
-                </button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" title="Board settings" aria-expanded="@(_showSettings ? "true" : "false")"
-                        @onclick="() => _showSettings = !_showSettings"><i class="bi bi-sliders" aria-hidden="true"></i><span class="visually-hidden">Board settings</span></button>
-                <button type="button" class="btn btn-sm btn-outline-secondary kb-help-toggle" title="Keyboard shortcuts (?)" aria-expanded="@(_showHelp ? "true" : "false")"
-                        @onclick="() => _showHelp = !_showHelp"><i class="bi bi-keyboard" aria-hidden="true"></i><span class="visually-hidden">Keyboard shortcuts</span></button>
+                <div class="kb-more">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" title="More board actions" aria-label="More board actions"
+                            aria-expanded="@(_showMore ? "true" : "false")" @onclick="() => _showMore = !_showMore"><i class="bi bi-three-dots" aria-hidden="true"></i></button>
+                    @if (_showMore)
+                    {
+                        <div class="kb-more-menu" role="menu">
+                            <button type="button" role="menuitem" @onclick="OpenAssistant"><i class="bi bi-stars" aria-hidden="true"></i><span><strong>Ask SentinelGPT</strong><small>Standup and stuck work</small></span></button>
+                            <button type="button" role="menuitem" @onclick="OpenBoardAutomations"><i class="bi bi-magic" aria-hidden="true"></i><span><strong>Automate</strong><small>Rules, templates and repeats</small></span></button>
+                            <a role="menuitem" href="admin/sentinel?database=@_board.DatabaseId"><i class="bi bi-journal-bookmark" aria-hidden="true"></i><span><strong>Open in Sentinel</strong><small>Table, calendar and timeline</small></span></a>
+                            <button type="button" role="menuitem" @onclick="ToggleZoom"><i class="bi @(_zoomed ? "bi-zoom-in" : "bi-zoom-out")" aria-hidden="true"></i><span><strong>@(_zoomed ? "Full-size cards" : "Zoom out")</strong><small>@(_zoomed ? "Return to the comfortable view" : "See more of the board")</small></span></button>
+                            <div class="kb-more-divider"></div>
+                            <button type="button" role="menuitem" @onclick="ToggleSettings"><i class="bi bi-sliders" aria-hidden="true"></i><span><strong>Board appearance</strong><small>Size, accent and background</small></span></button>
+                            <button type="button" role="menuitem" @onclick="ToggleHelp"><i class="bi bi-keyboard" aria-hidden="true"></i><span><strong>Keyboard shortcuts</strong><small>Move quickly without the mouse</small></span></button>
+                        </div>
+                    }
+                </div>
             </div>
         </header>
 
@@ -343,6 +345,7 @@ else
                                     @CardView(card, column)
                                 }
                             </ol>
+                            @ColumnComposer(column)
                         }
                     </section>
                 }
@@ -391,6 +394,7 @@ else
     private bool _focusTitle;
     private bool _showHelp;
     private bool _showSettings;
+    private bool _showMore;
     private int _settingsKey;
     private string? _menuKey;
     private string _me = string.Empty;
@@ -930,9 +934,6 @@ else
                 <button type="button" class="kb-column-add kb-column-menu-toggle" title="Column settings" aria-label="@column.Label settings" aria-expanded="@(_menuKey == column.Key ? "true" : "false")"
                         @onclick="() => ToggleColumnMenu(column)"><i class="bi bi-three-dots" aria-hidden="true"></i></button>
             }
-            <button type="button" class="kb-column-add" title="Add a card to @column.Label" aria-label="Add a card to @column.Label" @onclick="() => OpenQuickAdd(column)">
-                <i class="bi bi-plus-lg" aria-hidden="true"></i>
-            </button>
         </header>
         @if (_menuKey == column.Key)
         {
@@ -965,9 +966,13 @@ else
                 }
             </div>
         }
+    </text>;
+
+    // A calm, permanently discoverable composer at the foot of every column.
+    private RenderFragment ColumnComposer(ColumnState column) => @<div class="kb-composer">
         @if (_quickAddKey == column.Key)
         {
-            <form class="kb-quick-add" @onsubmit="() => AddCardAsync(column)" @onsubmit:preventDefault>
+            <form class="kb-quick-add is-open" @onsubmit="() => AddCardAsync(column)" @onsubmit:preventDefault>
                 <label class="visually-hidden" for="kb-quick-add">New card in @column.Label</label>
                 <input id="kb-quick-add" class="form-control form-control-sm" placeholder="Card title, then Enter" autocomplete="off" maxlength="300"
                        @ref="_quickAddInput" @bind="_newTitle" @bind:event="oninput" @onkeydown="QuickAddKey" />
@@ -984,11 +989,15 @@ else
                 <span class="kb-quick-add-hint">Enter adds · <code>!high #label @@name fri ~3</code> · Esc closes</span>
             </form>
         }
-    </text>;
+        else
+        {
+            <button type="button" class="kb-add-row" @onclick="() => OpenQuickAdd(column)"><i class="bi bi-plus-lg" aria-hidden="true"></i>Add card</button>
+        }
+    </div>;
 
-    private RenderFragment CardView(KanbanCard card, ColumnState column) => @<li class="kb-card @(IsOverdue(card, column) ? "is-overdue" : "") @(card.Blocked ? "is-blocked" : "") @AgingClass(card, column) @(_selection.IsSelected(card.RowId) ? "is-selected" : "") @(card.RowId == CardQuery ? "is-open" : "") @(_liveFlash.Contains(card.RowId) ? "is-live" : "") @(BusyWith(card) is null ? "" : "is-busy")"
+    private RenderFragment CardView(KanbanCard card, ColumnState column) => @<li class="kb-card @(IsOverdue(card, column) ? "is-overdue" : "") @(card.Blocked ? "is-blocked" : "") @(card.Priority is null ? "" : "has-priority") @AgingClass(card, column) @(_selection.IsSelected(card.RowId) ? "is-selected" : "") @(card.RowId == CardQuery ? "is-open" : "") @(_liveFlash.Contains(card.RowId) ? "is-live" : "") @(BusyWith(card) is null ? "" : "is-busy")"
             @key="card.RowId" data-kb-card="@card.RowId" tabindex="0" aria-selected="@(_selection.IsSelected(card.RowId) ? "true" : "false")"
-            aria-label="@CardLabel(card)" @onclick="() => OpenCard(card)">
+            style="@(card.Priority is { } p ? $"--priority-color: {p.Color}" : null)" aria-label="@CardLabel(card)" @onclick="() => OpenCard(card)">
         @if (_selection.IsSelected(card.RowId)) { <span class="kb-check" aria-hidden="true"><i class="bi bi-check-lg"></i></span> }
         <span class="kb-grip" data-kb-grip aria-hidden="true"><i class="bi bi-grip-vertical"></i></span>
         @if (!string.IsNullOrWhiteSpace(card.CoverImageUrl))
@@ -1019,7 +1028,8 @@ else
         @if (card.Labels.Count > 0)
         {
             <div class="kb-labels">
-                @foreach (var label in card.Labels) { <span class="kb-label" style="--tone: @label.Color">@label.Label</span> }
+                @foreach (var label in card.Labels.Take(2)) { <span class="kb-label" style="--tone: @label.Color">@label.Label</span> }
+                @if (card.Labels.Count > 2) { <span class="kb-label-more" title="@string.Join(", ", card.Labels.Skip(2).Select(label => label.Label))">+@(card.Labels.Count - 2)</span> }
             </div>
         }
         @if (HasFooter(card) || AgeDays(card, column) >= 1)
@@ -1141,6 +1151,36 @@ else
         _focusQuickAdd = true;
     }
 
+    private void AddToFirstColumn()
+    {
+        _showMore = false;
+        if (_columns.FirstOrDefault(column => !column.IsComplete) is { } column) OpenQuickAdd(column);
+    }
+
+    private void OpenAssistant()
+    {
+        _showMore = false;
+        _asking = true;
+    }
+
+    private void OpenBoardAutomations()
+    {
+        _showMore = false;
+        OpenAutomate(null);
+    }
+
+    private void ToggleZoom()
+    {
+        _showMore = false;
+        _zoomed = !_zoomed;
+    }
+
+    private void ToggleSettings()
+    {
+        _showMore = false;
+        _showSettings = !_showSettings;
+    }
+
     private void QuickAddKey(KeyboardEventArgs e)
     {
         if (e.Key == "Escape") _quickAddKey = null;
@@ -1224,6 +1264,7 @@ else
     [JSInvokable]
     public void ToggleHelp()
     {
+        _showMore = false;
         _showHelp = !_showHelp;
         StateHasChanged();
     }
