@@ -342,6 +342,19 @@ server release gate passed; the gate is PARTIAL only because no deployed/respons
 supplied. My day also loaded cleanly through live authenticated Chromium and WebKit sessions with
 the Knowledge navigation, six summary tiles and empty state intact and no console errors.
 
+**K8e done 28-10-26.** - A board's roadmap is a `SentinelPublicShare` with `IsRoadmap` (migration
+`AddBoardRoadmap`), referenced from `KanbanSettings.Roadmap` (share id, chosen columns, votes and
+descriptions toggles, the token kept encrypted for the copy link). `/roadmap/{token}` is a static,
+anonymous, noindex page with its own light/dark palette: only the chosen columns, titles and labels
+(and optional description snippets), never assignees, dates or ids. The generic share page refuses
+roadmap shares. Votes post to `/roadmap/{token}/vote/{rowId}` (antiforgery, `public-write` rate
+limit) and are stored as `BoardCardVote` rows keyed by a SHA-256 of share id + an HttpOnly
+`gws_rv` cookie, unique per card, so a second click takes the vote back. Cards carry a vote count
+chip on the board. The service test covers column/field filtering and one-vote-per-visitor; a live
+Chromium pass covered publish, view as a visitor, vote/unvote/revote, the refused generic link,
+phone width and light/dark headings (found and fixed: the global heading colour overrode the
+page's palette).
+
 - One-line cards: "Fix login !high #bug @grant fri" -> priority, label, assignee, due, as chips
   while typing, no AI needed.
 - SentinelGPT on the board (local Ollama, free and private): break a card into sub-cards and a

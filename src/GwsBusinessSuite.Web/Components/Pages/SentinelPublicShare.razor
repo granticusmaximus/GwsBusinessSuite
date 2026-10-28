@@ -187,8 +187,9 @@
     protected override async Task OnInitializedAsync()
     {
         _share = await AccessService.ResolvePublicShareAsync(Token);
-        // A public form's link opens the form only, never the database's rows.
-        if (_share?.FormViewId is not null) _share = null;
+        // A public form's link opens the form only, and a roadmap's only the roadmap - never the
+        // database's rows.
+        if (_share?.FormViewId is not null || _share?.IsRoadmap == true) _share = null;
         if (_share is not null)
         {
             _unlocked = !_share.RequiresPassword || SentinelShareUnlock.IsUnlocked(HttpContext, DataProtection, _share.Id);

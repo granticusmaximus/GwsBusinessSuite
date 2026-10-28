@@ -1,0 +1,16 @@
+/* Publish a board as a public roadmap (Boards K8e). The dialog's frame (.kb-modal) is in app.css. */
+.kb-roadmap { width: min(38rem, calc(100vw - 2rem)); }
+.kb-roadmap-note { font-size: .8125rem; color: var(--gws-text-soft); }
+.kb-roadmap-link { display: flex; align-items: center; gap: var(--gws-step-2); }
+.kb-roadmap-link i { color: var(--gws-status-success-text); }
+.kb-roadmap-link input { flex: 1; min-width: 0; font-family: var(--gws-font-mono); font-size: .75rem; }
+.kb-roadmap-stats { font-size: .75rem; color: var(--gws-text-soft); font-variant-numeric: tabular-nums; }
+.kb-roadmap-columns { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
+.kb-roadmap-columns legend { margin-bottom: 4px; font-size: .875rem; font-weight: 600; }
+.kb-roadmap-columns label, .kb-roadmap-option { display: flex; align-items: center; gap: var(--gws-step-2); font-size: .875rem; }
+.kb-roadmap-dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--tone); }
+.kb-roadmap-count { padding: 0 6px; border-radius: 999px; font-size: .6875rem; color: var(--gws-text-soft); background: var(--gws-panel-bg-2); }
+
+@media (pointer: coarse) {
+    .kb-roadmap-columns label, .kb-roadmap-option { min-height: 44px; }
+}

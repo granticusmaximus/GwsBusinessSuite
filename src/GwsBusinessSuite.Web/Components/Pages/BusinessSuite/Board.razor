@@ -75,6 +75,7 @@ else
                         <div class="kb-more-menu" role="menu">
                             <button type="button" role="menuitem" @onclick="OpenAssistant"><i class="bi bi-stars" aria-hidden="true"></i><span><strong>Ask SentinelGPT</strong><small>Standup and stuck work</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenBoardAutomations"><i class="bi bi-magic" aria-hidden="true"></i><span><strong>Automate</strong><small>Rules, templates and repeats</small></span></button>
+                            <button type="button" role="menuitem" @onclick="OpenRoadmap"><i class="bi bi-broadcast" aria-hidden="true"></i><span><strong>Public roadmap</strong><small>@(_board.Settings?.Roadmap is null ? "Share it read-only, with votes" : "Live - copy the link or change it")</small></span></button>
                             <a role="menuitem" href="admin/sentinel?database=@_board.DatabaseId"><i class="bi bi-journal-bookmark" aria-hidden="true"></i><span><strong>Open in Sentinel</strong><small>Table, calendar and timeline</small></span></a>
                             <button type="button" role="menuitem" @onclick="ToggleZoom"><i class="bi @(_zoomed ? "bi-zoom-in" : "bi-zoom-out")" aria-hidden="true"></i><span><strong>@(_zoomed ? "Full-size cards" : "Zoom out")</strong><small>@(_zoomed ? "Return to the comfortable view" : "See more of the board")</small></span></button>
                             <div class="kb-more-divider"></div>
@@ -368,6 +369,11 @@ else
         </SentinelDatabaseRowPage>
     }
 
+    @if (_sharing)
+    {
+        <KanbanRoadmapPanel Board="_board" OnChanged="RefreshAsync" OnClose="() => _sharing = false" />
+    }
+
     @if (_asking)
     {
         <KanbanAssistantPanel Board="_board" OnClose="() => _asking = false" />
@@ -571,6 +577,7 @@ else
     // ---- Automate (K6): rules per column, card templates, repeats ----
     private sealed record AutomateState(string? Column, bool Templates);
     private bool _asking;
+    private bool _sharing;
     private AutomateState? _automate;
     private IReadOnlyList<SentinelDatabaseRuleView> _rules = [];
     private IReadOnlyList<WikiDatabaseRowTemplate> _templates = [];
@@ -1047,6 +1054,10 @@ else
                 {
                     <span class="kb-meta @(card.ChecklistDone == card.ChecklistTotal ? "is-done" : "")" title="Checklist"><i class="bi bi-check2-square" aria-hidden="true"></i>@card.ChecklistDone/@card.ChecklistTotal</span>
                 }
+                @if (card.Votes > 0)
+                {
+                    <span class="kb-meta kb-votes" title="@($"{card.Votes} {(card.Votes == 1 ? "vote" : "votes")} on the public roadmap")"><i class="bi bi-caret-up-fill" aria-hidden="true"></i>@card.Votes</span>
+                }
                 @if (card.LinkKinds is { Count: > 0 } links)
                 {
                     @foreach (var group in links.GroupBy(kind => kind))
@@ -1161,6 +1172,12 @@ else
     {
         _showMore = false;
         _asking = true;
+    }
+
+    private void OpenRoadmap()
+    {
+        _showMore = false;
+        _sharing = true;
     }
 
     private void OpenBoardAutomations()
@@ -1463,7 +1480,7 @@ else
 
     private static bool HasFooter(KanbanCard card) =>
         card.Due is not null || card.ChecklistTotal > 0 || card.SubItemCount > 0 || card.Estimate is not null || card.Assignees.Count > 0 || card.Sprint is not null
-        || card.LinkKinds is { Count: > 0 };
+        || card.LinkKinds is { Count: > 0 } || card.Votes > 0;
 
     // A due date as written: Sentinel stores a picked date at UTC midnight, which local time would
     // show as the day before west of UTC.

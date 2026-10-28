@@ -37,7 +37,9 @@ public sealed record KanbanCard(
     // The start of the card's page, for rich cards (K7).
     string? Snippet = null,
     // What it's linked to (K8c): one entry per link, its KanbanLinkKinds.
-    IReadOnlyList<string>? LinkKinds = null);
+    IReadOnlyList<string>? LinkKinds = null,
+    // Votes on the board's public roadmap (K8e).
+    int Votes = 0);
 
 // OptionId null is the "No status" column (cards with no value yet), shown only when it has cards.
 public sealed record KanbanColumn(string? OptionId, string Label, string Color, string? Group, IReadOnlyList<KanbanCard> Cards, int? WipLimit = null);
@@ -66,6 +68,8 @@ public sealed record KanbanSettings
     public string? Background { get; init; }
     public string? Accent { get; init; }
     public string CardSize { get; init; } = KanbanCardSizes.Comfortable;
+    // The public roadmap, when the board has one (K8e).
+    public KanbanRoadmap? Roadmap { get; init; }
     // The board's sprints (K4), one per option of its Sprint property.
     public List<KanbanSprint> Sprints { get; init; } = [];
 
@@ -123,6 +127,24 @@ public sealed record KanbanInsights(
     IReadOnlyList<KanbanNamedForecast>? Forecasts = null);
 
 public sealed record KanbanNamedForecast(string Key, string Name, KanbanForecast Forecast);
+
+// A board's public roadmap (K8e): the Sentinel share behind it, its link (encrypted, so it can be
+// copied again), which columns it shows, and whether visitors vote and see card descriptions.
+public sealed record KanbanRoadmap
+{
+    public Guid ShareId { get; init; }
+    public string ProtectedToken { get; init; } = string.Empty;
+    public List<string> Columns { get; init; } = [];
+    public bool Votes { get; init; } = true;
+    public bool Descriptions { get; init; }
+}
+
+public sealed record KanbanRoadmapView(bool Published, string? Url, IReadOnlyList<string> Columns, bool Votes, bool Descriptions, int Views, int TotalVotes);
+
+// What a visitor sees: titles and labels, a description only if the board shares them, votes.
+public sealed record KanbanPublicCard(Guid RowId, string Title, IReadOnlyList<KanbanLabel> Labels, string? Description, int Votes, bool Voted);
+public sealed record KanbanPublicColumn(string Label, string Color, string? Group, IReadOnlyList<KanbanPublicCard> Cards);
+public sealed record KanbanPublicRoadmap(Guid ShareId, string Title, string? Icon, IReadOnlyList<KanbanPublicColumn> Columns, bool Votes);
 
 // "My day" (K8d): what's on one person's plate today - their cards across every board, by when
 // they're due or where they are, plus their open support tickets and the follow-ups due.
@@ -296,6 +318,16 @@ public interface IKanbanBoardService
     // A card made from a support ticket: its subject as the title, linked to it and its contact,
     // at the top of the column (null: the first column). Returns the card's row id.
     Task<Guid> AddCardFromTicketAsync(Guid databaseId, Guid ticketId, string? optionId, string performedBy, CancellationToken cancellationToken = default);
+    // Public roadmap (K8e). Publishing again with other choices updates the same link.
+    Task<KanbanRoadmapView> GetRoadmapAsync(Guid databaseId, CancellationToken cancellationToken = default);
+    Task<KanbanRoadmapView> PublishRoadmapAsync(Guid databaseId, IReadOnlyList<string> columns, bool votes, bool descriptions, string performedBy, CancellationToken cancellationToken = default);
+    Task UnpublishRoadmapAsync(Guid databaseId, string performedBy, CancellationToken cancellationToken = default);
+    // For /roadmap/{token}; null for a link that isn't a live roadmap. voterHash marks the cards this
+    // visitor has voted for.
+    Task<KanbanPublicRoadmap?> GetPublicRoadmapAsync(string token, string? voterHash, CancellationToken cancellationToken = default);
+    // A visitor's vote, or taking it back; the card's new count, or null when it can't be voted on.
+    Task<int?> VoteAsync(string token, Guid rowId, string voterHash, CancellationToken cancellationToken = default);
+
     // My day (K8d): the person's cards on every board, open tickets assigned to them, follow-ups due.
     Task<KanbanMyDay> GetMyDayAsync(string username, CancellationToken cancellationToken = default);
 

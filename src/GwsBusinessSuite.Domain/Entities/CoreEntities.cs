@@ -293,6 +293,15 @@ public sealed class TimeEntry : AuditableEntity
 // A board card's link to a CRM contact, support ticket or invoice (Boards K8c). Kind is one of
 // KanbanLinkKinds; TargetId that record's id. No foreign key: a deleted record leaves the link,
 // which then shows as gone rather than vanishing from under the card.
+// A vote on a public roadmap's card (Boards K8e). VoterHash is a hash of the share and a random id
+// kept in the visitor's cookie - no account, no IP - so one browser votes once per card.
+public sealed class BoardCardVote : AuditableEntity
+{
+    public Guid WikiDatabaseId { get; set; }
+    public Guid RowId { get; set; }
+    public required string VoterHash { get; set; }
+}
+
 public sealed class BoardCardLink : AuditableEntity
 {
     public Guid WikiDatabaseId { get; set; }
@@ -1110,6 +1119,9 @@ public sealed class SentinelPublicShare : AuditableEntity
     // Database shares only: a public form (Sentinel item 32) for this Form view. Such a link
     // only ever opens the form at /sentinel/form/{token}, never the database's rows.
     public Guid? FormViewId { get; set; }
+    // Database shares only: a board's public roadmap (Boards K8e). Such a link only ever opens
+    // /roadmap/{token} - the columns and card fields the board chose - never the database's rows.
+    public bool IsRoadmap { get; set; }
     public required string TokenHash { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
     public bool AllowSearchIndexing { get; set; }

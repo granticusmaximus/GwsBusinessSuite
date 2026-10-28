@@ -1,0 +1,94 @@
+/* A board's public roadmap (Boards K8e): a page of its own, light or dark with the visitor's system. */
+.rm {
+    --rm-bg: #f7f6f3;
+    --rm-panel: #ffffff;
+    --rm-border: #e4e1dc;
+    --rm-text: #1c1917;
+    --rm-soft: #6b6560;
+    --rm-accent: #c2410c;
+    min-height: 100dvh;
+    padding: clamp(1rem, 4vw, 3rem) clamp(1rem, 4vw, 3rem) 2rem;
+    color: var(--rm-text);
+    background: var(--rm-bg);
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+    .rm { --rm-bg: #121110; --rm-panel: #1c1a18; --rm-border: #2e2b28; --rm-text: #f4f2ef; --rm-soft: #a8a29e; --rm-accent: #f59e0b; }
+}
+
+/* The app's global heading colour follows the admin theme; the roadmap has its own palette. */
+.rm h1, .rm h2, .rm h3 { color: var(--rm-text); }
+.rm-head { display: flex; align-items: center; gap: 1rem; max-width: 80rem; margin: 0 auto 1.5rem; }
+.rm-icon { font-size: 2.5rem; line-height: 1; }
+.rm-head h1 { margin: 0; font-size: clamp(1.5rem, 3vw, 2.25rem); font-weight: 800; letter-spacing: -.01em; }
+.rm-head p { margin: .25rem 0 0; color: var(--rm-soft); }
+.rm-flash { max-width: 80rem; margin: 0 auto 1rem; padding: .5rem .75rem; border-radius: 8px; color: var(--rm-text); background: color-mix(in srgb, var(--rm-accent) 14%, var(--rm-panel)); }
+
+.rm-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+    gap: 1rem;
+    max-width: 80rem;
+    margin: 0 auto;
+    align-items: start;
+}
+
+.rm-column {
+    padding: .75rem;
+    border: 1px solid var(--rm-border);
+    border-top: 3px solid var(--tone);
+    border-radius: 12px;
+    background: linear-gradient(to bottom, color-mix(in srgb, var(--tone) 10%, var(--rm-panel)), var(--rm-panel) 10rem);
+}
+
+.rm-column h2 { display: flex; align-items: center; gap: .5rem; margin: .25rem .25rem .75rem; font-size: 1rem; font-weight: 700; }
+.rm-dot { width: .55rem; height: .55rem; border-radius: 50%; background: var(--tone); }
+.rm-count { margin-inline-start: auto; padding: 0 .5rem; border-radius: 999px; font-size: .75rem; color: var(--rm-soft); background: color-mix(in srgb, var(--rm-border) 60%, transparent); }
+.rm-empty { margin: .25rem; color: var(--rm-soft); font-size: .875rem; }
+.rm-cards { display: flex; flex-direction: column; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+
+.rm-card {
+    display: flex;
+    gap: .75rem;
+    align-items: flex-start;
+    padding: .75rem;
+    border: 1px solid var(--rm-border);
+    border-radius: 10px;
+    background: var(--rm-panel);
+    scroll-margin-top: 1rem;
+}
+
+.rm-card:target { box-shadow: 0 0 0 2px var(--rm-accent); }
+.rm-card-body { flex: 1; min-width: 0; }
+.rm-card h3 { margin: 0; font-size: .9375rem; font-weight: 650; overflow-wrap: anywhere; }
+.rm-card p { margin: .35rem 0 0; font-size: .8125rem; line-height: 1.45; color: var(--rm-soft); }
+.rm-labels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: .4rem; }
+.rm-labels span { padding: 0 .5rem; border-radius: 999px; font-size: .6875rem; font-weight: 600; color: color-mix(in srgb, var(--tone) 75%, var(--rm-text)); background: color-mix(in srgb, var(--tone) 16%, transparent); }
+.rm-vote-form { margin: 0; }
+
+.rm-vote {
+    display: grid;
+    justify-items: center;
+    gap: 0;
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+    padding: .25rem .5rem;
+    border: 1px solid var(--rm-border);
+    border-radius: 10px;
+    color: var(--rm-soft);
+    background: transparent;
+    font: inherit;
+    font-size: .8125rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+}
+
+.rm-vote svg { width: .85rem; height: .85rem; fill: currentColor; }
+.rm-vote:hover { border-color: var(--rm-accent); color: var(--rm-text); }
+.rm-vote:focus-visible { outline: 2px solid var(--rm-accent); outline-offset: 2px; }
+.rm-vote.is-on { border-color: var(--rm-accent); color: var(--rm-accent); background: color-mix(in srgb, var(--rm-accent) 10%, transparent); }
+.rm-foot { max-width: 80rem; margin: 2rem auto 0; font-size: .75rem; color: var(--rm-soft); text-align: center; }
+.rm-missing { max-width: 32rem; margin: 15vh auto; text-align: center; }
+.rm-missing p { color: var(--rm-soft); }

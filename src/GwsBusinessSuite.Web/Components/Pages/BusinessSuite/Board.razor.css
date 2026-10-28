@@ -808,3 +808,7 @@
     background: color-mix(in srgb, var(--tone) 16%, transparent);
 }
 .kb-quick-add-hint code { font-size: .6875rem; color: var(--gws-text-soft); }
+
+/* Public roadmap (K8e): a card's votes. */
+.kb-votes { color: var(--gws-sidebar-accent); font-weight: 700; }
+

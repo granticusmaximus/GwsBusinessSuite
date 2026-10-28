@@ -1869,6 +1869,46 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("BoardCardLinks");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.BoardCardVote", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RowId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("VoterHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("WikiDatabaseId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WikiDatabaseId");
+
+                    b.HasIndex("RowId", "VoterHash")
+                        .IsUnique();
+
+                    b.ToTable("BoardCardVotes");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.Booking", b =>
                 {
                     b.Property<Guid>("Id")
@@ -7001,6 +7041,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("IsDatabase")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsRoadmap")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset?>("LastAccessedAt")

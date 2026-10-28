@@ -87,6 +87,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<WikiDatabaseRowStatusChange> WikiDatabaseRowStatusChanges => Set<WikiDatabaseRowStatusChange>();
     public DbSet<KanbanBoardSettings> KanbanBoardSettings => Set<KanbanBoardSettings>();
     public DbSet<BoardCardLink> BoardCardLinks => Set<BoardCardLink>();
+    public DbSet<BoardCardVote> BoardCardVotes => Set<BoardCardVote>();
     public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
     public DbSet<SupportTicketMessage> SupportTicketMessages => Set<SupportTicketMessage>();
     public DbSet<SupportTicketAttachment> SupportTicketAttachments => Set<SupportTicketAttachment>();
@@ -1032,6 +1033,12 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             entity.HasIndex(x => new { x.Kind, x.TargetId });
         });
         modelBuilder.Entity<TimeEntry>().HasIndex(x => x.BoardCardId);
+        modelBuilder.Entity<BoardCardVote>(entity =>
+        {
+            entity.Property(x => x.VoterHash).HasMaxLength(64);
+            entity.HasIndex(x => new { x.RowId, x.VoterHash }).IsUnique();
+            entity.HasIndex(x => x.WikiDatabaseId);
+        });
     }
 
     private void SynchronizeNewsItemTimestamps()

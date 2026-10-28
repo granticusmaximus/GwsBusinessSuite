@@ -37,7 +37,7 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
             .Select(item => new SentinelShareView(
                 item.Id, item.TargetId, item.IsDatabase, null, item.ExpiresAt, item.AllowSearchIndexing,
                 item.RevokedAt != null, item.PasswordHash != null, item.ViewCount, item.LastAccessedAt, item.IsAutomationWorkflow,
-                item.IncludeSubpages, item.SiteTitle, item.FormViewId))
+                item.IncludeSubpages, item.SiteTitle, item.FormViewId, item.IsRoadmap))
             .ToListAsync(cancellationToken);
         // SQLite stores DateTimeOffset as TEXT and cannot translate ORDER BY for it. Keep the
         // bounded resource-share query server-side, then order the already-materialized rows
@@ -91,9 +91,10 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
     public async Task<SentinelShareView> CreatePublicShareAsync(
         Guid targetId, bool isDatabase, DateTimeOffset? expiresAt, bool allowSearchIndexing, string? password, string performedBy,
         bool isAutomationWorkflow = false, CancellationToken cancellationToken = default,
-        bool includeSubpages = false, string? siteTitle = null, Guid? formViewId = null)
+        bool includeSubpages = false, string? siteTitle = null, Guid? formViewId = null, bool isRoadmap = false)
     {
         if (formViewId is not null && !isDatabase) throw new ArgumentException("A form link belongs to a database.", nameof(formViewId));
+        if (isRoadmap && (!isDatabase || formViewId is not null)) throw new ArgumentException("A roadmap link belongs to a board's database.", nameof(isRoadmap));
         // A site is a page-tree feature; databases and automation status pages are single views.
         includeSubpages = includeSubpages && !isDatabase && !isAutomationWorkflow;
         siteTitle = includeSubpages && !string.IsNullOrWhiteSpace(siteTitle) ? siteTitle.Trim()[..Math.Min(siteTitle.Trim().Length, SentinelPublishedSite.MaxSiteTitleLength)] : null;
@@ -114,6 +115,7 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
             IncludeSubpages = includeSubpages,
             SiteTitle = siteTitle,
             FormViewId = formViewId,
+            IsRoadmap = isRoadmap,
             TokenHash = HashToken(token),
             ExpiresAt = expiresAt,
             AllowSearchIndexing = allowSearchIndexing,
@@ -125,7 +127,7 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
         await dbContext.SentinelPublicShares.AddAsync(entity, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
         return new SentinelShareView(entity.Id, targetId, isDatabase, token, expiresAt, allowSearchIndexing, false, hasPassword,
-            IsAutomationWorkflow: isAutomationWorkflow, IncludeSubpages: includeSubpages, SiteTitle: siteTitle, FormViewId: formViewId);
+            IsAutomationWorkflow: isAutomationWorkflow, IncludeSubpages: includeSubpages, SiteTitle: siteTitle, FormViewId: formViewId, IsRoadmap: isRoadmap);
     }
 
     public async Task RevokePublicShareAsync(Guid shareId, string performedBy, CancellationToken cancellationToken = default)
@@ -146,7 +148,7 @@ public sealed class SentinelAccessService(IAppDbContext dbContext) : ISentinelAc
             .FirstOrDefaultAsync(item => item.TokenHash == hash && item.RevokedAt == null, cancellationToken);
         if (item is null || item.ExpiresAt is { } expiresAt && expiresAt <= DateTimeOffset.UtcNow) return null;
         return new SentinelShareView(item.Id, item.TargetId, item.IsDatabase, null, item.ExpiresAt, item.AllowSearchIndexing, false, item.PasswordHash != null, IsAutomationWorkflow: item.IsAutomationWorkflow,
-            IncludeSubpages: item.IncludeSubpages, SiteTitle: item.SiteTitle, FormViewId: item.FormViewId);
+            IncludeSubpages: item.IncludeSubpages, SiteTitle: item.SiteTitle, FormViewId: item.FormViewId, IsRoadmap: item.IsRoadmap);
     }
 
     public async Task<bool> VerifySharePasswordAsync(Guid shareId, string password, CancellationToken cancellationToken = default)

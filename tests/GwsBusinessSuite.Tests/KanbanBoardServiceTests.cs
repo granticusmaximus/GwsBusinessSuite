@@ -737,4 +737,62 @@ public sealed class KanbanBoardServiceTests : IAsyncLifetime
         day.Tickets.Single().ContactName.Should().Be("Ada Lovelace");
         day.FollowUps.Select(followUp => followUp.Name).Should().Equal("Ada Lovelace");
     }
+
+    private sealed class ReversibleProtector : GwsBusinessSuite.Application.Abstractions.ISecretProtector
+    {
+        public string Protect(string plaintext) => "p:" + new string(plaintext.Reverse().ToArray());
+        public string Unprotect(string protectedValue) => new string(protectedValue[2..].Reverse().ToArray());
+    }
+
+    [Fact]
+    public async Task Roadmap_ShouldShowOnlyChosenColumnsAndFields_AndCountOneVotePerVisitor()
+    {
+        // K8e: a public roadmap is a roadmap-only Sentinel share; visitors see the chosen columns'
+        // titles and labels and vote once each; turning it off kills the link.
+        var access = new SentinelAccessService(_db);
+        var boards = new KanbanBoardService(_db, _databases, access, new ReversibleProtector());
+        var boardId = await boards.CreateBoardAsync("Product", "personal", "grant");
+        var board = (await boards.GetBoardAsync(boardId))!;
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var secret = await boards.AddQuickCardAsync(boardId, OptionId(board, "Backlog"), KanbanQuickParse.Parse("Secret idea", board, today, "grant"), "grant");
+        var dark = await boards.AddQuickCardAsync(boardId, OptionId(board, "Doing"), KanbanQuickParse.Parse("Dark mode @grant ~5 #feature", board, today, "grant"), "grant");
+        var shipped = await boards.AddQuickCardAsync(boardId, OptionId(board, "Done"), KanbanQuickParse.Parse("Exports", board, today, "grant"), "grant");
+        var row = await _db.WikiDatabaseRows.SingleAsync(item => item.Id == dark);
+        row.BlocksJson = WikiBlockJson.Serialize([new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [new WikiRichTextSpan("A darker theme for night owls.")], new Dictionary<string, string>())]);
+        await _db.SaveChangesAsync();
+
+        (await boards.GetRoadmapAsync(boardId)).Published.Should().BeFalse();
+        var noColumns = () => boards.PublishRoadmapAsync(boardId, [], true, false, "grant");
+        await noColumns.Should().ThrowAsync<ArgumentException>();
+        var view = await boards.PublishRoadmapAsync(boardId, [OptionId(board, "Doing"), OptionId(board, "Done")], votes: true, descriptions: false, "grant");
+        view.Published.Should().BeTrue();
+        var token = view.Url!["/roadmap/".Length..];
+        (await access.ResolvePublicShareAsync(token))!.IsRoadmap.Should().BeTrue();
+
+        var publicView = (await boards.GetPublicRoadmapAsync(token, null))!;
+        publicView.Columns.Select(column => column.Label).Should().Equal("Doing", "Done");
+        publicView.Columns.SelectMany(column => column.Cards).Select(card => card.Title).Should().Equal("Dark mode", "Exports");
+        publicView.Columns[0].Cards[0].Labels.Select(label => label.Label).Should().Equal("Feature");
+        publicView.Columns[0].Cards[0].Description.Should().BeNull("descriptions weren't shared");
+
+        (await boards.VoteAsync(token, dark, "visitor-a")).Should().Be(1);
+        (await boards.VoteAsync(token, dark, "visitor-b")).Should().Be(2);
+        (await boards.VoteAsync(token, dark, "visitor-a")).Should().Be(1, "voting again takes the vote back");
+        (await boards.VoteAsync(token, secret, "visitor-a")).Should().BeNull("the backlog isn't on show");
+        (await boards.GetPublicRoadmapAsync(token, "visitor-b"))!.Columns[0].Cards[0].Should().Match<KanbanPublicCard>(card => card.Votes == 1 && card.Voted);
+        (await boards.GetBoardAsync(boardId))!.Columns.SelectMany(column => column.Cards).Single(card => card.RowId == dark).Votes.Should().Be(1);
+
+        // Same link, new choices: descriptions on, votes off.
+        view = await boards.PublishRoadmapAsync(boardId, [OptionId(board, "Doing")], votes: false, descriptions: true, "grant");
+        view.Url.Should().Be("/roadmap/" + token);
+        (await boards.GetPublicRoadmapAsync(token, null))!.Columns.Single().Cards.Single().Description.Should().Be("A darker theme for night owls.");
+        (await boards.VoteAsync(token, dark, "visitor-c")).Should().BeNull("voting is off");
+        (await boards.GetPublicRoadmapAsync(token, null))!.Columns.SelectMany(column => column.Cards).Should().NotContain(card => card.RowId == shipped);
+
+        await boards.UnpublishRoadmapAsync(boardId, "grant");
+        (await boards.GetPublicRoadmapAsync(token, null)).Should().BeNull();
+        (await boards.GetRoadmapAsync(boardId)).Published.Should().BeFalse();
+        var again = await boards.PublishRoadmapAsync(boardId, [OptionId(board, "Done")], true, false, "grant");
+        again.Url.Should().NotBe("/roadmap/" + token, "a new link after turning it off");
+    }
 }

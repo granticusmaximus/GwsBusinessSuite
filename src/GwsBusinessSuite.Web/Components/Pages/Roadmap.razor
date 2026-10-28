@@ -1,0 +1,95 @@
+@page "/roadmap/{Token}"
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
+@layout GwsBusinessSuite.Web.Components.Layout.PublicShareLayout
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject IKanbanBoardService BoardService
+@inject ISentinelAccessService AccessService
+
+@* A board's public roadmap (Boards K8e): the columns and card details the board chose to show -
+   never assignees, estimates, dates or anything else on the cards - and, if it allows them,
+   votes: one per browser per card, through RoadmapEndpoints. A static page; voting posts a form. *@
+<PageTitle>@(_roadmap is null ? "Roadmap" : $"{_roadmap.Title} - roadmap")</PageTitle>
+<HeadContent><meta name="robots" content="noindex, nofollow" /></HeadContent>
+
+<main class="rm">
+    @if (_roadmap is null)
+    {
+        <div class="rm-missing">
+            <h1>This roadmap isn't here</h1>
+            <p>The link may have been turned off, or replaced with a new one.</p>
+        </div>
+    }
+    else
+    {
+        <header class="rm-head">
+            <span class="rm-icon" aria-hidden="true">@(_roadmap.Icon ?? "🗺️")</span>
+            <div>
+                <h1>@_roadmap.Title</h1>
+                <p>@(_roadmap.Votes ? "What we're working on, and what's next. Vote for what matters to you." : "What we're working on, and what's next.")</p>
+            </div>
+        </header>
+        @if (Voted is not null)
+        {
+            <p class="rm-flash" role="status">@(Voted == "added" ? "Thanks - your vote is in." : Voted == "removed" ? "Your vote is taken back." : "That vote didn't count; try again in a minute.")</p>
+        }
+        <div class="rm-columns">
+            @foreach (var (column, index) in _roadmap.Columns.Select((column, index) => (column, index)))
+            {
+                <section class="rm-column" style="--tone: @column.Color" aria-labelledby="@($"rm-col-{index}")">
+                    <h2 id="@($"rm-col-{index}")"><span class="rm-dot" aria-hidden="true"></span>@column.Label <span class="rm-count">@column.Cards.Count</span></h2>
+                    @if (column.Cards.Count == 0)
+                    {
+                        <p class="rm-empty">Nothing here yet.</p>
+                    }
+                    <ol class="rm-cards">
+                        @foreach (var card in column.Cards)
+                        {
+                            <li class="rm-card" id="@($"card-{card.RowId}")">
+                                <div class="rm-card-body">
+                                    <h3>@card.Title</h3>
+                                    @if (card.Labels.Count > 0)
+                                    {
+                                        <div class="rm-labels">@foreach (var label in card.Labels) { <span style="--tone: @label.Color">@label.Label</span> }</div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(card.Description)) { <p>@card.Description</p> }
+                                </div>
+                                @if (_roadmap.Votes)
+                                {
+                                    <form method="post" action="@($"roadmap/{Token}/vote/{card.RowId}")" class="rm-vote-form">
+                                        <AntiforgeryToken />
+                                        <button type="submit" class="rm-vote @(card.Voted ? "is-on" : "")" aria-pressed="@(card.Voted ? "true" : "false")"
+                                                aria-label="@($"{(card.Voted ? "Take back your vote for" : "Vote for")} {card.Title} ({card.Votes} {(card.Votes == 1 ? "vote" : "votes")})")">
+                                            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3l5 7H3z" /></svg>
+                                            <span>@card.Votes</span>
+                                        </button>
+                                    </form>
+                                }
+                            </li>
+                        }
+                    </ol>
+                </section>
+            }
+        </div>
+        <footer class="rm-foot">Shared from GWS Boards</footer>
+    }
+</main>
+
+@code {
+    [Parameter] public string Token { get; set; } = string.Empty;
+    [SupplyParameterFromQuery(Name = "voted")] public string? Voted { get; set; }
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+
+    private KanbanPublicRoadmap? _roadmap;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var voter = HttpContext?.Request.Cookies[RoadmapEndpoints.VoterCookie];
+        var share = await AccessService.ResolvePublicShareAsync(Token);
+        _roadmap = share is { IsRoadmap: true }
+            ? await BoardService.GetPublicRoadmapAsync(Token, voter is null ? null : RoadmapEndpoints.VoterHash(share.Id, voter))
+            : null;
+        if (_roadmap is not null) await AccessService.RecordShareViewAsync(_roadmap.ShareId);
+    }
+}

@@ -12,7 +12,8 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // Which property plays which part is read from the database itself: the Status property (or the
 // Select a Board view groups by) makes the columns, and Priority, Labels, Due, Assignee, Estimate
 // and the ID are found by type and the usual names, so any Sentinel database can open as a board.
-public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseService databases) : IKanbanBoardService
+public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseService databases,
+    ISentinelAccessService? access = null, ISecretProtector? secrets = null) : IKanbanBoardService
 {
     private static readonly string[] PriorityNames = ["Priority"];
     private static readonly string[] LabelNames = ["Labels", "Label", "Tags"];
@@ -130,6 +131,10 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
         var titleProperty = properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.Title);
         var subItems = database.Rows.Where(row => row.ParentRowId is not null).GroupBy(row => row.ParentRowId!.Value).ToDictionary(group => group.Key, group => group.Count());
+        // K8e: votes on the public roadmap.
+        var votes = settings.Roadmap is null ? new Dictionary<Guid, int>()
+            : (await db.BoardCardVotes.AsNoTracking().Where(vote => vote.WikiDatabaseId == databaseId).Select(vote => vote.RowId).ToListAsync(cancellationToken))
+                .GroupBy(rowId => rowId).ToDictionary(group => group.Key, group => group.Count());
         // K8c: what each card is linked to, for its icons.
         var links = (await db.BoardCardLinks.AsNoTracking().Where(link => link.WikiDatabaseId == databaseId)
                 .Select(link => new { link.RowId, link.Kind }).ToListAsync(cancellationToken))
@@ -145,7 +150,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
                     ? DateTimeOffset.FromUnixTimeSeconds(at)
                     : row.CreatedAt;
                 return (Status: current, Card: ToCard(row, properties, titleProperty, fields, subItems, settings.CardSize == KanbanCardSizes.Rich)
-                    with { EnteredColumnAt = entered, LinkKinds = links.GetValueOrDefault(row.Id) });
+                    with { EnteredColumnAt = entered, LinkKinds = links.GetValueOrDefault(row.Id), Votes = votes.GetValueOrDefault(row.Id) });
             })
             .ToList();
 
@@ -695,6 +700,99 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             .ToList();
         var overLimit = board.Columns.Where(column => column.WipLimit is { } limit && column.Cards.Count > limit).Select(column => column.Label).ToList();
         return new KanbanBrief(since, moves, stuck, overLimit, typical);
+    }
+
+    // ---- Public roadmap (K8e) ----
+
+    public async Task<KanbanRoadmapView> GetRoadmapAsync(Guid databaseId, CancellationToken cancellationToken = default)
+    {
+        var settings = await GetSettingsAsync(databaseId, cancellationToken);
+        if (settings.Roadmap is not { } roadmap) return new KanbanRoadmapView(false, null, [], true, false, 0, 0);
+        var views = await db.SentinelPublicShares.AsNoTracking().Where(share => share.Id == roadmap.ShareId).Select(share => share.ViewCount).FirstOrDefaultAsync(cancellationToken);
+        var totalVotes = await db.BoardCardVotes.AsNoTracking().CountAsync(vote => vote.WikiDatabaseId == databaseId, cancellationToken);
+        return new KanbanRoadmapView(true, RoadmapUrl(roadmap), roadmap.Columns, roadmap.Votes, roadmap.Descriptions, views, totalVotes);
+    }
+
+    public async Task<KanbanRoadmapView> PublishRoadmapAsync(Guid databaseId, IReadOnlyList<string> columns, bool votes, bool descriptions, string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        if (access is null || secrets is null) throw new InvalidOperationException("Publishing isn't available here.");
+        var board = await GetBoardAsync(databaseId, cancellationToken) ?? throw new InvalidOperationException("That board no longer exists.");
+        var chosen = board.Columns.Where(column => column.OptionId is not null && columns.Contains(column.OptionId)).Select(column => column.OptionId!).ToList();
+        if (chosen.Count == 0) throw new ArgumentException("Choose at least one column to show.", nameof(columns));
+        var settings = await GetSettingsAsync(databaseId, cancellationToken);
+        var roadmap = settings.Roadmap;
+        // A link that was revoked elsewhere (Sentinel's share panel) gets a fresh one.
+        var live = roadmap is not null && await db.SentinelPublicShares.AsNoTracking().AnyAsync(share => share.Id == roadmap.ShareId && share.RevokedAt == null, cancellationToken);
+        if (!live)
+        {
+            var share = await access.CreatePublicShareAsync(databaseId, isDatabase: true, expiresAt: null, allowSearchIndexing: false, password: null,
+                performedBy, cancellationToken: cancellationToken, isRoadmap: true);
+            roadmap = new KanbanRoadmap { ShareId = share.Id, ProtectedToken = secrets.Protect(share.PublicToken!) };
+        }
+        await SaveSettingsAsync(databaseId, settings with { Roadmap = roadmap! with { Columns = chosen, Votes = votes, Descriptions = descriptions } }, performedBy, cancellationToken);
+        return await GetRoadmapAsync(databaseId, cancellationToken);
+    }
+
+    public async Task UnpublishRoadmapAsync(Guid databaseId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var settings = await GetSettingsAsync(databaseId, cancellationToken);
+        if (settings.Roadmap is not { } roadmap) return;
+        if (access is not null) await access.RevokePublicShareAsync(roadmap.ShareId, performedBy, cancellationToken);
+        await SaveSettingsAsync(databaseId, settings with { Roadmap = null }, performedBy, cancellationToken);
+    }
+
+    public async Task<KanbanPublicRoadmap?> GetPublicRoadmapAsync(string token, string? voterHash, CancellationToken cancellationToken = default)
+    {
+        if (await LiveRoadmapAsync(token, cancellationToken) is not { } live) return null;
+        var (share, roadmap, board) = live;
+        var shown = board.Columns.Where(column => column.OptionId is not null && roadmap.Columns.Contains(column.OptionId)).ToList();
+        var ids = shown.SelectMany(column => column.Cards).Select(card => card.RowId).ToList();
+        var counts = (await db.BoardCardVotes.AsNoTracking().Where(vote => ids.Contains(vote.RowId)).Select(vote => new { vote.RowId, vote.VoterHash }).ToListAsync(cancellationToken))
+            .GroupBy(vote => vote.RowId).ToDictionary(group => group.Key, group => (Count: group.Count(), Mine: voterHash is not null && group.Any(vote => vote.VoterHash == voterHash)));
+        var descriptions = new Dictionary<Guid, string?>();
+        if (roadmap.Descriptions)
+        {
+            foreach (var row in await db.WikiDatabaseRows.AsNoTracking().Where(row => ids.Contains(row.Id)).Select(row => new { row.Id, row.BlocksJson }).ToListAsync(cancellationToken))
+                descriptions[row.Id] = SnippetOf(WikiBlockJson.ParseBlocks(row.BlocksJson));
+        }
+        return new KanbanPublicRoadmap(share.Id, board.Title, board.Icon,
+            shown.Select(column => new KanbanPublicColumn(column.Label, column.Color, column.Group, column.Cards
+                .Select(card => new KanbanPublicCard(card.RowId, card.Title, card.Labels, descriptions.GetValueOrDefault(card.RowId),
+                    counts.TryGetValue(card.RowId, out var count) ? count.Count : 0, counts.TryGetValue(card.RowId, out var mine) && mine.Mine))
+                .ToList())).ToList(),
+            roadmap.Votes);
+    }
+
+    public async Task<int?> VoteAsync(string token, Guid rowId, string voterHash, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(voterHash) || voterHash.Length > 64) return null;
+        if (await LiveRoadmapAsync(token, cancellationToken) is not { } live || !live.Roadmap.Votes) return null;
+        var (_, roadmap, board) = live;
+        var onShow = board.Columns.Any(column => column.OptionId is not null && roadmap.Columns.Contains(column.OptionId) && column.Cards.Any(card => card.RowId == rowId));
+        if (!onShow) return null;
+        var existing = await db.BoardCardVotes.FirstOrDefaultAsync(vote => vote.RowId == rowId && vote.VoterHash == voterHash, cancellationToken);
+        if (existing is null) db.BoardCardVotes.Add(new BoardCardVote { WikiDatabaseId = board.DatabaseId, RowId = rowId, VoterHash = voterHash, CreatedBy = "roadmap" });
+        else db.BoardCardVotes.Remove(existing);
+        await db.SaveChangesAsync(cancellationToken);
+        return await db.BoardCardVotes.CountAsync(vote => vote.RowId == rowId, cancellationToken);
+    }
+
+    // A token that is a live roadmap: its share, the board's roadmap settings for that same share
+    // (a replaced link stops working), and the board.
+    private async Task<(SentinelShareView Share, KanbanRoadmap Roadmap, KanbanBoard Board)?> LiveRoadmapAsync(string token, CancellationToken cancellationToken)
+    {
+        if (access is null || await access.ResolvePublicShareAsync(token, cancellationToken) is not { IsRoadmap: true } share) return null;
+        if ((await GetSettingsAsync(share.TargetId, cancellationToken)).Roadmap is not { } roadmap || roadmap.ShareId != share.Id) return null;
+        if (await GetBoardAsync(share.TargetId, cancellationToken) is not { } board) return null;
+        return (share, roadmap, board);
+    }
+
+    private string? RoadmapUrl(KanbanRoadmap roadmap)
+    {
+        if (secrets is null || string.IsNullOrEmpty(roadmap.ProtectedToken)) return null;
+        try { return $"/roadmap/{secrets.Unprotect(roadmap.ProtectedToken)}"; }
+        catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or FormatException) { return null; }
     }
 
     // ---- My day (K8d) ----

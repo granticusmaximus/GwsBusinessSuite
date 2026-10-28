@@ -1,0 +1,151 @@
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Domain.Entities
+@inject IKanbanBoardService BoardService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
+
+@* Publish a board as a public roadmap (Boards K8e): a read-only page anyone with the link can see -
+   only the columns chosen, only titles and labels (and descriptions, if chosen) - with votes. *@
+<div class="kb-modal-backdrop" @onclick="Close"></div>
+<section class="kb-modal kb-roadmap" role="dialog" aria-modal="true" aria-labelledby="kb-roadmap-title" tabindex="-1" @ref="_dialog" @onkeydown="CloseOnEscape">
+    <header class="kb-modal-head">
+        <h2 id="kb-roadmap-title"><i class="bi bi-broadcast me-2" aria-hidden="true"></i>Public roadmap</h2>
+        <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Close" @onclick="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+    </header>
+    @if (_view is null)
+    {
+        <p class="kb-roadmap-note">Loading…</p>
+    }
+    else
+    {
+        <p class="kb-roadmap-note">Anyone with the link sees the columns you choose - each card's title and labels, nothing else unless you add descriptions - and can vote for the cards they want. Search engines are asked not to list it.</p>
+        @if (_view.Published && _view.Url is { } url)
+        {
+            <div class="kb-roadmap-link">
+                <i class="bi bi-globe2" aria-hidden="true"></i>
+                <input class="form-control form-control-sm" readonly value="@Absolute(url)" aria-label="Roadmap link" />
+                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => CopyAsync(Absolute(url))"><i class="bi bi-clipboard me-1" aria-hidden="true"></i>Copy</button>
+                <a class="btn btn-sm btn-outline-secondary" href="@url" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>Open</a>
+            </div>
+            <p class="kb-roadmap-stats">@_view.Views @(_view.Views == 1 ? "view" : "views") · @_view.TotalVotes @(_view.TotalVotes == 1 ? "vote" : "votes")</p>
+        }
+        <fieldset class="kb-roadmap-columns">
+            <legend>Columns to show</legend>
+            @foreach (var column in Board.Columns.Where(column => column.OptionId is not null))
+            {
+                <label style="--tone: @column.Color">
+                    <input type="checkbox" class="form-check-input" checked="@_columns.Contains(column.OptionId!)" @onchange="e => Toggle(column.OptionId!, e.Value is true)" />
+                    <span class="kb-roadmap-dot" aria-hidden="true"></span>@column.Label <span class="kb-roadmap-count">@column.Cards.Count</span>
+                </label>
+            }
+        </fieldset>
+        <label class="kb-roadmap-option"><input type="checkbox" class="form-check-input" checked="@_votes" @onchange="e => _votes = e.Value is true" /> Let visitors vote</label>
+        <label class="kb-roadmap-option"><input type="checkbox" class="form-check-input" checked="@_descriptions" @onchange="e => _descriptions = e.Value is true" /> Show the first lines of each card's page</label>
+        <footer class="kb-modal-foot">
+            @if (_view.Published)
+            {
+                <button type="button" class="btn btn-outline-danger me-auto" disabled="@_busy" @onclick="UnpublishAsync">Stop publishing</button>
+            }
+            <button type="button" class="btn btn-primary" disabled="@(_busy || _columns.Count == 0)" @onclick="PublishAsync">
+                <i class="bi bi-broadcast me-1" aria-hidden="true"></i>@(_view.Published ? "Update the roadmap" : "Publish the roadmap")
+            </button>
+        </footer>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public KanbanBoard Board { get; set; } = default!;
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private KanbanRoadmapView? _view;
+    private readonly HashSet<string> _columns = [];
+    private bool _votes = true;
+    private bool _descriptions;
+    private bool _busy;
+    private ElementReference _dialog;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _view = await BoardService.GetRoadmapAsync(Board.DatabaseId);
+        if (_view.Published)
+        {
+            _columns.UnionWith(_view.Columns);
+            _votes = _view.Votes;
+            _descriptions = _view.Descriptions;
+        }
+        else
+        {
+            // A first guess: everything but a backlog-style first column.
+            var open = Board.Columns.Where(column => column.OptionId is not null).ToList();
+            _columns.UnionWith(open.Skip(open.Count > 2 ? 1 : 0).Select(column => column.OptionId!));
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await _dialog.FocusAsync();
+    }
+
+    private void Toggle(string optionId, bool on)
+    {
+        if (on) _columns.Add(optionId); else _columns.Remove(optionId);
+    }
+
+    private string Absolute(string url) => Navigation.ToAbsoluteUri(url.TrimStart('/')).ToString();
+
+    private async Task PublishAsync()
+    {
+        _busy = true;
+        try
+        {
+            var first = _view?.Published != true;
+            _view = await BoardService.PublishRoadmapAsync(Board.DatabaseId, _columns.ToList(), _votes, _descriptions, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await OnChanged.InvokeAsync();
+            Toasts.Show(first ? "The roadmap is live. Copy its link to share it." : "Roadmap updated.", tone: StatusTone.Success);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            Toasts.Show($"Couldn't publish it. {ex.Message}", tone: StatusTone.Danger);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task UnpublishAsync()
+    {
+        _busy = true;
+        try
+        {
+            await BoardService.UnpublishRoadmapAsync(Board.DatabaseId, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            _view = await BoardService.GetRoadmapAsync(Board.DatabaseId);
+            await OnChanged.InvokeAsync();
+            Toasts.Show("The roadmap link is off. Publishing again makes a new one.", tone: StatusTone.Success);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CopyAsync(string url)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gwsAssistant.copy", url);
+            Toasts.Show("Link copied.", tone: StatusTone.Success);
+        }
+        catch (JSException) { /* the browser refused the clipboard */ }
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task CloseOnEscape(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await Close();
+    }
+}
