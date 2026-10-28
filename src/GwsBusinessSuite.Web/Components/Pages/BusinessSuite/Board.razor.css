@@ -1,10 +1,10 @@
 /* Boards (.claude/plans/kanban-boards-2026-10.md): a full-height board whose columns scroll
    sideways and each column's cards scroll on their own. */
 .kb {
-    --kb-column-width: 18.5rem;
+    --kb-column-width: 17.75rem;
     display: flex;
     flex-direction: column;
-    gap: var(--gws-step-3);
+    gap: var(--gws-step-2);
     height: calc(100dvh - var(--gws-admin-bar-height) - var(--gws-status-strip-height) - var(--gws-bottom-bar-height) - 2 * var(--gws-content-pad-y));
     min-height: 26rem;
 }
@@ -14,6 +14,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--gws-step-2) var(--gws-step-3);
+    padding-inline: 2px;
 }
 
 .kb-back {
@@ -105,17 +106,18 @@
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    background-color: color-mix(in srgb, var(--gws-panel-bg) 32%, transparent);
-    border: 1px solid color-mix(in srgb, var(--gws-panel-border) 58%, transparent);
+    background-color: color-mix(in srgb, var(--gws-panel-bg) 18%, transparent);
+    border: 1px solid color-mix(in srgb, var(--gws-panel-border) 50%, transparent);
     border-radius: var(--gws-radius-md, 10px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12);
     scroll-snap-align: start;
     transition: background-color .15s ease, box-shadow .15s ease, flex-basis .25s ease;
 }
 
 .kb-column.kb-drop-target {
-    background: color-mix(in srgb, var(--column-color) 10%, var(--gws-panel-bg));
-    border-color: color-mix(in srgb, var(--column-color) 55%, var(--gws-panel-border));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--column-color) 30%, transparent);
+    background: color-mix(in srgb, var(--column-color) 9%, var(--gws-panel-bg));
+    border-color: color-mix(in srgb, var(--column-color) 42%, var(--gws-panel-border));
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--column-color) 28%, transparent);
 }
 
 .kb-column-head {
@@ -125,18 +127,18 @@
     display: flex;
     align-items: center;
     gap: var(--gws-step-2);
-    padding: 10px var(--gws-step-2) 9px var(--gws-step-3);
-    border-bottom: 1px solid color-mix(in srgb, var(--gws-panel-border) 55%, transparent);
-    background: color-mix(in srgb, var(--gws-panel-bg) 86%, transparent);
-    -webkit-backdrop-filter: blur(12px) saturate(1.3);
-    backdrop-filter: blur(12px) saturate(1.3);
+    padding: 8px var(--gws-step-2) 8px var(--gws-step-3);
+    border-bottom: 1px solid color-mix(in srgb, var(--gws-panel-border) 45%, transparent);
+    background: color-mix(in srgb, var(--gws-panel-bg) 90%, transparent);
+    -webkit-backdrop-filter: blur(8px) saturate(1.1);
+    backdrop-filter: blur(8px) saturate(1.1);
 }
 
 .kb-column-dot { width: .625rem; height: .625rem; border-radius: 3px; background: var(--column-color); }
 
 .kb-column-title {
     margin: 0;
-    font-size: .875rem;
+    font-size: .8125rem;
     font-weight: 650;
     color: var(--gws-text-strong);
     white-space: nowrap;
@@ -145,12 +147,12 @@
 }
 
 .kb-column-count {
-    padding: 0 7px;
+    padding: 0 6px;
     border-radius: 999px;
-    font-size: .75rem;
+    font-size: .6875rem;
     font-weight: 600;
     color: var(--gws-text-soft);
-    background: var(--gws-panel-bg-2);
+    background: color-mix(in srgb, var(--gws-panel-bg-2) 80%, transparent);
     font-variant-numeric: tabular-nums;
 }
 
@@ -202,18 +204,18 @@
 .kb-card {
     position: relative;
     flex-shrink: 0;
-    padding: var(--gws-step-2) var(--gws-step-3);
+    padding: 10px 12px;
     color: var(--gws-text-strong);
     background: var(--gws-panel-bg);
-    border: 1px solid var(--gws-panel-border);
+    border: 1px solid color-mix(in srgb, var(--gws-panel-border) 86%, transparent);
     border-radius: var(--gws-radius-sm, 8px);
-    box-shadow: 0 1px 1px rgba(0, 0, 0, .07);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
     cursor: grab;
     user-select: none;
     transition: border-color .12s ease, box-shadow .12s ease, transform .2s cubic-bezier(.2, .8, .2, 1);
 }
 
-.kb-card:hover { border-color: color-mix(in srgb, var(--column-color) 48%, var(--gws-panel-border)); box-shadow: 0 5px 15px rgba(0, 0, 0, .14); transform: translateY(-1px); }
+.kb-card:hover { border-color: color-mix(in srgb, var(--column-color) 42%, var(--gws-panel-border)); box-shadow: 0 4px 10px rgba(0, 0, 0, .08); transform: translateY(-1px); }
 
 .kb-card:focus-visible {
     outline: 2px solid var(--gws-sidebar-accent);
@@ -222,7 +224,7 @@
 
 .kb-card.is-overdue { border-inline-start: 3px solid var(--gws-status-danger-fill); }
 .kb-card.has-priority:not(.is-overdue, .is-blocked) { border-inline-start: 2px solid color-mix(in srgb, var(--priority-color) 72%, var(--gws-panel-border)); }
-.kb-card.is-selected { border-color: var(--gws-sidebar-accent); background: color-mix(in srgb, var(--gws-sidebar-accent) 5%, var(--gws-panel-bg)); box-shadow: 0 0 0 1px var(--gws-sidebar-accent); }
+.kb-card.is-selected { border-color: color-mix(in srgb, var(--gws-sidebar-accent) 55%, var(--gws-panel-border)); background: color-mix(in srgb, var(--gws-sidebar-accent) 5%, var(--gws-panel-bg)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--gws-sidebar-accent) 42%, transparent); }
 .kb-card.is-open { border-inline-end: 3px solid var(--gws-sidebar-accent); }
 
 .kb-check {
@@ -319,13 +321,13 @@
 }
 
 .kb-card-top { display: flex; align-items: center; gap: var(--gws-step-2); margin-bottom: 2px; }
-.kb-card-key { font-family: var(--gws-font-mono); font-size: .6875rem; color: var(--gws-text-soft); }
+.kb-card-key { font-family: var(--gws-font-mono); font-size: .65625rem; letter-spacing: .01em; color: var(--gws-text-soft); }
 .kb-priority { margin-inline-start: auto; color: var(--tone); font-size: .875rem; }
 
 .kb-card-title {
     margin: 0;
     font-size: .875rem;
-    font-weight: 600;
+    font-weight: 650;
     line-height: 1.35;
     overflow-wrap: anywhere;
 }
@@ -347,9 +349,9 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 4px var(--gws-step-3);
-    margin-top: var(--gws-step-2);
-    font-size: .75rem;
+    gap: 2px var(--gws-step-2);
+    margin-top: 8px;
+    font-size: .71875rem;
     color: var(--gws-text-soft);
 }
 
@@ -511,8 +513,8 @@
 
 .kb-lane-head {
     flex: 0 0 var(--kb-column-width);
-    background: var(--gws-panel-bg);
-    border: 1px solid var(--gws-panel-border);
+    background: color-mix(in srgb, var(--gws-panel-bg) 82%, transparent);
+    border: 1px solid color-mix(in srgb, var(--gws-panel-border) 70%, transparent);
     border-top: 3px solid var(--column-color);
     border-radius: var(--gws-radius-md, 10px);
 }
@@ -544,8 +546,8 @@
 .kb-cell {
     flex: 0 0 var(--kb-column-width);
     min-height: 4.5rem;
-    background: color-mix(in srgb, var(--gws-panel-bg) 55%, transparent);
-    border: 1px dashed color-mix(in srgb, var(--gws-panel-border) 80%, transparent);
+    background: transparent;
+    border: 1px dashed color-mix(in srgb, var(--gws-panel-border) 70%, transparent);
     border-radius: var(--gws-radius-md, 10px);
     transition: background-color .15s ease;
 }
