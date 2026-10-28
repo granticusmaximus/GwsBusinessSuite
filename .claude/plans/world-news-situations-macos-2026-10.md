@@ -119,9 +119,23 @@ open in the Events view.
 **Revised order:**
 2. ~~The Mac tab~~ The web page (done, above).
 3. ~~Outlet RSS feeds + the combined document + summaries~~ (done, above).
-4. ~~Situations~~ (done, above) + claims (needs a model good enough to extract claims; the
-   droplet's llama3.2 swapped roles in summaries - check quality before building).
-5. Monitoring, the World view, and the SentinelGPT tool.
+4. ~~Situations~~ (done, above) + claims (deferred after the 28-10-26 quality gate below).
+5. ~~Monitoring~~ (done 28-10-26), then the World view and the SentinelGPT tool.
+
+**Claims quality gate, 28-10-26: failed on llama3.2; no claims UI or storage built.** Tested the
+server-sized model against real stored multilingual source packs. On the France protests it found
+the broad 1,000-versus-1,300 arrest split but attributed several 1,300 reports to the 1,000 side.
+On Stephen Hubbard's release, sources explicitly called him 72 and 74; llama3.2 returned no claim
+and said the ages were consistent. gemma4 found both the arrest and injured-officer conflicts, but
+still grouped approximate totals too loosely. False source attribution is worse than omitting the
+feature, so claims wait for a model/evaluator that passes labelled examples.
+
+**Monitoring done 28-10-26.** A signed-in admin can watch/unwatch a situation from its detail.
+The dedicated World News database keeps the per-user watch at the current event count. After each
+read links events, one alert is written if a watched situation grew, its baseline advances in the
+same transaction, and the shared notification bell receives it live. The alert links back to the
+situation and supports read, done and snooze like the bell's other sources. Focused storage tests
+cover no backlog, one alert per growth interval, case-insensitive ownership, read state and unwatch.
 
 ## What clstr.news does (checked live 20-10-26)
 

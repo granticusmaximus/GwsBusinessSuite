@@ -253,6 +253,34 @@ public sealed class WorldNewsKitTests : IDisposable
     }
 
     [Fact]
+    public void Store_ShouldAlertAWatcherOnlyWhenTheirSituationGainsAnEvent()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        SeedEvent(store, "rally", Reports("rally", 3), [1f, 0f]);
+        var situation = new NewsSituation { Id = "election", Sum = [3f, 0f], LastSeen = Now };
+        store.SaveLinks([new SituationLink("rally", situation)]);
+
+        store.Watch("Grant", situation.Id, Now);
+        store.IsWatching("grant", situation.Id).Should().BeTrue();
+        store.CreateWatchAlerts(Now).Should().BeEmpty("watching starts at the current event count");
+
+        SeedEvent(store, "results", Reports("results", 4), [1f, 0f]);
+        situation.Sum[0] = 7f;
+        situation.LastSeen = Now.AddHours(1);
+        store.SaveLinks([new SituationLink("results", situation)]);
+        var alert = store.CreateWatchAlerts(Now.AddHours(1)).Should().ContainSingle().Subject;
+        alert.Username.Should().Be("grant");
+        alert.Message.Should().Be("1 new event in this watched situation.");
+        store.CreateWatchAlerts(Now.AddHours(2)).Should().BeEmpty("the watch baseline advances atomically");
+
+        store.Alerts("GRANT").Should().ContainSingle(a => !a.IsRead);
+        store.MarkAlertRead("grant", alert.Id);
+        store.Alerts("grant").Should().ContainSingle(a => a.IsRead);
+        store.Unwatch("grant", situation.Id);
+        store.IsWatching("grant", situation.Id).Should().BeFalse();
+    }
+
+    [Fact]
     public void Store_ShouldKeepReportsEventsAndFeedState()
     {
         var store = new WorldNewsStore(_dbPath);

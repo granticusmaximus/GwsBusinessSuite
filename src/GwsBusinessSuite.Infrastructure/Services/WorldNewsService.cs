@@ -81,6 +81,7 @@ public sealed class WorldNewsService : IDisposable
     public DateTimeOffset? LastRefreshed { get; private set; }
     public bool IsRefreshing => _running.CurrentCount == 0;
     public event Action? Changed;
+    public event Action<string, WorldNewsAlert>? AlertCreated;
 
     // One read. A read already running is left to finish rather than doubled up.
     public async Task RefreshAsync(CancellationToken ct)
@@ -92,6 +93,8 @@ public sealed class WorldNewsService : IDisposable
             Changed?.Invoke();
             // Synchronous SQLite work and CPU-bound grouping: keep it off the caller's thread.
             var report = await Task.Run(() => _pipeline.RunCycleAsync(ct), ct);
+            var alerts = Store.CreateWatchAlerts(DateTimeOffset.UtcNow);
+            foreach (var alert in alerts) AlertCreated?.Invoke(alert.Username, alert);
             LastRefreshed = DateTimeOffset.UtcNow;
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
             _eventLists.Clear();

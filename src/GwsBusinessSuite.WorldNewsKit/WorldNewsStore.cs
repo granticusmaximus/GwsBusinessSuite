@@ -19,6 +19,9 @@ public sealed record SituationOverview(string Id, string Title, string Latest, i
 public sealed record EventSummary(string EventId, int Version, string? Headline, string Text, string Model,
     int ArticleCount, DateTimeOffset CreatedAt);
 
+public sealed record WorldNewsAlert(Guid Id, string Username, string SituationId, string Title, string Message,
+    DateTimeOffset CreatedAt, bool IsRead);
+
 // The Mac app's local world-news database (SQLite). Times are stored as Unix seconds and vectors
 // as little-endian float32 blobs.
 public sealed class WorldNewsStore
@@ -46,6 +49,13 @@ public sealed class WorldNewsStore
                 event_id TEXT NOT NULL, version INTEGER NOT NULL, headline TEXT, summary TEXT NOT NULL, model TEXT NOT NULL,
                 article_count INTEGER NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (event_id, version));
             CREATE TABLE IF NOT EXISTS situations (id TEXT PRIMARY KEY, vector_sum BLOB NOT NULL, last_seen INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS situation_watches (
+                username TEXT NOT NULL, situation_id TEXT NOT NULL, event_count INTEGER NOT NULL, created_at INTEGER NOT NULL,
+                PRIMARY KEY (username, situation_id));
+            CREATE TABLE IF NOT EXISTS world_news_alerts (
+                id TEXT PRIMARY KEY, username TEXT NOT NULL, situation_id TEXT NOT NULL, title TEXT NOT NULL,
+                message TEXT NOT NULL, created_at INTEGER NOT NULL, read_at INTEGER);
+            CREATE INDEX IF NOT EXISTS ix_world_news_alerts_user ON world_news_alerts (username, read_at, created_at);
             """);
         // Databases from before outlet feeds (21-10-26) have no snippet column.
         using var columns = connection.CreateCommand();
@@ -333,10 +343,113 @@ public sealed class WorldNewsStore
         }).ToList();
     }
 
+    public SituationOverview? Situation(string situationId) =>
+        TopSituations(DateTimeOffset.UnixEpoch, int.MaxValue).FirstOrDefault(s => s.Id == situationId);
+
     // A situation's events in the order they broke.
     public IReadOnlyList<EventOverview> EventsForSituation(string situationId) =>
         Overviews("WHERE e.situation_id = $situation", "", ("$situation", situationId), ("$limit", 500))
             .OrderBy(e => e.FirstSeen).ToList();
+
+    public bool IsWatching(string username, string situationId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM situation_watches WHERE username = $username AND situation_id = $situation";
+        command.Parameters.AddWithValue("$username", NormalizeUsername(username));
+        command.Parameters.AddWithValue("$situation", situationId);
+        return (long)command.ExecuteScalar()! > 0;
+    }
+
+    public void Watch(string username, string situationId, DateTimeOffset now)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR REPLACE INTO situation_watches (username, situation_id, event_count, created_at)
+            SELECT $username, $situation, COUNT(*), $created FROM events WHERE situation_id = $situation
+            """;
+        command.Parameters.AddWithValue("$username", NormalizeUsername(username));
+        command.Parameters.AddWithValue("$situation", situationId);
+        command.Parameters.AddWithValue("$created", now.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+    }
+
+    public void Unwatch(string username, string situationId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM situation_watches WHERE username = $username AND situation_id = $situation";
+        command.Parameters.AddWithValue("$username", NormalizeUsername(username));
+        command.Parameters.AddWithValue("$situation", situationId);
+        command.ExecuteNonQuery();
+    }
+
+    // Called after a read has linked new events. One alert covers all events added since the last read.
+    public IReadOnlyList<WorldNewsAlert> CreateWatchAlerts(DateTimeOffset now)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        var pending = new List<(string Username, string SituationId, int Before, int Current, string Title)>();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT w.username, w.situation_id, w.event_count, COUNT(e.id),
+                       COALESCE((SELECT e2.title FROM events e2 WHERE e2.situation_id = w.situation_id ORDER BY e2.last_seen DESC LIMIT 1), 'Developing story')
+                FROM situation_watches w LEFT JOIN events e ON e.situation_id = w.situation_id
+                GROUP BY w.username, w.situation_id, w.event_count HAVING COUNT(e.id) > w.event_count
+                """;
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) pending.Add((reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetInt32(3), reader.GetString(4)));
+        }
+        var alerts = new List<WorldNewsAlert>();
+        foreach (var item in pending)
+        {
+            var alert = new WorldNewsAlert(Guid.NewGuid(), item.Username, item.SituationId, item.Title,
+                $"{item.Current - item.Before:N0} new {(item.Current - item.Before == 1 ? "event" : "events")} in this watched situation.", now, false);
+            using var insert = connection.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO world_news_alerts (id, username, situation_id, title, message, created_at)
+                VALUES ($id, $username, $situation, $title, $message, $created);
+                UPDATE situation_watches SET event_count = $count WHERE username = $username AND situation_id = $situation;
+                """;
+            insert.Parameters.AddWithValue("$id", alert.Id.ToString("N"));
+            insert.Parameters.AddWithValue("$username", item.Username);
+            insert.Parameters.AddWithValue("$situation", item.SituationId);
+            insert.Parameters.AddWithValue("$title", alert.Title);
+            insert.Parameters.AddWithValue("$message", alert.Message);
+            insert.Parameters.AddWithValue("$created", now.ToUnixTimeSeconds());
+            insert.Parameters.AddWithValue("$count", item.Current);
+            insert.ExecuteNonQuery();
+            alerts.Add(alert);
+        }
+        transaction.Commit();
+        return alerts;
+    }
+
+    public IReadOnlyList<WorldNewsAlert> Alerts(string username)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, username, situation_id, title, message, created_at, read_at FROM world_news_alerts WHERE username = $username ORDER BY created_at DESC LIMIT 100";
+        command.Parameters.AddWithValue("$username", NormalizeUsername(username));
+        using var reader = command.ExecuteReader();
+        var alerts = new List<WorldNewsAlert>();
+        while (reader.Read()) alerts.Add(new(Guid.ParseExact(reader.GetString(0), "N"), reader.GetString(1), reader.GetString(2),
+            reader.GetString(3), reader.GetString(4), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(5)), !reader.IsDBNull(6)));
+        return alerts;
+    }
+
+    public void MarkAlertRead(string username, Guid id)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE world_news_alerts SET read_at = $read WHERE id = $id AND username = $username";
+        command.Parameters.AddWithValue("$read", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        command.Parameters.AddWithValue("$id", id.ToString("N"));
+        command.Parameters.AddWithValue("$username", NormalizeUsername(username));
+        command.ExecuteNonQuery();
+    }
 
     public EventOverview? Event(string eventId) =>
         Overviews("WHERE e.id = $event", "", ("$event", eventId), ("$limit", 1)).FirstOrDefault();
@@ -474,6 +587,8 @@ public sealed class WorldNewsStore
 
     private static IReadOnlyList<string> Split(string? values) =>
         values is null ? [] : values.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static string NormalizeUsername(string username) => username.Trim().ToLowerInvariant();
 
     private SqliteConnection Open()
     {

@@ -10,6 +10,7 @@
 @inject GwsBusinessSuite.Application.Community.ChatNotifier ChatNotifier
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaService OverwatchAreaService
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaNotifier OverwatchAreaNotifier
+@inject GwsBusinessSuite.Infrastructure.Services.WorldNewsService WorldNews
 @inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject INotificationInboxStateService InboxStates
 @inject GwsBusinessSuite.Web.Services.ToastState Toasts
@@ -177,6 +178,7 @@
         "social" => "Social posts",
         "chat" => "Messages",
         "overwatch" => "Overwatch",
+        "world-news" => "World News",
         _ => kind
     };
 
@@ -188,7 +190,8 @@
         var socialAlerts = (await SocialPublishingService.ListAlertsAsync(unreadOnly: false)).Select(ToInboxItem);
         var chatAlerts = await LoadChatAlertsAsync();
         var overwatchAlerts = await LoadOverwatchAlertsAsync();
-        _items = dockerAlerts.Concat(socialAlerts).Concat(chatAlerts).Concat(overwatchAlerts).ToList();
+        var worldNewsAlerts = WorldNews.Store.Alerts(_currentUsername).Select(ToInboxItem);
+        _items = dockerAlerts.Concat(socialAlerts).Concat(chatAlerts).Concat(overwatchAlerts).Concat(worldNewsAlerts).ToList();
         await LoadStatesAsync();
         Recompute();
 
@@ -196,6 +199,7 @@
         SocialNotifier.OnAlert += HandleSocialAlert;
         ChatNotifier.OnMessage += HandleChatMessage;
         OverwatchAreaNotifier.OnAlert += HandleOverwatchAlert;
+        WorldNews.AlertCreated += HandleWorldNewsAlert;
     }
 
     private async Task LoadStatesAsync()
@@ -262,6 +266,15 @@
 
     private static InboxItem ToInboxItem(GwsBusinessSuite.Infrastructure.Services.OverwatchAreaAlertView alert) => new(
         "overwatch", alert.Id, alert.Title, alert.Message, alert.IsRead, alert.CreatedAt, alert.LinkUrl ?? $"/admin/osint?area={alert.AreaId}");
+
+    private static InboxItem ToInboxItem(GwsBusinessSuite.WorldNewsKit.WorldNewsAlert alert) => new(
+        "world-news", alert.Id, alert.Title, alert.Message, alert.IsRead, alert.CreatedAt,
+        $"/admin/world-news?situation={Uri.EscapeDataString(alert.SituationId)}");
+
+    private void HandleWorldNewsAlert(string username, GwsBusinessSuite.WorldNewsKit.WorldNewsAlert alert)
+    {
+        if (string.Equals(username, _currentUsername, StringComparison.OrdinalIgnoreCase)) AddItem(ToInboxItem(alert));
+    }
 
     private void HandleOverwatchAlert(string username, GwsBusinessSuite.Infrastructure.Services.OverwatchAreaAlertView alert)
     {
@@ -354,6 +367,7 @@
         if (item.Kind == "docker") await DockerHealthService.MarkAlertReadAsync(item.Id);
         else if (item.Kind == "chat") await ChatService.MarkThreadReadAsync(item.Id, _currentUsername);
         else if (item.Kind == "overwatch") await OverwatchAreaService.MarkAlertReadAsync(_currentUsername, item.Id);
+        else if (item.Kind == "world-news") WorldNews.Store.MarkAlertRead(_currentUsername, item.Id);
         else await SocialPublishingService.MarkAlertReadAsync(item.Id);
         ReplaceItem(item with { IsRead = true });
     }
@@ -428,6 +442,7 @@
         if (!string.IsNullOrWhiteSpace(_currentUsername))
         {
             await OverwatchAreaService.MarkAllAlertsReadAsync(_currentUsername);
+            foreach (var alert in _items.Where(a => a.Kind == "world-news" && !a.IsRead)) WorldNews.Store.MarkAlertRead(_currentUsername, alert.Id);
             foreach (var chat in _items.Where(a => a.Kind == "chat" && !a.IsRead))
             {
                 await ChatService.MarkThreadReadAsync(chat.Id, _currentUsername);
@@ -466,5 +481,6 @@
         SocialNotifier.OnAlert -= HandleSocialAlert;
         ChatNotifier.OnMessage -= HandleChatMessage;
         OverwatchAreaNotifier.OnAlert -= HandleOverwatchAlert;
+        WorldNews.AlertCreated -= HandleWorldNewsAlert;
     }
 }

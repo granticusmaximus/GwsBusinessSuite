@@ -6,6 +6,7 @@
 @using GwsBusinessSuite.Infrastructure.Services
 @using GwsBusinessSuite.WorldNewsKit
 @inject WorldNewsService News
+@inject ICurrentUserAccessor CurrentUserAccessor
 
 <PageTitle>World News</PageTitle>
 
@@ -86,6 +87,9 @@
                         <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Situations
                     </button>
                     <h2 class="world-news-detail-title">@_situation.Title</h2>
+                    <button type="button" class="btn btn-sm @(_watching ? "btn-primary" : "btn-outline-primary") mb-2" @onclick="ToggleWatchAsync">
+                        <i class="bi @(_watching ? "bi-bell-fill" : "bi-bell") me-1" aria-hidden="true"></i>@(_watching ? "Watching" : "Watch situation")
+                    </button>
                     <p class="world-news-detail-meta">
                         <StatusPill Tone="@Tone(_situation)">@State(_situation)</StatusPill>
                         @Count(_situation.EventCount, "event"), @Count(_situation.OutletCount, "outlet"), @Count(_situation.ArticleCount, "report").
@@ -224,6 +228,11 @@ else
     private int _rangeHours = 24;
     private const int PageSize = 60;
     private int _shown = PageSize;
+    private string _username = string.Empty;
+    private bool _watching;
+
+    [SupplyParameterFromQuery(Name = "situation")]
+    public string? SituationId { get; set; }
 
     private IReadOnlyList<EventOverview> VisibleEvents => string.IsNullOrWhiteSpace(_filter)
         ? _events ?? []
@@ -248,7 +257,15 @@ else
     protected override async Task OnInitializedAsync()
     {
         News.Changed += OnNewsChanged;
+        _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        if (!string.IsNullOrWhiteSpace(SituationId)) _view = WorldNewsView.Situations;
         await LoadAsync();
+        if (!string.IsNullOrWhiteSpace(SituationId)
+            && (_situations?.FirstOrDefault(s => s.Id == SituationId) ?? await Task.Run(() => News.Store.Situation(SituationId))) is { } situation)
+        {
+            _view = WorldNewsView.Situations;
+            await SelectSituationAsync(situation);
+        }
     }
 
     private async Task LoadAsync()
@@ -273,6 +290,15 @@ else
     {
         _situation = situation;
         _situationEvents = await Task.Run(() => News.Store.EventsForSituation(situation.Id));
+        _watching = await Task.Run(() => News.Store.IsWatching(_username, situation.Id));
+    }
+
+    private async Task ToggleWatchAsync()
+    {
+        if (_situation is null || string.IsNullOrWhiteSpace(_username)) return;
+        if (_watching) await Task.Run(() => News.Store.Unwatch(_username, _situation.Id));
+        else await Task.Run(() => News.Store.Watch(_username, _situation.Id, DateTimeOffset.UtcNow));
+        _watching = !_watching;
     }
 
     // An event in a situation opens in the Events view, with all its reports.
