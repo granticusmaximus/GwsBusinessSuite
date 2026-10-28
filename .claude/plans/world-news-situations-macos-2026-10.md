@@ -120,7 +120,7 @@ open in the Events view.
 2. ~~The Mac tab~~ The web page (done, above).
 3. ~~Outlet RSS feeds + the combined document + summaries~~ (done, above).
 4. ~~Situations~~ (done, above) + claims (deferred after the 28-10-26 quality gate below).
-5. ~~Monitoring~~ (done 28-10-26), then the World view and the SentinelGPT tool.
+5. ~~Monitoring~~ and ~~the World view~~ (done 28-10-26), then the SentinelGPT tool.
 
 **Claims quality gate, 28-10-26: failed on llama3.2; no claims UI or storage built.** Tested the
 server-sized model against real stored multilingual source packs. On the France protests it found
@@ -136,6 +136,14 @@ read links events, one alert is written if a watched situation grew, its baselin
 same transaction, and the shared notification bell receives it live. The alert links back to the
 situation and supports read, done and snooze like the bell's other sources. Focused storage tests
 cover no backlog, one alert per growth interval, case-insensitive ownership, read state and unwatch.
+
+**World view done 28-10-26.** The third World News mode opens on reports from the last 3 hours
+(with a 24-hour option): most-mentioned countries ranked by report count, each country's top three
+events ranked by distinct recent outlets then reports, and the ten biggest global events by the
+same rule. Each story opens the normal event detail and carries a Developing situation tag when it
+has a situation link. The projection counts only reports inside the selected window but retains the
+event's full country/language context. Focused tests cover window exclusion, deterministic country
+ordering, per-country/global ranking limits and situation tagging.
 
 ## What clstr.news does (checked live 20-10-26)
 

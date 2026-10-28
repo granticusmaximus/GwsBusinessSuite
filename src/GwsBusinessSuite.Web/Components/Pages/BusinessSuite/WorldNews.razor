@@ -26,18 +26,93 @@
                     aria-pressed="@(_view == WorldNewsView.Events ? "true" : "false")" @onclick="() => ShowAsync(WorldNewsView.Events)">Events</button>
             <button type="button" class="btn @(_view == WorldNewsView.Situations ? "btn-primary" : "btn-outline-secondary")"
                     aria-pressed="@(_view == WorldNewsView.Situations ? "true" : "false")" @onclick="() => ShowAsync(WorldNewsView.Situations)">Situations</button>
+            <button type="button" class="btn @(_view == WorldNewsView.World ? "btn-primary" : "btn-outline-secondary")"
+                    aria-pressed="@(_view == WorldNewsView.World ? "true" : "false")" @onclick="() => ShowAsync(WorldNewsView.World)">World</button>
         </div>
         <input type="search" class="form-control world-news-search" placeholder="@($"Filter {ViewName}")" aria-label="@($"Filter {ViewName}")"
                @bind="_filter" @bind:event="oninput" @bind:after="() => _shown = PageSize" />
         <select class="form-select world-news-range" aria-label="Time range" @bind="_rangeHours" @bind:after="ChangeRangeAsync">
-            <option value="24">Last 24 hours</option>
-            <option value="72">Last 3 days</option>
-            <option value="168">Last 7 days</option>
+            @if (_view == WorldNewsView.World)
+            {
+                <option value="3">Last 3 hours</option>
+                <option value="24">Last 24 hours</option>
+            }
+            else
+            {
+                <option value="24">Last 24 hours</option>
+                <option value="72">Last 3 days</option>
+                <option value="168">Last 7 days</option>
+            }
         </select>
     </Filters>
 </PageHeader>
 
-@if (_view == WorldNewsView.Situations)
+@if (_view == WorldNewsView.World)
+{
+    @if (_world is null)
+    {
+        <ListSkeleton Message="Building the world view…" />
+    }
+    else if (_world.BiggestStories.Count == 0)
+    {
+        <EmptyState Icon="bi-globe-americas" Title="No recent world news"
+                    Message="No reports arrived in this time range. Try the last 24 hours or read the news now." />
+    }
+    else
+    {
+        <div class="world-news-world">
+            <section class="world-news-world-panel" aria-labelledby="world-countries-title">
+                <h2 id="world-countries-title">Most mentioned countries</h2>
+                <ol class="world-news-country-ranking">
+                    @foreach (var country in VisibleCountries)
+                    {
+                        <li>
+                            <span class="world-news-country-name">@country.Name</span>
+                            <span>@Count(country.ReportCount, "report") · @Count(country.EventCount, "event")</span>
+                        </li>
+                    }
+                </ol>
+            </section>
+            <section class="world-news-world-panel" aria-labelledby="world-biggest-title">
+                <h2 id="world-biggest-title">Biggest stories</h2>
+                <div class="world-news-world-stories">
+                    @foreach (var story in VisibleBiggestStories)
+                    {
+                        <button type="button" class="world-news-event" @onclick="() => OpenEventAsync(story.Event)">
+                            <span class="world-news-event-title">@(story.Event.Headline ?? story.Event.Title)</span>
+                            <span class="world-news-event-meta">@WorldStorySummary(story)</span>
+                            @if (story.SituationId is not null)
+                            {
+                                <span class="world-news-situation-tag"><i class="bi bi-diagram-3" aria-hidden="true"></i> Developing situation</span>
+                            }
+                        </button>
+                    }
+                </div>
+            </section>
+        </div>
+        <section class="world-news-country-grid" aria-label="Top stories by country">
+            @foreach (var country in VisibleCountries)
+            {
+                <article class="world-news-country-card">
+                    <h2>@country.Name</h2>
+                    <p>@Count(country.OutletCount, "outlet") · @Count(country.ReportCount, "report")</p>
+                    <ol>
+                        @foreach (var story in country.TopStories)
+                        {
+                            <li>
+                                <button type="button" @onclick="() => OpenEventAsync(story.Event)">
+                                    <span>@(story.Event.Headline ?? story.Event.Title)</span>
+                                    <small>@WorldStorySummary(story)</small>
+                                </button>
+                            </li>
+                        }
+                    </ol>
+                </article>
+            }
+        </section>
+    }
+}
+else if (_view == WorldNewsView.Situations)
 {
     @if (_situations is null)
     {
@@ -214,7 +289,7 @@ else
 }
 
 @code {
-    private enum WorldNewsView { Events, Situations }
+    private enum WorldNewsView { Events, Situations, World }
 
     private WorldNewsView _view = WorldNewsView.Events;
     private IReadOnlyList<SituationOverview>? _situations;
@@ -224,6 +299,7 @@ else
     private EventOverview? _selected;
     private IReadOnlyList<WorldArticle> _articles = [];
     private EventSummary? _summary;
+    private WorldSnapshot? _world;
     private string _filter = string.Empty;
     private int _rangeHours = 24;
     private const int PageSize = 60;
@@ -239,7 +315,13 @@ else
         : (_events ?? []).Where(e => e.Title.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
             || e.Headline?.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase) == true).ToList();
 
-    private string ViewName => _view == WorldNewsView.Situations ? "situations" : "events";
+    private string ViewName => _view switch { WorldNewsView.Situations => "situations", WorldNewsView.World => "countries and stories", _ => "events" };
+
+    private IReadOnlyList<WorldCountry> VisibleCountries => (_world?.Countries ?? []).Where(country =>
+        string.IsNullOrWhiteSpace(_filter) || country.Name.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
+        || country.TopStories.Any(story => StoryMatches(story, _filter))).ToList();
+
+    private IReadOnlyList<WorldStory> VisibleBiggestStories => (_world?.BiggestStories ?? []).Where(story => StoryMatches(story, _filter)).ToList();
 
     private IReadOnlyList<SituationOverview> VisibleSituations => string.IsNullOrWhiteSpace(_filter)
         ? _situations ?? []
@@ -273,6 +355,11 @@ else
         _events = await Task.Run(() => News.TopEvents(_rangeHours));
         if (_selected is not null) _selected = _events.FirstOrDefault(e => e.Id == _selected.Id);
         if (_selected is not null) _summary = await Task.Run(() => News.Store.LatestSummary(_selected.Id));
+        if (_view == WorldNewsView.World)
+        {
+            _world = await Task.Run(() => News.World(_rangeHours));
+            return;
+        }
         if (_view != WorldNewsView.Situations) return;
         _situations = await Task.Run(() => News.TopSituations(_rangeHours));
         if (_situation is not null) _situation = _situations.FirstOrDefault(s => s.Id == _situation.Id);
@@ -281,6 +368,8 @@ else
 
     private Task ShowAsync(WorldNewsView view)
     {
+        if (view == WorldNewsView.World) _rangeHours = 3;
+        else if (view != WorldNewsView.World && _rangeHours == 3) _rangeHours = 24;
         _view = view;
         _shown = PageSize;
         return LoadAsync();
@@ -304,6 +393,7 @@ else
     // An event in a situation opens in the Events view, with all its reports.
     private async Task OpenEventAsync(EventOverview e)
     {
+        if (_rangeHours == 3) _rangeHours = 24;
         _view = WorldNewsView.Events;
         await SelectAsync(e);
     }
@@ -340,6 +430,13 @@ else
 
     private static string SituationSummary(SituationOverview s) =>
         $"{Count(s.EventCount, "event")} · {Count(s.OutletCount, "outlet")} · {Count(s.Languages.Count, "language")} · {s.LastSeen.ToLocalGwsDateTime()}";
+
+    private static string WorldStorySummary(WorldStory story) =>
+        $"{Count(story.RecentOutlets, "outlet")} · {Count(story.RecentReports, "report")} · {Count(story.Event.Countries.Count, "country", "countries")}";
+
+    private static bool StoryMatches(WorldStory story, string filter) => string.IsNullOrWhiteSpace(filter)
+        || story.Event.Title.Contains(filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
+        || story.Event.Headline?.Contains(filter.Trim(), StringComparison.CurrentCultureIgnoreCase) == true;
 
     private static string Count(int n, string one, string? many = null) => $"{n:N0} {(n == 1 ? one : many ?? one + "s")}";
 

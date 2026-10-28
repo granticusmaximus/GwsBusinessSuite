@@ -281,6 +281,31 @@ public sealed class WorldNewsKitTests : IDisposable
     }
 
     [Fact]
+    public void Store_ShouldBuildTheWorldViewFromReportsInsideTheRequestedWindow()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var flood = Reports("flood", 5).Select((a, i) => a with { Country = i < 3 ? "Turkey" : "Germany" }).ToArray();
+        var election = Reports("election", 3).Select(a => a with { Country = "Brazil" }).ToArray();
+        var markets = Reports("markets", 1).Select(a => a with { Country = "Germany" }).ToArray();
+        var old = Reports("old", 5).Select(a => a with { Country = "France", SeenAt = Now.AddHours(-10) }).ToArray();
+        SeedEvent(store, "flood", flood);
+        SeedEvent(store, "election", election);
+        SeedEvent(store, "markets", markets);
+        SeedEvent(store, "old", old);
+        store.SaveLinks([new SituationLink("election", new NewsSituation { Id = "vote", Sum = [1f, 0f], LastSeen = Now })]);
+
+        var world = store.World(Now.AddHours(-3), storiesPerCountry: 1, biggestStories: 2);
+
+        world.Countries.Select(c => c.Name).Should().Equal(["Brazil", "Germany", "Turkey"],
+            "countries rank by recent report count, then name");
+        world.Countries.Single(c => c.Name == "Germany").TopStories.Should().ContainSingle()
+            .Which.Event.Id.Should().Be("flood", "it has more recent outlets than the markets story");
+        world.Countries.Should().NotContain(c => c.Name == "France", "old reports are outside the window");
+        world.BiggestStories.Select(s => s.Event.Id).Should().Equal("flood", "election");
+        world.BiggestStories.Single(s => s.Event.Id == "election").SituationId.Should().Be("vote");
+    }
+
+    [Fact]
     public void Store_ShouldKeepReportsEventsAndFeedState()
     {
         var store = new WorldNewsStore(_dbPath);

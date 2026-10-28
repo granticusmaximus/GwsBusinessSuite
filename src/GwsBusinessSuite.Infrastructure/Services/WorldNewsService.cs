@@ -70,6 +70,8 @@ public sealed class WorldNewsService : IDisposable
     // Developing stories with news in the last rangeHours, likewise kept in memory between reads.
     public IReadOnlyList<SituationOverview> TopSituations(int rangeHours) => _situationLists.Get(rangeHours);
 
+    public WorldSnapshot World(int rangeHours) => Store.World(DateTimeOffset.UtcNow.AddHours(-rangeHours));
+
     private void WarmEventLists() => _ = Task.Run(() =>
     {
         try { _eventLists.Get(24); }

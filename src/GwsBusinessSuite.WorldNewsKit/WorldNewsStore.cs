@@ -22,6 +22,10 @@ public sealed record EventSummary(string EventId, int Version, string? Headline,
 public sealed record WorldNewsAlert(Guid Id, string Username, string SituationId, string Title, string Message,
     DateTimeOffset CreatedAt, bool IsRead);
 
+public sealed record WorldStory(EventOverview Event, int RecentReports, int RecentOutlets, string? SituationId);
+public sealed record WorldCountry(string Name, int ReportCount, int EventCount, int OutletCount, IReadOnlyList<WorldStory> TopStories);
+public sealed record WorldSnapshot(DateTimeOffset Since, IReadOnlyList<WorldCountry> Countries, IReadOnlyList<WorldStory> BiggestStories);
+
 // The Mac app's local world-news database (SQLite). Times are stored as Unix seconds and vectors
 // as little-endian float32 blobs.
 public sealed class WorldNewsStore
@@ -453,6 +457,64 @@ public sealed class WorldNewsStore
 
     public EventOverview? Event(string eventId) =>
         Overviews("WHERE e.id = $event", "", ("$event", eventId), ("$limit", 1)).FirstOrDefault();
+
+    // The World view counts reports seen inside the requested window. A story keeps its global
+    // event metadata, while RecentReports/RecentOutlets explain why it ranks in this window.
+    public WorldSnapshot World(DateTimeOffset since, int storiesPerCountry = 3, int biggestStories = 10)
+    {
+        using var connection = Open();
+        var countryRows = new List<(string Country, int Reports, int Events, int Outlets)>();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT country, COUNT(*), COUNT(DISTINCT event_id), COUNT(DISTINCT outlet)
+                FROM articles WHERE event_id IS NOT NULL AND seen_at >= $since AND TRIM(country) <> ''
+                GROUP BY country ORDER BY COUNT(*) DESC, country
+                """;
+            command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) countryRows.Add((reader.GetString(0), reader.GetInt32(1), reader.GetInt32(2), reader.GetInt32(3)));
+        }
+
+        var countries = countryRows.Select(row => new WorldCountry(row.Country, row.Reports, row.Events, row.Outlets,
+            ReadWorldStories(connection, since, row.Country)
+                .OrderByDescending(story => story.RecentOutlets).ThenByDescending(story => story.RecentReports)
+                .ThenByDescending(story => story.Event.LastSeen).Take(storiesPerCountry).ToList())).ToList();
+        var recent = ReadWorldStories(connection, since, null);
+        var biggest = recent.OrderByDescending(story => story.RecentOutlets).ThenByDescending(story => story.RecentReports)
+            .ThenByDescending(story => story.Event.LastSeen).Take(biggestStories).ToList();
+        return new WorldSnapshot(since, countries, biggest);
+    }
+
+    private static IReadOnlyList<WorldStory> ReadWorldStories(SqliteConnection connection, DateTimeOffset since, string? country)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT e.id, e.title, e.article_count, COUNT(DISTINCT recent.outlet),
+                   GROUP_CONCAT(DISTINCT all_articles.country), GROUP_CONCAT(DISTINCT all_articles.language),
+                   e.first_seen, e.last_seen,
+                   (SELECT headline FROM summaries WHERE event_id = e.id AND headline IS NOT NULL ORDER BY version DESC LIMIT 1),
+                   COUNT(DISTINCT recent.id), e.situation_id
+            FROM events e
+            JOIN articles recent ON recent.event_id = e.id AND recent.seen_at >= $since
+            JOIN articles all_articles ON all_articles.event_id = e.id
+            WHERE ($country IS NULL OR recent.country = $country)
+            GROUP BY e.id
+            """;
+        command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+        command.Parameters.AddWithValue("$country", (object?)country ?? DBNull.Value);
+        using var reader = command.ExecuteReader();
+        var stories = new List<WorldStory>();
+        while (reader.Read())
+        {
+            var overview = new EventOverview(reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetInt32(3),
+                Split(reader.IsDBNull(4) ? null : reader.GetString(4)), Split(reader.IsDBNull(5) ? null : reader.GetString(5)),
+                DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(6)), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(7)),
+                reader.IsDBNull(8) ? null : reader.GetString(8));
+            stories.Add(new WorldStory(overview, reader.GetInt32(9), reader.GetInt32(3), reader.IsDBNull(10) ? null : reader.GetString(10)));
+        }
+        return stories;
+    }
 
     // The busiest events since a time, covered by at least minOutlets outlets, that have no summary
     // yet or have grown by a quarter (and at least 3 reports) since their latest one.

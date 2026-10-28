@@ -230,3 +230,114 @@
     display: inline-flex;
     align-items: center;
 }
+
+.world-news-world {
+    display: grid;
+    grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.world-news-world-panel,
+.world-news-country-card {
+    padding: 1rem;
+    background: var(--gws-panel-bg);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md, 10px);
+}
+
+.world-news-world-panel h2,
+.world-news-country-card h2 {
+    margin: 0 0 .75rem;
+    font-size: 1.05rem;
+}
+
+.world-news-country-ranking {
+    display: grid;
+    gap: .45rem;
+    margin: 0;
+    padding-left: 1.75rem;
+}
+
+.world-news-country-ranking li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: .75rem;
+    color: var(--gws-text-soft);
+}
+
+.world-news-country-name {
+    color: var(--gws-text-strong);
+    font-weight: 600;
+}
+
+.world-news-world-stories {
+    display: grid;
+    gap: .25rem;
+}
+
+.world-news-situation-tag {
+    align-self: flex-start;
+    padding: .1rem .4rem;
+    color: var(--gws-text-soft);
+    background: var(--gws-body-bg);
+    border-radius: 999px;
+    font-size: .75rem;
+}
+
+.world-news-country-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+    gap: 1rem;
+}
+
+.world-news-country-card > p {
+    margin: -.5rem 0 .5rem;
+    color: var(--gws-text-soft);
+    font-size: .8rem;
+}
+
+.world-news-country-card ol {
+    margin: 0;
+    padding-left: 1.5rem;
+}
+
+.world-news-country-card li + li {
+    margin-top: .35rem;
+}
+
+.world-news-country-card button {
+    width: 100%;
+    min-height: 44px;
+    padding: .3rem .25rem;
+    text-align: left;
+    color: var(--gws-text-strong);
+    background: transparent;
+    border: 0;
+    border-radius: var(--gws-radius-sm, 6px);
+}
+
+.world-news-country-card button:hover {
+    background: var(--gws-body-bg);
+}
+
+.world-news-country-card button span,
+.world-news-country-card button small {
+    display: block;
+}
+
+.world-news-country-card button small {
+    margin-top: .15rem;
+    color: var(--gws-text-soft);
+}
+
+@container gws-main (max-width: 699.98px) {
+    .world-news-world {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .world-news-country-ranking li {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0;
+    }
+}
