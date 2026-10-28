@@ -216,6 +216,18 @@ public sealed class WikiDatabaseViewLogicTests
     }
 
     [Fact]
+    public void ViewConfigJson_ShouldRoundTripTimelineEndProperty()
+    {
+        var endPropertyId = Guid.NewGuid().ToString();
+
+        var parsed = WikiDatabaseViewConfigJson.Parse(WikiDatabaseViewConfigJson.Serialize(
+            new WikiDatabaseViewConfig([], [], null, TimelineEndPropertyId: endPropertyId)));
+
+        parsed.TimelineEndPropertyId.Should().Be(endPropertyId);
+        WikiDatabaseViewConfigJson.Parse("{}").TimelineEndPropertyId.Should().BeNull("existing Timelines keep one-day markers");
+    }
+
+    [Fact]
     public void ApplySort_Number_Descending_ShouldOrderHighestFirst()
     {
         var pointsProperty = NewProperty(WikiDatabasePropertyTypes.Number);
@@ -444,6 +456,26 @@ public sealed class WikiDatabaseViewLogicTests
     }
 
     [Fact]
+    public void BuildTimelineSchedule_ShouldSpanRowsWithAnEnd_IgnoringAnEndBeforeTheStart()
+    {
+        var startProperty = NewProperty(WikiDatabasePropertyTypes.Date);
+        var endProperty = NewProperty(WikiDatabasePropertyTypes.Date);
+        var ranged = WithDate(RowWithDate(startProperty.Id, new DateOnly(2026, 7, 21)), endProperty.Id, new DateOnly(2026, 7, 30));
+        var backwards = WithDate(RowWithDate(startProperty.Id, new DateOnly(2026, 7, 23)), endProperty.Id, new DateOnly(2026, 7, 22));
+        var single = RowWithDate(startProperty.Id, new DateOnly(2026, 7, 24));
+
+        var schedule = WikiDatabaseViewLogic.BuildTimelineSchedule([single, backwards, ranged], startProperty, null, endProperty);
+
+        schedule.DatedItems.Select(item => item.EndDate).Should().Equal(new DateOnly(2026, 7, 30), null, null);
+        schedule.StartDate.Should().Be(new DateOnly(2026, 7, 21));
+        schedule.EndDate.Should().Be(new DateOnly(2026, 7, 30), "the schedule runs to the latest end, not the latest start");
+        WikiDatabaseViewLogic.BuildTimelineSchedule([ranged], startProperty).DatedItems.Single().EndDate
+            .Should().BeNull("without an end property every row is a one-day marker");
+        FluentActions.Invoking(() => WikiDatabaseViewLogic.BuildTimelineSchedule([ranged], startProperty, null, NewProperty(WikiDatabasePropertyTypes.Text)))
+            .Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
     public void EnsureAcyclicTimelineDependencies_ShouldRejectIndirectCycleButAllowBranches()
     {
         var first = Guid.NewGuid();
@@ -567,6 +599,15 @@ public sealed class WikiDatabaseViewLogicTests
         var values = System.Text.Json.Nodes.JsonNode.Parse("{}")!.AsObject();
         WikiPropertyValues.SetCheckbox(values, propertyId, value);
         return new WikiDatabaseRow { Id = Guid.NewGuid(), PropertyValuesJson = WikiPropertyValues.Serialize(values) };
+    }
+
+    private static WikiDatabaseRow WithDate(WikiDatabaseRow row, Guid propertyId, DateOnly value)
+    {
+        var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+        WikiPropertyValues.SetDate(values, propertyId,
+            new DateTimeOffset(value.ToDateTime(TimeOnly.FromTimeSpan(TimeSpan.FromHours(12)), DateTimeKind.Local)));
+        row.PropertyValuesJson = WikiPropertyValues.Serialize(values);
+        return row;
     }
 
     private static WikiDatabaseRow RowWithDate(Guid propertyId, DateOnly? value)

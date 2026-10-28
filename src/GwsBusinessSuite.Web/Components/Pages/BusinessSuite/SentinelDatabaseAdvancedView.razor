@@ -18,10 +18,12 @@
     else
     {
         var dependencyProperty = ResolveTimelineDependencyProperty();
-        var schedule = WikiDatabaseViewLogic.BuildTimelineSchedule(VisibleRows, dateProperty, dependencyProperty);
+        var endProperty = ResolveTimelineEndProperty(dateProperty);
+        var schedule = WikiDatabaseViewLogic.BuildTimelineSchedule(VisibleRows, dateProperty, dependencyProperty, endProperty);
+        var dateProperties = Database.Properties.Where(property => property.Type == WikiDatabasePropertyTypes.Date).ToList();
         <div class="sentinel-db-timeline" aria-label="Timeline for @Database.Title" @ref="_timelineContainerRef"
              data-schedule-start="@schedule.StartDate?.ToString("yyyy-MM-dd")" data-schedule-end="@schedule.EndDate?.ToString("yyyy-MM-dd")"
-             data-can-edit="@(CanEdit ? "true" : "false")">
+             data-can-edit="@(CanEdit ? "true" : "false")" data-has-end="@(endProperty is null ? "false" : "true")">
             <header>
                 <div>
                     <strong>Timeline</strong>
@@ -34,10 +36,36 @@
                         <span>Add a date to a row to place it on the schedule.</span>
                     }
                 </div>
-                @if (dependencyProperty is not null)
-                {
-                    <span class="badge text-bg-secondary">@dependencyProperty.Name dependencies</span>
-                }
+                <div class="sentinel-db-timeline-dates">
+                    @if (CanEdit)
+                    {
+                        <label>
+                            <span>Starts</span>
+                            <select class="form-select form-select-sm" aria-label="Timeline start property" disabled="@_savingTimelineDates"
+                                    value="@dateProperty.Id" @onchange="e => SetTimelineDatesAsync(e.Value as string, endProperty?.Id.ToString())">
+                                @foreach (var property in dateProperties)
+                                {
+                                    <option value="@property.Id">@property.Name</option>
+                                }
+                            </select>
+                        </label>
+                        <label>
+                            <span>Ends</span>
+                            <select class="form-select form-select-sm" aria-label="Timeline end property" disabled="@_savingTimelineDates"
+                                    value="@(endProperty?.Id.ToString() ?? "")" @onchange="e => SetTimelineDatesAsync(dateProperty.Id.ToString(), e.Value as string)">
+                                <option value="">No end date</option>
+                                @foreach (var property in dateProperties.Where(property => property.Id != dateProperty.Id))
+                                {
+                                    <option value="@property.Id">@property.Name</option>
+                                }
+                            </select>
+                        </label>
+                    }
+                    @if (dependencyProperty is not null)
+                    {
+                        <span class="badge text-bg-secondary">@dependencyProperty.Name dependencies</span>
+                    }
+                </div>
             </header>
 
             @foreach (var item in schedule.DatedItems)
@@ -45,7 +73,7 @@
                 <article class="sentinel-db-timeline-row">
                     <div class="sentinel-db-timeline-label">
                         <button type="button" @onclick="() => OnOpenRow.InvokeAsync(item.Row.Id)">@Title(item.Row)</button>
-                        <time>@item.Date?.ToString("dd-MM-yy")</time>
+                        <time>@DateRange(item)</time>
                         @if (dependencyProperty is not null)
                         {
                             <details>
@@ -70,11 +98,19 @@
                         }
                     </div>
                     <div class="sentinel-db-timeline-track" style="@TimelineBarStyle(item, schedule)"
-                         data-row-id="@item.Row.Id" data-date="@item.Date?.ToString("yyyy-MM-dd")">
+                         data-row-id="@item.Row.Id" data-date="@item.Date?.ToString("yyyy-MM-dd")" data-end="@item.EndDate?.ToString("yyyy-MM-dd")">
                         <button type="button" class="sentinel-db-timeline-bar"
                                 @onclick="() => OnOpenRow.InvokeAsync(item.Row.Id)"
-                                title="@(CanEdit ? $"{Title(item.Row)} — {item.Date:dd-MM-yy} (drag to reschedule)" : $"{Title(item.Row)} — {item.Date:dd-MM-yy}")">
+                                title="@BarTitle(item, endProperty is not null)">
+                            @if (CanEdit && endProperty is not null)
+                            {
+                                <span class="sentinel-db-timeline-handle is-start" aria-hidden="true"></span>
+                            }
                             <span>@Title(item.Row)</span>
+                            @if (CanEdit && endProperty is not null)
+                            {
+                                <span class="sentinel-db-timeline-handle is-end" aria-hidden="true"></span>
+                            }
                         </button>
                         @if (item.DependsOnRowIds.Count > 0)
                         {
@@ -311,6 +347,7 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
     private string? _formMessage;
     private Guid? _savingDependencyRowId;
     private string? _timelineMessage;
+    private bool _savingTimelineDates;
     private bool _savingChartType;
     private ElementReference _timelineContainerRef;
     private ElementReference _mapContainerRef;
@@ -382,13 +419,12 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
         }
     }
 
-    // Drag-to-reschedule (Phase 5.1) - wikiTimelineDrag.js's pointer drag ends by calling this
-    // with the row's new single Date value (see that file's own header comment for why this is
-    // a move, not a start/end resize - the Timeline schedule has no end-date concept today).
+    // wikiTimelineDrag.js ends a drag here: a move shifts the start (and the end, when the view
+    // has one), dragging an edge changes just that date. A null end leaves the end alone.
     [JSInvokable]
-    public async Task UpdateTimelineRowDateAsync(string rowId, string newDateIso)
+    public async Task UpdateTimelineRowDatesAsync(string rowId, string startIso, string? endIso)
     {
-        if (!CanEdit || !Guid.TryParse(rowId, out var parsedRowId) || !DateTimeOffset.TryParse(newDateIso, out var newDate))
+        if (!CanEdit || !Guid.TryParse(rowId, out var parsedRowId) || !DateTimeOffset.TryParse(startIso, out var newStart))
         {
             return;
         }
@@ -400,11 +436,16 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
             return;
         }
 
+        var endProperty = ResolveTimelineEndProperty(dateProperty);
         _timelineMessage = null;
         try
         {
             var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
-            WikiPropertyValues.SetDate(values, dateProperty.Id, newDate);
+            WikiPropertyValues.SetDate(values, dateProperty.Id, newStart);
+            if (endProperty is not null && DateTimeOffset.TryParse(endIso, out var newEnd))
+            {
+                WikiPropertyValues.SetDate(values, endProperty.Id, newEnd < newStart ? newStart : newEnd);
+            }
 
             var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
             await WikiDatabaseService.SaveRowAsync(Database.Id, new WikiDatabaseRowEditor
@@ -440,6 +481,10 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
 
     private static IReadOnlyList<string> ChartPalette => WikiDatabaseViewLogic.ChartPalette;
 
+    // The view's own settings. Config may carry this user's personal filters and sorts on top,
+    // which a settings change here mustn't publish to everyone.
+    private WikiDatabaseViewConfig SharedConfig => WikiDatabaseViewConfigJson.Parse(View.ConfigJson);
+
     private string ChartType => Config.ChartType is WikiDatabaseChartTypes.Line or WikiDatabaseChartTypes.Donut
         ? Config.ChartType
         : WikiDatabaseChartTypes.Bar;
@@ -455,7 +500,7 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
         try
         {
             var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
-            await WikiDatabaseService.SaveViewAsync(Database.Id, View.Id, View.Name, View.Type, Config with { ChartType = chartType }, username);
+            await WikiDatabaseService.SaveViewAsync(Database.Id, View.Id, View.Name, View.Type, SharedConfig with { ChartType = chartType }, username);
             await OnChanged.InvokeAsync();
         }
         finally
@@ -488,6 +533,43 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
         ?? Database.Properties.FirstOrDefault(property => property.Type is WikiDatabasePropertyTypes.Select
             or WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Checkbox or WikiDatabasePropertyTypes.Text
             or WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup);
+
+    // The end is a different Date property than the start; anything else reads as no end.
+    private WikiDatabaseProperty? ResolveTimelineEndProperty(WikiDatabaseProperty startProperty) =>
+        Guid.TryParse(Config.TimelineEndPropertyId, out var propertyId) && propertyId != startProperty.Id
+            ? Database.Properties.FirstOrDefault(property => property.Id == propertyId && property.Type == WikiDatabasePropertyTypes.Date)
+            : null;
+
+    private async Task SetTimelineDatesAsync(string? startPropertyId, string? endPropertyId)
+    {
+        if (!CanEdit || _savingTimelineDates || string.IsNullOrEmpty(startPropertyId))
+        {
+            return;
+        }
+
+        _savingTimelineDates = true;
+        try
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            var end = string.IsNullOrEmpty(endPropertyId) || endPropertyId == startPropertyId ? null : endPropertyId;
+            await WikiDatabaseService.SaveViewAsync(Database.Id, View.Id, View.Name, View.Type,
+                SharedConfig with { GroupByPropertyId = startPropertyId, TimelineEndPropertyId = end }, username);
+            await OnChanged.InvokeAsync();
+        }
+        finally
+        {
+            _savingTimelineDates = false;
+        }
+    }
+
+    private static string DateRange(WikiDatabaseTimelineItem item) =>
+        item.EndDate is { } end && end != item.Date
+            ? $"{item.Date:dd-MM-yy} – {end:dd-MM-yy}"
+            : $"{item.Date:dd-MM-yy}";
+
+    private string BarTitle(WikiDatabaseTimelineItem item, bool hasEnd) =>
+        $"{Title(item.Row)} — {DateRange(item)}"
+        + (!CanEdit ? "" : hasEnd ? " (drag to move, drag an edge to change a date)" : " (drag to reschedule)");
 
     private WikiDatabaseProperty? ResolveTimelineDependencyProperty()
     {
@@ -531,7 +613,9 @@ else if (View.Type == WikiDatabaseViewTypes.Dashboard)
 
         var totalDays = Math.Max(1, end.DayNumber - start.DayNumber + 1);
         var left = (date.DayNumber - start.DayNumber) * 100d / totalDays;
-        var width = Math.Max(3d, 100d / totalDays);
+        // A range spans its days; a single date (or a very short range) stays visible at 3%.
+        var spanDays = (item.EndDate ?? date).DayNumber - date.DayNumber + 1;
+        var width = Math.Max(3d, spanDays * 100d / totalDays);
         return FormattableString.Invariant($"--timeline-left:{left:0.###}%;--timeline-width:{width:0.###}%;");
     }
 

@@ -1,6 +1,8 @@
 # Handoff: Sentinel → Notion parity — STALE, see 2026-08-21 status update below
 
 > **~~CLOSED~~ (audit 2026-10-07):** all done except Timeline drag-resize, which Grant deferred ("skip for now", 2026-08-21). It needs a schema decision from Grant first.
+>
+> **Timeline drag-resize DONE 28-10-26** with the option recommended to Grant (he said "move to next unit of work" rather than choosing): a second Date property picked as the view's end (`WikiDatabaseViewConfig.TimelineEndPropertyId`, schemaless, so no migration; GroupByPropertyId stays the start). Starts/Ends pickers in the Timeline header, bars span start..end, edge handles in `wikiTimelineDrag.js` (clamped so start never passes end), `UpdateTimelineRowDatesAsync`. Fixed on the way: releasing any bar drag also clicked the bar and opened the row over the timeline; database duplicates/templates dropped ChartType, swimlanes (SecondaryGroupByPropertyId) and now the end property - all three carried and remapped (FormSettings still isn't copied: its property ids would need remapping too); the chart-type picker saved the merged config, so a user's personal filters/sorts became everyone's - it and the Timeline pickers now save onto the view's shared config.
 
 ## 2026-08-21 status update
 This doc was last edited 2026-08-08 mid-Phase-2.5 and was never updated as work continued

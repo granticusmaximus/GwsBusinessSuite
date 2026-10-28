@@ -2030,6 +2030,36 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task DuplicateDatabaseAsync_ShouldKeepTimelineEndChartTypeAndSwimlanes_OnTheCopysProperties()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var source = await service.CreateDatabaseAsync("Plan", null, "u");
+        var starts = await service.SavePropertyAsync(source.Id, new WikiDatabasePropertyEditor { Name = "Starts", Type = WikiDatabasePropertyTypes.Date }, "u");
+        var ends = await service.SavePropertyAsync(source.Id, new WikiDatabasePropertyEditor { Name = "Ends", Type = WikiDatabasePropertyTypes.Date }, "u");
+        var status = await service.SavePropertyAsync(source.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Status",
+            Type = WikiDatabasePropertyTypes.Select,
+            Options = [new WikiDatabasePropertyOption("open", "Open", "#0f0")]
+        }, "u");
+        await service.SaveViewAsync(source.Id, null, "Timeline", WikiDatabaseViewTypes.Timeline,
+            new WikiDatabaseViewConfig([], [], starts.Id.ToString(), TimelineEndPropertyId: ends.Id.ToString()), "u");
+        await service.SaveViewAsync(source.Id, null, "Chart", WikiDatabaseViewTypes.Chart,
+            new WikiDatabaseViewConfig([], [], status.Id.ToString(), ChartType: WikiDatabaseChartTypes.Donut), "u");
+        await service.SaveViewAsync(source.Id, null, "Board", WikiDatabaseViewTypes.Board,
+            new WikiDatabaseViewConfig([], [], status.Id.ToString(), SecondaryGroupByPropertyId: starts.Id.ToString()), "u");
+
+        var copy = (await service.GetDatabaseAsync((await service.DuplicateDatabaseAsync(source.Id, "u")).Id))!;
+        string IdOf(string name) => copy.Properties.Single(property => property.Name == name).Id.ToString();
+        WikiDatabaseViewConfig ConfigOf(string type) => WikiDatabaseViewConfigJson.Parse(copy.Views.Single(view => view.Type == type).ConfigJson);
+
+        ConfigOf(WikiDatabaseViewTypes.Timeline).TimelineEndPropertyId.Should().Be(IdOf("Ends"));
+        ConfigOf(WikiDatabaseViewTypes.Chart).ChartType.Should().Be(WikiDatabaseChartTypes.Donut);
+        ConfigOf(WikiDatabaseViewTypes.Board).SecondaryGroupByPropertyId.Should().Be(IdOf("Starts"));
+    }
+
+    [Fact]
     public async Task DuplicateDatabaseAsync_ShouldRemapSelfRelationsAndRollupsToTheCopy()
     {
         await using var db = await CreateDbAsync();

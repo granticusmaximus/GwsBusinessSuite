@@ -137,7 +137,10 @@ public sealed record WikiDatabaseViewConfig(
     string? SecondaryGroupByPropertyId = null,
     // Form view only: questions, conditions, required answers and the thank-you message for the
     // view's form, including when it's shared publicly (SentinelPublicForms).
-    WikiDatabaseFormSettings? FormSettings = null)
+    WikiDatabaseFormSettings? FormSettings = null,
+    // Timeline view only: a second Date property read as each row's end, so bars span start to
+    // end and can be stretched. GroupByPropertyId stays the start; null keeps one-day markers.
+    string? TimelineEndPropertyId = null)
 {
     public static WikiDatabaseViewConfig Empty { get; } = new([], [], null, null, [], [], new Dictionary<string, string>(), null, null, null, null);
 }
@@ -235,7 +238,8 @@ public static class WikiDatabaseViewConfigJson
                     parsed.DependencyPropertyId,
                     parsed.ChartType,
                     parsed.SecondaryGroupByPropertyId,
-                    parsed.FormSettings);
+                    parsed.FormSettings,
+                    parsed.TimelineEndPropertyId);
         }
         catch (JsonException) { return WikiDatabaseViewConfig.Empty; }
     }
@@ -944,11 +948,16 @@ public static class WikiDatabaseViewLogic
     public static WikiDatabaseTimelineSchedule BuildTimelineSchedule(
         IReadOnlyList<WikiDatabaseRow> rows,
         WikiDatabaseProperty dateProperty,
-        WikiDatabaseProperty? dependencyProperty = null)
+        WikiDatabaseProperty? dependencyProperty = null,
+        WikiDatabaseProperty? endProperty = null)
     {
         if (dateProperty.Type != WikiDatabasePropertyTypes.Date)
         {
             throw new ArgumentException("Timeline views require a Date property.", nameof(dateProperty));
+        }
+        if (endProperty is not null && endProperty.Type != WikiDatabasePropertyTypes.Date)
+        {
+            throw new ArgumentException("A Timeline's end must be a Date property.", nameof(endProperty));
         }
         if (dependencyProperty is not null && dependencyProperty.Type != WikiDatabasePropertyTypes.Relation)
         {
@@ -962,6 +971,10 @@ public static class WikiDatabaseViewLogic
                 var date = WikiPropertyValues.GetDate(values, dateProperty.Id) is { } storedDate
                     ? new DateOnly?(DateOnly.FromDateTime(storedDate.ToLocalTime().DateTime))
                     : null;
+                var end = endProperty is not null && date is { } start && WikiPropertyValues.GetDate(values, endProperty.Id) is { } storedEnd
+                    && DateOnly.FromDateTime(storedEnd.ToLocalTime().DateTime) is var endDate && endDate >= start
+                        ? new DateOnly?(endDate)
+                        : null;
                 IReadOnlyList<Guid> dependencies = dependencyProperty is null
                     ? Array.Empty<Guid>()
                     : WikiPropertyValues.GetMultiSelect(values, dependencyProperty.Id)
@@ -970,7 +983,7 @@ public static class WikiDatabaseViewLogic
                         .Select(rowId => rowId!.Value)
                         .Distinct()
                         .ToList();
-                return new WikiDatabaseTimelineItem(row, date, dependencies);
+                return new WikiDatabaseTimelineItem(row, date, dependencies, end);
             })
             .OrderBy(item => item.Date is null)
             .ThenBy(item => item.Date)
@@ -980,7 +993,7 @@ public static class WikiDatabaseViewLogic
 
         return new WikiDatabaseTimelineSchedule(
             datedItems.FirstOrDefault()?.Date,
-            datedItems.LastOrDefault()?.Date,
+            datedItems.Count == 0 ? null : datedItems.Max(item => item.EndDate ?? item.Date),
             datedItems,
             items.Where(item => item.Date is null).ToList());
     }
@@ -1117,10 +1130,13 @@ public sealed record WikiDatabaseCalendarMonth(
 
 public sealed record WikiDatabaseTimelineGroup(DateOnly? Date, IReadOnlyList<WikiDatabaseRow> Rows);
 
+// Date is the start; EndDate (inclusive) is set only when the view has an end property and the
+// row's end isn't before its start.
 public sealed record WikiDatabaseTimelineItem(
     WikiDatabaseRow Row,
     DateOnly? Date,
-    IReadOnlyList<Guid> DependsOnRowIds);
+    IReadOnlyList<Guid> DependsOnRowIds,
+    DateOnly? EndDate = null);
 
 public sealed record WikiDatabaseTimelineSchedule(
     DateOnly? StartDate,

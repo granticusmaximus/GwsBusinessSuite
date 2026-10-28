@@ -2210,6 +2210,15 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 .sentinel-db-timeline-bar span { color: inherit; }
 .sentinel-db-timeline-bar { cursor: grab; touch-action: none; }
 .sentinel-db-timeline-bar.is-dragging { cursor: grabbing; z-index: 2; box-shadow: 0 .5rem 1.2rem rgba(0,0,0,.32); transition: none; }
+/* Edge handles (a view with an end property): drag one to change that date. */
+.sentinel-db-timeline-handle { position: absolute; top: 0; bottom: 0; width: .55rem; cursor: ew-resize; }
+.sentinel-db-timeline-handle.is-start { left: 0; }
+.sentinel-db-timeline-handle.is-end { right: 0; }
+.sentinel-db-timeline-handle::after { content: ""; position: absolute; top: 28%; bottom: 28%; left: 50%; width: 2px; border-radius: 1px; background: rgba(255,255,255,.55); opacity: 0; transition: opacity .12s; }
+.sentinel-db-timeline-bar:hover .sentinel-db-timeline-handle::after, .sentinel-db-timeline-bar.is-dragging .sentinel-db-timeline-handle::after { opacity: 1; }
+.sentinel-db-timeline-dates { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.sentinel-db-timeline-dates label { display: flex; align-items: center; gap: .35rem; }
+.sentinel-db-timeline-dates .form-select { width: auto; max-width: 11rem; }
 .sentinel-db-timeline-links { position: absolute; top: 2.35rem; left: var(--timeline-left,0); display: flex; align-items: center; gap: .25rem; max-width: 75%; color: #94a3b8; font-size: .75rem; white-space: nowrap; }
 .sentinel-db-timeline-undated { display: grid; grid-template-columns: 15rem minmax(30rem,1fr); gap: .75rem; min-width: 46rem; padding: .7rem .55rem; }
 .sentinel-db-timeline-undated > div { display: flex; flex-wrap: wrap; gap: .4rem; }

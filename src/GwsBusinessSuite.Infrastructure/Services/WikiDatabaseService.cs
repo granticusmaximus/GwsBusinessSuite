@@ -340,7 +340,14 @@ public sealed class WikiDatabaseService(
                     FilterGroup: RemapFilterGroup(config.FilterGroup, propertyIds),
                     DependencyPropertyId: config.DependencyPropertyId is null
                         ? null
-                        : RemapPropertyId(config.DependencyPropertyId, propertyIds))),
+                        : RemapPropertyId(config.DependencyPropertyId, propertyIds),
+                    ChartType: config.ChartType,
+                    SecondaryGroupByPropertyId: config.SecondaryGroupByPropertyId is null
+                        ? null
+                        : RemapPropertyId(config.SecondaryGroupByPropertyId, propertyIds),
+                    TimelineEndPropertyId: config.TimelineEndPropertyId is null
+                        ? null
+                        : RemapPropertyId(config.TimelineEndPropertyId, propertyIds))),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
@@ -601,7 +608,14 @@ public sealed class WikiDatabaseService(
                     FilterGroup: RemapFilterGroup(config.FilterGroup, propertyIds),
                     DependencyPropertyId: config.DependencyPropertyId is null
                         ? null
-                        : RemapPropertyId(config.DependencyPropertyId, propertyIds))),
+                        : RemapPropertyId(config.DependencyPropertyId, propertyIds),
+                    ChartType: config.ChartType,
+                    SecondaryGroupByPropertyId: config.SecondaryGroupByPropertyId is null
+                        ? null
+                        : RemapPropertyId(config.SecondaryGroupByPropertyId, propertyIds),
+                    TimelineEndPropertyId: config.TimelineEndPropertyId is null
+                        ? null
+                        : RemapPropertyId(config.TimelineEndPropertyId, propertyIds))),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
