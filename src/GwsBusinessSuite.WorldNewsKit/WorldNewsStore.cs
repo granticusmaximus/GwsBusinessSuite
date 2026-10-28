@@ -9,6 +9,11 @@ public sealed record EventOverview(string Id, string Title, int ArticleCount, in
     IReadOnlyList<string> Countries, IReadOnlyList<string> Languages, DateTimeOffset FirstSeen, DateTimeOffset LastSeen,
     string? Headline = null);
 
+// A situation as the feed shows it: Title is from its biggest event (an English headline when
+// one has one), Latest is its newest event's.
+public sealed record SituationOverview(string Id, string Title, string Latest, int EventCount, int ArticleCount, int OutletCount,
+    IReadOnlyList<string> Countries, IReadOnlyList<string> Languages, DateTimeOffset FirstSeen, DateTimeOffset LastSeen);
+
 // One version of an event's summary. Versions count up from 1; ArticleCount is how many reports
 // the event had when it was written, which decides when it's due again.
 public sealed record EventSummary(string EventId, int Version, string? Headline, string Text, string Model,
@@ -40,11 +45,16 @@ public sealed class WorldNewsStore
             CREATE TABLE IF NOT EXISTS summaries (
                 event_id TEXT NOT NULL, version INTEGER NOT NULL, headline TEXT, summary TEXT NOT NULL, model TEXT NOT NULL,
                 article_count INTEGER NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (event_id, version));
+            CREATE TABLE IF NOT EXISTS situations (id TEXT PRIMARY KEY, vector_sum BLOB NOT NULL, last_seen INTEGER NOT NULL);
             """);
         // Databases from before outlet feeds (21-10-26) have no snippet column.
         using var columns = connection.CreateCommand();
         columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('articles') WHERE name = 'snippet'";
         if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE articles ADD COLUMN snippet TEXT");
+        // Nor do databases from before situations (28-10-26) have events.situation_id.
+        columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'situation_id'";
+        if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE events ADD COLUMN situation_id TEXT");
+        Execute(connection, "CREATE INDEX IF NOT EXISTS ix_events_situation ON events (situation_id)");
     }
 
     // New reports only (a report already stored, by canonical URL, is skipped). Returns how many were new.
@@ -101,15 +111,15 @@ public sealed class WorldNewsStore
         return items;
     }
 
-    public List<NewsEvent> ActiveEvents(DateTimeOffset since)
+    public List<NewsEvent> ActiveEvents(DateTimeOffset since) =>
+        ReadEvents("WHERE last_seen >= $since", ("$since", since.ToUnixTimeSeconds()));
+
+    private List<NewsEvent> ReadEvents(string where, params (string Name, object Value)[] parameters)
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT id, title, title_language, vector_sum, article_count, first_seen, last_seen
-            FROM events WHERE last_seen >= $since
-            """;
-        command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+        command.CommandText = $"SELECT id, title, title_language, vector_sum, article_count, first_seen, last_seen FROM events {where}";
+        foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value);
         using var reader = command.ExecuteReader();
         var events = new List<NewsEvent>();
         while (reader.Read())
@@ -123,6 +133,58 @@ public sealed class WorldNewsStore
             });
         }
         return events;
+    }
+
+    // Events big enough to place in a situation that haven't been, oldest first.
+    public List<NewsEvent> EventsToLink(DateTimeOffset since, int minArticles) =>
+        ReadEvents("WHERE situation_id IS NULL AND article_count >= $min AND last_seen >= $since ORDER BY first_seen",
+            ("$min", minArticles), ("$since", since.ToUnixTimeSeconds()));
+
+    public List<NewsSituation> ActiveSituations(DateTimeOffset since)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, vector_sum, last_seen FROM situations WHERE last_seen >= $since";
+        command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+        using var reader = command.ExecuteReader();
+        var situations = new List<NewsSituation>();
+        while (reader.Read())
+        {
+            situations.Add(new NewsSituation
+            {
+                Id = reader.GetString(0), Sum = ToFloats((byte[])reader[1]),
+                LastSeen = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2))
+            });
+        }
+        return situations;
+    }
+
+    public void SaveLinks(IReadOnlyList<SituationLink> links)
+    {
+        if (links.Count == 0) return;
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        foreach (var situation in links.Select(link => link.Situation).Distinct())
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO situations (id, vector_sum, last_seen) VALUES ($id, $sum, $last)
+                ON CONFLICT (id) DO UPDATE SET vector_sum = excluded.vector_sum, last_seen = excluded.last_seen
+                """;
+            command.Parameters.AddWithValue("$id", situation.Id);
+            command.Parameters.AddWithValue("$sum", ToBytes(situation.Sum));
+            command.Parameters.AddWithValue("$last", situation.LastSeen.ToUnixTimeSeconds());
+            command.ExecuteNonQuery();
+        }
+        foreach (var link in links)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE events SET situation_id = $situation WHERE id = $event";
+            command.Parameters.AddWithValue("$situation", link.Situation.Id);
+            command.Parameters.AddWithValue("$event", link.EventId);
+            command.ExecuteNonQuery();
+        }
+        transaction.Commit();
     }
 
     // Which event each recent feed group went to, so later reports in that group follow it.
@@ -192,6 +254,7 @@ public sealed class WorldNewsStore
             using var command = connection.CreateCommand();
             command.CommandText = """
                 UPDATE articles SET event_id = $keep WHERE event_id = $drop;
+                UPDATE events SET situation_id = COALESCE(situation_id, (SELECT situation_id FROM events WHERE id = $drop)) WHERE id = $keep;
                 DELETE FROM events WHERE id = $drop;
                 DELETE FROM summaries WHERE event_id = $drop;
                 UPDATE events SET title = $title, title_language = $language, vector_sum = $sum, article_count = $count,
@@ -213,6 +276,67 @@ public sealed class WorldNewsStore
     // The busiest events since a time, by distinct outlets.
     public IReadOnlyList<EventOverview> TopEvents(DateTimeOffset since, int limit) =>
         Overviews("WHERE e.last_seen >= $since", "", ("$since", since.ToUnixTimeSeconds()), ("$limit", limit));
+
+    // Situations of two or more events with news since a time, busiest (by distinct outlets) first.
+    public IReadOnlyList<SituationOverview> TopSituations(DateTimeOffset since, int limit)
+    {
+        using var connection = Open();
+        var rows = new List<(string Id, int Events, int Articles, int Outlets, string? Countries, string? Languages, long First, long Last)>();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                SELECT e.situation_id, COUNT(DISTINCT e.id), COUNT(a.id), COUNT(DISTINCT a.outlet),
+                       GROUP_CONCAT(DISTINCT a.country), GROUP_CONCAT(DISTINCT a.language), MIN(e.first_seen), MAX(e.last_seen)
+                FROM events e JOIN articles a ON a.event_id = e.id
+                WHERE e.situation_id IN (SELECT situation_id FROM events WHERE situation_id IS NOT NULL
+                                         GROUP BY situation_id HAVING COUNT(*) >= 2 AND MAX(last_seen) >= $since)
+                GROUP BY e.situation_id
+                ORDER BY COUNT(DISTINCT a.outlet) DESC, MAX(e.last_seen) DESC LIMIT $limit
+                """;
+            command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+            command.Parameters.AddWithValue("$limit", limit);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+                rows.Add((reader.GetString(0), reader.GetInt32(1), reader.GetInt32(2), reader.GetInt32(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5),
+                    reader.GetInt64(6), reader.GetInt64(7)));
+        }
+        if (rows.Count == 0) return [];
+
+        // Each situation's events, for its title (the biggest, English when there is one) and latest.
+        var events = new Dictionary<string, List<(string Title, bool English, int Articles, long Last)>>();
+        using (var command = connection.CreateCommand())
+        {
+            var names = rows.Select((_, i) => $"$s{i}").ToList();
+            command.CommandText = $"""
+                SELECT situation_id, COALESCE((SELECT headline FROM summaries WHERE event_id = e.id AND headline IS NOT NULL
+                       ORDER BY version DESC LIMIT 1), title), title_language, article_count, last_seen
+                FROM events e WHERE situation_id IN ({string.Join(", ", names)})
+                """;
+            for (var i = 0; i < rows.Count; i++) command.Parameters.AddWithValue(names[i], rows[i].Id);
+            using var reader = command.ExecuteReader();
+            while (reader.Read())
+            {
+                var id = reader.GetString(0);
+                if (!events.TryGetValue(id, out var list)) events[id] = list = [];
+                list.Add((reader.GetString(1), reader.GetString(2) == "English", reader.GetInt32(3), reader.GetInt64(4)));
+            }
+        }
+
+        return rows.Select(row =>
+        {
+            var list = events.GetValueOrDefault(row.Id) ?? [];
+            var title = list.OrderByDescending(e => e.English).ThenByDescending(e => e.Articles).Select(e => e.Title).FirstOrDefault() ?? "";
+            var latest = list.OrderByDescending(e => e.Last).Select(e => e.Title).FirstOrDefault() ?? title;
+            return new SituationOverview(row.Id, title, latest, row.Events, row.Articles, row.Outlets, Split(row.Countries),
+                Split(row.Languages), DateTimeOffset.FromUnixTimeSeconds(row.First), DateTimeOffset.FromUnixTimeSeconds(row.Last));
+        }).ToList();
+    }
+
+    // A situation's events in the order they broke.
+    public IReadOnlyList<EventOverview> EventsForSituation(string situationId) =>
+        Overviews("WHERE e.situation_id = $situation", "", ("$situation", situationId), ("$limit", 500))
+            .OrderBy(e => e.FirstSeen).ToList();
 
     public EventOverview? Event(string eventId) =>
         Overviews("WHERE e.id = $event", "", ("$event", eventId), ("$limit", 1)).FirstOrDefault();
@@ -297,6 +421,7 @@ public sealed class WorldNewsStore
             DELETE FROM articles WHERE seen_at < $before;
             DELETE FROM events WHERE last_seen < $before;
             DELETE FROM summaries WHERE event_id NOT IN (SELECT id FROM events);
+            DELETE FROM situations WHERE id NOT IN (SELECT situation_id FROM events WHERE situation_id IS NOT NULL);
             """;
         command.Parameters.AddWithValue("$before", before.ToUnixTimeSeconds());
         command.ExecuteNonQuery();

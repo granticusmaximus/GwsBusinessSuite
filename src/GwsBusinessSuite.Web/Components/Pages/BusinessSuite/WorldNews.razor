@@ -10,7 +10,7 @@
 <PageTitle>World News</PageTitle>
 
 <PageHeader Title="World News" Icon="bi-globe-europe-africa"
-            Description="What newsrooms around the world are reporting, with every outlet's coverage of the same event grouped together across languages, and the biggest events summarized in English.">
+            Description="What newsrooms around the world are reporting, with every outlet's coverage of the same event grouped together across languages, events linked into stories that develop over days, and the biggest events summarized in English.">
     <Meta>
         <p class="small text-secondary mb-0">@StatusLine</p>
     </Meta>
@@ -20,7 +20,13 @@
         </button>
     </Actions>
     <Filters>
-        <input type="search" class="form-control world-news-search" placeholder="Filter events" aria-label="Filter events"
+        <div class="btn-group world-news-view" role="group" aria-label="Show">
+            <button type="button" class="btn @(_view == WorldNewsView.Events ? "btn-primary" : "btn-outline-secondary")"
+                    aria-pressed="@(_view == WorldNewsView.Events ? "true" : "false")" @onclick="() => ShowAsync(WorldNewsView.Events)">Events</button>
+            <button type="button" class="btn @(_view == WorldNewsView.Situations ? "btn-primary" : "btn-outline-secondary")"
+                    aria-pressed="@(_view == WorldNewsView.Situations ? "true" : "false")" @onclick="() => ShowAsync(WorldNewsView.Situations)">Situations</button>
+        </div>
+        <input type="search" class="form-control world-news-search" placeholder="@($"Filter {ViewName}")" aria-label="@($"Filter {ViewName}")"
                @bind="_filter" @bind:event="oninput" @bind:after="() => _shown = PageSize" />
         <select class="form-select world-news-range" aria-label="Time range" @bind="_rangeHours" @bind:after="ChangeRangeAsync">
             <option value="24">Last 24 hours</option>
@@ -30,7 +36,86 @@
     </Filters>
 </PageHeader>
 
-@if (_events is null)
+@if (_view == WorldNewsView.Situations)
+{
+    @if (_situations is null)
+    {
+        <ListSkeleton Message="Loading situations…" />
+    }
+    else if (_situations.Count == 0)
+    {
+        <EmptyState Icon="bi-diagram-3" Title="No situations yet"
+                    Message="A situation is one story developing over days: two or more events linked by what they report. They form as later reads find new events on the same story." />
+    }
+    else
+    {
+        <div class="world-news @(_situation is null ? "" : "has-selection")">
+            <div class="world-news-list" aria-label="Situations">
+                @if (VisibleSituations.Count == 0)
+                {
+                    <EmptyState Icon="bi-search" Message="No situations match that filter." />
+                }
+                @foreach (var situation in VisibleSituations.Take(_shown))
+                {
+                    <button type="button" class="world-news-event @(situation.Id == _situation?.Id ? "is-selected" : "")"
+                            aria-pressed="@(situation.Id == _situation?.Id ? "true" : "false")" @onclick="() => SelectSituationAsync(situation)">
+                        <span class="world-news-event-title">@situation.Title</span>
+                        <span class="world-news-event-meta"><StatusPill Tone="@Tone(situation)">@State(situation)</StatusPill> @SituationSummary(situation)</span>
+                        @if (situation.Latest != situation.Title)
+                        {
+                            <span class="world-news-event-meta world-news-latest">Latest: @situation.Latest</span>
+                        }
+                    </button>
+                }
+                @if (VisibleSituations.Count > _shown)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-secondary world-news-more" @onclick="() => _shown += PageSize">
+                        Show @Math.Min(PageSize, VisibleSituations.Count - _shown) more of @(VisibleSituations.Count - _shown)
+                    </button>
+                }
+            </div>
+
+            <section class="world-news-detail" aria-live="polite">
+                @if (_situation is null)
+                {
+                    <EmptyState Icon="bi-hand-index" Message="Pick a situation to see how the story developed, event by event." />
+                }
+                else
+                {
+                    <button type="button" class="btn btn-sm btn-outline-secondary world-news-back" @onclick="() => _situation = null">
+                        <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Situations
+                    </button>
+                    <h2 class="world-news-detail-title">@_situation.Title</h2>
+                    <p class="world-news-detail-meta">
+                        <StatusPill Tone="@Tone(_situation)">@State(_situation)</StatusPill>
+                        @Count(_situation.EventCount, "event"), @Count(_situation.OutletCount, "outlet"), @Count(_situation.ArticleCount, "report").
+                        First seen @_situation.FirstSeen.ToLocalGwsDateTime(), latest @_situation.LastSeen.ToLocalGwsDateTime().
+                    </p>
+                    <dl class="world-news-facts">
+                        <dt>Languages</dt>
+                        <dd>@string.Join(", ", _situation.Languages.Order())</dd>
+                        <dt>Reported from</dt>
+                        <dd>@string.Join(", ", _situation.Countries.Order())</dd>
+                    </dl>
+                    <h3 class="world-news-language">How it developed <span>(@_situationEvents.Count)</span></h3>
+                    <ol class="world-news-timeline">
+                        @foreach (var e in _situationEvents)
+                        {
+                            <li>
+                                <button type="button" class="world-news-event" @onclick="() => OpenEventAsync(e)">
+                                    <span class="world-news-event-meta">@e.FirstSeen.ToLocalGwsDateTime()</span>
+                                    <span class="world-news-event-title">@(e.Headline ?? e.Title)</span>
+                                    <span class="world-news-event-meta">@Summary(e)</span>
+                                </button>
+                            </li>
+                        }
+                    </ol>
+                }
+            </section>
+        </div>
+    }
+}
+else if (_events is null)
 {
     <ListSkeleton Message="Loading world news…" />
 }
@@ -125,6 +210,12 @@ else
 }
 
 @code {
+    private enum WorldNewsView { Events, Situations }
+
+    private WorldNewsView _view = WorldNewsView.Events;
+    private IReadOnlyList<SituationOverview>? _situations;
+    private SituationOverview? _situation;
+    private IReadOnlyList<EventOverview> _situationEvents = [];
     private IReadOnlyList<EventOverview>? _events;
     private EventOverview? _selected;
     private IReadOnlyList<WorldArticle> _articles = [];
@@ -138,6 +229,13 @@ else
         ? _events ?? []
         : (_events ?? []).Where(e => e.Title.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
             || e.Headline?.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase) == true).ToList();
+
+    private string ViewName => _view == WorldNewsView.Situations ? "situations" : "events";
+
+    private IReadOnlyList<SituationOverview> VisibleSituations => string.IsNullOrWhiteSpace(_filter)
+        ? _situations ?? []
+        : (_situations ?? []).Where(s => s.Title.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
+            || s.Latest.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)).ToList();
 
     private string SummaryNote => _summary is null
         ? "No summary yet. After each read, the busiest events covered by 3 or more outlets are summarized in English."
@@ -158,6 +256,30 @@ else
         _events = await Task.Run(() => News.TopEvents(_rangeHours));
         if (_selected is not null) _selected = _events.FirstOrDefault(e => e.Id == _selected.Id);
         if (_selected is not null) _summary = await Task.Run(() => News.Store.LatestSummary(_selected.Id));
+        if (_view != WorldNewsView.Situations) return;
+        _situations = await Task.Run(() => News.TopSituations(_rangeHours));
+        if (_situation is not null) _situation = _situations.FirstOrDefault(s => s.Id == _situation.Id);
+        if (_situation is not null) _situationEvents = await Task.Run(() => News.Store.EventsForSituation(_situation.Id));
+    }
+
+    private Task ShowAsync(WorldNewsView view)
+    {
+        _view = view;
+        _shown = PageSize;
+        return LoadAsync();
+    }
+
+    private async Task SelectSituationAsync(SituationOverview situation)
+    {
+        _situation = situation;
+        _situationEvents = await Task.Run(() => News.Store.EventsForSituation(situation.Id));
+    }
+
+    // An event in a situation opens in the Events view, with all its reports.
+    private async Task OpenEventAsync(EventOverview e)
+    {
+        _view = WorldNewsView.Events;
+        await SelectAsync(e);
     }
 
     private Task ChangeRangeAsync()
@@ -184,6 +306,14 @@ else
 
     private static string Summary(EventOverview e) =>
         $"{Count(e.OutletCount, "outlet")} · {Count(e.Languages.Count, "language")} · {Count(e.Countries.Count, "country", "countries")} · {e.LastSeen.ToLocalGwsDateTime()}";
+
+    private static string State(SituationOverview s) => SituationLinker.IsActive(s.LastSeen, DateTimeOffset.UtcNow) ? "Active" : "Quiet";
+
+    private static StatusTone Tone(SituationOverview s) =>
+        SituationLinker.IsActive(s.LastSeen, DateTimeOffset.UtcNow) ? StatusTone.Success : StatusTone.Neutral;
+
+    private static string SituationSummary(SituationOverview s) =>
+        $"{Count(s.EventCount, "event")} · {Count(s.OutletCount, "outlet")} · {Count(s.Languages.Count, "language")} · {s.LastSeen.ToLocalGwsDateTime()}";
 
     private static string Count(int n, string one, string? many = null) => $"{n:N0} {(n == 1 ? one : many ?? one + "s")}";
 

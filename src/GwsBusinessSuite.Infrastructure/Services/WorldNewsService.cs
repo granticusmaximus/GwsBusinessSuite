@@ -32,6 +32,7 @@ public sealed class WorldNewsService : IDisposable
     private readonly WorldNewsPipeline _pipeline;
     private readonly EventSummarizer _summarizer;
     private readonly EventListCache _eventLists;
+    private readonly RangeListCache<SituationOverview> _situationLists;
     private readonly ILogger<WorldNewsService> _logger;
 
     public WorldNewsService(IConfiguration configuration, IOptions<ContentStudioOptions> ollamaOptions,
@@ -58,12 +59,16 @@ public sealed class WorldNewsService : IDisposable
         LastRefreshed = Store.LastFetched(LastReadKey);
         if (LastRefreshed is not null) Status = string.Empty;
         _eventLists = new EventListCache(since => Store.TopEvents(since, MaxEvents), TimeProvider.System, Interval);
+        _situationLists = new RangeListCache<SituationOverview>(since => Store.TopSituations(since, MaxEvents), TimeProvider.System, Interval);
         // Built at startup, so the first visit after a deploy doesn't wait for it.
         WarmEventLists();
     }
 
     // The busiest events in the last rangeHours, from memory unless a read has changed them.
     public IReadOnlyList<EventOverview> TopEvents(int rangeHours) => _eventLists.Get(rangeHours);
+
+    // Developing stories with news in the last rangeHours, likewise kept in memory between reads.
+    public IReadOnlyList<SituationOverview> TopSituations(int rangeHours) => _situationLists.Get(rangeHours);
 
     private void WarmEventLists() => _ = Task.Run(() =>
     {
@@ -90,6 +95,7 @@ public sealed class WorldNewsService : IDisposable
             LastRefreshed = DateTimeOffset.UtcNow;
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
             _eventLists.Clear();
+            _situationLists.Clear();
             Status = "Summarizing the biggest events...";
             Changed?.Invoke();
             var summaries = await Task.Run(() => _summarizer.RunAsync(ct), ct);
@@ -114,6 +120,7 @@ public sealed class WorldNewsService : IDisposable
             _running.Release();
             // Summaries add English headlines, so the lists are rebuilt once more.
             _eventLists.Clear();
+            _situationLists.Clear();
             Changed?.Invoke();
         }
     }

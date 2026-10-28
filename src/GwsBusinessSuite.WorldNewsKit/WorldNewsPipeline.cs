@@ -9,6 +9,8 @@ public sealed record WorldNewsOptions
     public double JoinThreshold { get; init; } = EventClusterer.DefaultThreshold;
     public double MergeThreshold { get; init; } = EventClusterer.DefaultMergeThreshold;
     public TimeSpan EventWindow { get; init; } = EventClusterer.DefaultWindow;
+    public double SituationThreshold { get; init; } = SituationLinker.DefaultThreshold;
+    public TimeSpan SituationWindow { get; init; } = SituationLinker.DefaultWindow;
     public TimeSpan KeepFor { get; init; } = TimeSpan.FromDays(30);
     // How far back GDELT is asked on the first run (later runs ask from the last success, so a
     // Mac that slept catches up, up to GDELT's one-day lookback).
@@ -24,7 +26,8 @@ public sealed record WorldNewsOptions
     public int MaxEmbedPerCycle { get; init; } = int.MaxValue;
 }
 
-public sealed record CycleReport(int Fetched, int Added, int Embedded, int NewEvents, int UpdatedEvents, int MergedEvents, IReadOnlyList<string> Notes);
+public sealed record CycleReport(int Fetched, int Added, int Embedded, int NewEvents, int UpdatedEvents, int MergedEvents, IReadOnlyList<string> Notes,
+    int LinkedEvents = 0);
 
 // One refresh: read every feed (Google News editions, then outlets' own feeds), store the new
 // reports, embed their headlines with the local model, and group them into events. Only
@@ -118,8 +121,15 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         store.SaveClustering(clustering);
         var merges = EventClusterer.MergeTwins(events, clustering.Touched.ToHashSet(), options.MergeThreshold);
         store.ApplyMerges(merges);
+        // Events that reached a situation's size are placed in one (the first read after an update
+        // places every recent event, oldest first).
+        var situationSince = now - options.SituationWindow;
+        var links = SituationLinker.Link(store.EventsToLink(situationSince, SituationLinker.MinArticles),
+            store.ActiveSituations(situationSince), options.SituationThreshold, options.SituationWindow, () => Guid.NewGuid().ToString("N"));
+        store.SaveLinks(links);
         store.Prune(now - options.KeepFor);
 
-        return new CycleReport(fetched, added, embedded, clustering.Created, clustering.Touched.Count - clustering.Created, merges.Count, notes);
+        return new CycleReport(fetched, added, embedded, clustering.Created, clustering.Touched.Count - clustering.Created, merges.Count, notes,
+            links.Count);
     }
 }

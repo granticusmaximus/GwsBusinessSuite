@@ -101,10 +101,26 @@ News** (`/admin/world-news`, `WorldNews.razor`). The Mac app shows it in its Wor
 - Not checked: summary timing on the droplet's CPU (the status line will name a timeout), and
   the Markdown download inside the Mac app's WKWebView.
 
+**Situations done 28-10-26.** `SituationLinker` (WorldNewsKit): each event with 3+ reports,
+oldest first, joins the closest situation (sum of its events' unit centroids) active within 14
+days at 0.72, else starts one; shown once a situation has 2+ events; ACTIVE until 48 hours
+without a new event. Stored as a `situations` table (id, vector_sum, last_seen) and
+`events.situation_id` (added to older databases on open); event merges keep the link, pruning
+drops empty situations; the first read after deploying backfills every recent event. Tuned on
+1,724 live events (20-28 Oct): pairs >0.78 one story, 0.72-0.78 mostly one story, 0.66-0.72
+mixed with topics; centroid linking at 0.73+ split the Israeli election by language, 0.70-0.72
+left one "markets" group. A full live read linked 1,835 events into 164 shown situations (top:
+the Spanish train crash, 13 events / 475 outlets / 27 languages). Known miss: a Milei (Argentina)
+event joined Brazil's election situation (0.76 to one of its events, so a "near a member" rule
+wouldn't stop it; over all 316 links only 17 joined without a member at 0.72, about half of them
+right, so the rule wasn't added). Page: Events/Situations switch, situation timeline, events
+open in the Events view.
+
 **Revised order:**
 2. ~~The Mac tab~~ The web page (done, above).
 3. ~~Outlet RSS feeds + the combined document + summaries~~ (done, above).
-4. Situations + claims.
+4. ~~Situations~~ (done, above) + claims (needs a model good enough to extract claims; the
+   droplet's llama3.2 swapped roles in summaries - check quality before building).
 5. Monitoring, the World view, and the SentinelGPT tool.
 
 ## What clstr.news does (checked live 20-10-26)

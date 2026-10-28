@@ -176,6 +176,83 @@ public sealed class WorldNewsKitTests : IDisposable
     }
 
     [Fact]
+    public void SituationLinker_ShouldLinkEventsOnOneStory_AndKeepOthersAndOldOnesApart()
+    {
+        var rally = Event("rally", "Rally before the election", [1f, 0.1f, 0f], 4);
+        var results = Event("results", "Election results", [0.95f, 0.25f, 0f], 6);
+        var crash = Event("crash", "Train crash", [0f, 0.1f, 1f], 5);
+        var later = Event("later", "New election called", [1f, 0.15f, 0f], 3);
+        later.FirstSeen = Now.AddDays(20);
+        later.LastSeen = Now.AddDays(20);
+        var situations = new List<NewsSituation>();
+        var ids = 0;
+
+        var links = SituationLinker.Link([later, crash, results, rally], situations, SituationLinker.DefaultThreshold,
+            SituationLinker.DefaultWindow, () => $"s{ids++}");
+
+        links.Should().HaveCount(4);
+        links.Single(l => l.EventId == "results").Situation.Should().BeSameAs(links.Single(l => l.EventId == "rally").Situation);
+        links.Single(l => l.EventId == "crash").Situation.Should().NotBeSameAs(links.Single(l => l.EventId == "rally").Situation);
+        links.Single(l => l.EventId == "later").Situation.Should().NotBeSameAs(links.Single(l => l.EventId == "rally").Situation,
+            "twenty days on is outside the window, so it starts a new situation");
+        situations.Should().HaveCount(3);
+        SituationLinker.IsActive(Now.AddHours(-47), Now).Should().BeTrue();
+        SituationLinker.IsActive(Now.AddHours(-49), Now).Should().BeFalse();
+    }
+
+    [Fact]
+    public void Store_ShouldListSituationsOfTwoOrMoreEvents_AndKeepLinksThroughMergesAndPruning()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        SeedEvent(store, "rally", Reports("rally", 3), [1f, 0.1f]);
+        SeedEvent(store, "results", Reports("results", 5), [0.95f, 0.2f]);
+        SeedEvent(store, "crash", Reports("crash", 4), [0f, 1f]);
+        SeedEvent(store, "small", Reports("small", 2), [1f, 0.1f]);
+        var ids = 0;
+
+        var links = SituationLinker.Link(store.EventsToLink(Now.AddDays(-14), SituationLinker.MinArticles),
+            store.ActiveSituations(Now.AddDays(-14)), SituationLinker.DefaultThreshold, SituationLinker.DefaultWindow, () => $"s{ids++}");
+        store.SaveLinks(links);
+
+        links.Select(l => l.EventId).Should().BeEquivalentTo(["rally", "results", "crash"], "an event needs 3 reports to be placed");
+        store.EventsToLink(Now.AddDays(-14), SituationLinker.MinArticles).Should().BeEmpty("each event is placed once");
+        var situation = store.TopSituations(Now.AddDays(-1), 10).Should().ContainSingle("the crash is a situation of one event, not shown").Subject;
+        situation.EventCount.Should().Be(2);
+        situation.ArticleCount.Should().Be(8);
+        situation.Title.Should().Be("results report 0", "the biggest event names it");
+        store.EventsForSituation(situation.Id).Select(e => e.Id).Should().BeEquivalentTo(["rally", "results"]);
+
+        // The merged event keeps the situation; a situation with no events left is pruned.
+        var rally = store.ActiveEvents(Now.AddDays(-1)).Single(e => e.Id == "rally");
+        var small = store.ActiveEvents(Now.AddDays(-1)).Single(e => e.Id == "small");
+        small.Absorb(rally);
+        store.ApplyMerges([new EventMerge(small, rally)]);
+        store.EventsForSituation(situation.Id).Select(e => e.Id).Should().BeEquivalentTo(["small", "results"]);
+        store.Prune(Now.AddDays(1));
+        store.ActiveSituations(Now.AddDays(-30)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Store_ShouldAddTheSituationColumn_ToADatabaseFromBeforeSituations()
+    {
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE events (id TEXT PRIMARY KEY, title TEXT NOT NULL, title_language TEXT NOT NULL, vector_sum BLOB NOT NULL,
+                    article_count INTEGER NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL);
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var store = new WorldNewsStore(_dbPath);
+
+        store.EventsToLink(Now.AddDays(-14), 1).Should().BeEmpty();
+        new WorldNewsStore(_dbPath).TopSituations(Now.AddDays(-1), 10).Should().BeEmpty("opening it again doesn't add the column twice");
+    }
+
+    [Fact]
     public void Store_ShouldKeepReportsEventsAndFeedState()
     {
         var store = new WorldNewsStore(_dbPath);
@@ -531,11 +608,11 @@ public sealed class WorldNewsKitTests : IDisposable
         Enumerable.Range(0, count).Select(i => Article($"{prefix}{i}", $"{prefix} report {i}", "English", Now.AddHours(-2))).ToArray();
 
     // One event holding the given reports, stored as clustering would leave it.
-    private static void SeedEvent(WorldNewsStore store, string eventId, WorldArticle[] reports)
+    private static void SeedEvent(WorldNewsStore store, string eventId, WorldArticle[] reports, float[]? direction = null)
     {
         store.AddArticles(reports);
         store.SaveClustering(new ClusterResult(reports.Select(r => (r.Id, eventId)).ToList(),
-            [Event(eventId, reports[0].Title, [1f, 0f], reports.Length)], 1));
+            [Event(eventId, reports[0].Title, direction ?? [1f, 0f], reports.Length)], 1));
     }
 
     private static NewsEvent Event(string id, string title, float[] direction, int count)

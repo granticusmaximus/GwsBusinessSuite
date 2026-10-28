@@ -7,11 +7,15 @@ namespace GwsBusinessSuite.WorldNewsKit;
 // then the live render) on the droplet's small CPU beside Ollama. A list is rebuilt after Clear
 // (a read changed the data) or once it's older than maxAge, so the range's cutoff keeps moving.
 public sealed class EventListCache(Func<DateTimeOffset, IReadOnlyList<EventOverview>> load, TimeProvider time, TimeSpan maxAge)
+    : RangeListCache<EventOverview>(load, time, maxAge);
+
+// Situations are listed the same way.
+public class RangeListCache<T>(Func<DateTimeOffset, IReadOnlyList<T>> load, TimeProvider time, TimeSpan maxAge)
 {
-    private readonly ConcurrentDictionary<int, (int Generation, DateTimeOffset BuiltAt, IReadOnlyList<EventOverview> Events)> _lists = new();
+    private readonly ConcurrentDictionary<int, (int Generation, DateTimeOffset BuiltAt, IReadOnlyList<T> Events)> _lists = new();
     private int _generation;
 
-    public IReadOnlyList<EventOverview> Get(int rangeHours)
+    public IReadOnlyList<T> Get(int rangeHours)
     {
         var now = time.GetUtcNow();
         var generation = Volatile.Read(ref _generation);

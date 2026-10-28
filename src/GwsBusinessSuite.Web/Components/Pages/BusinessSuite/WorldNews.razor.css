@@ -9,6 +9,30 @@
     width: auto;
 }
 
+.world-news-view .btn {
+    min-height: 2.25rem;
+}
+
+/* A situation's events, oldest first. */
+.world-news-timeline {
+    display: grid;
+    gap: .25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.world-news-timeline .world-news-event {
+    border-color: var(--gws-panel-border);
+}
+
+.world-news-latest {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+}
+
 .world-news {
     display: grid;
     grid-template-columns: minmax(18rem, 26rem) minmax(0, 1fr);
