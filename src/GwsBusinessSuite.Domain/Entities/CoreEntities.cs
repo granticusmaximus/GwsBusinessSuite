@@ -286,6 +286,19 @@ public sealed class TimeEntry : AuditableEntity
     public bool Billable { get; set; } = true;
     public decimal HourlyRateUsd { get; set; }
     public Guid? InvoiceId { get; set; }
+    // The board card the time was spent on (Boards K8c), when started from one.
+    public Guid? BoardCardId { get; set; }
+}
+
+// A board card's link to a CRM contact, support ticket or invoice (Boards K8c). Kind is one of
+// KanbanLinkKinds; TargetId that record's id. No foreign key: a deleted record leaves the link,
+// which then shows as gone rather than vanishing from under the card.
+public sealed class BoardCardLink : AuditableEntity
+{
+    public Guid WikiDatabaseId { get; set; }
+    public Guid RowId { get; set; }
+    public required string Kind { get; set; }
+    public Guid TargetId { get; set; }
 }
 
 public static class SupportTicketStatuses

@@ -77,6 +77,13 @@ public sealed class TimeTrackingService(IAppDbContext db, IBillingService billin
         return await ToViewsAsync(entries, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<TimeEntryView>> ListForCardAsync(Guid boardCardId, CancellationToken cancellationToken = default)
+    {
+        var entries = await db.TimeEntries.AsNoTracking().Where(t => t.BoardCardId == boardCardId)
+            .OrderByDescending(t => t.StartedAtUnixSeconds).ToListAsync(cancellationToken);
+        return await ToViewsAsync(entries, cancellationToken);
+    }
+
     public async Task<IReadOnlyList<UnbilledTimeSummary>> ListUnbilledAsync(CancellationToken cancellationToken = default)
     {
         var entries = await db.TimeEntries.AsNoTracking()
@@ -148,6 +155,7 @@ public sealed class TimeTrackingService(IAppDbContext db, IBillingService billin
         ContactId = input.ContactId,
         DealId = input.DealId,
         TicketId = input.TicketId,
+        BoardCardId = input.BoardCardId,
         Description = Truncate((input.Description ?? string.Empty).Trim(), 500),
         StartedAt = startedAt,
         StartedAtUnixSeconds = startedAt.ToUnixTimeSeconds(),
@@ -200,6 +208,6 @@ public sealed class TimeTrackingService(IAppDbContext db, IBillingService billin
             e.TicketId, e.TicketId is { } t ? tickets.GetValueOrDefault(t) : null,
             e.Description, e.StartedAt, e.EndedAt,
             e.EndedAt is null ? Math.Max(0, (int)(now - e.StartedAt).TotalMinutes) : e.Minutes,
-            e.Billable, e.HourlyRateUsd, e.InvoiceId)).ToList();
+            e.Billable, e.HourlyRateUsd, e.InvoiceId, e.BoardCardId)).ToList();
     }
 }

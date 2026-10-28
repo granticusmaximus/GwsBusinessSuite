@@ -33,7 +33,11 @@ public sealed record KanbanCard(
     bool Blocked = false,
     string? BlockedReason = null,
     // When it moved into the column it's in (the status-change log; its creation before that log).
-    DateTimeOffset? EnteredColumnAt = null);
+    DateTimeOffset? EnteredColumnAt = null,
+    // The start of the card's page, for rich cards (K7).
+    string? Snippet = null,
+    // What it's linked to (K8c): one entry per link, its KanbanLinkKinds.
+    IReadOnlyList<string>? LinkKinds = null);
 
 // OptionId null is the "No status" column (cards with no value yet), shown only when it has cards.
 public sealed record KanbanColumn(string? OptionId, string Label, string Color, string? Group, IReadOnlyList<KanbanCard> Cards, int? WipLimit = null);
@@ -112,7 +116,47 @@ public sealed record KanbanInsights(
     IReadOnlyList<KanbanFlowColumn> FlowColumns,
     IReadOnlyList<KanbanFlowDay> Flow,
     IReadOnlyList<KanbanAging> Aging,
-    int WorkInProgress);
+    int WorkInProgress,
+    // K8: cards finished each day since logging began in the window (yesterday last), and when
+    // the open work, the running sprint and what's in progress are likely to be done.
+    IReadOnlyList<int>? DailyDone = null,
+    IReadOnlyList<KanbanNamedForecast>? Forecasts = null);
+
+public sealed record KanbanNamedForecast(string Key, string Name, KanbanForecast Forecast);
+
+// "My day" (K8d): what's on one person's plate today - their cards across every board, by when
+// they're due or where they are, plus their open support tickets and the follow-ups due.
+public static class KanbanMyDayBuckets
+{
+    public const string Overdue = "overdue";
+    public const string Today = "today";
+    public const string Doing = "doing";
+    public const string Next = "next";
+}
+
+// DoneOptionId: the board's first complete column, for a Done button (null on a board without one).
+public sealed record KanbanMyDayCard(Guid BoardId, string BoardTitle, string? BoardIcon, KanbanCard Card, string Column, string ColumnColor,
+    string Bucket, string? DoneOptionId);
+public sealed record KanbanMyDayTicket(Guid Id, string Subject, string Status, string Priority, string ContactName, DateTimeOffset? ResolutionDueAt);
+public sealed record KanbanMyDayFollowUp(Guid ContactId, string Name, string? Company, DateTimeOffset FollowUp);
+public sealed record KanbanMyDay(DateOnly Today, IReadOnlyList<KanbanMyDayCard> Cards, IReadOnlyList<KanbanMyDayTicket> Tickets,
+    IReadOnlyList<KanbanMyDayFollowUp> FollowUps);
+
+// Business links (K8c): what a card can be linked to.
+public static class KanbanLinkKinds
+{
+    public const string Contact = "contact";
+    public const string Ticket = "ticket";
+    public const string Invoice = "invoice";
+    public static readonly IReadOnlyList<string> All = [Contact, Ticket, Invoice];
+}
+
+// A card's link, with what the record says now: Gone when it's been deleted. Status is the
+// ticket's or invoice's; ContactId the contact time on the card bills to (a ticket's contact).
+public sealed record KanbanCardLink(Guid Id, string Kind, Guid TargetId, string Title, string? Status, bool Gone, Guid? ContactId, string? Detail = null);
+
+// Something to link to, from a search.
+public sealed record KanbanLinkCandidate(string Kind, Guid Id, string Title, string? Detail);
 
 // A card finished in the window and how long it took: from first entering an in-progress column
 // (or its creation, if it skipped them) to last reaching a complete one.
@@ -231,6 +275,32 @@ public interface IKanbanBoardService
     // A card from a card template (K6), named after it, at the top of a column (null: the column
     // the template was saved from). Returns the new card's row id.
     Task<Guid> AddCardFromTemplateAsync(Guid databaseId, Guid templateId, string? optionId, string performedBy, CancellationToken cancellationToken = default);
+
+    // A one-line card (K8): its title and what its tokens set, saved together, at the top of a column.
+    Task<Guid> AddQuickCardAsync(Guid databaseId, string? optionId, KanbanQuickCard card, string performedBy, CancellationToken cancellationToken = default);
+
+    // When these cards are likely to be done (K8), from the last 90 days' throughput; null for a
+    // board that isn't there.
+    Task<KanbanForecast?> ForecastAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, CancellationToken cancellationToken = default);
+
+    // The facts for a standup and for what's stuck (K8b): card moves since `since`, and the cards
+    // that are blocked or past their usual time, plus columns over their WIP limit.
+    Task<KanbanBrief?> GetBriefAsync(Guid databaseId, DateTimeOffset since, CancellationToken cancellationToken = default);
+
+    // Business links (K8c).
+    Task<IReadOnlyList<KanbanCardLink>> ListLinksAsync(Guid databaseId, Guid rowId, CancellationToken cancellationToken = default);
+    // Linking a ticket links its contact too, so time on the card has someone to bill.
+    Task LinkAsync(Guid databaseId, Guid rowId, string kind, Guid targetId, string performedBy, CancellationToken cancellationToken = default);
+    Task UnlinkAsync(Guid databaseId, Guid linkId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<KanbanLinkCandidate>> SearchLinkTargetsAsync(string kind, string query, CancellationToken cancellationToken = default);
+    // A card made from a support ticket: its subject as the title, linked to it and its contact,
+    // at the top of the column (null: the first column). Returns the card's row id.
+    Task<Guid> AddCardFromTicketAsync(Guid databaseId, Guid ticketId, string? optionId, string performedBy, CancellationToken cancellationToken = default);
+    // My day (K8d): the person's cards on every board, open tickets assigned to them, follow-ups due.
+    Task<KanbanMyDay> GetMyDayAsync(string username, CancellationToken cancellationToken = default);
+
+    // The open (not resolved or closed) tickets a card is linked to.
+    Task<IReadOnlyList<KanbanCardLink>> OpenTicketsAsync(Guid databaseId, Guid rowId, CancellationToken cancellationToken = default);
 
     Task<KanbanSettings> GetSettingsAsync(Guid databaseId, CancellationToken cancellationToken = default);
     Task SaveSettingsAsync(Guid databaseId, KanbanSettings settings, string performedBy, CancellationToken cancellationToken = default);

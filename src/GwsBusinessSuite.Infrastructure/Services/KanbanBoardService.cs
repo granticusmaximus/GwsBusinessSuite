@@ -130,6 +130,11 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
         var titleProperty = properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.Title);
         var subItems = database.Rows.Where(row => row.ParentRowId is not null).GroupBy(row => row.ParentRowId!.Value).ToDictionary(group => group.Key, group => group.Count());
+        // K8c: what each card is linked to, for its icons.
+        var links = (await db.BoardCardLinks.AsNoTracking().Where(link => link.WikiDatabaseId == databaseId)
+                .Select(link => new { link.RowId, link.Kind }).ToListAsync(cancellationToken))
+            .GroupBy(link => link.RowId)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<string>)group.Select(link => link.Kind).ToList());
         var cards = database.Rows
             .Where(row => row.ParentRowId is null)
             .OrderBy(row => row.SortOrder)
@@ -139,7 +144,8 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
                 var entered = current is not null && entries.TryGetValue((row.Id, current), out var at)
                     ? DateTimeOffset.FromUnixTimeSeconds(at)
                     : row.CreatedAt;
-                return (Status: current, Card: ToCard(row, properties, titleProperty, fields, subItems) with { EnteredColumnAt = entered });
+                return (Status: current, Card: ToCard(row, properties, titleProperty, fields, subItems, settings.CardSize == KanbanCardSizes.Rich)
+                    with { EnteredColumnAt = entered, LinkKinds = links.GetValueOrDefault(row.Id) });
             })
             .ToList();
 
@@ -298,10 +304,13 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             throw new ArgumentException("A WIP limit is a number from 1 to 999.", nameof(settings));
         if (settings.AgingDays is < 1 or > 365)
             throw new ArgumentException("Card age is shown after 1 to 365 days.", nameof(settings));
+        if (settings.Background is { } background && !KanbanLook.IsPreset(background) && !KanbanLook.IsImage(background))
+            throw new ArgumentException("A board background is one of the presets, or an image at an https:// address or on this site.", nameof(settings));
         var clean = settings with
         {
             CardSize = KanbanCardSizes.All.Contains(settings.CardSize) ? settings.CardSize : KanbanCardSizes.Comfortable,
-            Accent = settings.Accent is null ? null : SafeColor(settings.Accent)
+            Accent = settings.Accent is null ? null : SafeColor(settings.Accent),
+            Background = settings.Background == KanbanLook.NoBackground ? null : settings.Background
         };
 
         var now = DateTimeOffset.UtcNow;
@@ -414,8 +423,33 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             .OrderByDescending(item => item.Days)
             .ToList();
 
-        return new KanbanInsights(days, from, log.Count == 0 ? null : Day(At(log[0].AtUnixSeconds)), cycles, Percentile(0.5), Percentile(0.85),
-            throughput, flowColumns, flow, aging, cards.Count(entry => entry.Column.Group == WikiDatabaseStatusGroups.InProgress));
+        // Forecasts (K8) sample the days the log covers, up to yesterday - today isn't over, and a
+        // day from before logging began would count as a day nothing was finished.
+        var historyStarts = log.Count == 0 ? (DateOnly?)null : Day(At(log[0].AtUnixSeconds));
+        var dailyDone = new List<int>();
+        if (historyStarts is { } logged)
+        {
+            var finishedOn = cycles.GroupBy(cycle => cycle.Finished).ToDictionary(group => group.Key, group => group.Count());
+            for (var day = logged > from ? logged : from; day < today; day = day.AddDays(1)) dailyDone.Add(finishedOn.GetValueOrDefault(day));
+        }
+        int Open(Func<KanbanCard, KanbanColumn, bool> include) =>
+            cards.Count(entry => entry.Column.Group != WikiDatabaseStatusGroups.Complete && include(entry.Card, entry.Column));
+        var forecasts = new List<KanbanNamedForecast>
+        {
+            new("open", "Everything open", KanbanForecasting.Forecast(dailyDone, Open((_, _) => true), today))
+        };
+        var sprintOptions = board.SprintOptions ?? [];
+        if ((board.Settings?.Sprints ?? []).FirstOrDefault(sprint => sprint.State == KanbanSprintStates.Active) is { } running
+            && sprintOptions.FirstOrDefault(option => option.Id == running.OptionId) is { } runningOption)
+        {
+            forecasts.Add(new KanbanNamedForecast("sprint", runningOption.Label, KanbanForecasting.Forecast(dailyDone, Open((card, _) => card.SprintOptionId == running.OptionId), today)));
+        }
+        forecasts.Add(new KanbanNamedForecast("doing", "What's in progress", KanbanForecasting.Forecast(dailyDone,
+            Open((_, column) => column.Group == WikiDatabaseStatusGroups.InProgress), today)));
+
+        return new KanbanInsights(days, from, historyStarts, cycles, Percentile(0.5), Percentile(0.85),
+            throughput, flowColumns, flow, aging, cards.Count(entry => entry.Column.Group == WikiDatabaseStatusGroups.InProgress),
+            dailyDone, forecasts);
     }
 
     // ---- Sprints (K4) ----
@@ -579,6 +613,292 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         return open.Count;
     }
 
+    public async Task<Guid> AddQuickCardAsync(Guid databaseId, string? optionId, KanbanQuickCard card, string performedBy, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(card.Title)) throw new ArgumentException("A card needs a title.", nameof(card));
+        var board = await GetBoardAsync(databaseId, cancellationToken) ?? throw new InvalidOperationException("That board no longer exists.");
+        var titleProperty = await TitlePropertyAsync(databaseId, cancellationToken);
+        var fields = board.Fields;
+        var values = new JsonObject();
+        WikiPropertyValues.SetText(values, titleProperty.Id, card.Title.Trim());
+        if (optionId is not null) WikiPropertyValues.SetText(values, fields.StatusPropertyId, optionId);
+        // Only what the board has: the parser checked, this checks again for a stale preview.
+        if (card.PriorityOptionId is { } priority && fields.PriorityPropertyId is { } priorityField && board.PriorityOptions.Any(option => option.Id == priority))
+            WikiPropertyValues.SetText(values, priorityField, priority);
+        var labels = card.LabelOptionIds.Where(id => board.LabelOptions.Any(option => option.Id == id)).Distinct().ToList();
+        if (labels.Count > 0 && fields.LabelsPropertyId is { } labelsField) WikiPropertyValues.SetMultiSelect(values, labelsField, labels);
+        if (card.People.Count > 0 && fields.AssigneePropertyId is { } assigneeField)
+            values[assigneeField.ToString()] = new JsonArray(card.People.Distinct(StringComparer.OrdinalIgnoreCase).Select(person => (JsonNode?)JsonValue.Create(person)).ToArray());
+        // A picked date is kept at midnight UTC, as Sentinel's date picker stores it.
+        if (card.Due is { } due && fields.DuePropertyId is { } dueField)
+            WikiPropertyValues.SetDate(values, dueField, new DateTimeOffset(due.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero));
+        if (card.Estimate is { } estimate && fields.EstimatePropertyId is { } estimateField) WikiPropertyValues.SetNumber(values, estimateField, estimate);
+
+        var row = await databases.SaveRowAsync(databaseId, new WikiDatabaseRowEditor
+        {
+            Values = values.ToDictionary(pair => pair.Key, pair => pair.Value?.DeepClone())
+        }, performedBy, cancellationToken);
+        await databases.MoveRowAsync(databaseId, row.Id, fields.StatusPropertyId, optionId, 0, performedBy, cancellationToken);
+        return row.Id;
+    }
+
+    public async Task<KanbanForecast?> ForecastAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, CancellationToken cancellationToken = default)
+    {
+        var insights = await GetInsightsAsync(databaseId, 90, cancellationToken);
+        var board = insights is null ? null : await GetBoardAsync(databaseId, cancellationToken);
+        if (insights is null || board is null) return null;
+        var wanted = rowIds.ToHashSet();
+        var remaining = board.Columns.Where(column => column.Group != WikiDatabaseStatusGroups.Complete)
+            .Sum(column => column.Cards.Count(card => wanted.Contains(card.RowId)));
+        return KanbanForecasting.Forecast(insights.DailyDone ?? [], remaining, DateOnly.FromDateTime(DateTime.Now));
+    }
+
+    public async Task<KanbanBrief?> GetBriefAsync(Guid databaseId, DateTimeOffset since, CancellationToken cancellationToken = default)
+    {
+        var board = await GetBoardAsync(databaseId, cancellationToken);
+        if (board is null) return null;
+        var labels = board.Columns.Where(column => column.OptionId is not null).ToDictionary(column => column.OptionId!, column => column.Label);
+        var cards = board.Columns.SelectMany(column => column.Cards.Select(card => (Card: card, Column: column))).ToDictionary(entry => entry.Card.RowId);
+        var sinceSeconds = since.ToUnixTimeSeconds();
+        var log = (await db.WikiDatabaseRowStatusChanges.AsNoTracking()
+                .Where(change => change.WikiDatabaseId == databaseId && change.PropertyId == board.Fields.StatusPropertyId && change.AtUnixSeconds >= sinceSeconds)
+                .Select(change => new { change.RowId, change.FromOptionId, change.ToOptionId, change.AtUnixSeconds, change.CreatedBy })
+                .ToListAsync(cancellationToken))
+            .OrderBy(change => change.AtUnixSeconds)
+            .ToList();
+        // Cards only: a sub-item ticked off isn't news for the standup.
+        var moves = log
+            .Where(change => change.ToOptionId is not null && labels.ContainsKey(change.ToOptionId) && cards.ContainsKey(change.RowId))
+            .Select(change =>
+            {
+                var card = cards[change.RowId].Card;
+                return new KanbanBriefMove(change.RowId, card.Key, card.Title,
+                    change.FromOptionId is { } from && labels.TryGetValue(from, out var fromLabel) ? fromLabel : null,
+                    labels[change.ToOptionId!], string.IsNullOrWhiteSpace(change.CreatedBy) ? "someone" : change.CreatedBy,
+                    DateTimeOffset.FromUnixTimeSeconds(change.AtUnixSeconds));
+            })
+            .ToList();
+
+        // Stuck: blocked anywhere open, or in progress past the board's 85% cycle time (its aging
+        // threshold before there's history to say).
+        var typical = (await GetInsightsAsync(databaseId, 90, cancellationToken))?.P85CycleDays;
+        var threshold = typical ?? (board.Settings ?? KanbanSettings.Default).AgingDays;
+        var now = DateTimeOffset.UtcNow;
+        var stuck = cards.Values
+            .Where(entry => entry.Column.Group != WikiDatabaseStatusGroups.Complete)
+            .Select(entry => (entry.Card, entry.Column, Days: entry.Card.EnteredColumnAt is { } entered ? Math.Max(0, (now - entered).TotalDays) : 0))
+            .Where(entry => entry.Card.Blocked || (entry.Column.Group == WikiDatabaseStatusGroups.InProgress && entry.Days >= threshold))
+            .OrderByDescending(entry => entry.Card.Blocked).ThenByDescending(entry => entry.Days)
+            .Take(10)
+            .Select(entry => new KanbanBriefCard(entry.Card.RowId, entry.Card.Key, entry.Card.Title, entry.Column.Label, entry.Days,
+                entry.Card.Blocked, entry.Card.BlockedReason, entry.Card.Assignees, typical is { } p85 && entry.Days > p85))
+            .ToList();
+        var overLimit = board.Columns.Where(column => column.WipLimit is { } limit && column.Cards.Count > limit).Select(column => column.Label).ToList();
+        return new KanbanBrief(since, moves, stuck, overLimit, typical);
+    }
+
+    // ---- My day (K8d) ----
+
+    public async Task<KanbanMyDay> GetMyDayAsync(string username, CancellationToken cancellationToken = default)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var cards = new List<KanbanMyDayCard>();
+        foreach (var summary in await ListBoardsAsync(cancellationToken))
+        {
+            if (await GetBoardAsync(summary.DatabaseId, cancellationToken) is not { } board) continue;
+            var done = board.Columns.FirstOrDefault(column => column.Group == WikiDatabaseStatusGroups.Complete && column.OptionId is not null)?.OptionId;
+            foreach (var column in board.Columns.Where(column => column.Group != WikiDatabaseStatusGroups.Complete))
+            {
+                foreach (var card in column.Cards.Where(card => card.Assignees.Contains(username, StringComparer.OrdinalIgnoreCase)))
+                {
+                    // A picked date is stored at midnight UTC: its UTC date is the day as written.
+                    var due = card.Due is { } at ? DateOnly.FromDateTime(at.UtcDateTime) : (DateOnly?)null;
+                    var bucket = due < today ? KanbanMyDayBuckets.Overdue
+                        : due == today ? KanbanMyDayBuckets.Today
+                        : column.Group == WikiDatabaseStatusGroups.InProgress ? KanbanMyDayBuckets.Doing
+                        : KanbanMyDayBuckets.Next;
+                    cards.Add(new KanbanMyDayCard(board.DatabaseId, board.Title, board.Icon, card, column.Label, column.Color, bucket, done));
+                }
+            }
+        }
+        int PriorityRank(KanbanCard card) => card.Priority?.Label.ToLowerInvariant() switch { "urgent" => 0, "high" => 1, "medium" => 2, "low" => 3, _ => 4 };
+        var ordered = cards
+            .OrderBy(item => item.Bucket switch { KanbanMyDayBuckets.Overdue => 0, KanbanMyDayBuckets.Today => 1, KanbanMyDayBuckets.Doing => 2, _ => 3 })
+            .ThenBy(item => item.Card.Due ?? DateTimeOffset.MaxValue)
+            .ThenBy(item => PriorityRank(item.Card))
+            .ThenBy(item => item.Card.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // Tickets and follow-ups are filtered here: SQLite can't compare a DateTimeOffset, and the
+        // username is matched without regard to case.
+        var tickets = (await db.SupportTickets.AsNoTracking()
+                .Where(ticket => ticket.AssignedToUsername != null && (ticket.Status == SupportTicketStatuses.Open || ticket.Status == SupportTicketStatuses.Pending))
+                .Select(ticket => new { ticket.Id, ticket.Subject, ticket.Status, ticket.Priority, ticket.ContactId, ticket.AssignedToUsername, ticket.ResolutionDueAt })
+                .ToListAsync(cancellationToken))
+            .Where(ticket => string.Equals(ticket.AssignedToUsername, username, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var names = await ContactNamesAsync(tickets.Select(ticket => ticket.ContactId), cancellationToken);
+        var endOfToday = new DateTimeOffset(today.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeZoneInfo.Local.GetUtcOffset(DateTime.Now));
+        var followUps = (await db.Contacts.AsNoTracking()
+                .Where(contact => contact.TrashedAt == null && contact.FollowUpDate != null)
+                .Select(contact => new { contact.Id, contact.FullName, contact.Company, contact.FollowUpDate })
+                .ToListAsync(cancellationToken))
+            .Where(contact => contact.FollowUpDate < endOfToday)
+            .OrderBy(contact => contact.FollowUpDate)
+            .Take(20)
+            .Select(contact => new KanbanMyDayFollowUp(contact.Id, contact.FullName, contact.Company, contact.FollowUpDate!.Value))
+            .ToList();
+        return new KanbanMyDay(today, ordered,
+            tickets.OrderBy(ticket => ticket.ResolutionDueAt ?? DateTimeOffset.MaxValue)
+                .Select(ticket => new KanbanMyDayTicket(ticket.Id, ticket.Subject, ticket.Status, ticket.Priority, names.GetValueOrDefault(ticket.ContactId, "no contact"), ticket.ResolutionDueAt))
+                .ToList(),
+            followUps);
+    }
+
+    // ---- Business links (K8c) ----
+
+    public async Task<IReadOnlyList<KanbanCardLink>> ListLinksAsync(Guid databaseId, Guid rowId, CancellationToken cancellationToken = default)
+    {
+        var links = await db.BoardCardLinks.AsNoTracking()
+            .Where(link => link.WikiDatabaseId == databaseId && link.RowId == rowId)
+            .ToListAsync(cancellationToken);
+        return await DescribeLinksAsync(links, cancellationToken);
+    }
+
+    public async Task LinkAsync(Guid databaseId, Guid rowId, string kind, Guid targetId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        if (!KanbanLinkKinds.All.Contains(kind)) throw new ArgumentException($"A card can't be linked to a {kind}.", nameof(kind));
+        if (!await db.WikiDatabaseRows.AnyAsync(row => row.Id == rowId && row.WikiDatabaseId == databaseId && row.TrashedAt == null, cancellationToken))
+            throw new InvalidOperationException("That card no longer exists.");
+        Guid? alsoContact = null;
+        switch (kind)
+        {
+            case KanbanLinkKinds.Contact:
+                if (!await db.Contacts.AnyAsync(contact => contact.Id == targetId && contact.TrashedAt == null, cancellationToken))
+                    throw new InvalidOperationException("That contact no longer exists.");
+                break;
+            case KanbanLinkKinds.Ticket:
+                alsoContact = (await db.SupportTickets.AsNoTracking().Where(ticket => ticket.Id == targetId).Select(ticket => (Guid?)ticket.ContactId).FirstOrDefaultAsync(cancellationToken))
+                    ?? throw new InvalidOperationException("That ticket no longer exists.");
+                break;
+            case KanbanLinkKinds.Invoice:
+                alsoContact = (await db.Invoices.AsNoTracking().Where(invoice => invoice.Id == targetId).Select(invoice => (Guid?)invoice.ContactId).FirstOrDefaultAsync(cancellationToken))
+                    ?? throw new InvalidOperationException("That invoice no longer exists.");
+                break;
+        }
+        var now = DateTimeOffset.UtcNow;
+        async Task AddAsync(string linkKind, Guid id)
+        {
+            if (await db.BoardCardLinks.AnyAsync(link => link.RowId == rowId && link.Kind == linkKind && link.TargetId == id, cancellationToken)) return;
+            db.BoardCardLinks.Add(new BoardCardLink { WikiDatabaseId = databaseId, RowId = rowId, Kind = linkKind, TargetId = id, CreatedAt = now, CreatedBy = performedBy });
+        }
+        await AddAsync(kind, targetId);
+        if (alsoContact is { } contactId && contactId != Guid.Empty) await AddAsync(KanbanLinkKinds.Contact, contactId);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task UnlinkAsync(Guid databaseId, Guid linkId, CancellationToken cancellationToken = default)
+    {
+        var link = await db.BoardCardLinks.FirstOrDefaultAsync(item => item.Id == linkId && item.WikiDatabaseId == databaseId, cancellationToken);
+        if (link is null) return;
+        db.BoardCardLinks.Remove(link);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<KanbanLinkCandidate>> SearchLinkTargetsAsync(string kind, string query, CancellationToken cancellationToken = default)
+    {
+        var text = (query ?? string.Empty).Trim();
+        if (text.Length < 2) return [];
+        var pattern = $"%{text.Replace("%", "").Replace("_", "")}%";
+        return kind switch
+        {
+            KanbanLinkKinds.Contact => (await db.Contacts.AsNoTracking()
+                    .Where(contact => contact.TrashedAt == null && (EF.Functions.Like(contact.FullName, pattern) || EF.Functions.Like(contact.Email, pattern) || (contact.Company != null && EF.Functions.Like(contact.Company, pattern))))
+                    .OrderBy(contact => contact.FullName).Take(8)
+                    .Select(contact => new { contact.Id, contact.FullName, contact.Company, contact.Email })
+                    .ToListAsync(cancellationToken))
+                .Select(contact => new KanbanLinkCandidate(kind, contact.Id, contact.FullName, string.IsNullOrWhiteSpace(contact.Company) ? contact.Email : contact.Company))
+                .ToList(),
+            KanbanLinkKinds.Ticket => await NamedAsync((await db.SupportTickets.AsNoTracking()
+                    .Where(ticket => EF.Functions.Like(ticket.Subject, pattern))
+                    .Select(ticket => new { ticket.Id, ticket.Subject, ticket.Status, ticket.ContactId, ticket.CreatedAt })
+                    .Take(50).ToListAsync(cancellationToken))
+                // Newest first, sorted here: SQLite can't order by a DateTimeOffset.
+                .OrderByDescending(ticket => ticket.CreatedAt).Take(8)
+                .Select(ticket => (ticket.Id, ticket.Subject, ticket.Status, ticket.ContactId)).ToList()),
+            KanbanLinkKinds.Invoice => await NamedAsync((await db.Invoices.AsNoTracking()
+                    .Where(invoice => EF.Functions.Like(invoice.Title, pattern))
+                    .Select(invoice => new { invoice.Id, invoice.Title, invoice.Status, invoice.ContactId, invoice.CreatedAt })
+                    .Take(50).ToListAsync(cancellationToken))
+                .OrderByDescending(invoice => invoice.CreatedAt).Take(8)
+                .Select(invoice => (invoice.Id, invoice.Title, invoice.Status, invoice.ContactId)).ToList()),
+            _ => []
+        };
+
+        // "Open · Ada Lovelace": each record's status and its contact's name.
+        async Task<IReadOnlyList<KanbanLinkCandidate>> NamedAsync(IReadOnlyList<(Guid Id, string Title, string Status, Guid ContactId)> found)
+        {
+            var names = await ContactNamesAsync(found.Select(item => item.ContactId), cancellationToken);
+            return found.Select(item => new KanbanLinkCandidate(kind, item.Id, item.Title, $"{item.Status} · {names.GetValueOrDefault(item.ContactId, "no contact")}")).ToList();
+        }
+    }
+
+    private async Task<Dictionary<Guid, string>> ContactNamesAsync(IEnumerable<Guid> ids, CancellationToken cancellationToken)
+    {
+        var wanted = ids.Distinct().ToList();
+        return await db.Contacts.AsNoTracking().Where(contact => wanted.Contains(contact.Id))
+            .ToDictionaryAsync(contact => contact.Id, contact => contact.FullName, cancellationToken);
+    }
+
+    public async Task<Guid> AddCardFromTicketAsync(Guid databaseId, Guid ticketId, string? optionId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var subject = await db.SupportTickets.AsNoTracking().Where(ticket => ticket.Id == ticketId).Select(ticket => ticket.Subject).FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("That ticket no longer exists.");
+        var status = await StatusPropertyAsync(databaseId, cancellationToken);
+        var column = optionId ?? ColumnOrder(status).FirstOrDefault()?.Id;
+        var rowId = await AddCardAsync(databaseId, column, string.IsNullOrWhiteSpace(subject) ? "Support ticket" : subject.Trim(), performedBy, cancellationToken);
+        await LinkAsync(databaseId, rowId, KanbanLinkKinds.Ticket, ticketId, performedBy, cancellationToken);
+        return rowId;
+    }
+
+    public async Task<IReadOnlyList<KanbanCardLink>> OpenTicketsAsync(Guid databaseId, Guid rowId, CancellationToken cancellationToken = default) =>
+        (await ListLinksAsync(databaseId, rowId, cancellationToken))
+            .Where(link => link.Kind == KanbanLinkKinds.Ticket && !link.Gone
+                && link.Status is not (SupportTicketStatuses.Resolved or SupportTicketStatuses.Closed))
+            .ToList();
+
+    // Each link with what its record says now; contacts first, then tickets, then invoices.
+    private async Task<IReadOnlyList<KanbanCardLink>> DescribeLinksAsync(IReadOnlyList<BoardCardLink> links, CancellationToken cancellationToken)
+    {
+        if (links.Count == 0) return [];
+        List<Guid> Ids(string kind) => links.Where(link => link.Kind == kind).Select(link => link.TargetId).ToList();
+        var contactIds = Ids(KanbanLinkKinds.Contact);
+        var ticketIds = Ids(KanbanLinkKinds.Ticket);
+        var invoiceIds = Ids(KanbanLinkKinds.Invoice);
+        var contacts = await db.Contacts.AsNoTracking().Where(contact => contactIds.Contains(contact.Id) && contact.TrashedAt == null)
+            .ToDictionaryAsync(contact => contact.Id, contact => new { contact.FullName, contact.Company }, cancellationToken);
+        var tickets = await db.SupportTickets.AsNoTracking().Where(ticket => ticketIds.Contains(ticket.Id))
+            .ToDictionaryAsync(ticket => ticket.Id, ticket => new { ticket.Subject, ticket.Status, ticket.ContactId }, cancellationToken);
+        var invoices = await db.Invoices.AsNoTracking().Where(invoice => invoiceIds.Contains(invoice.Id))
+            .ToDictionaryAsync(invoice => invoice.Id, invoice => new { invoice.Title, invoice.Status, invoice.ContactId }, cancellationToken);
+        var names = await ContactNamesAsync(tickets.Values.Select(ticket => ticket.ContactId).Concat(invoices.Values.Select(invoice => invoice.ContactId)), cancellationToken);
+        return links
+            .Select(link => link.Kind switch
+            {
+                KanbanLinkKinds.Contact => contacts.TryGetValue(link.TargetId, out var contact)
+                    ? new KanbanCardLink(link.Id, link.Kind, link.TargetId, contact.FullName, null, false, link.TargetId, contact.Company)
+                    : new KanbanCardLink(link.Id, link.Kind, link.TargetId, "Deleted contact", null, true, null),
+                KanbanLinkKinds.Ticket => tickets.TryGetValue(link.TargetId, out var ticket)
+                    ? new KanbanCardLink(link.Id, link.Kind, link.TargetId, ticket.Subject, ticket.Status, false, ticket.ContactId, names.GetValueOrDefault(ticket.ContactId))
+                    : new KanbanCardLink(link.Id, link.Kind, link.TargetId, "Deleted ticket", null, true, null),
+                _ => invoices.TryGetValue(link.TargetId, out var invoice)
+                    ? new KanbanCardLink(link.Id, link.Kind, link.TargetId, invoice.Title, invoice.Status, false, invoice.ContactId, names.GetValueOrDefault(invoice.ContactId))
+                    : new KanbanCardLink(link.Id, link.Kind, link.TargetId, "Deleted invoice", null, true, null)
+            })
+            .OrderBy(link => KanbanLinkKinds.All.ToList().IndexOf(link.Kind)).ThenBy(link => link.Title, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
     public async Task<Guid> AddCardFromTemplateAsync(Guid databaseId, Guid templateId, string? optionId, string performedBy, CancellationToken cancellationToken = default)
     {
         var name = await db.WikiDatabaseRowTemplates.AsNoTracking()
@@ -669,7 +989,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         properties.FirstOrDefault(property => property.Type == type && names.Contains(property.Name.Trim(), StringComparer.OrdinalIgnoreCase));
 
     private static KanbanCard ToCard(WikiDatabaseRow row, IReadOnlyList<WikiDatabaseProperty> properties, WikiDatabaseProperty? titleProperty,
-        KanbanFields fields, IReadOnlyDictionary<Guid, int> subItems)
+        KanbanFields fields, IReadOnlyDictionary<Guid, int> subItems, bool withSnippet = false)
     {
         var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
         WikiDatabaseProperty? Property(Guid? id) => id is { } value ? properties.FirstOrDefault(property => property.Id == value) : null;
@@ -704,13 +1024,17 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
                 ? new KanbanLabel(sprintOption.Label, SafeColor(sprintOption.Color)) : null;
         }
 
-        var checklist = WikiBlockJson.ParseBlocks(row.BlocksJson).Where(block => block.Type == WikiBlockTypes.ToDo && block.PlainText.Trim().Length > 0).ToList();
+        var blocks = WikiBlockJson.ParseBlocks(row.BlocksJson);
+        var checklist = blocks.Where(block => block.Type == WikiBlockTypes.ToDo && block.PlainText.Trim().Length > 0).ToList();
+        // K7: no cover of its own, so the first picture in the card's page.
+        var cover = !string.IsNullOrWhiteSpace(row.CoverImageUrl) ? row.CoverImageUrl
+            : blocks.Where(block => block.Type == WikiBlockTypes.Image).Select(block => block.Props.GetValueOrDefault("url")).FirstOrDefault(IsPictureUrl);
         return new KanbanCard(
             row.Id,
             key,
             titleProperty is null ? "Untitled" : (WikiPropertyValues.GetText(values, titleProperty.Id) is { Length: > 0 } title ? title : "Untitled"),
             row.Icon,
-            row.CoverImageUrl,
+            cover,
             labels,
             priority,
             fields.DuePropertyId is { } due ? WikiPropertyValues.GetDate(values, due) : null,
@@ -725,7 +1049,25 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             sprint,
             sprintId,
             fields.BlockedPropertyId is { } blockedId && WikiPropertyValues.GetCheckbox(values, blockedId),
-            fields.BlockedReasonPropertyId is { } reasonId ? WikiPropertyValues.GetText(values, reasonId) : null);
+            fields.BlockedReasonPropertyId is { } reasonId ? WikiPropertyValues.GetText(values, reasonId) : null,
+            Snippet: withSnippet ? SnippetOf(blocks) : null);
+    }
+
+    private static bool IsPictureUrl(string? url) =>
+        url is { Length: > 0 }
+        && ((url.StartsWith('/') && !url.StartsWith("//", StringComparison.Ordinal))
+            || (Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme is "https" or "http"));
+
+    // The first words of the card's page (its first text block), up to 160 characters.
+    private static string? SnippetOf(IReadOnlyList<WikiBlock> blocks)
+    {
+        var text = blocks
+            .Where(block => block.Type is WikiBlockTypes.Paragraph or WikiBlockTypes.Quote or WikiBlockTypes.Callout
+                or WikiBlockTypes.BulletedListItem or WikiBlockTypes.NumberedListItem)
+            .Select(block => block.PlainText.Trim())
+            .FirstOrDefault(plain => plain.Length > 0);
+        if (text is null) return null;
+        return text.Length <= 160 ? text : text[..157].TrimEnd() + "…";
     }
 
     // Option colours are typed by people in Sentinel and end up in style attributes, so only a hex

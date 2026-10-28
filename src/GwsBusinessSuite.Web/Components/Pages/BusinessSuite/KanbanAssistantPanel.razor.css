@@ -1,0 +1,41 @@
+/* SentinelGPT on a board (Boards K8b). The dialog's frame (.kb-modal) is in app.css. */
+.kb-ask { width: min(56rem, calc(100vw - 2rem)); }
+.kb-ask-tabs { display: flex; gap: var(--gws-step-1); border-bottom: 1px solid var(--gws-panel-border); }
+
+.kb-ask-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: -1px;
+    padding: 6px 12px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    font-size: .875rem;
+    font-weight: 600;
+    color: var(--gws-text-soft);
+    background: transparent;
+}
+
+.kb-ask-tab.is-on { color: var(--gws-text-strong); border-bottom-color: var(--gws-sidebar-accent); }
+.kb-ask-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--gws-step-4); }
+.kb-ask-body h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 var(--gws-step-2); font-size: .8125rem; font-weight: 700; color: var(--gws-text-soft); text-transform: none; }
+.kb-ask-facts ul { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-inline-start: 1.1rem; font-size: .8125rem; }
+
+.kb-ask-writeup {
+    display: flex;
+    flex-direction: column;
+    gap: var(--gws-step-2);
+    padding: var(--gws-step-3);
+    border: 1px solid color-mix(in srgb, var(--gws-sidebar-accent) 35%, var(--gws-panel-border));
+    border-radius: var(--gws-radius-md, 10px);
+    background: color-mix(in srgb, var(--gws-sidebar-accent) 5%, var(--gws-panel-bg));
+}
+
+.kb-ask-text { white-space: pre-wrap; font-size: .875rem; line-height: 1.55; }
+.kb-ask-note { margin: 0; font-size: .8125rem; color: var(--gws-text-soft); }
+.kb-ask-actions { display: flex; flex-wrap: wrap; gap: var(--gws-step-2); }
+.kb-ask-privacy { display: flex; align-items: center; gap: 6px; margin: 0; font-size: .75rem; color: var(--gws-text-soft); }
+
+@container gws-main (max-width: 767.98px) {
+    .kb-ask-body { grid-template-columns: minmax(0, 1fr); }
+}

@@ -11,6 +11,7 @@
 
 <PageHeader Title="Boards" Icon="bi-kanban-fill" Description="Kanban and sprint boards for your work. Every board is a Sentinel database and every card a Sentinel page, so nothing lives in two places.">
     <Actions>
+        <a class="btn btn-outline-secondary" href="admin/my-day"><i class="bi bi-sun me-1" aria-hidden="true"></i>My day</a>
         <button type="button" class="btn btn-primary" @onclick="() => _creating = !_creating" aria-expanded="@(_creating ? "true" : "false")">
             <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New board
         </button>

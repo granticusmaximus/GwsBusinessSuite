@@ -800,6 +800,7 @@ app.MapHealthChecks("/health/ready", new()
 
 app.MapDeveloperApiEndpoints();
 app.MapDeveloperApiSentinelEndpoints();
+app.MapDeveloperApiBoardEndpoints();
 
 // Stripe billing webhooks - anonymous but signature-verified. Stripe.Event/Stripe.EventUtility/Stripe.Invoice are referenced fully-qualified here
 // rather than via a top-level "using Stripe;" because GwsBusinessSuite.Domain.Entities already

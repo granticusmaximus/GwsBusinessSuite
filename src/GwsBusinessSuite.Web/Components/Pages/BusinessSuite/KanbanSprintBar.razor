@@ -25,6 +25,15 @@
             <span class="kb-sprint-bar"><span style="width: @Percent(sprint.DonePoints, sprint.Points)%"></span></span>
             @Points(sprint.DonePoints) / @Points(sprint.Points) @Unit(sprint, sprint.Points)
         </span>
+        @* K8: when the sprint's open cards are likely done, at the board's own pace. *@
+        @if (_forecast is { CanForecast: true, Remaining: > 0 } forecast)
+        {
+            var late = sprint.End is { } sprintEnd && forecast.P85 > sprintEnd;
+            <span class="kb-sprint-forecast @(late ? "is-late" : "")"
+                  title="@($"From how many cards the board has finished each day lately: 50% likely by {Weekday(forecast.P50!.Value)}, 95% by {Weekday(forecast.P95!.Value)}.")">
+                <i class="bi bi-hourglass-split" aria-hidden="true"></i>85% likely done @Weekday(forecast.P85!.Value)@(late ? ", after the sprint ends" : "")
+            </span>
+        }
         @if (sprint.Burndown.Count > 1 && sprint.Start is not null && sprint.End is not null)
         {
             @Sparkline(sprint)
@@ -203,6 +212,27 @@
     private IEnumerable<KanbanSprintView> Open => Sprints.Where(sprint => sprint.State != KanbanSprintStates.Done);
     private KanbanSprintView? Planned => Open.FirstOrDefault(sprint => sprint.OptionId == _planId) ?? Open.FirstOrDefault();
     private IReadOnlyList<PlanItem> Cards => Board.Columns.SelectMany(column => column.Cards.Select(card => new PlanItem(card, column.Group == WikiDatabaseStatusGroups.Complete))).ToList();
+
+    private string? _forecastFor;
+    private KanbanForecast? _forecast;
+
+    // Worked out again only when the running sprint or its open cards change.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Active is not { } sprint)
+        {
+            (_forecastFor, _forecast) = (null, null);
+            return;
+        }
+        var open = Board.Columns.Where(column => column.Group != WikiDatabaseStatusGroups.Complete)
+            .SelectMany(column => column.Cards).Where(card => card.SprintOptionId == sprint.OptionId).Select(card => card.RowId).ToList();
+        var key = sprint.OptionId + ":" + string.Join(',', open);
+        if (key == _forecastFor) return;
+        _forecastFor = key;
+        _forecast = await BoardService.ForecastAsync(Board.DatabaseId, open);
+    }
+
+    private static string Weekday(DateOnly day) => $"{CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedDayName(day.DayOfWeek)} {day.ToGwsDate()}";
 
     protected override void OnParametersSet()
     {

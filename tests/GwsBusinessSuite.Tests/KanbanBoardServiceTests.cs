@@ -507,4 +507,234 @@ public sealed class KanbanBoardServiceTests : IAsyncLifetime
         var missing = () => _boards.AddCardFromTemplateAsync(boardId, Guid.NewGuid(), null, "grant");
         await missing.Should().ThrowAsync<InvalidOperationException>();
     }
+
+    [Fact]
+    public async Task Cards_ShouldTakeACoverFromTheirPage_AndRichCardsItsFirstLines()
+    {
+        // K7: a card with no cover of its own shows the first picture in its page; rich cards add
+        // the page's first text. Backgrounds are a preset or a safe image.
+        var boardId = await _boards.CreateBoardAsync("Look", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(boardId))!;
+        var cardId = await _boards.AddCardAsync(boardId, OptionId(board, "To do"), "Hero shot", "grant");
+        var blocks = WikiBlockJson.Serialize(
+        [
+            new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Image, 0, [], new Dictionary<string, string> { ["url"] = "javascript:alert(1)" }),
+            new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Paragraph, 0, [new WikiRichTextSpan("Shoot the new hero image in the studio, then pick three.")], new Dictionary<string, string>()),
+            new WikiBlock(Guid.NewGuid(), WikiBlockTypes.Image, 0, [], new Dictionary<string, string> { ["url"] = "/media/hero.jpg" })
+        ]);
+        var tracked = await _db.WikiDatabaseRows.SingleAsync(item => item.Id == cardId);
+        tracked.BlocksJson = blocks;
+        await _db.SaveChangesAsync();
+
+        Card(await _boards.GetBoardAsync(boardId), cardId).CoverImageUrl.Should().Be("/media/hero.jpg");
+        Card(await _boards.GetBoardAsync(boardId), cardId).Snippet.Should().BeNull("only rich cards carry their first lines");
+
+        await _boards.SaveSettingsAsync(boardId, KanbanSettings.Default with { CardSize = KanbanCardSizes.Rich, Background = "aurora", Accent = "#ec4899" }, "grant");
+        var rich = (await _boards.GetBoardAsync(boardId))!;
+        Card(rich, cardId).Snippet.Should().Be("Shoot the new hero image in the studio, then pick three.");
+        var look = rich.Settings ?? throw new InvalidOperationException("The board has no settings.");
+        look.Background.Should().Be("aurora");
+        look.Accent.Should().Be("#ec4899");
+
+        await _boards.SaveSettingsAsync(boardId, look with { Background = "/media/wall.jpg" }, "grant");
+        (await _boards.GetSettingsAsync(boardId)).Background.Should().Be("/media/wall.jpg");
+        await _boards.SaveSettingsAsync(boardId, look with { Background = KanbanLook.NoBackground }, "grant");
+        (await _boards.GetSettingsAsync(boardId)).Background.Should().BeNull();
+        var unsafeImage = () => _boards.SaveSettingsAsync(boardId, look with { Background = "https://x.example/a.jpg);color:red" }, "grant");
+        await unsafeImage.Should().ThrowAsync<ArgumentException>();
+        var unknown = () => _boards.SaveSettingsAsync(boardId, look with { Background = "lava" }, "grant");
+        await unknown.Should().ThrowAsync<ArgumentException>();
+
+        static KanbanCard Card(KanbanBoard? board, Guid id) => board!.Columns.SelectMany(column => column.Cards).Single(card => card.RowId == id);
+    }
+
+    [Fact]
+    public async Task QuickCards_ShouldSaveEveryField_AndForecastsUseRealFinishes()
+    {
+        // K8: a one-line card's fields go in with the card; forecasts come from logged finishes.
+        var boardId = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(boardId))!;
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var quick = KanbanQuickParse.Parse("Fix login !urgent #bug @grant @sam tomorrow ~2", board, today, "grant");
+        var id = await _boards.AddQuickCardAsync(boardId, OptionId(board, "To do"), quick, "grant");
+
+        board = (await _boards.GetBoardAsync(boardId))!;
+        var card = board.Columns.Single(column => column.Label == "To do").Cards[0];
+        card.RowId.Should().Be(id);
+        card.Title.Should().Be("Fix login");
+        card.Priority!.Label.Should().Be("Urgent");
+        card.Labels.Select(label => label.Label).Should().Equal("Bug");
+        card.Assignees.Should().Equal("grant", "sam");
+        DateOnly.FromDateTime(card.Due!.Value.UtcDateTime).Should().Be(today.AddDays(1));
+        card.Estimate.Should().Be(2m);
+        var untitled = () => _boards.AddQuickCardAsync(boardId, null, quick with { Title = " " }, "grant");
+        await untitled.Should().ThrowAsync<ArgumentException>();
+
+        // Two cards finished on each of the last five days (their moves into Done backdated).
+        var done = OptionId(board, "Done");
+        var finished = new List<Guid>();
+        for (var i = 0; i < 10; i++)
+        {
+            var row = await _boards.AddCardAsync(boardId, OptionId(board, "To do"), $"Old {i}", "grant");
+            await _boards.MoveCardAsync(boardId, row, done, null, "grant");
+            finished.Add(row);
+        }
+        var noon = new DateTimeOffset(today.ToDateTime(new TimeOnly(12, 0)), TimeZoneInfo.Local.GetUtcOffset(DateTime.Now));
+        foreach (var (row, index) in finished.Select((row, index) => (row, index)))
+        {
+            var at = noon.AddDays(-(index / 2 + 1)).ToUnixTimeSeconds();
+            foreach (var change in await _db.WikiDatabaseRowStatusChanges.Where(change => change.RowId == row).ToListAsync()) change.AtUnixSeconds = at;
+        }
+        foreach (var change in await _db.WikiDatabaseRowStatusChanges.Where(change => !finished.Contains(change.RowId)).ToListAsync())
+            change.AtUnixSeconds = noon.AddDays(-6).ToUnixTimeSeconds();
+        await _db.SaveChangesAsync();
+
+        var insights = (await _boards.GetInsightsAsync(boardId, 30))!;
+        insights.DailyDone.Should().Equal(0, 2, 2, 2, 2, 2);
+        insights.Forecasts!.Select(forecast => forecast.Key).Should().Equal("open", "doing");
+        var open = insights.Forecasts![0].Forecast;
+        open.Remaining.Should().Be(1);
+        open.CanForecast.Should().BeTrue();
+        open.P95.Should().BeOnOrBefore(today.AddDays(3));
+
+        var selected = await _boards.ForecastAsync(boardId, [id, finished[0]]);
+        selected!.Remaining.Should().Be(1, "a finished card isn't left to do");
+        (await _boards.ForecastAsync(Guid.NewGuid(), [id])).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Brief_ShouldGatherTodaysMoves_AndWhatsStuck()
+    {
+        // K8b: the facts a standup and "what's stuck" are written from.
+        var boardId = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(boardId))!;
+        var shipped = await _boards.AddCardAsync(boardId, OptionId(board, "Review"), "Press kit", "grant");
+        var started = await _boards.AddCardAsync(boardId, OptionId(board, "To do"), "Hero section", "sam");
+        var old = await _boards.AddCardAsync(boardId, OptionId(board, "Doing"), "Checkout", "grant");
+        var blocked = await _boards.AddCardAsync(boardId, OptionId(board, "To do"), "Legal review", "grant");
+        var sub = await _boards.AddSubItemAsync(boardId, started, "A step", "grant");
+        // Everything so far happened a fortnight ago.
+        foreach (var change in await _db.WikiDatabaseRowStatusChanges.ToListAsync()) change.AtUnixSeconds = DateTimeOffset.UtcNow.AddDays(-14).ToUnixTimeSeconds();
+        await _db.SaveChangesAsync();
+
+        var since = DateTimeOffset.UtcNow.AddHours(-1);
+        await _boards.MoveCardAsync(boardId, shipped, OptionId(board, "Done"), null, "grant");
+        await _boards.MoveCardAsync(boardId, started, OptionId(board, "Doing"), null, "sam");
+        await _boards.SetSubItemDoneAsync(boardId, sub, true, "sam");
+        await _boards.SetBlockedAsync(boardId, blocked, true, "waiting on legal", "grant");
+        await _boards.SaveSettingsAsync(boardId, (await _boards.GetSettingsAsync(boardId)) with { WipLimits = new Dictionary<string, int> { [OptionId(board, "Doing")] = 1 } }, "grant");
+
+        var brief = (await _boards.GetBriefAsync(boardId, since))!;
+        brief.Moves.Select(move => (move.Title, move.From, move.To, move.By)).Should().Equal(
+            ("Press kit", "Review", "Done", "grant"), ("Hero section", "To do", "Doing", "sam"));
+        brief.Stuck.Select(card => card.Title).Should().Equal("Legal review", "Checkout");
+        brief.Stuck[0].BlockedReason.Should().Be("waiting on legal");
+        brief.Stuck[1].DaysInColumn.Should().BeGreaterThan(13);
+        brief.OverLimit.Should().Equal("Doing");
+        (await _boards.GetBriefAsync(Guid.NewGuid(), since)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task BusinessLinks_ShouldTieCardsToContactsTicketsAndInvoices_AndTimeToTheCard()
+    {
+        // K8c: a ticket brings its contact; a deleted record shows as gone; a card can be made from
+        // a ticket; Done can tell which tickets are still open; time started from a card is its own.
+        var boardId = await _boards.CreateBoardAsync("Client work", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(boardId))!;
+        var ada = new Contact { FullName = "Ada Lovelace", Company = "Analytical Engines" };
+        var bob = new Contact { FullName = "Bob Builder" };
+        _db.Contacts.AddRange(ada, bob);
+        var ticket = new SupportTicket { ContactId = ada.Id, Subject = "Checkout fails with a coupon" };
+        var closed = new SupportTicket { ContactId = ada.Id, Subject = "Old login issue", Status = SupportTicketStatuses.Resolved };
+        var invoice = new Invoice { ContactId = bob.Id, Title = "October retainer" };
+        _db.SupportTickets.AddRange(ticket, closed);
+        _db.Invoices.Add(invoice);
+        await _db.SaveChangesAsync();
+
+        var card = await _boards.AddCardAsync(boardId, OptionId(board, "Doing"), "Fix checkout", "grant");
+        await _boards.LinkAsync(boardId, card, KanbanLinkKinds.Ticket, ticket.Id, "grant");
+        await _boards.LinkAsync(boardId, card, KanbanLinkKinds.Ticket, closed.Id, "grant");
+        await _boards.LinkAsync(boardId, card, KanbanLinkKinds.Invoice, invoice.Id, "grant");
+        await _boards.LinkAsync(boardId, card, KanbanLinkKinds.Ticket, ticket.Id, "grant"); // twice is once
+
+        var links = await _boards.ListLinksAsync(boardId, card);
+        links.Select(link => (link.Kind, link.Title)).Should().Equal(
+            (KanbanLinkKinds.Contact, "Ada Lovelace"), (KanbanLinkKinds.Contact, "Bob Builder"),
+            (KanbanLinkKinds.Ticket, "Checkout fails with a coupon"), (KanbanLinkKinds.Ticket, "Old login issue"),
+            (KanbanLinkKinds.Invoice, "October retainer"));
+        links.Single(link => link.Kind == KanbanLinkKinds.Ticket && link.Status == SupportTicketStatuses.Open).Detail.Should().Be("Ada Lovelace");
+        (await _boards.OpenTicketsAsync(boardId, card)).Select(link => link.TargetId).Should().Equal(ticket.Id);
+        (await _boards.GetBoardAsync(boardId))!.Columns.SelectMany(column => column.Cards).Single(item => item.RowId == card).LinkKinds
+            .Should().HaveCount(5);
+
+        var bad = () => _boards.LinkAsync(boardId, card, "deal", Guid.NewGuid(), "grant");
+        await bad.Should().ThrowAsync<ArgumentException>();
+        var missing = () => _boards.LinkAsync(boardId, card, KanbanLinkKinds.Contact, Guid.NewGuid(), "grant");
+        await missing.Should().ThrowAsync<InvalidOperationException>();
+
+        (await _boards.SearchLinkTargetsAsync(KanbanLinkKinds.Contact, "engines")).Select(found => found.Title).Should().Equal("Ada Lovelace");
+        (await _boards.SearchLinkTargetsAsync(KanbanLinkKinds.Ticket, "coupon")).Single().Detail.Should().Be("Open · Ada Lovelace");
+        (await _boards.SearchLinkTargetsAsync(KanbanLinkKinds.Invoice, "retainer")).Single().Id.Should().Be(invoice.Id);
+        (await _boards.SearchLinkTargetsAsync(KanbanLinkKinds.Contact, "a")).Should().BeEmpty("one letter is too little to search on");
+
+        // Time started from the card is the card's, billed to the ticket's contact.
+        var time = new TimeTrackingService(_db, null!, TimeProvider.System);
+        await time.StartAsync("grant", new GwsBusinessSuite.Application.TimeTracking.TimeEntryInput
+            { ContactId = ada.Id, TicketId = ticket.Id, BoardCardId = card, Description = "Fix checkout", HourlyRateUsd = 120 });
+        await time.StopAsync("grant");
+        var logged = await time.ListForCardAsync(card);
+        logged.Single().BoardCardId.Should().Be(card);
+        logged.Single().ContactName.Should().Be("Ada Lovelace");
+
+        // A ticket made into a card; a deleted record stays as a gone link until unlinked.
+        var fromTicket = await _boards.AddCardFromTicketAsync(boardId, ticket.Id, null, "grant");
+        (await _boards.GetBoardAsync(boardId))!.Columns[0].Cards[0].Title.Should().Be("Checkout fails with a coupon");
+        (await _boards.ListLinksAsync(boardId, fromTicket)).Select(link => link.Kind).Should().Equal(KanbanLinkKinds.Contact, KanbanLinkKinds.Ticket);
+        _db.Invoices.Remove(invoice);
+        await _db.SaveChangesAsync();
+        var gone = (await _boards.ListLinksAsync(boardId, card)).Single(link => link.Kind == KanbanLinkKinds.Invoice);
+        gone.Gone.Should().BeTrue();
+        await _boards.UnlinkAsync(boardId, gone.Id);
+        (await _boards.ListLinksAsync(boardId, card)).Should().NotContain(link => link.Kind == KanbanLinkKinds.Invoice);
+    }
+
+    [Fact]
+    public async Task MyDay_ShouldGatherMyCardsOnEveryBoard_ByWhenTheyreDue_WithMyTicketsAndFollowUps()
+    {
+        // K8d: overdue, due today, in progress, up next - only open cards assigned to me.
+        var work = await _boards.CreateBoardAsync("Work", "personal", "grant");
+        var home = await _boards.CreateBoardAsync("Home", "personal", "grant");
+        var w = (await _boards.GetBoardAsync(work))!;
+        var h = (await _boards.GetBoardAsync(home))!;
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        async Task<Guid> Card(Guid board, KanbanBoard layout, string column, string text) =>
+            await _boards.AddQuickCardAsync(board, OptionId(layout, column), KanbanQuickParse.Parse(text, layout, today, "grant"), "grant");
+
+        // With its year: a day and month already gone this year would mean next year's.
+        var late = await Card(work, w, "To do", $"Send the report @grant {today.AddDays(-2):dd-MM-yy}");
+        var due = await Card(home, h, "To do", "Pay the plumber @Grant today");
+        var doing = await Card(work, w, "Doing", "Draft the plan @grant");
+        var next = await Card(home, h, "Backlog", "Paint the fence !high @grant");
+        await Card(work, w, "Done", "Old thing @grant yesterday");
+        await Card(work, w, "To do", "Sam's thing @sam today");
+
+        var ada = new Contact { FullName = "Ada Lovelace", FollowUpDate = DateTimeOffset.Now.AddDays(-1) };
+        var bob = new Contact { FullName = "Bob Builder", FollowUpDate = DateTimeOffset.Now.AddDays(3) };
+        _db.Contacts.AddRange(ada, bob);
+        _db.SupportTickets.AddRange(
+            new SupportTicket { ContactId = ada.Id, Subject = "Mine", AssignedToUsername = "Grant" },
+            new SupportTicket { ContactId = ada.Id, Subject = "Mine but resolved", AssignedToUsername = "grant", Status = SupportTicketStatuses.Resolved },
+            new SupportTicket { ContactId = ada.Id, Subject = "Sam's", AssignedToUsername = "sam" });
+        await _db.SaveChangesAsync();
+
+        var day = await _boards.GetMyDayAsync("grant");
+        day.Today.Should().Be(today);
+        day.Cards.Select(item => (item.Card.RowId, item.Bucket)).Should().Equal(
+            (late, KanbanMyDayBuckets.Overdue), (due, KanbanMyDayBuckets.Today), (doing, KanbanMyDayBuckets.Doing), (next, KanbanMyDayBuckets.Next));
+        day.Cards.Select(item => item.BoardTitle).Should().Equal("Work", "Home", "Work", "Home");
+        day.Cards.Should().OnlyContain(item => item.DoneOptionId == OptionId(item.BoardTitle == "Work" ? w : h, "Done"));
+        day.Tickets.Select(ticket => ticket.Subject).Should().Equal("Mine");
+        day.Tickets.Single().ContactName.Should().Be("Ada Lovelace");
+        day.FollowUps.Select(followUp => followUp.Name).Should().Equal("Ada Lovelace");
+    }
 }

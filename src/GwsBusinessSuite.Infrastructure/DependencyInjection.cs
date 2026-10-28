@@ -99,6 +99,7 @@ public static class DependencyInjection
         services.AddSingleton<SemanticIndexSaveChangesInterceptor>();
         services.AddSingleton<ActivityFeedSaveChangesInterceptor>();
         services.AddSingleton<WikiDatabaseChangeNotifier>();
+        services.AddSingleton<GwsBusinessSuite.Application.Boards.KanbanPresence>();
         services.AddSingleton<WikiDatabaseChangeInterceptor>();
         services.AddDbContextFactory<ApplicationDbContext>((serviceProvider, options) => options
             .UseSqlite(connectionString)

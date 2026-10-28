@@ -1,0 +1,176 @@
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Domain.Entities
+@implements IAsyncDisposable
+@inject IKanbanBoardService BoardService
+@inject IJSRuntime JS
+
+@* SentinelGPT on a board (Boards K8b): a standup and what's stuck. The facts come from the board
+   and show straight away; the Ollama on this computer then writes them up, using only those facts.
+   Nothing goes to a server model. Without a local model the facts stand on their own. *@
+<div class="kb-modal-backdrop" @onclick="Close"></div>
+<section class="kb-modal kb-ask" role="dialog" aria-modal="true" aria-labelledby="kb-ask-title" tabindex="-1" @ref="_dialog" @onkeydown="CloseOnEscape">
+    <header class="kb-modal-head">
+        <h2 id="kb-ask-title"><i class="bi bi-stars me-2" aria-hidden="true"></i>Ask about @Board.Title</h2>
+        <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Close" @onclick="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+    </header>
+    <div class="kb-ask-tabs" role="group" aria-label="Ask">
+        <button type="button" class="kb-ask-tab @(_tab == Tab.Standup ? "is-on" : "")" aria-pressed="@(_tab == Tab.Standup ? "true" : "false")" @onclick="() => SwitchAsync(Tab.Standup)">
+            <i class="bi bi-people" aria-hidden="true"></i>Standup
+        </button>
+        <button type="button" class="kb-ask-tab @(_tab == Tab.Stuck ? "is-on" : "")" aria-pressed="@(_tab == Tab.Stuck ? "true" : "false")" @onclick="() => SwitchAsync(Tab.Stuck)">
+            <i class="bi bi-sign-stop" aria-hidden="true"></i>What's stuck
+        </button>
+    </div>
+
+    @if (_brief is null)
+    {
+        <p class="kb-ask-note">Gathering the board's facts…</p>
+    }
+    else
+    {
+        <div class="kb-ask-body">
+            <section class="kb-ask-facts" aria-label="Facts from the board">
+                <h3>@FactsHeading</h3>
+                <ul>@foreach (var fact in Facts) { <li>@fact</li> }</ul>
+            </section>
+            <section class="kb-ask-writeup" aria-label="Written up by the local model" aria-live="polite">
+                <h3><i class="bi bi-stars" aria-hidden="true"></i>@(_model is null ? "Written up" : $"Written up by {_model}")</h3>
+                @if (_writing && string.IsNullOrEmpty(_text))
+                {
+                    <p class="kb-ask-note">@_note</p>
+                }
+                else if (!string.IsNullOrEmpty(_text))
+                {
+                    <div class="kb-ask-text">@_text</div>
+                }
+                else if (_note is not null)
+                {
+                    <p class="kb-ask-note">@_note</p>
+                }
+                <div class="kb-ask-actions">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_writing" @onclick="WriteAsync"><i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>Write it again</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CopyAsync"><i class="bi bi-clipboard me-1" aria-hidden="true"></i>Copy</button>
+                </div>
+                <p class="kb-ask-privacy"><i class="bi bi-shield-lock" aria-hidden="true"></i>Runs on this computer's Ollama; the board's facts don't leave it.</p>
+            </section>
+        </div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public KanbanBoard Board { get; set; } = default!;
+    [Parameter] public bool StartWithStuck { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private enum Tab { Standup, Stuck }
+    private static readonly TimeSpan ModelTimeout = TimeSpan.FromMinutes(3);
+    private Tab _tab;
+    private KanbanBrief? _brief;
+    private string? _model;
+    private string _text = string.Empty;
+    private string? _note;
+    private bool _writing;
+    private ElementReference _dialog;
+    private GwsBusinessSuite.Web.Services.BrowserLocalOllamaService? _local;
+    private CancellationTokenSource? _cancel;
+
+    private string FactsHeading => _tab == Tab.Stuck || _brief is null
+        ? "From the board"
+        : "Since " + _brief.Since.LocalDateTime.ToString("ddd dd-MM-yy", System.Globalization.CultureInfo.InvariantCulture);
+
+    private IReadOnlyCollection<string> CompleteColumns => Board.Columns.Where(column => column.Group == WikiDatabaseStatusGroups.Complete).Select(column => column.Label).ToList();
+    private IReadOnlyList<string> Facts => _brief is null ? [] : _tab == Tab.Standup ? KanbanAssistant.StandupFacts(_brief, CompleteColumns) : KanbanAssistant.StuckFacts(_brief);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tab = StartWithStuck ? Tab.Stuck : Tab.Standup;
+        _brief = await BoardService.GetBriefAsync(Board.DatabaseId, KanbanAssistant.StandupSince(DateTimeOffset.Now));
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await _dialog.FocusAsync();
+        await WriteAsync();
+    }
+
+    private async Task SwitchAsync(Tab tab)
+    {
+        if (_tab == tab) return;
+        _tab = tab;
+        await WriteAsync();
+    }
+
+    // Streams the local model's write-up of the facts on the current tab.
+    private async Task WriteAsync()
+    {
+        if (_brief is null) return;
+        _cancel?.Cancel();
+        var cancel = _cancel = new CancellationTokenSource(ModelTimeout);
+        _text = string.Empty;
+        _writing = true;
+        _note = "Looking for a model on this computer…";
+        StateHasChanged();
+        try
+        {
+            _local ??= new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            var status = await _local.ProbeAsync(cancel.Token);
+            _model = LocalModels.PickChatModel(status.Models);
+            if (!status.IsReachable || _model is null)
+            {
+                _note = $"No local model to write this up ({status.Error ?? "no Ollama model is installed"}). The facts above are the board's own.";
+                return;
+            }
+            _note = $"{_model} is writing… the first answer can take a minute while it loads.";
+            StateHasChanged();
+            var (system, facts) = _tab == Tab.Standup
+                ? (KanbanAssistant.StandupSystem, KanbanAssistant.StandupFacts(_brief, CompleteColumns))
+                : (KanbanAssistant.StuckSystem, KanbanAssistant.StuckFacts(_brief));
+            await foreach (var piece in _local.GenerateStreamAsync(_model, system, KanbanAssistant.FactsPrompt(Board.Title, facts), cancel.Token))
+            {
+                if (cancel.IsCancellationRequested) break;
+                _text += piece;
+                StateHasChanged();
+            }
+            _text = _text.Trim();
+            _note = _text.Length == 0 ? $"{_model} didn't answer. The facts above are the board's own." : null;
+        }
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested && _cancel == cancel)
+        {
+            _note = $"{_model} took longer than {ModelTimeout.TotalMinutes:0} minutes. The facts above are the board's own.";
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException)
+        {
+            _note = $"The local model couldn't answer ({ex.Message}). The facts above are the board's own.";
+        }
+        finally
+        {
+            if (_cancel == cancel) _writing = false;
+        }
+    }
+
+    private async Task CopyAsync()
+    {
+        var text = string.IsNullOrWhiteSpace(_text) ? string.Join("\n", Facts.Select(fact => "- " + fact)) : _text;
+        try { await JS.InvokeVoidAsync("gwsAssistant.copy", text); }
+        catch (JSException) { /* the browser refused the clipboard */ }
+    }
+
+    private Task Close()
+    {
+        _cancel?.Cancel();
+        return OnClose.InvokeAsync();
+    }
+
+    private async Task CloseOnEscape(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await Close();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _cancel?.Cancel();
+        if (_local is not null) await _local.DisposeAsync();
+    }
+}

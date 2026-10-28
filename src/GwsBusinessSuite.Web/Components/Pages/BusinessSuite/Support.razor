@@ -17,6 +17,8 @@
 @inject IJSRuntime JS
 @inject ILogger<Support> Logger
 @inject GwsBusinessSuite.Web.Services.ToastState Toasts
+@inject GwsBusinessSuite.Application.Boards.IKanbanBoardService Boards
+@inject NavigationManager Navigation
 @using GwsBusinessSuite.Application.Abstractions
 
 <PageTitle>Support</PageTitle>
@@ -253,6 +255,12 @@ else
                             </select>
                             <input class="form-control form-control-sm w-auto" placeholder="Assign to..."
                                    value="@SelectedTicket.AssignedToUsername" @onchange="OnAssignChangedAsync" />
+                            @* Boards K8c: the ticket as a card on a board, linked both ways. *@
+                            <select class="form-select form-select-sm w-auto" aria-label="Add this ticket to a board as a card" @key="@($"board-{_boardPickKey}")"
+                                    @onfocus="LoadBoardsAsync" @onchange="AddToBoardAsync">
+                                <option value="">Add to board…</option>
+                                @foreach (var board in _boards) { <option value="@board.DatabaseId">@board.Title</option> }
+                            </select>
                         </div>
                     </div>
                     <div class="mt-2">
@@ -389,6 +397,33 @@ else
     private List<Contact> Contacts { get; set; } = [];
     private IReadOnlyList<SupportTicketView> Tickets { get; set; } = [];
     private SupportTicketView? SelectedTicket { get; set; }
+    private IReadOnlyList<GwsBusinessSuite.Application.Boards.KanbanBoardSummary> _boards = [];
+    private int _boardPickKey;
+
+    private async Task LoadBoardsAsync()
+    {
+        if (_boards.Count == 0) _boards = await Boards.ListBoardsAsync();
+    }
+
+    private async Task AddToBoardAsync(ChangeEventArgs e)
+    {
+        _boardPickKey++;
+        if (SelectedTicket is null || !Guid.TryParse(e.Value as string, out var boardId)) return;
+        try
+        {
+            var rowId = await Boards.AddCardFromTicketAsync(boardId, SelectedTicket.Id, null, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            var board = _boards.FirstOrDefault(item => item.DatabaseId == boardId)?.Title ?? "the board";
+            Toasts.Show($"Added to {board} as a card.", () =>
+            {
+                Navigation.NavigateTo($"admin/boards/{boardId}?card={rowId}");
+                return Task.CompletedTask;
+            }, tone: StatusTone.Success, actionLabel: "Open card");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            Toasts.Show($"Couldn't add it to the board. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
     private Guid? SelectedTicketId { get; set; }
     private string StatusFilter { get; set; } = string.Empty;
     private static readonly IReadOnlyList<ListColumnOption> TicketColumns =

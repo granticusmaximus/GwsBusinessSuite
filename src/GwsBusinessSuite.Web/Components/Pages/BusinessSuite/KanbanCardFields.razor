@@ -7,6 +7,9 @@
 @inject IWikiDatabaseService Databases
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject GwsBusinessSuite.Web.Services.ToastState Toasts
+@inject IJSRuntime JS
+@inject GwsBusinessSuite.Application.TimeTracking.ITimeTrackingService Time
+@implements IAsyncDisposable
 
 @* A card's fields in the board's drawer (Boards K2): everything the card shows, editable, above its
    Sentinel page. Each change saves at once; a refusal re-draws the control (@key) and says why. *@
@@ -105,7 +108,25 @@
     <div class="kb-fields-subitems">
         <h3><i class="bi bi-diagram-3" aria-hidden="true"></i>Sub-items
             @if (_subItems.Count > 0) { <span>@_subItems.Count(item => item.Done)/@_subItems.Count</span> }
+            <button type="button" class="kb-break" disabled="@_breaking" title="Suggest the steps that finish this card, with the AI on this computer" @onclick="BreakDownAsync">
+                <i class="bi bi-stars" aria-hidden="true"></i>Break it down
+            </button>
         </h3>
+        @* K8b: steps suggested by the local model, added only once chosen. *@
+        @if (_breakNote is not null) { <p class="kb-break-note" aria-live="polite">@_breakNote</p> }
+        @if (_proposed is { Count: > 0 } proposed)
+        {
+            <ul class="kb-break-list">
+                @foreach (var step in proposed)
+                {
+                    <li><label><input type="checkbox" class="form-check-input" checked="@_keep.Contains(step)" @onchange="e => KeepStep(step, e.Value is true)" /> @step</label></li>
+                }
+            </ul>
+            <div class="kb-break-actions">
+                <button type="button" class="btn btn-sm btn-primary" disabled="@(_keep.Count == 0)" @onclick="AddProposedAsync">Add @_keep.Count @(_keep.Count == 1 ? "sub-item" : "sub-items")</button>
+                <button type="button" class="btn btn-sm btn-link" @onclick="DiscardProposed">Discard</button>
+            </div>
+        }
         @if (_subItems.Count > 0)
         {
             <ul>
@@ -124,6 +145,92 @@
             <input id="kb-subitem-new" class="form-control form-control-sm" placeholder="Add a sub-item, then Enter" maxlength="300"
                    @bind="_newSubItem" @bind:event="oninput" />
         </form>
+    </div>
+
+    @* Business links (K8c): the contacts, tickets and invoices this card is about. Hovering one
+       previews it; time on the card bills the linked contact. *@
+    <div class="kb-fields-links">
+        <h3><i class="bi bi-link-45deg" aria-hidden="true"></i>Linked</h3>
+        @if (_links.Count > 0)
+        {
+            <ul>
+                @foreach (var link in _links)
+                {
+                    <li class="@(link.Gone ? "is-gone" : "")" @key="link.Id">
+                        <a href="@LinkUrl(link)" data-preview="@(link.Gone ? null : $"{link.Kind}:{link.TargetId}")">
+                            <i class="bi @(GwsBusinessSuite.Web.Components.Pages.BusinessSuite.Board.LinkIcon(link.Kind))" aria-hidden="true"></i>
+                            <span class="kb-link-title">@link.Title</span>
+                            @if (link.Status is not null) { <span class="kb-link-status">@link.Status</span> }
+                        </a>
+                        <button type="button" class="kb-link-remove" aria-label="Unlink @link.Title" @onclick="() => UnlinkAsync(link)"><i class="bi bi-x" aria-hidden="true"></i></button>
+                    </li>
+                }
+            </ul>
+        }
+        <div class="kb-link-add">
+            <label class="visually-hidden" for="kb-link-kind">Link a</label>
+            <select id="kb-link-kind" class="form-select form-select-sm" value="@_linkKind" @onchange="SetLinkKindAsync">
+                <option value="@KanbanLinkKinds.Contact">Contact</option>
+                <option value="@KanbanLinkKinds.Ticket">Ticket</option>
+                <option value="@KanbanLinkKinds.Invoice">Invoice</option>
+            </select>
+            <label class="visually-hidden" for="kb-link-search">Find one to link</label>
+            <input id="kb-link-search" class="form-control form-control-sm" placeholder="@($"Find {(_linkKind == KanbanLinkKinds.Invoice ? "an" : "a")} {_linkKind} to link…")" autocomplete="off" maxlength="100"
+                   @bind="_linkQuery" @bind:event="oninput" @bind:after="SearchLinksAsync" />
+        </div>
+        @if (_candidates.Count > 0)
+        {
+            <ul class="kb-link-results" aria-label="Matches">
+                @foreach (var candidate in _candidates)
+                {
+                    <li @key="candidate.Id">
+                        <button type="button" @onclick="() => LinkAsync(candidate)">
+                            <span>@candidate.Title</span>
+                            @if (!string.IsNullOrWhiteSpace(candidate.Detail)) { <span class="kb-link-status">@candidate.Detail</span> }
+                        </button>
+                    </li>
+                }
+            </ul>
+        }
+        else if (_linkQuery.Trim().Length >= 2 && !_searching)
+        {
+            <p class="kb-break-note">No @(_linkKind)s match.</p>
+        }
+    </div>
+
+    @* Time on the card (K8c): a timer that bills the linked contact, through Time Tracking. *@
+    <div class="kb-fields-time">
+        <h3><i class="bi bi-stopwatch" aria-hidden="true"></i>Time
+            @if (_entries.Count > 0) { <span>@Hours(_entries.Sum(entry => entry.Minutes))</span> }
+        </h3>
+        @if (BillTo is not { } billTo)
+        {
+            <p class="kb-break-note">Link a contact, ticket or invoice to track billable time here.</p>
+        }
+        else if (_running is { } running && running.BoardCardId == Row.Id)
+        {
+            <div class="kb-time-row">
+                <button type="button" class="btn btn-sm btn-danger" disabled="@_timing" @onclick="StopTimerAsync"><i class="bi bi-stop-fill me-1" aria-hidden="true"></i>Stop</button>
+                <span class="kb-time-running"><span class="kb-time-dot" aria-hidden="true"></span>Running since @running.StartedAt.ToLocalTime().ToGwsTime() for @running.ContactName</span>
+            </div>
+        }
+        else
+        {
+            <div class="kb-time-row">
+                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_timing" @onclick="StartTimerAsync"><i class="bi bi-play-fill me-1" aria-hidden="true"></i>Start timer</button>
+                <span class="kb-break-note">Bills @billTo.Name@(_rate > 0 ? $" at ${_rate.ToString("0.##", CultureInfo.InvariantCulture)}/h" : "")@(_running is not null ? " · stops the timer you have running" : "")</span>
+            </div>
+        }
+        @if (_entries.Count > 0)
+        {
+            <ul class="kb-time-entries">
+                @foreach (var entry in _entries.Take(4))
+                {
+                    <li @key="entry.Id"><span>@entry.StartedAt.ToLocalTime().ToGwsDate()</span><span>@entry.Username</span><span>@Hours(entry.Minutes)</span>
+                        <span class="kb-link-status">@(entry.InvoiceId is not null ? "billed" : entry.IsRunning ? "running" : entry.Billable ? "to bill" : "not billable")</span></li>
+                }
+            </ul>
+        }
     </div>
 
     @* Card templates (K6): this card's fields and page, to make again from a column's menu or on a
@@ -193,7 +300,133 @@
         if (_loadedFor == Row.Id) return;
         _loadedFor = Row.Id;
         _newSubItem = string.Empty;
+        _linkQuery = string.Empty;
+        _candidates = [];
         await LoadSubItemsAsync();
+        await LoadLinksAndTimeAsync();
+    }
+
+    // ---- Business links and time (K8c) ----
+    private IReadOnlyList<KanbanCardLink> _links = [];
+    private IReadOnlyList<KanbanLinkCandidate> _candidates = [];
+    private string _linkKind = KanbanLinkKinds.Contact;
+    private string _linkQuery = string.Empty;
+    private bool _searching;
+    private IReadOnlyList<GwsBusinessSuite.Application.TimeTracking.TimeEntryView> _entries = [];
+    private GwsBusinessSuite.Application.TimeTracking.TimeEntryView? _running;
+    private decimal _rate;
+    private bool _timing;
+
+    private sealed record BillTarget(Guid ContactId, string Name, Guid? TicketId);
+
+    // Who time on this card bills: a linked contact first, else a linked ticket's or invoice's.
+    private BillTarget? BillTo => _links.Where(link => !link.Gone && link.ContactId is not null)
+        .OrderBy(link => link.Kind == KanbanLinkKinds.Contact ? 0 : 1)
+        .Select(link => new BillTarget(link.ContactId!.Value, link.Kind == KanbanLinkKinds.Contact ? link.Title : link.Detail ?? link.Title,
+            _links.FirstOrDefault(item => item.Kind == KanbanLinkKinds.Ticket && !item.Gone && item.ContactId == link.ContactId)?.TargetId))
+        .FirstOrDefault();
+
+    private async Task LoadLinksAndTimeAsync()
+    {
+        var me = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        _links = await BoardService.ListLinksAsync(Database.Id, Row.Id);
+        _entries = await Time.ListForCardAsync(Row.Id);
+        _running = await Time.GetRunningAsync(me);
+        _rate = await Time.GetLastRateAsync(me);
+    }
+
+    private static string LinkUrl(KanbanCardLink link) => link.Kind switch
+    {
+        KanbanLinkKinds.Contact => $"/admin/crm/contacts/{link.TargetId}",
+        KanbanLinkKinds.Ticket => $"/admin/support?ticket={link.TargetId}",
+        _ => $"/admin/billing?invoice={link.TargetId}"
+    };
+
+    private static string Hours(int minutes) => minutes < 60 ? $"{minutes} min" : $"{(minutes / 60m).ToString("0.#", CultureInfo.InvariantCulture)} h";
+
+    private async Task SetLinkKindAsync(ChangeEventArgs e)
+    {
+        _linkKind = e.Value as string ?? KanbanLinkKinds.Contact;
+        await SearchLinksAsync();
+    }
+
+    private async Task SearchLinksAsync()
+    {
+        _searching = true;
+        try { _candidates = await BoardService.SearchLinkTargetsAsync(_linkKind, _linkQuery); }
+        finally { _searching = false; }
+    }
+
+    private async Task LinkAsync(KanbanLinkCandidate candidate)
+    {
+        try
+        {
+            await BoardService.LinkAsync(Database.Id, Row.Id, candidate.Kind, candidate.Id, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            _linkQuery = string.Empty;
+            _candidates = [];
+            await LoadLinksAndTimeAsync();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            Toasts.Show($"Couldn't link it. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
+    private async Task UnlinkAsync(KanbanCardLink link)
+    {
+        await BoardService.UnlinkAsync(Database.Id, link.Id);
+        await LoadLinksAndTimeAsync();
+        await OnChanged.InvokeAsync();
+        Toasts.Show($"Unlinked {link.Title}.", async () =>
+        {
+            await BoardService.LinkAsync(Database.Id, Row.Id, link.Kind, link.TargetId, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await LoadLinksAndTimeAsync();
+            await OnChanged.InvokeAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task StartTimerAsync()
+    {
+        if (BillTo is not { } billTo) return;
+        _timing = true;
+        try
+        {
+            await Time.StartAsync(await CurrentUserAccessor.GetCurrentUsernameAsync(), new GwsBusinessSuite.Application.TimeTracking.TimeEntryInput
+            {
+                ContactId = billTo.ContactId,
+                TicketId = billTo.TicketId,
+                BoardCardId = Row.Id,
+                Description = Title,
+                Billable = true,
+                HourlyRateUsd = _rate
+            });
+            await LoadLinksAndTimeAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            Toasts.Show($"Couldn't start the timer. {ex.Message}", tone: StatusTone.Danger);
+        }
+        finally
+        {
+            _timing = false;
+        }
+    }
+
+    private async Task StopTimerAsync()
+    {
+        _timing = true;
+        try
+        {
+            var stopped = await Time.StopAsync(await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await LoadLinksAndTimeAsync();
+            if (stopped is not null) Toasts.Show($"{Hours(stopped.Minutes)} logged for {stopped.ContactName}. It's on Billing's unbilled time.", tone: StatusTone.Success);
+        }
+        finally
+        {
+            _timing = false;
+        }
     }
 
     private async Task LoadSubItemsAsync() => _subItems = await BoardService.ListSubItemsAsync(Database.Id, Row.Id);
@@ -297,6 +530,94 @@
             _revision++;
             Toasts.Show($"Couldn't update that sub-item. {ex.Message}", tone: StatusTone.Danger);
         }
+    }
+
+    private GwsBusinessSuite.Web.Services.BrowserLocalOllamaService? _local;
+    private bool _breaking;
+    private string? _breakNote;
+    private List<string>? _proposed;
+    private readonly HashSet<string> _keep = new(StringComparer.OrdinalIgnoreCase);
+
+    // The local model suggests the steps; nothing is added until they're chosen.
+    private async Task BreakDownAsync()
+    {
+        _breaking = true;
+        _proposed = null;
+        _breakNote = "Looking for a model on this computer…";
+        try
+        {
+            _local ??= new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
+            var status = await _local.ProbeAsync();
+            var model = LocalModels.PickChatModel(status.Models);
+            if (!status.IsReachable || model is null)
+            {
+                _breakNote = $"There's no local model to ask ({status.Error ?? "no Ollama model is installed"}).";
+                return;
+            }
+            _breakNote = $"{model} is thinking… the first answer can take a minute while it loads.";
+            StateHasChanged();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            var page = string.Join("\n", WikiBlockJson.ParseBlocks(Row.BlocksJson).Select(block => block.PlainText.Trim()).Where(text => text.Length > 0));
+            var output = await _local.GenerateJsonAsync(model, KanbanAssistant.BreakdownSystem, KanbanAssistant.BreakdownPrompt(Title, page), timeout.Token);
+            var steps = KanbanAssistant.ParseSteps(output)
+                .Where(step => !_subItems.Any(item => string.Equals(item.Title, step, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            _proposed = steps;
+            _keep.Clear();
+            _keep.UnionWith(steps);
+            _breakNote = steps.Count == 0 ? $"{model} didn't suggest any new steps." : $"Suggested by {model}. Untick any you don't want.";
+        }
+        catch (OperationCanceledException)
+        {
+            _breakNote = "The local model took too long to answer.";
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException)
+        {
+            _breakNote = $"The local model couldn't answer ({ex.Message}).";
+        }
+        finally
+        {
+            _breaking = false;
+        }
+    }
+
+    private void KeepStep(string step, bool keep)
+    {
+        if (keep) _keep.Add(step); else _keep.Remove(step);
+    }
+
+    private void DiscardProposed()
+    {
+        _proposed = null;
+        _breakNote = null;
+    }
+
+    private async Task AddProposedAsync()
+    {
+        if (_proposed is null) return;
+        var me = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        var added = 0;
+        try
+        {
+            foreach (var step in _proposed.Where(_keep.Contains))
+            {
+                await BoardService.AddSubItemAsync(Database.Id, Row.Id, step, me);
+                added++;
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            Toasts.Show($"Couldn't add every step. {ex.Message}", tone: StatusTone.Danger);
+        }
+        DiscardProposed();
+        await LoadSubItemsAsync();
+        await OnChanged.InvokeAsync();
+        if (added > 0) Toasts.Show($"Added {added} {(added == 1 ? "sub-item" : "sub-items")}.", tone: StatusTone.Success);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_local is not null) await _local.DisposeAsync();
     }
 
     private async Task AddSubItemAsync()

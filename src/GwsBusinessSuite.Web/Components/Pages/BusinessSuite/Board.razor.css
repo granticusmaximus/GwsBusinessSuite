@@ -61,17 +61,22 @@
     scroll-snap-type: x proximity;
 }
 
+/* A column scrolls as a whole under its pinned, frosted header (K7), with a faint wash of its
+   colour from the top. */
 .kb-column {
     flex: 0 0 var(--kb-column-width);
     display: flex;
     flex-direction: column;
     min-height: 0;
-    background: color-mix(in srgb, var(--gws-panel-bg) 70%, transparent);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background-color: color-mix(in srgb, var(--gws-panel-bg) 70%, transparent);
+    background-image: linear-gradient(to bottom, color-mix(in srgb, var(--column-color) 10%, transparent), transparent 12rem);
     border: 1px solid var(--gws-panel-border);
     border-top: 3px solid var(--column-color);
     border-radius: var(--gws-radius-md, 10px);
     scroll-snap-align: start;
-    transition: background-color .15s ease, box-shadow .15s ease;
+    transition: background-color .15s ease, box-shadow .15s ease, flex-basis .25s ease;
 }
 
 .kb-column.kb-drop-target {
@@ -80,10 +85,16 @@
 }
 
 .kb-column-head {
+    position: sticky;
+    top: 0;
+    z-index: 2;
     display: flex;
     align-items: center;
     gap: var(--gws-step-2);
     padding: var(--gws-step-2) var(--gws-step-2) var(--gws-step-2) var(--gws-step-3);
+    background: color-mix(in srgb, var(--gws-panel-bg) 74%, transparent);
+    -webkit-backdrop-filter: blur(12px) saturate(1.3);
+    backdrop-filter: blur(12px) saturate(1.3);
 }
 
 .kb-column-dot { width: .5rem; height: .5rem; border-radius: 50%; background: var(--column-color); }
@@ -126,14 +137,15 @@
 .kb-quick-add-hint { display: block; margin-top: 4px; font-size: .6875rem; color: var(--gws-text-soft); }
 
 .kb-cards {
-    flex: 1;
+    /* Positioned so a card's offsetTop is its place in the list, whatever gap a drag opens. */
+    position: relative;
+    flex: 1 0 auto;
     min-height: 2.5rem;
     display: flex;
     flex-direction: column;
     gap: var(--gws-step-2);
     margin: 0;
     padding: 2px var(--gws-step-2) var(--gws-step-2);
-    overflow-y: auto;
     list-style: none;
 }
 
@@ -148,7 +160,7 @@
     box-shadow: 0 1px 2px rgba(0, 0, 0, .12);
     cursor: grab;
     user-select: none;
-    transition: border-color .12s ease, box-shadow .12s ease, transform .12s ease;
+    transition: border-color .12s ease, box-shadow .12s ease, transform .2s cubic-bezier(.2, .8, .2, 1);
 }
 
 .kb-card:hover { border-color: color-mix(in srgb, var(--column-color) 55%, var(--gws-panel-border)); box-shadow: 0 4px 14px rgba(0, 0, 0, .18); }
@@ -246,6 +258,9 @@
 .kb-card-cover {
     display: block;
     width: calc(100% + 2 * var(--gws-step-3));
+    max-width: none;
+    pointer-events: none;
+    -webkit-user-drag: none;
     max-height: 8rem;
     margin: calc(-1 * var(--gws-step-2)) calc(-1 * var(--gws-step-3)) var(--gws-step-2);
     object-fit: cover;
@@ -316,6 +331,10 @@
 }
 
 .kb-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--gws-step-2);
     margin: 0 var(--gws-step-2) var(--gws-step-2);
     padding: var(--gws-step-4) var(--gws-step-2);
     font-size: .8125rem;
@@ -433,7 +452,9 @@
     gap: var(--gws-step-3);
     width: max-content;
     padding-bottom: var(--gws-step-2);
-    background: var(--gws-content-bg, var(--gws-panel-bg));
+    background: color-mix(in srgb, var(--gws-content-bg, var(--gws-panel-bg)) 78%, transparent);
+    -webkit-backdrop-filter: blur(12px) saturate(1.3);
+    backdrop-filter: blur(12px) saturate(1.3);
 }
 
 .kb-lane-head {
@@ -547,7 +568,189 @@
 @container gws-main (max-width: 575.98px) {
     .kb { --kb-column-width: 85cqw; height: auto; min-height: 0; }
     .kb-columns { scroll-snap-type: x mandatory; }
-    .kb-cards { max-height: 65dvh; }
+    .kb-column { max-height: 70dvh; }
     .kb-tools { width: 100%; margin-inline-start: 0; }
     .kb-filter { flex: 1 1 auto; width: auto; }
 }
+
+/* ---- The look (K7) ---- */
+
+/* Card sizes. Compact: title-first, labels as colour bars. Rich: taller covers and the page's first lines. */
+.kb-size-compact .kb-card { padding: 6px 10px; }
+.kb-size-compact .kb-card-cover, .kb-size-compact .kb-card-progress { display: none; }
+.kb-size-compact .kb-card-title { font-size: .8125rem; }
+.kb-size-compact .kb-labels { gap: 3px; margin-top: 6px; }
+.kb-size-compact .kb-label { width: 2rem; height: 6px; padding: 0; overflow: hidden; font-size: 0; color: transparent; background: var(--tone); }
+.kb-size-rich .kb-card-cover { max-height: 11rem; min-height: 6rem; }
+.kb-card-snippet {
+    display: -webkit-box;
+    margin: 4px 0 0;
+    overflow: hidden;
+    font-size: .75rem;
+    line-height: 1.45;
+    color: var(--gws-text-soft);
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+}
+
+/* Checklist progress along the bottom of a card. */
+.kb-card-progress { height: 3px; margin-top: var(--gws-step-2); overflow: hidden; border-radius: 999px; background: color-mix(in srgb, var(--gws-panel-border) 70%, transparent); }
+.kb-card-progress > span { display: block; height: 100%; border-radius: inherit; background: var(--column-color); transition: width .3s ease; }
+.kb-card-progress.is-done > span { background: var(--gws-status-success-fill); }
+
+/* A WIP limit as a ring that fills toward the limit. */
+.kb-wip { display: inline-flex; align-items: center; gap: 5px; }
+.kb-wip-ring {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: conic-gradient(currentColor var(--fill, 0%), color-mix(in srgb, currentColor 22%, transparent) 0);
+    -webkit-mask: radial-gradient(circle, transparent 3px, #000 3.5px);
+    mask: radial-gradient(circle, transparent 3px, #000 3.5px);
+}
+
+/* Backgrounds: soft colour behind frosted columns, in either theme. */
+.kb.has-backdrop {
+    padding: var(--gws-step-3);
+    border-radius: var(--gws-radius-lg, 14px);
+    background: var(--kb-backdrop);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gws-panel-border) 60%, transparent);
+}
+
+.kb-bg-aurora { --kb-backdrop: radial-gradient(ellipse 70% 60% at 8% 0%, color-mix(in srgb, var(--gws-sidebar-accent) 28%, transparent), transparent 70%), radial-gradient(ellipse 60% 55% at 92% 8%, color-mix(in srgb, #22d3ee 22%, transparent), transparent 70%), radial-gradient(ellipse 80% 60% at 50% 105%, color-mix(in srgb, #a855f7 20%, transparent), transparent 70%); }
+.kb-bg-dusk { --kb-backdrop: linear-gradient(160deg, color-mix(in srgb, #f59e0b 20%, transparent), color-mix(in srgb, #ec4899 16%, transparent) 50%, color-mix(in srgb, #6366f1 20%, transparent)); }
+.kb-bg-meadow { --kb-backdrop: linear-gradient(200deg, color-mix(in srgb, #10b981 22%, transparent), color-mix(in srgb, #84cc16 10%, transparent) 55%, color-mix(in srgb, #06b6d4 14%, transparent)); }
+.kb-bg-ocean { --kb-backdrop: linear-gradient(180deg, color-mix(in srgb, #0ea5e9 22%, transparent), color-mix(in srgb, #1e3a8a 22%, transparent)); }
+.kb-bg-grid { --kb-backdrop: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--gws-text-soft) 32%, transparent) 1px, transparent 1.6px) 0 0 / 18px 18px; }
+.kb-bg-image { --kb-backdrop: linear-gradient(color-mix(in srgb, var(--gws-content-bg, var(--gws-panel-bg)) 64%, transparent), color-mix(in srgb, var(--gws-content-bg, var(--gws-panel-bg)) 64%, transparent)), var(--kb-image) center / cover no-repeat; }
+
+.kb.has-backdrop .kb-column, .kb.has-backdrop .kb-lane-head, .kb.has-backdrop .kb-cell {
+    background-color: color-mix(in srgb, var(--gws-panel-bg) 62%, transparent);
+    -webkit-backdrop-filter: blur(10px) saturate(1.2);
+    backdrop-filter: blur(10px) saturate(1.2);
+}
+
+/* The look's settings. */
+.kb-look {
+    display: grid;
+    flex-basis: 100%;
+    grid-template-columns: max-content minmax(0, 1fr);
+    align-items: center;
+    gap: var(--gws-step-2) var(--gws-step-3);
+    margin-top: var(--gws-step-2);
+    padding-top: var(--gws-step-2);
+    border-top: 1px solid var(--gws-panel-border);
+}
+
+.kb-look-label { color: var(--gws-text-soft); }
+.kb-segment { display: inline-flex; width: max-content; padding: 2px; border: 1px solid var(--gws-panel-border); border-radius: 999px; }
+.kb-segment > button { padding: 2px 12px; border: 0; border-radius: 999px; font-size: .8125rem; color: var(--gws-text-soft); background: transparent; }
+.kb-segment > button.is-on { color: var(--gws-text-strong); background: var(--gws-panel-bg); box-shadow: 0 1px 2px rgba(0, 0, 0, .2); }
+.kb-swatches, .kb-backdrops { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.kb-swatch {
+    width: 22px;
+    height: 22px;
+    border: 2px solid transparent;
+    border-radius: 50%;
+    background: var(--swatch);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15);
+}
+
+.kb-swatch.is-default { background: conic-gradient(#3b82f6, #ec4899, #f59e0b, #10b981, #3b82f6); }
+.kb-swatch.is-on { border-color: var(--gws-text-strong); }
+
+.kb-backdrop {
+    display: grid;
+    place-items: end start;
+    width: 4.5rem;
+    height: 2.75rem;
+    padding: 3px 6px;
+    border: 2px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-sm, 8px);
+    font-size: .6875rem;
+    font-weight: 600;
+    color: var(--gws-text-strong);
+    background: var(--kb-backdrop, var(--gws-panel-bg));
+}
+
+.kb-backdrop.is-on { border-color: var(--gws-sidebar-accent); }
+.kb-backdrop.kb-bg-none { --kb-backdrop: var(--gws-panel-bg); }
+.kb-settings .kb-look-image { width: 100%; max-width: 26rem; }
+
+/* Zoom out: the whole board at a glance. */
+.kb.is-zoomed { --kb-column-width: 12.5rem; }
+.kb.is-zoomed .kb-columns, .kb.is-zoomed .kb-lane-row, .kb.is-zoomed .kb-lane-heads { gap: var(--gws-step-2); }
+.kb.is-zoomed .kb-card { padding: 5px 8px; }
+.kb.is-zoomed .kb-card-title { font-size: .75rem; }
+.kb.is-zoomed :is(.kb-card-cover, .kb-card-snippet, .kb-card-top, .kb-labels, .kb-card-progress, .kb-grip) { display: none; }
+.kb.is-zoomed .kb-card-foot .kb-meta:not(.kb-age, .is-overdue) { display: none; }
+
+/* Focus one column: the rest fold to strips (still places to drop a card). */
+.kb-focus-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--gws-step-2);
+    font-size: .8125rem;
+    color: var(--gws-text-soft);
+}
+
+.kb-focus-bar strong { color: var(--gws-text-strong); }
+.kb-column.is-folded { flex: 0 0 3rem; overflow: hidden; }
+.kb-column.is-folded .kb-cards { display: none; }
+
+.kb-fold {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--gws-step-2);
+    padding: var(--gws-step-3) 0;
+    border: 0;
+    color: var(--gws-text-soft);
+    background: transparent;
+}
+
+.kb-fold:hover { background: color-mix(in srgb, var(--column-color) 10%, transparent); }
+.kb-fold-title { writing-mode: vertical-rl; transform: rotate(180deg); font-size: .8125rem; font-weight: 650; color: var(--gws-text-strong); white-space: nowrap; }
+.kb-column.is-focused { flex: 1 1 auto; max-width: 72rem; }
+.kb-column.is-focused .kb-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); align-content: start; }
+
+/* Presence: others on the board, and a card someone has open. */
+.kb-viewers { display: inline-flex; align-items: center; }
+.kb-viewer { margin-inline-start: -5px; box-shadow: 0 0 0 2px var(--gws-panel-bg), 0 0 0 4px color-mix(in srgb, var(--gws-sidebar-accent) 85%, transparent); }
+.kb-viewer:first-child { margin-inline-start: 0; }
+.kb-viewer-more { margin-inline-start: 6px; font-size: .75rem; color: var(--gws-text-soft); }
+.kb-busy { display: inline-flex; }
+.kb-busy .kb-avatar { width: 1.25rem; height: 1.25rem; font-size: .5625rem; box-shadow: 0 0 0 2px color-mix(in srgb, var(--gws-sidebar-accent) 85%, transparent); }
+.kb-card.is-busy { animation: kb-busy 2.4s ease-in-out infinite; }
+@keyframes kb-busy { 50% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--gws-sidebar-accent) 55%, transparent), 0 4px 14px rgba(0, 0, 0, .18); } }
+
+/* An empty column's drawing. */
+.kb-empty-art { width: 4rem; height: 3rem; fill: none; stroke: color-mix(in srgb, var(--column-color) 75%, var(--gws-text-soft)); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; opacity: .85; }
+.kb-empty-art .kb-empty-spark { stroke: var(--gws-text-soft); opacity: .6; }
+
+@media (prefers-reduced-motion: reduce) {
+    .kb-card.is-busy { animation: none; box-shadow: 0 0 0 2px color-mix(in srgb, var(--gws-sidebar-accent) 55%, transparent); }
+    .kb-column, .kb-card-progress > span { transition: none; }
+}
+
+/* The card being dragged stays behind as a faint placeholder - also while the pointer, captured by
+   it, keeps it hovered (the hover rule above would make it opaque again). */
+.kb-card.kb-dragging, .kb-card.kb-dragging:hover { opacity: .35; filter: none; }
+
+/* One-line cards (K8): what a quick-add line sets, as chips. */
+.kb-quick-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.kb-quick-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: .6875rem;
+    font-weight: 600;
+    color: color-mix(in srgb, var(--tone) 70%, var(--gws-text-strong));
+    background: color-mix(in srgb, var(--tone) 16%, transparent);
+}
+.kb-quick-add-hint code { font-size: .6875rem; color: var(--gws-text-soft); }

@@ -10,7 +10,8 @@ public sealed class ToastState(ILogger<ToastState> logger)
 {
     private int _nextId;
 
-    public sealed record Toast(int Id, string Message, StatusTone Tone, Func<Task>? Undo, bool SurvivesNavigation);
+    // ActionLabel names the button when it isn't an undo ("Resolve", "Open card").
+    public sealed record Toast(int Id, string Message, StatusTone Tone, Func<Task>? Undo, bool SurvivesNavigation, string? ActionLabel = null);
 
     public Toast? Current { get; private set; }
 
@@ -18,9 +19,9 @@ public sealed class ToastState(ILogger<ToastState> logger)
 
     // SurvivesNavigation keeps the toast through the next page change, for an action that leaves
     // the page (trashing the record you're on); any later navigation dismisses it as usual.
-    public void Show(string message, Func<Task>? undo = null, StatusTone tone = StatusTone.Neutral, bool survivesNavigation = false)
+    public void Show(string message, Func<Task>? undo = null, StatusTone tone = StatusTone.Neutral, bool survivesNavigation = false, string? actionLabel = null)
     {
-        Current = new Toast(Interlocked.Increment(ref _nextId), message, tone, undo, survivesNavigation);
+        Current = new Toast(Interlocked.Increment(ref _nextId), message, tone, undo, survivesNavigation, actionLabel);
         Changed?.Invoke();
     }
 
@@ -46,12 +47,13 @@ public sealed class ToastState(ILogger<ToastState> logger)
         try
         {
             await undo();
-            Show("Undone.", tone: StatusTone.Success);
+            // An action other than Undo ("Resolve") says what it did itself.
+            if (toast.ActionLabel is null) Show("Undone.", tone: StatusTone.Success);
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "An undo failed: {Message}", toast.Message);
-            Show($"Couldn't undo that. {ex.Message}", tone: StatusTone.Danger);
+            logger.LogWarning(ex, "A toast action failed: {Message}", toast.Message);
+            Show(toast.ActionLabel is null ? $"Couldn't undo that. {ex.Message}" : $"Couldn't do that. {ex.Message}", tone: StatusTone.Danger);
         }
     }
 }

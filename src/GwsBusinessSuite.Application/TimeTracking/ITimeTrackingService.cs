@@ -18,7 +18,8 @@ public sealed record TimeEntryView(
     int Minutes,
     bool Billable,
     decimal HourlyRateUsd,
-    Guid? InvoiceId)
+    Guid? InvoiceId,
+    Guid? BoardCardId = null)
 {
     public bool IsRunning => EndedAt is null;
     public decimal Hours => Math.Round(Minutes / 60m, 2);
@@ -30,6 +31,8 @@ public sealed class TimeEntryInput
     public Guid ContactId { get; set; }
     public Guid? DealId { get; set; }
     public Guid? TicketId { get; set; }
+    // The board card the time is for (Boards K8c).
+    public Guid? BoardCardId { get; set; }
     public string Description { get; set; } = string.Empty;
     // For a manual entry: when the work happened and how long it took.
     public DateTimeOffset StartedAt { get; set; }
@@ -58,6 +61,9 @@ public interface ITimeTrackingService
     Task<IReadOnlyList<TimeEntryView>> ListAsync(DateTimeOffset fromUtc, DateTimeOffset toUtc, string? username = null, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<TimeEntryView>> ListForContactAsync(Guid contactId, CancellationToken cancellationToken = default);
+
+    // Every entry started from a board card (Boards K8c), newest first.
+    Task<IReadOnlyList<TimeEntryView>> ListForCardAsync(Guid boardCardId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<UnbilledTimeSummary>> ListUnbilledAsync(CancellationToken cancellationToken = default);
 

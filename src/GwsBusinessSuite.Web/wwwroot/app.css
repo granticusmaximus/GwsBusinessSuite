@@ -1020,6 +1020,71 @@ h1:focus { outline: none; }
     pointer-events: none;
 }
 
+/* The gap a drag opens (K7): the drop line becomes the slot the card will take. */
+.kb-drop-line.is-slot {
+    height: 3rem;
+    border: 2px dashed color-mix(in srgb, var(--gws-sidebar-accent) 70%, transparent);
+    border-radius: var(--gws-radius-sm, 8px);
+    background: color-mix(in srgb, var(--gws-sidebar-accent) 8%, transparent);
+    box-shadow: none;
+}
+
+/* A card reaching Done (K7): a ring, sparks and a check over it, then gone. */
+.kb-burst {
+    position: fixed;
+    z-index: 1998;
+    width: 0;
+    height: 0;
+    pointer-events: none;
+}
+
+.kb-burst::before {
+    content: "";
+    position: absolute;
+    left: -28px;
+    top: -28px;
+    width: 56px;
+    height: 56px;
+    border: 2px solid var(--gws-status-success-fill);
+    border-radius: 50%;
+    animation: kb-burst-ring .7s ease-out forwards;
+}
+
+.kb-burst > span {
+    position: absolute;
+    left: -3px;
+    top: -3px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--gws-status-success-fill);
+    transform: rotate(var(--a)) translateY(0);
+    animation: kb-burst-spark .8s cubic-bezier(.2, .8, .2, 1) forwards;
+}
+
+.kb-burst > span:nth-child(3n) { background: var(--gws-sidebar-accent); }
+.kb-burst > span:nth-child(3n + 1) { width: 4px; height: 4px; }
+
+.kb-burst > i {
+    position: absolute;
+    left: -14px;
+    top: -14px;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    font-size: 1.125rem;
+    color: #fff;
+    background: var(--gws-status-success-fill);
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--gws-status-success-fill) 45%, transparent);
+    animation: kb-burst-check 1s cubic-bezier(.2, .8, .2, 1) forwards;
+}
+
+@keyframes kb-burst-ring { from { transform: scale(.3); opacity: .9; } to { transform: scale(1.9); opacity: 0; } }
+@keyframes kb-burst-spark { 0% { transform: rotate(var(--a)) translateY(0) scale(1); opacity: 1; } 100% { transform: rotate(var(--a)) translateY(-46px) scale(.4); opacity: 0; } }
+@keyframes kb-burst-check { 0% { transform: scale(0); } 30% { transform: scale(1.15); } 45% { transform: scale(1); opacity: 1; } 80% { opacity: 1; } 100% { transform: scale(.9); opacity: 0; } }
+
 /* Boards' dialogs (the sprint planner, Automate): shared by components with their own scoped CSS. */
 .kb-modal-backdrop {
     position: fixed;

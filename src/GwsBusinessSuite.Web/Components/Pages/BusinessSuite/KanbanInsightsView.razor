@@ -51,6 +51,55 @@
             </div>
         </div>
 
+        @if (insights.Forecasts is { Count: > 0 } forecasts)
+        {
+            @* Forecasts (K8): Monte Carlo from the board's own finishing rate - no estimates. *@
+            var chosen = forecasts.FirstOrDefault(item => item.Key == _forecastKey) ?? forecasts[0];
+            var forecast = chosen.Forecast;
+            <section class="kbi-card kbi-wide" aria-labelledby="kbi-forecast-title">
+                <header class="kbi-card-head">
+                    <h3 id="kbi-forecast-title">When it's likely done</h3>
+                    <p>@ForecastNote(insights)</p>
+                </header>
+                <div class="kbi-forecast-pick" role="group" aria-label="Forecast for">
+                    @foreach (var item in forecasts)
+                    {
+                        <button type="button" class="kbi-range-btn @(item.Key == chosen.Key ? "is-on" : "")" aria-pressed="@(item.Key == chosen.Key ? "true" : "false")"
+                                @onclick="() => _forecastKey = item.Key">@item.Name <span class="kbi-forecast-count">@item.Forecast.Remaining</span></button>
+                    }
+                </div>
+                @if (forecast.Remaining == 0)
+                {
+                    <p class="kbi-empty">Nothing left to do here.</p>
+                }
+                else if (!forecast.CanForecast)
+                {
+                    <p class="kbi-empty">Not enough history to forecast yet: nothing has been finished since moves were first recorded.</p>
+                }
+                else
+                {
+                    <div class="kbi-forecast-dates">
+                        @foreach (var (label, date, sub) in new[] { ("50% likely by", forecast.P50!.Value, "a coin flip"), ("85% likely by", forecast.P85!.Value, "a date to promise"), ("95% likely by", forecast.P95!.Value, "almost certain") })
+                        {
+                            <div class="kbi-tile @(label.StartsWith("85", StringComparison.Ordinal) ? "is-key" : "")">
+                                <span class="kbi-tile-label">@label</span>
+                                <span class="kbi-tile-value">@WhenLabel(date)</span>
+                                <span class="kbi-tile-sub">@sub · @forecast.Remaining @(forecast.Remaining == 1 ? "card" : "cards")</span>
+                            </div>
+                        }
+                    </div>
+                    <div class="kbi-scroll">@ForecastChart(chosen)</div>
+                    <details class="kbi-data">
+                        <summary>Data</summary>
+                        <table class="table table-sm">
+                            <thead><tr><th>Done by the end of</th><th class="text-end">Chance</th></tr></thead>
+                            <tbody>@foreach (var point in forecast.Curve) { <tr><td>@point.Day.ToGwsDate()</td><td class="text-end">@Percent(point.Chance)</td></tr> }</tbody>
+                        </table>
+                    </details>
+                }
+            </section>
+        }
+
         <section class="kbi-card kbi-wide" aria-labelledby="kbi-flow-title">
             <header class="kbi-card-head">
                 <h3 id="kbi-flow-title">Cumulative flow</h3>
@@ -161,6 +210,7 @@
 
     private KanbanInsights? _insights;
     private int _days = 30;
+    private string? _forecastKey;
     private ElementReference _root;
     private IJSObjectReference? _module;
     private IJSObjectReference? _handle;
@@ -190,6 +240,67 @@
     // carry no scope attribute, so their styles use ::deep.
     private static MarkupString SvgText(string cssClass, double x, double y, string anchor, string content) =>
         new($"<text class=\"{cssClass}\" x=\"{F(x)}\" y=\"{F(y)}\" text-anchor=\"{anchor}\">{System.Net.WebUtility.HtmlEncode(content)}</text>");
+
+    private static string ForecastNote(KanbanInsights insights)
+    {
+        var sampled = insights.DailyDone?.Count ?? 0;
+        var note = $"Simulated {KanbanForecasting.Trials:N0} times from the last {sampled} {(sampled == 1 ? "day" : "days")} of this board: how many cards it finished each day, quiet days included.";
+        return sampled < 14 ? note + " With under two weeks of history, treat these as rough." : note;
+    }
+
+    private static string Percent(double chance) => (chance * 100).ToString("0", CultureInfo.InvariantCulture) + "%";
+
+    private static string WhenLabel(DateOnly day)
+    {
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        if (day == today) return "Today";
+        if (day == today.AddDays(1)) return "Tomorrow";
+        return $"{CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedDayName(day.DayOfWeek)} {day.ToGwsDate()}";
+    }
+
+    // The chance of being done by the end of each day, with the 50 / 85 / 95% days marked.
+    private RenderFragment ForecastChart(KanbanNamedForecast chosen) => __builder =>
+    {
+        var curve = chosen.Forecast.Curve;
+        const double width = 820, height = 220, left = 40, right = 24, top = 22, bottom = 26;
+        var plotW = width - left - right;
+        var plotH = height - top - bottom;
+        var n = curve.Count;
+        double X(int i) => left + (n <= 1 ? plotW / 2 : i * plotW / (n - 1));
+        double Y(double chance) => top + plotH * (1 - chance);
+        var line = string.Join(" ", Enumerable.Range(0, n).Select(i => $"{F(X(i))},{F(Y(curve[i].Chance))}"));
+        var area = $"M{F(X(0))},{F(Y(0))} L{string.Join(" L", Enumerable.Range(0, n).Select(i => $"{F(X(i))},{F(Y(curve[i].Chance))}"))} L{F(X(n - 1))},{F(Y(0))} Z";
+        <svg class="kbi-svg" viewBox="0 0 @F(width) @F(height)" width="@F(width)" height="@F(height)" role="img" aria-labelledby="kbi-forecast-title" data-kbi-chart>
+            @foreach (var tick in new[] { 0, 0.25, 0.5, 0.75, 1 })
+            {
+                <line class="kbi-grid" x1="@F(left)" x2="@F(left + plotW)" y1="@F(Y(tick))" y2="@F(Y(tick))" />
+                @SvgText("kbi-axis", left - 6, Y(tick) + 4, "end", Percent(tick))
+            }
+            <path class="kbi-forecast-area" d="@area" />
+            <polyline class="kbi-forecast-line" points="@line" />
+            @foreach (var (label, day) in new[] { ("50%", chosen.Forecast.P50), ("85%", chosen.Forecast.P85), ("95%", chosen.Forecast.P95) })
+            {
+                var at = curve.ToList().FindIndex(point => point.Day == day);
+                @if (at >= 0)
+                {
+                    <line class="kbi-ref" x1="@F(X(at))" x2="@F(X(at))" y1="@F(top)" y2="@F(top + plotH)" />
+                    @SvgText("kbi-ref-label", X(at), top - 6, "middle", label)
+                }
+            }
+            <line class="kbi-crosshair" x1="0" x2="0" y1="@F(top)" y2="@F(top + plotH)" data-kbi-crosshair visibility="hidden" />
+            @foreach (var i in new[] { 0, n / 2, n - 1 }.Distinct())
+            {
+                @SvgText("kbi-axis", X(i), height - 6, i == 0 && n > 1 ? "start" : i == n - 1 && n > 1 ? "end" : "middle", i == 0 ? "today" : curve[i].Day.ToString("dd-MM", CultureInfo.InvariantCulture))
+            }
+            @for (var i = 0; i < n; i++)
+            {
+                var point = curve[i];
+                var slot = n <= 1 ? plotW : plotW / (n - 1);
+                <rect class="kbi-hit" x="@F(Math.Max(left, X(i) - slot / 2))" width="@F(Math.Min(slot, plotW))" y="@F(top)" height="@F(plotH)"
+                      data-kbi-tip-text="@($"Done by the end of {WhenLabel(point.Day)}\n{Percent(point.Chance)}\tlikely\t")" data-kbi-x="@F(X(i))" />
+            }
+        </svg>
+    };
 
     // ("column@(" would read to Razor as an email address, so the sentence is built here.)
     private static string AgingNote(KanbanInsights insights) => insights.P85CycleDays is { } p85

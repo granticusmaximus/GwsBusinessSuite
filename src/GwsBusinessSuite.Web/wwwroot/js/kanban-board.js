@@ -4,13 +4,18 @@
 // before), which saves it and re-renders the board. Pointer events: a mouse drags a card from
 // anywhere on it; touch drags from the card's grip (touch-action: none), so a swipe elsewhere still
 // scrolls. Arrow keys move between cards, [ and ] move a card a column, Alt+arrows reorder it.
+// Motion (K7): the dragged copy lifts and tilts with the pointer, the cards below the drop point
+// open a gap for it, and when the board re-renders every card that moved glides from where it was
+// (FLIP) - the dropped one settling into place. Reduced motion keeps the plain drop line.
 
 const DRAG_THRESHOLD = 5;
 const EDGE = 64;
+const GLIDE = 'cubic-bezier(.2, .8, .2, 1)';
+const calm = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function init(root, dotnet) {
     let press = null;   // { card, x, y, pointerId }
-    let drag = null;    // { card, ghost, line, offsetX, offsetY, x, y, target, frame }
+    let drag = null;    // { card, ghost, line, offsetX, offsetY, x, y, vx, tilt, gap, target, frame }
     const swallowClick = event => { event.stopPropagation(); event.preventDefault(); };
 
     const columns = () => [...root.querySelectorAll('[data-kb-column]')];
@@ -32,10 +37,19 @@ export function init(root, dotnet) {
         }
         if (!drag) return;
         event.preventDefault();
+        drag.vx = event.clientX - drag.x;
         drag.x = event.clientX;
         drag.y = event.clientY;
-        drag.ghost.style.transform = `translate(${drag.x - drag.offsetX}px, ${drag.y - drag.offsetY}px) rotate(2deg)`;
+        paint();
         locate();
+    }
+
+    // The lifted copy leans into the way it's moving and straightens as it slows.
+    function paint() {
+        const still = calm();
+        const lean = still ? 0 : Math.max(-9, Math.min(9, drag.vx * 0.8));
+        drag.tilt += (lean - drag.tilt) * 0.25;
+        drag.ghost.style.transform = `translate(${drag.x - drag.offsetX}px, ${drag.y - drag.offsetY}px) rotate(${(still ? 2 : drag.tilt).toFixed(2)}deg) scale(${still ? 1 : 1.03})`;
     }
 
     function begin(event) {
@@ -54,7 +68,7 @@ export function init(root, dotnet) {
         document.body.appendChild(line);
         card.classList.add('kb-dragging');
         root.classList.add('kb-is-dragging');
-        drag = { card, ghost, line, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top, x: event.clientX, y: event.clientY, target: null, frame: 0 };
+        drag = { card, ghost, line, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top, x: event.clientX, y: event.clientY, vx: 0, tilt: 2, gap: calm() ? 0 : rect.height + 8, target: null, frame: 0 };
         try { card.setPointerCapture(event.pointerId); } catch { /* the pointer may be gone */ }
         drag.frame = requestAnimationFrame(autoScroll);
     }
@@ -72,17 +86,94 @@ export function init(root, dotnet) {
             if (d < best) { best = d; column = c; }
         }
         const others = cardsIn(column).filter(c => c !== drag.card);
-        const before = others.find(c => { const r = c.getBoundingClientRect(); return drag.y < r.top + r.height / 2; }) || null;
-        all.forEach(c => c.classList.toggle('kb-drop-target', c === column));
-        drag.target = { column, before };
-
         const list = column.querySelector('[data-kb-cards]');
         const listRect = list.getBoundingClientRect();
+        // Where each card sits in the list's layout - offsetTop ignores the gap's transform, even
+        // halfway through its slide, so the drop point doesn't jump about.
+        const top = c => listRect.top + c.offsetTop;
+        const before = others.find(c => drag.y < top(c) + c.offsetHeight / 2) || null;
+        all.forEach(c => c.classList.toggle('kb-drop-target', c === column));
+        drag.target = { column, before };
+        openGap(others, before);
+
         let y;
-        if (before) y = before.getBoundingClientRect().top - 5;
-        else if (others.length) y = others[others.length - 1].getBoundingClientRect().bottom + 3;
+        if (before) y = top(before) - 5;
+        else if (others.length) y = top(others[others.length - 1]) + others[others.length - 1].offsetHeight + 3;
         else y = listRect.top + 4;
-        Object.assign(drag.line.style, { left: listRect.left + 6 + 'px', width: listRect.width - 12 + 'px', top: y + 'px', display: 'block' });
+        const slot = drag.gap > 0 && before;
+        drag.line.classList.toggle('is-slot', !!slot);
+        Object.assign(drag.line.style, {
+            left: listRect.left + 6 + 'px', width: listRect.width - 12 + 'px', top: y + 'px', display: 'block',
+            height: slot ? drag.gap - 6 + 'px' : ''
+        });
+    }
+
+    // The cards from the drop point down slide aside to make room; every other card settles back.
+    function openGap(others, before) {
+        if (!drag.gap) return;
+        const from = before ? others.indexOf(before) : -1;
+        const moving = new Set(from < 0 ? [] : others.slice(from));
+        for (const c of root.querySelectorAll('[data-kb-shifted]')) {
+            if (!moving.has(c)) { c.removeAttribute('data-kb-shifted'); c.style.transform = ''; }
+        }
+        for (const c of moving) {
+            if (c.hasAttribute('data-kb-shifted')) continue;
+            c.setAttribute('data-kb-shifted', '');
+            c.style.transform = `translateY(${drag.gap}px)`;
+        }
+    }
+
+    function closeGap(instant) {
+        for (const c of root.querySelectorAll('[data-kb-shifted]')) {
+            c.removeAttribute('data-kb-shifted');
+            if (instant) {
+                c.style.transition = 'none';
+                c.style.transform = '';
+                requestAnimationFrame(() => { c.style.transition = ''; });
+            } else {
+                c.style.transform = '';
+            }
+        }
+    }
+
+    // Where every card is on screen now, by id - the "first" of FLIP.
+    function snapshot() {
+        const rects = new Map();
+        for (const c of root.querySelectorAll('[data-kb-card]')) rects.set(c.getAttribute('data-kb-card'), c.getBoundingClientRect());
+        return rects;
+    }
+
+    // Plays the move once Blazor's next render lands: each card that moved glides from its old
+    // place to its new one; `landed` (a dropped card) settles in from where it was let go.
+    function glideAfterRender(before, landed) {
+        if (calm()) return;
+        const observer = new MutationObserver(() => {
+            observer.disconnect();
+            clearTimeout(timer);
+            requestAnimationFrame(() => glide(before, landed));
+        });
+        const timer = setTimeout(() => observer.disconnect(), 3000);
+        observer.observe(root, { childList: true, subtree: true });
+    }
+
+    function glide(before, landed) {
+        for (const card of root.querySelectorAll('[data-kb-card]')) {
+            const id = card.getAttribute('data-kb-card');
+            const was = before.get(id);
+            if (!was) continue;
+            const now = card.getBoundingClientRect();
+            const dx = was.left - now.left;
+            const dy = was.top - now.top;
+            if (id === landed) {
+                card.animate([
+                    { transform: `translate(${dx}px, ${dy}px) rotate(1.5deg) scale(1.03)`, boxShadow: '0 18px 40px rgba(0, 0, 0, .35)' },
+                    { transform: 'translate(0, 0) scale(1.012)', offset: 0.8 },
+                    { transform: 'none' }
+                ], { duration: 340, easing: GLIDE });
+            } else if (Math.abs(dx) >= 1 || Math.abs(dy) >= 1) {
+                card.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: 'none' }], { duration: 240, easing: GLIDE });
+            }
+        }
     }
 
     function autoScroll() {
@@ -93,12 +184,15 @@ export function init(root, dotnet) {
             if (drag.x < r.left + EDGE) board.scrollLeft -= Math.ceil((r.left + EDGE - drag.x) / 4);
             else if (drag.x > r.right - EDGE) board.scrollLeft += Math.ceil((drag.x - (r.right - EDGE)) / 4);
         }
-        const list = drag.target && drag.target.column.querySelector('[data-kb-cards]');
-        if (list) {
-            const r = list.getBoundingClientRect();
-            if (drag.y < r.top + EDGE / 2) list.scrollTop -= 8;
-            else if (drag.y > r.bottom - EDGE / 2) list.scrollTop += 8;
+        // A column scrolls as a whole (K7); with swimlanes the board itself scrolls down.
+        const box = drag.target && drag.target.column.scrollHeight > drag.target.column.clientHeight ? drag.target.column : board;
+        if (box && box.scrollHeight > box.clientHeight) {
+            const r = box.getBoundingClientRect();
+            if (drag.y < r.top + EDGE / 2) box.scrollTop -= 8;
+            else if (drag.y > r.bottom - EDGE / 2) box.scrollTop += 8;
         }
+        drag.vx *= 0.8;
+        paint();
         locate();
         drag.frame = requestAnimationFrame(autoScroll);
     }
@@ -109,6 +203,10 @@ export function init(root, dotnet) {
         drag = null;
         if (!current) return;
         cancelAnimationFrame(current.frame);
+        // What the eye sees at the drop - the open gap, and the copy where it was let go - is
+        // where the glide starts from.
+        const before = snapshot();
+        before.set(current.card.getAttribute('data-kb-card'), current.ghost.getBoundingClientRect());
         current.ghost.remove();
         current.line.remove();
         current.card.classList.remove('kb-dragging');
@@ -117,16 +215,18 @@ export function init(root, dotnet) {
         // The pointerup that ends a drag also clicks the card; that click must not open it.
         window.addEventListener('click', swallowClick, { capture: true, once: true });
         setTimeout(() => window.removeEventListener('click', swallowClick, { capture: true }), 0);
-        if (!commit || !current.target) return;
-        const { column, before } = current.target;
+        if (!commit || !current.target) { closeGap(false); return; }
+        const { column, before: anchor } = current.target;
         const sameColumn = column.contains(current.card);
         const next = cardsIn(column).filter(c => c !== current.card)[cardsIn(column).indexOf(current.card)] || null;
-        if (sameColumn && before === next) return; // dropped where it was
-        move(current.card, column, before);
+        if (sameColumn && anchor === next) { closeGap(false); return; } // dropped where it was
+        closeGap(true);
+        move(current.card, column, anchor, before);
     }
 
-    function move(card, column, before) {
+    function move(card, column, before, from) {
         const id = card.getAttribute('data-kb-card');
+        glideAfterRender(from || snapshot(), from ? id : null);
         return dotnet.invokeMethodAsync('MoveCard', id, column.getAttribute('data-kb-column'), before ? before.getAttribute('data-kb-card') : '', column.getAttribute('data-kb-lane'))
             .then(() => refocus(id))
             .catch(() => { /* .NET reports a failed move itself */ });
@@ -223,8 +323,37 @@ export function init(root, dotnet) {
     return {
         // Live updates (K6) wait for a drag to finish before the board re-renders.
         isDragging() { return drag !== null; },
+        // A live update is about to re-render the board: its cards glide to where they land.
+        prepareGlide() { glideAfterRender(snapshot(), null); },
+        // A card reached a Done column (K7): a check bursts over it once it has settled. It lives
+        // on <body>, outside the cards Blazor renders.
+        celebrate(id) {
+            if (calm()) return;
+            const card = root.querySelector(`[data-kb-card="${CSS.escape(id)}"]`);
+            if (!card) return;
+            setTimeout(() => {
+                const r = card.getBoundingClientRect();
+                if (r.width === 0) return;
+                const burst = document.createElement('div');
+                burst.className = 'kb-burst';
+                burst.setAttribute('aria-hidden', 'true');
+                burst.style.left = r.left + r.width / 2 + 'px';
+                burst.style.top = r.top + r.height / 2 + 'px';
+                for (let i = 0; i < 12; i++) {
+                    const spark = document.createElement('span');
+                    spark.style.setProperty('--a', i * 30 + 'deg');
+                    burst.appendChild(spark);
+                }
+                const check = document.createElement('i');
+                check.className = 'bi bi-check-lg';
+                burst.appendChild(check);
+                document.body.appendChild(burst);
+                setTimeout(() => burst.remove(), 1100);
+            }, 260);
+        },
         dispose() {
             end(false);
+            document.querySelectorAll('.kb-burst').forEach(burst => burst.remove());
             root.removeEventListener('pointerdown', onPointerDown);
             root.removeEventListener('click', onClickCapture, true);
             window.removeEventListener('pointermove', onPointerMove);

@@ -1,0 +1,56 @@
+/* My day (Boards K8d). */
+.md-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: var(--gws-step-3); margin-bottom: var(--gws-step-5); }
+
+.md-tile {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    grid-template-rows: auto auto;
+    column-gap: var(--gws-step-2);
+    align-items: center;
+    padding: var(--gws-step-3) var(--gws-step-4);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md, 10px);
+    color: var(--gws-text-strong);
+    background: var(--gws-panel-bg);
+    text-decoration: none;
+}
+
+.md-tile:hover { border-color: var(--gws-sidebar-accent); }
+.md-tile i { grid-row: span 2; font-size: 1.25rem; color: var(--gws-sidebar-accent); }
+.md-tile strong { font-size: 1.5rem; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.md-tile span { font-size: .8125rem; color: var(--gws-text-soft); }
+.md-tile.is-alert { border-color: color-mix(in srgb, var(--gws-status-danger-fill) 60%, var(--gws-panel-border)); }
+.md-tile.is-alert i, .md-tile.is-alert strong { color: var(--gws-status-danger-text); }
+
+.md-section { margin-bottom: var(--gws-step-5); scroll-margin-top: var(--gws-step-5); }
+.md-section h2 { display: flex; align-items: center; gap: var(--gws-step-2); margin: 0 0 var(--gws-step-2); font-size: 1rem; font-weight: 700; }
+.md-section h2 span { padding: 0 8px; border-radius: 999px; font-size: .75rem; font-weight: 600; color: var(--gws-text-soft); background: var(--gws-panel-bg-2); }
+.md-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+
+.md-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--gws-step-2) var(--gws-step-3);
+    padding: var(--gws-step-2) var(--gws-step-3);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-sm, 8px);
+    background: var(--gws-panel-bg);
+    transition: opacity .2s ease;
+}
+
+.md-row.is-done { opacity: .5; }
+.md-board { display: inline-flex; align-items: center; gap: 6px; font-size: .75rem; color: var(--gws-text-soft); text-decoration: none; }
+.md-board:hover { color: var(--gws-text-strong); }
+.md-card { display: inline-flex; flex: 1 1 16rem; align-items: baseline; gap: var(--gws-step-2); min-width: 0; color: var(--gws-text-strong); text-decoration: none; }
+.md-card:hover .md-title { text-decoration: underline; }
+.md-key { font-family: var(--gws-font-mono); font-size: .75rem; color: var(--gws-text-soft); }
+.md-title { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.md-column, .md-priority { padding: 0 8px; border-radius: 999px; font-size: .75rem; color: color-mix(in srgb, var(--tone, var(--gws-text-soft)) 70%, var(--gws-text-strong)); background: color-mix(in srgb, var(--tone, var(--gws-text-soft)) 14%, transparent); }
+.md-due { display: inline-flex; align-items: center; gap: 4px; font-size: .75rem; color: var(--gws-text-soft); font-variant-numeric: tabular-nums; }
+.md-due.is-late { color: var(--gws-status-danger-text); font-weight: 600; }
+.md-due.is-today { color: var(--gws-status-warning-text); font-weight: 600; }
+.md-done { display: inline-flex; align-items: center; gap: 4px; margin-inline-start: auto; }
+
+@media (pointer: coarse) { .md-done { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) { .md-row { transition: none; } }

@@ -11,13 +11,17 @@ public static class DeveloperApiScopes
     // Deliberately has no "sentinel:write" counterpart - see NativeToolExecutor (App project)
     // for why the native Mac SentinelGPT tab's tool set is permanently read-only.
     public const string SentinelRead = "sentinel:read";
+    // Boards K8d: adds cards to a board (the menu-bar companion's Add a Card), and lists boards to
+    // pick from - nothing else on a board, and nothing else in Sentinel.
+    public const string BoardsWrite = "boards:write";
 
     public static readonly string[] All =
     [
         ContactsRead, ContactsWrite,
         DealsRead, DealsWrite,
         CmsPagesRead, CmsPagesWrite,
-        SentinelRead
+        SentinelRead,
+        BoardsWrite
     ];
 }
 

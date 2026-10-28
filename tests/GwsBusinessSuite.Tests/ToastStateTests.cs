@@ -79,4 +79,22 @@ public sealed class ToastStateTests
         _toasts.OnNavigated();
         _toasts.Current.Should().BeNull("only the one navigation");
     }
+
+    [Fact]
+    public async Task AnotherAction_ShouldSpeakForItself_RatherThanSayUndone()
+    {
+        // Boards K8c: a toast's button can be an action other than Undo ("Resolve", "Open card").
+        _toasts.Show("PRO-7 is done. Resolve its ticket too?", () =>
+        {
+            _toasts.Show("Ticket resolved.", tone: StatusTone.Success);
+            return Task.CompletedTask;
+        }, actionLabel: "Resolve");
+        _toasts.Current!.ActionLabel.Should().Be("Resolve");
+        await _toasts.UndoAsync(_toasts.Current.Id);
+        _toasts.Current!.Message.Should().Be("Ticket resolved.");
+
+        _toasts.Show("Added.", () => throw new InvalidOperationException("gone"), actionLabel: "Open card");
+        await _toasts.UndoAsync(_toasts.Current!.Id);
+        _toasts.Current!.Message.Should().Be("Couldn't do that. gone");
+    }
 }

@@ -1,0 +1,166 @@
+@page "/admin/my-day"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Domain.Entities
+@inject IKanbanBoardService BoardService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
+
+<PageTitle>My day</PageTitle>
+
+@* My day (Boards K8d): everything assigned to me across every board - overdue, due today, in
+   progress, up next - with my open support tickets and the follow-ups due, in one place. *@
+<PageHeader Title="My day" Icon="bi-sun-fill" Description="@Subtitle">
+    <Actions>
+        <a class="btn btn-outline-secondary" href="admin/boards"><i class="bi bi-kanban me-1" aria-hidden="true"></i>All boards</a>
+    </Actions>
+</PageHeader>
+
+@if (_day is null)
+{
+    <ListSkeleton Message="Gathering your day…" Rows="5" CssClass="px-0" />
+}
+else
+{
+    var day = _day;
+    <div class="md-tiles">
+        @foreach (var (bucket, label, icon) in Buckets)
+        {
+            var count = day.Cards.Count(card => card.Bucket == bucket);
+            <a class="md-tile @(bucket == KanbanMyDayBuckets.Overdue && count > 0 ? "is-alert" : "")" href="@($"admin/my-day#md-{bucket}")">
+                <i class="bi @icon" aria-hidden="true"></i><strong>@count</strong><span>@label</span>
+            </a>
+        }
+        <a class="md-tile" href="admin/my-day#md-tickets"><i class="bi bi-life-preserver" aria-hidden="true"></i><strong>@day.Tickets.Count</strong><span>Tickets</span></a>
+        <a class="md-tile" href="admin/my-day#md-follow-ups"><i class="bi bi-telephone-outbound" aria-hidden="true"></i><strong>@day.FollowUps.Count</strong><span>Follow-ups</span></a>
+    </div>
+
+    @if (day.Cards.Count == 0 && day.Tickets.Count == 0 && day.FollowUps.Count == 0)
+    {
+        <EmptyState Icon="bi-sun" Title="A clear day" Message="Nothing on any board is assigned to you, no tickets are waiting on you, and no follow-ups are due." />
+    }
+
+    @foreach (var (bucket, label, icon) in Buckets.Where(item => day.Cards.Any(card => card.Bucket == item.Bucket)))
+    {
+        var items = day.Cards.Where(card => card.Bucket == bucket).ToList();
+        <section class="md-section" id="@($"md-{bucket}")" aria-labelledby="@($"md-{bucket}-title")">
+            <h2 id="@($"md-{bucket}-title")"><i class="bi @icon" aria-hidden="true"></i>@label <span>@items.Count</span></h2>
+            <ul class="md-list">
+                @foreach (var item in items)
+                {
+                    <li @key="item.Card.RowId" class="md-row @(_finishing.Contains(item.Card.RowId) ? "is-done" : "")">
+                        <a class="md-board" href="@($"admin/boards/{item.BoardId}")" title="Open the board"><span aria-hidden="true">@(item.BoardIcon ?? "🗂️")</span>@item.BoardTitle</a>
+                        <a class="md-card" href="@($"admin/boards/{item.BoardId}?card={item.Card.RowId}")">
+                            @if (item.Card.Key is not null) { <span class="md-key">@item.Card.Key</span> }
+                            <span class="md-title">@item.Card.Title</span>
+                        </a>
+                        <span class="md-column" style="--tone: @item.ColumnColor">@item.Column</span>
+                        @if (item.Card.Due is { } due)
+                        {
+                            <span class="md-due @(item.Bucket == KanbanMyDayBuckets.Overdue ? "is-late" : item.Bucket == KanbanMyDayBuckets.Today ? "is-today" : "")">
+                                <i class="bi bi-calendar-event" aria-hidden="true"></i>@DateOnly.FromDateTime(due.UtcDateTime).ToGwsDate()
+                            </span>
+                        }
+                        @if (item.Card.Priority is { } priority) { <span class="md-priority" style="--tone: @priority.Color">@priority.Label</span> }
+                        @if (item.DoneOptionId is not null)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-success md-done" disabled="@_finishing.Contains(item.Card.RowId)"
+                                    aria-label="@($"Mark {item.Card.Title} done")" @onclick="() => DoneAsync(item)"><i class="bi bi-check-lg" aria-hidden="true"></i>Done</button>
+                        }
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
+    @if (day.Tickets.Count > 0)
+    {
+        <section class="md-section" id="md-tickets" aria-labelledby="md-tickets-title">
+            <h2 id="md-tickets-title"><i class="bi bi-life-preserver" aria-hidden="true"></i>Support tickets assigned to you <span>@day.Tickets.Count</span></h2>
+            <ul class="md-list">
+                @foreach (var ticket in day.Tickets)
+                {
+                    <li @key="ticket.Id" class="md-row">
+                        <a class="md-card" href="@($"admin/support?ticket={ticket.Id}")" data-preview="@($"ticket:{ticket.Id}")"><span class="md-title">@ticket.Subject</span></a>
+                        <span class="md-column">@ticket.ContactName</span>
+                        <span class="md-priority">@ticket.Status · @ticket.Priority</span>
+                        @if (ticket.ResolutionDueAt is { } due)
+                        {
+                            <span class="md-due @(due < DateTimeOffset.UtcNow ? "is-late" : "")"><i class="bi bi-alarm" aria-hidden="true"></i>@due.ToLocalTime().ToGwsDate()</span>
+                        }
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+
+    @if (day.FollowUps.Count > 0)
+    {
+        <section class="md-section" id="md-follow-ups" aria-labelledby="md-follow-ups-title">
+            <h2 id="md-follow-ups-title"><i class="bi bi-telephone-outbound" aria-hidden="true"></i>Follow-ups due <span>@day.FollowUps.Count</span></h2>
+            <ul class="md-list">
+                @foreach (var followUp in day.FollowUps)
+                {
+                    <li @key="followUp.ContactId" class="md-row">
+                        <a class="md-card" href="@($"admin/crm/contacts/{followUp.ContactId}")" data-preview="@($"contact:{followUp.ContactId}")"><span class="md-title">@followUp.Name</span></a>
+                        @if (!string.IsNullOrWhiteSpace(followUp.Company)) { <span class="md-column">@followUp.Company</span> }
+                        <span class="md-due @(DateOnly.FromDateTime(followUp.FollowUp.LocalDateTime) < day.Today ? "is-late" : "is-today")">
+                            <i class="bi bi-calendar-event" aria-hidden="true"></i>@followUp.FollowUp.ToLocalTime().ToGwsDate()
+                        </span>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+}
+
+@code {
+    private static readonly (string Bucket, string Label, string Icon)[] Buckets =
+    [
+        (KanbanMyDayBuckets.Overdue, "Overdue", "bi-exclamation-octagon"),
+        (KanbanMyDayBuckets.Today, "Due today", "bi-calendar-check"),
+        (KanbanMyDayBuckets.Doing, "In progress", "bi-play-circle"),
+        (KanbanMyDayBuckets.Next, "Up next", "bi-arrow-right-circle")
+    ];
+
+    private KanbanMyDay? _day;
+    private string _me = string.Empty;
+    private readonly HashSet<Guid> _finishing = [];
+
+    private string Subtitle => _day is null ? "Your cards on every board, your tickets and your follow-ups."
+        : $"{System.Globalization.CultureInfo.InvariantCulture.DateTimeFormat.GetDayName(_day.Today.DayOfWeek)} {_day.Today.ToGwsDate()} · your cards on every board, your tickets and your follow-ups.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _me = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        _day = await BoardService.GetMyDayAsync(_me);
+    }
+
+    // Done moves the card to its board's first complete column, with Undo.
+    private async Task DoneAsync(KanbanMyDayCard item)
+    {
+        _finishing.Add(item.Card.RowId);
+        try
+        {
+            var board = await BoardService.GetBoardAsync(item.BoardId);
+            var from = board?.Columns.FirstOrDefault(column => column.Cards.Any(card => card.RowId == item.Card.RowId))?.OptionId;
+            await BoardService.MoveCardAsync(item.BoardId, item.Card.RowId, item.DoneOptionId, null, _me);
+            _day = await BoardService.GetMyDayAsync(_me);
+            Toasts.Show($"{item.Card.Key ?? item.Card.Title} is done.", async () =>
+            {
+                await BoardService.MoveCardAsync(item.BoardId, item.Card.RowId, from, null, _me);
+                _day = await BoardService.GetMyDayAsync(_me);
+                StateHasChanged();
+            }, tone: StatusTone.Success);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException or ArgumentException)
+        {
+            Toasts.Show($"Couldn't finish it. {ex.Message}", tone: StatusTone.Danger);
+        }
+        finally
+        {
+            _finishing.Remove(item.Card.RowId);
+        }
+    }
+}

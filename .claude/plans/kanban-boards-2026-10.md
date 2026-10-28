@@ -247,6 +247,29 @@ Route: `/admin/boards` (your boards, new board from a template) and `/admin/boar
 - Live updates when a card changes elsewhere (the board's open in two places), recurring cards and
   card templates from the board, Mac app check, user guide.
 
+**K6 done 28-10-26.** - Rules are Sentinel database rules (each an Automation workflow) with a new
+`WhenPropertyBecomes` kind built on the trigger's new `changedTo` operator (needs `previousValues`,
+now in every `database.rowChangedTrigger` payload) and `CardsOnly` (a `core.if` on `parentRowId`),
+so a rule runs once as a card enters a column and never for sub-items. `MoveRowAsync` fires the
+trigger now (drags started no rule before - a real gap for Sentinel's own rules too). Actions: set
+a field (Person allowed now: `SaveInlineCellAsync` takes comma-separated usernames), complete its
+sub-items (new `database.completeSubItems` node -> `IKanbanBoardService.CompleteSubItemsAsync`),
+email, run a workflow. `KanbanAutomations.razor`: rules list, suggestions, builder; templates
+(`AddCardFromTemplateAsync` names the card after the template - Sentinel templates leave titles
+empty, so `CreateRowFromTemplateAsync` takes an optional title), repeats via `KanbanRepeats`
+(four shapes <-> cron) on Sentinel row recurrences, which now run on the app's local zone
+(`CronSchedule.GetNextOccurrence(..., zone)`; the UTC walk showed 08:30 as 04:30 here) and name
+rows after their template. Column ⚡ chips from `SentinelDatabaseRuleView.WhenPropertyId/Value`
+(read from the trigger node). Live: `WikiDatabaseChangeInterceptor` (SaveChanges hook) ->
+`WikiDatabaseChangeNotifier` -> Board reloads 400 ms later unless the save came from its own
+circuit's DbContext (`Origin`), waits out a drag (`isDragging`), lights changed cards (re-sort-only
+rows excluded) and credits the person over the rule they set off. Mac check: Playwright WebKit
+(drag, keys, drawer, live, Insights, dialogs) - found Escape dead in both board dialogs because
+WebKit doesn't focus a clicked button; dialogs now take focus on open. Local WebKit login needs
+the Secure auth cookie re-added without the flag (http only). Tests: end-to-end rules through the
+real engine, changedTo cases, builder, repeats, the save hook (incl. failed saves), template
+cards, local-zone schedules.
+
 ### K7 - Visual polish (Grant: "complete all", 27-10-26)
 - Motion: FLIP glide when cards move, neighbours open a gap while dragging, a lift (shadow, tilt
   with the pointer) and a settle on drop; reduced motion turns it off.
@@ -259,7 +282,66 @@ Route: `/admin/boards` (your boards, new board from a template) and `/admin/boar
 - Zoom out (mini-map of a big board) and focus one column.
 - Done celebration (a check burst), illustrated empty columns.
 
+**K7 done 28-10-26.** - Look settings (`KanbanLook`: card sizes, 8 accents, 5 preset backgrounds +
+an image, validated `IsImage` - https:// or a site path, nothing that can leave a CSS `url()`; the
+service refuses anything else). The board root carries `kb-size-*`, `kb-bg-*` and an accent that
+overrides `--gws-sidebar-accent` inside it. Covers fall back to the first image block; rich cards get
+`KanbanCard.Snippet`. Columns scroll as a whole under sticky frosted headers with a colour wash
+(the drag auto-scroll moved to the column). WIP ring (conic gradient), checklist progress bars.
+Motion in `kanban-board.js`: lift + lean with pointer velocity, a gap that opens under the drop
+point (positions from `offsetTop`, which ignores the gap's transform - rects mid-transition made
+the drop point jump), FLIP glide after Blazor's render (a MutationObserver), settle on drop,
+`celebrate` burst on `<body>` when a card enters a Complete column, `prepareGlide` for live
+updates; all off with reduced motion. Zoom out; focus one column (others fold, still drop
+targets; Esc leaves). Presence: `KanbanPresence` singleton (30 s check-ins, 90 s expiry) - ringed
+avatars, a pulse on a card someone has open. Illustrated empty columns. Found live: a press on a
+cover started a native image drag (covers now `draggable=false` + `pointer-events: none`, guarded
+by a test); covers were clipped by a global `img { max-width: 100% }`; the drag placeholder stayed
+opaque because pointer capture keeps it hovered. Burndown sparkline was already in the sprint bar
+(K4). Checked in Chromium and WebKit (the Mac app's engine).
+
 ### K8 - Beyond the competition
+
+K8 runs as five verified units: **K8a** one-line cards + forecasts; **K8b** SentinelGPT on the board;
+**K8c** business links + time on cards; **K8d** My day + Mac capture; **K8e** public roadmap + votes.
+
+**K8a done 28-10-26.** - `KanbanQuickParse` (!priority by name/prefix/number, #label, @person/@me,
+~estimate, a trailing day word or dd-MM[-yy]; only what the board has; a one-word title is never
+eaten) with chips under quick add; `AddQuickCardAsync` saves all fields in one `SaveRowAsync`, so
+rules see them on the row-added trigger. `KanbanForecasting`: Monte Carlo (4,000 seeded trials)
+over daily finishes since logging began (today excluded); `KanbanInsights.DailyDone/Forecasts`
+(everything open, the running sprint, what's in progress) with a cumulative-chance chart in
+Insights; `ForecastAsync(rowIds)` for the selection bar and the sprint bar's "85% likely done by".
+
+**K8b done 28-10-26.** - `GetBriefAsync` gathers the facts (card moves since the last working day
+with who made them, blocked / past-P85 cards, over-limit columns); `KanbanAssistant` turns them into
+plain lines (shown as-is, and the whole prompt) and holds the prompts plus `ParseSteps` (JSON object
+or array, else bullet lines; short, de-duplicated). `KanbanAssistantPanel` streams a write-up from
+`BrowserLocalOllamaService` (this computer's Ollama, `LocalModels.PickChatModel`), 3-minute cap;
+the drawer's Break it down uses `GenerateJsonAsync` and adds only ticked steps. Checked live with
+gemma4 (standup in ~2 s). Also fixed: the drawer's Blocked checkbox was stretched into a bar by
+`.kb-fields-inline > input` (K3).
+
+**K8c done 28-10-26.** - `BoardCardLink` entity (row -> contact / ticket / invoice, no FK so a deleted
+record shows as gone) + `TimeEntry.BoardCardId`, migration `AddBoardCardLinks`. `LinkAsync` (a ticket
+or invoice also links its contact), `ListLinksAsync` (live titles/status), `SearchLinkTargetsAsync`,
+`AddCardFromTicketAsync`, `OpenTicketsAsync`; board cards carry `LinkKinds` for their icons. Drawer:
+Linked (chips with `data-preview` hover cards, search, unlink with Undo) and Time (start/stop through
+`ITimeTrackingService`, billed to the linked contact, `ListForCardAsync`). Support's ticket header:
+Add to board. Done -> a "Resolve" toast (`ToastState` gained `actionLabel`; a non-undo action no
+longer says "Undone."). Found live: link icons were hidden on cards with no other footer details.
+
+**K8d done 28-10-26.** - `/admin/my-day` gathers every open card assigned to the signed-in user
+across boards into overdue / today / in-progress / next, alongside their open support tickets and
+due CRM follow-ups; Done moves a card to its first Complete column with Undo. The Mac menu-bar
+companion's Cmd-N quick add uses the same one-line parser through two `boards:write` endpoints,
+remembers the last board, and queues unreachable writes in a local Application Support outbox for
+the next successful refresh. The scope can only list boards and add a card. Focused Kanban tests
+(93), the separate trimmed menu-bar Release build (x64 + arm64, zero warnings), and the local
+server release gate passed; the gate is PARTIAL only because no deployed/responsive target was
+supplied. My day also loaded cleanly through live authenticated Chromium and WebKit sessions with
+the Knowledge navigation, six summary tiles and empty state intact and no console errors.
+
 - One-line cards: "Fix login !high #bug @grant fri" -> priority, label, assignee, due, as chips
   while typing, no AI needed.
 - SentinelGPT on the board (local Ollama, free and private): break a card into sub-cards and a

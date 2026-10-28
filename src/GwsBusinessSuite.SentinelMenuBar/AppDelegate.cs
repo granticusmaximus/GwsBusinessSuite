@@ -8,6 +8,7 @@ namespace GwsBusinessSuite.SentinelMenuBar;
 // at the hosted app (see docs/CROSS_PLATFORM_CLIENTS.md). For the at-a-glance status it reads
 // GET /api/v1/sentinel/status with a Developer API key (sentinel:read, read-only) that the user
 // pastes in once via "Set API key..." and that's kept in the Keychain - it holds no other data.
+// Add a Card (Boards K8d) also needs the key to carry boards:write; without it the item says so.
 [Register("AppDelegate")]
 public class AppDelegate : NSApplicationDelegate
 {
@@ -16,7 +17,11 @@ public class AppDelegate : NSApplicationDelegate
     private const string SentinelUrl = BaseUrl + "/sentinel";
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromMinutes(2);
 
+    private const string LastBoardKey = "LastBoardId";
+
     private readonly StatusClient _client = new(HostUrl);
+    private readonly BoardCardClient _cards = new(HostUrl);
+    private readonly CardOutbox _outbox = new();
     private NSStatusItem? _statusItem;
     private NSTimer? _timer;
     private StatusSummary? _summary;
@@ -80,11 +85,27 @@ public class AppDelegate : NSApplicationDelegate
                 _lastChecked = DateTimeOffset.Now;
                 Render();
             });
+            if (problem == StatusProblem.None) await SendQueuedCardsAsync();
         }
         finally
         {
             _refreshing = false;
         }
+    }
+
+    // Cards typed while the server was out of reach, sent now it's back.
+    private async Task SendQueuedCardsAsync()
+    {
+        var queued = _outbox.List();
+        if (queued.Count == 0) return;
+        var left = new List<QueuedCard>();
+        foreach (var card in queued)
+        {
+            var (_, problem) = await _cards.AddCardAsync(KeychainKeyStore.Read(), card.BoardId, card.Text);
+            if (problem == CardProblem.Unreachable) left.Add(card);
+        }
+        _outbox.Replace(left);
+        InvokeOnMainThread(Render);
     }
 
     private void Render()
@@ -119,6 +140,11 @@ public class AppDelegate : NSApplicationDelegate
         }
         menu.AddItem(CreateItem("Refresh Now", () => _ = RefreshAsync(), "r"));
         menu.AddItem(NSMenuItem.SeparatorItem);
+        menu.AddItem(CreateItem("Add a Card...", () => _ = AddCardAsync(), "n"));
+        if (_outbox.List().Count is var waiting and > 0)
+        {
+            menu.AddItem(new NSMenuItem(waiting == 1 ? "1 card waiting to send" : $"{waiting} cards waiting to send") { Enabled = false });
+        }
         menu.AddItem(CreateItem("Open GWS Business Suite", OpenMacApp, "o"));
         menu.AddItem(CreateItem("Open Sentinel", OpenSentinel));
         menu.AddItem(CreateItem("Open Dashboard", OpenDashboard));
@@ -148,7 +174,7 @@ public class AppDelegate : NSApplicationDelegate
         var alert = new NSAlert
         {
             MessageText = "Developer API key",
-            InformativeText = "Create a key with the sentinel:read scope in Settings > Developer API, then paste it here. It's stored in your Keychain and only used to read status counts.",
+            InformativeText = "Create a key with the sentinel:read scope in Settings > Developer API (add boards:write to use Add a Card), then paste it here. It's stored in your Keychain and only used for status counts and the cards you add.",
             AccessoryView = field
         };
         alert.AddButton("Save");
@@ -159,6 +185,112 @@ public class AppDelegate : NSApplicationDelegate
             KeychainKeyStore.Save(field.StringValue.Trim());
             _ = RefreshAsync();
         }
+    }
+
+    // Asks for a one-line card and the board it goes on, then adds it - or keeps it for later when
+    // the server can't be reached.
+    private async Task AddCardAsync()
+    {
+        var key = KeychainKeyStore.Read();
+        if (key is null)
+        {
+            InvokeOnMainThread(PromptForKey);
+            return;
+        }
+        var (boards, problem) = await _cards.ListBoardsAsync(key);
+        InvokeOnMainThread(() =>
+        {
+            if (problem == CardProblem.NotAllowed)
+            {
+                ShowMessage("This key can't add cards", "Create a Developer API key with the boards:write scope (and sentinel:read for the status) in Settings > Developer API, then set it here.");
+                return;
+            }
+            var offline = problem == CardProblem.Unreachable;
+            BringForward();
+            var picker = new NSPopUpButton(new CoreGraphics.CGRect(0, 30, 340, 26), false);
+            var last = NSUserDefaults.StandardUserDefaults.StringForKey(LastBoardKey);
+            foreach (var board in boards)
+            {
+                picker.AddItem($"{board.Icon ?? "🗂️"} {board.Title}");
+                if (board.Id.ToString() == last) picker.SelectItem(picker.ItemCount - 1);
+            }
+            if (boards.Count == 0) picker.AddItem(offline ? "The board you used last" : "Your most recent board");
+            var field = new NSTextField(new CoreGraphics.CGRect(0, 0, 340, 24)) { PlaceholderString = "Fix login !high #bug @me fri ~3" };
+            var accessory = new NSView(new CoreGraphics.CGRect(0, 0, 340, 58));
+            accessory.AddSubview(picker);
+            accessory.AddSubview(field);
+            var alert = new NSAlert
+            {
+                MessageText = "Add a card",
+                InformativeText = offline
+                    ? "The server can't be reached; the card will be added when it can."
+                    : "!priority, #label, @person, a day (fri, 05-11) and ~points set the card's fields.",
+                AccessoryView = accessory
+            };
+            alert.AddButton("Add");
+            alert.AddButton("Cancel");
+            alert.Window.InitialFirstResponder = field;
+            if (alert.RunModal() != (nint)(long)NSAlertButtonReturn.First || string.IsNullOrWhiteSpace(field.StringValue)) return;
+            Guid? boardId = boards.Count > 0 && picker.IndexOfSelectedItem >= 0 ? boards[(int)picker.IndexOfSelectedItem].Id
+                : Guid.TryParse(last, out var lastId) ? lastId : null;
+            if (boardId is { } chosen) NSUserDefaults.StandardUserDefaults.SetString(chosen.ToString(), LastBoardKey);
+            _ = SendCardAsync(key, boardId, field.StringValue.Trim());
+        });
+    }
+
+    private async Task SendCardAsync(string key, Guid? boardId, string text)
+    {
+        var (card, problem) = await _cards.AddCardAsync(key, boardId, text);
+        InvokeOnMainThread(() =>
+        {
+            switch (problem)
+            {
+                case CardProblem.None when card is not null:
+                    if (Confirm($"Added to {card.BoardTitle}", $"\u201c{card.Title}\u201d is in {card.Column}.", "Open Card")) OpenUrl(HostUrl + card.Url.TrimStart('/'));
+                    break;
+                case CardProblem.Unreachable:
+                    _outbox.Add(new QueuedCard(boardId, text, DateTimeOffset.Now));
+                    Render();
+                    ShowMessage("Saved for later", "The server can't be reached right now; the card will be added on the next refresh.");
+                    break;
+                case CardProblem.NotAllowed:
+                    ShowMessage("This key can't add cards", "Create a Developer API key with the boards:write scope in Settings > Developer API, then set it here.");
+                    break;
+                default:
+                    ShowMessage("The card wasn't added", "It needs a title as well as its !priority, #labels or @people, and the board has to still be there.");
+                    break;
+            }
+        });
+    }
+
+    private static void BringForward()
+    {
+        // A menu-bar app has no window of its own, so bring it forward for the dialog.
+        if (OperatingSystem.IsMacOSVersionAtLeast(14))
+        {
+            NSApplication.SharedApplication.Activate();
+        }
+        else
+        {
+            NSApplication.SharedApplication.ActivateIgnoringOtherApps(true);
+        }
+    }
+
+    private static void ShowMessage(string title, string text)
+    {
+        BringForward();
+        var alert = new NSAlert { MessageText = title, InformativeText = text };
+        alert.AddButton("OK");
+        alert.RunModal();
+    }
+
+    private static bool Confirm(string title, string text, string action)
+    {
+        BringForward();
+        var alert = new NSAlert { MessageText = title, InformativeText = text };
+        alert.AddButton(action);
+        alert.AddButton("OK");
+        return alert.RunModal() == (nint)(long)NSAlertButtonReturn.First;
     }
 
     private void RemoveKey()

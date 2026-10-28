@@ -16,7 +16,7 @@
             <span class="gws-toast-message">@toast.Message</span>
             @if (toast.Undo is not null)
             {
-                <button type="button" class="gws-toast-undo" @onclick="() => Toasts.UndoAsync(toast.Id)">Undo</button>
+                <button type="button" class="gws-toast-undo" @onclick="() => Toasts.UndoAsync(toast.Id)">@(toast.ActionLabel ?? "Undo")</button>
             }
             <button type="button" class="gws-toast-close" aria-label="Dismiss" @onclick="() => Toasts.Dismiss(toast.Id)">
                 <i class="bi bi-x-lg" aria-hidden="true"></i>

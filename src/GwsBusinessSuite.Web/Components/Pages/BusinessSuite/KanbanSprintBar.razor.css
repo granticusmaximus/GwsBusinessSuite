@@ -28,6 +28,8 @@
 .kb-sprint-progress { display: inline-flex; align-items: center; gap: var(--gws-step-2); font-variant-numeric: tabular-nums; color: var(--gws-text-soft); }
 .kb-sprint-bar { width: 6rem; height: 6px; overflow: hidden; border-radius: 999px; background: var(--gws-panel-border); }
 .kb-sprint-bar > span { display: block; height: 100%; border-radius: inherit; background: var(--gws-status-success-fill); }
+.kb-sprint-forecast { display: inline-flex; align-items: center; gap: 6px; color: var(--gws-text-soft); font-variant-numeric: tabular-nums; }
+.kb-sprint-forecast.is-late { color: var(--gws-status-warning-text); font-weight: 600; }
 .kb-sprint-actions { display: inline-flex; gap: var(--gws-step-2); margin-inline-start: auto; }
 
 .kb-sprint-burn { display: block; overflow: visible; }

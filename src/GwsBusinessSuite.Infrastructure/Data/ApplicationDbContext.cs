@@ -86,6 +86,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<BillingSettings> BillingSettings => Set<BillingSettings>();
     public DbSet<WikiDatabaseRowStatusChange> WikiDatabaseRowStatusChanges => Set<WikiDatabaseRowStatusChange>();
     public DbSet<KanbanBoardSettings> KanbanBoardSettings => Set<KanbanBoardSettings>();
+    public DbSet<BoardCardLink> BoardCardLinks => Set<BoardCardLink>();
     public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
     public DbSet<SupportTicketMessage> SupportTicketMessages => Set<SupportTicketMessage>();
     public DbSet<SupportTicketAttachment> SupportTicketAttachments => Set<SupportTicketAttachment>();
@@ -1023,6 +1024,14 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WikiDatabaseRowStatusChange>().HasIndex(x => new { x.WikiDatabaseId, x.AtUnixSeconds });
         modelBuilder.Entity<WikiDatabaseRowStatusChange>().HasIndex(x => x.RowId);
         modelBuilder.Entity<KanbanBoardSettings>().HasIndex(x => x.WikiDatabaseId).IsUnique();
+        modelBuilder.Entity<BoardCardLink>(entity =>
+        {
+            entity.Property(x => x.Kind).HasMaxLength(20);
+            entity.HasIndex(x => new { x.RowId, x.Kind, x.TargetId }).IsUnique();
+            entity.HasIndex(x => x.WikiDatabaseId);
+            entity.HasIndex(x => new { x.Kind, x.TargetId });
+        });
+        modelBuilder.Entity<TimeEntry>().HasIndex(x => x.BoardCardId);
     }
 
     private void SynchronizeNewsItemTimestamps()

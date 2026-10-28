@@ -156,3 +156,11 @@ rect.kbi-hit.is-hover { fill: color-mix(in srgb, var(--gws-text-soft) 8%, transp
     .kbi-aging-track { grid-column: 1 / -1; grid-row: 2; }
     .kbi-late { grid-column: 1 / -1; justify-self: start; }
 }
+
+/* Forecasts (K8). */
+.kbi-forecast-pick { display: flex; flex-wrap: wrap; gap: var(--gws-step-2); }
+.kbi-forecast-count { margin-inline-start: 4px; padding: 0 6px; border-radius: 999px; font-size: .6875rem; font-variant-numeric: tabular-nums; background: var(--gws-panel-bg-2); }
+.kbi-forecast-dates { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: var(--gws-step-3); }
+.kbi-forecast-dates .kbi-tile.is-key { border-color: color-mix(in srgb, var(--gws-sidebar-accent) 60%, var(--gws-panel-border)); }
+.kbi-forecast-area { fill: color-mix(in srgb, var(--gws-sidebar-accent) 16%, transparent); stroke: none; }
+.kbi-forecast-line { fill: none; stroke: var(--gws-sidebar-accent); stroke-width: 2; stroke-linejoin: round; }
