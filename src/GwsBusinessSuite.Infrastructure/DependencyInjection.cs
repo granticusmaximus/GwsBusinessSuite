@@ -239,6 +239,22 @@ public static class DependencyInjection
             .WithSharedSmtpFallback(configuration);
         services.AddSingleton<GwsBusinessSuite.Application.Scheduling.IBookingEmailSender, BookingEmailSender>();
         services.AddScoped<GwsBusinessSuite.Application.Scheduling.IBookingService, BookingService>();
+        // Booking calendar sync: owners' iCal feeds read in the background through a client whose
+        // every connection is checked to be a public address (the address is admin-entered).
+        services.AddHttpClient(BookingCalendarService.HttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Calendar/1.0");
+        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            ConnectCallback = AutomationDestinationValidator.ConnectAsync,
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 5,
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        });
+        services.AddScoped<GwsBusinessSuite.Application.Scheduling.IBookingCalendarService, BookingCalendarService>();
+        services.AddHostedService<BookingCalendarBackgroundService>();
         services.AddScoped<GwsBusinessSuite.Application.Scoring.IDealScoringService, DealScoringService>();
         services.AddOptions<EmailCampaignEmailOptions>()
             .Bind(configuration.GetSection(EmailCampaignEmailOptions.SectionName))

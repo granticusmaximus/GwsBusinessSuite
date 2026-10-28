@@ -1,0 +1,266 @@
+@using GwsBusinessSuite.Application.Scheduling
+@using GwsBusinessSuite.Application.Abstractions
+@inject IBookingCalendarService Calendar
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
+
+@* Scheduling > Calendar sync: busy times from the owner's calendars hide slots, and a private
+   feed puts confirmed bookings into their calendar. *@
+<div class="card border-0 shadow-sm mt-4">
+    <div class="card-header bg-white border-bottom py-3 fw-semibold">Calendar sync</div>
+    <div class="card-body">
+        <h3 class="h6 mb-1">Busy times from your calendars</h3>
+        <p class="small text-secondary mb-2">Times you're busy in these calendars aren't offered to visitors. Each is read every 10 minutes.</p>
+        @if (_error is not null)
+        {
+            <div class="alert alert-danger d-flex align-items-start gap-2 py-2 px-3 small" role="alert">
+                <i class="bi bi-exclamation-triangle-fill mt-1 flex-shrink-0" aria-hidden="true"></i>
+                <div>@_error</div>
+            </div>
+        }
+        @if (_feeds.Count > 0)
+        {
+            <ul class="list-group list-group-flush mb-3">
+                @foreach (var feed in _feeds)
+                {
+                    <li class="list-group-item px-0">
+                        <div class="d-flex justify-content-between align-items-start gap-2">
+                            <div class="min-w-0">
+                                <div class="fw-semibold">@feed.Name</div>
+                                <div class="small text-secondary">@feed.UrlHint · @Scope(feed)</div>
+                                @if (feed.LastError is not null)
+                                {
+                                    <div class="small text-danger">
+                                        <i class="bi bi-exclamation-triangle me-1" aria-hidden="true"></i>Couldn't read it @Format(feed.LastAttemptAt): @feed.LastError
+                                        @(feed.LastSyncedAt is null ? "" : $"Using the busy times read {Format(feed.LastSyncedAt)}.")
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="small text-secondary">Read @Format(feed.LastSyncedAt) · @Summary(feed)</div>
+                                }
+                            </div>
+                            <div class="d-flex gap-2 flex-shrink-0">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" title="Read it now" aria-label="@($"Read {feed.Name} now")"
+                                        disabled="@_busy" @onclick="() => SyncAsync(feed.Id)"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></button>
+                                <button type="button" class="btn btn-sm btn-outline-danger" title="Remove" aria-label="@($"Remove {feed.Name}")"
+                                        disabled="@_busy" @onclick="() => _pendingRemove = feed"><i class="bi bi-trash3" aria-hidden="true"></i></button>
+                            </div>
+                        </div>
+                    </li>
+                }
+            </ul>
+        }
+        <form @onsubmit="AddAsync" @onsubmit:preventDefault>
+            <div class="mb-2">
+                <input class="form-control form-control-sm" placeholder="Name, e.g. Work calendar" aria-label="Calendar name" maxlength="120"
+                       @bind="_name" @bind:event="oninput" />
+            </div>
+            <div class="mb-2">
+                <input class="form-control form-control-sm" inputmode="url" autocomplete="off" spellcheck="false" placeholder="iCal address (https:// or webcal://)"
+                       aria-label="iCal address" @bind="_address" @bind:event="oninput" />
+            </div>
+            <div class="mb-2">
+                <input class="form-control form-control-sm" placeholder="Only for this owner's booking types (optional)" aria-label="Owner username"
+                       @bind="_owner" @bind:event="oninput" />
+            </div>
+            <div class="form-check small mb-2">
+                <input id="booking-calendar-all-day" type="checkbox" class="form-check-input" @bind="_allDay" />
+                <label class="form-check-label" for="booking-calendar-all-day">All-day events block the whole day</label>
+            </div>
+            <button type="submit" class="btn btn-sm btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_name) || string.IsNullOrWhiteSpace(_address))">
+                <i class="bi bi-calendar-check me-1" aria-hidden="true"></i>@(_busy ? "Reading it…" : "Add calendar")
+            </button>
+        </form>
+        <details class="small text-secondary mt-2">
+            <summary>Where's the iCal address?</summary>
+            <ul class="mb-1 mt-1 ps-3">
+                <li><strong>Google Calendar</strong>: Settings, pick the calendar, Integrate calendar, <em>Secret address in iCal format</em>.</li>
+                <li><strong>iCloud</strong>: in Calendar, share the calendar, tick <em>Public Calendar</em> and copy the link.</li>
+                <li><strong>Outlook</strong>: Settings, Calendar, Shared calendars, Publish a calendar, the <em>ICS</em> link.</li>
+            </ul>
+            Treat it like a password: anyone with it can read that calendar. It's stored encrypted.
+        </details>
+
+        <hr />
+        <h3 class="h6 mb-1">Your bookings in your calendar</h3>
+        <p class="small text-secondary mb-2">
+            A private link your calendar can subscribe to - in Google Calendar, Other calendars, From URL; on a Mac, File, New Calendar
+            Subscription. New bookings appear when your calendar next checks it (Google can take several hours). Anyone with the link can see your bookings.
+        </p>
+        @if (_export?.Url is { } url)
+        {
+            <div class="input-group input-group-sm mb-2">
+                <input class="form-control" readonly value="@Absolute(url)" aria-label="Your bookings calendar link" />
+                <button type="button" class="btn btn-outline-secondary" @onclick="() => CopyAsync(Absolute(url))"><i class="bi bi-clipboard me-1" aria-hidden="true"></i>Copy</button>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a class="btn btn-sm btn-outline-secondary" href="@Webcal(url)"><i class="bi bi-calendar-plus me-1" aria-hidden="true"></i>Subscribe on this computer</a>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => _pendingExport = ExportChange.NewLink">New link</button>
+                <button type="button" class="btn btn-sm btn-outline-danger" disabled="@_busy" @onclick="() => _pendingExport = ExportChange.TurnOff">Turn off</button>
+            </div>
+        }
+        else
+        {
+            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_busy" @onclick="NewLinkAsync">
+                <i class="bi bi-link-45deg me-1" aria-hidden="true"></i>Make a link
+            </button>
+        }
+    </div>
+</div>
+
+<ConfirmModal Show="_pendingRemove is not null" Title="Remove calendar"
+              Message="@($"Stop reading busy times from {_pendingRemove?.Name}? Its times become bookable again.")"
+              ConfirmText="Remove" Busy="_busy" OnConfirm="RemoveAsync" OnCancel="() => _pendingRemove = null" />
+<ConfirmModal Show="_pendingExport is not null" Title="@(_pendingExport == ExportChange.TurnOff ? "Turn off the link" : "Make a new link")"
+              Message="@(_pendingExport == ExportChange.TurnOff ? "Calendars subscribed to it stop getting your bookings." : "The current link stops working; calendars subscribed to it need the new one.")"
+              ConfirmText="@(_pendingExport == ExportChange.TurnOff ? "Turn off" : "Make a new link")" Busy="_busy"
+              OnConfirm="ConfirmExportAsync" OnCancel="() => _pendingExport = null" />
+
+@code {
+    private enum ExportChange { NewLink, TurnOff }
+
+    private IReadOnlyList<BookingCalendarFeedView> _feeds = [];
+    private BookingCalendarExportView? _export;
+    private string _name = string.Empty;
+    private string _address = string.Empty;
+    private string _owner = string.Empty;
+    private bool _allDay;
+    private bool _busy;
+    private string? _error;
+    private BookingCalendarFeedView? _pendingRemove;
+    private ExportChange? _pendingExport;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _feeds = await Calendar.ListFeedsAsync();
+        _export = await Calendar.GetExportAsync();
+    }
+
+    private async Task AddAsync()
+    {
+        if (_busy || string.IsNullOrWhiteSpace(_name) || string.IsNullOrWhiteSpace(_address)) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            var feed = await Calendar.AddFeedAsync(_name, _address, _owner, _allDay, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            Toasts.Show($"{feed.Name} added: {Summary(feed)}.", tone: StatusTone.Success);
+            _name = _address = _owner = string.Empty;
+            _allDay = false;
+            _feeds = await Calendar.ListFeedsAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SyncAsync(Guid feedId)
+    {
+        _busy = true;
+        try
+        {
+            if (await Calendar.SyncFeedAsync(feedId) is { } feed)
+            {
+                Toasts.Show(feed.LastError is null ? $"{feed.Name} read: {Summary(feed)}." : $"Couldn't read {feed.Name}: {feed.LastError}",
+                    tone: feed.LastError is null ? StatusTone.Success : StatusTone.Danger);
+            }
+            _feeds = await Calendar.ListFeedsAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RemoveAsync()
+    {
+        if (_pendingRemove is not { } feed) return;
+        _busy = true;
+        try
+        {
+            await Calendar.RemoveFeedAsync(feed.Id);
+            _feeds = await Calendar.ListFeedsAsync();
+            Toasts.Show($"{feed.Name} removed.", tone: StatusTone.Success);
+        }
+        finally
+        {
+            _pendingRemove = null;
+            _busy = false;
+        }
+    }
+
+    private async Task ConfirmExportAsync()
+    {
+        var change = _pendingExport;
+        _pendingExport = null;
+        if (change == ExportChange.TurnOff)
+        {
+            _busy = true;
+            try
+            {
+                await Calendar.DisableExportAsync(await CurrentUserAccessor.GetCurrentUsernameAsync());
+                _export = new BookingCalendarExportView(null);
+                Toasts.Show("The bookings link is off.", tone: StatusTone.Success);
+            }
+            finally
+            {
+                _busy = false;
+            }
+        }
+        else if (change == ExportChange.NewLink)
+        {
+            await NewLinkAsync();
+        }
+    }
+
+    private async Task NewLinkAsync()
+    {
+        _busy = true;
+        try
+        {
+            _export = await Calendar.CreateExportLinkAsync(await CurrentUserAccessor.GetCurrentUsernameAsync());
+            Toasts.Show("Link ready. Copy it into your calendar app.", tone: StatusTone.Success);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CopyAsync(string url)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gwsAssistant.copy", url);
+            Toasts.Show("Link copied.", tone: StatusTone.Success);
+        }
+        catch (JSException) { /* the browser refused the clipboard */ }
+    }
+
+    private string Absolute(string url) => Navigation.ToAbsoluteUri(url.TrimStart('/')).ToString();
+
+    // Calendar apps open webcal:// links as a subscription.
+    private string Webcal(string url)
+    {
+        var absolute = new Uri(Absolute(url));
+        return $"webcal://{absolute.Authority}{absolute.PathAndQuery}";
+    }
+
+    private static string Scope(BookingCalendarFeedView feed) =>
+        (feed.OwnerUsername is null ? "every booking type" : $"{feed.OwnerUsername}'s booking types")
+        + (feed.AllDayEventsBlock ? " · all-day events block" : "");
+
+    private static string Summary(BookingCalendarFeedView feed) =>
+        $"{feed.BusyCount} busy {(feed.BusyCount == 1 ? "time" : "times")} ahead"
+        + (feed.SkippedCount > 0 ? $", {feed.SkippedCount} repeating {(feed.SkippedCount == 1 ? "event" : "events")} skipped" : "");
+
+    private static string Format(DateTimeOffset? value) => value?.ToLocalTime().ToString("dd-MM-yy HH:mm") ?? "never";
+}

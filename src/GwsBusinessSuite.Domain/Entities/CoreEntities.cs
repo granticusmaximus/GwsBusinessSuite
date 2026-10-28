@@ -454,6 +454,37 @@ public static class BookingStatuses
     public const string Cancelled = "Cancelled";
 }
 
+// A calendar whose busy times hide booking slots: a private iCal address (Google's "secret
+// address in iCal format", an iCloud public calendar link, an Outlook published ICS link). It's
+// read in the background; the booking pages only ever read the stored busy times.
+public sealed class BookingCalendarFeed : AuditableEntity
+{
+    public required string Name { get; set; }
+    // Anyone with the address can read the calendar, so it's kept encrypted; UrlHint is the
+    // host alone, for display.
+    public required string UrlProtected { get; set; }
+    public string UrlHint { get; set; } = string.Empty;
+    // Blank applies to every booking type; otherwise only to types with this owner.
+    public string? OwnerUsername { get; set; }
+    // Most all-day events (birthdays, holidays) aren't meetings, so by default they don't block.
+    public bool AllDayEventsBlock { get; set; }
+    // The busy times from yesterday to 90 days ahead, as JSON (see BookingCalendarIcs).
+    public string BusyJson { get; set; } = "[]";
+    public int BusyCount { get; set; }
+    // Events whose repeat rule couldn't be worked out, left out of the busy times.
+    public int SkippedCount { get; set; }
+    public DateTimeOffset? LastSyncedAt { get; set; }
+    public DateTimeOffset? LastAttemptAt { get; set; }
+    public string? LastError { get; set; }
+}
+
+// One row: the private feed of confirmed bookings that Google or iCloud can subscribe to.
+public sealed class BookingCalendarSettings : AuditableEntity
+{
+    public string? ExportTokenHash { get; set; }
+    public string? ExportTokenProtected { get; set; }
+}
+
 // A confirmed (or since-cancelled) slot against a BookingType. ManageTokenHash follows the
 // same "mint a random token, store only its SHA-256 hash, hand the raw token to the visitor
 // in a link" convention as ClientPortalLoginToken/SentinelPublicShare - the emailed

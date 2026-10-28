@@ -2375,6 +2375,10 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
 @keyframes gws-spin { to { transform: rotate(360deg); } }
 .gws-spin { animation: gws-spin 1s linear infinite; }
 
+/* ── Lets a flex child shrink below its content, so text-truncate inside it works and the
+      buttons beside it stay in view (Bootstrap has no such utility; ~20 rows use this) ── */
+.min-w-0 { min-width: 0; }
+
 /* ── Small colored indicator dot (topic/category badges in list items) ── */
 .gws-topic-dot {
     display: inline-block;

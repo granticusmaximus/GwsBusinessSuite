@@ -15,7 +15,9 @@ public sealed class BookingService(
     TimeProvider timeProvider,
     // Optional, resolved by DI in production - see AutomationWorkflowService's own comment on
     // this same pattern for why it's nullable (existing tests new this class up directly).
-    ISecurityAuditService? securityAudit = null) : IBookingService
+    ISecurityAuditService? securityAudit = null,
+    // Busy times from the owner's calendars; optional for the same reason.
+    IBookingCalendarService? calendar = null) : IBookingService
 {
     public const int MaxDaysAhead = 90;
     // Minimum notice can't go below this: avoids a meeting that starts before anyone could
@@ -111,8 +113,10 @@ public sealed class BookingService(
     }
 
     // Free slots: the weekly windows read as wall-clock times in the type's zone (so 09:00 stays
-    // 09:00 across daylight-saving changes), minus confirmed bookings (plus the buffer after each),
-    // inside the notice/booking-window limits and the daily cap.
+    // 09:00 across daylight-saving changes), minus confirmed bookings of any type with the same
+    // owner (one person can't take two meetings at once) and busy times from the owner's
+    // calendars, each with the buffer around it, inside the notice/booking-window limits and
+    // the daily cap (which counts this type's bookings only).
     private async Task<List<BookingSlot>> ComputeSlotsAsync(BookingType type, DateTimeOffset fromUtc, int daysAhead, CancellationToken cancellationToken)
     {
         var availability = ParseAvailability(type.AvailabilityJson);
@@ -127,16 +131,28 @@ public sealed class BookingService(
         var rangeStartUtc = LocalToUtc(firstDate, TimeOnly.MinValue, zone) ?? fromUtc;
         var rangeEndUtc = LocalToUtc(firstDate.AddDays(days), TimeOnly.MinValue, zone) ?? fromUtc.AddDays(days);
 
-        // SQLite/EF Core can't translate DateTimeOffset range comparisons - materialize this
-        // type's confirmed bookings first, then filter the range client-side.
+        var owner = BookingCalendarService.NormalizeOwner(type.OwnerUsername);
+        var sameOwner = (await db.BookingTypes.AsNoTracking()
+            .Select(item => new { item.Id, item.OwnerUsername })
+            .ToListAsync(cancellationToken))
+            .Where(item => string.Equals(BookingCalendarService.NormalizeOwner(item.OwnerUsername), owner, StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.Id)
+            .ToList();
+
+        // SQLite/EF Core can't translate DateTimeOffset range comparisons - materialize these
+        // types' confirmed bookings first, then filter the range client-side.
         var existing = (await db.Bookings.AsNoTracking()
-            .Where(booking => booking.BookingTypeId == type.Id && booking.Status == BookingStatuses.Confirmed)
-            .Select(booking => new { booking.StartsAt, booking.EndsAt })
+            .Where(booking => sameOwner.Contains(booking.BookingTypeId) && booking.Status == BookingStatuses.Confirmed)
+            .Select(booking => new { booking.BookingTypeId, booking.StartsAt, booking.EndsAt })
             .ToListAsync(cancellationToken))
             .Where(booking => booking.StartsAt < rangeEndUtc.AddDays(1) && booking.EndsAt > rangeStartUtc.AddDays(-1))
             .ToList();
+        var busy = existing.Select(booking => new BookingBusyTime(booking.StartsAt, booking.EndsAt)).ToList();
+        if (calendar is not null)
+            busy.AddRange(await calendar.GetBusyAsync(type.OwnerUsername, zone, rangeStartUtc.AddDays(-1), rangeEndUtc.AddDays(1), cancellationToken));
         var buffer = TimeSpan.FromMinutes(type.BufferMinutes);
         var perDay = existing
+            .Where(booking => booking.BookingTypeId == type.Id)
             .GroupBy(booking => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(booking.StartsAt, zone).DateTime))
             .ToDictionary(group => group.Key, group => group.Count());
 
@@ -157,7 +173,7 @@ public sealed class BookingService(
                     {
                         var slotEnd = slotStart.AddMinutes(type.DurationMinutes);
                         if (slotStart >= earliestStart
-                            && !existing.Any(booking => slotStart < booking.EndsAt + buffer && slotEnd + buffer > booking.StartsAt))
+                            && !busy.Any(time => slotStart < time.End + buffer && slotEnd + buffer > time.Start))
                         {
                             slots.Add(new BookingSlot(slotStart, slotEnd));
                         }
@@ -177,7 +193,7 @@ public sealed class BookingService(
 
     // A wall-clock date and time in a zone, as a UTC instant. Null when that time doesn't exist
     // (the hour skipped when clocks spring forward); an hour that happens twice uses its first.
-    private static DateTimeOffset? LocalToUtc(DateOnly date, TimeOnly time, TimeZoneInfo zone)
+    internal static DateTimeOffset? LocalToUtc(DateOnly date, TimeOnly time, TimeZoneInfo zone)
     {
         var local = date.ToDateTime(time, DateTimeKind.Unspecified);
         if (zone.IsInvalidTime(local)) return null;

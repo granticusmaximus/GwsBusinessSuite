@@ -24,6 +24,8 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SupportTicketCannedResponse> SupportTicketCannedResponses { get; }
     DbSet<BookingType> BookingTypes { get; }
     DbSet<Booking> Bookings { get; }
+    DbSet<BookingCalendarFeed> BookingCalendarFeeds { get; }
+    DbSet<BookingCalendarSettings> BookingCalendarSettings { get; }
     DbSet<EmailCampaign> EmailCampaigns { get; }
     DbSet<EmailCampaignStep> EmailCampaignSteps { get; }
     DbSet<EmailCampaignEnrollment> EmailCampaignEnrollments { get; }

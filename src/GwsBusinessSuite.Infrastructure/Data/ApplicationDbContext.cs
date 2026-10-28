@@ -94,6 +94,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SupportTicketCannedResponse> SupportTicketCannedResponses => Set<SupportTicketCannedResponse>();
     public DbSet<BookingType> BookingTypes => Set<BookingType>();
     public DbSet<Booking> Bookings => Set<Booking>();
+    public DbSet<BookingCalendarFeed> BookingCalendarFeeds => Set<BookingCalendarFeed>();
+    public DbSet<BookingCalendarSettings> BookingCalendarSettings => Set<BookingCalendarSettings>();
     public DbSet<EmailCampaign> EmailCampaigns => Set<EmailCampaign>();
     public DbSet<EmailCampaignStep> EmailCampaignSteps => Set<EmailCampaignStep>();
     public DbSet<EmailCampaignEnrollment> EmailCampaignEnrollments => Set<EmailCampaignEnrollment>();
@@ -338,6 +340,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<Booking>().HasIndex(x => x.BookingTypeId);
         modelBuilder.Entity<Booking>().HasIndex(x => x.ManageTokenHash).IsUnique();
         modelBuilder.Entity<Booking>().HasIndex(x => new { x.BookingTypeId, x.StartsAt });
+        modelBuilder.Entity<BookingCalendarSettings>().HasIndex(x => x.ExportTokenHash);
 
         modelBuilder.Entity<EmailCampaignStep>()
             .HasOne(x => x.Campaign)
