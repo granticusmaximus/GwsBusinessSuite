@@ -347,7 +347,8 @@ public sealed class WikiDatabaseService(
                         : RemapPropertyId(config.SecondaryGroupByPropertyId, propertyIds),
                     TimelineEndPropertyId: config.TimelineEndPropertyId is null
                         ? null
-                        : RemapPropertyId(config.TimelineEndPropertyId, propertyIds))),
+                        : RemapPropertyId(config.TimelineEndPropertyId, propertyIds),
+                    FormSettings: RemapFormSettings(config.FormSettings, propertyIds))),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });
@@ -372,6 +373,23 @@ public sealed class WikiDatabaseService(
         Guid.TryParse(propertyId, out var parsed) && propertyIds.TryGetValue(parsed, out var remapped)
             ? remapped.ToString()
             : propertyId;
+
+    // A form's questions, required answers and conditions name properties; a condition's Value is
+    // an option id (or text), which copies keep, so only the property ids move.
+    private static WikiDatabaseFormSettings? RemapFormSettings(
+        WikiDatabaseFormSettings? settings,
+        IReadOnlyDictionary<Guid, Guid> propertyIds) => settings is null
+            ? null
+            : settings with
+            {
+                HiddenPropertyIds = settings.HiddenPropertyIds?.Select(id => RemapPropertyId(id, propertyIds)).ToList(),
+                RequiredPropertyIds = settings.RequiredPropertyIds?.Select(id => RemapPropertyId(id, propertyIds)).ToList(),
+                Conditions = settings.Conditions?.Select(condition => condition with
+                {
+                    PropertyId = RemapPropertyId(condition.PropertyId, propertyIds),
+                    WhenPropertyId = RemapPropertyId(condition.WhenPropertyId, propertyIds)
+                }).ToList()
+            };
 
     private static WikiDatabaseFilterGroup? RemapFilterGroup(
         WikiDatabaseFilterGroup? group,
@@ -615,7 +633,8 @@ public sealed class WikiDatabaseService(
                         : RemapPropertyId(config.SecondaryGroupByPropertyId, propertyIds),
                     TimelineEndPropertyId: config.TimelineEndPropertyId is null
                         ? null
-                        : RemapPropertyId(config.TimelineEndPropertyId, propertyIds))),
+                        : RemapPropertyId(config.TimelineEndPropertyId, propertyIds),
+                    FormSettings: RemapFormSettings(config.FormSettings, propertyIds))),
                 CreatedAt = now,
                 CreatedBy = performedBy
             });

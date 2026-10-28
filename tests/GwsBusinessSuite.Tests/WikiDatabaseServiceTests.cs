@@ -2060,6 +2060,39 @@ public sealed class WikiDatabaseServiceTests
     }
 
     [Fact]
+    public async Task DuplicateDatabaseAsync_ShouldKeepFormSettings_PointingAtTheCopysProperties()
+    {
+        await using var db = await CreateDbAsync();
+        var service = new WikiDatabaseService(db);
+        var source = await service.CreateDatabaseAsync("Requests", null, "u");
+        var kind = await service.SavePropertyAsync(source.Id, new WikiDatabasePropertyEditor
+        {
+            Name = "Kind",
+            Type = WikiDatabasePropertyTypes.Select,
+            Options = [new WikiDatabasePropertyOption("bug", "Bug", "#f00")]
+        }, "u");
+        var steps = await service.SavePropertyAsync(source.Id, new WikiDatabasePropertyEditor { Name = "Steps", Type = WikiDatabasePropertyTypes.Text }, "u");
+        var notes = await service.SavePropertyAsync(source.Id, new WikiDatabasePropertyEditor { Name = "Notes", Type = WikiDatabasePropertyTypes.Text }, "u");
+        await service.SaveViewAsync(source.Id, null, "Form", WikiDatabaseViewTypes.Form,
+            new WikiDatabaseViewConfig([], [], null, FormSettings: new WikiDatabaseFormSettings(
+                "Report a problem", null, "Thanks!",
+                HiddenPropertyIds: [notes.Id.ToString()],
+                RequiredPropertyIds: [kind.Id.ToString()],
+                Conditions: [new WikiDatabaseFormCondition(steps.Id.ToString(), kind.Id.ToString(), WikiDatabaseFormOperators.Is, "bug")])), "u");
+
+        var copy = (await service.GetDatabaseAsync((await service.DuplicateDatabaseAsync(source.Id, "u")).Id))!;
+        string IdOf(string name) => copy.Properties.Single(property => property.Name == name).Id.ToString();
+        var form = WikiDatabaseViewConfigJson.Parse(copy.Views.Single(view => view.Type == WikiDatabaseViewTypes.Form).ConfigJson).FormSettings;
+
+        form.Should().NotBeNull("a copied form should still ask the same questions");
+        form!.Title.Should().Be("Report a problem");
+        form.ThankYouMessage.Should().Be("Thanks!");
+        form.HiddenPropertyIds.Should().Equal(IdOf("Notes"));
+        form.RequiredPropertyIds.Should().Equal(IdOf("Kind"));
+        form.Conditions.Should().Equal(new WikiDatabaseFormCondition(IdOf("Steps"), IdOf("Kind"), WikiDatabaseFormOperators.Is, "bug"));
+    }
+
+    [Fact]
     public async Task DuplicateDatabaseAsync_ShouldRemapSelfRelationsAndRollupsToTheCopy()
     {
         await using var db = await CreateDbAsync();
