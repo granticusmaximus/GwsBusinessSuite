@@ -15,14 +15,26 @@
     font-size: 0.82rem;
 }
 
-.btn-xs {
-    padding: 0.15rem 0.5rem;
-    font-size: .75rem;
-}
-
 @container gws-main (max-width: 687.98px) {
     .cms-structured-toolbar {
         grid-template-columns: 1fr;
         align-items: stretch;
     }
+}
+
+/* The "Edit this page in the visual editor" call to action (it shares CmsBlockPreview's class
+   name, but that component's scoped styles don't reach this page). */
+.cms-block-preview-empty {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.5rem;
+    border: 1px dashed var(--gws-panel-border);
+    border-radius: 1rem;
+    background: var(--gws-panel-bg);
+}
+
+.cms-block-preview-empty > i {
+    font-size: 2rem;
+    color: var(--bs-primary);
 }

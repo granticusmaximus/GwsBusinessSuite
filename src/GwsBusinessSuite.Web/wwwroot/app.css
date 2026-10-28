@@ -2379,6 +2379,11 @@ hr { border-color: var(--gws-panel-border); opacity: 1; }
       buttons beside it stay in view (Bootstrap has no such utility; ~20 rows use this) ── */
 .min-w-0 { min-width: 0; }
 
+/* ── Extra-small button (Bootstrap 5 dropped btn-xs). It lived in two pages' scoped CSS, so on
+      the ~14 other pages that use it the buttons rendered full size. Touch screens still get
+      the coarse-pointer minimum tap height from gws-responsive.css. ── */
+.btn-xs { --bs-btn-padding-y: .15rem; --bs-btn-padding-x: .5rem; --bs-btn-font-size: .75rem; }
+
 /* ── Small colored indicator dot (topic/category badges in list items) ── */
 .gws-topic-dot {
     display: inline-block;

@@ -70,7 +70,7 @@
 ::deep .metric-card .metric-comparison.declined { color: #fca5a5; }
 ::deep .metric-card .metric-comparison.neutral { color: var(--growth-muted); }
 ::deep .metric-card .metric-detail { font-size: .75rem; }
-.growth-panel { background: var(--growth-panel); border: 1px solid var(--growth-line); border-radius: .9rem; overflow: hidden; }
+::deep .growth-panel { background: var(--growth-panel); border: 1px solid var(--growth-line); border-radius: .9rem; overflow: hidden; }
 .conversion-panel { margin-bottom: .9rem; }
 .conversion-heading { padding: .9rem 1rem; border-bottom: 1px solid var(--growth-line); }
 .conversion-totals { display: flex; align-items: center; gap: 1.5rem; text-align: right; }

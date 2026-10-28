@@ -186,7 +186,7 @@
                         <div class="border-top px-2 pt-2 d-flex flex-wrap gap-1">
                             @foreach (var file in PendingFiles)
                             {
-                                <span class="badge text-bg-light border"><i class="bi bi-paperclip"></i> @file.FileName <button type="button" class="btn-close btn-close-sm ms-1" style="font-size:.5rem" aria-label="Remove @file.FileName" @onclick="() => PendingFiles.Remove(file)"></button></span>
+                                <span class="badge text-bg-light border"><i class="bi bi-paperclip"></i> @file.FileName <button type="button" class="btn-close ms-1" style="font-size:.5rem" aria-label="Remove @file.FileName" @onclick="() => PendingFiles.Remove(file)"></button></span>
                             }
                         </div>
                     }

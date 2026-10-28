@@ -1,8 +1,3 @@
-.btn-xs {
-    padding: 0.15rem 0.5rem;
-    font-size: .75rem;
-}
-
 /* On a narrow content area a row's actions (Edit, Settings, View, Duplicate, Trash - about 300px)
    drop under the title instead of pushing the row past the screen's edge. */
 @container gws-main (max-width: 575.98px) {
