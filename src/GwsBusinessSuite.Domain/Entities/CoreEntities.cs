@@ -325,6 +325,7 @@ public static class BoardNotificationKinds
     public const string Assigned = "assigned";
     public const string DueTomorrow = "due-tomorrow";
     public const string Overdue = "overdue";
+    public const string DependencyCleared = "dependency-cleared";
 }
 
 public sealed class BoardCardLink : AuditableEntity

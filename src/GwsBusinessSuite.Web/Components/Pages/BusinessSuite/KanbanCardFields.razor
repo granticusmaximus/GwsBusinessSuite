@@ -92,6 +92,21 @@
             }
         </dd>
 
+        <dt><i class="bi bi-signpost-split" aria-hidden="true"></i>Waiting on</dt>
+        <dd>
+            <select class="form-select form-select-sm" aria-label="Waiting on" multiple size="@Math.Min(5, Math.Max(2, DependencyChoices.Count()))"
+                    @onchange="SetWaitingOnAsync">
+                @foreach (var card in DependencyChoices)
+                {
+                    <option value="@card.RowId" selected="@WaitingOn.Contains(card.RowId)">@(card.Key is null ? card.Title : $"{card.Key} · {card.Title}")</option>
+                }
+            </select>
+            @if (CurrentCard?.WaitingOnOpen is > 0)
+            {
+                <small class="text-body-secondary">@CurrentCard.WaitingOnOpen open</small>
+            }
+        </dd>
+
         @foreach (var other in OtherSelects)
         {
             <dt><i class="bi bi-list-ul" aria-hidden="true"></i>@other.Name</dt>
@@ -443,6 +458,28 @@
 
     private bool IsBlocked => Board.Fields.BlockedPropertyId is { } id && WikiPropertyValues.GetCheckbox(Values, id);
     private string? BlockedReason => Board.Fields.BlockedReasonPropertyId is { } id ? WikiPropertyValues.GetText(Values, id) : null;
+    private KanbanCard? CurrentCard => Board.Columns.SelectMany(column => column.Cards).FirstOrDefault(card => card.RowId == Row.Id);
+    private IReadOnlyList<Guid> WaitingOn => CurrentCard?.WaitingOn ?? [];
+    private IEnumerable<KanbanCard> DependencyChoices => Board.Columns.SelectMany(column => column.Cards)
+        .Where(card => card.RowId != Row.Id).OrderBy(card => card.Key ?? card.Title);
+
+    private async Task SetWaitingOnAsync(ChangeEventArgs e)
+    {
+        // Blazor supplies the selected values for a multiple select as string[].
+        var ids = e.Value is string[] selected
+            ? selected.Select(value => Guid.TryParse(value, out var id) ? id : (Guid?)null).Where(id => id is not null).Select(id => id!.Value).ToList()
+            : [];
+        try
+        {
+            await BoardService.SetWaitingOnAsync(Database.Id, Row.Id, ids, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _revision++;
+            Toasts.Show($"Couldn't change dependencies. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
 
     // Through the board service, which adds Blocked / Blocked reason to a board that lacks them.
     private async Task SetBlockedAsync(bool blocked, string? reason)

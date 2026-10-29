@@ -142,6 +142,7 @@ public sealed class BoardNotificationService(
                 {
                     BoardNotificationKinds.Assigned => "Assigned to you",
                     BoardNotificationKinds.DueTomorrow => "Due tomorrow",
+                    BoardNotificationKinds.DependencyCleared => "Ready to continue",
                     _ => "Overdue"
                 } + (titles.TryGetValue(note.WikiDatabaseId, out var title) ? $" · {title}" : string.Empty),
                 note.Message, note.CreatedAt, note.ReadAt is not null))

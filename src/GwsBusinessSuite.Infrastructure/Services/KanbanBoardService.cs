@@ -16,7 +16,7 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // Select a Board view groups by) makes the columns, and Priority, Labels, Due, Assignee, Estimate
 // and the ID are found by type and the usual names, so any Sentinel database can open as a board.
 public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseService databases,
-    ISentinelAccessService? access = null, ISecretProtector? secrets = null) : IKanbanBoardService
+    ISentinelAccessService? access = null, ISecretProtector? secrets = null, BoardNotificationNotifier? notifier = null) : IKanbanBoardService
 {
     private static readonly string[] PriorityNames = ["Priority"];
     private static readonly string[] LabelNames = ["Labels", "Label", "Tags"];
@@ -26,6 +26,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
     private static readonly string[] SprintNames = ["Sprint", "Cycle", "Iteration"];
     private const string BlockedName = "Blocked";
     private const string BlockedReasonName = "Blocked reason";
+    private const string WaitingOnName = "Waiting on";
     private static readonly System.Text.Json.JsonSerializerOptions SettingsJson = new(System.Text.Json.JsonSerializerDefaults.Web);
 
     public async Task<IReadOnlyList<KanbanBoardSummary>> ListBoardsAsync(CancellationToken cancellationToken = default)
@@ -141,7 +142,8 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             Find(properties, WikiDatabasePropertyTypes.Select, SprintNames)?.Id,
             Find(properties, WikiDatabasePropertyTypes.Checkbox, [BlockedName])?.Id,
             Find(properties, WikiDatabasePropertyTypes.Text, [BlockedReasonName])?.Id,
-            Find(properties, WikiDatabasePropertyTypes.Date, [KanbanArchive.PropertyName])?.Id);
+            Find(properties, WikiDatabasePropertyTypes.Date, [KanbanArchive.PropertyName])?.Id,
+            Find(properties, WikiDatabasePropertyTypes.Relation, [WaitingOnName])?.Id);
         var settings = await GetSettingsAsync(databaseId, cancellationToken);
 
         // When each card last moved into the column it's in now; a row from before the log, or
@@ -169,6 +171,11 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
                 && WikiPropertyValues.GetDate(WikiPropertyValues.ParseObject(row.PropertyValuesJson), archivedProperty) is not null)
                 .Select(row => row.Id).ToHashSet()
             : [];
+        var rowValues = database.Rows.Where(row => row.ParentRowId is null)
+            .ToDictionary(row => row.Id, row => WikiPropertyValues.ParseObject(row.PropertyValuesJson));
+        var completeRows = rowValues.Where(pair =>
+                WikiPropertyValues.GetText(pair.Value, status.Id) is { } option && CompleteOptionIds(status).Contains(option))
+            .Select(pair => pair.Key).ToHashSet();
         var cards = database.Rows
             .Where(row => row.ParentRowId is null && (includeArchived || !archived.Contains(row.Id)))
             .OrderBy(row => row.SortOrder)
@@ -178,8 +185,14 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
                 var entered = current is not null && entries.TryGetValue((row.Id, current), out var at)
                     ? DateTimeOffset.FromUnixTimeSeconds(at)
                     : row.CreatedAt;
+                var waitingOn = fields.WaitingOnPropertyId is { } waitingProperty
+                    ? WikiPropertyValues.GetMultiSelect(WikiPropertyValues.ParseObject(row.PropertyValuesJson), waitingProperty)
+                        .Select(value => Guid.TryParse(value, out var id) ? id : (Guid?)null).Where(id => id is not null).Select(id => id!.Value)
+                        .Where(rowValues.ContainsKey).Distinct().ToList()
+                    : [];
                 return (Status: current, Card: ToCard(row, properties, titleProperty, fields, subItems, settings.CardSize == KanbanCardSizes.Rich)
-                    with { EnteredColumnAt = entered, LinkKinds = links.GetValueOrDefault(row.Id), Votes = votes.GetValueOrDefault(row.Id) });
+                    with { EnteredColumnAt = entered, LinkKinds = links.GetValueOrDefault(row.Id), Votes = votes.GetValueOrDefault(row.Id),
+                        WaitingOn = waitingOn, WaitingOnOpen = waitingOn.Count(id => !completeRows.Contains(id)) });
             })
             .ToList();
 
@@ -287,6 +300,8 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             .ToList();
         var index = beforeRowId is { } before && column.IndexOf(before) is >= 0 and var at ? at : column.Count;
         await databases.MoveRowAsync(databaseId, rowId, status.Id, optionId, index, performedBy, cancellationToken);
+        if (optionId is not null && CompleteOptionIds(status).Contains(optionId))
+            await UnblockDependentsAsync(databaseId, rowId, performedBy, cancellationToken);
     }
 
     public async Task<Guid> AddCardAsync(Guid databaseId, string? optionId, string title, string performedBy, CancellationToken cancellationToken = default)
@@ -439,6 +454,71 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         await SetCardsValueAsync(databaseId, [rowId], flag, _ => JsonValue.Create(blocked), performedBy, cancellationToken);
         var text = blocked && !string.IsNullOrWhiteSpace(reason) ? reason.Trim() : null;
         await SetCardsValueAsync(databaseId, [rowId], why, _ => text is null ? null : JsonValue.Create(text), performedBy, cancellationToken);
+    }
+
+    public async Task SetWaitingOnAsync(Guid databaseId, Guid rowId, IReadOnlyCollection<Guid> dependencyRowIds, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var dependencies = dependencyRowIds.Distinct().ToList();
+        if (dependencies.Contains(rowId)) throw new ArgumentException("A card can't wait on itself.", nameof(dependencyRowIds));
+        var valid = await db.WikiDatabaseRows.AsNoTracking()
+            .Where(item => item.WikiDatabaseId == databaseId && item.TrashedAt == null && item.ParentRowId == null && dependencies.Contains(item.Id))
+            .Select(item => item.Id).ToListAsync(cancellationToken);
+        if (valid.Count != dependencies.Count) throw new ArgumentException("Dependencies must be cards on this board.", nameof(dependencyRowIds));
+
+        var properties = await db.WikiDatabaseProperties.AsNoTracking().Where(property => property.WikiDatabaseId == databaseId).ToListAsync(cancellationToken);
+        var relation = Find(properties, WikiDatabasePropertyTypes.Relation, [WaitingOnName])
+            ?? await databases.SavePropertyAsync(databaseId, new WikiDatabasePropertyEditor
+            {
+                Name = WaitingOnName, Type = WikiDatabasePropertyTypes.Relation, RelatedDatabaseId = databaseId
+            }, performedBy, cancellationToken);
+        await SetCardsValueAsync(databaseId, [rowId], relation.Id,
+            _ => dependencies.Count == 0 ? null : new JsonArray(dependencies.Select(id => (JsonNode?)JsonValue.Create(id.ToString())).ToArray()),
+            performedBy, cancellationToken);
+
+        var board = await GetBoardAsync(databaseId, cancellationToken);
+        var open = board?.Columns.SelectMany(column => column.Cards).FirstOrDefault(card => card.RowId == rowId)?.WaitingOnOpen ?? 0;
+        if (open > 0) await SetBlockedAsync(databaseId, rowId, true, $"Waiting on {open} {(open == 1 ? "card" : "cards")}", performedBy, cancellationToken);
+        else await ClearAutomaticDependencyBlockAsync(databaseId, rowId, performedBy, cancellationToken);
+    }
+
+    private async Task UnblockDependentsAsync(Guid databaseId, Guid completedRowId, string performedBy, CancellationToken cancellationToken)
+    {
+        var board = await GetBoardAsync(databaseId, cancellationToken);
+        if (board?.Fields.WaitingOnPropertyId is null) return;
+        foreach (var card in board.Columns.SelectMany(column => column.Cards)
+                     .Where(card => card.WaitingOn?.Contains(completedRowId) == true && card.WaitingOnOpen == 0))
+            await ClearAutomaticDependencyBlockAsync(databaseId, card.RowId, performedBy, cancellationToken, notifyAssignees: true);
+    }
+
+    private async Task ClearAutomaticDependencyBlockAsync(Guid databaseId, Guid rowId, string performedBy, CancellationToken cancellationToken, bool notifyAssignees = false)
+    {
+        var board = await GetBoardAsync(databaseId, cancellationToken);
+        var card = board?.Columns.SelectMany(column => column.Cards).FirstOrDefault(card => card.RowId == rowId);
+        if (card?.Blocked == true && card.BlockedReason?.StartsWith("Waiting on ", StringComparison.Ordinal) == true)
+        {
+            await SetBlockedAsync(databaseId, rowId, false, null, performedBy, cancellationToken);
+            if (notifyAssignees && board is not null)
+            {
+                var active = await db.AppUsers.AsNoTracking().Where(user => user.IsActive)
+                    .Select(user => user.Username).ToListAsync(cancellationToken);
+                var eligible = active.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var now = DateTimeOffset.UtcNow;
+                var key = $"dependencies-cleared:{now.ToUnixTimeSeconds()}";
+                var name = card.Key is null ? $"\"{card.Title}\"" : $"{card.Key} \"{card.Title}\"";
+                foreach (var assignee in card.Assignees.Where(eligible.Contains).Distinct(StringComparer.OrdinalIgnoreCase))
+                {
+                    db.BoardNotifications.Add(new BoardNotification
+                    {
+                        Username = assignee, WikiDatabaseId = databaseId, RowId = rowId,
+                        Kind = BoardNotificationKinds.DependencyCleared, Key = key,
+                        Message = $"{board.Title}: {name} is unblocked; its final dependency is complete.",
+                        CreatedAt = now, CreatedBy = performedBy
+                    });
+                }
+                await db.SaveChangesAsync(cancellationToken);
+                foreach (var assignee in card.Assignees.Where(eligible.Contains).Distinct(StringComparer.OrdinalIgnoreCase)) notifier?.Notify(assignee);
+            }
+        }
     }
 
     // ---- Flow metrics (K5) ----

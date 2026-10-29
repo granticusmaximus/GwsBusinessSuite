@@ -349,6 +349,40 @@ public sealed class KanbanBoardServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task WaitingOn_ShouldUseASelfRelation_BlockThenAutomaticallyUnblock()
+    {
+        var id = await _boards.CreateBoardAsync("Release", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        var todo = OptionId(board, "To do");
+        var prerequisite = await _boards.AddCardAsync(id, todo, "Approve copy", "grant");
+        var dependent = await _boards.AddCardAsync(id, todo, "Publish site", "grant");
+        var assignee = board.Fields.AssigneePropertyId!.Value;
+        await _boards.SetCardsValueAsync(id, [dependent], assignee, _ => new JsonArray("grant"), "grant");
+        _db.AppUsers.Add(new AppUser { Username = "grant", PasswordHash = "test", Role = AppRoles.Admin, IsActive = true });
+        await _db.SaveChangesAsync();
+
+        await _boards.SetWaitingOnAsync(id, dependent, [prerequisite], "grant");
+
+        board = (await _boards.GetBoardAsync(id))!;
+        var waiting = board.Columns.SelectMany(column => column.Cards).Single(card => card.RowId == dependent);
+        waiting.WaitingOn.Should().Equal(prerequisite);
+        waiting.WaitingOnOpen.Should().Be(1);
+        waiting.Blocked.Should().BeTrue();
+        waiting.BlockedReason.Should().Be("Waiting on 1 card");
+        var relation = (await _databases.GetDatabaseAsync(id))!.Properties.Single(property => property.Name == "Waiting on");
+        relation.Type.Should().Be(WikiDatabasePropertyTypes.Relation);
+        WikiDatabasePropertyConfig.Parse(relation).RelatedDatabaseId.Should().Be(id);
+
+        await _boards.MoveCardAsync(id, prerequisite, OptionId(board, "Done"), null, "grant");
+
+        waiting = (await _boards.GetBoardAsync(id))!.Columns.SelectMany(column => column.Cards).Single(card => card.RowId == dependent);
+        waiting.WaitingOnOpen.Should().Be(0);
+        waiting.Blocked.Should().BeFalse();
+        waiting.BlockedReason.Should().BeNull();
+        (await _db.BoardNotifications.SingleAsync()).Kind.Should().Be(BoardNotificationKinds.DependencyCleared);
+    }
+
+    [Fact]
     public async Task EnteredColumnAt_ShouldBeTheLatestMoveIntoTheColumn_OrCreationBeforeTheLog()
     {
         var id = await _boards.CreateBoardAsync("Ops", "personal", "grant");

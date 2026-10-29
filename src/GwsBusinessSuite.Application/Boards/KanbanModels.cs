@@ -39,7 +39,11 @@ public sealed record KanbanCard(
     // What it's linked to (K8c): one entry per link, its KanbanLinkKinds.
     IReadOnlyList<string>? LinkKinds = null,
     // Votes on the board's public roadmap (K8e).
-    int Votes = 0);
+    int Votes = 0,
+    // K9c: same-board cards this card cannot finish before. The relation is shared with
+    // Sentinel Timeline rather than copied into board-only storage.
+    IReadOnlyList<Guid>? WaitingOn = null,
+    int WaitingOnOpen = 0);
 
 // OptionId null is the "No status" column (cards with no value yet), shown only when it has cards.
 public sealed record KanbanColumn(string? OptionId, string Label, string Color, string? Group, IReadOnlyList<KanbanCard> Cards, int? WipLimit = null);
@@ -48,7 +52,7 @@ public sealed record KanbanColumn(string? OptionId, string Label, string Color, 
 public sealed record KanbanFields(Guid StatusPropertyId, Guid? PriorityPropertyId, Guid? LabelsPropertyId, Guid? DuePropertyId,
     Guid? AssigneePropertyId, Guid? EstimatePropertyId, Guid? KeyPropertyId,
     Guid? SprintPropertyId = null, Guid? BlockedPropertyId = null, Guid? BlockedReasonPropertyId = null,
-    Guid? ArchivedPropertyId = null);
+    Guid? ArchivedPropertyId = null, Guid? WaitingOnPropertyId = null);
 
 public sealed record KanbanOption(string Id, string Label, string Color);
 
@@ -378,6 +382,10 @@ public interface IKanbanBoardService
     // Flags or clears a card as blocked, with an optional reason. A board without Blocked / Blocked
     // reason properties gets them the first time a card is blocked.
     Task SetBlockedAsync(Guid databaseId, Guid rowId, bool blocked, string? reason, string performedBy, CancellationToken cancellationToken = default);
+
+    // K9c: dependencies are a self-relation named "Waiting on". Completing the final
+    // dependency clears the dependent card's automatic blocked state.
+    Task SetWaitingOnAsync(Guid databaseId, Guid rowId, IReadOnlyCollection<Guid> dependencyRowIds, string performedBy, CancellationToken cancellationToken = default);
 
     // Sprints (K4), oldest first.
     Task<IReadOnlyList<KanbanSprintView>> ListSprintsAsync(Guid databaseId, CancellationToken cancellationToken = default);
