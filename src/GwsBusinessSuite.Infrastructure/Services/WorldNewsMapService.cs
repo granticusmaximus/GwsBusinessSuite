@@ -77,24 +77,45 @@ public sealed partial class WorldNewsMapService(WorldNewsService news)
         new("Vietnam", 14.1, 108.3, ["Vietnam", "Vietnamese"])
     ];
 
+    // How far back the globe layer, Brief me and World News's "Show on Overwatch" link all look.
+    public static readonly TimeSpan Window = TimeSpan.FromHours(24);
+
+    // Country names are proper nouns, so matching is case-sensitive: "US" must not catch "us",
+    // nor "Polish" "polish". One pattern per country, compiled once.
+    private static readonly (CountryPoint Country, Regex Pattern)[] Patterns = Countries
+        .Select(country => (country, new Regex(
+            $@"(?<![\p{{L}}\p{{N}}])(?:{string.Join("|", country.Aliases.OrderByDescending(alias => alias.Length).Select(Regex.Escape))})(?![\p{{L}}\p{{N}}])",
+            RegexOptions.CultureInvariant | RegexOptions.Compiled)))
+        .ToArray();
+
     public IReadOnlyList<WorldNewsMapSignal> Signals(BoundingBox bounds, DateTimeOffset since, int limit = MaximumSignals)
     {
         if (limit <= 0) return [];
+        // Place and filter on the overview alone; only the few that survive need their latest
+        // event, summary and sources read from the store.
         return news.Store.TopSituations(since, 300)
             .Where(s => s.OutletCount >= MinimumOutlets)
-            .Select(Project)
-            .OfType<WorldNewsMapSignal>()
-            .Where(s => bounds.Contains(s.Latitude, s.Longitude))
-            .OrderByDescending(s => s.OutletCount)
-            .ThenByDescending(s => s.LastSeen)
+            .Select(s => (Situation: s, Location: Locate(s.Title, s.Latest)))
+            .Where(item => item.Location is { } location && bounds.Contains(location.Latitude, location.Longitude))
+            .OrderByDescending(item => item.Situation.OutletCount)
+            .ThenByDescending(item => item.Situation.LastSeen)
             .Take(Math.Min(limit, MaximumSignals))
+            .Select(item => Project(item.Situation, item.Location!))
             .ToList();
     }
 
-    private WorldNewsMapSignal? Project(GwsBusinessSuite.WorldNewsKit.SituationOverview situation)
+    // The situation a World News link points at, or null when the layer wouldn't show it.
+    public WorldNewsMapSignal? Signal(string situationId, DateTimeOffset since) =>
+        news.Store.Situation(situationId) is { } situation && Place(situation, since) is { } location
+            ? Project(situation, location)
+            : null;
+
+    // Where the layer would put a situation, or null when it stays off the globe.
+    public static WorldNewsCountryLocation? Place(GwsBusinessSuite.WorldNewsKit.SituationOverview situation, DateTimeOffset since) =>
+        situation.OutletCount >= MinimumOutlets && situation.LastSeen >= since ? Locate(situation.Title, situation.Latest) : null;
+
+    private WorldNewsMapSignal Project(GwsBusinessSuite.WorldNewsKit.SituationOverview situation, WorldNewsCountryLocation location)
     {
-        var location = Locate(situation.Title, situation.Latest);
-        if (location is null) return null;
         var latestEvent = news.Store.EventsForSituation(situation.Id).OrderByDescending(e => e.LastSeen).FirstOrDefault();
         var summary = latestEvent is null ? null : news.Store.LatestSummary(latestEvent.Id)?.Text;
         var sources = latestEvent is null ? [] : news.Store.ArticlesForEvent(latestEvent.Id)
@@ -114,13 +135,11 @@ public sealed partial class WorldNewsMapService(WorldNewsService news)
         return point is null ? null : new WorldNewsCountryLocation(point.Name, point.Latitude, point.Longitude);
     }
 
-    private static CountryPoint? MatchCountry(string text) => Countries
-        .SelectMany(country => country.Aliases.Select(alias => (Country: country, Alias: alias)))
-        .Where(item => Named(item.Alias).IsMatch(text))
-        .OrderByDescending(item => item.Alias.Length)
+    // The longest mention wins: "South African" names South Africa even beside a passing "US".
+    private static CountryPoint? MatchCountry(string text) => Patterns
+        .Select(item => (item.Country, Longest: item.Pattern.Matches(text).Select(match => match.Length).DefaultIfEmpty(0).Max()))
+        .Where(item => item.Longest > 0)
+        .OrderByDescending(item => item.Longest)
         .Select(item => item.Country)
         .FirstOrDefault();
-
-    private static Regex Named(string name) => new($@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(name)}(?![\p{{L}}\p{{N}}])",
-        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 }

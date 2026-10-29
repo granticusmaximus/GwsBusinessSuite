@@ -165,6 +165,14 @@ else if (_view == WorldNewsView.Situations)
                     <button type="button" class="btn btn-sm @(_watching ? "btn-primary" : "btn-outline-primary") mb-2" @onclick="ToggleWatchAsync">
                         <i class="bi @(_watching ? "bi-bell-fill" : "bi-bell") me-1" aria-hidden="true"></i>@(_watching ? "Watching" : "Watch situation")
                     </button>
+                    @if (GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.Place(_situation, DateTimeOffset.UtcNow - GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.Window) is { } place)
+                    {
+                        @* Overwatch is a full page load: Cesium doesn't start under enhanced navigation. *@
+                        <a class="btn btn-sm btn-outline-secondary mb-2 ms-1" href="@($"admin/osint?news={Uri.EscapeDataString(_situation.Id)}")"
+                           data-enhance-nav="false" title="See this situation on the Overwatch globe, placed at @place.Country (country-level)">
+                            <i class="bi bi-globe2 me-1" aria-hidden="true"></i>Show on Overwatch
+                        </a>
+                    }
                     <p class="world-news-detail-meta">
                         <StatusPill Tone="@Tone(_situation)">@State(_situation)</StatusPill>
                         @Count(_situation.EventCount, "event"), @Count(_situation.OutletCount, "outlet"), @Count(_situation.ArticleCount, "report").

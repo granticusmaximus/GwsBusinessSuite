@@ -821,6 +821,28 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     }
 
     [Fact]
+    public async Task OpenWorldNews_ShouldOpenThePanelWithoutAClick_ForWorldNewsLinks()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+
+        await page.EvaluateAsync("""
+            () => window.tacticalGlobe.openWorldNews({
+              id: 'situation-2', title: 'Japan earthquake aftershocks', latest: 'Japan earthquake aftershocks',
+              country: 'Japan', lat: 36.2, lon: 138.3, eventCount: 2, outletCount: 7, reportCount: 9,
+              lastSeen: '29-10-26 11:05', summary: null, href: '/admin/world-news?situation=situation-2', sources: []
+            })
+            """);
+
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-incident-panel')", new PageWaitForFunctionOptions { Timeout = 5000 });
+        var panelText = await page.EvaluateAsync<string>("document.querySelector('.tg-incident-panel').textContent");
+        panelText.Should().Contain("Japan earthquake aftershocks").And.Contain("7 OUTLETS").And.NotContain("LATEST:");
+        (await page.GetAttributeAsync(".tg-incident-panel a.tg-incident-report", "href"))
+            .Should().Be("/admin/world-news?situation=situation-2");
+    }
+
+    [Fact]
     public async Task WeatherSnapshot_ShouldRenderCurrentConditionsInThePanel()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);

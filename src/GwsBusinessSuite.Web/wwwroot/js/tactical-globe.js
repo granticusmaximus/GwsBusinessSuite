@@ -3124,6 +3124,7 @@ window.tacticalGlobe = (function () {
         clearTrafficIncidents: clearTrafficIncidents,
         setWorldNews: setWorldNews,
         clearWorldNews: clearWorldNews,
+        openWorldNews: openWorldNewsPanel,
         setCoverageMarkers: setCoverageMarkers,
         setHazards: setHazards,
         setMessageSigns: setMessageSigns,

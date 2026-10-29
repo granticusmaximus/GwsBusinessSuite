@@ -1296,6 +1296,9 @@
     public Guid? BriefingId { get; set; }
 
     // ?route=Macon, GA&route=Atlanta, GA - a shared or printed route reopens in DIRECTIONS.
+    [SupplyParameterFromQuery(Name = "news")]
+    public string? WorldNewsSituationId { get; set; }
+
     [SupplyParameterFromQuery(Name = "route")]
     public string[]? LinkedRouteStops { get; set; }
 
@@ -1424,6 +1427,8 @@
             _morningBrief = morning;
             StateHasChanged();
         }
+
+        if (!string.IsNullOrWhiteSpace(WorldNewsSituationId)) await OpenLinkedWorldNewsAsync(WorldNewsSituationId);
 
         if (LinkedRouteStops is { Length: >= 2 } linkedStops)
         {
@@ -1671,28 +1676,7 @@
                 var incidents = await TrafficIncidentDirectoryService.GetIncidentsInBoundingBoxAsync(_lastBbox);
                 if (Current() && _incidentsOn) await ApplyIncidentsAsync(incidents);
             }) : Task.CompletedTask,
-            _worldNewsOn ? TimedAsync("world news", async () =>
-            {
-                var signals = WorldNewsMap.Signals(_lastBbox, DateTimeOffset.UtcNow - TimeSpan.FromHours(24));
-                if (!Current() || !_worldNewsOn) return;
-                _worldNewsCount = signals.Count;
-                await JS.InvokeVoidAsync("tacticalGlobe.setWorldNews", signals.Select(signal => new
-                {
-                    id = signal.SituationId,
-                    title = signal.Title,
-                    latest = signal.Latest,
-                    country = signal.Country,
-                    lat = signal.Latitude,
-                    lon = signal.Longitude,
-                    eventCount = signal.EventCount,
-                    outletCount = signal.OutletCount,
-                    reportCount = signal.ReportCount,
-                    lastSeen = signal.LastSeen.ToLocalGwsDateTime(),
-                    summary = signal.Summary,
-                    href = $"/admin/world-news?situation={Uri.EscapeDataString(signal.SituationId)}",
-                    sources = signal.Sources.Select(source => new { source.Outlet, source.Title, source.Url })
-                }).ToList());
-            }) : Task.CompletedTask,
+            _worldNewsOn ? TimedAsync("world news", () => Current() ? PushWorldNewsAsync() : Task.CompletedTask) : Task.CompletedTask,
             // Weather-on-zoom: always kept current for wherever the view is centered, not gated
             // behind a toggle - matches cameras/pins being always-on rather than opt-in.
             TimedAsync("weather", async () =>
@@ -1864,24 +1848,7 @@
         _worldNewsOn = !_worldNewsOn;
         if (_worldNewsOn)
         {
-            var signals = WorldNewsMap.Signals(_lastBbox, DateTimeOffset.UtcNow - TimeSpan.FromHours(24));
-            _worldNewsCount = signals.Count;
-            await JS.InvokeVoidAsync("tacticalGlobe.setWorldNews", signals.Select(signal => new
-            {
-                id = signal.SituationId,
-                title = signal.Title,
-                latest = signal.Latest,
-                country = signal.Country,
-                lat = signal.Latitude,
-                lon = signal.Longitude,
-                eventCount = signal.EventCount,
-                outletCount = signal.OutletCount,
-                reportCount = signal.ReportCount,
-                lastSeen = signal.LastSeen.ToLocalGwsDateTime(),
-                summary = signal.Summary,
-                href = $"/admin/world-news?situation={Uri.EscapeDataString(signal.SituationId)}",
-                sources = signal.Sources.Select(source => new { source.Outlet, source.Title, source.Url })
-            }).ToList());
+            await PushWorldNewsAsync();
         }
         else
         {
@@ -1889,6 +1856,44 @@
             await JS.InvokeVoidAsync("tacticalGlobe.clearWorldNews");
         }
     }
+
+    private static DateTimeOffset WorldNewsSince =>
+        DateTimeOffset.UtcNow - GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.Window;
+
+    private async Task PushWorldNewsAsync()
+    {
+        var signals = WorldNewsMap.Signals(_lastBbox, WorldNewsSince);
+        if (!_worldNewsOn) return;
+        _worldNewsCount = signals.Count;
+        await JS.InvokeVoidAsync("tacticalGlobe.setWorldNews", signals.Select(ToWorldNewsPayload).ToList());
+    }
+
+    // World News's "Show on Overwatch": layer on, country in view, that situation's panel open.
+    private async Task OpenLinkedWorldNewsAsync(string situationId)
+    {
+        if (WorldNewsMap.Signal(situationId, WorldNewsSince) is not { } signal) return;
+        _worldNewsOn = true;
+        await JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", signal.Latitude, signal.Longitude, 3_000_000, 1.5);
+        await JS.InvokeVoidAsync("tacticalGlobe.openWorldNews", ToWorldNewsPayload(signal));
+        StateHasChanged();
+    }
+
+    private static object ToWorldNewsPayload(GwsBusinessSuite.Infrastructure.Services.WorldNewsMapSignal signal) => new
+    {
+        id = signal.SituationId,
+        title = signal.Title,
+        latest = signal.Latest,
+        country = signal.Country,
+        lat = signal.Latitude,
+        lon = signal.Longitude,
+        eventCount = signal.EventCount,
+        outletCount = signal.OutletCount,
+        reportCount = signal.ReportCount,
+        lastSeen = signal.LastSeen.ToLocalGwsDateTime(),
+        summary = signal.Summary,
+        href = $"/admin/world-news?situation={Uri.EscapeDataString(signal.SituationId)}",
+        sources = signal.Sources.Select(source => new { source.Outlet, source.Title, source.Url })
+    };
 
     // Plain client-side UI state (which panel is open) - no JS/server round-trip needed to
     // toggle it, unlike RADAR/ALERTS/INCIDENTS which each drive a Cesium layer.

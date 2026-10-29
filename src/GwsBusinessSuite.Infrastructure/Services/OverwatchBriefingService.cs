@@ -71,7 +71,7 @@ public sealed class OverwatchBriefingService(
     private BriefingFacts AddWorldNews(BriefingFacts facts, BoundingBox bounds)
     {
         if (worldNewsMap is null) return facts;
-        var items = worldNewsMap.Signals(bounds, facts.At - TimeSpan.FromHours(24), 4);
+        var items = worldNewsMap.Signals(bounds, facts.At - WorldNewsMapService.Window, 4);
         if (items.Count == 0) return facts;
         var combined = facts.Facts.ToList();
         foreach (var item in items)
