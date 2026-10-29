@@ -629,6 +629,29 @@ public sealed class WorldNewsKitTests : IDisposable
     }
 
     [Fact]
+    public void Summarizer_ShouldHandOutJobs_AndSaveAnotherMachinesAnswers()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        SeedEvent(store, "big", Reports("big", 5));
+        SeedEvent(store, "small", Reports("small", 2));
+        var summarizer = new EventSummarizer(store, (_, _, _) => throw new InvalidOperationException("the server's model isn't asked"),
+            "test-model", new ManualTime(Now), at => at.ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture),
+            new SummaryOptions());
+
+        var job = summarizer.Jobs(5).Should().ContainSingle("only events 3+ outlets covered are due").Subject;
+        job.Should().Match<SummaryJob>(j => j.EventId == "big" && j.ArticleCount == 5 && j.SystemPrompt == EventSummarizer.SystemPrompt
+            && j.Prompt.Contains("Outlet big0"));
+
+        summarizer.Save("big", "no labels and too short", "gemma4:latest on the Mac", 5).Should().Be("That answer has no usable summary.");
+        summarizer.Save("gone", "HEADLINE: x\nSUMMARY: y", "gemma4:latest on the Mac", 5).Should().Be("That event isn't there any more.");
+        summarizer.Save("big", "HEADLINE: Big event in English\nSUMMARY: What happened, where and when, written on the Mac.",
+            "gemma4:latest on the Mac", 5).Should().BeNull();
+
+        store.LatestSummary("big")!.Should().Match<EventSummary>(s => s.Model == "gemma4:latest on the Mac" && s.Headline == "Big event in English");
+        summarizer.Jobs(5).Should().BeEmpty("it's due again only once coverage grows");
+    }
+
+    [Fact]
     public async Task Summarizer_ShouldSummarizeTheBusiestEvents_AndStopWhenTheModelFails()
     {
         var store = new WorldNewsStore(_dbPath);

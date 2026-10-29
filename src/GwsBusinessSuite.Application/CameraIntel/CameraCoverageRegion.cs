@@ -83,5 +83,22 @@ public static class CameraCoverageRegions
         new("Montana (511MT)", "511MT", 47.00, -109.60, 900_000),
         new("West Virginia (WV511)", "WV511", 38.60, -80.60, 500_000),
         new("New Mexico (NMRoads)", "NMRoads", 34.50, -106.10, 800_000),
+        // The 511 platform's key-less camera lists (Platform511CameraProvider, 29-10-26).
+        new("Alaska (511 Alaska)", "511 Alaska", 61.21, -149.24, 900_000),
+        new("Arizona (AZ511)", "AZ511", 33.46, -111.99, 500_000),
+        new("Wisconsin (511WI)", "511WI", 43.07, -88.14, 500_000),
+        new("Nevada (NVRoads)", "NVRoads", 36.24, -115.26, 500_000),
+        new("Utah (UDOT Traffic)", "UDOT Traffic", 40.53, -111.90, 400_000),
+        new("Louisiana (511LA)", "511LA", 30.36, -91.11, 500_000),
+        new("Connecticut (CTroads)", "CTroads", 41.56, -72.76, 300_000),
+        new("Pennsylvania (511PA)", "511PA", 40.25, -76.52, 600_000),
+        new("Ontario (511 Ontario)", "511 Ontario", 43.79, -79.57, 500_000),
+        new("Alberta (511 Alberta)", "511 Alberta", 51.05, -114.06, 700_000),
+        new("Saskatchewan (Highway Hotline)", "Saskatchewan Highway Hotline", 52.34, -105.84, 900_000),
+        new("Manitoba (Manitoba 511)", "Manitoba 511", 49.89, -98.41, 700_000),
+        new("Nova Scotia (511 Nova Scotia)", "511 Nova Scotia", 45.25, -63.57, 500_000),
+        new("New Brunswick (511 New Brunswick)", "511 New Brunswick", 46.13, -66.22, 500_000),
+        new("Prince Edward Island (511 PEI)", "511 PEI", 46.28, -63.31, 300_000),
+        new("Yukon (511 Yukon)", "511 Yukon", 61.02, -134.99, 900_000),
     ];
 }

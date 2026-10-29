@@ -316,6 +316,57 @@ else
                         <i class="bi bi-download me-1" aria-hidden="true"></i>Download document
                     </a>
                 </section>
+                @if (_claims.Count > 0)
+                {
+                    <section class="world-news-claims" aria-label="Coverage figures">
+                        <h3 class="world-news-language">Coverage figures</h3>
+                        <p class="world-news-claims-note">
+                            Read straight from each report's headline and description, without AI. Point at an outlet to see the sentence a figure came from.
+                        </p>
+                        @foreach (var claim in _claims)
+                        {
+                            <div class="world-news-claim">
+                                <div class="world-news-claim-head">
+                                    <strong>@claim.Label</strong>
+                                    @if (claim.Corroborated)
+                                    {
+                                        <StatusPill Tone="StatusTone.Warning">Coverage disagrees</StatusPill>
+                                    }
+                                    else if (claim.Disputed)
+                                    {
+                                        <StatusPill Tone="StatusTone.Neutral">Figures vary</StatusPill>
+                                    }
+                                    else if (claim.Consensus)
+                                    {
+                                        <StatusPill Tone="StatusTone.Success">@Count(claim.Values[0].Outlets, "outlet") agree</StatusPill>
+                                    }
+                                </div>
+                                @if (claim.MayHaveRisen)
+                                {
+                                    <p class="world-news-claims-note">The lower figures all came first, so the number may have risen as reports were updated.</p>
+                                }
+                                <ul class="world-news-claim-values">
+                                    @foreach (var value in claim.Values.Take(6))
+                                    {
+                                        <li>
+                                            <span class="world-news-claim-value">@ValueText(value)</span>
+                                            <span class="world-news-claim-sources">
+                                                @foreach (var source in value.Sources.Take(5))
+                                                {
+                                                    <a href="@source.Article.Url" target="_blank" rel="noopener noreferrer" title="@source.Excerpt">@source.Article.Outlet</a>
+                                                }
+                                                @if (value.Sources.Count > 5)
+                                                {
+                                                    <span>and @(value.Sources.Count - 5) more</span>
+                                                }
+                                            </span>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                    </section>
+                }
                 <dl class="world-news-facts">
                     <dt>Languages</dt>
                     <dd>@string.Join(", ", _selected.Languages.Order())</dd>
@@ -353,6 +404,7 @@ else
     private EventOverview? _selected;
     private IReadOnlyList<WorldArticle> _articles = [];
     private EventSummary? _summary;
+    private IReadOnlyList<CoverageClaim> _claims = [];
     private WorldSnapshot? _world;
     private string _filter = string.Empty;
     private int _rangeHours = 24;
@@ -393,7 +445,10 @@ else
         ? "No summary yet. After each read, the busiest events covered by 3 or more outlets are summarized in English."
         : $"Summary by {_summary.Model} from {Count(_summary.ArticleCount, "report")}, {_summary.CreatedAt.ToLocalGwsDateTime()}"
           + (_summary.Version > 1 ? $" (version {_summary.Version}; rewritten as coverage grows)." : ".")
-          + " Written by AI from headlines and outlets' descriptions: check the sources before relying on a detail.";
+          + " Written by AI from headlines and outlets' descriptions"
+          + (_summary.Model.EndsWith(" on the Mac", StringComparison.Ordinal)
+              ? ": check the sources before relying on a detail."
+              : " by the server's small model, which can mix up who did what: check the sources before relying on a detail.");
 
     private string StatusLine => ((News.LastRefreshed is { } at ? $"Read {at.ToLocalGwsDateTime()}. " : string.Empty) + News.Status).Trim();
 
@@ -537,8 +592,21 @@ else
     {
         _selected = e;
         _summary = null;
-        (_articles, _summary) = await Task.Run(() => (News.Store.ArticlesForEvent(e.Id), News.Store.LatestSummary(e.Id)));
+        _claims = [];
+        (_articles, _summary, _claims) = await Task.Run(() =>
+        {
+            var articles = News.Store.ArticlesForEvent(e.Id);
+            return (articles, News.Store.LatestSummary(e.Id), CoverageClaims.For(articles));
+        });
     }
+
+    private static string ValueText(ClaimValue value) => value.Qualifier switch
+    {
+        ClaimQualifier.AtLeast => $"at least {value.Value:N0}",
+        ClaimQualifier.About => $"about {value.Value:N0}",
+        ClaimQualifier.UpTo => $"up to {value.Value:N0}",
+        _ => value.Value.ToString("N0", System.Globalization.CultureInfo.CurrentCulture)
+    };
 
     // A read takes from seconds to a few minutes; the page follows it through News.Changed.
     private void ReadNow() => _ = News.RefreshAsync(CancellationToken.None);

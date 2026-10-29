@@ -54,6 +54,27 @@ namespace GwsBusinessSuite.Infrastructure;
 
 public static class DependencyInjection
 {
+    // Host, source name (as the coverage list shows it) and coverage box (North, South, East, West).
+    public static readonly IReadOnlyList<(string Host, string Name, BoundingBox Coverage)> Platform511Sites =
+    [
+        ("511.alaska.gov", "511 Alaska", new(68.6, 54.5, -130.0, -170.0)),
+        ("511.novascotia.ca", "511 Nova Scotia", new(47.4, 43.2, -59.5, -66.6)),
+        ("511.gnb.ca", "511 New Brunswick", new(48.5, 44.6, -63.4, -69.1)),
+        ("www.manitoba511.ca", "Manitoba 511", new(60.0, 48.5, -88.5, -102.1)),
+        ("hotline.gov.sk.ca", "Saskatchewan Highway Hotline", new(60.1, 48.6, -101.3, -110.1)),
+        ("511yukon.ca", "511 Yukon", new(69.7, 59.3, -123.5, -141.1)),
+        ("511.gov.pe.ca", "511 PEI", new(47.3, 45.7, -61.8, -64.6)),
+        ("az511.gov", "AZ511", new(37.4, 30.9, -108.6, -115.1)),
+        ("511wi.gov", "511WI", new(47.4, 42.3, -86.2, -93.2)),
+        ("www.nvroads.com", "NVRoads", new(42.4, 34.7, -113.7, -120.5)),
+        ("udottraffic.utah.gov", "UDOT Traffic", new(42.4, 36.5, -108.9, -114.4)),
+        ("www.511la.org", "511LA", new(33.4, 28.6, -88.6, -94.4)),
+        ("ctroads.org", "CTroads", new(42.4, 40.5, -71.5, -74.1)),
+        ("www.511pa.com", "511PA", new(42.6, 39.2, -74.3, -81.0)),
+        ("511on.ca", "511 Ontario", new(57.0, 41.6, -74.0, -95.4)),
+        ("511.alberta.ca", "511 Alberta", new(60.1, 48.6, -109.7, -120.3))
+    ];
+
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("DefaultConnection") ?? "Data Source=gws-suite.db";
@@ -809,6 +830,24 @@ public static class DependencyInjection
             sp.GetRequiredService<ILogger<IterisAtisCameraProvider>>(),
             stateCode: "mt", sourceName: "511MT", sourceAttributionUrl: "https://www.511mt.net",
             coverage: new BoundingBox(North: 50.6, South: 44.0, East: -103.0, West: -116.8)));
+
+        // The 511 platform's key-less public camera list (Grant chose key-less over registering
+        // developer keys, 29-10-26; verified live on all 16 sites that day). Boxes are each site's
+        // own cameras with a margin; a camera outside its box (Wisconsin lists some at 0,0) is
+        // dropped. Newfoundland and North Carolina answer 500 and New Jersey 403, so they're out.
+        services.AddHttpClient("511-platform", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-OverwatchGrid/1.0 (+https://www.gwsapp.net)");
+        });
+        foreach (var (host, name, box) in Platform511Sites)
+        {
+            services.AddScoped<ICameraFeedProvider>(sp => new Platform511CameraProvider(
+                sp.GetRequiredService<IHttpClientFactory>().CreateClient("511-platform"),
+                sp.GetRequiredService<IMemoryCache>(),
+                sp.GetRequiredService<ILogger<Platform511CameraProvider>>(),
+                host, name, box));
+        }
 
         // Highway message signs (Overwatch SIGNS layer + route watch), verified live 2026-10-09.
         services.AddHttpClient<CaltransMessageSignProvider>(client =>

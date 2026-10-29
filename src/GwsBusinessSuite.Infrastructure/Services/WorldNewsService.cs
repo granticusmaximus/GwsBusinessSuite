@@ -103,9 +103,12 @@ public sealed class WorldNewsService : IDisposable
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
             _eventLists.Clear();
             _situationLists.Clear();
-            Status = "Summarizing the biggest events...";
+            // While the Mac app writes summaries with its bigger local model, the server's small
+            // one stays out of it; it takes over again if the Mac hasn't asked for work in a while.
+            var relayActive = RelayActive(DateTimeOffset.UtcNow);
+            Status = relayActive ? "Summaries are being written on the Mac..." : "Summarizing the biggest events...";
             Changed?.Invoke();
-            var summaries = await Task.Run(() => _summarizer.RunAsync(ct), ct);
+            var summaries = relayActive ? new SummaryRunReport(0, []) : await Task.Run(() => _summarizer.RunAsync(ct), ct);
             var notes = report.Notes.Concat(summaries.Notes).ToList();
             var problems = notes.Count == 0 ? string.Empty
                 : $" {notes.Count} {(notes.Count == 1 ? "problem" : "problems")}: {notes[0]}";
@@ -131,6 +134,31 @@ public sealed class WorldNewsService : IDisposable
             Changed?.Invoke();
         }
     }
+
+    private const string RelayKey = "world-news:summary-relay";
+    // How recently the Mac app must have asked for work for the server's model to stand aside.
+    public static readonly TimeSpan RelayFreshness = TimeSpan.FromHours(2);
+
+    // The Mac app (signed in as an admin) asks for events to summarize with its local model.
+    // Asking is also how the server knows the Mac is doing it.
+    public IReadOnlyList<SummaryJob> SummaryJobsForRelay(int limit)
+    {
+        Store.SetLastFetched(RelayKey, DateTimeOffset.UtcNow);
+        return _summarizer.Jobs(Math.Clamp(limit, 1, 10));
+    }
+
+    public string? SaveRelaySummary(string eventId, string answer, string model, int articleCount)
+    {
+        var error = _summarizer.Save(eventId, answer, $"{model.Trim()} on the Mac", articleCount);
+        if (error is null)
+        {
+            _eventLists.Clear();
+            _situationLists.Clear();
+        }
+        return error;
+    }
+
+    public bool RelayActive(DateTimeOffset now) => Store.LastFetched(RelayKey) is { } at && at >= now - RelayFreshness;
 
     private IReadOnlyDictionary<string, IReadOnlyList<float[]>>? _kindExamples;
 

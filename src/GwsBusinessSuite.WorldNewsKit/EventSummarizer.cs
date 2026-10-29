@@ -21,6 +21,10 @@ public sealed record SummaryOptions
 
 public sealed record SummaryRunReport(int Written, IReadOnlyList<string> Notes);
 
+// An event due a summary, with the prompt to answer, for a summarizer outside the server (the Mac
+// app's local model). ArticleCount comes back with the answer so the next one is due on growth.
+public sealed record SummaryJob(string EventId, string Title, int ArticleCount, string SystemPrompt, string Prompt);
+
 // Writes an English headline and summary for the busiest events, from their reports' headlines
 // and outlets' descriptions (never fetched article text). An event is summarized again only once
 // it has grown (see WorldNewsStore.EventsDueSummary), and every version is kept.
@@ -37,6 +41,22 @@ public sealed partial class EventSummarizer(WorldNewsStore store, TextGenerator 
         HEADLINE: one plain English headline, at most 12 words
         SUMMARY: 2 to 4 short sentences on what happened, where, and who is involved. If outlets disagree on a number or a fact, say so and name them.
         """;
+
+    // The events due a summary now, oldest growth first, for another machine to write.
+    public IReadOnlyList<SummaryJob> Jobs(int limit) =>
+        store.EventsDueSummary(time.GetUtcNow() - options.Window, options.MinOutlets, limit)
+            .Select(e => new SummaryJob(e.Id, e.Title, e.ArticleCount, SystemPrompt,
+                EventDocument.ToPrompt(e, store.ArticlesForEvent(e.Id), formatTime, options.MaxPromptChars)))
+            .ToList();
+
+    // Saves another machine's answer for a job. Returns what went wrong, or null once saved.
+    public string? Save(string eventId, string answer, string writtenBy, int articleCount)
+    {
+        if (store.Event(eventId) is null) return "That event isn't there any more.";
+        if (Parse(answer) is not { } parsed) return "That answer has no usable summary.";
+        store.SaveSummary(eventId, parsed.Headline, parsed.Text, writtenBy, articleCount, time.GetUtcNow());
+        return null;
+    }
 
     public async Task<SummaryRunReport> RunAsync(CancellationToken ct)
     {

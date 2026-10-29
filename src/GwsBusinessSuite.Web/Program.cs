@@ -1326,6 +1326,34 @@ app.MapPost("/api/sentinel/clip", async (
 
 // Offline reading (Sentinel item 12): read-only copies of the pages this person keeps offline,
 // for the Mac app to store and show when the server can't be reached.
+// World News summaries written on the Mac (29-10-26): the Mac app's local model (gemma4) is
+// accurate where the droplet's small one mixes up who did what, and costs the droplet nothing.
+// The app asks for due events with the Workspace tab's session, then sends back each answer.
+app.MapGet("/admin/api/native/world-news/summary-jobs", (HttpContext httpContext, GwsBusinessSuite.Infrastructure.Services.WorldNewsService news, int? limit) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    return Results.Json(news.SummaryJobsForRelay(limit ?? 5).Select(job => new
+    {
+        eventId = job.EventId, title = job.Title, articleCount = job.ArticleCount, system = job.SystemPrompt, prompt = job.Prompt
+    }));
+})
+    .RequireAuthorization("AdminOnly");
+
+app.MapPost("/admin/api/native/world-news/summaries", (NativeWorldNewsSummary request, HttpContext httpContext, GwsBusinessSuite.Infrastructure.Services.WorldNewsService news) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    if (string.IsNullOrWhiteSpace(request.EventId) || string.IsNullOrWhiteSpace(request.Model) || request.Model.Length > 80
+        || string.IsNullOrWhiteSpace(request.Answer) || request.Answer.Length > 8000)
+        return Results.BadRequest(new { error = "Send the event, the model and its answer." });
+    return news.SaveRelaySummary(request.EventId, request.Answer, request.Model, request.ArticleCount) is { } error
+        ? Results.BadRequest(new { error })
+        : Results.Json(new { saved = true });
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
 app.MapGet("/admin/api/native/offline-pages", async (
     HttpContext httpContext,
     GwsBusinessSuite.Application.Wiki.ISentinelOfflineService offline,
@@ -5192,6 +5220,7 @@ record NativeLockDeviceRequest(string? Name, string? PublicKey, string? Storage)
 record NativeLockChallengeRequest(Guid KeyId);
 record NativeLockUnlockRequest(Guid KeyId, string? Signature);
 record NativeQuickNoteRequest(string? Title, string? Markdown, bool? DailyNote = null, Guid? ContactId = null, Guid? BookingId = null);
+record NativeWorldNewsSummary(string? EventId, string? Model, string? Answer, int ArticleCount);
 record NativeCameraWatchReading(string? CameraId, string? ModelOutput, string? ImageBase64);
 record NativeContactRequest(string? FullName, string? Email, string? Company);
 record MobileApprovalResolutionRequest(bool Approved, string? Comment);

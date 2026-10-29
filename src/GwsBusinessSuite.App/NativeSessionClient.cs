@@ -14,6 +14,9 @@ public sealed record QuickNoteSaveResult(string? Url, string? Error);
 // read from its cookie store, so there's no second sign-in and nothing new stored.
 public sealed record ContactCreateResult(string? Url, string? FullName, string? Error);
 
+// A World News event due a summary, with the prompt to answer (WorldNewsSummaryRelay).
+public sealed record WorldNewsSummaryJob(string EventId, string Title, int ArticleCount, string SystemPrompt, string Prompt);
+
 public sealed class NativeSessionClient(HttpClient httpClient)
 {
     private const string SignInFirst = "Sign in on the Workspace tab first - this uses that session.";
@@ -47,6 +50,29 @@ public sealed class NativeSessionClient(HttpClient httpClient)
     {
         var (json, error) = await PostAsync("/admin/api/native/quick-notes", new { title, markdown, dailyNote = toDailyNote, contactId, bookingId }, cancellationToken);
         return json is { } body ? new(AppEndpoints.BaseUrl + body.GetProperty("url").GetString(), null) : new(null, error);
+    }
+
+    // World News events whose summaries this Mac's local model writes.
+    public async Task<(IReadOnlyList<WorldNewsSummaryJob>? Jobs, string? Error)> GetWorldNewsSummaryJobsAsync(int limit,
+        CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await GetJsonAsync($"/admin/api/native/world-news/summary-jobs?limit={limit}", cancellationToken);
+        if (json is not { ValueKind: JsonValueKind.Array } list) return (null, error ?? "The server sent something unexpected.");
+        return (list.EnumerateArray().Select(item => new WorldNewsSummaryJob(
+            item.GetProperty("eventId").GetString() ?? string.Empty,
+            item.GetProperty("title").GetString() ?? string.Empty,
+            item.GetProperty("articleCount").GetInt32(),
+            item.GetProperty("system").GetString() ?? string.Empty,
+            item.GetProperty("prompt").GetString() ?? string.Empty)).ToList(), null);
+    }
+
+    // Null once the server has saved the summary, otherwise what went wrong.
+    public async Task<string?> SaveWorldNewsSummaryAsync(WorldNewsSummaryJob job, string model, string answer,
+        CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await PostAsync("/admin/api/native/world-news/summaries",
+            new { eventId = job.EventId, model, answer, articleCount = job.ArticleCount }, cancellationToken);
+        return json is null ? error : null;
     }
 
     // Bookings around today and recent contacts a meeting note can be linked to.

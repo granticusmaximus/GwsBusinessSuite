@@ -77,6 +77,8 @@ public static class MauiProgram
 		builder.Services.AddSingleton(services => new QuickNoteOutbox(
 			Path.Combine(FileSystem.Current.AppDataDirectory, "quick-note-outbox.json"), services.GetRequiredService<NativeSessionClient>()));
 		builder.Services.AddSingleton<OfflineSyncService>();
+		// World News summaries with this Mac's local model (gemma4), sent to the server.
+		builder.Services.AddSingleton<WorldNewsSummaryRelay>();
 		// Page lock / sign in with Touch ID.
 		builder.Services.AddSingleton(_ => new TouchIdKeyStore(Path.Combine(FileSystem.Current.AppDataDirectory, "touchid")));
 		builder.Services.AddSingleton<TouchIdLockService>();
