@@ -211,8 +211,13 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         IReadOnlyList<KanbanOption> OptionsOf(Guid? propertyId) => properties.FirstOrDefault(property => property.Id == propertyId) is { } property
             ? WikiDatabasePropertyConfig.GetOptions(property).Select(option => new KanbanOption(option.Id, option.Label, SafeColor(option.Color))).ToList()
             : [];
+        var faceFields = properties.Where(property => property.Type != WikiDatabasePropertyTypes.Title
+                && property.Id != status.Id && property.Id != fields.ArchivedPropertyId
+                && property.Id != fields.BlockedPropertyId && property.Id != fields.BlockedReasonPropertyId)
+            .OrderBy(property => property.SortOrder)
+            .Select(property => new KanbanFaceField(property.Id, property.Name, property.Type)).ToList();
         return new KanbanBoard(database.Id, database.Title, database.Icon, fields, columns, OptionsOf(fields.PriorityPropertyId), OptionsOf(fields.LabelsPropertyId),
-            settings, OptionsOf(fields.SprintPropertyId), archived.Count);
+            settings, OptionsOf(fields.SprintPropertyId), archived.Count, faceFields);
     }
 
     // ---- Archive (K9a) ----
@@ -423,11 +428,15 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             throw new ArgumentException("Card age is shown after 1 to 365 days.", nameof(settings));
         if (settings.Background is { } background && !KanbanLook.IsPreset(background) && !KanbanLook.IsImage(background))
             throw new ArgumentException("A board background is one of the presets, or an image at an https:// address or on this site.", nameof(settings));
+        var validFaceFields = (await db.WikiDatabaseProperties.AsNoTracking()
+                .Where(property => property.WikiDatabaseId == databaseId && property.Type != WikiDatabasePropertyTypes.Title)
+                .Select(property => property.Id).ToListAsync(cancellationToken)).ToHashSet();
         var clean = settings with
         {
             CardSize = KanbanCardSizes.All.Contains(settings.CardSize) ? settings.CardSize : KanbanCardSizes.Comfortable,
             Accent = settings.Accent is null ? null : SafeColor(settings.Accent),
-            Background = settings.Background == KanbanLook.NoBackground ? null : settings.Background
+            Background = settings.Background == KanbanLook.NoBackground ? null : settings.Background,
+            CardFaceFields = settings.CardFaceFields?.Where(validFaceFields.Contains).Distinct().ToList()
         };
 
         var now = DateTimeOffset.UtcNow;
@@ -1304,6 +1313,12 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         // K7: no cover of its own, so the first picture in the card's page.
         var cover = !string.IsNullOrWhiteSpace(row.CoverImageUrl) ? row.CoverImageUrl
             : blocks.Where(block => block.Type == WikiBlockTypes.Image).Select(block => block.Props.GetValueOrDefault("url")).FirstOrDefault(IsPictureUrl);
+        var cardProperties = properties
+            .Where(property => property.Type is not (WikiDatabasePropertyTypes.Title or WikiDatabasePropertyTypes.Status or WikiDatabasePropertyTypes.Button)
+                && property.Id != fields.ArchivedPropertyId && property.Id != fields.BlockedPropertyId && property.Id != fields.BlockedReasonPropertyId)
+            .Select(property => new KanbanCardProperty(property.Id, property.Name, property.Type,
+                WikiPropertyValues.GetDisplayText(property, values, row.CreatedAt, row.UpdatedAt, row.CreatedBy, row.UpdatedBy)))
+            .Where(property => !string.IsNullOrWhiteSpace(property.Value)).ToList();
         return new KanbanCard(
             row.Id,
             key,
@@ -1325,7 +1340,8 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             sprintId,
             fields.BlockedPropertyId is { } blockedId && WikiPropertyValues.GetCheckbox(values, blockedId),
             fields.BlockedReasonPropertyId is { } reasonId ? WikiPropertyValues.GetText(values, reasonId) : null,
-            Snippet: withSnippet ? SnippetOf(blocks) : null);
+            Snippet: withSnippet ? SnippetOf(blocks) : null,
+            Properties: cardProperties);
     }
 
     private static bool IsPictureUrl(string? url) =>

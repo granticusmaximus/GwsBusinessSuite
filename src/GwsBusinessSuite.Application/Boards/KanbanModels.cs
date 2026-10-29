@@ -10,6 +10,8 @@ namespace GwsBusinessSuite.Application.Boards;
 public sealed record KanbanBoardSummary(Guid DatabaseId, string Title, string? Icon, int CardCount, int OpenCount, DateTimeOffset LastActivity);
 
 public sealed record KanbanLabel(string Label, string Color);
+public sealed record KanbanCardProperty(Guid PropertyId, string Name, string Type, string Value);
+public sealed record KanbanFaceField(Guid PropertyId, string Name, string Type);
 
 public sealed record KanbanCard(
     Guid RowId,
@@ -43,7 +45,8 @@ public sealed record KanbanCard(
     // K9c: same-board cards this card cannot finish before. The relation is shared with
     // Sentinel Timeline rather than copied into board-only storage.
     IReadOnlyList<Guid>? WaitingOn = null,
-    int WaitingOnOpen = 0);
+    int WaitingOnOpen = 0,
+    IReadOnlyList<KanbanCardProperty>? Properties = null);
 
 // OptionId null is the "No status" column (cards with no value yet), shown only when it has cards.
 public sealed record KanbanColumn(string? OptionId, string Label, string Color, string? Group, IReadOnlyList<KanbanCard> Cards, int? WipLimit = null);
@@ -59,7 +62,8 @@ public sealed record KanbanOption(string Id, string Label, string Color);
 // PriorityOptions / LabelOptions: the choices for those fields, in order (empty when the board has none).
 public sealed record KanbanBoard(Guid DatabaseId, string Title, string? Icon, KanbanFields Fields, IReadOnlyList<KanbanColumn> Columns,
     IReadOnlyList<KanbanOption> PriorityOptions, IReadOnlyList<KanbanOption> LabelOptions,
-    KanbanSettings? Settings = null, IReadOnlyList<KanbanOption>? SprintOptions = null, int ArchivedCount = 0);
+    KanbanSettings? Settings = null, IReadOnlyList<KanbanOption>? SprintOptions = null, int ArchivedCount = 0,
+    IReadOnlyList<KanbanFaceField>? FaceFields = null);
 
 // K9a: a card taken off the board by auto-archive or by hand; restoring puts it back in its column.
 public sealed record KanbanArchivedCard(Guid RowId, string Title, string? Key, string? Column, DateTimeOffset ArchivedAt);
@@ -97,6 +101,9 @@ public sealed record KanbanSettings
     // K9b: when this board's notifications started (Unix seconds). The first sweep records the
     // assignments and due dates already there as read, so turning it on doesn't flood the bell.
     public long? NotificationsSince { get; init; }
+    // Null preserves the familiar default face for boards saved before K9d. An explicit list,
+    // including an empty one, is the board's chosen property set.
+    public List<Guid>? CardFaceFields { get; init; }
 
     public static KanbanSettings Default { get; } = new();
 }

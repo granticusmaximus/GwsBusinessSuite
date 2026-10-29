@@ -169,6 +169,17 @@ else
                     <input id="kb-bg-image" type="url" class="form-control form-control-sm kb-look-image" placeholder="https://… or /media/…" maxlength="500"
                            value="@(KanbanLook.IsImage(Settings.Background) ? Settings.Background : "")" @key="@($"bg-{_settingsKey}")" @onchange="SetBackgroundImageAsync" />
                 </div>
+                <fieldset class="kb-face-fields">
+                    <legend>Fields on cards</legend>
+                    <p>Choose the Sentinel properties shown on every card.</p>
+                    <div>
+                        @foreach (var field in _board.FaceFields ?? [])
+                        {
+                            <label><input type="checkbox" class="form-check-input" checked="@FaceFieldIds.Contains(field.PropertyId)"
+                                          @onchange="e => SetFaceFieldAsync(field.PropertyId, e.Value is true)" />@field.Name</label>
+                        }
+                    </div>
+                </fieldset>
             </section>
         }
 
@@ -609,6 +620,31 @@ else
     // ---- Filters, swimlanes, WIP and age (K3) ----
 
     private KanbanSettings Settings => _board?.Settings ?? KanbanSettings.Default;
+
+    private IReadOnlySet<Guid> FaceFieldIds => (Settings.CardFaceFields ?? DefaultFaceFields()).ToHashSet();
+
+    private List<Guid> DefaultFaceFields() => _board is null ? [] : new Guid?[]
+    {
+        _board.Fields.KeyPropertyId, _board.Fields.PriorityPropertyId, _board.Fields.LabelsPropertyId,
+        _board.Fields.DuePropertyId, _board.Fields.AssigneePropertyId, _board.Fields.EstimatePropertyId,
+        _board.Fields.SprintPropertyId
+    }.Where(id => id is not null).Select(id => id!.Value).ToList();
+
+    private bool ShowFace(Guid? propertyId) => propertyId is { } id && FaceFieldIds.Contains(id);
+
+    private IReadOnlyList<KanbanCardProperty> CustomFaceProperties(KanbanCard card)
+    {
+        var builtIn = DefaultFaceFields().ToHashSet();
+        return (card.Properties ?? []).Where(property => FaceFieldIds.Contains(property.PropertyId) && !builtIn.Contains(property.PropertyId)).ToList();
+    }
+
+    private Task SetFaceFieldAsync(Guid propertyId, bool shown)
+    {
+        var fields = FaceFieldIds.ToList();
+        if (shown && !fields.Contains(propertyId)) fields.Add(propertyId);
+        if (!shown) fields.Remove(propertyId);
+        return SaveSettingsAsync(Settings with { CardFaceFields = fields });
+    }
 
     // Sprints (K4), loaded with the board when it has a Sprint property.
     private IReadOnlyList<KanbanSprintView> _sprints = [];
@@ -1058,10 +1094,10 @@ else
             @* draggable=false: pressing on the picture drags the card, not a copy of the image. *@
             <img class="kb-card-cover" src="@card.CoverImageUrl" alt="" loading="lazy" draggable="false" />
         }
-        @if (card.Key is not null || card.Priority is not null || card.Blocked || BusyWith(card) is not null)
+        @if ((ShowFace(_board!.Fields.KeyPropertyId) && card.Key is not null) || (ShowFace(_board.Fields.PriorityPropertyId) && card.Priority is not null) || card.Blocked || BusyWith(card) is not null)
         {
             <div class="kb-card-top">
-                @if (card.Key is not null) { <span class="kb-card-key">@card.Key</span> }
+                @if (ShowFace(_board.Fields.KeyPropertyId) && card.Key is not null) { <span class="kb-card-key">@card.Key</span> }
                 @if (BusyWith(card) is { } busy)
                 {
                     <span class="kb-busy" title="@busy has this card open"><span class="kb-avatar" style="--hue: @Hue(busy)">@Initials(busy)</span></span>
@@ -1070,7 +1106,7 @@ else
                 {
                     <span class="kb-blocked" title="@(string.IsNullOrWhiteSpace(card.BlockedReason) ? "Blocked" : $"Blocked: {card.BlockedReason}")"><i class="bi bi-slash-circle" aria-hidden="true"></i>Blocked</span>
                 }
-                @if (card.Priority is { } priority)
+                @if (ShowFace(_board.Fields.PriorityPropertyId) && card.Priority is { } priority)
                 {
                     <span class="kb-priority" style="--tone: @priority.Color" title="@priority.Label priority"><i class="bi @PriorityIcon(priority.Label)" aria-hidden="true"></i></span>
                 }
@@ -1078,12 +1114,21 @@ else
         }
         <p class="kb-card-title">@if (!string.IsNullOrWhiteSpace(card.Icon)) { <span class="me-1" aria-hidden="true">@card.Icon</span> }@card.Title</p>
         @if (!string.IsNullOrWhiteSpace(card.Snippet)) { <p class="kb-card-snippet">@card.Snippet</p> }
-        @if (card.Labels.Count > 0)
+        @if (ShowFace(_board!.Fields.LabelsPropertyId) && card.Labels.Count > 0)
         {
             <div class="kb-labels">
                 @foreach (var label in card.Labels.Take(2)) { <span class="kb-label" style="--tone: @label.Color">@label.Label</span> }
                 @if (card.Labels.Count > 2) { <span class="kb-label-more" title="@string.Join(", ", card.Labels.Skip(2).Select(label => label.Label))">+@(card.Labels.Count - 2)</span> }
             </div>
+        }
+        @if (CustomFaceProperties(card) is { Count: > 0 } custom)
+        {
+            <dl class="kb-card-properties">
+                @foreach (var property in custom)
+                {
+                    <div><dt>@property.Name</dt><dd>@property.Value</dd></div>
+                }
+            </dl>
         }
         @if (HasFooter(card) || AgeDays(card, column) >= 1)
         {
@@ -1092,7 +1137,7 @@ else
                 {
                     <span class="kb-meta kb-age" title="In @column.Label for @days @(days == 1 ? "day" : "days")"><i class="bi bi-hourglass-split" aria-hidden="true"></i>@(days)d</span>
                 }
-                @if (card.Due is { } due)
+                @if (ShowFace(_board!.Fields.DuePropertyId) && card.Due is { } due)
                 {
                     <span class="kb-meta @DueClass(card, column)" title="Due @AsWritten(due).ToGwsDate()"><i class="bi bi-calendar-event" aria-hidden="true"></i>@AsWritten(due).ToGwsDate()</span>
                 }
@@ -1115,15 +1160,15 @@ else
                 {
                     <span class="kb-meta" title="Sub-items"><i class="bi bi-diagram-3" aria-hidden="true"></i>@card.SubItemCount</span>
                 }
-                @if (card.Sprint is { } sprint && Settings.SwimlaneBy != KanbanSwimlanes.Sprint)
+                @if (ShowFace(_board!.Fields.SprintPropertyId) && card.Sprint is { } sprint && Settings.SwimlaneBy != KanbanSwimlanes.Sprint)
                 {
                     <span class="kb-meta" title="Sprint"><i class="bi bi-lightning-charge" aria-hidden="true"></i>@sprint.Label</span>
                 }
-                @if (card.Estimate is { } estimate)
+                @if (ShowFace(_board!.Fields.EstimatePropertyId) && card.Estimate is { } estimate)
                 {
                     <span class="kb-meta kb-estimate" title="Estimate">@estimate.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)</span>
                 }
-                @if (card.Assignees.Count > 0)
+                @if (ShowFace(_board!.Fields.AssigneePropertyId) && card.Assignees.Count > 0)
                 {
                     <span class="kb-assignees">
                         @foreach (var person in card.Assignees.Take(3))
@@ -1556,8 +1601,11 @@ else
 
     private static string Cards(int count) => count == 1 ? "1 card" : $"{count} cards";
 
-    private static bool HasFooter(KanbanCard card) =>
-        card.Due is not null || card.ChecklistTotal > 0 || card.SubItemCount > 0 || card.Estimate is not null || card.Assignees.Count > 0 || card.Sprint is not null
+    private bool HasFooter(KanbanCard card) =>
+        (ShowFace(_board!.Fields.DuePropertyId) && card.Due is not null) || card.ChecklistTotal > 0 || card.SubItemCount > 0
+        || (ShowFace(_board.Fields.EstimatePropertyId) && card.Estimate is not null)
+        || (ShowFace(_board.Fields.AssigneePropertyId) && card.Assignees.Count > 0)
+        || (ShowFace(_board.Fields.SprintPropertyId) && card.Sprint is not null)
         || card.LinkKinds is { Count: > 0 } || card.Votes > 0;
 
     // A due date as written: Sentinel stores a picked date at UTC midnight, which local time would

@@ -338,6 +338,11 @@
 }
 
 .kb-labels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: var(--gws-step-2); }
+.kb-card-properties { display: grid; gap: 3px; margin: 7px 0 0; font-size: .6875rem; }
+.kb-card-properties div { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 6px; }
+.kb-card-properties :is(dt, dd) { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kb-card-properties dt { color: var(--gws-text-soft); font-weight: 500; }
+.kb-card-properties dd { color: var(--gws-text-strong); text-align: end; }
 
 .kb-label {
     padding: 0 7px;
@@ -443,6 +448,12 @@
 }
 
 .kb-settings input { width: 5rem; }
+.kb-face-fields { flex: 1 1 100%; min-width: 0; margin: 2px 0 0; padding: 10px 12px; border: 1px solid var(--gws-panel-border); border-radius: var(--gws-radius-sm, 7px); }
+.kb-face-fields legend { float: none; width: auto; margin: 0; padding: 0 4px; font-size: .75rem; font-weight: 650; color: var(--gws-text-strong); }
+.kb-face-fields p { margin: 0 0 8px; font-size: .6875rem; color: var(--gws-text-soft); }
+.kb-face-fields > div { display: flex; flex-wrap: wrap; gap: 7px 14px; }
+.kb-face-fields label { display: inline-flex; align-items: center; gap: 6px; font-size: .75rem; color: var(--gws-text-strong); }
+.kb-face-fields input { width: 1rem; }
 
 .kb-wip {
     padding: 0 8px;

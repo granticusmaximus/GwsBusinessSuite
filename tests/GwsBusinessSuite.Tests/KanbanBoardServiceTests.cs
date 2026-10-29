@@ -327,6 +327,29 @@ public sealed class KanbanBoardServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CardFaceFields_ShouldPersistCustomProperties_AndProjectTheirDisplayValue()
+    {
+        var id = await _boards.CreateBoardAsync("Ops", "personal", "grant");
+        var custom = await _databases.SavePropertyAsync(id, new WikiDatabasePropertyEditor
+        {
+            Name = "Customer", Type = WikiDatabasePropertyTypes.Text
+        }, "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        var card = await _boards.AddCardAsync(id, board.Columns[0].OptionId, "Prepare handoff", "grant");
+        await _boards.SetCardsValueAsync(id, [card], custom.Id, _ => JsonValue.Create("Northwind"), "grant");
+        await _boards.SaveSettingsAsync(id, KanbanSettings.Default with { CardFaceFields = [custom.Id, custom.Id, Guid.NewGuid()] }, "grant");
+
+        board = (await _boards.GetBoardAsync(id))!;
+        board.Settings!.CardFaceFields.Should().Equal([custom.Id], "duplicates and deleted properties are removed");
+        board.FaceFields.Should().Contain(field => field.PropertyId == custom.Id && field.Name == "Customer");
+        board.Columns.SelectMany(column => column.Cards).Single(item => item.RowId == card).Properties
+            .Should().ContainSingle(property => property.PropertyId == custom.Id && property.Value == "Northwind");
+
+        await _boards.SaveSettingsAsync(id, board.Settings with { CardFaceFields = [] }, "grant");
+        (await _boards.GetSettingsAsync(id)).CardFaceFields.Should().BeEmpty("an explicit empty selection is distinct from the legacy default");
+    }
+
+    [Fact]
     public async Task Blocking_ShouldAddTheFieldsToABoardWithoutThem_AndCarryTheReason()
     {
         var tasks = await _databases.CreateDatabaseAsync("Tasks", null, "grant");

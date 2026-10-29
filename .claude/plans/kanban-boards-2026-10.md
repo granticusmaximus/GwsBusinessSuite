@@ -399,7 +399,16 @@ Built in this order, each one verified unit (verify-release + a live browser che
 - **K9c "Waiting on".** Same-board card-to-card dependencies (reusing the Timeline's Depends on
   relation): "Waiting on PRO-3" on the card, counts as blocked, unblocks itself and tells the
   assignee when the last one finishes.
+  **Done 29-10-26.** Built: a self-relation named `Waiting on`, dependency editing in the card
+  drawer, open-dependency state on board cards, automatic dependency blocking/unblocking, and a
+  `dependency-cleared` bell/digest notification for assignees. The relation remains a normal
+  Sentinel relation so Timeline and database views use the same source. Tests: 30 focused
+  KanbanBoardService tests; verify-release local gates PASS (deployed/responsive targets absent).
 - **K9d Card face fields.** Per board, pick which properties show on cards, custom ones included.
+  **Done 29-10-26.** Board settings persist an explicit property selection while existing boards
+  retain the familiar Key/Priority/Labels/Due/Assignee/Estimate/Sprint default. The appearance
+  panel lists eligible Sentinel properties, custom values use Sentinel's shared display formatting,
+  and cards render the chosen custom fields without changing their data.
 - **K9e Epics.** Group cards across columns under an epic with progress and a forecast; filter by
   epic; the roadmap groups by epic.
 - **K9f Email cards onto a board.** A per-board plus-address on the existing Sentinel email-in
