@@ -167,6 +167,12 @@
     private (string Kind, Guid Id)? _snoozeMenuFor;
     private CancellationTokenSource? _wake;
     private string _currentUsername = string.Empty;
+    // Container health and social publishing alerts are global (one read state for everyone) and
+    // admin business: the bell is in every admin-layout page, which Authors and Contributors reach
+    // too, so only admins see them - or can mark them read for everyone.
+    private bool _isAdmin;
+
+    [CascadingParameter] private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthState { get; set; }
 
     private IEnumerable<InboxEntry> Shown => _view.Visible.Where(entry => _filter is null || entry.Item.Kind == _filter);
 
@@ -186,8 +192,9 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var dockerAlerts = (await DockerHealthService.ListAlertsAsync(unreadOnly: false)).Select(ToInboxItem);
-        var socialAlerts = (await SocialPublishingService.ListAlertsAsync(unreadOnly: false)).Select(ToInboxItem);
+        _isAdmin = AuthState is not null && (await AuthState).User.IsInRole(GwsBusinessSuite.Domain.Entities.AppRoles.Admin);
+        var dockerAlerts = _isAdmin ? (await DockerHealthService.ListAlertsAsync(unreadOnly: false)).Select(ToInboxItem) : [];
+        var socialAlerts = _isAdmin ? (await SocialPublishingService.ListAlertsAsync(unreadOnly: false)).Select(ToInboxItem) : [];
         var chatAlerts = await LoadChatAlertsAsync();
         var overwatchAlerts = await LoadOverwatchAlertsAsync();
         var worldNewsAlerts = WorldNews.Store.Alerts(_currentUsername).Select(ToInboxItem);
@@ -195,8 +202,11 @@
         await LoadStatesAsync();
         Recompute();
 
-        DockerNotifier.OnAlert += HandleDockerAlert;
-        SocialNotifier.OnAlert += HandleSocialAlert;
+        if (_isAdmin)
+        {
+            DockerNotifier.OnAlert += HandleDockerAlert;
+            SocialNotifier.OnAlert += HandleSocialAlert;
+        }
         ChatNotifier.OnMessage += HandleChatMessage;
         OverwatchAreaNotifier.OnAlert += HandleOverwatchAlert;
         WorldNews.AlertCreated += HandleWorldNewsAlert;
@@ -437,8 +447,11 @@
 
     private async Task MarkAllReadAsync()
     {
-        await DockerHealthService.MarkAllAlertsReadAsync();
-        await SocialPublishingService.MarkAllAlertsReadAsync();
+        if (_isAdmin)
+        {
+            await DockerHealthService.MarkAllAlertsReadAsync();
+            await SocialPublishingService.MarkAllAlertsReadAsync();
+        }
         if (!string.IsNullOrWhiteSpace(_currentUsername))
         {
             await OverwatchAreaService.MarkAllAlertsReadAsync(_currentUsername);
