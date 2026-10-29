@@ -1,0 +1,40 @@
+.kb-addcol-open {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--gws-step-2);
+    width: 100%;
+    padding: var(--gws-step-2) var(--gws-step-3, 12px);
+    border: 1px dashed color-mix(in srgb, var(--gws-panel-border) 80%, transparent);
+    border-radius: var(--gws-radius-sm, 8px);
+    color: var(--gws-text-soft);
+    background: transparent;
+    font-size: .875rem;
+    cursor: pointer;
+}
+
+.kb-addcol-open:hover,
+.kb-addcol-open:focus-visible {
+    color: var(--gws-text-strong);
+    background: color-mix(in srgb, var(--gws-panel-bg) 40%, transparent);
+}
+
+.kb-addcol {
+    display: grid;
+    gap: var(--gws-step-2);
+    padding: var(--gws-step-2);
+    border-radius: var(--gws-radius-sm, 8px);
+    background: var(--gws-panel-bg-2);
+}
+
+.kb-addcol-field {
+    display: grid;
+    gap: 2px;
+    color: var(--gws-text-soft);
+    font-size: .75rem;
+}
+
+.kb-addcol-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--gws-step-2);
+}

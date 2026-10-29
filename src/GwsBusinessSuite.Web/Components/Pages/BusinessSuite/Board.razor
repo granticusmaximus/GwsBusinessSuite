@@ -85,6 +85,7 @@ else
                     {
                         <div class="kb-more-menu" role="menu">
                             <button type="button" role="menuitem" @onclick="StartRename"><i class="bi bi-pencil" aria-hidden="true"></i><span><strong>Rename board</strong><small>Its name and icon</small></span></button>
+                            <button type="button" role="menuitem" @onclick="StartAddColumn"><i class="bi bi-layout-three-columns" aria-hidden="true"></i><span><strong>Add a column</strong><small>Rename, recolour or delete one from its ⋯</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenAssistant"><i class="bi bi-stars" aria-hidden="true"></i><span><strong>Ask SentinelGPT</strong><small>Standup and stuck work</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenBoardAutomations"><i class="bi bi-magic" aria-hidden="true"></i><span><strong>Automate</strong><small>Rules, templates and repeats</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenRoadmap"><i class="bi bi-broadcast" aria-hidden="true"></i><span><strong>Public roadmap</strong><small>@(_board.Settings?.Roadmap is null ? "Share it read-only, with votes" : "Live - copy the link or change it")</small></span></button>
@@ -99,6 +100,13 @@ else
                 </div>
             </div>
         </header>
+
+        @if (_addingColumn)
+        {
+            <div class="kb-addcol-bar">
+                <KanbanAddColumn HasGroups="ColumnsHaveGroups" StartOpen="true" OnAdd="AddColumnAsync" OnCancel="() => _addingColumn = false" />
+            </div>
+        }
 
         @if (_showHelp)
         {
@@ -374,6 +382,9 @@ else
                         }
                     </section>
                 }
+                <section class="kb-column-new" aria-label="Add a column">
+                    <KanbanAddColumn HasGroups="ColumnsHaveGroups" OnAdd="AddColumnAsync" />
+                </section>
             </div>
         }
         }
@@ -459,6 +470,7 @@ else
         public string Key { get; } = column.OptionId ?? string.Empty;
         public string Label { get; } = column.Label;
         public string Color { get; } = column.Color;
+        public string? Group { get; } = column.Group;
         public bool IsComplete { get; } = column.Group == WikiDatabaseStatusGroups.Complete;
         public bool IsInProgress { get; } = column.Group == WikiDatabaseStatusGroups.InProgress;
         public int? WipLimit { get; } = column.WipLimit;
@@ -506,6 +518,66 @@ else
     }
 
     // After a change anywhere: the board, and the open card's fresh row.
+    // Columns are the board's Status options; KanbanColumnEditor and KanbanAddColumn collect the
+    // change and these save it (29-10-26).
+    private bool _addingColumn;
+
+    private bool ColumnsHaveGroups => _columns.Any(column => column.Group is not null);
+
+    private void StartAddColumn()
+    {
+        _showMore = false;
+        _addingColumn = true;
+    }
+
+    // Whether a column has a neighbour in its own group that side: a Status board keeps its groups in order.
+    private bool CanMoveColumn(ColumnState column, int offset)
+    {
+        var group = _columns.Where(other => other.OptionId is not null && other.Group == column.Group).ToList();
+        var at = group.IndexOf(column) + offset;
+        return at >= 0 && at < group.Count;
+    }
+
+    private IReadOnlyList<(string Id, string Label)> OtherColumns(ColumnState column) =>
+        _columns.Where(other => other.OptionId is not null && other.Key != column.Key).Select(other => (other.OptionId!, other.Label)).ToList();
+
+    private Task AddColumnAsync((string Label, string? Group) add) => ChangeColumnsAsync(async () =>
+    {
+        await BoardService.AddColumnAsync(DatabaseId, add.Label, add.Group, _me);
+        _addingColumn = false;
+    }, $"Added {add.Label.Trim()}.");
+
+    private Task SaveColumnAsync(ColumnState column, (string Label, string Color, string? Group) change) => ChangeColumnsAsync(async () =>
+    {
+        await BoardService.UpdateColumnAsync(DatabaseId, column.OptionId!, change.Label, change.Color, change.Group, _me);
+        _menuKey = null;
+    }, "Column saved.");
+
+    private Task MoveColumnAsync(ColumnState column, int offset) =>
+        ChangeColumnsAsync(() => BoardService.MoveColumnAsync(DatabaseId, column.OptionId!, offset, _me), null);
+
+    private Task DeleteColumnAsync(ColumnState column, string? moveTo) => ChangeColumnsAsync(async () =>
+    {
+        await BoardService.DeleteColumnAsync(DatabaseId, column.OptionId!, moveTo, _me);
+        _menuKey = null;
+    }, column.Cards.Count > 0 && OtherColumns(column).FirstOrDefault(other => other.Id == moveTo) is { Label: { } target }
+        ? $"Deleted {column.Label}; its cards are in {target}."
+        : $"Deleted {column.Label}.");
+
+    private async Task ChangeColumnsAsync(Func<Task> change, string? done)
+    {
+        try
+        {
+            await change();
+            await RefreshAsync();
+            if (done is not null) Toasts.Show(done, tone: StatusTone.Success);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            Toasts.Show($"Couldn't change the columns. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
     private void StartRename()
     {
         _showMore = false;
@@ -1021,6 +1093,10 @@ else
         @if (_menuKey == column.Key)
         {
             <div class="kb-column-menu">
+                <KanbanColumnEditor @key="column.Key" Label="@column.Label" Color="@column.Color" Group="@column.Group" HasGroups="ColumnsHaveGroups"
+                                    CanMoveLeft="CanMoveColumn(column, -1)" CanMoveRight="CanMoveColumn(column, 1)" CardCount="column.Cards.Count"
+                                    OtherColumns="OtherColumns(column)" OnSave="change => SaveColumnAsync(column, change)"
+                                    OnMove="offset => MoveColumnAsync(column, offset)" OnDelete="moveTo => DeleteColumnAsync(column, moveTo)" />
                 <label for="kb-wip-input">WIP limit</label>
                 <input id="kb-wip-input" type="number" min="1" max="999" class="form-control form-control-sm" value="@column.WipLimit" placeholder="None"
                        @onchange="e => SetWipAsync(column, e.Value as string)" />

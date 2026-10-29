@@ -121,6 +121,131 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         await databases.RenameDatabaseAsync(databaseId, name, emoji, performedBy, cancellationToken);
     }
 
+    public async Task<string> AddColumnAsync(Guid databaseId, string label, string? group, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var (status, options) = await ColumnOptionsAsync(databaseId, cancellationToken);
+        var name = ColumnLabel(label, options, exceptId: null);
+        var color = KanbanColumnEdits.Colors.FirstOrDefault(c => options.All(o => !string.Equals(o.Color, c, StringComparison.OrdinalIgnoreCase)))
+            ?? KanbanColumnEdits.Colors[options.Count % KanbanColumnEdits.Colors.Count];
+        var option = new WikiDatabasePropertyOption(Guid.NewGuid().ToString(), name, color, ColumnGroup(status, group));
+        await SaveColumnOptionsAsync(databaseId, status, [.. options, option], performedBy, cancellationToken);
+        return option.Id;
+    }
+
+    public async Task UpdateColumnAsync(Guid databaseId, string optionId, string label, string color, string? group, string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var (status, options) = await ColumnOptionsAsync(databaseId, cancellationToken);
+        var current = options.FirstOrDefault(o => o.Id == optionId) ?? throw new KeyNotFoundException("That column isn't on the board any more.");
+        if (!SafeColorPattern().IsMatch(color ?? string.Empty)) throw new ArgumentException("Pick a colour for the column.", nameof(color));
+        var newGroup = ColumnGroup(status, group ?? current.Group);
+        if (current.Group == WikiDatabaseStatusGroups.Complete && newGroup != WikiDatabaseStatusGroups.Complete
+            && options.Count(o => o.Group == WikiDatabaseStatusGroups.Complete) == 1)
+            throw new InvalidOperationException("Keep at least one Done column: it's how the board knows a card is finished.");
+        var updated = current with { Label = ColumnLabel(label, options, exceptId: optionId), Color = color!, Group = newGroup };
+        // Changing group moves the column to the end of its new group, as a new column would land.
+        var list = options.Where(o => o.Id != optionId).ToList();
+        if (newGroup == current.Group) list.Insert(options.ToList().FindIndex(o => o.Id == optionId), updated);
+        else list.Add(updated);
+        await SaveColumnOptionsAsync(databaseId, status, list, performedBy, cancellationToken);
+    }
+
+    public async Task MoveColumnAsync(Guid databaseId, string optionId, int offset, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var (status, options) = await ColumnOptionsAsync(databaseId, cancellationToken);
+        var current = options.FirstOrDefault(o => o.Id == optionId) ?? throw new KeyNotFoundException("That column isn't on the board any more.");
+        // Neighbours as the board shows them: a Status board orders by group first, so a column
+        // only swaps places with another column of its own group.
+        var shown = ColumnOrderOf(status, options).Where(o => o.Group == current.Group).ToList();
+        var at = shown.FindIndex(o => o.Id == optionId);
+        var target = at + Math.Sign(offset);
+        if (offset == 0 || target < 0 || target >= shown.Count) return;
+        var list = options.ToList();
+        var (a, b) = (list.FindIndex(o => o.Id == optionId), list.FindIndex(o => o.Id == shown[target].Id));
+        (list[a], list[b]) = (list[b], list[a]);
+        await SaveColumnOptionsAsync(databaseId, status, list, performedBy, cancellationToken);
+    }
+
+    public async Task DeleteColumnAsync(Guid databaseId, string optionId, string? moveCardsTo, string performedBy,
+        CancellationToken cancellationToken = default)
+    {
+        var database = await databases.GetDatabaseAsync(databaseId, cancellationToken) ?? throw new KeyNotFoundException("That board isn't there any more.");
+        var status = StatusProperty(database) ?? throw new KeyNotFoundException("That board has no columns to edit.");
+        var options = WikiDatabasePropertyConfig.GetOptions(status).ToList();
+        var current = options.FirstOrDefault(o => o.Id == optionId) ?? throw new KeyNotFoundException("That column isn't on the board any more.");
+        if (options.Count == 1) throw new InvalidOperationException("A board needs at least one column.");
+        if (current.Group == WikiDatabaseStatusGroups.Complete && options.Count(o => o.Group == WikiDatabaseStatusGroups.Complete) == 1)
+            throw new InvalidOperationException("Keep at least one Done column: it's how the board knows a card is finished.");
+        // Every card in it, archived ones and sub-items included, so none is left pointing at nothing.
+        var rows = database.Rows
+            .Where(row => WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), status.Id) == optionId)
+            .Select(row => row.Id)
+            .ToList();
+        if (rows.Count > 0)
+        {
+            // The board asks where visible cards go; archived cards and sub-items it can't see
+            // go to a neighbour in the same group (or the first other column) when it doesn't say.
+            var others = ColumnOrderOf(status, options).Where(o => o.Id != optionId).ToList();
+            var target = moveCardsTo is not null && others.Any(o => o.Id == moveCardsTo) ? moveCardsTo
+                : moveCardsTo is null ? (others.FirstOrDefault(o => o.Group == current.Group) ?? others[0]).Id
+                : throw new ArgumentException("Choose another column on this board for its cards.", nameof(moveCardsTo));
+            await SetCardsValueAsync(databaseId, rows, status.Id, _ => JsonValue.Create(target), performedBy, cancellationToken);
+        }
+        await SaveColumnOptionsAsync(databaseId, status, options.Where(o => o.Id != optionId).ToList(), performedBy, cancellationToken);
+
+        // Its WIP limit and its place on the public roadmap go with it.
+        var settings = await GetSettingsAsync(databaseId, cancellationToken);
+        if (settings.WipLimits.ContainsKey(optionId) || settings.Roadmap?.Columns.Contains(optionId) == true)
+        {
+            var limits = new Dictionary<string, int>(settings.WipLimits);
+            limits.Remove(optionId);
+            await SaveSettingsAsync(databaseId, settings with
+            {
+                WipLimits = limits,
+                Roadmap = settings.Roadmap is null ? null : settings.Roadmap with { Columns = settings.Roadmap.Columns.Where(c => c != optionId).ToList() }
+            }, performedBy, cancellationToken);
+        }
+    }
+
+    private async Task<(WikiDatabaseProperty Status, IReadOnlyList<WikiDatabasePropertyOption> Options)> ColumnOptionsAsync(Guid databaseId,
+        CancellationToken cancellationToken)
+    {
+        var database = await databases.GetDatabaseAsync(databaseId, cancellationToken) ?? throw new KeyNotFoundException("That board isn't there any more.");
+        var status = StatusProperty(database) ?? throw new KeyNotFoundException("That board has no columns to edit.");
+        return (status, WikiDatabasePropertyConfig.GetOptions(status));
+    }
+
+    // Through Sentinel, as the database editor saves it, keeping the property's other settings.
+    private async Task SaveColumnOptionsAsync(Guid databaseId, WikiDatabaseProperty status, IReadOnlyList<WikiDatabasePropertyOption> options,
+        string performedBy, CancellationToken cancellationToken)
+    {
+        var config = WikiDatabasePropertyConfig.Parse(status);
+        await databases.SavePropertyAsync(databaseId, new WikiDatabasePropertyEditor
+        {
+            Id = status.Id,
+            Name = status.Name,
+            Type = status.Type,
+            Options = options,
+            IsRequired = config.IsRequired
+        }, performedBy, cancellationToken);
+    }
+
+    private static string ColumnLabel(string label, IReadOnlyList<WikiDatabasePropertyOption> options, string? exceptId)
+    {
+        var name = (label ?? string.Empty).Trim();
+        if (name.Length == 0) throw new ArgumentException("Give the column a name.", nameof(label));
+        if (name.Length > KanbanColumnEdits.MaxLabelLength)
+            throw new ArgumentException($"Keep column names under {KanbanColumnEdits.MaxLabelLength} characters.", nameof(label));
+        if (options.Any(o => o.Id != exceptId && string.Equals(o.Label.Trim(), name, StringComparison.CurrentCultureIgnoreCase)))
+            throw new ArgumentException($"There's already a column called \"{name}\".", nameof(label));
+        return name;
+    }
+
+    // A Status board's columns each belong to a group; a Select board's have none.
+    private static string? ColumnGroup(WikiDatabaseProperty status, string? group) =>
+        status.Type != WikiDatabasePropertyTypes.Status ? null
+            : group is not null && WikiDatabaseStatusGroups.All.Contains(group) ? group : WikiDatabaseStatusGroups.ToDo;
+
     public Task<KanbanBoard?> GetBoardAsync(Guid databaseId, CancellationToken cancellationToken = default) =>
         LoadBoardAsync(databaseId, includeArchived: false, cancellationToken);
 
@@ -1252,9 +1377,11 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     // A Status property reads left to right through its groups (To-do, In progress, Complete);
     // within a group, and for a Select, the options keep their own order.
-    private static IReadOnlyList<WikiDatabasePropertyOption> ColumnOrder(WikiDatabaseProperty property)
+    private static IReadOnlyList<WikiDatabasePropertyOption> ColumnOrder(WikiDatabaseProperty property) =>
+        ColumnOrderOf(property, WikiDatabasePropertyConfig.GetOptions(property));
+
+    private static IReadOnlyList<WikiDatabasePropertyOption> ColumnOrderOf(WikiDatabaseProperty property, IReadOnlyList<WikiDatabasePropertyOption> options)
     {
-        var options = WikiDatabasePropertyConfig.GetOptions(property);
         if (property.Type != WikiDatabasePropertyTypes.Status) return options;
         return options
             .Select((option, index) => (Option: option, Index: index))

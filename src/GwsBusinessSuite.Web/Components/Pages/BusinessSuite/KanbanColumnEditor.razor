@@ -1,0 +1,138 @@
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Domain.Entities
+@* A column's own settings, at the top of its menu: name, colour, group (Status boards), moving it
+   left or right within its group, and deleting it (its cards go to another column first). The
+   board does the saving (KanbanBoardService's column methods); this only collects the change. *@
+<div class="kb-coledit">
+    <form class="kb-coledit-form" @onsubmit="SaveAsync" @onsubmit:preventDefault>
+        <label class="kb-coledit-field">
+            <span>Column name</span>
+            <input class="form-control form-control-sm" maxlength="@KanbanColumnEdits.MaxLabelLength" autocomplete="off"
+                   @bind="_label" @bind:event="oninput" />
+        </label>
+        <div class="kb-coledit-swatches" role="radiogroup" aria-label="Column colour">
+            @foreach (var color in KanbanColumnEdits.Colors)
+            {
+                var chosen = string.Equals(color, _color, StringComparison.OrdinalIgnoreCase);
+                <button type="button" role="radio" aria-checked="@(chosen ? "true" : "false")" aria-label="@ColorName(color)" title="@ColorName(color)"
+                        class="kb-coledit-swatch @(chosen ? "is-chosen" : "")" style="--swatch: @color" @onclick="() => _color = color"></button>
+            }
+        </div>
+        @if (HasGroups)
+        {
+            <label class="kb-coledit-field">
+                <span>Counts as</span>
+                <select class="form-select form-select-sm" @bind="_group">
+                    <option value="@WikiDatabaseStatusGroups.ToDo">To do</option>
+                    <option value="@WikiDatabaseStatusGroups.InProgress">In progress</option>
+                    <option value="@WikiDatabaseStatusGroups.Complete">Done</option>
+                </select>
+            </label>
+        }
+        <button type="submit" class="btn btn-sm btn-primary" disabled="@(_busy || !Changed)">Save column</button>
+    </form>
+    <div class="kb-coledit-row">
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || !CanMoveLeft)" @onclick="() => MoveAsync(-1)"
+                aria-label="Move @Label left"><i class="bi bi-arrow-left" aria-hidden="true"></i> Move left</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || !CanMoveRight)" @onclick="() => MoveAsync(1)"
+                aria-label="Move @Label right">Move right <i class="bi bi-arrow-right" aria-hidden="true"></i></button>
+    </div>
+    @if (!_deleting)
+    {
+        <button type="button" class="btn btn-sm btn-link kb-coledit-delete" disabled="@_busy" @onclick="() => _deleting = true">
+            <i class="bi bi-trash" aria-hidden="true"></i> Delete column
+        </button>
+    }
+    else
+    {
+        <div class="kb-coledit-confirm" role="group" aria-label="Delete @Label">
+            @if (CardCount > 0)
+            {
+                <label class="kb-coledit-field">
+                    <span>Move its @CardCount @(CardCount == 1 ? "card" : "cards") to</span>
+                    <select class="form-select form-select-sm" @bind="_moveTo">
+                        <option value="">Choose a column</option>
+                        @foreach (var other in OtherColumns)
+                        {
+                            <option value="@other.Id">@other.Label</option>
+                        }
+                    </select>
+                </label>
+            }
+            else
+            {
+                <p class="kb-coledit-note">It's empty, so nothing else changes.</p>
+            }
+            <div class="kb-coledit-row">
+                <button type="button" class="btn btn-sm btn-danger" disabled="@(_busy || (CardCount > 0 && string.IsNullOrEmpty(_moveTo)))"
+                        @onclick="DeleteAsync">Delete @Label</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => _deleting = false">Keep it</button>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Color { get; set; } = string.Empty;
+    [Parameter] public string? Group { get; set; }
+    // Status boards' columns belong to To do / In progress / Done; a Select board's don't.
+    [Parameter] public bool HasGroups { get; set; }
+    [Parameter] public bool CanMoveLeft { get; set; }
+    [Parameter] public bool CanMoveRight { get; set; }
+    [Parameter] public int CardCount { get; set; }
+    [Parameter] public IReadOnlyList<(string Id, string Label)> OtherColumns { get; set; } = [];
+    [Parameter, EditorRequired] public EventCallback<(string Label, string Color, string? Group)> OnSave { get; set; }
+    [Parameter, EditorRequired] public EventCallback<int> OnMove { get; set; }
+    [Parameter, EditorRequired] public EventCallback<string?> OnDelete { get; set; }
+
+    private string _label = string.Empty;
+    private string _color = string.Empty;
+    private string? _group;
+    private string _moveTo = string.Empty;
+    private bool _deleting;
+    private bool _busy;
+
+    private bool Changed => !string.IsNullOrWhiteSpace(_label)
+        && (_label.Trim() != Label || !string.Equals(_color, Color, StringComparison.OrdinalIgnoreCase) || (HasGroups && _group != Group));
+
+    protected override void OnInitialized()
+    {
+        _label = Label;
+        _color = Color;
+        _group = Group ?? WikiDatabaseStatusGroups.ToDo;
+    }
+
+    private Task SaveAsync() => RunAsync(() => OnSave.InvokeAsync((_label.Trim(), _color, HasGroups ? _group : null)));
+
+    private Task MoveAsync(int offset) => RunAsync(() => OnMove.InvokeAsync(offset));
+
+    private Task DeleteAsync() => RunAsync(() => OnDelete.InvokeAsync(string.IsNullOrEmpty(_moveTo) ? null : _moveTo));
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            await action();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string ColorName(string color) => color.ToLowerInvariant() switch
+    {
+        "#78716c" => "Grey",
+        "#2563eb" => "Blue",
+        "#d97706" => "Amber",
+        "#7c3aed" => "Violet",
+        "#15803d" => "Green",
+        "#b91c1c" => "Red",
+        "#0e7490" => "Teal",
+        "#be185d" => "Pink",
+        _ => color
+    };
+}

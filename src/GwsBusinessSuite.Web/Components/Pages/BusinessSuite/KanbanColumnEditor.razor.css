@@ -1,0 +1,67 @@
+.kb-coledit {
+    display: grid;
+    gap: var(--gws-step-2);
+    flex-basis: 100%;
+    padding-bottom: var(--gws-step-2);
+    border-bottom: 1px solid color-mix(in srgb, var(--gws-panel-border) 60%, transparent);
+}
+
+.kb-coledit-form {
+    display: grid;
+    gap: var(--gws-step-2);
+}
+
+.kb-coledit-field {
+    display: grid;
+    gap: 2px;
+    color: var(--gws-text-soft);
+    font-size: .75rem;
+}
+
+.kb-coledit-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.kb-coledit-swatch {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 2px solid transparent;
+    border-radius: 50%;
+    background: var(--swatch);
+    box-shadow: inset 0 0 0 2px var(--gws-panel-bg-2);
+    cursor: pointer;
+}
+
+.kb-coledit-swatch.is-chosen {
+    border-color: var(--gws-text-strong);
+}
+
+.kb-coledit-swatch:focus-visible {
+    outline: 2px solid var(--gws-sidebar-accent);
+    outline-offset: 2px;
+}
+
+.kb-coledit-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--gws-step-2);
+}
+
+.kb-coledit-delete {
+    justify-self: start;
+    padding-inline: 0;
+    color: var(--gws-status-danger-fill);
+}
+
+.kb-coledit-confirm {
+    display: grid;
+    gap: var(--gws-step-2);
+}
+
+.kb-coledit-note {
+    margin: 0;
+    color: var(--gws-text-soft);
+}

@@ -483,6 +483,19 @@
 
 .kb-column-menu input { width: 5.5rem; }
 
+/* Column settings and the add slot (29-10-26): their own components bring their styles. */
+.kb-column-menu ::deep .kb-coledit input { width: 100%; }
+
+.kb-column-new {
+    flex: 0 0 var(--kb-column-width);
+    align-self: flex-start;
+}
+
+.kb-addcol-bar {
+    max-width: 24rem;
+    margin-bottom: var(--gws-step-3, 12px);
+}
+
 .kb-card.is-blocked { border-inline-start: 3px solid var(--gws-status-danger-fill); }
 
 .kb-blocked {

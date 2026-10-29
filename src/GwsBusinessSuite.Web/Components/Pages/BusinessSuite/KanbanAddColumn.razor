@@ -1,0 +1,92 @@
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Domain.Entities
+@* Adds a column: a name and, on a Status board, which group it counts as. A new column lands at
+   the end of its group. Shown as a slot after the last column, and from the board's menu. *@
+@if (!_open)
+{
+    <button type="button" class="kb-addcol-open" @onclick="Open"><i class="bi bi-plus-lg" aria-hidden="true"></i>Add column</button>
+}
+else
+{
+    <form class="kb-addcol" @onsubmit="AddAsync" @onsubmit:preventDefault @onkeydown="OnKeyDown">
+        <label class="kb-addcol-field">
+            <span>New column</span>
+            <input @ref="_input" class="form-control form-control-sm" maxlength="@KanbanColumnEdits.MaxLabelLength" autocomplete="off"
+                   placeholder="e.g. Review" @bind="_label" @bind:event="oninput" />
+        </label>
+        @if (HasGroups)
+        {
+            <label class="kb-addcol-field">
+                <span>Counts as</span>
+                <select class="form-select form-select-sm" @bind="_group">
+                    <option value="@WikiDatabaseStatusGroups.ToDo">To do</option>
+                    <option value="@WikiDatabaseStatusGroups.InProgress">In progress</option>
+                    <option value="@WikiDatabaseStatusGroups.Complete">Done</option>
+                </select>
+            </label>
+        }
+        <div class="kb-addcol-row">
+            <button type="submit" class="btn btn-sm btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_label))">Add column</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="CloseAsync">Cancel</button>
+        </div>
+    </form>
+}
+
+@code {
+    [Parameter] public bool HasGroups { get; set; }
+    // Open straight away (from the board menu) rather than as the "Add column" button.
+    [Parameter] public bool StartOpen { get; set; }
+    [Parameter, EditorRequired] public EventCallback<(string Label, string? Group)> OnAdd { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private ElementReference _input;
+    private bool _open;
+    private bool _focus;
+    private bool _busy;
+    private string _label = string.Empty;
+    private string _group = WikiDatabaseStatusGroups.InProgress;
+
+    protected override void OnInitialized()
+    {
+        _open = StartOpen;
+        _focus = StartOpen;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focus) return;
+        _focus = false;
+        await _input.FocusAsync();
+    }
+
+    private void Open()
+    {
+        _open = true;
+        _focus = true;
+    }
+
+    private async Task AddAsync()
+    {
+        if (_busy || string.IsNullOrWhiteSpace(_label)) return;
+        _busy = true;
+        try
+        {
+            await OnAdd.InvokeAsync((_label.Trim(), HasGroups ? _group : null));
+            _label = string.Empty;
+            _open = StartOpen;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        _label = string.Empty;
+        _open = false;
+        await OnCancel.InvokeAsync();
+    }
+
+    private Task OnKeyDown(KeyboardEventArgs e) => e.Key == "Escape" ? CloseAsync() : Task.CompletedTask;
+}

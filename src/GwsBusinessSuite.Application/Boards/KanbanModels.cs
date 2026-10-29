@@ -247,6 +247,14 @@ public sealed record KanbanColumnSeed(string Label, string Color, string Group);
 
 public sealed record KanbanTemplate(string Key, string Name, string Description, string Icon, IReadOnlyList<KanbanColumnSeed> Columns, bool Sprints = false);
 
+// Editing a board's columns: they're the options of its Status (or grouping Select) property.
+public static class KanbanColumnEdits
+{
+    public const int MaxLabelLength = 60;
+    // The status palette's fills, in the order a new column takes them.
+    public static readonly IReadOnlyList<string> Colors = ["#78716c", "#2563eb", "#d97706", "#7c3aed", "#15803d", "#b91c1c", "#0e7490", "#be185d"];
+}
+
 public static class KanbanTemplates
 {
     // Column colours are the status palette's fills (StatusTones), so a column reads like the
@@ -303,6 +311,15 @@ public interface IKanbanBoardService
     // Renames the board - its Sentinel database, so Sentinel shows the new name too. The icon is
     // an emoji; blank goes back to the default.
     Task RenameBoardAsync(Guid databaseId, string title, string? icon, string performedBy, CancellationToken cancellationToken = default);
+
+    // Columns (29-10-26). Group is a WikiDatabaseStatusGroups value for a Status board, ignored for
+    // a Select board. A new column goes at the end of its group. Delete moves the column's cards to
+    // moveCardsTo first (a neighbour in its group when null).
+    Task<string> AddColumnAsync(Guid databaseId, string label, string? group, string performedBy, CancellationToken cancellationToken = default);
+    Task UpdateColumnAsync(Guid databaseId, string optionId, string label, string color, string? group, string performedBy, CancellationToken cancellationToken = default);
+    // offset -1 moves it one place left, +1 one place right, within its group.
+    Task MoveColumnAsync(Guid databaseId, string optionId, int offset, string performedBy, CancellationToken cancellationToken = default);
+    Task DeleteColumnAsync(Guid databaseId, string optionId, string? moveCardsTo, string performedBy, CancellationToken cancellationToken = default);
 
     // Deleting a board moves its Sentinel database (cards and all) to Sentinel's Trash, where it
     // can be restored; its page and any public roadmap stop opening until then.
