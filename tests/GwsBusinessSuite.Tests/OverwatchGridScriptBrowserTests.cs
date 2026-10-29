@@ -793,6 +793,34 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     }
 
     [Fact]
+    public async Task WorldNewsClick_ShouldOpenReportedNewsPanel_WithSourcesAndDeepLink()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+
+        await page.EvaluateAsync("""
+            () => window.tacticalGlobe.setWorldNews([{
+              id: 'situation-1', title: 'United States rail disruption', latest: 'Services begin to recover',
+              country: 'United States', lat: 39.8, lon: -98.5, eventCount: 3, outletCount: 12,
+              reportCount: 18, lastSeen: '29-10-26 10:30', summary: 'Several operators reported delays.',
+              href: '/admin/world-news?situation=situation-1',
+              sources: [{ outlet: 'Example News', title: 'Rail services delayed', url: 'https://example.test/report' }]
+            }])
+            """);
+        await page.WaitForTimeoutAsync(1000);
+
+        await page.Mouse.ClickAsync(400, 300);
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-incident-panel')", new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        var panelText = await page.EvaluateAsync<string>("document.querySelector('.tg-incident-panel').textContent");
+        panelText.Should().Contain("REPORTED NEWS").And.Contain("NOT A CONFIRMED INCIDENT")
+            .And.Contain("United States rail disruption").And.Contain("12 OUTLETS");
+        (await page.GetAttributeAsync(".tg-incident-panel a.tg-incident-report", "href"))
+            .Should().Be("/admin/world-news?situation=situation-1");
+    }
+
+    [Fact]
     public async Task WeatherSnapshot_ShouldRenderCurrentConditionsInThePanel()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);

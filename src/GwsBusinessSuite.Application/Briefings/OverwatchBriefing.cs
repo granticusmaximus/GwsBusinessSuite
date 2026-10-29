@@ -145,6 +145,7 @@ public static partial class OverwatchBriefing
         AddCount(counts, facts, "weather", "weather alert", "weather alerts");
         AddCount(counts, facts, "hazard", "hazard", "hazards");
         AddCount(counts, facts, "camera", "camera needing a look", "cameras needing a look");
+        AddCount(counts, facts, "world-news", "reported news development", "reported news developments");
         var top = facts.Facts.Where(f => f.Kind != "route").Take(3).Select(f => f.Text);
         return $"{string.Join(", ", counts)}. {string.Join("; ", top)}.";
     }

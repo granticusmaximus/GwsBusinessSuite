@@ -29,6 +29,7 @@
 @inject GwsBusinessSuite.Infrastructure.Services.CameraWatchService CameraWatch
 @inject GwsBusinessSuite.Infrastructure.Services.TimeMachineService TimeMachine
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchBriefingService Briefings
+@inject GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService WorldNewsMap
 @inject GwsBusinessSuite.Infrastructure.Services.MapNoteService MapNotes
 @inject GwsBusinessSuite.Application.LiveLayers.AircraftService AircraftService
 @inject GwsBusinessSuite.Application.RoadTraffic.HpmsRoadTrafficService RoadTrafficService
@@ -178,6 +179,20 @@
             }
         </div>
         <div class="tg-layer-group">
+            <div class="tg-layer-group-title">INTELLIGENCE</div>
+            <div class="tg-layer-buttons">
+                <button type="button" data-tg-toggle="world-news" class="tg-toggle @(_worldNewsOn ? "tg-toggle-on" : "")"
+                        title="Reported World News situations whose headlines explicitly name a country; country-level placement, not confirmed incidents"
+                        @onclick="ToggleWorldNewsAsync">
+                    WORLD NEWS [@(_worldNewsOn ? "ON" : "OFF")]
+                </button>
+            </div>
+            @if (_worldNewsOn)
+            {
+                <div class="tg-hazard-summary">@_worldNewsCount reported situation@(_worldNewsCount == 1 ? "" : "s") in view · country-level placement</div>
+            }
+        </div>
+        <div class="tg-layer-group">
             <div class="tg-layer-group-title">HAZARDS</div>
             <div class="tg-layer-buttons">
                 <button type="button" data-tg-toggle="hazards" class="tg-toggle @(_hazardsOn ? "tg-toggle-on" : "")"
@@ -246,7 +261,7 @@
     {
         <div class="tg-floating-panel tg-info-panel" aria-label="Sources and credits">
             <div class="tg-coverage-panel-header"><span>SOURCES</span><button type="button" class="tg-panel-close" aria-label="Close sources" @onclick="ToggleInfoPanel">&times;</button></div>
-            <p class="tg-info-text">Basemap: Esri, Maxar, Earthstar Geographics &middot; 25+ US state DOTs &middot; DriveBC &middot; Madrid Traffic &middot; Fintraffic &middot; NZTA &middot; QLD Traffic &middot; Windy &middot; Datumfeed &middot; Mapillary &middot; KartaView &middot; Overpass/OSM &middot; Wikimedia Commons &middot; NOAA/NWS &middot; Search: Photon/OSM, US Census Bureau &middot; full source list: COVERAGE panel / user guide</p>
+            <p class="tg-info-text">Basemap: Esri, Maxar, Earthstar Geographics &middot; 25+ US state DOTs &middot; DriveBC &middot; Madrid Traffic &middot; Fintraffic &middot; NZTA &middot; QLD Traffic &middot; Windy &middot; Datumfeed &middot; Mapillary &middot; KartaView &middot; Overpass/OSM &middot; Wikimedia Commons &middot; NOAA/NWS &middot; World News: Google News country editions and outlet feeds &middot; Search: Photon/OSM, US Census Bureau &middot; full source list: COVERAGE panel / user guide</p>
             <p class="tg-info-text">ADMIN // AUTHORIZED ACCESS ONLY. Public sources only - never unsecured private cameras.</p>
         </div>
     }
@@ -1300,6 +1315,8 @@
     private string? _hazardSummary;
     private int _camerasInViewTotal;
     private bool _incidentsOn;
+    private bool _worldNewsOn;
+    private int _worldNewsCount;
     private bool _selectModeOn;
     private string _username = "unknown";
     private List<CameraFeed> _favorites = new();
@@ -1654,6 +1671,28 @@
                 var incidents = await TrafficIncidentDirectoryService.GetIncidentsInBoundingBoxAsync(_lastBbox);
                 if (Current() && _incidentsOn) await ApplyIncidentsAsync(incidents);
             }) : Task.CompletedTask,
+            _worldNewsOn ? TimedAsync("world news", async () =>
+            {
+                var signals = WorldNewsMap.Signals(_lastBbox, DateTimeOffset.UtcNow - TimeSpan.FromHours(24));
+                if (!Current() || !_worldNewsOn) return;
+                _worldNewsCount = signals.Count;
+                await JS.InvokeVoidAsync("tacticalGlobe.setWorldNews", signals.Select(signal => new
+                {
+                    id = signal.SituationId,
+                    title = signal.Title,
+                    latest = signal.Latest,
+                    country = signal.Country,
+                    lat = signal.Latitude,
+                    lon = signal.Longitude,
+                    eventCount = signal.EventCount,
+                    outletCount = signal.OutletCount,
+                    reportCount = signal.ReportCount,
+                    lastSeen = signal.LastSeen.ToLocalGwsDateTime(),
+                    summary = signal.Summary,
+                    href = $"/admin/world-news?situation={Uri.EscapeDataString(signal.SituationId)}",
+                    sources = signal.Sources.Select(source => new { source.Outlet, source.Title, source.Url })
+                }).ToList());
+            }) : Task.CompletedTask,
             // Weather-on-zoom: always kept current for wherever the view is centered, not gated
             // behind a toggle - matches cameras/pins being always-on rather than opt-in.
             TimedAsync("weather", async () =>
@@ -1817,6 +1856,37 @@
         else
         {
             await JS.InvokeVoidAsync("tacticalGlobe.clearTrafficIncidents");
+        }
+    }
+
+    private async Task ToggleWorldNewsAsync()
+    {
+        _worldNewsOn = !_worldNewsOn;
+        if (_worldNewsOn)
+        {
+            var signals = WorldNewsMap.Signals(_lastBbox, DateTimeOffset.UtcNow - TimeSpan.FromHours(24));
+            _worldNewsCount = signals.Count;
+            await JS.InvokeVoidAsync("tacticalGlobe.setWorldNews", signals.Select(signal => new
+            {
+                id = signal.SituationId,
+                title = signal.Title,
+                latest = signal.Latest,
+                country = signal.Country,
+                lat = signal.Latitude,
+                lon = signal.Longitude,
+                eventCount = signal.EventCount,
+                outletCount = signal.OutletCount,
+                reportCount = signal.ReportCount,
+                lastSeen = signal.LastSeen.ToLocalGwsDateTime(),
+                summary = signal.Summary,
+                href = $"/admin/world-news?situation={Uri.EscapeDataString(signal.SituationId)}",
+                sources = signal.Sources.Select(source => new { source.Outlet, source.Title, source.Url })
+            }).ToList());
+        }
+        else
+        {
+            _worldNewsCount = 0;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearWorldNews");
         }
     }
 
@@ -2085,7 +2155,7 @@
     private bool _helpOpen;
 
     private int ActiveLayerCount =>
-        new[] { _radarOn, _alertsOn, _incidentsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
+        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
 
     private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {

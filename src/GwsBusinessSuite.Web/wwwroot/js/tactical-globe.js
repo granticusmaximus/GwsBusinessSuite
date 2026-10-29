@@ -230,6 +230,29 @@ window.tacticalGlobe = (function () {
             cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
         });
 
+        // World News is an intelligence overlay, not a confirmed incident layer. Purple markers
+        // and clusters keep that distinction visible; every marker is deliberately country-level.
+        const worldNewsDataSource = new Cesium.CustomDataSource('tg-world-news');
+        await viewer.dataSources.add(worldNewsDataSource);
+        worldNewsDataSource.clustering.enabled = true;
+        worldNewsDataSource.clustering.pixelRange = 50;
+        worldNewsDataSource.clustering.minimumClusterSize = 3;
+        worldNewsDataSource.clustering.clusterEvent.addEventListener(function (clusteredEntities, cluster) {
+            cluster.billboard.show = true;
+            cluster.billboard.image = pinBillboardImage;
+            cluster.billboard.width = 20;
+            cluster.billboard.height = 20;
+            cluster.billboard.color = Cesium.Color.fromCssColorString('#c77dff');
+            cluster.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            cluster.label.show = true;
+            cluster.label.text = clusteredEntities.length.toString();
+            cluster.label.font = 'bold 12px "Share Tech Mono", monospace';
+            cluster.label.fillColor = Cesium.Color.fromCssColorString('#05080a');
+            cluster.label.verticalOrigin = Cesium.VerticalOrigin.CENTER;
+            cluster.label.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
+            cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+        });
+
         // Hazard layer (earthquakes, wildfires, flooding river gauges) - unclustered: there are
         // rarely more than a few hundred in view and each is worth seeing individually.
         const hazardDataSource = new Cesium.CustomDataSource('tg-hazards');
@@ -305,6 +328,8 @@ window.tacticalGlobe = (function () {
                 }
             } else if (entity && entity._tacticalGlobeIncident) {
                 openIncidentPanel(entity._tacticalGlobeIncident);
+            } else if (entity && entity._tacticalGlobeWorldNews) {
+                openWorldNewsPanel(entity._tacticalGlobeWorldNews);
             } else if (entity && entity._tacticalGlobeHazard) {
                 openHazardPanel(entity._tacticalGlobeHazard);
             } else if (entity && entity._tacticalGlobeSign) {
@@ -327,7 +352,7 @@ window.tacticalGlobe = (function () {
         }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
         viewers.set(containerId, {
-            containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities,
+            containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities, worldNewsDataSource,
             hazardDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
             ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null
         });
@@ -1972,6 +1997,66 @@ window.tacticalGlobe = (function () {
         entry.incidentEntities.clear();
     }
 
+    function setWorldNews(containerIdOrSignals, maybeSignals) {
+        let containerId = 'tg-viewport';
+        let signals = containerIdOrSignals;
+        if (typeof containerIdOrSignals === 'string') {
+            containerId = containerIdOrSignals;
+            signals = maybeSignals;
+        }
+        const entry = viewers.get(containerId);
+        if (!entry) return;
+        entry.worldNewsDataSource.entities.suspendEvents();
+        entry.worldNewsDataSource.entities.removeAll();
+        (signals || []).forEach(function (signal) {
+            const size = Math.min(24, 12 + Math.log2(Math.max(1, signal.outletCount)) * 2);
+            const entity = entry.worldNewsDataSource.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(signal.lon, signal.lat),
+                billboard: {
+                    image: pinBillboardImage,
+                    width: size,
+                    height: size,
+                    color: Cesium.Color.fromCssColorString('#c77dff'),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                }
+            });
+            entity._tacticalGlobeWorldNews = signal;
+        });
+        entry.worldNewsDataSource.entities.resumeEvents();
+    }
+
+    function clearWorldNews(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) entry.worldNewsDataSource.entities.removeAll();
+    }
+
+    function openWorldNewsPanel(signal) {
+        closeIncidentPanel();
+        const sources = (signal.sources || []).map(function (source) {
+            return '<li><a target="_blank" rel="noopener" href="' + escapeHtml(source.url) + '">' +
+                escapeHtml(source.outlet + ': ' + source.title) + '</a></li>';
+        }).join('');
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel';
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header"><span>REPORTED NEWS</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button></div>' +
+            '<div class="tg-stream-panel-body">' +
+            '<div class="tg-incident-type">COUNTRY-LEVEL PLACEMENT · NOT A CONFIRMED INCIDENT</div>' +
+            '<h2>' + escapeHtml(signal.title) + '</h2>' +
+            (signal.latest !== signal.title ? '<div><strong>LATEST:</strong> ' + escapeHtml(signal.latest) + '</div>' : '') +
+            (signal.summary ? '<p>' + escapeHtml(signal.summary) + '</p>' : '') +
+            '<div class="tg-stream-panel-meta">' + escapeHtml(signal.country) + ' · ' +
+            escapeHtml(String(signal.eventCount)) + ' EVENTS · ' + escapeHtml(String(signal.outletCount)) +
+            ' OUTLETS · UPDATED ' + escapeHtml(signal.lastSeen) + '</div>' +
+            (sources ? '<ul class="tg-world-news-sources">' + sources + '</ul>' : '') +
+            '<a class="tg-incident-report" href="' + escapeHtml(signal.href) + '">OPEN IN WORLD NEWS</a>' +
+            '</div>';
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        if (!openAsModal(panel, closeIncidentPanel)) return;
+        incidentPanel = panel;
+    }
+
     // Keyed on the normalized category (IncidentNormalizer) so every source colors the same
     // way; GDOT's raw names are kept as a fallback for any payload without a category.
     function incidentTypeColor(categoryOrEventType) {
@@ -3037,6 +3122,8 @@ window.tacticalGlobe = (function () {
         getCameraAlertSeverity: getCameraAlertSeverity,
         setTrafficIncidents: setTrafficIncidents,
         clearTrafficIncidents: clearTrafficIncidents,
+        setWorldNews: setWorldNews,
+        clearWorldNews: clearWorldNews,
         setCoverageMarkers: setCoverageMarkers,
         setHazards: setHazards,
         setMessageSigns: setMessageSigns,

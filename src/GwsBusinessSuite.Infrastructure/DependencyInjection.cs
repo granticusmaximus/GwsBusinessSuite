@@ -865,6 +865,7 @@ public static class DependencyInjection
         services.AddScoped<OverwatchAreaService>();
         services.AddScoped<OverwatchTripService>();
         services.AddHostedService<OverwatchAreaBackgroundService>();
+        services.AddScoped<WorldNewsMapService>();
         // Overwatch briefings: facts for "Brief me" (written by the local model) + the daily morning briefing.
         services.AddScoped<OverwatchBriefingService>();
         services.AddHostedService<OverwatchBriefingBackgroundService>();

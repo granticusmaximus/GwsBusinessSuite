@@ -40,7 +40,8 @@ public sealed class OverwatchBriefingService(
     IOptions<GrowthReportEmailOptions> smtpOptions,
     TimeProvider timeProvider,
     ILogger<OverwatchBriefingService> logger,
-    IMailTransport? mailTransport = null)
+    IMailTransport? mailTransport = null,
+    WorldNewsMapService? worldNewsMap = null)
 {
     public const string AlertCreatedBy = "overwatch-briefing";
     public const int MaxMorningTrips = 5;
@@ -55,7 +56,7 @@ public sealed class OverwatchBriefingService(
         var alertList = await Safely(() => weatherAlerts.GetActiveAlertsAsync(bounds, ct), [], "weather alerts");
         var hazardList = await Safely(async () => (await hazards.GetHazardsAsync(bounds, ct)).Features, [], "hazards");
         var cameras = (await CameraStatesAsync(username, ct)).Where(c => bounds.Contains(c.Latitude, c.Longitude));
-        return OverwatchBriefing.ForArea(scope, now, incidentList, alertList, hazardList, cameras);
+        return AddWorldNews(OverwatchBriefing.ForArea(scope, now, incidentList, alertList, hazardList, cameras), bounds);
     }
 
     public async Task<BriefingFacts> GetRouteFactsAsync(string username, string scope, RouteWatchResult route, CancellationToken ct = default) =>
@@ -65,6 +66,21 @@ public sealed class OverwatchBriefingService(
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
         return await db.OverwatchCameraWatchStates.AsNoTracking().Where(s => s.Username == username).ToListAsync(ct);
+    }
+
+    private BriefingFacts AddWorldNews(BriefingFacts facts, BoundingBox bounds)
+    {
+        if (worldNewsMap is null) return facts;
+        var items = worldNewsMap.Signals(bounds, facts.At - TimeSpan.FromHours(24), 4);
+        if (items.Count == 0) return facts;
+        var combined = facts.Facts.ToList();
+        foreach (var item in items)
+        {
+            combined.Add(new BriefingFact(combined.Count + 1, "world-news",
+                $"Reported news associated with {item.Country}: {item.Latest} ({item.OutletCount} outlets; location is country-level)",
+                item.Latitude, item.Longitude));
+        }
+        return facts with { Facts = combined };
     }
 
     // One unreachable source shouldn't sink the whole briefing.

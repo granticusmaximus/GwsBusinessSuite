@@ -388,14 +388,14 @@ Built in this order, each one verified unit (verify-release + a live browser che
   (a control disabled while busy drops focus to the page) - both fixed.
 - **K9b Assignment and due-date notifications.** Bell notification (optional daily email) when a
   card is assigned to you, due tomorrow, or overdue.
-  **In progress 29-10-26 (handed to Codex).** Built: `BoardNotification` (+ migrations
+  **Done 29-10-26.** Built: `BoardNotification` (+ migrations
   AddBoardNotifications, AddBoardNotificationQuiet), `BoardNotificationService` (5-minute sweep,
   first look per board quiet via `KanbanSettings.NotificationsSince`, no note for cards the person
   created, admins only until K9g, 90-day prune of due notes, 07:00 digest to
   `MemberProfile.EmailBoardDigest`), bell kind "board", Community profile opt-in. Tests:
-  BoardNotificationServiceTests (3); verify-release PASS. Live: a sweep made admin2's
-  "assigned" note. Left: confirm the bell shows it and opening it lands on the card
-  (`?card=`), add the user-guide bullet, commit the Quiet migration + service fixes.
+  BoardNotificationServiceTests (3); verify-release PASS. Live: admin2's bell showed
+  "Assigned to you · Product launch" and opening it landed on the exact card (`?card=`) with the
+  "Launch checklist" drawer open. Operator guidance is in `docs/SENTINEL_USER_GUIDE.md`.
 - **K9c "Waiting on".** Same-board card-to-card dependencies (reusing the Timeline's Depends on
   relation): "Waiting on PRO-3" on the card, counts as blocked, unblocks itself and tells the
   assignee when the last one finishes.
