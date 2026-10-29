@@ -40,6 +40,12 @@ public static class DeveloperApiSentinelEndpointExtensions
             Results.Ok(await service.GetSystemHealthAsync(ct)))
             .RequireAuthorization(DeveloperApiPolicies.ForScope(DeveloperApiScopes.SentinelRead));
 
+        // What the world's press is reporting (World News): the last week's events matching the
+        // question by meaning, each with its situation and a few sources. Read-only, like the rest.
+        api.MapGet("/world-news/search", async (string query, GwsBusinessSuite.Infrastructure.Services.WorldNewsService news, CancellationToken ct) =>
+            Results.Ok(await news.SearchAsync(query, ct)))
+            .RequireAuthorization(DeveloperApiPolicies.ForScope(DeveloperApiScopes.SentinelRead));
+
         // The menu-bar companion's glance: counts that want attention, plus the key owner's own
         // unread messages/area alerts and running timer. Read-only like everything above.
         api.MapGet("/status", async (ClaimsPrincipal user, IDeveloperApiStatusService service, CancellationToken ct) =>

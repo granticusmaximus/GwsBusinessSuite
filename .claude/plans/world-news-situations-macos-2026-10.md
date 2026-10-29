@@ -116,6 +116,17 @@ wouldn't stop it; over all 316 links only 17 joined without a member at 0.72, ab
 right, so the rule wasn't added). Page: Events/Situations switch, situation timeline, events
 open in the Events view.
 
+**SentinelGPT `search_world_news` done 29-10-26.** The Mac app's native SentinelGPT tab (local
+gemma4) gets the tool through the `sentinel:read` key, from `GET /api/v1/sentinel/world-news/search`
+(`WorldNewsService.SearchAsync`). The question is embedded with embeddinggemma and ranked against
+the last 7 days' events of 2+ reports (`WorldNewsSearch.Rank`: score >= 0.5, at most 3 per
+situation, 8 in all), each returned with headline, summary, outlets, countries, situation and up to
+four sources. Measured on 2,622 live events: real questions scored 0.66-0.89 at their best match,
+"banana bread recipe" at most 0.38. Without the embedding model it matches headline words (question
+words ignored) and says so. Checked live: "train crash in Spain" gave 8 results (the situation's
+three biggest first), banana bread gave none, no key gave 401, and a dead Ollama fell back to
+headline words. The hosted web assistant doesn't have it yet (like the other native-only reads).
+
 **Revised order:**
 2. ~~The Mac tab~~ The web page (done, above).
 3. ~~Outlet RSS feeds + the combined document + summaries~~ (done, above).

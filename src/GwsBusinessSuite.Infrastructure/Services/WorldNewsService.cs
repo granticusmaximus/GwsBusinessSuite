@@ -34,6 +34,7 @@ public sealed class WorldNewsService : IDisposable
     private readonly EventListCache _eventLists;
     private readonly RangeListCache<SituationOverview> _situationLists;
     private readonly ILogger<WorldNewsService> _logger;
+    private readonly WorldNewsOptions _options;
 
     public WorldNewsService(IConfiguration configuration, IOptions<ContentStudioOptions> ollamaOptions,
         IHttpClientFactory httpClientFactory, IServiceScopeFactory scopes, ILogger<WorldNewsService> logger)
@@ -45,8 +46,8 @@ public sealed class WorldNewsService : IDisposable
         var baseUrl = string.IsNullOrWhiteSpace(ollamaOptions.Value.BaseUrl) ? ContentStudioOptions.DefaultBaseUrl : ollamaOptions.Value.BaseUrl;
         _ollama = new OllamaClient(new Uri(baseUrl.TrimEnd('/') + "/"), new HttpClient { Timeout = TimeSpan.FromMinutes(5) });
         var http = httpClientFactory.CreateClient(HttpClientName);
-        _pipeline = new WorldNewsPipeline(Store, http, new GdeltDocClient(http, TimeProvider.System), _ollama, TimeProvider.System,
-            new WorldNewsOptions { MaxEmbedPerCycle = configuration.GetValue("WorldNews:MaxEmbedPerCycle", 1500) });
+        _options = new WorldNewsOptions { MaxEmbedPerCycle = configuration.GetValue("WorldNews:MaxEmbedPerCycle", 1500) };
+        _pipeline = new WorldNewsPipeline(Store, http, new GdeltDocClient(http, TimeProvider.System), _ollama, TimeProvider.System, _options);
         // IOllamaService is a typed HttpClient, so each summary takes a fresh one rather than this
         // singleton holding one for the app's lifetime. 8k context fits SummaryOptions.MaxPromptChars.
         var model = ollamaOptions.Value.Model;
@@ -128,6 +129,51 @@ public sealed class WorldNewsService : IDisposable
             _situationLists.Clear();
             Changed?.Invoke();
         }
+    }
+
+    // SentinelGPT's search_world_news: the last week's events that match the question by meaning,
+    // with their situation and a few sources. Falls back to matching headline words when the
+    // embedding model can't be reached.
+    public async Task<WorldNewsSearchResult> SearchAsync(string query, CancellationToken ct)
+    {
+        var question = query.Trim();
+        if (question.Length == 0) return new WorldNewsSearchResult(question, "nothing", []);
+        var since = DateTimeOffset.UtcNow - WorldNewsSearch.Window;
+        var candidates = await Task.Run(() => Store.SearchCandidates(since, WorldNewsSearch.MinArticles), ct);
+        var situations = candidates.ToDictionary(c => c.EventId, c => c.SituationId);
+
+        IReadOnlyList<string> ids;
+        string matchedBy;
+        try
+        {
+            var vector = (await _ollama.EmbedAsync(_options.EmbeddingModel, [question], ct))[0];
+            ids = WorldNewsSearch.Rank(vector, candidates).Select(hit => hit.EventId).ToList();
+            matchedBy = "meaning";
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "World news search couldn't embed the question; matching headline words instead");
+            ids = WorldNewsSearch.MatchWords(question, TopEvents(168));
+            matchedBy = "headline words";
+        }
+
+        var items = await Task.Run(() => ids.Select(id => Describe(id, situations.GetValueOrDefault(id))).OfType<WorldNewsSearchItem>().ToList(), ct);
+        return new WorldNewsSearchResult(question, matchedBy, items);
+    }
+
+    private WorldNewsSearchItem? Describe(string eventId, string? situationId)
+    {
+        if (Store.Event(eventId) is not { } e) return null;
+        var summary = Store.LatestSummary(eventId);
+        WorldNewsSearchSituation? situation = null;
+        if (situationId is not null && Store.EventsForSituation(situationId) is { Count: >= 2 } linked)
+        {
+            var biggest = linked.OrderByDescending(x => x.Languages.Contains("English")).ThenByDescending(x => x.ArticleCount).First();
+            situation = new WorldNewsSearchSituation(biggest.Headline ?? biggest.Title,
+                SituationLinker.IsActive(linked.Max(x => x.LastSeen), DateTimeOffset.UtcNow), linked.Count);
+        }
+        return new WorldNewsSearchItem(e.Headline ?? e.Title, e.Headline is null ? null : e.Title, summary?.Text, e.OutletCount, e.ArticleCount,
+            e.Countries, e.Languages, e.FirstSeen, e.LastSeen, situation, WorldNewsSearch.Sources(Store.ArticlesForEvent(eventId)));
     }
 
     // The event's combined document as Markdown, or null when the event is gone.

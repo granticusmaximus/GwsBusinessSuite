@@ -306,6 +306,48 @@ public sealed class WorldNewsKitTests : IDisposable
     }
 
     [Fact]
+    public void Search_ShouldRankByMeaning_DropUnrelatedEvents_AndLimitEachSituation()
+    {
+        WorldNewsCandidate Candidate(string id, float[] direction, string? situation = null) => new(id, direction, situation);
+        var crash = new[] { 1f, 0.1f, 0f };
+
+        var hits = WorldNewsSearch.Rank(crash,
+        [
+            Candidate("crash", [1f, 0.12f, 0f], "s1"),
+            Candidate("mourning", [0.95f, 0.2f, 0f], "s1"),
+            Candidate("inquiry", [0.9f, 0.3f, 0f], "s1"),
+            Candidate("tributes", [0.92f, 0.25f, 0f], "s1"),
+            Candidate("other-crash", [0.8f, 0f, 0.4f]),
+            Candidate("football", [0f, 0.1f, 1f]),
+        ]);
+
+        hits.Select(h => h.EventId).Should().Equal(["crash", "mourning", "tributes", "other-crash"],
+            "three from one situation, then the next story; the football match is unrelated");
+        hits.Should().BeInDescendingOrder(h => h.Score);
+    }
+
+    [Fact]
+    public void Search_ShouldMatchHeadlineWords_WhenThereIsNoModel_AndPickVariedSources()
+    {
+        EventOverview Overview(string id, string title, int outlets, string? headline = null) =>
+            new(id, title, outlets, outlets, [], [], Now, Now, headline);
+
+        var ids = WorldNewsSearch.MatchWords("What about the train crash?", [
+            Overview("a", "Spanish train crash leaves 68 dead", 10),
+            Overview("b", "Train strike called off", 40),
+            Overview("c", "Tren chocan en España", 90, headline: "Two trains crash in Spain"),
+            Overview("d", "The elections: what happens next", 200),
+        ]);
+        ids.Should().Equal(["c", "a", "b"], "both words before one, then by coverage; question words like 'what' and 'the' don't count");
+
+        var sources = WorldNewsSearch.Sources([
+            Article("1", "Crash in Spain", "English", Now), Article("2", "More on the crash", "English", Now.AddMinutes(-5)),
+            Article("3", "Third English report", "English", Now.AddMinutes(-9)), Article("4", "Choque de trenes", "Spanish", Now),
+            Article("5", "Otro informe", "Spanish", Now.AddMinutes(-3)), Article("6", "Treinramp", "Dutch", Now)]);
+        sources.Select(s => s.Language).Should().Equal(["English", "English", "Spanish", "Dutch"]);
+    }
+
+    [Fact]
     public void Store_ShouldKeepReportsEventsAndFeedState()
     {
         var store = new WorldNewsStore(_dbPath);

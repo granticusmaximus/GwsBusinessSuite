@@ -25,6 +25,14 @@ public sealed record GroundingCmsPage(
 public sealed record GroundingHealthAlert(
     string ContainerName, string Severity, string Message, bool IsRead, DateTimeOffset CreatedAt);
 public sealed record GroundingSystemHealth(int UnreadAlertCount, IReadOnlyList<GroundingHealthAlert> RecentAlerts);
+// Mirrors the server's WorldNewsSearchResult (WorldNewsKit) - the shape is the JSON contract.
+public sealed record GroundingWorldNewsSource(string Outlet, string Title, string Url, string Language);
+public sealed record GroundingWorldNewsSituation(string Title, bool Active, int Events);
+public sealed record GroundingWorldNewsItem(
+    string Headline, string? OriginalHeadline, string? Summary, int Outlets, int Reports, IReadOnlyList<string> Countries,
+    IReadOnlyList<string> Languages, DateTimeOffset FirstSeen, DateTimeOffset LastSeen, GroundingWorldNewsSituation? Situation,
+    IReadOnlyList<GroundingWorldNewsSource> Sources);
+public sealed record GroundingWorldNews(string Query, string MatchedBy, IReadOnlyList<GroundingWorldNewsItem> Results);
 
 // The generic outcome wrapper the newer reads use. The two wiki-specific outcome types below
 // predate it and keep their own shapes so existing callers are untouched.
@@ -98,6 +106,9 @@ public sealed class SentinelGroundingClient(SecureApiKeyStore apiKeyStore)
 
     public Task<GroundingOutcome<GroundingSystemHealth>> GetSystemHealthAsync(CancellationToken cancellationToken) =>
         GetAsync<GroundingSystemHealth>("/api/v1/sentinel/health", cancellationToken);
+
+    public Task<GroundingOutcome<GroundingWorldNews>> SearchWorldNewsAsync(string query, CancellationToken cancellationToken) =>
+        GetAsync<GroundingWorldNews>($"/api/v1/sentinel/world-news/search?query={Uri.EscapeDataString(query)}", cancellationToken);
 
     // One authenticated GET, with the same three-way outcome the wiki calls use, so every tool
     // can tell "no key" from "request failed" from "genuinely empty" without repeating itself.

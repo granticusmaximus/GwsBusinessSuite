@@ -350,6 +350,21 @@ public sealed class WorldNewsStore
     public SituationOverview? Situation(string situationId) =>
         TopSituations(DateTimeOffset.UnixEpoch, int.MaxValue).FirstOrDefault(s => s.Id == situationId);
 
+    // Recent events worth searching, with their meaning vectors and situations.
+    public IReadOnlyList<WorldNewsCandidate> SearchCandidates(DateTimeOffset since, int minArticles)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id, vector_sum, situation_id FROM events WHERE last_seen >= $since AND article_count >= $min";
+        command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+        command.Parameters.AddWithValue("$min", minArticles);
+        using var reader = command.ExecuteReader();
+        var candidates = new List<WorldNewsCandidate>();
+        while (reader.Read())
+            candidates.Add(new WorldNewsCandidate(reader.GetString(0), ToFloats((byte[])reader[1]), reader.IsDBNull(2) ? null : reader.GetString(2)));
+        return candidates;
+    }
+
     // A situation's events in the order they broke.
     public IReadOnlyList<EventOverview> EventsForSituation(string situationId) =>
         Overviews("WHERE e.situation_id = $situation", "", ("$situation", situationId), ("$limit", 500))

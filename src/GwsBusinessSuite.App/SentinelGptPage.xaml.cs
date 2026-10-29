@@ -268,7 +268,9 @@ public partial class SentinelGptPage : ContentPage
               - get_pipeline: sales totals by stage - use this for "how much", "how many deals", "pipeline value".
               - search_cms_pages: pages on the public website, their slugs and publish status.
               - get_system_health: container alerts, for "is anything down/broken".
-            Use them only when the question is clearly about Grant's own business data, never for general knowledge.
+              - search_world_news: what newsrooms around the world reported in the last 7 days - use it for news and
+                current events, and name the outlets it returns rather than adding details they don't give.
+            Use the others only when the question is clearly about Grant's own business data, never for general knowledge.
             These are read-only - you cannot change any record, so never claim you have.
 
             They are only offered when the user has configured a grounding key, so if you don't see them, that data

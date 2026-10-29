@@ -47,7 +47,11 @@ public sealed class NativeToolExecutor(SentinelGroundingClient grounding) : IOll
         new OllamaToolDefinition(
             "get_system_health",
             "Get current operational health: unread container health alerts and the most recent ones. Use for \"is anything broken/down\" questions. Takes no arguments.",
-            """{"type":"object","properties":{}}""")
+            """{"type":"object","properties":{}}"""),
+        new OllamaToolDefinition(
+            "search_world_news",
+            "Search what newsrooms around the world reported in the last 7 days, by meaning and in any language (World News). Returns matching news events with an English headline, a summary when there is one, how many outlets covered it, the countries, whether it is part of a developing situation, and source links. Use for questions about current events or what is happening somewhere.",
+            """{"type":"object","properties":{"query":{"type":"string","description":"The news topic or question, e.g. \"train crash in Spain\""}},"required":["query"]}""")
     ];
 
     // Offered only when a grounding key actually exists. Without one every call would come back
@@ -73,6 +77,7 @@ public sealed class NativeToolExecutor(SentinelGroundingClient grounding) : IOll
                 "get_pipeline" => Describe(await grounding.GetPipelineAsync(cancellationToken), "the sales pipeline"),
                 "search_cms_pages" => await SearchCmsPagesAsync(arguments.RootElement, cancellationToken),
                 "get_system_health" => Describe(await grounding.GetSystemHealthAsync(cancellationToken), "system health"),
+                "search_world_news" => await SearchWorldNewsAsync(arguments.RootElement, cancellationToken),
                 _ => JsonSerializer.Serialize(new { error = $"Unknown tool: {call.Name}" })
             };
         }
@@ -96,6 +101,14 @@ public sealed class NativeToolExecutor(SentinelGroundingClient grounding) : IOll
         return query.Length == 0
             ? JsonSerializer.Serialize(new { error = "A query is required - a page title, slug, or topic." })
             : Describe(await grounding.SearchCmsPagesAsync(query, cancellationToken), "website pages");
+    }
+
+    private async Task<string> SearchWorldNewsAsync(JsonElement arguments, CancellationToken cancellationToken)
+    {
+        var query = ReadQuery(arguments);
+        return query.Length == 0
+            ? JsonSerializer.Serialize(new { error = "A query is required - a news topic, place, or person." })
+            : Describe(await grounding.SearchWorldNewsAsync(query, cancellationToken), "World News");
     }
 
     private static string ReadQuery(JsonElement arguments) =>
