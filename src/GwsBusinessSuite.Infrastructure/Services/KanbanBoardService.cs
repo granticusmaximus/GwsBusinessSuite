@@ -4,6 +4,9 @@ using GwsBusinessSuite.Application.Boards;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
@@ -117,7 +120,11 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         await databases.RenameDatabaseAsync(databaseId, name, emoji, performedBy, cancellationToken);
     }
 
-    public async Task<KanbanBoard?> GetBoardAsync(Guid databaseId, CancellationToken cancellationToken = default)
+    public Task<KanbanBoard?> GetBoardAsync(Guid databaseId, CancellationToken cancellationToken = default) =>
+        LoadBoardAsync(databaseId, includeArchived: false, cancellationToken);
+
+    // Archived cards (K9a) are off the board, but Insights still counts them.
+    private async Task<KanbanBoard?> LoadBoardAsync(Guid databaseId, bool includeArchived, CancellationToken cancellationToken)
     {
         var database = await databases.GetDatabaseAsync(databaseId, cancellationToken);
         if (database is null || StatusProperty(database) is not { } status) return null;
@@ -133,7 +140,8 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             properties.FirstOrDefault(p => p.Type == WikiDatabasePropertyTypes.UniqueId)?.Id,
             Find(properties, WikiDatabasePropertyTypes.Select, SprintNames)?.Id,
             Find(properties, WikiDatabasePropertyTypes.Checkbox, [BlockedName])?.Id,
-            Find(properties, WikiDatabasePropertyTypes.Text, [BlockedReasonName])?.Id);
+            Find(properties, WikiDatabasePropertyTypes.Text, [BlockedReasonName])?.Id,
+            Find(properties, WikiDatabasePropertyTypes.Date, [KanbanArchive.PropertyName])?.Id);
         var settings = await GetSettingsAsync(databaseId, cancellationToken);
 
         // When each card last moved into the column it's in now; a row from before the log, or
@@ -156,8 +164,13 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
                 .Select(link => new { link.RowId, link.Kind }).ToListAsync(cancellationToken))
             .GroupBy(link => link.RowId)
             .ToDictionary(group => group.Key, group => (IReadOnlyList<string>)group.Select(link => link.Kind).ToList());
+        var archived = fields.ArchivedPropertyId is { } archivedProperty
+            ? database.Rows.Where(row => row.ParentRowId is null
+                && WikiPropertyValues.GetDate(WikiPropertyValues.ParseObject(row.PropertyValuesJson), archivedProperty) is not null)
+                .Select(row => row.Id).ToHashSet()
+            : [];
         var cards = database.Rows
-            .Where(row => row.ParentRowId is null)
+            .Where(row => row.ParentRowId is null && (includeArchived || !archived.Contains(row.Id)))
             .OrderBy(row => row.SortOrder)
             .Select(row =>
             {
@@ -186,7 +199,75 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             ? WikiDatabasePropertyConfig.GetOptions(property).Select(option => new KanbanOption(option.Id, option.Label, SafeColor(option.Color))).ToList()
             : [];
         return new KanbanBoard(database.Id, database.Title, database.Icon, fields, columns, OptionsOf(fields.PriorityPropertyId), OptionsOf(fields.LabelsPropertyId),
-            settings, OptionsOf(fields.SprintPropertyId));
+            settings, OptionsOf(fields.SprintPropertyId), archived.Count);
+    }
+
+    // ---- Archive (K9a) ----
+
+    public async Task<IReadOnlyList<KanbanArchivedCard>> ListArchivedAsync(Guid databaseId, CancellationToken cancellationToken = default)
+    {
+        if (await LoadBoardAsync(databaseId, includeArchived: true, cancellationToken) is not { Fields.ArchivedPropertyId: { } archivedProperty } board) return [];
+        var dates = (await db.WikiDatabaseRows.AsNoTracking()
+                .Where(row => row.WikiDatabaseId == databaseId && row.TrashedAt == null && row.ParentRowId == null)
+                .Select(row => new { row.Id, row.PropertyValuesJson })
+                .ToListAsync(cancellationToken))
+            .Select(row => (row.Id, At: WikiPropertyValues.GetDate(WikiPropertyValues.ParseObject(row.PropertyValuesJson), archivedProperty)))
+            .Where(row => row.At is not null)
+            .ToDictionary(row => row.Id, row => row.At!.Value);
+        return board.Columns
+            .SelectMany(column => column.Cards.Where(card => dates.ContainsKey(card.RowId))
+                .Select(card => new KanbanArchivedCard(card.RowId, card.Title, card.Key, column.Label, dates[card.RowId])))
+            .OrderByDescending(card => card.ArchivedAt)
+            .ToList();
+    }
+
+    public async Task<int> ArchiveCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default)
+    {
+        if (rowIds.Count == 0) return 0;
+        var property = await EnsureArchivedPropertyAsync(databaseId, performedBy, cancellationToken);
+        var now = JsonValue.Create(DateTimeOffset.UtcNow);
+        var changed = await SetCardsValueAsync(databaseId, rowIds, property, previous => previous ?? now.DeepClone(), performedBy, cancellationToken);
+        return changed.Count;
+    }
+
+    public async Task UnarchiveCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default)
+    {
+        if (rowIds.Count == 0) return;
+        var property = await EnsureArchivedPropertyAsync(databaseId, performedBy, cancellationToken);
+        await SetCardsValueAsync(databaseId, rowIds, property, _ => null, performedBy, cancellationToken);
+        // A restored card gets the full ArchiveAfterDays again before the sweep takes it.
+        var settings = await GetSettingsAsync(databaseId, cancellationToken);
+        var restored = new Dictionary<string, long>(settings.RestoredAt);
+        var at = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        foreach (var rowId in rowIds) restored[rowId.ToString()] = at;
+        await SaveSettingsAsync(databaseId, settings with { RestoredAt = restored }, performedBy, cancellationToken);
+    }
+
+    public async Task<int> ArchiveDueCardsAsync(DateTimeOffset now, CancellationToken cancellationToken = default)
+    {
+        var archived = 0;
+        foreach (var summary in await ListBoardsAsync(cancellationToken))
+        {
+            if (await GetBoardAsync(summary.DatabaseId, cancellationToken) is not { Settings: { ArchiveAfterDays: > 0 } settings } board) continue;
+            var cutoff = now.AddDays(-settings.ArchiveAfterDays);
+            var due = board.Columns
+                .Where(column => column.Group == WikiDatabaseStatusGroups.Complete)
+                .SelectMany(column => column.Cards)
+                .Where(card => card.EnteredColumnAt <= cutoff
+                    && !(settings.RestoredAt.TryGetValue(card.RowId.ToString(), out var restored) && DateTimeOffset.FromUnixTimeSeconds(restored) > cutoff))
+                .Select(card => card.RowId)
+                .ToList();
+            if (due.Count > 0) archived += await ArchiveCardsAsync(summary.DatabaseId, due, "board-archive", cancellationToken);
+        }
+        return archived;
+    }
+
+    private async Task<Guid> EnsureArchivedPropertyAsync(Guid databaseId, string performedBy, CancellationToken cancellationToken)
+    {
+        var properties = await db.WikiDatabaseProperties.AsNoTracking().Where(property => property.WikiDatabaseId == databaseId).ToListAsync(cancellationToken);
+        return Find(properties, WikiDatabasePropertyTypes.Date, [KanbanArchive.PropertyName])?.Id
+            ?? (await databases.SavePropertyAsync(databaseId,
+                new WikiDatabasePropertyEditor { Name = KanbanArchive.PropertyName, Type = WikiDatabasePropertyTypes.Date }, performedBy, cancellationToken)).Id;
     }
 
     public async Task MoveCardAsync(Guid databaseId, Guid rowId, string? optionId, Guid? beforeRowId, string performedBy, CancellationToken cancellationToken = default)
@@ -365,7 +446,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
     public async Task<KanbanInsights?> GetInsightsAsync(Guid databaseId, int days, CancellationToken cancellationToken = default)
     {
         if (days is not (30 or 90 or 180)) throw new ArgumentException("Insights cover 30, 90 or 180 days.", nameof(days));
-        var board = await GetBoardAsync(databaseId, cancellationToken);
+        var board = await LoadBoardAsync(databaseId, includeArchived: true, cancellationToken);
         if (board is null) return null;
         var status = board.Fields.StatusPropertyId;
         var today = DateOnly.FromDateTime(DateTime.Now);
@@ -1197,5 +1278,41 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
     {
         var letters = new string(title.Where(char.IsLetter).Take(3).ToArray()).ToUpperInvariant();
         return (letters.Length >= 2 ? letters : "TASK") + "-";
+    }
+}
+
+// Board housekeeping every hour, starting two minutes after start-up: archives each board's cards
+// that have sat in a Complete column past its ArchiveAfterDays (K9a).
+public sealed class KanbanHousekeepingBackgroundService(
+    IServiceScopeFactory scopeFactory,
+    ILogger<KanbanHousekeepingBackgroundService> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            await Task.Delay(TimeSpan.FromMinutes(2), stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        using var timer = new PeriodicTimer(TimeSpan.FromHours(1));
+        do
+        {
+            try
+            {
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var archived = await scope.ServiceProvider.GetRequiredService<IKanbanBoardService>().ArchiveDueCardsAsync(DateTimeOffset.UtcNow, stoppingToken);
+                if (archived > 0) logger.LogInformation("Archived {Count} finished board card(s).", archived);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Board housekeeping failed.");
+            }
+        }
+        while (await timer.WaitForNextTickAsync(stoppingToken));
     }
 }

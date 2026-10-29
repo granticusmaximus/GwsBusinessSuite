@@ -62,6 +62,38 @@ public sealed class KanbanBoardServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Archive_ShouldTakeFinishedCardsOffTheBoard_AfterTheBoardsDays_ButKeepThemInInsights()
+    {
+        var id = await _boards.CreateBoardAsync("Website relaunch", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        var done = OptionId(board, "Done");
+        var shipped = await _boards.AddCardAsync(id, board.Columns[0].OptionId, "Ship the homepage", "grant");
+        var open = await _boards.AddCardAsync(id, board.Columns[0].OptionId, "Write the FAQ", "grant");
+        await _boards.MoveCardAsync(id, shipped, done, null, "grant");
+        var now = DateTimeOffset.UtcNow;
+
+        (await _boards.ArchiveDueCardsAsync(now.AddDays(10))).Should().Be(0, "14 days by default, and it finished just now");
+        (await _boards.ArchiveDueCardsAsync(now.AddDays(15))).Should().Be(1);
+
+        board = (await _boards.GetBoardAsync(id))!;
+        board.Columns.SelectMany(column => column.Cards).Select(card => card.RowId).Should().Equal([open], "only the open card is left on the board");
+        board.ArchivedCount.Should().Be(1);
+        (await _boards.ListArchivedAsync(id)).Should().ContainSingle(card => card.RowId == shipped && card.Column == "Done");
+        (await _boards.GetInsightsAsync(id, 30))!.Cycles.Should().Contain(cycle => cycle.RowId == shipped, "Insights still counts archived cards");
+
+        // Restoring gives it the full 14 days again; Never turns the sweep off.
+        await _boards.UnarchiveCardsAsync(id, [shipped], "grant");
+        (await _boards.ArchiveDueCardsAsync(now.AddDays(10))).Should().Be(0);
+        await _boards.SaveSettingsAsync(id, await _boards.GetSettingsAsync(id) with { ArchiveAfterDays = 0 }, "grant");
+        (await _boards.ArchiveDueCardsAsync(now.AddDays(400))).Should().Be(0);
+        (await _boards.GetBoardAsync(id))!.ArchivedCount.Should().Be(0);
+
+        // By hand, at any age.
+        (await _boards.ArchiveCardsAsync(id, [shipped], "grant")).Should().Be(1);
+        (await _boards.ArchiveCardsAsync(id, [shipped], "grant")).Should().Be(0, "archiving twice changes nothing");
+    }
+
+    [Fact]
     public async Task DeleteBoard_ShouldMoveItToTheTrash_AndRestoreBoard_ShouldBringItBack()
     {
         var id = await _boards.CreateBoardAsync("Website relaunch", "personal", "grant");

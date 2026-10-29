@@ -1909,6 +1909,66 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("BoardCardVotes");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.BoardNotification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("EmailedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ReadAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("RowId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("WikiDatabaseId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username", "ReadAt");
+
+                    b.HasIndex("Username", "RowId", "Kind", "Key")
+                        .IsUnique();
+
+                    b.ToTable("BoardNotifications");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.Booking", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4608,6 +4668,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<string>("Email")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<bool>("EmailBoardDigest")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("JobTitle")
                         .IsRequired()

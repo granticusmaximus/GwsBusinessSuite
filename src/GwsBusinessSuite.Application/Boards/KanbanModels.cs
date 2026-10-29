@@ -47,14 +47,26 @@ public sealed record KanbanColumn(string? OptionId, string Label, string Color, 
 // Which of the database's properties play which part on the board. Only Status is required.
 public sealed record KanbanFields(Guid StatusPropertyId, Guid? PriorityPropertyId, Guid? LabelsPropertyId, Guid? DuePropertyId,
     Guid? AssigneePropertyId, Guid? EstimatePropertyId, Guid? KeyPropertyId,
-    Guid? SprintPropertyId = null, Guid? BlockedPropertyId = null, Guid? BlockedReasonPropertyId = null);
+    Guid? SprintPropertyId = null, Guid? BlockedPropertyId = null, Guid? BlockedReasonPropertyId = null,
+    Guid? ArchivedPropertyId = null);
 
 public sealed record KanbanOption(string Id, string Label, string Color);
 
 // PriorityOptions / LabelOptions: the choices for those fields, in order (empty when the board has none).
 public sealed record KanbanBoard(Guid DatabaseId, string Title, string? Icon, KanbanFields Fields, IReadOnlyList<KanbanColumn> Columns,
     IReadOnlyList<KanbanOption> PriorityOptions, IReadOnlyList<KanbanOption> LabelOptions,
-    KanbanSettings? Settings = null, IReadOnlyList<KanbanOption>? SprintOptions = null);
+    KanbanSettings? Settings = null, IReadOnlyList<KanbanOption>? SprintOptions = null, int ArchivedCount = 0);
+
+// K9a: a card taken off the board by auto-archive or by hand; restoring puts it back in its column.
+public sealed record KanbanArchivedCard(Guid RowId, string Title, string? Key, string? Column, DateTimeOffset ArchivedAt);
+
+public static class KanbanArchive
+{
+    // The "Archived" date property: when set, the card is off the board (still in Sentinel).
+    public const string PropertyName = "Archived";
+    public const int DefaultDays = 14;
+    public static readonly IReadOnlyList<int> DayChoices = [0, 7, 14, 30, 90];
+}
 
 // A board's own settings, kept in KanbanBoardSettings.SettingsJson (K3; K7 adds the look).
 public sealed record KanbanSettings
@@ -72,6 +84,15 @@ public sealed record KanbanSettings
     public KanbanRoadmap? Roadmap { get; init; }
     // The board's sprints (K4), one per option of its Sprint property.
     public List<KanbanSprint> Sprints { get; init; } = [];
+    // K9a: days a card stays in a Complete column before it's archived; 0 never archives. A
+    // board saved before K9a reads as the default.
+    public int ArchiveAfterDays { get; init; } = KanbanArchive.DefaultDays;
+    // Cards restored from the archive, by row id, with when (Unix seconds): a restored card gets
+    // the full ArchiveAfterDays again before the sweep takes it.
+    public Dictionary<string, long> RestoredAt { get; init; } = [];
+    // K9b: when this board's notifications started (Unix seconds). The first sweep records the
+    // assignments and due dates already there as read, so turning it on doesn't flood the bell.
+    public long? NotificationsSince { get; init; }
 
     public static KanbanSettings Default { get; } = new();
 }
@@ -345,6 +366,13 @@ public interface IKanbanBoardService
     Task<IReadOnlyList<KanbanCardLink>> OpenTicketsAsync(Guid databaseId, Guid rowId, CancellationToken cancellationToken = default);
 
     Task<KanbanSettings> GetSettingsAsync(Guid databaseId, CancellationToken cancellationToken = default);
+
+    // K9a: archived cards newest first; archive some by hand; put them back; and the hourly sweep
+    // that archives every board's cards past their ArchiveAfterDays (returns how many).
+    Task<IReadOnlyList<KanbanArchivedCard>> ListArchivedAsync(Guid databaseId, CancellationToken cancellationToken = default);
+    Task<int> ArchiveCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default);
+    Task UnarchiveCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default);
+    Task<int> ArchiveDueCardsAsync(DateTimeOffset now, CancellationToken cancellationToken = default);
     Task SaveSettingsAsync(Guid databaseId, KanbanSettings settings, string performedBy, CancellationToken cancellationToken = default);
 
     // Flags or clears a card as blocked, with an optional reason. A board without Blocked / Blocked

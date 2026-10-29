@@ -18,6 +18,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<KanbanBoardSettings> KanbanBoardSettings { get; }
     DbSet<BoardCardLink> BoardCardLinks { get; }
     DbSet<BoardCardVote> BoardCardVotes { get; }
+    DbSet<BoardNotification> BoardNotifications { get; }
     DbSet<SupportTicket> SupportTickets { get; }
     DbSet<SupportTicketMessage> SupportTicketMessages { get; }
     DbSet<SupportTicketAttachment> SupportTicketAttachments { get; }

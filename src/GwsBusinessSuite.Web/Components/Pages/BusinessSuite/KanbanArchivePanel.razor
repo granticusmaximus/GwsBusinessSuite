@@ -1,0 +1,122 @@
+@using GwsBusinessSuite.Application.Boards
+@inject IKanbanBoardService BoardService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
+
+@* The board's archive (Boards K9a): finished cards taken off the board, after a set time or by
+   hand. They stay in Sentinel and in Insights; Restore puts one back in its column. *@
+<div class="kb-modal-backdrop" @onclick="Close"></div>
+<section class="kb-modal kb-archive" role="dialog" aria-modal="true" aria-labelledby="kb-archive-title" tabindex="-1" @ref="_dialog" @onkeydown="CloseOnEscape">
+    <header class="kb-modal-head">
+        <h2 id="kb-archive-title"><i class="bi bi-archive me-2" aria-hidden="true"></i>Archived cards</h2>
+        <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Close" @onclick="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+    </header>
+    <label class="kb-archive-setting">
+        <span>Archive finished cards after</span>
+        <select class="form-select form-select-sm" aria-label="Archive finished cards after" value="@Days" disabled="@_busy" @onchange="SetDaysAsync">
+            @foreach (var days in KanbanArchive.DayChoices)
+            {
+                <option value="@days">@(days == 0 ? "Never" : $"{days} days")</option>
+            }
+        </select>
+    </label>
+    <p class="kb-archive-note">Cards that sit in a finished column this long leave the board. They stay in Sentinel and still count in Insights and forecasts.</p>
+    @if (_cards is null)
+    {
+        <p class="kb-archive-note">Loading…</p>
+    }
+    else if (_cards.Count == 0)
+    {
+        <p class="kb-archive-empty">Nothing archived yet.</p>
+    }
+    else
+    {
+        <input type="search" class="form-control form-control-sm" placeholder="@($"Search {_cards.Count} archived {(_cards.Count == 1 ? "card" : "cards")}")"
+               aria-label="Search archived cards" @bind="_filter" @bind:event="oninput" />
+        <ul class="kb-archive-list">
+            @foreach (var card in Visible)
+            {
+                <li @key="card.RowId">
+                    <span class="kb-archive-title">
+                        @if (card.Key is not null) { <span class="kb-archive-key">@card.Key</span> }
+                        @card.Title
+                    </span>
+                    <span class="kb-archive-meta">@card.Column · archived @card.ArchivedAt.ToLocalGwsDateTime()</span>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => RestoreAsync(card)">Restore</button>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public KanbanBoard Board { get; set; } = null!;
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private ElementReference _dialog;
+    private IReadOnlyList<KanbanArchivedCard>? _cards;
+    private string _filter = string.Empty;
+    private bool _busy;
+    // A control disabled while busy loses focus to the page, where Esc no longer reaches the
+    // dialog; after each action the dialog takes focus back.
+    private bool _refocus;
+
+    private int Days => Board.Settings?.ArchiveAfterDays ?? KanbanArchive.DefaultDays;
+
+    private IEnumerable<KanbanArchivedCard> Visible => string.IsNullOrWhiteSpace(_filter)
+        ? _cards ?? []
+        : (_cards ?? []).Where(card => card.Title.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
+            || card.Key?.Contains(_filter.Trim(), StringComparison.OrdinalIgnoreCase) == true);
+
+    protected override async Task OnInitializedAsync() => _cards = await BoardService.ListArchivedAsync(Board.DatabaseId);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender && !_refocus) return;
+        _refocus = false;
+        await _dialog.FocusAsync();
+    }
+
+    private async Task SetDaysAsync(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value as string, out var days)) return;
+        _busy = true;
+        try
+        {
+            var settings = await BoardService.GetSettingsAsync(Board.DatabaseId);
+            await BoardService.SaveSettingsAsync(Board.DatabaseId, settings with { ArchiveAfterDays = days }, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            Toasts.Show(days == 0 ? "Finished cards stay on the board." : $"Finished cards leave the board after {days} days.", tone: StatusTone.Success);
+            await OnChanged.InvokeAsync();
+        }
+        finally
+        {
+            _busy = false;
+            _refocus = true;
+        }
+    }
+
+    private async Task RestoreAsync(KanbanArchivedCard card)
+    {
+        _busy = true;
+        try
+        {
+            await BoardService.UnarchiveCardsAsync(Board.DatabaseId, [card.RowId], await CurrentUserAccessor.GetCurrentUsernameAsync());
+            _cards = await BoardService.ListArchivedAsync(Board.DatabaseId);
+            Toasts.Show($"{card.Key ?? card.Title} is back on the board.", tone: StatusTone.Success);
+            await OnChanged.InvokeAsync();
+        }
+        finally
+        {
+            _busy = false;
+            _refocus = true;
+        }
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task CloseOnEscape(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await Close();
+    }
+}

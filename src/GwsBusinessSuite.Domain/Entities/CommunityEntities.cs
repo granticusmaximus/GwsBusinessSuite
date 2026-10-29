@@ -32,6 +32,8 @@ public sealed class MemberProfile : AuditableEntity
     // Work email - also where unread-message reminders go (when NotifyUnreadMessagesByEmail).
     public string Email { get; set; } = string.Empty;
     public bool NotifyUnreadMessagesByEmail { get; set; } = true;
+    // A morning email of the day's board notifications (Boards K9b), to Email. Off until chosen.
+    public bool EmailBoardDigest { get; set; }
     public string LinkedInUrl { get; set; } = string.Empty;
     public string TwitterUrl { get; set; } = string.Empty;
     public string WebsiteUrl { get; set; } = string.Empty;

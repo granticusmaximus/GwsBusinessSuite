@@ -11,6 +11,8 @@
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaService OverwatchAreaService
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaNotifier OverwatchAreaNotifier
 @inject GwsBusinessSuite.Infrastructure.Services.WorldNewsService WorldNews
+@inject GwsBusinessSuite.Application.Boards.IBoardNotificationService BoardNotifications
+@inject GwsBusinessSuite.Application.Boards.BoardNotificationNotifier BoardNotifier
 @inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject INotificationInboxStateService InboxStates
 @inject GwsBusinessSuite.Web.Services.ToastState Toasts
@@ -184,6 +186,7 @@
         "social" => "Social posts",
         "chat" => "Messages",
         "overwatch" => "Overwatch",
+        "board" => "Boards",
         "world-news" => "World News",
         _ => kind
     };
@@ -198,7 +201,8 @@
         var chatAlerts = await LoadChatAlertsAsync();
         var overwatchAlerts = await LoadOverwatchAlertsAsync();
         var worldNewsAlerts = WorldNews.Store.Alerts(_currentUsername).Select(ToInboxItem);
-        _items = dockerAlerts.Concat(socialAlerts).Concat(chatAlerts).Concat(overwatchAlerts).Concat(worldNewsAlerts).ToList();
+        var boardAlerts = await LoadBoardAlertsAsync();
+        _items = dockerAlerts.Concat(socialAlerts).Concat(chatAlerts).Concat(overwatchAlerts).Concat(worldNewsAlerts).Concat(boardAlerts).ToList();
         await LoadStatesAsync();
         Recompute();
 
@@ -210,6 +214,25 @@
         ChatNotifier.OnMessage += HandleChatMessage;
         OverwatchAreaNotifier.OnAlert += HandleOverwatchAlert;
         WorldNews.AlertCreated += HandleWorldNewsAlert;
+        BoardNotifier.OnNotified += HandleBoardNotified;
+    }
+
+    // Boards K9b: cards assigned to you, due tomorrow or overdue.
+    private async Task<List<InboxItem>> LoadBoardAlertsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_currentUsername)) return [];
+        return (await BoardNotifications.ListAsync(_currentUsername))
+            .Select(note => new InboxItem("board", note.Id, note.Title, note.Message, note.IsRead, note.CreatedAt, note.Url))
+            .ToList();
+    }
+
+    private void HandleBoardNotified(string username)
+    {
+        if (!string.Equals(username, _currentUsername, StringComparison.OrdinalIgnoreCase)) return;
+        _ = InvokeAsync(async () =>
+        {
+            foreach (var item in await LoadBoardAlertsAsync()) AddItem(item);
+        });
     }
 
     private async Task LoadStatesAsync()
@@ -378,6 +401,7 @@
         else if (item.Kind == "chat") await ChatService.MarkThreadReadAsync(item.Id, _currentUsername);
         else if (item.Kind == "overwatch") await OverwatchAreaService.MarkAlertReadAsync(_currentUsername, item.Id);
         else if (item.Kind == "world-news") WorldNews.Store.MarkAlertRead(_currentUsername, item.Id);
+        else if (item.Kind == "board") await BoardNotifications.MarkReadAsync(_currentUsername, item.Id);
         else await SocialPublishingService.MarkAlertReadAsync(item.Id);
         ReplaceItem(item with { IsRead = true });
     }
@@ -455,6 +479,7 @@
         if (!string.IsNullOrWhiteSpace(_currentUsername))
         {
             await OverwatchAreaService.MarkAllAlertsReadAsync(_currentUsername);
+            await BoardNotifications.MarkAllReadAsync(_currentUsername);
             foreach (var alert in _items.Where(a => a.Kind == "world-news" && !a.IsRead)) WorldNews.Store.MarkAlertRead(_currentUsername, alert.Id);
             foreach (var chat in _items.Where(a => a.Kind == "chat" && !a.IsRead))
             {
@@ -494,6 +519,7 @@
         SocialNotifier.OnAlert -= HandleSocialAlert;
         ChatNotifier.OnMessage -= HandleChatMessage;
         OverwatchAreaNotifier.OnAlert -= HandleOverwatchAlert;
+        BoardNotifier.OnNotified -= HandleBoardNotified;
         WorldNews.AlertCreated -= HandleWorldNewsAlert;
     }
 }

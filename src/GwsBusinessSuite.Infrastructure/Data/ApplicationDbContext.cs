@@ -88,6 +88,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<KanbanBoardSettings> KanbanBoardSettings => Set<KanbanBoardSettings>();
     public DbSet<BoardCardLink> BoardCardLinks => Set<BoardCardLink>();
     public DbSet<BoardCardVote> BoardCardVotes => Set<BoardCardVote>();
+    public DbSet<BoardNotification> BoardNotifications => Set<BoardNotification>();
     public DbSet<SupportTicket> SupportTickets => Set<SupportTicket>();
     public DbSet<SupportTicketMessage> SupportTicketMessages => Set<SupportTicketMessage>();
     public DbSet<SupportTicketAttachment> SupportTicketAttachments => Set<SupportTicketAttachment>();
@@ -1041,6 +1042,14 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
             entity.Property(x => x.VoterHash).HasMaxLength(64);
             entity.HasIndex(x => new { x.RowId, x.VoterHash }).IsUnique();
             entity.HasIndex(x => x.WikiDatabaseId);
+        });
+        modelBuilder.Entity<BoardNotification>(entity =>
+        {
+            entity.Property(x => x.Username).HasMaxLength(128);
+            entity.Property(x => x.Kind).HasMaxLength(32);
+            entity.Property(x => x.Key).HasMaxLength(32);
+            entity.HasIndex(x => new { x.Username, x.RowId, x.Kind, x.Key }).IsUnique();
+            entity.HasIndex(x => new { x.Username, x.ReadAt });
         });
     }
 

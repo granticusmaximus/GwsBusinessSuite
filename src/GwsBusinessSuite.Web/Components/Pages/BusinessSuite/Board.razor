@@ -88,6 +88,7 @@ else
                             <button type="button" role="menuitem" @onclick="OpenAssistant"><i class="bi bi-stars" aria-hidden="true"></i><span><strong>Ask SentinelGPT</strong><small>Standup and stuck work</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenBoardAutomations"><i class="bi bi-magic" aria-hidden="true"></i><span><strong>Automate</strong><small>Rules, templates and repeats</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenRoadmap"><i class="bi bi-broadcast" aria-hidden="true"></i><span><strong>Public roadmap</strong><small>@(_board.Settings?.Roadmap is null ? "Share it read-only, with votes" : "Live - copy the link or change it")</small></span></button>
+                            <button type="button" role="menuitem" @onclick="OpenArchive"><i class="bi bi-archive" aria-hidden="true"></i><span><strong>Archived cards</strong><small>@ArchiveSummary</small></span></button>
                             <a role="menuitem" href="admin/sentinel?database=@_board.DatabaseId"><i class="bi bi-journal-bookmark" aria-hidden="true"></i><span><strong>Open in Sentinel</strong><small>Table, calendar and timeline</small></span></a>
                             <button type="button" role="menuitem" @onclick="ToggleZoom"><i class="bi @(_zoomed ? "bi-zoom-in" : "bi-zoom-out")" aria-hidden="true"></i><span><strong>@(_zoomed ? "Full-size cards" : "Zoom out")</strong><small>@(_zoomed ? "Return to the comfortable view" : "See more of the board")</small></span></button>
                             <div class="kb-more-divider"></div>
@@ -385,6 +386,10 @@ else
     {
         <KanbanRoadmapPanel Board="_board" OnChanged="RefreshAsync" OnClose="() => _sharing = false" />
     }
+    @if (_archiving)
+    {
+        <KanbanArchivePanel Board="_board" OnChanged="RefreshAsync" OnClose="() => _archiving = false" />
+    }
 
     @if (_asking)
     {
@@ -612,6 +617,7 @@ else
     private sealed record AutomateState(string? Column, bool Templates);
     private bool _asking;
     private bool _sharing;
+    private bool _archiving;
     private AutomateState? _automate;
     private IReadOnlyList<SentinelDatabaseRuleView> _rules = [];
     private IReadOnlyList<WikiDatabaseRowTemplate> _templates = [];
@@ -989,6 +995,12 @@ else
                 <button type="button" class="kb-column-menu-item" @onclick="() => OpenAutomate(column.Key)">
                     <i class="bi bi-lightning-charge" aria-hidden="true"></i>Add a rule for @column.Label
                 </button>
+                @if (column.IsComplete && column.Cards.Count > 0)
+                {
+                    <button type="button" class="kb-column-menu-item" @onclick="() => ArchiveColumnAsync(column)">
+                        <i class="bi bi-archive" aria-hidden="true"></i>Archive these @column.Cards.Count @(column.Cards.Count == 1 ? "card" : "cards")
+                    </button>
+                }
                 @if (Lanes is null)
                 {
                     <button type="button" class="kb-column-menu-item" @onclick="() => FocusColumn(column.Key)">
@@ -1212,6 +1224,38 @@ else
     {
         _showMore = false;
         _sharing = true;
+    }
+
+    // K9a: finished cards leave the board after the board's ArchiveAfterDays, or by hand.
+    private string ArchiveSummary => (_board?.ArchivedCount ?? 0) is var count && (_board?.Settings?.ArchiveAfterDays ?? KanbanArchive.DefaultDays) is var days
+        ? $"{count} archived · {(days == 0 ? "auto-archive off" : $"after {days} days done")}"
+        : string.Empty;
+
+    private void OpenArchive()
+    {
+        _showMore = false;
+        _archiving = true;
+    }
+
+    private async Task ArchiveColumnAsync(ColumnState column)
+    {
+        _menuKey = null;
+        var ids = column.Cards.Select(card => card.RowId).ToList();
+        try
+        {
+            var archived = await BoardService.ArchiveCardsAsync(DatabaseId, ids, _me);
+            await RefreshAsync();
+            Toasts.Show($"{archived} {(archived == 1 ? "card" : "cards")} archived.", async () =>
+            {
+                await BoardService.UnarchiveCardsAsync(DatabaseId, ids, _me);
+                await RefreshAsync();
+                StateHasChanged();
+            }, StatusTone.Success);
+        }
+        catch (InvalidOperationException ex)
+        {
+            Toasts.Show($"Couldn't archive them. {ex.Message}", tone: StatusTone.Danger);
+        }
     }
 
     private void OpenBoardAutomations()

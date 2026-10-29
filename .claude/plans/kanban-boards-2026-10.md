@@ -370,3 +370,32 @@ page's palette).
 - Public roadmaps: publish a board read-only through Sentinel publishing, with votes.
 
 Each phase is one verified unit (verify-release + a live browser check), in order.
+
+### K9 - Efficiency and team features (Grant approved all 7, 29-10-26)
+
+Built in this order, each one verified unit (verify-release + a live browser check):
+
+- **K9a Auto-archive finished cards.** Cards in a Complete column longer than N days (default 14;
+  "Never" turns it off) are archived: hidden from the board, listed in the board's Archive panel
+  with Restore, still in Sentinel (an "Archived" date property) and still counted by Insights and
+  forecasts. Manual "Archive done cards now" in a Complete column's menu.
+  **Done 29-10-26.** `ArchiveAfterDays` (default 14, 0 = never) and `RestoredAt` in
+  KanbanSettings; an "Archived" Date property marks a card (created on first archive);
+  `LoadBoardAsync(includeArchived)` keeps archived cards off the board but in Insights; hourly
+  `KanbanHousekeepingBackgroundService` runs `ArchiveDueCardsAsync`; KanbanArchivePanel (list,
+  search, Restore, the setting); "Archive these cards" with Undo on finished columns. Found live:
+  Undo didn't redraw (missing StateHasChanged) and Esc stopped closing the panel after an action
+  (a control disabled while busy drops focus to the page) - both fixed.
+- **K9b Assignment and due-date notifications.** Bell notification (optional daily email) when a
+  card is assigned to you, due tomorrow, or overdue.
+- **K9c "Waiting on".** Same-board card-to-card dependencies (reusing the Timeline's Depends on
+  relation): "Waiting on PRO-3" on the card, counts as blocked, unblocks itself and tells the
+  assignee when the last one finishes.
+- **K9d Card face fields.** Per board, pick which properties show on cards, custom ones included.
+- **K9e Epics.** Group cards across columns under an epic with progress and a forecast; filter by
+  epic; the roadmap groups by epic.
+- **K9f Email cards onto a board.** A per-board plus-address on the existing Sentinel email-in
+  login: an email becomes a card with the email as its page, attachments kept.
+- **K9g Share a board with the team.** Per-board View/Edit grants (Sentinel per-item access, as
+  Automation sharing) for Authors/Contributors; they see only shared boards and never CRM links,
+  timers or billing on cards.

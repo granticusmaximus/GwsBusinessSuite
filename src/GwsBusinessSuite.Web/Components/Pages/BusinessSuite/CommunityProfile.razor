@@ -100,6 +100,10 @@ else
                                         <InputCheckbox class="form-check-input" id="notify-unread" @bind-Value="Editor.NotifyUnreadMessagesByEmail" />
                                         <label class="form-check-label small" for="notify-unread">Email me about messages I haven't read after 15 minutes</label>
                                     </div>
+                                    <div class="form-check">
+                                        <InputCheckbox class="form-check-input" id="board-digest" @bind-Value="Editor.EmailBoardDigest" />
+                                        <label class="form-check-label small" for="board-digest">Email me each morning about board cards assigned to me, due or overdue</label>
+                                    </div>
                                 </div>
                                 <div class="col-md-12">
                                     <label class="form-label fw-semibold small">Avatar URL</label>
@@ -227,6 +231,7 @@ else
                 Phone = Profile.Phone,
                 Email = Profile.Email,
                 NotifyUnreadMessagesByEmail = Profile.NotifyUnreadMessagesByEmail,
+                EmailBoardDigest = Profile.EmailBoardDigest,
                 LinkedInUrl = Profile.LinkedInUrl,
                 TwitterUrl = Profile.TwitterUrl,
                 WebsiteUrl = Profile.WebsiteUrl

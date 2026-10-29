@@ -1,0 +1,11 @@
+.kb-archive { width: min(36rem, calc(100vw - 2rem)); }
+.kb-archive-setting { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--gws-step-2); font-size: .875rem; font-weight: 600; }
+.kb-archive-setting .form-select { width: auto; }
+.kb-archive-note { margin: 0; font-size: .8125rem; color: var(--gws-text-soft); }
+.kb-archive-empty { margin: var(--gws-step-3) 0; color: var(--gws-text-soft); text-align: center; }
+.kb-archive-list { display: grid; gap: 4px; max-height: min(26rem, 55vh); margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.kb-archive-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px var(--gws-step-2); padding: var(--gws-step-2); border: 1px solid var(--gws-panel-border); border-radius: var(--gws-radius-sm, 8px); }
+.kb-archive-list li .btn { grid-row: span 2; }
+.kb-archive-title { min-width: 0; overflow: hidden; font-size: .875rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.kb-archive-key { margin-inline-end: 6px; font-family: var(--gws-font-mono); font-size: .6875rem; font-weight: 500; color: var(--gws-text-soft); }
+.kb-archive-meta { font-size: .75rem; color: var(--gws-text-soft); }

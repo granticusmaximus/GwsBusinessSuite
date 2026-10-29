@@ -302,6 +302,28 @@ public sealed class BoardCardVote : AuditableEntity
     public required string VoterHash { get; set; }
 }
 
+// A board notification for one person (Boards K9b): a card assigned to them, due tomorrow, or
+// overdue. Key makes each one once only - "assigned", or the due date (yyyy-MM-dd) for the due
+// kinds, so moving a due date notifies again.
+public sealed class BoardNotification : AuditableEntity
+{
+    public required string Username { get; set; }
+    public Guid WikiDatabaseId { get; set; }
+    public Guid RowId { get; set; }
+    public required string Kind { get; set; }
+    public required string Key { get; set; }
+    public required string Message { get; set; }
+    public DateTimeOffset? ReadAt { get; set; }
+    public DateTimeOffset? EmailedAt { get; set; }
+}
+
+public static class BoardNotificationKinds
+{
+    public const string Assigned = "assigned";
+    public const string DueTomorrow = "due-tomorrow";
+    public const string Overdue = "overdue";
+}
+
 public sealed class BoardCardLink : AuditableEntity
 {
     public Guid WikiDatabaseId { get; set; }

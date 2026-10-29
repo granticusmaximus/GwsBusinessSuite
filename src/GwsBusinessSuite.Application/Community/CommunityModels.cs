@@ -43,7 +43,8 @@ public sealed record MemberProfileView(
     // Every department the member belongs to, primary first.
     IReadOnlyList<DepartmentMembershipView>? Departments = null,
     string Email = "",
-    bool NotifyUnreadMessagesByEmail = true)
+    bool NotifyUnreadMessagesByEmail = true,
+    bool EmailBoardDigest = false)
 {
     public IReadOnlyList<DepartmentMembershipView> AllDepartments => Departments ?? [];
     public bool IsInDepartment(Guid departmentId) => AllDepartments.Any(d => d.Id == departmentId);
@@ -66,6 +67,7 @@ public sealed class MemberProfileEditorModel
     public string Phone { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public bool NotifyUnreadMessagesByEmail { get; set; } = true;
+    public bool EmailBoardDigest { get; set; }
     public string LinkedInUrl { get; set; } = string.Empty;
     public string TwitterUrl { get; set; } = string.Empty;
     public string WebsiteUrl { get; set; } = string.Empty;

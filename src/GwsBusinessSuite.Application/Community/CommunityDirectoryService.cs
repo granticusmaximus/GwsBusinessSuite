@@ -152,6 +152,7 @@ public sealed class CommunityDirectoryService(IAppDbContext dbContext) : ICommun
         profile.Phone = editor.Phone?.Trim() ?? string.Empty;
         profile.Email = editor.Email?.Trim() ?? string.Empty;
         profile.NotifyUnreadMessagesByEmail = editor.NotifyUnreadMessagesByEmail;
+        profile.EmailBoardDigest = editor.EmailBoardDigest;
         profile.LinkedInUrl = editor.LinkedInUrl?.Trim() ?? string.Empty;
         profile.TwitterUrl = editor.TwitterUrl?.Trim() ?? string.Empty;
         profile.WebsiteUrl = editor.WebsiteUrl?.Trim() ?? string.Empty;
@@ -264,5 +265,6 @@ public sealed class CommunityDirectoryService(IAppDbContext dbContext) : ICommun
         profile?.WebsiteUrl ?? string.Empty,
         departments,
         profile?.Email ?? string.Empty,
-        profile?.NotifyUnreadMessagesByEmail ?? true);
+        profile?.NotifyUnreadMessagesByEmail ?? true,
+        profile?.EmailBoardDigest ?? false);
 }
