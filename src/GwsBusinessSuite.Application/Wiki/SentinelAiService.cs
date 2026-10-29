@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Automation;
+using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.SemanticSearch;
 using GwsBusinessSuite.Domain.Entities;
@@ -35,7 +36,9 @@ public sealed class SentinelAiService(
     // lazily via IServiceProvider, never through its constructor), so there's no DI cycle.
     IAutomationNodeRegistry? automationNodeRegistry = null,
     IAutomationWorkflowService? automationWorkflowService = null,
-    IHybridSearchService? hybridSearchService = null) : ISentinelAiService
+    IHybridSearchService? hybridSearchService = null,
+    // World News for admins' conversations; optional for the same reason as the rest.
+    IWorldNewsSearch? worldNews = null) : ISentinelAiService
 {
     private static readonly HashSet<string> AllowedActions =
     [
@@ -732,12 +735,24 @@ public sealed class SentinelAiService(
             context.AppendLine().AppendLine("CURRENT ADMIN PAGE (what the user is looking at right now):").AppendLine(page);
         }
 
-        if (includeSuiteContext)
+        // The business overview (CRM contacts and deals, commissions, automations, health alerts)
+        // and World News are for admins only: the side panel sits on every admin-layout page, and
+        // Authors and Contributors reach some of those through ContentAccess.
+        if (includeSuiteContext && await db.AppUsers.AsNoTracking().AnyAsync(
+                user => user.Username == performedBy && user.IsActive && user.Role == AppRoles.Admin, cancellationToken))
         {
             yield return new SentinelAiStreamChunk(string.Empty, null, "Searching GWS Business Suite");
             var (suiteContext, suiteCitations) = await BuildSuiteContextAsync(db, instruction, cancellationToken);
             context.AppendLine().AppendLine(suiteContext);
             citations.AddRange(suiteCitations);
+
+            if (worldNews is not null && await NewsContextAsync(instruction, cancellationToken) is { } news)
+            {
+                yield return new SentinelAiStreamChunk(string.Empty, null, "Reading World News");
+                context.AppendLine().AppendLine("WORLD NEWS (what newsrooms reported in the last 7 days - name the outlets, add nothing they don't say):")
+                    .Append(news.Text);
+                citations.AddRange(news.Sources.Select(source => new SentinelAiCitation(null, false, source.Title, source.Url, "web")));
+            }
         }
 
         if (includeInternet)
@@ -1460,6 +1475,20 @@ public sealed class SentinelAiService(
         var start = text.IndexOf('{');
         var end = text.LastIndexOf('}');
         return start >= 0 && end > start ? text[start..(end + 1)] : null;
+    }
+
+    // A news lookup must never break an answer: without World News the reply just goes without.
+    private async Task<WorldNewsContext?> NewsContextAsync(string instruction, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await worldNews!.ContextAsync(instruction, cancellationToken);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger?.LogWarning(ex, "World News context for SentinelGPT failed.");
+            return null;
+        }
     }
 
     // Ranked top-K retrieval (reusing the same SentinelWorkspaceService.SearchAsync the

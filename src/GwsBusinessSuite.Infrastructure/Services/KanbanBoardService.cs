@@ -101,6 +101,12 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         return database.Id;
     }
 
+    public Task DeleteBoardAsync(Guid databaseId, string performedBy, CancellationToken cancellationToken = default) =>
+        databases.TrashDatabaseAsync(databaseId, performedBy, cancellationToken);
+
+    public Task RestoreBoardAsync(Guid databaseId, string performedBy, CancellationToken cancellationToken = default) =>
+        databases.RestoreDatabaseAsync(databaseId, performedBy, cancellationToken);
+
     public async Task RenameBoardAsync(Guid databaseId, string title, string? icon, string performedBy, CancellationToken cancellationToken = default)
     {
         var name = title.Trim();

@@ -6,6 +6,7 @@
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject ILogger<Boards> Logger
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
 
 <PageTitle>Boards</PageTitle>
 
@@ -86,8 +87,12 @@ else
             else
             {
             <div class="boards-tile-wrap">
-            <button type="button" class="boards-tile-rename" title="Rename board" aria-label="@($"Rename {board.Title}")"
-                    @onclick="() => StartRename(board.DatabaseId)"><i class="bi bi-pencil" aria-hidden="true"></i></button>
+            <div class="boards-tile-actions">
+                <button type="button" class="boards-tile-action" title="Rename board" aria-label="@($"Rename {board.Title}")"
+                        @onclick="() => StartRename(board.DatabaseId)"><i class="bi bi-pencil" aria-hidden="true"></i></button>
+                <button type="button" class="boards-tile-action is-danger" title="Delete board" aria-label="@($"Delete {board.Title}")"
+                        @onclick="() => _pendingDelete = board"><i class="bi bi-trash3" aria-hidden="true"></i></button>
+            </div>
             <a class="boards-tile" href="admin/boards/@board.DatabaseId">
                 <span class="boards-tile-icon" aria-hidden="true">@(string.IsNullOrWhiteSpace(board.Icon) ? "🗂️" : board.Icon)</span>
                 <span class="boards-tile-title">@board.Title</span>
@@ -106,6 +111,10 @@ else
     </div>
 }
 
+<ConfirmModal Show="_pendingDelete is not null" Title="Delete board"
+              Message="@DeleteMessage" ConfirmText="Move to trash" Busy="_busy"
+              OnConfirm="DeleteAsync" OnCancel="() => _pendingDelete = null" />
+
 @code {
     private IReadOnlyList<KanbanBoardSummary>? _boards;
     private bool _creating;
@@ -114,6 +123,7 @@ else
     private string _title = string.Empty;
     private string? _error;
     private Guid? _renamingId;
+    private KanbanBoardSummary? _pendingDelete;
     private string? _renameError;
 
     // ⌘K's "New board" arrives as ?new=1.
@@ -131,6 +141,37 @@ else
             Logger.LogError(ex, "Listing boards failed.");
             _error = "Couldn't load your boards. " + ex.Message;
             _boards = [];
+        }
+    }
+
+    private string DeleteMessage => _pendingDelete is not { } board ? string.Empty
+        : $"Move \"{board.Title}\" and its {board.CardCount} {(board.CardCount == 1 ? "card" : "cards")} to the trash? " +
+          "You can restore it from Sentinel's Trash; until then it won't open, and any public roadmap link stops working.";
+
+    private async Task DeleteAsync()
+    {
+        if (_pendingDelete is not { } board) return;
+        _busy = true;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            await BoardService.DeleteBoardAsync(board.DatabaseId, performedBy);
+            _boards = await BoardService.ListBoardsAsync();
+            Toasts.Show($"{board.Title} moved to the trash.", async () =>
+            {
+                await BoardService.RestoreBoardAsync(board.DatabaseId, performedBy);
+                _boards = await BoardService.ListBoardsAsync();
+                await InvokeAsync(StateHasChanged);
+            }, StatusTone.Success);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException)
+        {
+            _error = "Couldn't delete it. " + ex.Message;
+        }
+        finally
+        {
+            _pendingDelete = null;
+            _busy = false;
         }
     }
 

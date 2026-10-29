@@ -134,7 +134,7 @@ public sealed class WorldNewsService : IDisposable
     // SentinelGPT's search_world_news: the last week's events that match the question by meaning,
     // with their situation and a few sources. Falls back to matching headline words when the
     // embedding model can't be reached.
-    public async Task<WorldNewsSearchResult> SearchAsync(string query, CancellationToken ct)
+    public async Task<WorldNewsSearchResult> SearchAsync(string query, CancellationToken ct, double minScore = WorldNewsSearch.MinScore)
     {
         var question = query.Trim();
         if (question.Length == 0) return new WorldNewsSearchResult(question, "nothing", []);
@@ -147,7 +147,7 @@ public sealed class WorldNewsService : IDisposable
         try
         {
             var vector = (await _ollama.EmbedAsync(_options.EmbeddingModel, [question], ct))[0];
-            ids = WorldNewsSearch.Rank(vector, candidates).Select(hit => hit.EventId).ToList();
+            ids = WorldNewsSearch.Rank(vector, candidates, minScore: minScore).Select(hit => hit.EventId).ToList();
             matchedBy = "meaning";
         }
         catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException && !ct.IsCancellationRequested)
@@ -188,6 +188,33 @@ public sealed class WorldNewsService : IDisposable
     {
         _ollama.Dispose();
         _running.Dispose();
+    }
+}
+
+// World News as reading for SentinelGPT's web answers: only events the question is clearly about
+// (matched by meaning - a headline-word fallback is too loose to add unasked), top five.
+public sealed class WorldNewsAssistantSearch(WorldNewsService news) : GwsBusinessSuite.Application.NewsIntelligence.IWorldNewsSearch
+{
+    public async Task<GwsBusinessSuite.Application.NewsIntelligence.WorldNewsContext?> ContextAsync(string question, CancellationToken cancellationToken = default)
+    {
+        var result = await news.SearchAsync(question, cancellationToken, WorldNewsSearch.ContextMinScore);
+        if (result.MatchedBy != "meaning" || result.Results.Count == 0) return null;
+        var text = new System.Text.StringBuilder();
+        var sources = new List<GwsBusinessSuite.Application.NewsIntelligence.WorldNewsContextSource>();
+        foreach (var item in result.Results.Take(5))
+        {
+            text.AppendLine($"NEWS EVENT: {item.Headline} - {item.Outlets} outlets; reported from {string.Join(", ", item.Countries.Take(8))}; " +
+                $"{item.FirstSeen.ToLocalGwsDateTime()} to {item.LastSeen.ToLocalGwsDateTime()}");
+            if (item.Situation is { } situation)
+                text.AppendLine($"PART OF: {situation.Title} ({(situation.Active ? "active" : "quiet")}, {situation.Events} events)");
+            if (item.Summary is { } summary) text.AppendLine($"SUMMARY (AI-written from headlines): {summary}");
+            foreach (var source in item.Sources)
+            {
+                text.AppendLine($"SOURCE: {source.Outlet} ({source.Language}): {source.Title} - {source.Url}");
+                sources.Add(new(source.Outlet + ": " + source.Title, source.Url));
+            }
+        }
+        return new GwsBusinessSuite.Application.NewsIntelligence.WorldNewsContext(text.ToString(), sources);
     }
 }
 

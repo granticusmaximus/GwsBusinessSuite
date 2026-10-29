@@ -62,6 +62,26 @@ public sealed class KanbanBoardServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DeleteBoard_ShouldMoveItToTheTrash_AndRestoreBoard_ShouldBringItBack()
+    {
+        var id = await _boards.CreateBoardAsync("Website relaunch", "personal", "grant");
+        var board = (await _boards.GetBoardAsync(id))!;
+        await _boards.AddCardAsync(id, board.Columns[0].OptionId, "Draft the brief", "grant");
+
+        await _boards.DeleteBoardAsync(id, "grant");
+
+        (await _boards.ListBoardsAsync()).Should().NotContain(summary => summary.DatabaseId == id);
+        (await _boards.GetBoardAsync(id)).Should().BeNull("a trashed board doesn't open");
+        (await _db.WikiDatabases.SingleAsync(database => database.Id == id)).TrashedAt.Should().NotBeNull("it's in Sentinel's Trash, not gone");
+
+        await _boards.RestoreBoardAsync(id, "grant");
+
+        var restored = (await _boards.GetBoardAsync(id))!;
+        restored.Columns.SelectMany(column => column.Cards).Should().ContainSingle(card => card.Title == "Draft the brief");
+        (await _boards.ListBoardsAsync()).Should().Contain(summary => summary.DatabaseId == id);
+    }
+
+    [Fact]
     public async Task RenameBoard_ShouldRenameItsDatabase_AndRefuseABlankName()
     {
         var id = await _boards.CreateBoardAsync("Website relaunch", "personal", "grant");

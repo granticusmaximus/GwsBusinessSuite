@@ -23,6 +23,10 @@ public sealed record WorldNewsCandidate(string EventId, float[] Centroid, string
 public static class WorldNewsSearch
 {
     public const double MinScore = 0.5;
+    // Bringing news into an answer unasked needs a clearer match: everyday business questions
+    // ("how is the sales pipeline doing", "is anything down") scored 0.38-0.54 against noise
+    // headlines, news questions 0.66 and up (measured 29-10-26).
+    public const double ContextMinScore = 0.62;
     public const int Limit = 8;
     public const int PerSituation = 3;
     public const int MinArticles = 2;

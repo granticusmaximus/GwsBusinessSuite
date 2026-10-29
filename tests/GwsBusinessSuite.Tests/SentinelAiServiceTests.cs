@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Application.Settings;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
@@ -425,6 +426,7 @@ public sealed class SentinelAiServiceTests
         await using var db = new ApplicationDbContext(options);
         await db.Database.EnsureCreatedAsync();
 
+        db.AppUsers.Add(new AppUser { Username = "grant", Role = AppRoles.Admin, IsActive = true });
         db.Contacts.Add(new GwsBusinessSuite.Domain.Entities.Contact
         {
             FullName = "Ada Lovelace",
@@ -509,6 +511,54 @@ public sealed class SentinelAiServiceTests
             && item.Url == "https://not-microsoft.example/docs");
     }
 
+    [Theory]
+    [InlineData("grant", true)]
+    [InlineData("sam", false)]
+    public async Task StreamAgentConversationAsync_ShouldShareBusinessDataAndWorldNews_OnlyWithAdmins(string asker, bool admin)
+    {
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
+        await using var db = new ApplicationDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "grant", Role = AppRoles.Admin, IsActive = true });
+        db.AppUsers.Add(new AppUser { Username = "sam", Role = AppRoles.Author, IsActive = true });
+        var contact = new GwsBusinessSuite.Domain.Entities.Contact { FullName = "Ada Lovelace", CreatedBy = "grant" };
+        db.Contacts.Add(contact);
+        await db.SaveChangesAsync();
+        db.Deals.Add(new GwsBusinessSuite.Domain.Entities.Deal
+        {
+            ContactId = contact.Id, Title = "Spain rail contract", Stage = GwsBusinessSuite.Domain.Entities.DealStages.Negotiation,
+            ValueUsd = 90_000, Notes = "Confidential terms", CreatedBy = "grant"
+        });
+        await db.SaveChangesAsync();
+
+        var ollama = new FakeStreamingOllamaService(["An answer."]);
+        var news = new FakeWorldNews();
+        var service = new SentinelAiService(
+            new FakeAppDbContextFactory(options), ollama, new SiteSettingsService(db),
+            new SentinelWorkspaceService(db, TimeProvider.System), CreateCache(), worldNews: news);
+
+        SentinelAiRunView? completed = null;
+        await foreach (var chunk in service.StreamAgentConversationAsync(
+            Guid.NewGuid(), null, "What's the latest on the Spain rail crash and our Spain rail deal?", asker,
+            includeInternet: false, useDeepAnalysis: false))
+        {
+            completed ??= chunk.CompletedRun;
+        }
+
+        if (admin)
+        {
+            ollama.LastUserPrompt.Should().Contain("Spain rail contract").And.Contain("WORLD NEWS").And.Contain("Two trains collide in Spain");
+            completed!.Citations.Should().Contain(citation => citation.Url == "https://news.example/crash");
+        }
+        else
+        {
+            ollama.LastUserPrompt.Should().NotContain("Spain rail contract").And.NotContain("Confidential terms").And.NotContain("WORLD NEWS");
+            news.Questions.Should().BeEmpty("an Author's question never reaches World News either");
+        }
+    }
+
     [Fact]
     public async Task StreamAgentConversationAsync_ShouldNotLoadTeacherModelsForOrdinaryLongText()
     {
@@ -572,6 +622,7 @@ public sealed class SentinelAiServiceTests
         var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
         await using var db = new ApplicationDbContext(options);
         await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "grant", Role = AppRoles.Admin, IsActive = true });
 
         var ada = new GwsBusinessSuite.Domain.Entities.Contact
         {
@@ -627,6 +678,7 @@ public sealed class SentinelAiServiceTests
         var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
         await using var db = new ApplicationDbContext(options);
         await db.Database.EnsureCreatedAsync();
+        db.AppUsers.Add(new AppUser { Username = "grant", Role = AppRoles.Admin, IsActive = true });
 
         var contact = new GwsBusinessSuite.Domain.Entities.Contact { FullName = "Ada Lovelace", CreatedBy = "grant" };
         db.Contacts.Add(contact);
@@ -1362,6 +1414,19 @@ public sealed class SentinelAiServiceTests
             var response = responses[Math.Min(_index, responses.Count - 1)];
             _index++;
             return Task.FromResult(response);
+        }
+    }
+
+    private sealed class FakeWorldNews : IWorldNewsSearch
+    {
+        public List<string> Questions { get; } = [];
+
+        public Task<WorldNewsContext?> ContextAsync(string question, CancellationToken cancellationToken = default)
+        {
+            Questions.Add(question);
+            return Task.FromResult<WorldNewsContext?>(new WorldNewsContext(
+                "NEWS EVENT: Two trains collide in Spain - 400 outlets\nSOURCE: Reuters (English): Trains collide - https://news.example/crash\n",
+                [new WorldNewsContextSource("Reuters: Trains collide", "https://news.example/crash")]));
         }
     }
 
