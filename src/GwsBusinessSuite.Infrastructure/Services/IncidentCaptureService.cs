@@ -12,10 +12,12 @@ public sealed record IncidentCaptureCamera(
     string FrameKey, string CameraId, string Name, double Latitude, double Longitude,
     string StreamUrl, string SourceName, string SourceAttributionUrl, double MilesAway);
 
+// Notes and LinkUrl are set for a World News story captured from Overwatch (its summary and
+// sources, and the situation on World News); AreaId is then empty.
 public sealed record IncidentCapture(
     Guid Id, string Username, Guid AreaId, string AreaName, string Title,
     double Latitude, double Longitude, DateTimeOffset StartedAt, DateTimeOffset Until,
-    List<IncidentCaptureCamera> Cameras);
+    List<IncidentCaptureCamera> Cameras, string? Notes = null, string? LinkUrl = null);
 
 // "Evidence capture" for watch areas: when a check finds a new crash, closure or road hazard, the
 // nearest public still-image cameras start saving frames - for an hour from when it was first
@@ -39,16 +41,18 @@ public sealed class IncidentCaptureService(
 
     // Null when no still-image camera is close enough - there's nothing to capture.
     public async Task<IncidentCapture?> StartAsync(string username, Guid areaId, string areaName, string title,
-        double latitude, double longitude, CancellationToken ct = default)
+        double latitude, double longitude, CancellationToken ct = default, double radiusMiles = CaptureRadiusMiles,
+        string? notes = null, string? linkUrl = null)
     {
-        var nearby = await NearestSnapshotCamerasAsync(latitude, longitude, ct);
+        var nearby = await NearestSnapshotCamerasAsync(latitude, longitude, radiusMiles, ct);
         if (nearby.Count == 0) return null;
 
         var id = Guid.NewGuid();
         var now = timeProvider.GetUtcNow();
         var capture = new IncidentCapture(id, username, areaId, areaName, title, latitude, longitude, now, now + CaptureDuration,
             nearby.Select((c, i) => new IncidentCaptureCamera($"capture-{id:N}-{i}", c.Camera.Id, c.Camera.Name,
-                c.Camera.Latitude, c.Camera.Longitude, c.Camera.StreamUrl, c.Camera.SourceName, c.Camera.SourceAttributionUrl, c.Miles)).ToList());
+                c.Camera.Latitude, c.Camera.Longitude, c.Camera.StreamUrl, c.Camera.SourceName, c.Camera.SourceAttributionUrl, c.Miles)).ToList(),
+            notes, linkUrl);
         manifests.Save(capture);
 
         foreach (var camera in capture.Cameras)
@@ -104,16 +108,17 @@ public sealed class IncidentCaptureService(
         }
     }
 
-    private async Task<IReadOnlyList<(CameraFeed Camera, double Miles)>> NearestSnapshotCamerasAsync(double latitude, double longitude, CancellationToken ct)
+    private async Task<IReadOnlyList<(CameraFeed Camera, double Miles)>> NearestSnapshotCamerasAsync(double latitude, double longitude,
+        double radiusMiles, CancellationToken ct)
     {
-        var dLat = CaptureRadiusMiles / 69.0;
-        var dLon = CaptureRadiusMiles / (69.0 * Math.Max(0.2, Math.Cos(latitude * Math.PI / 180)));
+        var dLat = radiusMiles / 69.0;
+        var dLon = radiusMiles / (69.0 * Math.Max(0.2, Math.Cos(latitude * Math.PI / 180)));
         var inBox = await cameras.GetCamerasInBoundingBoxAsync(
             new BoundingBox(latitude + dLat, latitude - dLat, longitude + dLon, longitude - dLon), ct);
         return inBox
             .Where(c => c.StreamKind == CameraStreamKind.Snapshot)
             .Select(c => (Camera: c, Miles: Miles(latitude, longitude, c.Latitude, c.Longitude)))
-            .Where(x => x.Miles <= CaptureRadiusMiles)
+            .Where(x => x.Miles <= radiusMiles)
             .OrderBy(x => x.Miles)
             .Take(MaxCamerasPerCapture)
             .ToList();

@@ -12,7 +12,8 @@ public sealed record EventOverview(string Id, string Title, int ArticleCount, in
 // A situation as the feed shows it: Title is from its biggest event (an English headline when
 // one has one), Latest is its newest event's.
 public sealed record SituationOverview(string Id, string Title, string Latest, int EventCount, int ArticleCount, int OutletCount,
-    IReadOnlyList<string> Countries, IReadOnlyList<string> Languages, DateTimeOffset FirstSeen, DateTimeOffset LastSeen);
+    IReadOnlyList<string> Countries, IReadOnlyList<string> Languages, DateTimeOffset FirstSeen, DateTimeOffset LastSeen,
+    string? Kind = null);
 
 // One version of an event's summary. Versions count up from 1; ArticleCount is how many reports
 // the event had when it was written, which decides when it's due again.
@@ -22,6 +23,10 @@ public sealed record EventSummary(string EventId, int Version, string? Headline,
 public sealed record WorldNewsAlert(Guid Id, string Username, string SituationId, string Title, string Message,
     DateTimeOffset CreatedAt, bool IsRead);
 
+// A hand correction of where Overwatch puts a situation: a country code (and optional city), or
+// Hidden to keep it off the globe.
+public sealed record SituationPlacement(string SituationId, string? CountryCode, string? City, bool Hidden,
+    string UpdatedBy, DateTimeOffset UpdatedAt);
 public sealed record WorldStory(EventOverview Event, int RecentReports, int RecentOutlets, string? SituationId);
 public sealed record WorldCountry(string Name, int ReportCount, int EventCount, int OutletCount, IReadOnlyList<WorldStory> TopStories);
 public sealed record WorldSnapshot(DateTimeOffset Since, IReadOnlyList<WorldCountry> Countries, IReadOnlyList<WorldStory> BiggestStories);
@@ -60,6 +65,11 @@ public sealed class WorldNewsStore
                 id TEXT PRIMARY KEY, username TEXT NOT NULL, situation_id TEXT NOT NULL, title TEXT NOT NULL,
                 message TEXT NOT NULL, created_at INTEGER NOT NULL, read_at INTEGER);
             CREATE INDEX IF NOT EXISTS ix_world_news_alerts_user ON world_news_alerts (username, read_at, created_at);
+            CREATE TABLE IF NOT EXISTS situation_placements (
+                situation_id TEXT PRIMARY KEY, country_code TEXT, city TEXT, hidden INTEGER NOT NULL,
+                updated_by TEXT NOT NULL, updated_at INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS surge_watchers (username TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS surge_alerts_sent (situation_id TEXT PRIMARY KEY, sent_at INTEGER NOT NULL);
             """);
         // Databases from before outlet feeds (21-10-26) have no snippet column.
         using var columns = connection.CreateCommand();
@@ -69,6 +79,9 @@ public sealed class WorldNewsStore
         columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('events') WHERE name = 'situation_id'";
         if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE events ADD COLUMN situation_id TEXT");
         Execute(connection, "CREATE INDEX IF NOT EXISTS ix_events_situation ON events (situation_id)");
+        // Nor situations.kind, from before Overwatch's kinds (29-10-26).
+        columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('situations') WHERE name = 'kind'";
+        if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE situations ADD COLUMN kind TEXT");
     }
 
     // New reports only (a report already stored, by canonical URL, is skipped). Returns how many were new.
@@ -295,12 +308,13 @@ public sealed class WorldNewsStore
     public IReadOnlyList<SituationOverview> TopSituations(DateTimeOffset since, int limit)
     {
         using var connection = Open();
-        var rows = new List<(string Id, int Events, int Articles, int Outlets, string? Countries, string? Languages, long First, long Last)>();
+        var rows = new List<(string Id, int Events, int Articles, int Outlets, string? Countries, string? Languages, long First, long Last, string? Kind)>();
         using (var command = connection.CreateCommand())
         {
             command.CommandText = """
                 SELECT e.situation_id, COUNT(DISTINCT e.id), COUNT(a.id), COUNT(DISTINCT a.outlet),
-                       GROUP_CONCAT(DISTINCT a.country), GROUP_CONCAT(DISTINCT a.language), MIN(e.first_seen), MAX(e.last_seen)
+                       GROUP_CONCAT(DISTINCT a.country), GROUP_CONCAT(DISTINCT a.language), MIN(e.first_seen), MAX(e.last_seen),
+                       (SELECT kind FROM situations s WHERE s.id = e.situation_id)
                 FROM events e JOIN articles a ON a.event_id = e.id
                 WHERE e.situation_id IN (SELECT situation_id FROM events WHERE situation_id IS NOT NULL
                                          GROUP BY situation_id HAVING COUNT(*) >= 2 AND MAX(last_seen) >= $since)
@@ -313,7 +327,7 @@ public sealed class WorldNewsStore
             while (reader.Read())
                 rows.Add((reader.GetString(0), reader.GetInt32(1), reader.GetInt32(2), reader.GetInt32(3),
                     reader.IsDBNull(4) ? null : reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5),
-                    reader.GetInt64(6), reader.GetInt64(7)));
+                    reader.GetInt64(6), reader.GetInt64(7), reader.IsDBNull(8) ? null : reader.GetString(8)));
         }
         if (rows.Count == 0) return [];
 
@@ -343,7 +357,7 @@ public sealed class WorldNewsStore
             var title = list.OrderByDescending(e => e.English).ThenByDescending(e => e.Articles).Select(e => e.Title).FirstOrDefault() ?? "";
             var latest = list.OrderByDescending(e => e.Last).Select(e => e.Title).FirstOrDefault() ?? title;
             return new SituationOverview(row.Id, title, latest, row.Events, row.Articles, row.Outlets, Split(row.Countries),
-                Split(row.Languages), DateTimeOffset.FromUnixTimeSeconds(row.First), DateTimeOffset.FromUnixTimeSeconds(row.Last));
+                Split(row.Languages), DateTimeOffset.FromUnixTimeSeconds(row.First), DateTimeOffset.FromUnixTimeSeconds(row.Last), row.Kind);
         }).ToList();
     }
 
@@ -404,6 +418,88 @@ public sealed class WorldNewsStore
         command.ExecuteNonQuery();
     }
 
+    // Every correction (a short list: one per situation someone fixed by hand).
+    public IReadOnlyDictionary<string, SituationPlacement> Placements()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT situation_id, country_code, city, hidden, updated_by, updated_at FROM situation_placements";
+        using var reader = command.ExecuteReader();
+        var placements = new Dictionary<string, SituationPlacement>(StringComparer.Ordinal);
+        while (reader.Read())
+            placements[reader.GetString(0)] = new SituationPlacement(reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1),
+                reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt64(3) != 0, reader.GetString(4),
+                DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(5)));
+        return placements;
+    }
+
+    public void SetPlacement(SituationPlacement placement)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR REPLACE INTO situation_placements (situation_id, country_code, city, hidden, updated_by, updated_at)
+            VALUES ($situation, $country, $city, $hidden, $by, $at)
+            """;
+        command.Parameters.AddWithValue("$situation", placement.SituationId);
+        command.Parameters.AddWithValue("$country", (object?)placement.CountryCode ?? DBNull.Value);
+        command.Parameters.AddWithValue("$city", (object?)placement.City ?? DBNull.Value);
+        command.Parameters.AddWithValue("$hidden", placement.Hidden ? 1 : 0);
+        command.Parameters.AddWithValue("$by", placement.UpdatedBy);
+        command.Parameters.AddWithValue("$at", placement.UpdatedAt.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+    }
+
+    public void ClearPlacement(string situationId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "DELETE FROM situation_placements WHERE situation_id = $situation";
+        command.Parameters.AddWithValue("$situation", situationId);
+        command.ExecuteNonQuery();
+    }
+
+    // What each situation is about (SituationKinds). onlyMissing keeps kinds a better classifier
+    // already set, for when the keyword fallback stands in.
+    public void SaveKinds(IReadOnlyList<(string SituationId, string Kind)> kinds, bool onlyMissing = false)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = onlyMissing
+            ? "UPDATE situations SET kind = $kind WHERE id = $id AND kind IS NULL"
+            : "UPDATE situations SET kind = $kind WHERE id = $id";
+        var id = command.Parameters.Add("$id", SqliteType.Text);
+        var kind = command.Parameters.Add("$kind", SqliteType.Text);
+        foreach (var (situationId, situationKind) in kinds)
+        {
+            id.Value = situationId;
+            kind.Value = situationKind;
+            command.ExecuteNonQuery();
+        }
+        transaction.Commit();
+    }
+
+    // Distinct outlets on each situation with news since cut: all of them, and those that had
+    // reported before cut. A story whose coverage doubles in a couple of hours is surging.
+    public IReadOnlyDictionary<string, (int Outlets, int OutletsBefore)> SituationGrowth(DateTimeOffset cut)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT e.situation_id, COUNT(DISTINCT a.outlet), COUNT(DISTINCT CASE WHEN a.seen_at < $cut THEN a.outlet END)
+            FROM events e JOIN articles a ON a.event_id = e.id
+            WHERE e.situation_id IN (SELECT situation_id FROM events WHERE situation_id IS NOT NULL AND last_seen >= $cut)
+            GROUP BY e.situation_id
+            """;
+        command.Parameters.AddWithValue("$cut", cut.ToUnixTimeSeconds());
+        using var reader = command.ExecuteReader();
+        var growth = new Dictionary<string, (int, int)>(StringComparer.Ordinal);
+        while (reader.Read()) growth[reader.GetString(0)] = (reader.GetInt32(1), reader.GetInt32(2));
+        return growth;
+    }
+
     // Called after a read has linked new events. One alert covers all events added since the last read.
     public IReadOnlyList<WorldNewsAlert> CreateWatchAlerts(DateTimeOffset now)
     {
@@ -441,6 +537,75 @@ public sealed class WorldNewsStore
             insert.Parameters.AddWithValue("$count", item.Current);
             insert.ExecuteNonQuery();
             alerts.Add(alert);
+        }
+        transaction.Commit();
+        return alerts;
+    }
+
+    public bool IsWatchingSurges(string username)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM surge_watchers WHERE username = $username";
+        command.Parameters.AddWithValue("$username", NormalizeUsername(username));
+        return (long)command.ExecuteScalar()! > 0;
+    }
+
+    public void WatchSurges(string username, bool on, DateTimeOffset now)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = on
+            ? "INSERT OR IGNORE INTO surge_watchers (username, created_at) VALUES ($username, $created)"
+            : "DELETE FROM surge_watchers WHERE username = $username";
+        command.Parameters.AddWithValue("$username", NormalizeUsername(username));
+        command.Parameters.AddWithValue("$created", now.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+    }
+
+    // One alert per surging situation for everyone who asked, at most once a day per situation.
+    public IReadOnlyList<WorldNewsAlert> CreateSurgeAlerts(IReadOnlyList<(string SituationId, string Title, string Message)> surging,
+        DateTimeOffset now)
+    {
+        if (surging.Count == 0) return [];
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        var watchers = new List<string>();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT username FROM surge_watchers";
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) watchers.Add(reader.GetString(0));
+        }
+        var alerts = new List<WorldNewsAlert>();
+        foreach (var (situationId, title, message) in surging)
+        {
+            using var claim = connection.CreateCommand();
+            claim.CommandText = """
+                INSERT INTO surge_alerts_sent (situation_id, sent_at) VALUES ($situation, $now)
+                ON CONFLICT (situation_id) DO UPDATE SET sent_at = $now WHERE sent_at < $dayAgo
+                """;
+            claim.Parameters.AddWithValue("$situation", situationId);
+            claim.Parameters.AddWithValue("$now", now.ToUnixTimeSeconds());
+            claim.Parameters.AddWithValue("$dayAgo", now.AddDays(-1).ToUnixTimeSeconds());
+            if (claim.ExecuteNonQuery() == 0) continue;
+            foreach (var username in watchers)
+            {
+                var alert = new WorldNewsAlert(Guid.NewGuid(), username, situationId, title, message, now, false);
+                using var insert = connection.CreateCommand();
+                insert.CommandText = """
+                    INSERT INTO world_news_alerts (id, username, situation_id, title, message, created_at)
+                    VALUES ($id, $username, $situation, $title, $message, $created)
+                    """;
+                insert.Parameters.AddWithValue("$id", alert.Id.ToString("N"));
+                insert.Parameters.AddWithValue("$username", username);
+                insert.Parameters.AddWithValue("$situation", situationId);
+                insert.Parameters.AddWithValue("$title", title);
+                insert.Parameters.AddWithValue("$message", message);
+                insert.Parameters.AddWithValue("$created", now.ToUnixTimeSeconds());
+                insert.ExecuteNonQuery();
+                alerts.Add(alert);
+            }
         }
         transaction.Commit();
         return alerts;
@@ -612,6 +777,8 @@ public sealed class WorldNewsStore
             DELETE FROM events WHERE last_seen < $before;
             DELETE FROM summaries WHERE event_id NOT IN (SELECT id FROM events);
             DELETE FROM situations WHERE id NOT IN (SELECT situation_id FROM events WHERE situation_id IS NOT NULL);
+            DELETE FROM situation_placements WHERE situation_id NOT IN (SELECT id FROM situations);
+            DELETE FROM surge_alerts_sent WHERE situation_id NOT IN (SELECT id FROM situations);
             """;
         command.Parameters.AddWithValue("$before", before.ToUnixTimeSeconds());
         command.ExecuteNonQuery();

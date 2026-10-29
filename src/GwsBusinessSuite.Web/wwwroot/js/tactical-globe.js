@@ -2008,17 +2008,41 @@ window.tacticalGlobe = (function () {
         if (!entry) return;
         entry.worldNewsDataSource.entities.suspendEvents();
         entry.worldNewsDataSource.entities.removeAll();
+        const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         (signals || []).forEach(function (signal) {
-            const size = Math.min(24, 12 + Math.log2(Math.max(1, signal.outletCount)) * 2);
+            // Bigger for wider coverage (3 outlets ~12px, 50+ ~30px); faded once a story goes quiet.
+            const size = Math.min(30, 8 + Math.log2(Math.max(2, signal.outletCount)) * 4);
+            const color = Cesium.Color.fromCssColorString('#c77dff').withAlpha(signal.active === false ? 0.45 : 1);
+            const billboard = {
+                image: pinBillboardImage,
+                width: size,
+                height: size,
+                color: color,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            };
+            let label;
+            if (signal.surge) {
+                // A slow pulse so breaking news catches the eye without strobing.
+                if (!reduced) {
+                    billboard.scale = new Cesium.CallbackProperty(function () {
+                        return 1 + 0.3 * (0.5 + 0.5 * Math.sin(Date.now() / 350));
+                    }, false);
+                }
+                label = {
+                    text: 'SURGING',
+                    font: 'bold 11px "Share Tech Mono", monospace',
+                    fillColor: Cesium.Color.fromCssColorString('#f3e3ff'),
+                    outlineColor: Cesium.Color.fromCssColorString('#05080a'),
+                    outlineWidth: 3,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    pixelOffset: new Cesium.Cartesian2(0, -size),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                };
+            }
             const entity = entry.worldNewsDataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(signal.lon, signal.lat),
-                billboard: {
-                    image: pinBillboardImage,
-                    width: size,
-                    height: size,
-                    color: Cesium.Color.fromCssColorString('#c77dff'),
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
-                }
+                billboard: billboard,
+                label: label
             });
             entity._tacticalGlobeWorldNews = signal;
         });
@@ -2028,6 +2052,12 @@ window.tacticalGlobe = (function () {
     function clearWorldNews(containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (entry) entry.worldNewsDataSource.entities.removeAll();
+    }
+
+    function placementLabel(precision) {
+        if (precision === 'city') return 'CITY-LEVEL PLACEMENT';
+        if (precision === 'corrected') return 'PLACED BY HAND';
+        return 'COUNTRY-LEVEL PLACEMENT';
     }
 
     function openWorldNewsPanel(signal) {
@@ -2042,19 +2072,86 @@ window.tacticalGlobe = (function () {
             '<div class="tg-stream-panel-header"><span>REPORTED NEWS</span>' +
             '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button></div>' +
             '<div class="tg-stream-panel-body">' +
-            '<div class="tg-incident-type">COUNTRY-LEVEL PLACEMENT · NOT A CONFIRMED INCIDENT</div>' +
+            '<div class="tg-incident-type">' + escapeHtml(placementLabel(signal.precision)) + ' · NOT A CONFIRMED INCIDENT</div>' +
+            (signal.surge ? '<div class="tg-world-news-surge">' + escapeHtml(signal.surge) + '</div>' : '') +
             '<h2>' + escapeHtml(signal.title) + '</h2>' +
             (signal.latest !== signal.title ? '<div><strong>LATEST:</strong> ' + escapeHtml(signal.latest) + '</div>' : '') +
             (signal.summary ? '<p>' + escapeHtml(signal.summary) + '</p>' : '') +
-            '<div class="tg-stream-panel-meta">' + escapeHtml(signal.country) + ' · ' +
+            '<div class="tg-stream-panel-meta">' + escapeHtml((signal.kindLabel ? signal.kindLabel.toUpperCase() + ' · ' : '') +
+            (signal.active === false ? 'QUIET · ' : '')) + escapeHtml(signal.place || signal.country) + ' · ' +
             escapeHtml(String(signal.eventCount)) + ' EVENTS · ' + escapeHtml(String(signal.outletCount)) +
             ' OUTLETS · UPDATED ' + escapeHtml(signal.lastSeen) + '</div>' +
             (sources ? '<ul class="tg-world-news-sources">' + sources + '</ul>' : '') +
+            '<div class="tg-world-news-context" aria-live="polite"></div>' +
             '<a class="tg-incident-report" href="' + escapeHtml(signal.href) + '">OPEN IN WORLD NEWS</a>' +
             '</div>';
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
         if (!openAsModal(panel, closeIncidentPanel)) return;
         incidentPanel = panel;
+        loadWorldNewsContext(panel, signal);
+    }
+
+    // Overwatch's own data around the story, asked of the page once the panel is open: official
+    // signals that back it, what's near it (city-level only) and a button to record the cameras.
+    async function loadWorldNewsContext(panel, signal) {
+        const entry = viewers.get('tg-viewport');
+        const slot = panel.querySelector('.tg-world-news-context');
+        if (!entry || !entry.dotNetRef || !slot) return;
+        slot.textContent = 'CHECKING OVERWATCH DATA...';
+        let context;
+        try {
+            context = await entry.dotNetRef.invokeMethodAsync('WorldNewsContextAsync', signal.id);
+        } catch (err) {
+            context = null;
+        }
+        slot.textContent = '';
+        if (!context) return;
+        const list = function (title, items) {
+            if (!items || !items.length) return '';
+            return '<div class="tg-world-news-context-title">' + escapeHtml(title) + '</div><ul class="tg-world-news-sources">' +
+                items.map(function (item) { return '<li>' + item + '</li>'; }).join('') + '</ul>';
+        };
+        let html = list('BACKED BY', (context.backing || []).map(function (b) {
+            const text = escapeHtml(b.source + ': ' + b.text);
+            return b.url ? '<a target="_blank" rel="noopener" href="' + escapeHtml(b.url) + '">' + text + '</a>' : text;
+        }));
+        if (!context.precise) {
+            html += '<div class="tg-world-news-context-note">Nearby cameras, alerts and capture need a city-level place. ' +
+                'Use Wrong place? on World News to pin one.</div>';
+        } else {
+            html += list('NEARBY CAMERAS', (context.cameras || []).map(function (c, i) {
+                return '<button type="button" class="tg-world-news-camera" data-camera-index="' + i + '">' +
+                    escapeHtml(c.name + ' · ' + c.miles + ' MI') + '</button>';
+            }));
+            html += list('WEATHER ALERTS', (context.alerts || []).map(escapeHtml));
+            html += list('HAZARDS NEARBY', (context.hazards || []).map(escapeHtml));
+            html += list('POWER OUTAGES NEARBY', (context.outages || []).map(escapeHtml));
+            if (!(context.cameras || []).length && !(context.alerts || []).length && !(context.hazards || []).length && !(context.outages || []).length) {
+                html += '<div class="tg-world-news-context-note">No Overwatch cameras, alerts, hazards or outages within 25 miles.</div>';
+            }
+            html += '<button type="button" class="tg-incident-report tg-world-news-capture">CAPTURE NEARBY CAMERAS</button>';
+        }
+        slot.innerHTML = html;
+        slot.querySelectorAll('.tg-world-news-camera').forEach(function (button) {
+            button.addEventListener('click', function () {
+                const camera = context.cameras[Number(button.getAttribute('data-camera-index'))];
+                closeIncidentPanel();
+                openCamera(camera.pin);
+            });
+        });
+        const capture = slot.querySelector('.tg-world-news-capture');
+        if (capture) {
+            capture.addEventListener('click', async function () {
+                capture.disabled = true;
+                capture.textContent = 'STARTING CAPTURE...';
+                try {
+                    capture.textContent = (await entry.dotNetRef.invokeMethodAsync('CaptureWorldNewsAsync', signal.id)).toUpperCase();
+                } catch (err) {
+                    capture.textContent = 'CAPTURE FAILED - TRY AGAIN';
+                    capture.disabled = false;
+                }
+            });
+        }
     }
 
     // Keyed on the normalized category (IncidentNormalizer) so every source colors the same

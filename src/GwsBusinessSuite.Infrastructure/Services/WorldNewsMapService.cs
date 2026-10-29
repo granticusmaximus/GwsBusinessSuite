@@ -1,145 +1,132 @@
-using System.Text.RegularExpressions;
 using GwsBusinessSuite.Application.CameraIntel;
+using GwsBusinessSuite.WorldNewsKit;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
 // A deliberately conservative projection of World News onto Overwatch. Article.Country is the
 // publishing edition/outlet country, not proof of where the event happened, so it is never used
-// as a coordinate. A situation is mapped only when its own headline explicitly names a country
-// we can place. The marker remains country-level and is labelled as reported news, not an
-// operational incident.
+// as a coordinate. A situation is mapped only when its own headline (or, to sharpen a country to
+// a city, its summary) names a place we can locate. Every marker says how precise it is and is
+// labelled as reported news, not an operational incident.
 public sealed record WorldNewsMapSignal(
     string SituationId,
     string Title,
     string Latest,
-    string Country,
-    double Latitude,
-    double Longitude,
+    WorldNewsLocation Location,
     int EventCount,
     int OutletCount,
     int ReportCount,
     DateTimeOffset LastSeen,
     string? Summary,
-    IReadOnlyList<WorldNewsMapSource> Sources);
+    IReadOnlyList<WorldNewsMapSource> Sources,
+    string Kind = SituationKinds.Other,
+    // New events in the last 48 hours (World News's "Active"); otherwise Quiet.
+    bool Active = true,
+    // Set when coverage is surging (SituationSurge), saying how.
+    string? Surge = null)
+{
+    public string Country => Location.Country;
+    public double Latitude => Location.Latitude;
+    public double Longitude => Location.Longitude;
+}
 
 public sealed record WorldNewsMapSource(string Outlet, string Title, string Url);
-public sealed record WorldNewsCountryLocation(string Country, double Latitude, double Longitude);
 
-public sealed partial class WorldNewsMapService(WorldNewsService news)
+public sealed class WorldNewsMapService(WorldNewsStore store)
 {
     public const int MinimumOutlets = 3;
     public const int MaximumSignals = 50;
 
-    private sealed record CountryPoint(string Name, double Latitude, double Longitude, string[] Aliases);
-
-    private static readonly CountryPoint[] Countries =
-    [
-        new("United States", 39.8, -98.6, ["United States", "U.S.", "US"]),
-        new("United Kingdom", 54.0, -2.0, ["United Kingdom", "Britain", "British", "UK"]),
-        new("Canada", 56.1, -106.3, ["Canada", "Canadian"]),
-        new("Australia", -25.3, 133.8, ["Australia", "Australian"]),
-        new("India", 20.6, 78.9, ["India", "Indian"]),
-        new("Nigeria", 9.1, 8.7, ["Nigeria", "Nigerian"]),
-        new("South Africa", -30.6, 22.9, ["South Africa", "South African"]),
-        new("Kenya", 0.0, 37.9, ["Kenya", "Kenyan"]),
-        new("Philippines", 12.9, 121.8, ["Philippines", "Philippine", "Filipino"]),
-        new("Pakistan", 30.4, 69.3, ["Pakistan", "Pakistani"]),
-        new("France", 46.2, 2.2, ["France", "French"]),
-        new("Germany", 51.2, 10.5, ["Germany", "German"]),
-        new("Italy", 41.9, 12.6, ["Italy", "Italian"]),
-        new("Spain", 40.5, -3.7, ["Spain", "Spanish"]),
-        new("Portugal", 39.4, -8.2, ["Portugal", "Portuguese"]),
-        new("Netherlands", 52.1, 5.3, ["Netherlands", "Dutch"]),
-        new("Sweden", 60.1, 18.6, ["Sweden", "Swedish"]),
-        new("Norway", 60.5, 8.5, ["Norway", "Norwegian"]),
-        new("Poland", 51.9, 19.1, ["Poland", "Polish"]),
-        new("Czechia", 49.8, 15.5, ["Czechia", "Czech Republic", "Czech"]),
-        new("Hungary", 47.2, 19.5, ["Hungary", "Hungarian"]),
-        new("Romania", 45.9, 24.9, ["Romania", "Romanian"]),
-        new("Greece", 39.1, 21.8, ["Greece", "Greek"]),
-        new("Ukraine", 48.4, 31.2, ["Ukraine", "Ukrainian"]),
-        new("Russia", 61.5, 105.3, ["Russia", "Russian"]),
-        new("Turkey", 39.0, 35.2, ["Turkey", "Turkish", "Türkiye"]),
-        new("Israel", 31.0, 34.9, ["Israel", "Israeli"]),
-        new("Saudi Arabia", 23.9, 45.1, ["Saudi Arabia", "Saudi"]),
-        new("Egypt", 26.8, 30.8, ["Egypt", "Egyptian"]),
-        new("United Arab Emirates", 23.4, 53.8, ["United Arab Emirates", "UAE", "Emirati"]),
-        new("Brazil", -14.2, -51.9, ["Brazil", "Brazilian"]),
-        new("Mexico", 23.6, -102.6, ["Mexico", "Mexican"]),
-        new("Argentina", -38.4, -63.6, ["Argentina", "Argentine", "Argentinian"]),
-        new("Colombia", 4.6, -74.3, ["Colombia", "Colombian"]),
-        new("Japan", 36.2, 138.3, ["Japan", "Japanese"]),
-        new("South Korea", 35.9, 127.8, ["South Korea", "South Korean"]),
-        new("China", 35.9, 104.2, ["China", "Chinese"]),
-        new("Taiwan", 23.7, 121.0, ["Taiwan", "Taiwanese"]),
-        new("Indonesia", -0.8, 113.9, ["Indonesia", "Indonesian"]),
-        new("Thailand", 15.9, 100.9, ["Thailand", "Thai"]),
-        new("Vietnam", 14.1, 108.3, ["Vietnam", "Vietnamese"])
-    ];
-
-    // How far back the globe layer, Brief me and World News's "Show on Overwatch" link all look.
+    // How far back Brief me and World News's "Show on Overwatch" link look; the layer itself can
+    // look back further (Windows).
     public static readonly TimeSpan Window = TimeSpan.FromHours(24);
+    public static readonly IReadOnlyList<int> WindowHours = [24, 72, 168];
 
-    // Country names are proper nouns, so matching is case-sensitive: "US" must not catch "us",
-    // nor "Polish" "polish". One pattern per country, compiled once.
-    private static readonly (CountryPoint Country, Regex Pattern)[] Patterns = Countries
-        .Select(country => (country, new Regex(
-            $@"(?<![\p{{L}}\p{{N}}])(?:{string.Join("|", country.Aliases.OrderByDescending(alias => alias.Length).Select(Regex.Escape))})(?![\p{{L}}\p{{N}}])",
-            RegexOptions.CultureInvariant | RegexOptions.Compiled)))
-        .ToArray();
-
-    public IReadOnlyList<WorldNewsMapSignal> Signals(BoundingBox bounds, DateTimeOffset since, int limit = MaximumSignals)
+    public IReadOnlyList<WorldNewsMapSignal> Signals(BoundingBox bounds, DateTimeOffset since,
+        IReadOnlyCollection<string>? kinds = null, int limit = MaximumSignals)
     {
         if (limit <= 0) return [];
+        var corrections = store.Placements();
+        var growth = store.SituationGrowth(DateTimeOffset.UtcNow - SituationSurge.Window);
         // Place and filter on the overview alone; only the few that survive need their latest
         // event, summary and sources read from the store.
-        return news.Store.TopSituations(since, 300)
-            .Where(s => s.OutletCount >= MinimumOutlets)
-            .Select(s => (Situation: s, Location: Locate(s.Title, s.Latest)))
+        return store.TopSituations(since, 300)
+            .Where(s => s.OutletCount >= MinimumOutlets && (kinds is null || kinds.Contains(KindOf(s))))
+            .Select(s => (Situation: s, Location: Locate(s, corrections)))
             .Where(item => item.Location is { } location && bounds.Contains(location.Latitude, location.Longitude))
             .OrderByDescending(item => item.Situation.OutletCount)
             .ThenByDescending(item => item.Situation.LastSeen)
             .Take(Math.Min(limit, MaximumSignals))
-            .Select(item => Project(item.Situation, item.Location!))
+            .Select(item => Project(item.Situation, item.Location!, growth))
             .ToList();
     }
 
     // The situation a World News link points at, or null when the layer wouldn't show it.
     public WorldNewsMapSignal? Signal(string situationId, DateTimeOffset since) =>
-        news.Store.Situation(situationId) is { } situation && Place(situation, since) is { } location
-            ? Project(situation, location)
+        store.Situation(situationId) is { } situation && Place(situation, since) is { } location
+            ? Project(situation, location, store.SituationGrowth(DateTimeOffset.UtcNow - SituationSurge.Window))
             : null;
 
-    // Where the layer would put a situation, or null when it stays off the globe.
-    public static WorldNewsCountryLocation? Place(GwsBusinessSuite.WorldNewsKit.SituationOverview situation, DateTimeOffset since) =>
-        situation.OutletCount >= MinimumOutlets && situation.LastSeen >= since ? Locate(situation.Title, situation.Latest) : null;
+    // A situation the last read hasn't classified yet (straight after a deploy) goes by its words.
+    public static string KindOf(SituationOverview situation) =>
+        situation.Kind ?? SituationKinds.FromWords($"{situation.Title} {situation.Latest}");
 
-    private WorldNewsMapSignal Project(GwsBusinessSuite.WorldNewsKit.SituationOverview situation, WorldNewsCountryLocation location)
+    // Where the layer would put a situation, or null when it stays off the globe.
+    public WorldNewsLocation? Place(SituationOverview situation, DateTimeOffset since) =>
+        situation.OutletCount >= MinimumOutlets && situation.LastSeen >= since ? Locate(situation, store.Placements()) : null;
+
+    // Where the headlines alone put it, ignoring any correction (for "Wrong place?").
+    public static WorldNewsLocation? Named(SituationOverview situation) => Locate(situation.Title, situation.Latest);
+
+    public SituationPlacement? Correction(string situationId) => store.Placements().GetValueOrDefault(situationId);
+
+    // "Wrong place?" on World News: pin to a country and optionally one of its cities. Returns what
+    // to tell the person, or null once saved.
+    public string? Correct(string situationId, string? countryCode, string? city, string username, DateTimeOffset now)
     {
-        var latestEvent = news.Store.EventsForSituation(situation.Id).OrderByDescending(e => e.LastSeen).FirstOrDefault();
-        var summary = latestEvent is null ? null : news.Store.LatestSummary(latestEvent.Id)?.Text;
-        var sources = latestEvent is null ? [] : news.Store.ArticlesForEvent(latestEvent.Id)
+        if (WorldNewsPlaces.Instance.Country(countryCode) is not { } country) return "Pick a country.";
+        var found = string.IsNullOrWhiteSpace(city) ? null : WorldNewsPlaces.Instance.FindCity(country.Code, city);
+        if (!string.IsNullOrWhiteSpace(city) && found is null)
+            return $"No city called \"{city.Trim()}\" in {country.Name} is in the place list (cities of 50,000+ people). Leave the city blank to place it at the country.";
+        store.SetPlacement(new SituationPlacement(situationId, country.Code, found?.Name, false, username, now));
+        return null;
+    }
+
+    public void Hide(string situationId, string username, DateTimeOffset now) =>
+        store.SetPlacement(new SituationPlacement(situationId, null, null, true, username, now));
+
+    public void ClearCorrection(string situationId) => store.ClearPlacement(situationId);
+
+    // A correction from World News wins over what the headlines name.
+    private static WorldNewsLocation? Locate(SituationOverview situation, IReadOnlyDictionary<string, SituationPlacement> corrections)
+    {
+        if (!corrections.TryGetValue(situation.Id, out var fix)) return Named(situation);
+        if (fix.Hidden || WorldNewsPlaces.Instance.Country(fix.CountryCode) is not { } country) return null;
+        return WorldNewsPlaces.Instance.At(country, WorldNewsPlaces.Instance.FindCity(country.Code, fix.City), WorldNewsPrecision.Corrected);
+    }
+
+    private WorldNewsMapSignal Project(SituationOverview situation, WorldNewsLocation location,
+        IReadOnlyDictionary<string, (int Outlets, int OutletsBefore)> growth)
+    {
+        var latestEvent = store.EventsForSituation(situation.Id).OrderByDescending(e => e.LastSeen).FirstOrDefault();
+        var summary = latestEvent is null ? null : store.LatestSummary(latestEvent.Id)?.Text;
+        var sources = latestEvent is null ? [] : store.ArticlesForEvent(latestEvent.Id)
             .DistinctBy(a => a.Outlet, StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(a => a.SeenAt)
             .Take(4)
             .Select(a => new WorldNewsMapSource(a.Outlet, a.Title, a.Url))
             .ToList();
-        return new WorldNewsMapSignal(situation.Id, situation.Title, situation.Latest, location.Country,
-            location.Latitude, location.Longitude, situation.EventCount, situation.OutletCount,
-            situation.ArticleCount, situation.LastSeen, summary, sources);
+        // The summary often names the city the headline leaves out ("near Madrid, in Toledo province").
+        if (location.Precision == WorldNewsPrecision.Country && summary is not null
+            && Locate(situation.Title, situation.Latest, summary) is { City: not null } sharper && sharper.CountryCode == location.CountryCode)
+            location = sharper;
+        var (outlets, before) = growth.GetValueOrDefault(situation.Id);
+        return new WorldNewsMapSignal(situation.Id, situation.Title, situation.Latest, location, situation.EventCount,
+            situation.OutletCount, situation.ArticleCount, situation.LastSeen, summary, sources, KindOf(situation),
+            situation.LastSeen >= DateTimeOffset.UtcNow - SituationLinker.QuietAfter,
+            SituationSurge.IsSurging(outlets, before) ? SituationSurge.Message(outlets, before) : null);
     }
 
-    public static WorldNewsCountryLocation? Locate(string title, string latest)
-    {
-        var point = MatchCountry($"{title} {latest}");
-        return point is null ? null : new WorldNewsCountryLocation(point.Name, point.Latitude, point.Longitude);
-    }
-
-    // The longest mention wins: "South African" names South Africa even beside a passing "US".
-    private static CountryPoint? MatchCountry(string text) => Patterns
-        .Select(item => (item.Country, Longest: item.Pattern.Matches(text).Select(match => match.Length).DefaultIfEmpty(0).Max()))
-        .Where(item => item.Longest > 0)
-        .OrderByDescending(item => item.Longest)
-        .Select(item => item.Country)
-        .FirstOrDefault();
+    public static WorldNewsLocation? Locate(string title, string latest, string? detail = null) =>
+        WorldNewsPlaces.Instance.Locate($"{title} {latest}", detail);
 }

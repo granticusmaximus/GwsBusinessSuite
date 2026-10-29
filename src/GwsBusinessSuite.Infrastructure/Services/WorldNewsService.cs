@@ -96,7 +96,8 @@ public sealed class WorldNewsService : IDisposable
             Changed?.Invoke();
             // Synchronous SQLite work and CPU-bound grouping: keep it off the caller's thread.
             var report = await Task.Run(() => _pipeline.RunCycleAsync(ct), ct);
-            var alerts = Store.CreateWatchAlerts(DateTimeOffset.UtcNow);
+            await ClassifySituationsAsync(ct);
+            var alerts = Store.CreateWatchAlerts(DateTimeOffset.UtcNow).Concat(CreateSurgeAlerts(DateTimeOffset.UtcNow));
             foreach (var alert in alerts) AlertCreated?.Invoke(alert.Username, alert);
             LastRefreshed = DateTimeOffset.UtcNow;
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
@@ -129,6 +130,58 @@ public sealed class WorldNewsService : IDisposable
             _situationLists.Clear();
             Changed?.Invoke();
         }
+    }
+
+    private IReadOnlyDictionary<string, IReadOnlyList<float[]>>? _kindExamples;
+
+    // What each situation with news in the last fortnight is about, for Overwatch's kind filter.
+    // Redone every read: a situation's fingerprint moves as events join it.
+    private async Task ClassifySituationsAsync(CancellationToken ct)
+    {
+        var since = DateTimeOffset.UtcNow - SituationLinker.DefaultWindow;
+        var active = Store.ActiveSituations(since);
+        if (active.Count == 0) return;
+        if (await KindExamplesAsync(ct) is { } examples)
+        {
+            Store.SaveKinds(active.Select(s => (s.Id, SituationKinds.Classify(s.Sum, examples))).ToList());
+            return;
+        }
+        var text = Store.TopSituations(since, int.MaxValue).ToDictionary(s => s.Id, s => $"{s.Title} {s.Latest}");
+        Store.SaveKinds(active.Select(s => (s.Id, SituationKinds.FromWords(text.GetValueOrDefault(s.Id) ?? string.Empty))).ToList(),
+            onlyMissing: true);
+    }
+
+    // The kinds' example headlines as unit vectors, embedded once per run of the app.
+    private async Task<IReadOnlyDictionary<string, IReadOnlyList<float[]>>?> KindExamplesAsync(CancellationToken ct)
+    {
+        if (_kindExamples is not null) return _kindExamples;
+        try
+        {
+            var examples = SituationKinds.Examples.SelectMany(pair => pair.Value.Select(text => (Kind: pair.Key, Text: text))).ToList();
+            var vectors = await _ollama.EmbedAsync(_options.EmbeddingModel, examples.Select(e => e.Text).ToList(), ct);
+            return _kindExamples = examples.Zip(vectors)
+                .GroupBy(pair => pair.First.Kind)
+                .ToDictionary(group => group.Key, group => (IReadOnlyList<float[]>)group.Select(pair => EventClusterer.Normalize(pair.Second)).ToList());
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "World news kinds fell back to keywords: the examples couldn't be embedded");
+            return null;
+        }
+    }
+
+    // Alerts for people who asked about surging stories (World News > Situations). Only the kinds
+    // Overwatch shows by default: a cup final going viral isn't operational news.
+    private IReadOnlyList<WorldNewsAlert> CreateSurgeAlerts(DateTimeOffset now)
+    {
+        var growth = Store.SituationGrowth(now - SituationSurge.Window);
+        var surging = Store.TopSituations(now - SituationSurge.Window, MaxEvents)
+            .Where(s => s.Kind is not null && SituationKinds.Operational.Contains(s.Kind))
+            .Select(s => (Situation: s, Growth: growth.GetValueOrDefault(s.Id)))
+            .Where(item => SituationSurge.IsSurging(item.Growth.Outlets, item.Growth.OutletsBefore))
+            .Select(item => (item.Situation.Id, item.Situation.Title, SituationSurge.Message(item.Growth.Outlets, item.Growth.OutletsBefore)))
+            .ToList();
+        return Store.CreateSurgeAlerts(surging, now);
     }
 
     // SentinelGPT's search_world_news: the last week's events that match the question by meaning,

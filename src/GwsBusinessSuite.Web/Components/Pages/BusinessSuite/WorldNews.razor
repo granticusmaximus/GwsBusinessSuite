@@ -6,6 +6,7 @@
 @using GwsBusinessSuite.Infrastructure.Services
 @using GwsBusinessSuite.WorldNewsKit
 @inject WorldNewsService News
+@inject WorldNewsMapService WorldNewsMap
 @inject ICurrentUserAccessor CurrentUserAccessor
 
 <PageTitle>World News</PageTitle>
@@ -44,6 +45,14 @@
                 <option value="168">Last 7 days</option>
             }
         </select>
+        @if (_view == WorldNewsView.Situations)
+        {
+            <button type="button" class="btn @(_surgeAlerts ? "btn-primary" : "btn-outline-secondary")" aria-pressed="@(_surgeAlerts ? "true" : "false")"
+                    title="Get a notification when a disaster, transport, conflict or health story's coverage doubles within two hours"
+                    @onclick="ToggleSurgeAlertsAsync">
+                <i class="bi @(_surgeAlerts ? "bi-lightning-charge-fill" : "bi-lightning-charge") me-1" aria-hidden="true"></i>Surge alerts
+            </button>
+        }
     </Filters>
 </PageHeader>
 
@@ -165,13 +174,48 @@ else if (_view == WorldNewsView.Situations)
                     <button type="button" class="btn btn-sm @(_watching ? "btn-primary" : "btn-outline-primary") mb-2" @onclick="ToggleWatchAsync">
                         <i class="bi @(_watching ? "bi-bell-fill" : "bi-bell") me-1" aria-hidden="true"></i>@(_watching ? "Watching" : "Watch situation")
                     </button>
-                    @if (GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.Place(_situation, DateTimeOffset.UtcNow - GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.Window) is { } place)
+                    @if (_place is { } place)
                     {
                         @* Overwatch is a full page load: Cesium doesn't start under enhanced navigation. *@
                         <a class="btn btn-sm btn-outline-secondary mb-2 ms-1" href="@($"admin/osint?news={Uri.EscapeDataString(_situation.Id)}")"
-                           data-enhance-nav="false" title="See this situation on the Overwatch globe, placed at @place.Country (country-level)">
+                           data-enhance-nav="false" title="See this situation on the Overwatch globe, placed at @place.Label">
                             <i class="bi bi-globe2 me-1" aria-hidden="true"></i>Show on Overwatch
                         </a>
+                    }
+                    <button type="button" class="btn btn-sm btn-link mb-2" aria-expanded="@(_placing ? "true" : "false")" @onclick="TogglePlacing">
+                        Wrong place?
+                    </button>
+                    @if (_placing)
+                    {
+                        <div class="world-news-placing">
+                            <p class="world-news-placing-now">@PlacementNow()</p>
+                            <form class="world-news-placing-form" @onsubmit="SavePlacement">
+                                <label>
+                                    Country
+                                    <select class="form-select form-select-sm" @bind="_placeCountry">
+                                        <option value="">Choose a country</option>
+                                        @foreach (var country in WorldNewsPlaces.Instance.Countries)
+                                        {
+                                            <option value="@country.Code">@country.Name</option>
+                                        }
+                                    </select>
+                                </label>
+                                <label>
+                                    City (optional)
+                                    <input class="form-control form-control-sm" @bind="_placeCity" @bind:event="oninput" maxlength="80" />
+                                </label>
+                                <button type="submit" class="btn btn-sm btn-primary" disabled="@string.IsNullOrEmpty(_placeCountry)">Place here</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="HidePlacement">Keep off the globe</button>
+                                @if (_correction is not null)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="UndoPlacement">Undo correction</button>
+                                }
+                            </form>
+                            @if (_placeMessage is not null)
+                            {
+                                <p class="world-news-placing-message" role="alert">@_placeMessage</p>
+                            }
+                        </div>
                     }
                     <p class="world-news-detail-meta">
                         <StatusPill Tone="@Tone(_situation)">@State(_situation)</StatusPill>
@@ -183,6 +227,8 @@ else if (_view == WorldNewsView.Situations)
                         <dd>@string.Join(", ", _situation.Languages.Order())</dd>
                         <dt>Reported from</dt>
                         <dd>@string.Join(", ", _situation.Countries.Order())</dd>
+                        <dt>Kind</dt>
+                        <dd>@SituationKinds.Label(WorldNewsMapService.KindOf(_situation))</dd>
                     </dl>
                     <h3 class="world-news-language">How it developed <span>(@_situationEvents.Count)</span></h3>
                     <ol class="world-news-timeline">
@@ -314,6 +360,13 @@ else
     private int _shown = PageSize;
     private string _username = string.Empty;
     private bool _watching;
+    private bool _placing;
+    private bool _surgeAlerts;
+    private WorldNewsLocation? _place;
+    private SituationPlacement? _correction;
+    private string _placeCountry = string.Empty;
+    private string _placeCity = string.Empty;
+    private string? _placeMessage;
 
     [SupplyParameterFromQuery(Name = "situation")]
     public string? SituationId { get; set; }
@@ -348,6 +401,7 @@ else
     {
         News.Changed += OnNewsChanged;
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        _surgeAlerts = !string.IsNullOrWhiteSpace(_username) && await Task.Run(() => News.Store.IsWatchingSurges(_username));
         if (!string.IsNullOrWhiteSpace(SituationId)) _view = WorldNewsView.Situations;
         await LoadAsync();
         if (!string.IsNullOrWhiteSpace(SituationId)
@@ -372,6 +426,7 @@ else
         _situations = await Task.Run(() => News.TopSituations(_rangeHours));
         if (_situation is not null) _situation = _situations.FirstOrDefault(s => s.Id == _situation.Id);
         if (_situation is not null) _situationEvents = await Task.Run(() => News.Store.EventsForSituation(_situation.Id));
+        LoadPlacement();
     }
 
     private Task ShowAsync(WorldNewsView view)
@@ -388,6 +443,72 @@ else
         _situation = situation;
         _situationEvents = await Task.Run(() => News.Store.EventsForSituation(situation.Id));
         _watching = await Task.Run(() => News.Store.IsWatching(_username, situation.Id));
+        _placing = false;
+        LoadPlacement();
+    }
+
+    // Where Overwatch puts the open situation, and any hand correction of it.
+    private void LoadPlacement()
+    {
+        if (_situation is null) return;
+        _correction = WorldNewsMap.Correction(_situation.Id);
+        _place = WorldNewsMap.Place(_situation, DateTimeOffset.UtcNow - WorldNewsMapService.Window);
+    }
+
+    private void TogglePlacing()
+    {
+        _placing = !_placing;
+        _placeMessage = null;
+        var current = _correction is { Hidden: false } ? WorldNewsPlaces.Instance.Country(_correction.CountryCode) : null;
+        var named = _situation is null ? null : WorldNewsMapService.Named(_situation);
+        _placeCountry = current?.Code ?? named?.CountryCode ?? string.Empty;
+        _placeCity = _correction is { Hidden: false } ? _correction.City ?? string.Empty : named?.City ?? string.Empty;
+    }
+
+    private string PlacementNow()
+    {
+        if (_situation is null) return string.Empty;
+        var shown = _place is null ? " It isn't on the globe now: that needs 3 or more outlets and news in the last 24 hours." : string.Empty;
+        if (_correction is { Hidden: true })
+            return $"Kept off the globe by {_correction.UpdatedBy} on {_correction.UpdatedAt.ToLocalGwsDateTime()}.";
+        if (_correction is not null)
+            return $"Placed by hand at {_place?.Label ?? _correction.City ?? _correction.CountryCode} by {_correction.UpdatedBy} on {_correction.UpdatedAt.ToLocalGwsDateTime()}.{shown}";
+        return WorldNewsMapService.Named(_situation) is { } named
+            ? $"The headlines place it at {named.Label} ({named.PlacementText}).{shown}"
+            : "The headlines don't name a place, so it isn't on the globe. Pick one below to put it there.";
+    }
+
+    private void SavePlacement()
+    {
+        if (_situation is null) return;
+        _placeMessage = WorldNewsMap.Correct(_situation.Id, _placeCountry, _placeCity, _username, DateTimeOffset.UtcNow);
+        if (_placeMessage is not null) return;
+        _placing = false;
+        LoadPlacement();
+    }
+
+    private void HidePlacement()
+    {
+        if (_situation is null) return;
+        WorldNewsMap.Hide(_situation.Id, _username, DateTimeOffset.UtcNow);
+        _placing = false;
+        LoadPlacement();
+    }
+
+    private void UndoPlacement()
+    {
+        if (_situation is null) return;
+        WorldNewsMap.ClearCorrection(_situation.Id);
+        _placing = false;
+        LoadPlacement();
+    }
+
+    private async Task ToggleSurgeAlertsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_username)) return;
+        _surgeAlerts = !_surgeAlerts;
+        var on = _surgeAlerts;
+        await Task.Run(() => News.Store.WatchSurges(_username, on, DateTimeOffset.UtcNow));
     }
 
     private async Task ToggleWatchAsync()

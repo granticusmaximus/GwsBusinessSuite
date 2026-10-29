@@ -8,6 +8,7 @@ using GwsBusinessSuite.Application.RouteWatch;
 using GwsBusinessSuite.Application.TrafficIncidents;
 using GwsBusinessSuite.Application.Weather;
 using GwsBusinessSuite.Domain.Entities;
+using GwsBusinessSuite.WorldNewsKit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -71,13 +72,13 @@ public sealed class OverwatchBriefingService(
     private BriefingFacts AddWorldNews(BriefingFacts facts, BoundingBox bounds)
     {
         if (worldNewsMap is null) return facts;
-        var items = worldNewsMap.Signals(bounds, facts.At - WorldNewsMapService.Window, 4);
+        var items = worldNewsMap.Signals(bounds, facts.At - WorldNewsMapService.Window, SituationKinds.Operational, limit: 4);
         if (items.Count == 0) return facts;
         var combined = facts.Facts.ToList();
         foreach (var item in items)
         {
             combined.Add(new BriefingFact(combined.Count + 1, "world-news",
-                $"Reported news associated with {item.Country}: {item.Latest} ({item.OutletCount} outlets; location is country-level)",
+                $"Reported news associated with {item.Location.Label}: {item.Latest} ({item.OutletCount} outlets; {item.Location.PlacementText})",
                 item.Latitude, item.Longitude));
         }
         return facts with { Facts = combined };

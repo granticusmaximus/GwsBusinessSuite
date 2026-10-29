@@ -111,8 +111,13 @@ public sealed class IncidentReportService(
     {
         var capture = captures.ListForUser(username).FirstOrDefault(c => c.Id == captureId);
         if (capture is null) return null;
-        var subject = new IncidentReportSubject(capture.Title, "Incident capture", string.Empty, capture.AreaName, $"Captured in watched area \"{capture.AreaName}\".",
-            "Overwatch", capture.Latitude, capture.Longitude, capture.StartedAt, capture.Until);
+        // A World News story captured from Overwatch carries its summary and sources instead of an area.
+        var subject = capture.Notes is { Length: > 0 } notes
+            ? new IncidentReportSubject(capture.Title, "Reported news capture", string.Empty, capture.AreaName,
+                $"Reported news, not a confirmed incident. Cameras recorded from Overwatch.\n{notes}", "World News",
+                capture.Latitude, capture.Longitude, capture.StartedAt, capture.Until)
+            : new IncidentReportSubject(capture.Title, "Incident capture", string.Empty, capture.AreaName, $"Captured in watched area \"{capture.AreaName}\".",
+                "Overwatch", capture.Latitude, capture.Longitude, capture.StartedAt, capture.Until);
         var recorded = new List<IncidentReportFrame>();
         foreach (var camera in capture.Cameras)
         {

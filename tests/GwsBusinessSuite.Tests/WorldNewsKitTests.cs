@@ -699,6 +699,38 @@ public sealed class WorldNewsKitTests : IDisposable
     private static WorldArticle Article(string id, string title, string language, DateTimeOffset seen, string? hint = null) =>
         new(id, $"https://example.com/{id}", title, "Outlet " + id, language, "Somewhere", seen, "test", hint);
 
+    [Fact]
+    public void Store_ShouldSendEachSurgeAlertToEveryoneWhoAsked_AtMostOnceADay()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        store.WatchSurges("Grant", true, Now);
+        store.WatchSurges("sam", true, Now);
+        store.WatchSurges("sam", false, Now);
+        store.IsWatchingSurges("grant").Should().BeTrue();
+        store.IsWatchingSurges("sam").Should().BeFalse();
+
+        var surging = new List<(string, string, string)> { ("crash", "Trains collide", "Surging: 8 outlets") };
+        store.CreateSurgeAlerts(surging, Now).Should().ContainSingle().Which.Username.Should().Be("grant");
+        store.CreateSurgeAlerts(surging, Now.AddHours(3)).Should().BeEmpty("one alert a day per story");
+        store.CreateSurgeAlerts(surging, Now.AddHours(25)).Should().ContainSingle("a new surge the next day is news again");
+        store.Alerts("grant").Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void Store_ShouldKeepKinds_AndOnlyFillGapsWhenAskedTo()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        SeedEvent(store, "rally", Reports("rally", 3), [1f, 0f]);
+        SeedEvent(store, "results", Reports("results", 3), [1f, 0f]);
+        var situation = new NewsSituation { Id = "election", Sum = [6f, 0f], LastSeen = Now };
+        store.SaveLinks([new SituationLink("rally", situation), new SituationLink("results", situation)]);
+
+        store.TopSituations(Now.AddDays(-1), 10).Single().Kind.Should().BeNull("not classified yet");
+        store.SaveKinds([("election", SituationKinds.Politics)]);
+        store.SaveKinds([("election", SituationKinds.Sport)], onlyMissing: true);
+        store.TopSituations(Now.AddDays(-1), 10).Single().Kind.Should().Be(SituationKinds.Politics, "the keyword fallback doesn't overwrite");
+    }
+
     private static WorldArticle[] Reports(string prefix, int count) =>
         Enumerable.Range(0, count).Select(i => Article($"{prefix}{i}", $"{prefix} report {i}", "English", Now.AddHours(-2))).ToArray();
 

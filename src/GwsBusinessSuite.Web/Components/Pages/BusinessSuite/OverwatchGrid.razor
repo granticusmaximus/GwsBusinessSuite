@@ -30,6 +30,7 @@
 @inject GwsBusinessSuite.Infrastructure.Services.TimeMachineService TimeMachine
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchBriefingService Briefings
 @inject GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService WorldNewsMap
+@inject GwsBusinessSuite.Infrastructure.Services.WorldNewsContextService NewsContext
 @inject GwsBusinessSuite.Infrastructure.Services.MapNoteService MapNotes
 @inject GwsBusinessSuite.Application.LiveLayers.AircraftService AircraftService
 @inject GwsBusinessSuite.Application.RoadTraffic.HpmsRoadTrafficService RoadTrafficService
@@ -182,14 +183,33 @@
             <div class="tg-layer-group-title">INTELLIGENCE</div>
             <div class="tg-layer-buttons">
                 <button type="button" data-tg-toggle="world-news" class="tg-toggle @(_worldNewsOn ? "tg-toggle-on" : "")"
-                        title="Reported World News situations whose headlines explicitly name a country; country-level placement, not confirmed incidents"
+                        title="Reported World News situations, placed at the country or city their headlines name; not confirmed incidents"
                         @onclick="ToggleWorldNewsAsync">
                     WORLD NEWS [@(_worldNewsOn ? "ON" : "OFF")]
                 </button>
             </div>
             @if (_worldNewsOn)
             {
-                <div class="tg-hazard-summary">@_worldNewsCount reported situation@(_worldNewsCount == 1 ? "" : "s") in view · country-level placement</div>
+                <div class="tg-hazard-summary">@_worldNewsCount reported situation@(_worldNewsCount == 1 ? "" : "s") in view · placed from what the headlines name</div>
+                <div class="tg-layer-buttons" role="group" aria-label="Kinds of news to show">
+                    @foreach (var kind in GwsBusinessSuite.WorldNewsKit.SituationKinds.All)
+                    {
+                        var shown = _worldNewsKinds.Contains(kind);
+                        <button type="button" class="tg-toggle @(shown ? "tg-toggle-on" : "")" aria-pressed="@(shown ? "true" : "false")"
+                                data-tg-news-kind="@kind" @onclick="() => ToggleWorldNewsKindAsync(kind)">
+                            @GwsBusinessSuite.WorldNewsKit.SituationKinds.Label(kind).ToUpperInvariant()
+                        </button>
+                    }
+                </div>
+                <div class="tg-layer-buttons" role="group" aria-label="How far back to look">
+                    @foreach (var hours in GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.WindowHours)
+                    {
+                        <button type="button" class="tg-toggle @(_worldNewsHours == hours ? "tg-toggle-on" : "")"
+                                aria-pressed="@(_worldNewsHours == hours ? "true" : "false")" @onclick="() => SetWorldNewsWindowAsync(hours)">
+                            @(hours == 24 ? "LAST 24 HOURS" : $"LAST {hours / 24} DAYS")
+                        </button>
+                    }
+                </div>
             }
         </div>
         <div class="tg-layer-group">
@@ -1195,6 +1215,10 @@
                                             <button type="button" disabled="@(frameCount == 0)" title="@camera.Name (@camera.MilesAway.ToString("0.0") mi away)"
                                                     @onclick="() => OpenCaptureCameraAsync(capture, camera)">CAM @(capture.Cameras.IndexOf(camera) + 1) (@frameCount)</button>
                                         }
+                                        @if (capture.LinkUrl is not null)
+                                        {
+                                            <a class="tg-link-btn" href="@capture.LinkUrl" title="This story on World News: every source and the full timeline">NEWS</a>
+                                        }
                                         <a class="tg-link-btn" href="@($"/admin/api/overwatch/incident-report?capture={capture.Id}")" target="_blank" rel="noopener"
                                            title="A PDF of this capture: details, map, weather and the recorded frames">REPORT</a>
                                         <button type="button" aria-label="@($"Delete capture {capture.Title}")" @onclick="() => DeleteCapture(capture)">X</button>
@@ -1857,12 +1881,27 @@
         }
     }
 
-    private static DateTimeOffset WorldNewsSince =>
-        DateTimeOffset.UtcNow - GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.Window;
+    // Disasters, transport, conflict and health by default: the news that belongs on a map.
+    private readonly HashSet<string> _worldNewsKinds = [.. GwsBusinessSuite.WorldNewsKit.SituationKinds.Operational];
+    private int _worldNewsHours = 24;
+
+    private DateTimeOffset WorldNewsSince => DateTimeOffset.UtcNow.AddHours(-_worldNewsHours);
+
+    private Task ToggleWorldNewsKindAsync(string kind)
+    {
+        if (!_worldNewsKinds.Remove(kind)) _worldNewsKinds.Add(kind);
+        return PushWorldNewsAsync();
+    }
+
+    private Task SetWorldNewsWindowAsync(int hours)
+    {
+        _worldNewsHours = hours;
+        return PushWorldNewsAsync();
+    }
 
     private async Task PushWorldNewsAsync()
     {
-        var signals = WorldNewsMap.Signals(_lastBbox, WorldNewsSince);
+        var signals = WorldNewsMap.Signals(_lastBbox, WorldNewsSince, _worldNewsKinds);
         if (!_worldNewsOn) return;
         _worldNewsCount = signals.Count;
         await JS.InvokeVoidAsync("tacticalGlobe.setWorldNews", signals.Select(ToWorldNewsPayload).ToList());
@@ -1873,9 +1912,44 @@
     {
         if (WorldNewsMap.Signal(situationId, WorldNewsSince) is not { } signal) return;
         _worldNewsOn = true;
+        // A link to a sports story should still show its marker.
+        _worldNewsKinds.Add(signal.Kind);
         await JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", signal.Latitude, signal.Longitude, 3_000_000, 1.5);
         await JS.InvokeVoidAsync("tacticalGlobe.openWorldNews", ToWorldNewsPayload(signal));
         StateHasChanged();
+    }
+
+    // The news panel's "Backed by", "Nearby" and capture button (tactical-globe.js loadWorldNewsContext).
+    [JSInvokable]
+    public async Task<object?> WorldNewsContextAsync(string situationId)
+    {
+        if (WorldNewsMap.Signal(situationId, WorldNewsSince) is not { } signal) return null;
+        var context = await NewsContext.ForAsync(signal);
+        return new
+        {
+            backing = context.Backing.Select(b => new { source = b.Source, text = b.Text, url = b.Url }).ToList(),
+            precise = context.Nearby is not null,
+            cameras = context.Nearby?.Cameras.Select(c => new { name = c.Camera.Name, miles = Math.Round(c.Miles, 1), pin = ToPinPayload(c.Camera) }).ToList(),
+            alerts = context.Nearby?.Alerts.Select(a => a.Event).Distinct().ToList(),
+            hazards = context.Nearby?.Hazards.Select(h => h.Title).ToList(),
+            outages = context.Nearby?.Outages.Select(o => $"{o.CustomersOut:N0} customers out in {o.Name}, {o.State}").ToList()
+        };
+    }
+
+    [JSInvokable]
+    public async Task<string> CaptureWorldNewsAsync(string situationId)
+    {
+        if (WorldNewsMap.Signal(situationId, WorldNewsSince) is not { } signal) return "That story isn't on the globe any more.";
+        if (signal.Location.City is null) return "Capture needs a city-level place; this story is placed at a country's centre.";
+        var capture = await NewsContext.CaptureAsync(_username, signal);
+        if (capture is null)
+            return $"No public still camera within {GwsBusinessSuite.Infrastructure.Services.WorldNewsContextService.CaptureRadiusMiles:0} miles of {signal.Location.City} to record.";
+        await InvokeAsync(() =>
+        {
+            _captures = IncidentCaptureService.ListForUser(_username).ToList();
+            StateHasChanged();
+        });
+        return $"Recording {capture.Cameras.Count} camera{(capture.Cameras.Count == 1 ? "" : "s")} for an hour. See AREAS > CAPTURES.";
     }
 
     private static object ToWorldNewsPayload(GwsBusinessSuite.Infrastructure.Services.WorldNewsMapSignal signal) => new
@@ -1884,6 +1958,12 @@
         title = signal.Title,
         latest = signal.Latest,
         country = signal.Country,
+        place = signal.Location.Label,
+        precision = signal.Location.Precision,
+        kind = signal.Kind,
+        kindLabel = GwsBusinessSuite.WorldNewsKit.SituationKinds.Label(signal.Kind),
+        active = signal.Active,
+        surge = signal.Surge,
         lat = signal.Latitude,
         lon = signal.Longitude,
         eventCount = signal.EventCount,

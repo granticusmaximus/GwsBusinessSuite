@@ -830,14 +830,18 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await page.EvaluateAsync("""
             () => window.tacticalGlobe.openWorldNews({
               id: 'situation-2', title: 'Japan earthquake aftershocks', latest: 'Japan earthquake aftershocks',
-              country: 'Japan', lat: 36.2, lon: 138.3, eventCount: 2, outletCount: 7, reportCount: 9,
+              country: 'Japan', place: 'Sendai, Japan', precision: 'city', kindLabel: 'Disasters', active: false,
+              surge: 'Surging: coverage went from 3 to 8 outlets in the last 2 hours.',
+              lat: 38.3, lon: 140.9, eventCount: 2, outletCount: 7, reportCount: 9,
               lastSeen: '29-10-26 11:05', summary: null, href: '/admin/world-news?situation=situation-2', sources: []
             })
             """);
 
         await page.WaitForFunctionAsync("!!document.querySelector('.tg-incident-panel')", new PageWaitForFunctionOptions { Timeout = 5000 });
         var panelText = await page.EvaluateAsync<string>("document.querySelector('.tg-incident-panel').textContent");
-        panelText.Should().Contain("Japan earthquake aftershocks").And.Contain("7 OUTLETS").And.NotContain("LATEST:");
+        panelText.Should().Contain("Japan earthquake aftershocks").And.Contain("7 OUTLETS").And.NotContain("LATEST:")
+            .And.Contain("CITY-LEVEL PLACEMENT").And.Contain("DISASTERS · QUIET · Sendai, Japan")
+            .And.Contain("Surging: coverage went from 3 to 8 outlets");
         (await page.GetAttributeAsync(".tg-incident-panel a.tg-incident-report", "href"))
             .Should().Be("/admin/world-news?situation=situation-2");
     }

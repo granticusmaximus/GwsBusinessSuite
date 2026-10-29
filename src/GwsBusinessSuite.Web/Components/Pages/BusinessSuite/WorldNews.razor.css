@@ -113,6 +113,41 @@
     color: var(--gws-text-soft);
 }
 
+.world-news-placing {
+    border: 1px solid var(--gws-panel-border);
+    border-radius: .5rem;
+    background: var(--gws-panel-bg);
+    padding: .75rem;
+    margin-bottom: 1rem;
+}
+
+.world-news-placing-now {
+    color: var(--gws-text-soft);
+    margin-bottom: .5rem;
+}
+
+.world-news-placing-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: .5rem;
+}
+
+.world-news-placing-form label {
+    display: grid;
+    gap: .2rem;
+    font-size: .85rem;
+    color: var(--gws-text-soft);
+    min-width: 0;
+    flex: 1 1 10rem;
+}
+
+.world-news-placing-message {
+    color: var(--bs-danger, #dc3545);
+    font-size: .85rem;
+    margin: .5rem 0 0;
+}
+
 .world-news-facts {
     display: grid;
     grid-template-columns: auto 1fr;
