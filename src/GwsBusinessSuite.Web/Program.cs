@@ -1535,6 +1535,15 @@ app.MapPost("/admin/api/native/overwatch/watch-reading", async (
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");
 
+// Country outlines for Overwatch's World News shading (Natural Earth 1:110m, embedded). Static, so
+// the browser keeps it for a day.
+app.MapGet("/admin/api/world-news/countries.geojson", (HttpContext httpContext) =>
+{
+    httpContext.Response.Headers.CacheControl = "private, max-age=86400";
+    return Results.Text(GwsBusinessSuite.Infrastructure.Services.WorldNewsPlaces.OutlinesJson, "application/geo+json");
+})
+    .RequireAuthorization("AdminOnly");
+
 // The before/after frames of a camera-watch detection (the owner's own alerts only).
 // Overwatch incident report PDF: ?source=&id=&lat=&lon= for an incident on the map, or
 // ?capture={id} for one of the user's incident captures.

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
@@ -39,6 +40,14 @@ public sealed class WorldNewsPlaces
 
     private static readonly Lazy<WorldNewsPlaces> Shared = new(() => new WorldNewsPlaces(
         ReadResource("countries.tsv"), ReadResource("cities.tsv")));
+
+    // Natural Earth 1:110m outlines (simplified: a point within a few miles of a coast or border
+    // can land outside, which is fine for "which countries does this route cross").
+    private static readonly Lazy<IReadOnlyList<(string Code, double[] Box, List<double[][]> Rings)>> Outlines = new(() => ReadOutlines(OutlinesJson));
+
+    // The outlines as GeoJSON, for the browser's country shading.
+    public static string OutlinesJson => SharedOutlines.Value;
+    private static readonly Lazy<string> SharedOutlines = new(() => ReadResource("countries.geojson"));
 
     private static readonly Regex Word = new(@"[\p{L}\p{M}\p{N}]+(?:['’.\-][\p{L}\p{M}\p{N}]+)*",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
@@ -110,6 +119,22 @@ public sealed class WorldNewsPlaces
             .SelectMany(pair => pair.Value)
             .Where(city => string.Equals(city.CountryCode, countryCode, StringComparison.OrdinalIgnoreCase))
             .MaxBy(city => city.Population);
+    }
+
+    // The country a point is in, by outline; null at sea or for the smallest countries (the
+    // 1:110m outlines leave them out).
+    public static string? CountryAt(double latitude, double longitude)
+    {
+        foreach (var (code, box, rings) in Outlines.Value)
+        {
+            if (latitude < box[1] || latitude > box[3] || longitude < box[0] || longitude > box[2]) continue;
+            // Even-odd across every ring of the country: holes (lakes, enclaves) cancel out.
+            var inside = false;
+            foreach (var ring in rings)
+                if (InRing(ring, longitude, latitude)) inside = !inside;
+            if (inside) return code;
+        }
+        return null;
     }
 
     public WorldNewsLocation At(WorldNewsCountry country, WorldNewsCity? city, string precision) =>
@@ -184,6 +209,38 @@ public sealed class WorldNewsPlaces
     private static IEnumerable<string[]> Rows(string tsv) => tsv.Split('\n')
         .Where(line => line.Length > 0 && line[0] != '#')
         .Select(line => line.TrimEnd('\r').Split('\t'));
+
+    private static bool InRing(double[][] ring, double x, double y)
+    {
+        var inside = false;
+        for (int i = 0, j = ring.Length - 1; i < ring.Length; j = i++)
+        {
+            var (xi, yi, xj, yj) = (ring[i][0], ring[i][1], ring[j][0], ring[j][1]);
+            if ((yi > y) != (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+        }
+        return inside;
+    }
+
+    private static List<(string Code, double[] Box, List<double[][]> Rings)> ReadOutlines(string geoJson)
+    {
+        using var document = JsonDocument.Parse(geoJson);
+        var countries = new List<(string, double[], List<double[][]>)>();
+        foreach (var feature in document.RootElement.GetProperty("features").EnumerateArray())
+        {
+            var geometry = feature.GetProperty("geometry");
+            var coordinates = geometry.GetProperty("coordinates");
+            var polygons = geometry.GetProperty("type").GetString() == "MultiPolygon"
+                ? coordinates.EnumerateArray().ToList()
+                : [coordinates];
+            var rings = polygons.SelectMany(polygon => polygon.EnumerateArray())
+                .Select(ring => ring.EnumerateArray().Select(point => new[] { point[0].GetDouble(), point[1].GetDouble() }).ToArray())
+                .ToList();
+            var points = rings.SelectMany(ring => ring).ToList();
+            var box = new[] { points.Min(p => p[0]), points.Min(p => p[1]), points.Max(p => p[0]), points.Max(p => p[1]) };
+            countries.Add((feature.GetProperty("properties").GetProperty("iso").GetString()!, box, rings));
+        }
+        return countries;
+    }
 
     private static string ReadResource(string name)
     {

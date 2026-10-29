@@ -6,10 +6,11 @@ Inputs (download, then pass their paths):
   ne_110m_admin_0_countries.geojson  Natural Earth - simplified outlines for country shading
   cities15000.txt                    GeoNames (CC BY 4.0) - https://download.geonames.org/export/dump/
 
-Outputs into src/GwsBusinessSuite.Infrastructure/WorldNewsPlaces/ and wwwroot/data/:
+Outputs into src/GwsBusinessSuite.Infrastructure/WorldNewsPlaces/ (embedded in the build):
   countries.tsv   iso2, name, lat, lon, aliases (|)
   cities.tsv      name, iso2, lat, lon, population, aliases (|)
-  world-countries.geojson   iso2 + name + outline, coordinates rounded to 0.01 degrees
+  countries.geojson   iso2 + name + outline, coordinates rounded to 0.01 degrees (point-in-country
+                      checks, and Overwatch's country shading via /admin/api/world-news/countries.geojson)
 
 Usage: scripts/build-world-news-places.py <ne50.geojson> <ne110.geojson> <cities15000.txt>
 """
@@ -20,7 +21,6 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "src", "GwsBusinessSuite.Infrastructure", "WorldNewsPlaces")
-WEB = os.path.join(ROOT, "src", "GwsBusinessSuite.Web", "wwwroot", "data")
 
 # The names the app has always used (they match World News's edition countries).
 CANONICAL = {"CN": "China", "US": "United States", "TR": "Turkey", "CZ": "Czechia", "KR": "South Korea", "KP": "North Korea",
@@ -194,7 +194,6 @@ def outlines(ne110, isos):
 
 def main(ne50, ne110, cities_path):
     os.makedirs(OUT, exist_ok=True)
-    os.makedirs(WEB, exist_ok=True)
     country_rows = countries(ne50)
     all_country_aliases = {a for row in country_rows for a in row[4]} | AMBIGUOUS
     with open(os.path.join(OUT, "countries.tsv"), "w", encoding="utf-8") as f:
@@ -207,7 +206,7 @@ def main(ne50, ne110, cities_path):
         for name, iso, lat, lon, pop, aliases in sorted(city_rows, key=lambda r: -r[4]):
             f.write(f"{name}\t{iso}\t{lat}\t{lon}\t{pop}\t{'|'.join(aliases)}\n")
     names = {row[0]: row[1] for row in country_rows}
-    with open(os.path.join(WEB, "world-countries.geojson"), "w", encoding="utf-8") as f:
+    with open(os.path.join(OUT, "countries.geojson"), "w", encoding="utf-8") as f:
         json.dump(outlines(ne110, names), f, ensure_ascii=False, separators=(",", ":"))
     print(f"{len(country_rows)} countries, {len(city_rows)} cities")
 

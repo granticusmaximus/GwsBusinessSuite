@@ -35,6 +35,12 @@
     backdrop-filter: blur(1px);
 }
 
+/* World News coverage lines and playback draw on the globe behind the panel. */
+.tg-modal-backdrop.tg-modal-backdrop-clear {
+    background: rgba(2, 4, 5, 0.12);
+    backdrop-filter: none;
+}
+
 .tg-stream-panel {
     position: absolute;
     width: 380px;
@@ -356,6 +362,40 @@
 .tg-world-news-capture {
     display: block;
     margin-bottom: 0.25rem;
+}
+
+.tg-world-news-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.tg-world-news-playback-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.3rem;
+}
+
+.tg-world-news-playback-row input[type="range"] {
+    flex: 1 1 auto;
+    min-width: 0;
+    accent-color: #c77dff;
+}
+
+.tg-world-news-play {
+    background: transparent;
+    border: 1px solid rgba(125, 255, 176, 0.6);
+    color: #7dffb0;
+    font: inherit;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+}
+
+.tg-world-news-step {
+    margin-top: 0.3rem;
+    overflow-wrap: anywhere;
 }
 
 .tg-world-news-capture:disabled {

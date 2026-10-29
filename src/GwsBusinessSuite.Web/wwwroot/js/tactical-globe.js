@@ -330,6 +330,8 @@ window.tacticalGlobe = (function () {
                 openIncidentPanel(entity._tacticalGlobeIncident);
             } else if (entity && entity._tacticalGlobeWorldNews) {
                 openWorldNewsPanel(entity._tacticalGlobeWorldNews);
+            } else if (entity && entity._tacticalGlobeNewsCountry) {
+                openNewsCountryPanel(entity._tacticalGlobeNewsCountry);
             } else if (entity && entity._tacticalGlobeHazard) {
                 openHazardPanel(entity._tacticalGlobeHazard);
             } else if (entity && entity._tacticalGlobeSign) {
@@ -2082,13 +2084,246 @@ window.tacticalGlobe = (function () {
             escapeHtml(String(signal.eventCount)) + ' EVENTS · ' + escapeHtml(String(signal.outletCount)) +
             ' OUTLETS · UPDATED ' + escapeHtml(signal.lastSeen) + '</div>' +
             (sources ? '<ul class="tg-world-news-sources">' + sources + '</ul>' : '') +
+            '<div class="tg-world-news-actions">' +
+            '<button type="button" class="tg-incident-report tg-world-news-capture tg-world-news-coverage-button">WHO\'S REPORTING</button>' +
+            '<button type="button" class="tg-incident-report tg-world-news-capture tg-world-news-play-button">PLAY STORY</button>' +
+            '</div>' +
+            '<div class="tg-world-news-coverage"></div>' +
+            '<div class="tg-world-news-playback"></div>' +
             '<div class="tg-world-news-context" aria-live="polite"></div>' +
             '<a class="tg-incident-report" href="' + escapeHtml(signal.href) + '">OPEN IN WORLD NEWS</a>' +
             '</div>';
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        panel.querySelector('.tg-world-news-coverage-button').addEventListener('click', function (event) {
+            showNewsCoverage(panel, signal, event.currentTarget);
+        });
+        panel.querySelector('.tg-world-news-play-button').addEventListener('click', function (event) {
+            playNewsStory(panel, signal, event.currentTarget);
+        });
         if (!openAsModal(panel, closeIncidentPanel)) return;
         incidentPanel = panel;
         loadWorldNewsContext(panel, signal);
+    }
+
+    // ---- World News: coverage lines, playback and country shading ----
+
+    // Lines and the playback marker belong to one open story; closing its panel clears them.
+    let newsPlaybackTimer = null;
+
+    function newsOverlay(entry) {
+        if (!entry.newsOverlay) {
+            entry.newsOverlay = new Cesium.CustomDataSource('tg-news-overlay');
+            entry.viewer.dataSources.add(entry.newsOverlay);
+        }
+        return entry.newsOverlay;
+    }
+
+    // The globe has to show through for lines and playback to be seen; the panel can be dragged aside.
+    function seeThrough(panel) {
+        if (panel._tgBackdrop) panel._tgBackdrop.classList.add('tg-modal-backdrop-clear');
+    }
+
+    function clearNewsOverlay() {
+        if (newsPlaybackTimer) {
+            clearInterval(newsPlaybackTimer);
+            newsPlaybackTimer = null;
+        }
+        const entry = viewers.get('tg-viewport');
+        if (entry && entry.newsOverlay) entry.newsOverlay.entities.removeAll();
+    }
+
+    // "Who's reporting": a line from each edition country's centre to the story, thicker for more outlets.
+    async function showNewsCoverage(panel, signal, button) {
+        const entry = viewers.get('tg-viewport');
+        if (!entry || !entry.dotNetRef) return;
+        button.disabled = true;
+        seeThrough(panel);
+        let coverage = [];
+        try {
+            coverage = await entry.dotNetRef.invokeMethodAsync('WorldNewsCoverage', signal.id);
+        } catch (err) {
+            coverage = [];
+        }
+        const overlay = newsOverlay(entry);
+        overlay.entities.values.filter(function (e) { return e._tgNewsLine; }).forEach(function (e) { overlay.entities.remove(e); });
+        coverage.forEach(function (c) {
+            const line = overlay.entities.add({
+                polyline: {
+                    positions: Cesium.Cartesian3.fromDegreesArray([c.lon, c.lat, signal.lon, signal.lat]),
+                    width: Math.min(6, 1 + Math.log2(Math.max(1, c.outlets))),
+                    arcType: Cesium.ArcType.GEODESIC,
+                    material: Cesium.Color.fromCssColorString('#c77dff').withAlpha(0.7)
+                }
+            });
+            line._tgNewsLine = true;
+        });
+        const slot = panel.querySelector('.tg-world-news-coverage');
+        if (slot) {
+            slot.innerHTML = coverage.length
+                ? '<div class="tg-world-news-context-title">WHO\'S REPORTING</div><div>' +
+                  coverage.map(function (c) { return escapeHtml(c.country + ' ' + c.outlets); }).join(' · ') + '</div>'
+                : '<div class="tg-world-news-context-note">No reporting countries recorded.</div>';
+        }
+    }
+
+    // Playback: step through the story's events in the order they broke, moving a marker to where
+    // each one's headline puts it.
+    async function playNewsStory(panel, signal, button) {
+        const entry = viewers.get('tg-viewport');
+        const slot = panel.querySelector('.tg-world-news-playback');
+        if (!entry || !entry.dotNetRef || !slot) return;
+        button.disabled = true;
+        seeThrough(panel);
+        let steps = null;
+        try {
+            steps = await entry.dotNetRef.invokeMethodAsync('WorldNewsTimeline', signal.id);
+        } catch (err) {
+            steps = null;
+        }
+        if (!steps || !steps.length) {
+            slot.innerHTML = '<div class="tg-world-news-context-note">No events to play.</div>';
+            return;
+        }
+        slot.innerHTML =
+            '<div class="tg-world-news-context-title">HOW IT DEVELOPED</div>' +
+            '<div class="tg-world-news-playback-row">' +
+            '<button type="button" class="tg-world-news-play" aria-label="Play">PLAY</button>' +
+            '<input type="range" min="0" max="' + (steps.length - 1) + '" value="0" aria-label="Event in the story" />' +
+            '</div><div class="tg-world-news-step" aria-live="polite"></div>';
+        const range = slot.querySelector('input[type=range]');
+        const text = slot.querySelector('.tg-world-news-step');
+        const play = slot.querySelector('.tg-world-news-play');
+        const overlay = newsOverlay(entry);
+        const marker = overlay.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(steps[0].lon, steps[0].lat),
+            point: {
+                pixelSize: 14,
+                color: Cesium.Color.fromCssColorString('#f3e3ff'),
+                outlineColor: Cesium.Color.fromCssColorString('#c77dff'),
+                outlineWidth: 3,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY
+            }
+        });
+        function show(index) {
+            const step = steps[index];
+            range.value = String(index);
+            marker.position = Cesium.Cartesian3.fromDegrees(step.lon, step.lat);
+            text.textContent = 'EVENT ' + (index + 1) + ' OF ' + steps.length + ' · ' + step.at + ' · ' + step.outlets +
+                ' OUTLETS · ' + step.place + ' · ' + step.title;
+        }
+        range.addEventListener('input', function () { show(Number(range.value)); });
+        play.addEventListener('click', function () {
+            if (newsPlaybackTimer) {
+                clearInterval(newsPlaybackTimer);
+                newsPlaybackTimer = null;
+                play.textContent = 'PLAY';
+                return;
+            }
+            if (Number(range.value) >= steps.length - 1) show(0);
+            play.textContent = 'PAUSE';
+            newsPlaybackTimer = setInterval(function () {
+                const next = Number(range.value) + 1;
+                if (next >= steps.length) {
+                    clearInterval(newsPlaybackTimer);
+                    newsPlaybackTimer = null;
+                    play.textContent = 'PLAY';
+                    return;
+                }
+                show(next);
+            }, 1500);
+        });
+        show(0);
+    }
+
+    // Five steps of one hue, lighter to darker for more outlets; translucent over the imagery.
+    const newsShades = [0.12, 0.2, 0.3, 0.42, 0.56].map(function (alpha) {
+        return Cesium.Color.fromCssColorString('#c77dff').withAlpha(alpha);
+    });
+    let newsOutlines = null;
+
+    function loadNewsOutlines() {
+        if (!newsOutlines) {
+            newsOutlines = fetch('/admin/api/world-news/countries.geojson', { credentials: 'same-origin' })
+                .then(function (response) {
+                    if (!response.ok) throw new Error('outlines ' + response.status);
+                    return response.json();
+                })
+                .catch(function (err) {
+                    newsOutlines = null;
+                    throw err;
+                });
+        }
+        return newsOutlines;
+    }
+
+    async function setNewsShading(totals) {
+        const entry = viewers.get('tg-viewport');
+        if (!entry) return;
+        let outlines;
+        try {
+            outlines = await loadNewsOutlines();
+        } catch (err) {
+            return;
+        }
+        if (!entry.newsShading) {
+            entry.newsShading = new Cesium.CustomDataSource('tg-news-shading');
+            await entry.viewer.dataSources.add(entry.newsShading);
+        }
+        const byCode = new Map((totals || []).map(function (t) { return [t.code, t]; }));
+        const most = Math.max(1, ...(totals || []).map(function (t) { return t.outlets; }));
+        const entities = entry.newsShading.entities;
+        entities.suspendEvents();
+        entities.removeAll();
+        outlines.features.forEach(function (feature) {
+            const total = byCode.get(feature.properties.iso);
+            if (!total) return;
+            // Log scale, so one huge story doesn't wash every other country out to the palest step.
+            const step = Math.min(4, Math.floor(5 * Math.log(1 + total.outlets) / Math.log(1 + most)));
+            const polygons = feature.geometry.type === 'MultiPolygon' ? feature.geometry.coordinates : [feature.geometry.coordinates];
+            polygons.forEach(function (rings) {
+                const toPositions = function (ring) { return Cesium.Cartesian3.fromDegreesArray(ring.flat()); };
+                const entity = entities.add({
+                    polygon: {
+                        hierarchy: new Cesium.PolygonHierarchy(toPositions(rings[0]),
+                            rings.slice(1).map(function (hole) { return new Cesium.PolygonHierarchy(toPositions(hole)); })),
+                        material: newsShades[step]
+                    }
+                });
+                entity._tacticalGlobeNewsCountry = total;
+            });
+        });
+        entities.resumeEvents();
+    }
+
+    function clearNewsShading() {
+        const entry = viewers.get('tg-viewport');
+        if (entry && entry.newsShading) entry.newsShading.entities.removeAll();
+    }
+
+    function openNewsCountryPanel(total) {
+        closeIncidentPanel();
+        const entry = viewers.get('tg-viewport');
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel';
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header"><span>REPORTED NEWS · ' + escapeHtml(total.name.toUpperCase()) + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button></div>' +
+            '<div class="tg-stream-panel-body">' +
+            '<div class="tg-stream-panel-meta">' + escapeHtml(String(total.outlets)) + ' OUTLETS ON ' +
+            escapeHtml(String(total.stories.length)) + (total.stories.length === 5 ? '+' : '') + ' STORIES PLACED HERE</div>' +
+            '<ul class="tg-world-news-sources">' + total.stories.map(function (story, i) {
+                return '<li><button type="button" class="tg-world-news-camera" data-story-index="' + i + '">' + escapeHtml(story.title) + '</button></li>';
+            }).join('') + '</ul></div>';
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        panel.querySelectorAll('[data-story-index]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                const story = total.stories[Number(button.getAttribute('data-story-index'))];
+                closeIncidentPanel();
+                if (entry && entry.dotNetRef) entry.dotNetRef.invokeMethodAsync('OpenWorldNewsStoryAsync', story.id);
+            });
+        });
+        if (!openAsModal(panel, closeIncidentPanel)) return;
+        incidentPanel = panel;
     }
 
     // Overwatch's own data around the story, asked of the page once the panel is open: official
@@ -2615,6 +2850,7 @@ window.tacticalGlobe = (function () {
             incidentPanel._tgBackdrop.parentNode.removeChild(incidentPanel._tgBackdrop);
         }
         incidentPanel = null;
+        clearNewsOverlay();
     }
 
     // Normalized fields from IncidentNormalizer - only the ones the source actually supplied.
@@ -3222,6 +3458,8 @@ window.tacticalGlobe = (function () {
         setWorldNews: setWorldNews,
         clearWorldNews: clearWorldNews,
         openWorldNews: openWorldNewsPanel,
+        setNewsShading: setNewsShading,
+        clearNewsShading: clearNewsShading,
         setCoverageMarkers: setCoverageMarkers,
         setHazards: setHazards,
         setMessageSigns: setMessageSigns,

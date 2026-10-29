@@ -201,6 +201,17 @@
                         </button>
                     }
                 </div>
+                <div class="tg-layer-buttons">
+                    <button type="button" class="tg-toggle @(_worldNewsShading ? "tg-toggle-on" : "")" aria-pressed="@(_worldNewsShading ? "true" : "false")"
+                            title="Shade each country by how many outlets cover the stories placed there; click a country for its stories"
+                            @onclick="ToggleWorldNewsShadingAsync">
+                        SHADE COUNTRIES [@(_worldNewsShading ? "ON" : "OFF")]
+                    </button>
+                </div>
+                @if (_worldNewsShading)
+                {
+                    <div class="tg-hazard-summary">Lighter to darker purple: fewer to more outlets on the stories placed in a country</div>
+                }
                 <div class="tg-layer-buttons" role="group" aria-label="How far back to look">
                     @foreach (var hours in GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.WindowHours)
                     {
@@ -281,7 +292,7 @@
     {
         <div class="tg-floating-panel tg-info-panel" aria-label="Sources and credits">
             <div class="tg-coverage-panel-header"><span>SOURCES</span><button type="button" class="tg-panel-close" aria-label="Close sources" @onclick="ToggleInfoPanel">&times;</button></div>
-            <p class="tg-info-text">Basemap: Esri, Maxar, Earthstar Geographics &middot; 25+ US state DOTs &middot; DriveBC &middot; Madrid Traffic &middot; Fintraffic &middot; NZTA &middot; QLD Traffic &middot; Windy &middot; Datumfeed &middot; Mapillary &middot; KartaView &middot; Overpass/OSM &middot; Wikimedia Commons &middot; NOAA/NWS &middot; World News: Google News country editions and outlet feeds &middot; Search: Photon/OSM, US Census Bureau &middot; full source list: COVERAGE panel / user guide</p>
+            <p class="tg-info-text">Basemap: Esri, Maxar, Earthstar Geographics &middot; 25+ US state DOTs &middot; DriveBC &middot; Madrid Traffic &middot; Fintraffic &middot; NZTA &middot; QLD Traffic &middot; Windy &middot; Datumfeed &middot; Mapillary &middot; KartaView &middot; Overpass/OSM &middot; Wikimedia Commons &middot; NOAA/NWS &middot; World News: Google News country editions and outlet feeds, places from GeoNames (CC BY 4.0) and Natural Earth &middot; Search: Photon/OSM, US Census Bureau &middot; full source list: COVERAGE panel / user guide</p>
             <p class="tg-info-text">ADMIN // AUTHORIZED ACCESS ONLY. Public sources only - never unsecured private cameras.</p>
         </div>
     }
@@ -811,7 +822,7 @@
                         {
                             <div class="tg-route-summary" role="status">
                                 @route.DistanceMiles.ToString("N0") MI · @FormatDuration(route.DurationMinutes) ·
-                                @route.Incidents.Count INCIDENTS · @route.Cameras.Count CAMERAS · @route.Alerts.Count ALERTS
+                                @route.Incidents.Count INCIDENTS · @route.Cameras.Count CAMERAS · @route.Alerts.Count ALERTS@(_routeNews.Count > 0 ? $" · {_routeNews.Count} NEWS" : "")
                             </div>
                             <div class="tg-route-row tg-route-actions">
                                 <a class="tg-link-btn" href="@GwsBusinessSuite.Application.RouteWatch.RouteDirectionsText.PrintLink(_routeStops)" target="_blank" rel="noopener"
@@ -935,6 +946,13 @@
                                     <li class="tg-coverage-item tg-route-sign">
                                         <span>MI @item.MilesAlong.ToString("0") · SIGN@(item.Sign.Direction is { } signDirection ? " · " + signDirection.ToUpperInvariant() : "")
                                             <small>@item.Sign.Text</small></span>
+                                    </li>
+                                }
+                                @foreach (var item in _routeNews)
+                                {
+                                    <li class="tg-coverage-item">
+                                        <span>NEWS · @item.Reason.ToUpperInvariant()<small>@item.Signal.Title</small></span>
+                                        <button type="button" @onclick="() => OpenRouteNewsAsync(item.Signal)">VIEW</button>
                                     </li>
                                 }
                                 @foreach (var item in route.Incidents)
@@ -1150,6 +1168,7 @@
                             <label><input type="checkbox" @bind="_areaIncidents" /> INCIDENTS</label>
                             <label><input type="checkbox" @bind="_areaWeather" /> WEATHER</label>
                             <label><input type="checkbox" @bind="_areaHazards" /> HAZARDS</label>
+                            <label title="World News stories placed at a city in the area: disasters, transport, conflict and health"><input type="checkbox" @bind="_areaNews" /> NEWS</label>
                         </div>
                         <select aria-label="Minimum severity" value="@_areaSeverity" @onchange="e => _areaSeverity = e.Value?.ToString() ?? OverwatchAreaSeverityAny">
                             <option value="major">MAJOR ONLY</option>
@@ -1878,6 +1897,8 @@
         {
             _worldNewsCount = 0;
             await JS.InvokeVoidAsync("tacticalGlobe.clearWorldNews");
+            if (_worldNewsShading) await JS.InvokeVoidAsync("tacticalGlobe.clearNewsShading");
+            _worldNewsShading = false;
         }
     }
 
@@ -1905,6 +1926,59 @@
         if (!_worldNewsOn) return;
         _worldNewsCount = signals.Count;
         await JS.InvokeVoidAsync("tacticalGlobe.setWorldNews", signals.Select(ToWorldNewsPayload).ToList());
+        if (_worldNewsShading) await PushWorldNewsShadingAsync();
+    }
+
+    private bool _worldNewsShading;
+
+    private async Task ToggleWorldNewsShadingAsync()
+    {
+        _worldNewsShading = !_worldNewsShading;
+        if (_worldNewsShading) await PushWorldNewsShadingAsync();
+        else await JS.InvokeVoidAsync("tacticalGlobe.clearNewsShading");
+    }
+
+    // The whole world, not just the view: shading is the overview before any one story is in sight.
+    private async Task PushWorldNewsShadingAsync()
+    {
+        var totals = WorldNewsMap.CountryTotals(WorldNewsSince, _worldNewsKinds);
+        await JS.InvokeVoidAsync("tacticalGlobe.setNewsShading", totals.Select(t => new
+        {
+            code = t.Code,
+            name = t.Name,
+            outlets = t.Outlets,
+            stories = t.Stories.Select(story => new { id = story.Id, title = story.Title }).ToList()
+        }).ToList());
+    }
+
+    // A story picked from a country's shading panel.
+    [JSInvokable]
+    public async Task OpenWorldNewsStoryAsync(string situationId)
+    {
+        if (WorldNewsMap.Signal(situationId, WorldNewsSince) is not { } signal) return;
+        await FlyToNewsAsync(signal);
+        await JS.InvokeVoidAsync("tacticalGlobe.openWorldNews", ToWorldNewsPayload(signal));
+    }
+
+    // The news panel's "Who's reporting" lines: each edition country's outlets, to the story.
+    [JSInvokable]
+    public object WorldNewsCoverage(string situationId) =>
+        WorldNewsMap.Coverage(situationId).Select(c => new { country = c.Country, lat = c.Latitude, lon = c.Longitude, outlets = c.Outlets }).ToList();
+
+    // The news panel's playback: the situation's events in the order they broke.
+    [JSInvokable]
+    public object? WorldNewsTimeline(string situationId)
+    {
+        if (WorldNewsMap.Signal(situationId, WorldNewsSince) is not { } signal) return null;
+        return WorldNewsMap.Timeline(situationId, signal.Location).Select(step => new
+        {
+            title = step.Title,
+            at = step.FirstSeen.ToLocalGwsDateTime(),
+            outlets = step.Outlets,
+            place = step.Location.Label,
+            lat = step.Location.Latitude,
+            lon = step.Location.Longitude
+        }).ToList();
     }
 
     // World News's "Show on Overwatch": layer on, country in view, that situation's panel open.
@@ -1914,7 +1988,7 @@
         _worldNewsOn = true;
         // A link to a sports story should still show its marker.
         _worldNewsKinds.Add(signal.Kind);
-        await JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", signal.Latitude, signal.Longitude, 3_000_000, 1.5);
+        await FlyToNewsAsync(signal);
         await JS.InvokeVoidAsync("tacticalGlobe.openWorldNews", ToWorldNewsPayload(signal));
         StateHasChanged();
     }
@@ -1952,6 +2026,17 @@
         return $"Recording {capture.Cameras.Count} camera{(capture.Cameras.Count == 1 ? "" : "s")} for an hour. See AREAS > CAPTURES.";
     }
 
+    private async Task OpenRouteNewsAsync(GwsBusinessSuite.Infrastructure.Services.WorldNewsMapSignal signal)
+    {
+        await FlyToNewsAsync(signal);
+        await JS.InvokeVoidAsync("tacticalGlobe.openWorldNews", ToWorldNewsPayload(signal));
+    }
+
+    // A city fills the view from about 60 km up; a country needs a few thousand.
+    private Task FlyToNewsAsync(GwsBusinessSuite.Infrastructure.Services.WorldNewsMapSignal signal) =>
+        JS.InvokeVoidAsync("tacticalGlobe.flyTo", "tg-viewport", signal.Latitude, signal.Longitude,
+            signal.Location.City is null ? 3_000_000 : 60_000, 1.5).AsTask();
+
     private static object ToWorldNewsPayload(GwsBusinessSuite.Infrastructure.Services.WorldNewsMapSignal signal) => new
     {
         id = signal.SituationId,
@@ -1986,6 +2071,7 @@
     private bool _areaIncidents = true;
     private bool _areaWeather = true;
     private bool _areaHazards = true;
+    private bool _areaNews = true;
     private string _areaSeverity = "moderate";
     private string? _areaMessage;
     private List<GwsBusinessSuite.Infrastructure.Services.OverwatchAreaView> _areas = new();
@@ -2022,7 +2108,7 @@
         _areaMessage = null;
         try
         {
-            var added = await OverwatchAreaService.AddAreaAsync(_username, _areaName, _lastBbox, _areaIncidents, _areaWeather, _areaHazards, _areaSeverity);
+            var added = await OverwatchAreaService.AddAreaAsync(_username, _areaName, _lastBbox, _areaIncidents, _areaWeather, _areaHazards, _areaSeverity, _areaNews);
             _areaName = string.Empty;
             _areaMessage = $"Watching {added.Name}. The first check learns what's already there; after that, new items appear in the bell.";
             _areas = (await OverwatchAreaService.ListAreasAsync(_username)).ToList();
@@ -2048,7 +2134,7 @@
 
     private static string AreaDescription(GwsBusinessSuite.Infrastructure.Services.OverwatchAreaView area)
     {
-        var what = new[] { area.WatchIncidents ? "incidents" : null, area.WatchWeather ? "weather" : null, area.WatchHazards ? "hazards" : null }
+        var what = new[] { area.WatchIncidents ? "incidents" : null, area.WatchWeather ? "weather" : null, area.WatchHazards ? "hazards" : null, area.WatchNews ? "news" : null }
             .Where(w => w is not null);
         var checkedText = area.LastCheckedAt is { } at ? $"checked {Ago(at)}" : "first check pending";
         return $"{string.Join(", ", what)} · {area.MinSeverity} · {checkedText}";
@@ -2061,6 +2147,8 @@
     private string? _tripMessage;
     private List<GwsBusinessSuite.Infrastructure.Services.OverwatchTripView> _trips = new();
     private GwsBusinessSuite.Application.RouteWatch.RouteWatchResult? _route;
+    // Reported World News stories near the route or in a country it crosses (WorldNewsMapService.AlongRoute).
+    private IReadOnlyList<GwsBusinessSuite.Infrastructure.Services.WorldNewsRouteItem> _routeNews = [];
     // "datetime-local" value (yyyy-MM-ddTHH:mm) in this server's local time zone - the same zone
     // every other admin time on this page is shown in. Blank means "leaving now".
     // "Ask the cameras": still-image cameras along the route read by a vision model on the Ollama
@@ -3123,6 +3211,7 @@
     {
         await CancelPickAsync();
         _route = null;
+        _routeNews = [];
         _departurePlan = null;
         _drivingLight = [];
         await JS.InvokeVoidAsync("tacticalGlobe.clearRoute");
@@ -3183,6 +3272,9 @@
             _route = await RouteWatchService.WatchTripAsync(stops);
             _departurePlan = null;
             _chosenDeparture = null;
+            _routeNews = _route.Error is null
+                ? WorldNewsMap.AlongRoute(_route.Path, DateTimeOffset.UtcNow - GwsBusinessSuite.Infrastructure.Services.WorldNewsMapService.RouteWindow)
+                : [];
             if (_route.Error is null)
             {
                 await JS.InvokeVoidAsync("tacticalGlobe.setRoute",

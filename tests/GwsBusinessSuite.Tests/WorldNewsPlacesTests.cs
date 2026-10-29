@@ -73,4 +73,15 @@ public sealed class WorldNewsPlacesTests
         Places.FindCity("ES", "Narnia").Should().BeNull();
         Places.Countries.Should().HaveCountGreaterThan(200).And.OnlyHaveUniqueItems(c => c.Code);
     }
+
+    [Theory]
+    [InlineData(40.42, -3.70, "ES")]
+    [InlineData(48.85, 2.35, "FR")]
+    [InlineData(38.90, -77.03, "US")]
+    [InlineData(-33.87, 151.21, "AU")]
+    [InlineData(0.0, -30.0, null)]
+    public void CountryAt_ShouldFindTheCountryAPointIsIn(double lat, double lon, string? code)
+    {
+        WorldNewsPlaces.CountryAt(lat, lon).Should().Be(code);
+    }
 }

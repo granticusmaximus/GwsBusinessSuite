@@ -10,6 +10,7 @@
     <!-- Countries and cities World News places stories by (scripts/build-world-news-places.py). -->
     <EmbeddedResource Include="WorldNewsPlaces\countries.tsv" LogicalName="GwsBusinessSuite.Infrastructure.WorldNewsPlaces.countries.tsv" />
     <EmbeddedResource Include="WorldNewsPlaces\cities.tsv" LogicalName="GwsBusinessSuite.Infrastructure.WorldNewsPlaces.cities.tsv" />
+    <EmbeddedResource Include="WorldNewsPlaces\countries.geojson" LogicalName="GwsBusinessSuite.Infrastructure.WorldNewsPlaces.countries.geojson" />
   </ItemGroup>
 
   <ItemGroup>

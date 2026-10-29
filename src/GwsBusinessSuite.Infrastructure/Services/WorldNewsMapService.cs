@@ -1,4 +1,6 @@
 using GwsBusinessSuite.Application.CameraIntel;
+using GwsBusinessSuite.Application.RoadTraffic;
+using GwsBusinessSuite.Application.RouteWatch;
 using GwsBusinessSuite.WorldNewsKit;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
@@ -31,6 +33,13 @@ public sealed record WorldNewsMapSignal(
 }
 
 public sealed record WorldNewsMapSource(string Outlet, string Title, string Url);
+public sealed record WorldNewsRouteItem(WorldNewsMapSignal Signal, string Reason);
+// A country's share of the placed stories, for Overwatch's country shading.
+public sealed record WorldNewsCountryTotal(string Code, string Name, int Outlets, IReadOnlyList<(string Id, string Title)> Stories);
+// One edition country reporting a story, for the coverage lines.
+public sealed record WorldNewsCoverage(string Country, double Latitude, double Longitude, int Outlets);
+// One event of a situation in the order they broke, placed where its own headline says.
+public sealed record WorldNewsTimelineStep(string Title, DateTimeOffset FirstSeen, int Outlets, WorldNewsLocation Location);
 
 public sealed class WorldNewsMapService(WorldNewsStore store)
 {
@@ -46,19 +55,91 @@ public sealed class WorldNewsMapService(WorldNewsStore store)
         IReadOnlyCollection<string>? kinds = null, int limit = MaximumSignals)
     {
         if (limit <= 0) return [];
-        var corrections = store.Placements();
         var growth = store.SituationGrowth(DateTimeOffset.UtcNow - SituationSurge.Window);
-        // Place and filter on the overview alone; only the few that survive need their latest
-        // event, summary and sources read from the store.
-        return store.TopSituations(since, 300)
-            .Where(s => s.OutletCount >= MinimumOutlets && (kinds is null || kinds.Contains(KindOf(s))))
-            .Select(s => (Situation: s, Location: Locate(s, corrections)))
-            .Where(item => item.Location is { } location && bounds.Contains(location.Latitude, location.Longitude))
+        return Placed(since, kinds)
+            .Where(item => bounds.Contains(item.Location.Latitude, item.Location.Longitude))
             .OrderByDescending(item => item.Situation.OutletCount)
             .ThenByDescending(item => item.Situation.LastSeen)
             .Take(Math.Min(limit, MaximumSignals))
-            .Select(item => Project(item.Situation, item.Location!, growth))
+            .Select(item => Project(item.Situation, item.Location, growth))
             .ToList();
+    }
+
+    // How close a city-level story has to be to a watched route, and how far back trips look
+    // (a rail strike or a closed border matters for days).
+    public const double RouteMiles = 25;
+    public static readonly TimeSpan RouteWindow = TimeSpan.FromDays(3);
+    // A country-level story only says the country is affected; for a route that's worth knowing
+    // about strikes, closures and unrest, not a disaster somewhere else in the country.
+    private static readonly HashSet<string> CountryWideKinds = [SituationKinds.Transport, SituationKinds.Conflict];
+
+    // Stories along a watched route: city-level ones near the path, and country-wide transport
+    // or unrest stories in a country it passes through.
+    public IReadOnlyList<WorldNewsRouteItem> AlongRoute(IReadOnlyList<RoutePoint> path, DateTimeOffset since, int limit = 10)
+    {
+        if (path.Count == 0) return [];
+        var step = Math.Max(1, path.Count / 200);
+        var crossed = path.Where((_, i) => i % step == 0 || i == path.Count - 1)
+            .Select(point => WorldNewsPlaces.CountryAt(point.Latitude, point.Longitude))
+            .OfType<string>()
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var near = new List<(SituationOverview Situation, WorldNewsLocation Location, string Reason, double Miles)>();
+        foreach (var (situation, location) in Placed(since, SituationKinds.Operational))
+        {
+            if (location.Precision != WorldNewsPrecision.Country)
+            {
+                var miles = path.Min(point => RoadTrafficSummary.Miles(location.Latitude, location.Longitude, point.Latitude, point.Longitude));
+                if (miles <= RouteMiles) near.Add((situation, location, miles < 1 ? "on the route" : $"{miles:0} mi from the route", miles));
+            }
+            else if (crossed.Contains(location.CountryCode) && CountryWideKinds.Contains(KindOf(situation)))
+            {
+                near.Add((situation, location, $"in {location.Country}, which the route crosses", double.MaxValue));
+            }
+        }
+        var growth = store.SituationGrowth(DateTimeOffset.UtcNow - SituationSurge.Window);
+        return near.OrderBy(item => item.Miles).ThenByDescending(item => item.Situation.OutletCount).Take(limit)
+            .Select(item => new WorldNewsRouteItem(Project(item.Situation, item.Location, growth), item.Reason))
+            .ToList();
+    }
+
+    // Outlets on the stories placed in each country (city-level ones count for their country), for
+    // shading. Stories lists a few of each country's biggest for its panel.
+    public IReadOnlyList<WorldNewsCountryTotal> CountryTotals(DateTimeOffset since, IReadOnlyCollection<string>? kinds, int storiesEach = 5) =>
+        Placed(since, kinds)
+            .GroupBy(item => item.Location.CountryCode, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new WorldNewsCountryTotal(group.Key, group.First().Location.Country, group.Sum(item => item.Situation.OutletCount),
+                group.OrderByDescending(item => item.Situation.OutletCount).Take(storiesEach)
+                    .Select(item => (item.Situation.Id, item.Situation.Title)).ToList()))
+            .OrderByDescending(total => total.Outlets)
+            .ToList();
+
+    // Where a story's outlets are: their edition countries, at each country's label point.
+    public IReadOnlyList<WorldNewsCoverage> Coverage(string situationId) =>
+        store.SituationCoverage(situationId)
+            .Select(row => (Row: row, Country: WorldNewsPlaces.Instance.FindCountry(row.Country)))
+            .Where(item => item.Country is not null)
+            .Select(item => new WorldNewsCoverage(item.Country!.Name, item.Country.Latitude, item.Country.Longitude, item.Row.Outlets))
+            .ToList();
+
+    // A situation's events oldest first, each placed by its own headline or, failing that, where
+    // the situation is.
+    public IReadOnlyList<WorldNewsTimelineStep> Timeline(string situationId, WorldNewsLocation fallback) =>
+        store.EventsForSituation(situationId)
+            .OrderBy(e => e.FirstSeen)
+            .Select(e => new WorldNewsTimelineStep(e.Headline ?? e.Title, e.FirstSeen, e.OutletCount,
+                fallback.Precision == WorldNewsPrecision.Corrected ? fallback : Locate(e.Headline ?? e.Title, e.Title) ?? fallback))
+            .ToList();
+
+    // Every situation the layer could show, with where it goes. Placing needs only the overview;
+    // the latest event, summary and sources are read later, for the few that are kept.
+    private IEnumerable<(SituationOverview Situation, WorldNewsLocation Location)> Placed(DateTimeOffset since, IReadOnlyCollection<string>? kinds)
+    {
+        var corrections = store.Placements();
+        foreach (var situation in store.TopSituations(since, 300))
+        {
+            if (situation.OutletCount < MinimumOutlets || (kinds is not null && !kinds.Contains(KindOf(situation)))) continue;
+            if (Locate(situation, corrections) is { } location) yield return (situation, location);
+        }
     }
 
     // The situation a World News link points at, or null when the layer wouldn't show it.

@@ -5369,6 +5369,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.Property<bool>("WatchIncidents")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("WatchNews")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("WatchWeather")
                         .HasColumnType("INTEGER");
 

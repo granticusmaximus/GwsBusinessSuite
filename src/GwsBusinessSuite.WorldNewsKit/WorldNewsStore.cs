@@ -481,6 +481,22 @@ public sealed class WorldNewsStore
         transaction.Commit();
     }
 
+    // How many distinct outlets in each edition country covered a situation, most first.
+    public IReadOnlyList<(string Country, int Outlets)> SituationCoverage(string situationId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT a.country, COUNT(DISTINCT a.outlet) FROM events e JOIN articles a ON a.event_id = e.id
+            WHERE e.situation_id = $situation GROUP BY a.country ORDER BY 2 DESC
+            """;
+        command.Parameters.AddWithValue("$situation", situationId);
+        using var reader = command.ExecuteReader();
+        var coverage = new List<(string, int)>();
+        while (reader.Read()) coverage.Add((reader.GetString(0), reader.GetInt32(1)));
+        return coverage;
+    }
+
     // Distinct outlets on each situation with news since cut: all of them, and those that had
     // reported before cut. A story whose coverage doubles in a couple of hours is surging.
     public IReadOnlyDictionary<string, (int Outlets, int OutletsBefore)> SituationGrowth(DateTimeOffset cut)

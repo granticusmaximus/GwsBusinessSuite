@@ -145,8 +145,20 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await page.RouteAsync("http://localhost/js/tactical-globe.js", route => route.FulfillAsync(new()
         {
             Status = 200,
-            ContentType = "application/javascript",
+            // The script's own text has "·" separators; without a charset they decode as "Â·".
+            ContentType = "application/javascript; charset=utf-8",
             Body = script
+        }));
+        // Close zooms ask Esri for imagery and road-label tiles, and Esri sometimes answers one
+        // without its CORS header, which Chrome logs as a console error (a pre-push run, and CI on
+        // 29-10-26, failed on exactly that). Every test gets those tiles as a blank image, so the
+        // tests check the script, not Esri's servers.
+        await page.RouteAsync("https://server.arcgisonline.com/**/tile/**", route => route.FulfillAsync(new()
+        {
+            Status = 200,
+            ContentType = "image/png",
+            Headers = new Dictionary<string, string> { ["Access-Control-Allow-Origin"] = "*" },
+            BodyBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
         }));
 
         await page.GotoAsync("http://localhost/overwatch-grid-harness");
@@ -186,6 +198,9 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
                 }
                 if (methodName === 'BuildShareLinkAsync') {
                   return Promise.resolve(window.__mockShareLink || 'https://example.test/admin/osint?v=stub');
+                }
+                if (window.__mockInvoke && Object.prototype.hasOwnProperty.call(window.__mockInvoke, methodName)) {
+                  return Promise.resolve(window.__mockInvoke[methodName]);
                 }
                 if (methodName === 'AnalyzeCameraAsync') {
                   var analyzeResult = window.__mockAnalyzeResult === undefined ? 'light traffic, clear skies' : window.__mockAnalyzeResult;
@@ -431,17 +446,6 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     {
         var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
         await using var pageScope = page;
-        // The flight ends at street level, where the globe asks Esri for close-zoom imagery and
-        // road-label tiles. Esri sometimes answers one without its CORS header, which Chrome logs
-        // as a console error - a pre-push run failed on exactly that. Those tiles are served here
-        // as a blank image instead, so this test checks the script, not Esri's servers.
-        await page.RouteAsync("https://server.arcgisonline.com/**/tile/**", route => route.FulfillAsync(new()
-        {
-            Status = 200,
-            ContentType = "image/png",
-            Headers = new Dictionary<string, string> { ["Access-Control-Allow-Origin"] = "*" },
-            BodyBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
-        }));
         (await InitAsync(page)).Should().BeNull();
 
         (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setThreeD('tg-viewport', true)")).Should().Be("no-token");
@@ -840,10 +844,64 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await page.WaitForFunctionAsync("!!document.querySelector('.tg-incident-panel')", new PageWaitForFunctionOptions { Timeout = 5000 });
         var panelText = await page.EvaluateAsync<string>("document.querySelector('.tg-incident-panel').textContent");
         panelText.Should().Contain("Japan earthquake aftershocks").And.Contain("7 OUTLETS").And.NotContain("LATEST:")
-            .And.Contain("CITY-LEVEL PLACEMENT").And.Contain("DISASTERS · QUIET · Sendai, Japan")
+            .And.Contain("CITY-LEVEL PLACEMENT").And.Contain("DISASTERS").And.Contain("QUIET").And.Contain("Sendai, Japan")
             .And.Contain("Surging: coverage went from 3 to 8 outlets");
         (await page.GetAttributeAsync(".tg-incident-panel a.tg-incident-report", "href"))
             .Should().Be("/admin/world-news?situation=situation-2");
+    }
+
+    [Fact]
+    public async Task WorldNewsPanel_ShouldShowBackingAndNearby_PlayTheStory_AndDrawWhoIsReporting()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await InitAsync(page);
+        await page.EvaluateAsync("""
+            () => {
+              window.__mockInvoke = {
+                WorldNewsContextAsync: { backing: [{ source: 'USGS', text: 'M 5.4 - 12 km NE of Tokyo, Japan', url: null }],
+                  precise: true, cameras: [], alerts: ['Flood Warning'], hazards: [], outages: [] },
+                WorldNewsTimeline: [
+                  { title: 'Quake shakes Tokyo', at: '28-10-26 09:00', outlets: 4, place: 'Tokyo, Japan', lat: 35.7, lon: 139.7 },
+                  { title: 'Aftershocks hit Sendai', at: '29-10-26 06:30', outlets: 9, place: 'Sendai, Japan', lat: 38.3, lon: 140.9 }
+                ],
+                WorldNewsCoverage: [{ country: 'Japan', lat: 36.1, lon: 138.4, outlets: 5 }, { country: 'United Kingdom', lat: 54, lon: -2, outlets: 2 }],
+                CaptureWorldNewsAsync: 'Recording 2 cameras for an hour. See AREAS > CAPTURES.'
+              };
+              window.tacticalGlobe.openWorldNews({
+                id: 'quake', title: 'M5.4 quake shakes Tokyo', latest: 'M5.4 quake shakes Tokyo', country: 'Japan', place: 'Tokyo, Japan',
+                precision: 'city', lat: 35.7, lon: 139.7, eventCount: 2, outletCount: 9, reportCount: 12, lastSeen: '29-10-26 06:30',
+                summary: null, href: '/admin/world-news?situation=quake', sources: []
+              });
+            }
+            """);
+
+        await page.WaitForFunctionAsync("document.querySelector('.tg-world-news-context')?.textContent.includes('BACKED BY')",
+            null, new PageWaitForFunctionOptions { Timeout = 5000 });
+        var context = await page.TextContentAsync(".tg-world-news-context");
+        context.Should().Contain("USGS: M 5.4 - 12 km NE of Tokyo, Japan").And.Contain("WEATHER ALERTS").And.Contain("Flood Warning");
+
+        await page.ClickAsync(".tg-world-news-play-button");
+        await page.WaitForFunctionAsync("document.querySelector('.tg-world-news-step')?.textContent.includes('EVENT 1 OF 2')",
+            null, new PageWaitForFunctionOptions { Timeout = 5000 });
+        await page.EvaluateAsync("""
+            () => {
+              const range = document.querySelector('.tg-world-news-playback input[type=range]');
+              range.value = '1';
+              range.dispatchEvent(new Event('input'));
+            }
+            """);
+        (await page.TextContentAsync(".tg-world-news-step")).Should().Contain("EVENT 2 OF 2").And.Contain("Sendai, Japan");
+
+        await page.ClickAsync(".tg-world-news-coverage-button");
+        await page.WaitForFunctionAsync("document.querySelector('.tg-world-news-coverage')?.textContent.includes('Japan 5')",
+            null, new PageWaitForFunctionOptions { Timeout = 5000 });
+        (await page.EvaluateAsync<bool>("document.querySelector('.tg-modal-backdrop').classList.contains('tg-modal-backdrop-clear')"))
+            .Should().BeTrue("the lines are drawn on the globe behind the panel");
+
+        await page.ClickAsync(".tg-world-news-context .tg-world-news-capture");
+        await page.WaitForFunctionAsync("document.querySelector('.tg-world-news-context .tg-world-news-capture').textContent.startsWith('RECORDING 2 CAMERAS')",
+            null, new PageWaitForFunctionOptions { Timeout = 5000 });
     }
 
     [Fact]

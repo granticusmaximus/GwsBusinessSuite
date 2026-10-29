@@ -54,6 +54,25 @@ public sealed class OverwatchAreaServiceTests
     }
 
     [Fact]
+    public async Task News_ShouldAlertForANewStoryPlacedAtACityInTheArea_NotForACountrysCentre()
+    {
+        using var news = new WorldNewsTestStore();
+        news.SeedSituation("old", "Water main bursts in Macon, US", "Macon, US crews repair main");
+        news.Store.SaveKinds([("old", "disaster")]);
+        await using var f = await Fixture.CreateAsync([], worldNews: new WorldNewsMapService(news.Store));
+        await f.Service.AddAreaAsync("grant", "Macon", Macon, false, false, false, "moderate");
+        (await f.Service.CheckAllAsync()).Should().Be(0, "the first check learns today's stories");
+
+        news.SeedSituation("tornado", "Tornado hits Macon, US", "Storm damage in Macon, US");
+        news.SeedSituation("us", "US storms: tornado warnings across the South", "US storms move east");
+        news.Store.SaveKinds([("tornado", "disaster"), ("us", "disaster")]);
+        (await f.Service.CheckAllAsync()).Should().Be(1);
+
+        (await f.Service.ListAlertsAsync("grant")).Single().Message.Should().Be("1 new: Reported news: Tornado hits Macon, US",
+            "a country-level story sits at the country's centre, which says nothing about Macon");
+    }
+
+    [Fact]
     public async Task NewCrash_ShouldStartRecordingTheNearestStillCamera_ForAnHour()
     {
         var incidents = new List<TrafficIncident>();
@@ -149,7 +168,7 @@ public sealed class OverwatchAreaServiceTests
         public CameraTimelapseStore? Frames { get; private set; }
 
         public static async Task<Fixture> CreateAsync(List<TrafficIncident> incidents, IReadOnlyList<CameraFeed>? cameras = null,
-            string? captureRoot = null, TimeProvider? clock = null)
+            string? captureRoot = null, TimeProvider? clock = null, WorldNewsMapService? worldNews = null)
         {
             var f = new Fixture { _connection = new SqliteConnection("Data Source=:memory:") };
             await f._connection.OpenAsync();
@@ -170,7 +189,7 @@ public sealed class OverwatchAreaServiceTests
                     NullLogger<IncidentCaptureService>.Instance);
             }
             f.Service = new OverwatchAreaService(new Factory(options), directory, new NoAlerts(), hazards, f.Notifier, time,
-                NullLogger<OverwatchAreaService>.Instance, f.Captures);
+                NullLogger<OverwatchAreaService>.Instance, f.Captures, worldNews);
             return f;
         }
 

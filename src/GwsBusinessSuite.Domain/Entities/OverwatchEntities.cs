@@ -15,6 +15,8 @@ public sealed class OverwatchWatchArea : AuditableEntity
     public bool WatchIncidents { get; set; } = true;
     public bool WatchWeather { get; set; } = true;
     public bool WatchHazards { get; set; } = true;
+    // World News stories placed at a city inside the area (disasters, transport, conflict, health).
+    public bool WatchNews { get; set; } = true;
     // "major", "moderate" or "any" - see OverwatchAreaSeverity.
     public string MinSeverity { get; set; } = "moderate";
     // Keys of items already reported (or present at the baseline check), newest last, capped.

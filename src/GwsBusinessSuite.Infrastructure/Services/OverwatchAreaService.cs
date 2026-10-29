@@ -5,6 +5,7 @@ using GwsBusinessSuite.Application.Hazards;
 using GwsBusinessSuite.Application.TrafficIncidents;
 using GwsBusinessSuite.Application.Weather;
 using GwsBusinessSuite.Domain.Entities;
+using GwsBusinessSuite.WorldNewsKit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -13,7 +14,7 @@ using Microsoft.Extensions.Logging;
 namespace GwsBusinessSuite.Infrastructure.Services;
 
 public sealed record OverwatchAreaView(Guid Id, string Name, BoundingBox Bounds, bool WatchIncidents, bool WatchWeather,
-    bool WatchHazards, string MinSeverity, DateTimeOffset? LastCheckedAt);
+    bool WatchHazards, string MinSeverity, DateTimeOffset? LastCheckedAt, bool WatchNews = false);
 
 public sealed record OverwatchAreaAlertView(Guid Id, Guid AreaId, string Title, string Message, bool IsRead, DateTimeOffset CreatedAt, string? LinkUrl = null);
 
@@ -36,11 +37,13 @@ public sealed class OverwatchAreaService(
     OverwatchAreaNotifier notifier,
     TimeProvider timeProvider,
     ILogger<OverwatchAreaService> logger,
-    IncidentCaptureService? captures = null)
+    IncidentCaptureService? captures = null,
+    WorldNewsMapService? worldNews = null)
 {
     public const int MaxAreasPerUser = 20;
     private const int MaxSeenKeys = 2000;
     private const int MaxItemsInMessage = 4;
+    private const string NewsBaselineKey = "news:baseline";
     // New incidents per check that start a camera capture - a pile-up of closures in one sweep
     // shouldn't fan out into dozens of captures.
     private const int MaxCapturesPerCheck = 3;
@@ -57,7 +60,7 @@ public sealed class OverwatchAreaService(
     }
 
     public async Task<OverwatchAreaView> AddAreaAsync(string username, string name, BoundingBox bounds, bool watchIncidents,
-        bool watchWeather, bool watchHazards, string minSeverity, CancellationToken ct = default)
+        bool watchWeather, bool watchHazards, string minSeverity, bool watchNews = true, CancellationToken ct = default)
     {
         name = (name ?? string.Empty).Trim();
         if (name.Length is 0 or > 80) throw new ArgumentException("Give the area a name (up to 80 characters).");
@@ -71,7 +74,7 @@ public sealed class OverwatchAreaService(
         var area = new OverwatchWatchArea
         {
             Username = username, Name = name, North = bounds.North, South = bounds.South, East = bounds.East, West = bounds.West,
-            WatchIncidents = watchIncidents, WatchWeather = watchWeather, WatchHazards = watchHazards, MinSeverity = minSeverity,
+            WatchIncidents = watchIncidents, WatchWeather = watchWeather, WatchHazards = watchHazards, WatchNews = watchNews, MinSeverity = minSeverity,
             CreatedBy = username, CreatedAt = timeProvider.GetUtcNow()
         };
         db.OverwatchWatchAreas.Add(area);
@@ -159,9 +162,19 @@ public sealed class OverwatchAreaService(
         if (area.WatchIncidents) items.AddRange(IncidentItems(await incidents.GetIncidentsInBoundingBoxAsync(bounds, ct), area.MinSeverity));
         if (area.WatchWeather) items.AddRange(WeatherItems(await weatherAlerts.GetActiveAlertsAsync(bounds, ct), area.MinSeverity));
         if (area.WatchHazards) items.AddRange(HazardItems((await hazards.GetHazardsAsync(bounds, ct)).Features, area.MinSeverity));
+        var news = area.WatchNews && worldNews is not null
+            ? NewsItems(worldNews.Signals(bounds, timeProvider.GetUtcNow() - WorldNewsMapService.Window, SituationKinds.Operational), area.MinSeverity).ToList()
+            : [];
+        items.AddRange(news);
 
         var seen = JsonSerializer.Deserialize<List<string>>(area.SeenKeysJson) ?? [];
         var seenSet = seen.ToHashSet(StringComparer.Ordinal);
+        // An area saved before it watched the news learns today's stories quietly, as a new area does.
+        if (area.WatchNews && worldNews is not null && seenSet.Add(NewsBaselineKey))
+        {
+            seen.Add(NewsBaselineKey);
+            seen.AddRange(news.Select(i => i.Key).Where(seenSet.Add));
+        }
         var fresh = items.Where(i => seenSet.Add(i.Key)).ToList();
         var isBaseline = area.LastCheckedAt is null;
         seen.AddRange(fresh.Select(i => i.Key));
@@ -242,12 +255,19 @@ public sealed class OverwatchAreaService(
             .Where(x => PassesSeverity(x.Severity, minSeverity))
             .Select(x => new OverwatchAreaItem($"weather:{x.Alert.Id}", x.Alert.Event, x.Severity));
 
+    // Only stories placed at a city (or by hand): a country's centre inside an area says nothing about the area.
+    public static IEnumerable<OverwatchAreaItem> NewsItems(IEnumerable<WorldNewsMapSignal> list, string minSeverity) =>
+        list.Where(s => s.Location.Precision != WorldNewsPrecision.Country)
+            .Select(s => (Signal: s, Severity: s.Surge is null ? "moderate" : "major"))
+            .Where(x => PassesSeverity(x.Severity, minSeverity))
+            .Select(x => new OverwatchAreaItem($"news:{x.Signal.SituationId}", $"Reported news: {x.Signal.Title}", x.Severity));
+
     public static IEnumerable<OverwatchAreaItem> HazardItems(IEnumerable<HazardFeature> list, string minSeverity) =>
         list.Where(h => PassesSeverity(h.Severity, minSeverity))
             .Select(h => new OverwatchAreaItem($"hazard:{h.Id}", h.Title, h.Severity));
 
     private static OverwatchAreaView ToView(OverwatchWatchArea a) => new(a.Id, a.Name, new BoundingBox(a.North, a.South, a.East, a.West),
-        a.WatchIncidents, a.WatchWeather, a.WatchHazards, a.MinSeverity, a.LastCheckedAt);
+        a.WatchIncidents, a.WatchWeather, a.WatchHazards, a.MinSeverity, a.LastCheckedAt, a.WatchNews);
 }
 
 public sealed class OverwatchAreaBackgroundService(IServiceScopeFactory scopeFactory, ILogger<OverwatchAreaBackgroundService> logger) : BackgroundService

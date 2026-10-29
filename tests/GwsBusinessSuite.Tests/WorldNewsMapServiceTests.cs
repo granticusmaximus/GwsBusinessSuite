@@ -1,6 +1,7 @@
 using FluentAssertions;
 using GwsBusinessSuite.Infrastructure.Services;
 using GwsBusinessSuite.Application.CameraIntel;
+using GwsBusinessSuite.Application.RouteWatch;
 using GwsBusinessSuite.WorldNewsKit;
 
 namespace GwsBusinessSuite.Tests;
@@ -55,7 +56,7 @@ public sealed class WorldNewsMapServiceTests
     [Fact]
     public void Place_ShouldMatchWhatTheLayerShows()
     {
-        using var temp = new TempStore();
+        using var temp = new WorldNewsTestStore();
         var map = new WorldNewsMapService(temp.Store);
         var since = Now - WorldNewsMapService.Window;
         SituationOverview Situation(string title, int outlets, DateTimeOffset lastSeen) =>
@@ -72,7 +73,7 @@ public sealed class WorldNewsMapServiceTests
     [Fact]
     public void Corrections_ShouldPlaceHideAndRestoreASituation()
     {
-        using var temp = new TempStore();
+        using var temp = new WorldNewsTestStore();
         temp.SeedSituation("ebola", "Ebola cases exceed 10,000 in Congo", "Health workers race to contain the outbreak");
         var map = new WorldNewsMapService(temp.Store);
         var world = new BoundingBox(90, -90, 180, -180);
@@ -99,7 +100,7 @@ public sealed class WorldNewsMapServiceTests
     [Fact]
     public void Signals_ShouldShowTheChosenKinds_AndFlagSurgingStories()
     {
-        using var temp = new TempStore();
+        using var temp = new WorldNewsTestStore();
         temp.SeedSituation("crash", "Two trains collide in Spain", "Spanish rail services resume");
         temp.SeedSituation("final", "Spain wins the cup final", "Spanish fans celebrate in Madrid");
         temp.Store.SaveKinds([("crash", SituationKinds.Transport), ("final", SituationKinds.Sport)]);
@@ -119,45 +120,45 @@ public sealed class WorldNewsMapServiceTests
         surging.Active.Should().BeTrue();
     }
 
-    private static readonly DateTimeOffset Now = DateTimeOffset.UtcNow;
-
-    // A throwaway World News database with situations seeded as a read would leave them.
-    private sealed class TempStore : IDisposable
+    [Fact]
+    public void AlongRoute_ShouldFindNearbyStories_AndCountryWideStrikesOrUnrest()
     {
-        private readonly string _path = Path.Combine(Path.GetTempPath(), $"wn-map-{Guid.NewGuid():N}.db");
+        using var temp = new WorldNewsTestStore();
+        temp.SeedSituation("toledo", "Trains collide near Toledo, Spain", "Toledo, Spain crash inquiry");
+        temp.SeedSituation("strike", "Spain rail strike halts trains", "Spanish rail strike enters day two");
+        temp.SeedSituation("floods", "Spain floods leave thousands homeless", "Spanish floods recede");
+        temp.SeedSituation("barcelona", "Protest in Barcelona, Spain turns violent", "Barcelona, Spain clashes continue");
+        temp.Store.SaveKinds([("toledo", SituationKinds.Transport), ("strike", SituationKinds.Transport),
+            ("floods", SituationKinds.Disaster), ("barcelona", SituationKinds.Conflict)]);
+        var map = new WorldNewsMapService(temp.Store);
+        // Madrid to Toledo, roughly along the A-42.
+        RoutePoint[] path = [new(40.42, -3.70), new(40.24, -3.76), new(40.05, -3.92), new(39.86, -4.02)];
 
-        public TempStore() => Store = new WorldNewsStore(_path);
+        var items = map.AlongRoute(path, Now.AddDays(-3));
 
-        public WorldNewsStore Store { get; }
-
-        // Two events of three outlets each, linked into one situation.
-        public void SeedSituation(string id, string firstTitle, string secondTitle)
-        {
-            SeedEvent(id, $"{id}-1", firstTitle, ["Outlet 0", "Outlet 1", "Outlet 2"], Now.AddHours(-4));
-            SeedEvent(id, $"{id}-2", secondTitle, ["Outlet 0", "Outlet 1", "Outlet 2"], Now.AddHours(-4));
-        }
-
-        public void SeedEvent(string situationId, string eventId, string title, string[] outlets, DateTimeOffset seen)
-        {
-            var situation = new NewsSituation { Id = situationId, Sum = [1f, 0f], LastSeen = Now.AddHours(-1) };
-            var reports = outlets.Select((outlet, i) => new WorldArticle($"{eventId}-{i}", $"https://example.com/{eventId}/{i}",
-                title, outlet, "English", "Somewhere", seen, "test", null)).ToArray();
-            Store.AddArticles(reports);
-            Store.SaveClustering(new ClusterResult(reports.Select(r => (r.Id, eventId)).ToList(),
-            [
-                new NewsEvent
-                {
-                    Id = eventId, Title = title, TitleLanguage = "English", Sum = [reports.Length, 0f], ArticleCount = reports.Length,
-                    FirstSeen = seen.AddHours(-1), LastSeen = Now.AddHours(-1)
-                }
-            ], 1));
-            Store.SaveLinks([new SituationLink(eventId, situation)]);
-        }
-
-        public void Dispose()
-        {
-            Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
-            foreach (var file in new[] { _path, _path + "-wal", _path + "-shm" }) File.Delete(file);
-        }
+        items.Select(i => (i.Signal.SituationId, i.Reason)).Should().Equal(
+            ("toledo", "on the route"),
+            ("strike", "in Spain, which the route crosses"));
     }
+
+    [Fact]
+    public void CountryTotalsCoverageAndTimeline_ShouldDescribeWhereStoriesAreAndWhoReportsThem()
+    {
+        using var temp = new WorldNewsTestStore();
+        temp.SeedEvent("quake", "quake-1", "Quake shakes Tokyo, Japan", ["NHK", "Kyodo", "BBC"], Now.AddHours(-6));
+        temp.SeedEvent("quake", "quake-2", "Aftershocks hit Sendai, Japan", ["NHK", "Reuters", "CNN", "DW"], Now.AddHours(-2));
+        temp.SeedSituation("crash", "Trains collide near Toledo, Spain", "Spain rail inquiry opens");
+        temp.Store.SaveKinds([("quake", SituationKinds.Disaster), ("crash", SituationKinds.Transport)]);
+        var map = new WorldNewsMapService(temp.Store);
+
+        map.CountryTotals(Now.AddDays(-1), SituationKinds.Operational).Select(t => (t.Code, t.Outlets)).Should().Equal(("JP", 6), ("ES", 3));
+
+        map.Coverage("quake").Should().ContainSingle("every seeded report is from a UK edition")
+            .Which.Should().Match<WorldNewsCoverage>(c => c.Country == "United Kingdom" && c.Outlets == 6);
+
+        var japan = map.Signal("quake", Now.AddDays(-1))!.Location;
+        map.Timeline("quake", japan).Select(step => step.Location.City).Should().Equal("Tokyo", "Sendai");
+    }
+
+    private static readonly DateTimeOffset Now = WorldNewsTestStore.Now;
 }
