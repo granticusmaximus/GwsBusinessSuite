@@ -268,6 +268,10 @@ public interface IKanbanBoardService
     // Null when the database is gone or has nothing to make columns from.
     Task<KanbanBoard?> GetBoardAsync(Guid databaseId, CancellationToken cancellationToken = default);
 
+    // Renames the board - its Sentinel database, so Sentinel shows the new name too. The icon is
+    // an emoji; blank goes back to the default.
+    Task RenameBoardAsync(Guid databaseId, string title, string? icon, string performedBy, CancellationToken cancellationToken = default);
+
     // Puts the card in a column (null = No status) just before another card, or last when
     // beforeRowId is null. "Before a card" rather than an index, since the board shows only
     // top-level cards (and a filter hides more) while Sentinel orders every row in the column.

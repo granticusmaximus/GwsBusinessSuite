@@ -101,6 +101,16 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         return database.Id;
     }
 
+    public async Task RenameBoardAsync(Guid databaseId, string title, string? icon, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var name = title.Trim();
+        if (name.Length == 0) throw new ArgumentException("Give the board a name.", nameof(title));
+        if (name.Length > 120) throw new ArgumentException("Keep the name under 120 characters.", nameof(title));
+        var emoji = string.IsNullOrWhiteSpace(icon) ? null : icon.Trim();
+        if (emoji is { Length: > 16 }) throw new ArgumentException("Use one emoji for the icon.", nameof(icon));
+        await databases.RenameDatabaseAsync(databaseId, name, emoji, performedBy, cancellationToken);
+    }
+
     public async Task<KanbanBoard?> GetBoardAsync(Guid databaseId, CancellationToken cancellationToken = default)
     {
         var database = await databases.GetDatabaseAsync(databaseId, cancellationToken);

@@ -62,6 +62,27 @@ public sealed class KanbanBoardServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task RenameBoard_ShouldRenameItsDatabase_AndRefuseABlankName()
+    {
+        var id = await _boards.CreateBoardAsync("Website relaunch", "personal", "grant");
+
+        await _boards.RenameBoardAsync(id, "  Launch week  ", " 🚀 ", "grant");
+
+        var board = (await _boards.GetBoardAsync(id))!;
+        board.Title.Should().Be("Launch week");
+        board.Icon.Should().Be("🚀");
+        (await _databases.GetDatabaseAsync(id))!.Title.Should().Be("Launch week", "the board is its Sentinel database");
+        (await _boards.ListBoardsAsync()).Single(summary => summary.DatabaseId == id).Title.Should().Be("Launch week");
+
+        await _boards.RenameBoardAsync(id, "Launch week", "", "grant");
+        (await _boards.GetBoardAsync(id))!.Icon.Should().BeNull("a blank icon goes back to the default");
+        await FluentActions.Awaiting(() => _boards.RenameBoardAsync(id, "   ", null, "grant"))
+            .Should().ThrowAsync<ArgumentException>().WithMessage("Give the board a name*");
+        await FluentActions.Awaiting(() => _boards.RenameBoardAsync(Guid.NewGuid(), "Gone", null, "grant"))
+            .Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    [Fact]
     public async Task AddCard_ShouldGoToTheTopOfItsColumn_WithTheBoardsId()
     {
         var id = await _boards.CreateBoardAsync("Website relaunch", "personal", "grant");

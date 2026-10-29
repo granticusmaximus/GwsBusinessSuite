@@ -91,3 +91,51 @@
     border-radius: inherit;
     background: var(--gws-status-success-fill);
 }
+
+/* Rename from the list: a pencil in the tile's corner (beside the link, not inside it). */
+.boards-tile-wrap {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+.boards-tile-wrap > .boards-tile {
+    flex: 1;
+}
+
+.boards-tile-rename {
+    position: absolute;
+    top: var(--gws-step-2);
+    right: var(--gws-step-2);
+    z-index: 1;
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    color: var(--gws-text-soft);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    opacity: 0;
+    transition: opacity .12s ease;
+}
+
+.boards-tile-wrap:hover .boards-tile-rename,
+.boards-tile-rename:focus-visible {
+    opacity: 1;
+}
+
+.boards-tile-rename:hover {
+    color: var(--gws-text-strong);
+    background: var(--gws-panel-bg-2);
+    border-color: var(--gws-panel-border);
+}
+
+@media (hover: none) {
+    .boards-tile-rename { opacity: 1; }
+}
+
+.boards-tile-renaming {
+    gap: var(--gws-step-2);
+}

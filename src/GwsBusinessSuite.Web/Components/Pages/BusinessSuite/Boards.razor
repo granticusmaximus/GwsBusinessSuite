@@ -72,6 +72,22 @@ else
     <div class="boards-grid">
         @foreach (var board in _boards)
         {
+            @if (_renamingId == board.DatabaseId)
+            {
+                <div class="boards-tile boards-tile-renaming">
+                    <KanbanRenameForm Title="@board.Title" Icon="@board.Icon" IdPrefix="@($"rename-{board.DatabaseId:N}")"
+                                      OnSave="rename => RenameAsync(board.DatabaseId, rename)" OnCancel="() => _renamingId = null" />
+                    @if (_renameError is not null)
+                    {
+                        <span class="boards-tile-meta text-danger">@_renameError</span>
+                    }
+                </div>
+            }
+            else
+            {
+            <div class="boards-tile-wrap">
+            <button type="button" class="boards-tile-rename" title="Rename board" aria-label="@($"Rename {board.Title}")"
+                    @onclick="() => StartRename(board.DatabaseId)"><i class="bi bi-pencil" aria-hidden="true"></i></button>
             <a class="boards-tile" href="admin/boards/@board.DatabaseId">
                 <span class="boards-tile-icon" aria-hidden="true">@(string.IsNullOrWhiteSpace(board.Icon) ? "🗂️" : board.Icon)</span>
                 <span class="boards-tile-title">@board.Title</span>
@@ -84,6 +100,8 @@ else
                     </span>
                 }
             </a>
+            </div>
+            }
         }
     </div>
 }
@@ -95,6 +113,8 @@ else
     private string _templateKey = KanbanTemplates.All[0].Key;
     private string _title = string.Empty;
     private string? _error;
+    private Guid? _renamingId;
+    private string? _renameError;
 
     // ⌘K's "New board" arrives as ?new=1.
     [SupplyParameterFromQuery(Name = "new")] public string? NewQuery { get; set; }
@@ -111,6 +131,26 @@ else
             Logger.LogError(ex, "Listing boards failed.");
             _error = "Couldn't load your boards. " + ex.Message;
             _boards = [];
+        }
+    }
+
+    private void StartRename(Guid databaseId)
+    {
+        _renamingId = databaseId;
+        _renameError = null;
+    }
+
+    private async Task RenameAsync(Guid databaseId, (string Title, string? Icon) rename)
+    {
+        try
+        {
+            await BoardService.RenameBoardAsync(databaseId, rename.Title, rename.Icon, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            _boards = await BoardService.ListBoardsAsync();
+            _renamingId = null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            _renameError = ex.Message;
         }
     }
 

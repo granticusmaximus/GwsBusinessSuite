@@ -39,8 +39,19 @@ else
     <div class="kb @RootClass" style="@RootStyle" @ref="_root" data-gws-no-shortcuts>
         <header class="kb-header">
             <a class="kb-back" href="admin/boards" title="All boards"><i class="bi bi-arrow-left" aria-hidden="true"></i><span class="visually-hidden">All boards</span></a>
-            <span class="kb-icon" aria-hidden="true">@(string.IsNullOrWhiteSpace(_board.Icon) ? "🗂️" : _board.Icon)</span>
-            <h1 class="kb-title">@_board.Title</h1>
+            @if (_renaming)
+            {
+                <KanbanRenameForm Title="@_board.Title" Icon="@_board.Icon" OnSave="RenameAsync" OnCancel="() => _renaming = false" />
+            }
+            else
+            {
+                <span class="kb-icon" aria-hidden="true">@(string.IsNullOrWhiteSpace(_board.Icon) ? "🗂️" : _board.Icon)</span>
+                <h1 class="kb-title">
+                    <button type="button" class="kb-title-button" title="Rename board" @onclick="StartRename">
+                        @_board.Title<i class="bi bi-pencil kb-title-pencil" aria-hidden="true"></i>
+                    </button>
+                </h1>
+            }
             <span class="kb-summary">@OpenCount open · @TotalCount @(TotalCount == 1 ? "card" : "cards")</span>
             @* Live (K6): changes saved anywhere else show here within a moment. *@
             <span class="kb-live @(_liveNote is null ? "" : "is-fresh")" title="Live: changes made anywhere else appear here as they happen" role="status">
@@ -73,6 +84,7 @@ else
                     @if (_showMore)
                     {
                         <div class="kb-more-menu" role="menu">
+                            <button type="button" role="menuitem" @onclick="StartRename"><i class="bi bi-pencil" aria-hidden="true"></i><span><strong>Rename board</strong><small>Its name and icon</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenAssistant"><i class="bi bi-stars" aria-hidden="true"></i><span><strong>Ask SentinelGPT</strong><small>Standup and stuck work</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenBoardAutomations"><i class="bi bi-magic" aria-hidden="true"></i><span><strong>Automate</strong><small>Rules, templates and repeats</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenRoadmap"><i class="bi bi-broadcast" aria-hidden="true"></i><span><strong>Public roadmap</strong><small>@(_board.Settings?.Roadmap is null ? "Share it read-only, with votes" : "Live - copy the link or change it")</small></span></button>
@@ -404,6 +416,7 @@ else
     private int _settingsKey;
     private string? _menuKey;
     private string _me = string.Empty;
+    private bool _renaming;
     private BoardFilters _filters = BoardFilters.None;
     private readonly HashSet<string> _collapsedLanes = [];
     private int _bulkKey;
@@ -477,6 +490,27 @@ else
     }
 
     // After a change anywhere: the board, and the open card's fresh row.
+    private void StartRename()
+    {
+        _showMore = false;
+        _renaming = true;
+    }
+
+    private async Task RenameAsync((string Title, string? Icon) rename)
+    {
+        try
+        {
+            await BoardService.RenameBoardAsync(DatabaseId, rename.Title, rename.Icon, _me);
+            _renaming = false;
+            await RefreshAsync();
+            Toasts.Show("Board renamed.", tone: StatusTone.Success);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            Toasts.Show($"Couldn't rename it. {ex.Message}", tone: StatusTone.Danger);
+        }
+    }
+
     private async Task RefreshAsync()
     {
         await LoadAsync();

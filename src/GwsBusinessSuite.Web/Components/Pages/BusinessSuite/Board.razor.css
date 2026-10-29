@@ -29,6 +29,11 @@
 .kb-back:hover { color: var(--gws-text-strong); background: var(--gws-panel-bg); }
 .kb-icon { font-size: 1.5rem; line-height: 1; }
 .kb-title { margin: 0; font-size: 1.375rem; font-weight: 750; color: var(--gws-text-strong); }
+/* The name renames the board when clicked; the pencil shows on hover (always on touch screens). */
+.kb-title-button { display: inline-flex; align-items: center; gap: .45rem; padding: 0; border: 0; border-radius: 6px; background: none; color: inherit; font: inherit; text-align: left; cursor: text; }
+.kb-title-pencil { font-size: .8125rem; color: var(--gws-text-soft); opacity: 0; transition: opacity .12s ease; }
+.kb-title-button:hover .kb-title-pencil, .kb-title-button:focus-visible .kb-title-pencil { opacity: 1; }
+@media (hover: none) { .kb-title-pencil { opacity: .7; } }
 .kb-summary { font-size: .8125rem; color: var(--gws-text-soft); font-variant-numeric: tabular-nums; }
 .kb-tools { display: flex; align-items: center; gap: var(--gws-step-2); margin-inline-start: auto; }
 .kb-more { position: relative; }

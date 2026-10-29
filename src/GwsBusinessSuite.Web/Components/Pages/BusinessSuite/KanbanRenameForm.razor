@@ -1,0 +1,53 @@
+@* Renames a board: its emoji and its name. Enter saves, Esc cancels. Used on the board's own
+   header and on its tile in the board list. *@
+<form class="kb-rename @CssClass" @onsubmit="SaveAsync" @onsubmit:preventDefault @onkeydown="OnKeyDown">
+    <label class="visually-hidden" for="@($"{IdPrefix}-icon")">Board icon (an emoji)</label>
+    <input id="@($"{IdPrefix}-icon")" class="form-control form-control-sm kb-rename-icon" maxlength="16" placeholder="🗂️"
+           autocomplete="off" @bind="_icon" @bind:event="oninput" />
+    <label class="visually-hidden" for="@($"{IdPrefix}-title")">Board name</label>
+    <input id="@($"{IdPrefix}-title")" @ref="_titleInput" class="form-control form-control-sm kb-rename-title" maxlength="120"
+           autocomplete="off" @bind="_title" @bind:event="oninput" />
+    <button type="submit" class="btn btn-sm btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_title))">Save</button>
+    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => OnCancel.InvokeAsync()">Cancel</button>
+</form>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string? Icon { get; set; }
+    [Parameter, EditorRequired] public EventCallback<(string Title, string? Icon)> OnSave { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public string IdPrefix { get; set; } = "kb-rename";
+    [Parameter] public string? CssClass { get; set; }
+
+    private ElementReference _titleInput;
+    private string _title = string.Empty;
+    private string? _icon;
+    private bool _busy;
+
+    protected override void OnInitialized()
+    {
+        _title = Title;
+        _icon = Icon;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await _titleInput.FocusAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy || string.IsNullOrWhiteSpace(_title)) return;
+        _busy = true;
+        try
+        {
+            await OnSave.InvokeAsync((_title, _icon));
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private Task OnKeyDown(KeyboardEventArgs e) => e.Key == "Escape" ? OnCancel.InvokeAsync() : Task.CompletedTask;
+}

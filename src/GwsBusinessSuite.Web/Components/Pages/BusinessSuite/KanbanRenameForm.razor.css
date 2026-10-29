@@ -1,0 +1,18 @@
+.kb-rename {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--gws-step-2);
+    min-width: 0;
+}
+
+.kb-rename-icon {
+    width: 3.25rem;
+    text-align: center;
+}
+
+.kb-rename-title {
+    flex: 1 1 12rem;
+    width: min(22rem, 100%);
+    font-weight: 650;
+}
