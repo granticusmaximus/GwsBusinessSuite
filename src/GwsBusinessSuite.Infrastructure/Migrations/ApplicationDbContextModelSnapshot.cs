@@ -1939,6 +1939,9 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("Quiet")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTimeOffset?>("ReadAt")
                         .HasColumnType("TEXT");
 

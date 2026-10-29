@@ -13,7 +13,7 @@ using MimeKit;
 namespace GwsBusinessSuite.Infrastructure.Services;
 
 // Board notifications (Boards K9b). A sweep every few minutes compares each board with what's
-// already been said: a person newly assigned to a card (not by themselves), and the assignees of
+// already been said: a person newly assigned to a card they didn't make, and the assignees of
 // an open card due tomorrow or overdue. Each is said once (BoardNotification's unique key), and
 // unassigning someone clears their "assigned" note so a later reassignment says it again.
 // Every call opens its own context (the factory): the bell calls it from a layout island, which
@@ -36,7 +36,10 @@ public sealed class BoardNotificationService(
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         var zone = timeProvider.LocalTimeZone;
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, zone).DateTime);
-        var users = (await db.AppUsers.AsNoTracking().Where(user => user.IsActive).Select(user => user.Username).ToListAsync(cancellationToken))
+        // Only people who can open boards: Admins (K9g adds people a board is shared with), so a
+        // notification never leads to "Access Denied".
+        var users = (await db.AppUsers.AsNoTracking().Where(user => user.IsActive && user.Role == AppRoles.Admin)
+                .Select(user => user.Username).ToListAsync(cancellationToken))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var said = await db.BoardNotifications.ToListAsync(cancellationToken);
         // Due-date notes go after 90 days (a card still overdue then says so once more);
@@ -56,11 +59,13 @@ public sealed class BoardNotificationService(
             var settings = board.Settings ?? KanbanSettings.Default;
             // The first look at a board records what's already there without telling anyone.
             var quiet = settings.NotificationsSince is null;
-            var editors = (await db.WikiDatabaseRows.AsNoTracking()
+            // Who made each card. (Not who last edited it: adding or moving a card renumbers the
+            // whole column, which stamps every card in it with that person.)
+            var creators = (await db.WikiDatabaseRows.AsNoTracking()
                     .Where(row => row.WikiDatabaseId == board.DatabaseId)
-                    .Select(row => new { row.Id, Editor = row.UpdatedBy ?? row.CreatedBy })
+                    .Select(row => new { row.Id, row.CreatedBy })
                     .ToListAsync(cancellationToken))
-                .ToDictionary(row => row.Id, row => row.Editor);
+                .ToDictionary(row => row.Id, row => row.CreatedBy);
 
             foreach (var column in board.Columns)
             foreach (var card in column.Cards)
@@ -70,8 +75,8 @@ public sealed class BoardNotificationService(
 
                 foreach (var person in assignees)
                 {
-                    // Assigning yourself is no news.
-                    var self = string.Equals(editors.GetValueOrDefault(card.RowId), person, StringComparison.OrdinalIgnoreCase);
+                    // A card you made yourself (a quick add with @me, say) is no news.
+                    var self = string.Equals(creators.GetValueOrDefault(card.RowId), person, StringComparison.OrdinalIgnoreCase);
                     if (Add(person, card.RowId, BoardNotificationKinds.Assigned, BoardNotificationKinds.Assigned, $"{name} was assigned to you.", quiet || self))
                         made++;
                 }
@@ -100,8 +105,9 @@ public sealed class BoardNotificationService(
                     {
                         Username = person, WikiDatabaseId = board.DatabaseId, RowId = rowId, Kind = noteKind, Key = key,
                         Message = $"{board.Title}: {message}", CreatedAt = now, CreatedBy = "board-notifications",
-                        // Recorded but not shown: the first look at a board, or your own assignment.
-                        ReadAt = silent ? now : null
+                        // Recorded but not shown: the first look at a board, or a card you made.
+                        ReadAt = silent ? now : null,
+                        Quiet = silent
                     };
                     db.BoardNotifications.Add(note);
                     said.Add(note);
@@ -126,10 +132,9 @@ public sealed class BoardNotificationService(
         var since = timeProvider.GetUtcNow().AddDays(-ListDays);
         var notes = await db.BoardNotifications.AsNoTracking().Where(note => note.Username == username).ToListAsync(cancellationToken);
         var titles = await db.WikiDatabases.AsNoTracking().Select(database => new { database.Id, database.Title }).ToDictionaryAsync(d => d.Id, d => d.Title, cancellationToken);
-        // SQLite can't compare DateTimeOffset, so the window and order are applied here. Quietly
-        // recorded ones (read the moment they were made) aren't news.
+        // SQLite can't compare DateTimeOffset, so the window and order are applied here.
         return notes
-            .Where(note => note.CreatedAt >= since && note.ReadAt != note.CreatedAt)
+            .Where(note => note.CreatedAt >= since && !note.Quiet)
             .OrderByDescending(note => note.CreatedAt)
             .Take(50)
             .Select(note => new BoardNotificationView(note.Id, note.WikiDatabaseId, note.RowId, note.Kind,

@@ -315,6 +315,9 @@ public sealed class BoardNotification : AuditableEntity
     public required string Message { get; set; }
     public DateTimeOffset? ReadAt { get; set; }
     public DateTimeOffset? EmailedAt { get; set; }
+    // Recorded so it isn't said later, but never shown: what a board already had on its first
+    // look, and cards a person made for themselves.
+    public bool Quiet { get; set; }
 }
 
 public static class BoardNotificationKinds
