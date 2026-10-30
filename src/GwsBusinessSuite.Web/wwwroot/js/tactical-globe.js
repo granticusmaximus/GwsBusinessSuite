@@ -3437,6 +3437,30 @@ window.tacticalGlobe = (function () {
         return div.innerHTML;
     }
 
+    // Resolves true once the globe has drawn the tiles in view, so Overwatch's boot screen lifts
+    // then instead of after a fixed wait (30-10-26); false if that took longer than maxMs. Before
+    // the first frame no tiles are queued yet, so "loaded" only counts after some were loading.
+    function whenDrawn(containerId, maxMs) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return Promise.resolve(false);
+        const globe = entry.viewer.scene.globe;
+        return new Promise(resolve => {
+            let sawLoading = false;
+            let removeListener = null;
+            const timer = setTimeout(() => finish(false), maxMs);
+            function finish(drawn) {
+                clearTimeout(timer);
+                if (removeListener) removeListener();
+                resolve(drawn);
+            }
+            removeListener = globe.tileLoadProgressEvent.addEventListener(queued => {
+                if (queued > 0) sawLoading = true;
+                else if (sawLoading && globe.tilesLoaded) finish(true);
+            });
+            entry.viewer.scene.requestRender();
+        });
+    }
+
     function dispose(containerId) {
         closeStreamPanel();
         closeIncidentPanel();
@@ -3542,6 +3566,7 @@ window.tacticalGlobe = (function () {
         clearCoverageMarkers: clearCoverageMarkers,
         setWeatherSnapshot: setWeatherSnapshot,
         dispose: dispose,
+        whenDrawn: whenDrawn,
         isCoverageBannerDismissed: isCoverageBannerDismissed,
         dismissCoverageBanner: dismissCoverageBanner
     };

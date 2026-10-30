@@ -45,6 +45,9 @@ public sealed record AgentActionItem(Guid Id, string Tool, string Summary, strin
 // A World News event due a summary, with the prompt to answer (WorldNewsSummaryRelay).
 public sealed record WorldNewsSummaryJob(string EventId, string Title, int ArticleCount, string SystemPrompt, string Prompt);
 
+// A World News headline waiting for its embedding (WorldNewsEmbedRelay).
+public sealed record WorldNewsEmbedJob(string Id, string Title);
+
 public sealed class NativeSessionClient(HttpClient httpClient)
 {
     private const string SignInFirst = "Sign in on the Workspace tab first - this uses that session.";
@@ -100,6 +103,28 @@ public sealed class NativeSessionClient(HttpClient httpClient)
     {
         var (json, error) = await PostAsync("/admin/api/native/world-news/summaries",
             new { eventId = job.EventId, model, answer, articleCount = job.ArticleCount }, cancellationToken);
+        return json is null ? error : null;
+    }
+
+    // World News headlines this Mac embeds, and the model the server groups them with. No headlines
+    // unless one of models (what this Mac has installed) is that model.
+    public async Task<(string? Model, IReadOnlyList<WorldNewsEmbedJob>? Jobs, string? Error)> GetWorldNewsEmbedJobsAsync(
+        IEnumerable<string> models, int limit, CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await GetJsonAsync(
+            $"/admin/api/native/world-news/embed-jobs?limit={limit}&models={Uri.EscapeDataString(string.Join(',', models))}", cancellationToken);
+        if (json is not { ValueKind: JsonValueKind.Object } body) return (null, null, error ?? "The server sent something unexpected.");
+        return (body.GetProperty("model").GetString(), body.GetProperty("jobs").EnumerateArray()
+            .Select(item => new WorldNewsEmbedJob(item.GetProperty("id").GetString() ?? string.Empty, item.GetProperty("title").GetString() ?? string.Empty))
+            .ToList(), null);
+    }
+
+    // Null once the server has saved the embeddings, otherwise what went wrong.
+    public async Task<string?> SaveWorldNewsEmbeddingsAsync(string model, IReadOnlyList<(string Id, float[] Vector)> embeddings,
+        CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await PostAsync("/admin/api/native/world-news/embeddings",
+            new { model, items = embeddings.Select(embedding => new { id = embedding.Id, vector = embedding.Vector }) }, cancellationToken);
         return json is null ? error : null;
     }
 

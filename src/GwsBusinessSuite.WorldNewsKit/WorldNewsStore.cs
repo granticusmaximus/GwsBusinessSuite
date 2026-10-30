@@ -172,6 +172,37 @@ public sealed class WorldNewsStore
         transaction.Commit();
     }
 
+    // Embeddings from the Mac app (WorldNewsEmbedRelay): only for reports still waiting for one,
+    // so a report the server embedded or grouped meanwhile keeps what it has. Returns how many.
+    public int FillEmbeddings(IReadOnlyList<(string Id, float[] Vector)> embeddings)
+    {
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE articles SET embedding = $vector WHERE id = $id AND embedding IS NULL";
+        var id = command.Parameters.Add(new SqliteParameter { ParameterName = "$id" });
+        var vector = command.Parameters.Add(new SqliteParameter { ParameterName = "$vector" });
+        var filled = 0;
+        foreach (var (articleId, values) in embeddings)
+        {
+            id.Value = articleId;
+            vector.Value = ToBytes(values);
+            filled += command.ExecuteNonQuery();
+        }
+        transaction.Commit();
+        return filled;
+    }
+
+    // How many numbers the stored vectors have, from an event's (null before the first event), so
+    // vectors from a different model can be turned away.
+    public int? EmbeddingDimensions()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT length(vector_sum) / 4 FROM events LIMIT 1";
+        return command.ExecuteScalar() is long dimensions ? (int)dimensions : null;
+    }
+
     public IReadOnlyList<(WorldArticle Article, float[] Vector)> EmbeddedUnassigned()
     {
         using var connection = Open();
@@ -303,7 +334,10 @@ public sealed class WorldNewsStore
         }
         using (var assign = connection.CreateCommand())
         {
-            assign.CommandText = "UPDATE articles SET event_id = $event WHERE id = $id";
+            // A report's embedding only serves to group it; once it's in an event (whose own vector
+            // carries the meaning) it's dropped. Embeddings were ~1.3 GB of the droplet's 2 GB of
+            // reports (30-10-26). Empty, not NULL: NULL means "still to embed".
+            assign.CommandText = "UPDATE articles SET event_id = $event, embedding = X'' WHERE id = $id";
             var id = assign.Parameters.Add(new SqliteParameter { ParameterName = "$id" });
             var eventId = assign.Parameters.Add(new SqliteParameter { ParameterName = "$event" });
             foreach (var (articleId, target) in result.Assignments)
@@ -867,6 +901,45 @@ public sealed class WorldNewsStore
     }
 
     // Reports and events older than the cutoff go; the database only holds what can still matter.
+    // The one-time catch-up for reports grouped before embeddings were dropped on grouping: a
+    // batch of rowids at a time, so the reader's own writes only ever wait a moment.
+    public int ReleaseGroupedEmbeddings(int batchSize = 2_000, Action? betweenBatches = null)
+    {
+        using var connection = Open();
+        long last;
+        using (var max = connection.CreateCommand())
+        {
+            max.CommandText = "SELECT COALESCE(MAX(rowid), 0) FROM articles";
+            last = (long)max.ExecuteScalar()!;
+        }
+
+        var released = 0;
+        using var command = connection.CreateCommand();
+        command.CommandText = "UPDATE articles SET embedding = X'' WHERE rowid > $from AND rowid <= $to AND event_id IS NOT NULL AND length(embedding) > 0";
+        var from = command.Parameters.Add(new SqliteParameter { ParameterName = "$from" });
+        var to = command.Parameters.Add(new SqliteParameter { ParameterName = "$to" });
+        for (long start = 0; start < last; start += batchSize)
+        {
+            from.Value = start;
+            to.Value = start + batchSize;
+            released += command.ExecuteNonQuery();
+            betweenBatches?.Invoke();
+        }
+        return released;
+    }
+
+    // Gives the space back after ReleaseGroupedEmbeddings: a row that shrank leaves a half-empty
+    // page rather than a free one, so only rewriting the file packs them again. Minutes on the
+    // droplet, so it's for a quiet background moment.
+    public void Compact()
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandTimeout = 0;
+        command.CommandText = "VACUUM; PRAGMA wal_checkpoint(TRUNCATE);";
+        command.ExecuteNonQuery();
+    }
+
     public void Prune(DateTimeOffset before)
     {
         using var connection = Open();

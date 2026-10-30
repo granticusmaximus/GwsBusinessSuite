@@ -27,6 +27,9 @@ public sealed record WorldNewsOptions
     // Caps one cycle's embedding work, so a backlog (the first read is about 6,000 reports) is
     // spread over several cycles instead of holding a small server's CPU for minutes.
     public int MaxEmbedPerCycle { get; init; } = int.MaxValue;
+    // True while the Mac app is embedding the headlines with the same model (30-10-26,
+    // WorldNewsEmbedRelay): a read then leaves embedding to it and groups what has arrived.
+    public Func<bool>? EmbedElsewhere { get; init; }
 }
 
 public sealed record CycleReport(int Fetched, int Added, int Embedded, int NewEvents, int UpdatedEvents, int MergedEvents, IReadOnlyList<string> Notes,
@@ -104,7 +107,7 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         {
             IReadOnlyList<WorldArticle> batch;
             var embedSince = time.GetUtcNow() - options.EventWindow;
-            while (embedded < options.MaxEmbedPerCycle
+            while (options.EmbedElsewhere?.Invoke() != true && embedded < options.MaxEmbedPerCycle
                    && (batch = store.RecentArticlesToEmbed(Math.Min(options.EmbedBatchSize, options.MaxEmbedPerCycle - embedded), embedSince)).Count > 0)
             {
                 IReadOnlyList<float[]> vectors;
@@ -126,6 +129,17 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
             notes.Add($"Local Ollama couldn't embed reports ({options.EmbeddingModel}): {ex.Message}");
         }
 
+        var grouped = Group();
+        store.Prune(time.GetUtcNow() - options.KeepFor);
+
+        return new CycleReport(fetched, added, embedded, grouped.Clustering.Created, grouped.Clustering.Touched.Count - grouped.Clustering.Created,
+            grouped.Merged, notes, grouped.Linked);
+    }
+
+    // Groups the embedded reports not yet in an event, merges twin events and places events in
+    // situations. Part of every read, and run on its own when the Mac app sends embeddings.
+    public (ClusterResult Clustering, int Merged, int Linked) Group()
+    {
         var now = time.GetUtcNow();
         var since = now - options.EventWindow;
         var events = store.ActiveEvents(since);
@@ -140,9 +154,6 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         var links = SituationLinker.Link(store.EventsToLink(situationSince, SituationLinker.MinArticles),
             store.ActiveSituations(situationSince), options.SituationThreshold, options.SituationWindow, () => Guid.NewGuid().ToString("N"));
         store.SaveLinks(links);
-        store.Prune(now - options.KeepFor);
-
-        return new CycleReport(fetched, added, embedded, clustering.Created, clustering.Touched.Count - clustering.Created, merges.Count, notes,
-            links.Count);
+        return (clustering, merges.Count, links.Count);
     }
 }

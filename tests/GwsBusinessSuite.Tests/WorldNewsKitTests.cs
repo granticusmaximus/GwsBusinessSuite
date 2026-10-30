@@ -280,6 +280,63 @@ public sealed class WorldNewsKitTests : IDisposable
         store.TopEvents(Now.AddDays(-1), 5).Should().ContainSingle().Which.OutletCount.Should().Be(3);
     }
 
+    [Fact]
+    public void Store_ShouldDropAReportsEmbeddingOnceItsGrouped_WithoutAskingForItAgain()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var reports = Reports("flood", 3);
+        store.AddArticles(reports);
+        store.SaveEmbeddings(reports.Select(r => (r.Id, new[] { 1f, 0f })).ToList());
+        store.EmbeddedUnassigned().Should().HaveCount(3);
+
+        store.SaveClustering(new ClusterResult(reports.Select(r => (r.Id, "flood")).ToList(), [Event("flood", reports[0].Title, [1f, 0f], 3)], 1));
+
+        store.EmbeddedUnassigned().Should().BeEmpty();
+        store.RecentArticlesToEmbed(10, Now.AddDays(-1)).Should().BeEmpty("an emptied embedding isn't one still to make");
+        EmbeddingBytes().Should().Be(0, "the event's own vector carries the meaning now");
+    }
+
+    [Fact]
+    public void Store_ShouldDropEmbeddingsGroupedBeforeThat_AndCompactTheFile()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        SeedEvent(store, "big", Reports("big", 300));
+        Execute("UPDATE articles SET embedding = randomblob(3072)"); // as reports were kept before 30-10-26
+        var waits = 0;
+
+        store.ReleaseGroupedEmbeddings(batchSize: 50, betweenBatches: () => waits++).Should().Be(300);
+
+        waits.Should().BeGreaterThan(1, "it goes in batches so the reader's writes aren't held up");
+        EmbeddingBytes().Should().Be(0);
+        store.ReleaseGroupedEmbeddings().Should().Be(0, "a later start has nothing to do");
+        var before = DiskBytes();
+        store.Compact();
+        DiskBytes().Should().BeLessThan(before / 2, "the emptied rows are packed together again");
+        store.TopEvents(Now.AddDays(-1), 5).Should().ContainSingle().Which.ArticleCount.Should().Be(300);
+    }
+
+    // The file and its write-ahead log, where recent writes sit until a checkpoint.
+    private long DiskBytes() =>
+        new FileInfo(_dbPath).Length + (File.Exists(_dbPath + "-wal") ? new FileInfo(_dbPath + "-wal").Length : 0);
+
+    private long EmbeddingBytes()
+    {
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath};Pooling=False");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COALESCE(SUM(length(embedding)), 0) FROM articles";
+        return (long)command.ExecuteScalar()!;
+    }
+
+    private void Execute(string sql)
+    {
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath};Pooling=False");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
+    }
+
     private IReadOnlyList<string> ArticleIndexes()
     {
         using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath};Pooling=False");

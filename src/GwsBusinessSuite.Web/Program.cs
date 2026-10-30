@@ -1355,6 +1355,32 @@ app.MapPost("/admin/api/native/world-news/summaries", (NativeWorldNewsSummary re
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");
 
+// World News headlines embedded on the Mac (30-10-26): the droplet's steadiest Ollama load. The app
+// says which models it has; only with the server's own embedding model does it get headlines (and
+// the server stand aside), then it sends each one's vector back to be grouped.
+app.MapGet("/admin/api/native/world-news/embed-jobs", (HttpContext httpContext, GwsBusinessSuite.Infrastructure.Services.WorldNewsService news, string? models, int? limit) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    var installed = (models ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var (model, jobs) = news.EmbedJobsForRelay(installed, limit ?? 64);
+    return Results.Json(new { model, jobs = jobs.Select(job => new { id = job.Id, title = job.Title }) });
+})
+    .RequireAuthorization("AdminOnly");
+
+app.MapPost("/admin/api/native/world-news/embeddings", async (NativeWorldNewsEmbeddings request, HttpContext httpContext, GwsBusinessSuite.Infrastructure.Services.WorldNewsService news) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    if (string.IsNullOrWhiteSpace(request.Model) || request.Items is not { Count: > 0 } items
+        || items.Count > GwsBusinessSuite.Infrastructure.Services.WorldNewsService.MaxEmbedJobs || items.Any(item => string.IsNullOrWhiteSpace(item.Id)))
+        return Results.BadRequest(new { error = "Send the model and up to 128 headline embeddings." });
+    var error = await Task.Run(() => news.SaveRelayEmbeddings(request.Model, items.Select(item => (item.Id, item.Vector)).ToList()));
+    return error is null ? Results.Json(new { saved = true }) : Results.BadRequest(new { error });
+})
+    .RequireAuthorization("AdminOnly")
+    .RequireRateLimiting("admin-mutation");
+
 // SentinelGPT's agent on the person's Mac (30-10-26): the Mac app's relay long-polls here for model
 // calls from turns started in a browser with no local model, answers each with its own Ollama and
 // posts the reply. Only calls for the signed-in person are handed out (SentinelAgentRelay).
@@ -5307,6 +5333,8 @@ record NativeLockChallengeRequest(Guid KeyId);
 record NativeLockUnlockRequest(Guid KeyId, string? Signature);
 record NativeQuickNoteRequest(string? Title, string? Markdown, bool? DailyNote = null, Guid? ContactId = null, Guid? BookingId = null);
 record NativeWorldNewsSummary(string? EventId, string? Model, string? Answer, int ArticleCount);
+record NativeWorldNewsEmbeddings(string? Model, List<NativeWorldNewsEmbedding>? Items);
+record NativeWorldNewsEmbedding(string Id, float[] Vector);
 // The Mac's answer to one relayed agent model call: Ollama's /api/chat body, or what went wrong.
 record NativeAgentChatReply(string? Body, string? Error);
 record NativeAgentTurnRequest(Guid ConversationId, string? Message, string? Model);

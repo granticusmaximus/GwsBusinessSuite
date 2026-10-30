@@ -217,6 +217,19 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         }
         """);
 
+    // Overwatch's boot screen lifts on this (30-10-26) instead of after a fixed 1.8 s.
+    [Fact]
+    public async Task WhenDrawn_ShouldResolveOnceTheFirstTilesAreIn_AndAtOnceForAMissingGlobe()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await page.EvaluateAsync<bool>("() => window.tacticalGlobe.whenDrawn('nowhere', 5000)")).Should().BeFalse("there's no globe there to wait for");
+
+        (await InitAsync(page)).Should().BeNull();
+
+        (await page.EvaluateAsync<bool>("() => window.tacticalGlobe.whenDrawn('tg-viewport', 60000)")).Should().BeTrue();
+    }
+
     [Fact]
     public async Task StreetView_DraggingThePersonOntoTheGlobe_ShouldReportWhereItLanded_AndMarkIt()
     {

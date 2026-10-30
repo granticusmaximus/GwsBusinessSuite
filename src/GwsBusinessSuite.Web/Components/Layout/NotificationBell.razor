@@ -508,7 +508,8 @@
         Close();
         // Overwatch loads its globe script from the page itself, which only runs on a full page
         // load (the sidebar link sets data-enhance-nav="false" for the same reason) - an in-app
-        // navigation would leave tacticalGlobe undefined and crash the circuit.
+        // navigation would leave tacticalGlobe undefined and crash the circuit. It also needs
+        // its own CSP ('unsafe-eval' for Cesium), which only a full load of /admin/osint gets.
         Navigation.NavigateTo(item.NavigateTo, forceLoad: item.Kind == "overwatch");
     }
 

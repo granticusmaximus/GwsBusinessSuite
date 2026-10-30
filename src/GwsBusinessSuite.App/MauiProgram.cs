@@ -79,6 +79,8 @@ public static class MauiProgram
 		builder.Services.AddSingleton<OfflineSyncService>();
 		// World News summaries with this Mac's local model (gemma4), sent to the server.
 		builder.Services.AddSingleton<WorldNewsSummaryRelay>();
+		// World News headlines embedded with this Mac's embeddinggemma, so the droplet needn't.
+		builder.Services.AddSingleton<WorldNewsEmbedRelay>();
 		// SentinelGPT's agent: lets a browser on another computer think with this Mac's model.
 		builder.Services.AddSingleton<SentinelAgentMacRelay>();
 		// Page lock / sign in with Touch ID.

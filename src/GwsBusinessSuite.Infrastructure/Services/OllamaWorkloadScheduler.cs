@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace GwsBusinessSuite.Infrastructure.Services;
 
 public enum OllamaWorkloadPriority
@@ -11,8 +13,10 @@ public enum OllamaWorkloadPriority
 /// scheduled work. This mirrors the production Ollama one-request limit inside the app,
 /// where workload intent is known, instead of relying on Ollama's FIFO queue.
 /// </summary>
-public sealed class OllamaWorkloadScheduler(TimeProvider? time = null)
+public sealed class OllamaWorkloadScheduler(TimeProvider? time = null, ILogger<OllamaWorkloadScheduler>? logger = null)
 {
+    // A wait longer than this is logged, so slowness can be put down to the queue or not (30-10-26).
+    private static readonly TimeSpan LoggedWait = TimeSpan.FromSeconds(2);
     private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly object _gate = new();
     private readonly LinkedList<Waiter> _interactiveWaiters = [];
@@ -104,11 +108,12 @@ public sealed class OllamaWorkloadScheduler(TimeProvider? time = null)
         // may still link its token (a cancelled source without a timer needs no disposal).
         arrived?.Cancel();
 
-        return new ValueTask<IAsyncDisposable>(WaitForLeaseAsync(waiter, cancellationToken));
+        return new ValueTask<IAsyncDisposable>(WaitForLeaseAsync(waiter, priority, cancellationToken));
     }
 
-    private async Task<IAsyncDisposable> WaitForLeaseAsync(Waiter waiter, CancellationToken cancellationToken)
+    private async Task<IAsyncDisposable> WaitForLeaseAsync(Waiter waiter, OllamaWorkloadPriority priority, CancellationToken cancellationToken)
     {
+        var queued = _time.GetTimestamp();
         using var registration = cancellationToken.Register(
             static state =>
             {
@@ -116,7 +121,11 @@ public sealed class OllamaWorkloadScheduler(TimeProvider? time = null)
                 cancellation.Scheduler.Cancel(cancellation.Waiter, cancellation.Token);
             },
             new CancellationState(this, waiter, cancellationToken));
-        return await waiter.Completion.Task.ConfigureAwait(false);
+        var lease = await waiter.Completion.Task.ConfigureAwait(false);
+        var waited = _time.GetElapsedTime(queued);
+        if (waited >= LoggedWait)
+            logger?.LogInformation("An {Priority} Ollama request waited {Seconds:N1} s for its turn", priority.ToString().ToLowerInvariant(), waited.TotalSeconds);
+        return lease;
     }
 
     private void Cancel(Waiter waiter, CancellationToken cancellationToken)

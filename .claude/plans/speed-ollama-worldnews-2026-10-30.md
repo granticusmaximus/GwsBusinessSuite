@@ -42,6 +42,16 @@ hand every time he opened the app.
   SURGING marker pulses (browser test counts drawn frames).
 
 ## Next
-- [ ] Timing logs for globe moves and Ollama queue waits.
+- [x] Timing logs (30-10-26): Overwatch "ready N ms after its first render", World News "{list} built in N ms", and Ollama requests that waited 2 s or more for their turn. Globe moves aren't timed.
+- [x] World News speed (30-10-26):
+  - lists served from memory and rebuilt in the background
+  - covering index
+  - embeddings dropped once grouped, plus a one-time compaction
+  - embedding done on the Mac (WorldNewsEmbedRelay) while it has embeddinggemma
+- [x] Overwatch (30-10-26):
+  - the boot screen lifts when the first tiles are drawn (at most 2 s after the globe starts), not after a fixed 1.8 s
+  - notes load alongside globe init
+  - Cesium is prefetched while the portal is idle
+  - It stays a full page load: Cesium needs 'unsafe-eval', which only /admin/osint's own CSP allows.
 - [ ] After deploy: re-check the droplet (docker stats during a read) to confirm the app keeps a core.
 - [ ] Boards K9g (sharing) is paused, nothing written.

@@ -55,8 +55,8 @@
 
 
 
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+@* Share Tech Mono comes with the layout's fonts. Cesium is usually in the browser's cache already:
+   js/overwatch-prefetch.js fetches it while the rest of the portal is idle. *@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Widgets/widgets.css" />
 <link rel="stylesheet" href="/tactical-globe.css" />
 <script src="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Cesium.js"></script>
@@ -1348,6 +1348,11 @@
     private DotNetObjectReference<OverwatchGrid>? _dotNetRef;
     private List<CameraFeed> _visibleCameras = new();
     private bool _bootComplete;
+    // The longest the boot screen waits for the first tiles after the globe starts. It used to lift
+    // 1.8 s after the 3D cities and notes had loaded too, so this is never slower than that.
+    private const int BootWaitMs = 2000;
+    private System.Diagnostics.Stopwatch? _opening;
+    private long _globeStartedMs;
     private bool _hasAnyProviderConfigured = true;
     private bool _bannerDismissed;
     private bool _emptyHintDismissed;
@@ -1384,6 +1389,7 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender) _opening = System.Diagnostics.Stopwatch.StartNew();
         if (_streetSceneNeedsOpen && _streetScene is { } openScene)
         {
             _streetSceneNeedsOpen = false;
@@ -1398,6 +1404,8 @@
         }
 
         _dotNetRef = DotNetObjectReference.Create(this);
+        // From the database while the globe starts in the browser.
+        var notesLoading = MapNotes.ListAsync(_username);
         try
         {
             // A real incident: a Cesium API mismatch (OpenStreetMapImageryProvider.fromUrl,
@@ -1416,6 +1424,8 @@
             StateHasChanged();
             return;
         }
+        _globeStartedMs = _opening!.ElapsedMilliseconds;
+        _ = MarkBootCompleteAsync();
 
         if (IonToken is not null)
         {
@@ -1449,7 +1459,7 @@
             StateHasChanged();
         }
 
-        _notes = (await MapNotes.ListAsync(_username)).ToList();
+        _notes = (await notesLoading).ToList();
         if (NoteId is { } noteId)
         {
             if (await MapNotes.OpenAsync(_username, noteId, NoteKey) is { } linkedNote)
@@ -1497,8 +1507,6 @@
                 await JS.InvokeVoidAsync("tacticalGlobe.openWatchWallWithCameras", "tg-viewport", pins);
             }
         }
-
-        _ = MarkBootCompleteAsync();
     }
 
     private async Task DismissBannerAsync()
@@ -1507,11 +1515,28 @@
         await JS.InvokeVoidAsync("tacticalGlobe.dismissCoverageBanner");
     }
 
+    // The boot screen lifts once the globe has drawn what's in view, as soon as it's ready: it used
+    // to wait for everything after the globe started (3D cities, notes, linked items) and then a
+    // fixed 1.8 s more (30-10-26).
     private async Task MarkBootCompleteAsync()
     {
-        await Task.Delay(1800);
+        bool drawn;
+        try
+        {
+            drawn = await JS.InvokeAsync<bool>("tacticalGlobe.whenDrawn", "tg-viewport", BootWaitMs);
+        }
+        catch (JSDisconnectedException)
+        {
+            return;
+        }
+        catch (JSException)
+        {
+            drawn = false;
+        }
         _bootComplete = true;
-        StateHasChanged();
+        await InvokeAsync(StateHasChanged);
+        Logger.LogInformation("Overwatch ready {Total} ms after its first render: globe started at {Globe} ms, first view {Drawn}",
+            _opening?.ElapsedMilliseconds, _globeStartedMs, drawn ? "drawn" : $"not drawn within {BootWaitMs} ms");
     }
 
     // Called from tactical-globe.js's location search instead of a client-side fetch(): the

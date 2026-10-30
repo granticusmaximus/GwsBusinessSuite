@@ -57,6 +57,7 @@ public sealed class WorldNewsService : IDisposable
         _options = new WorldNewsOptions
         {
             MaxEmbedPerCycle = configuration.GetValue("WorldNews:MaxEmbedPerCycle", 1500),
+            EmbedElsewhere = () => EmbedRelayActive(DateTimeOffset.UtcNow),
             EmbedSlot = workloads is null ? null : ct => workloads.AcquireAsync(OllamaWorkloadPriority.Background, ct).AsTask()
         };
         _pipeline = new WorldNewsPipeline(Store, http, new GdeltDocClient(http, TimeProvider.System), _ollama, TimeProvider.System, _options);
@@ -85,9 +86,12 @@ public sealed class WorldNewsService : IDisposable
         LastRefreshed = Store.LastFetched(LastReadKey);
         if (LastRefreshed is not null) Status = string.Empty;
         void RebuildFailed(Exception ex) => _logger.LogWarning(ex, "Rebuilding a World News list failed");
-        _eventLists = new EventListCache(since => Store.TopEvents(since, MaxEvents), TimeProvider.System, Interval, onError: RebuildFailed);
-        _situationLists = new RangeListCache<SituationOverview>(since => Store.TopSituations(since, MaxEvents), TimeProvider.System, Interval, onError: RebuildFailed);
-        _worldSnapshots = new RangeListCache<WorldSnapshot>(since => [Store.World(since)], TimeProvider.System, Interval, onError: RebuildFailed);
+        _eventLists = new EventListCache(since => Timed("event list", since, () => Store.TopEvents(since, MaxEvents)),
+            TimeProvider.System, Interval, onError: RebuildFailed);
+        _situationLists = new RangeListCache<SituationOverview>(since => Timed("situation list", since, () => Store.TopSituations(since, MaxEvents)),
+            TimeProvider.System, Interval, onError: RebuildFailed);
+        _worldSnapshots = new RangeListCache<WorldSnapshot>(since => Timed("world view", since, () => (IReadOnlyList<WorldSnapshot>)[Store.World(since)]),
+            TimeProvider.System, Interval, onError: RebuildFailed);
         // Built at startup, so the first visit after a deploy doesn't wait for it.
         WarmEventLists();
     }
@@ -100,21 +104,46 @@ public sealed class WorldNewsService : IDisposable
 
     public WorldSnapshot World(int rangeHours) => _worldSnapshots.Get(rangeHours)[0];
 
-    // The list first, so the page has it soon after a deploy; then, once, the covering index a
-    // database from before it needs (minutes over the droplet's 2 GB of reports), and the lists
-    // rebuilt on it.
-    private void WarmEventLists() => _ = Task.Run(() =>
+    // The list first, so the page has it soon after a deploy; then the upkeep a database from
+    // before 30-10-26 needs, once (each step does nothing after that): the covering index, dropping
+    // grouped reports' embeddings, and giving that space back. Minutes over the droplet's 2 GB.
+    // Each list's build time in the log (30-10-26): it took 50-70 s before the covering index.
+    private IReadOnlyList<T> Timed<T>(string list, DateTimeOffset since, Func<IReadOnlyList<T>> build)
+    {
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var built = build();
+        _logger.LogInformation("World News {List} for the last {Hours:N0} h built in {Ms:N0} ms",
+            list, (DateTimeOffset.UtcNow - since).TotalHours, started.ElapsedMilliseconds);
+        return built;
+    }
+
+    private const int CompactAfterReleasing = 10_000;
+
+    private void WarmEventLists() => _ = Task.Run(async () =>
     {
         try { _eventLists.Get(24); }
         catch (Exception ex) { _logger.LogWarning(ex, "Building the world news event list failed"); }
         try
         {
             var started = System.Diagnostics.Stopwatch.StartNew();
-            if (!Store.EnsureCoveringIndex()) return;
-            _logger.LogInformation("World News covering index built in {Seconds:N0} s", started.Elapsed.TotalSeconds);
+            var indexed = Store.EnsureCoveringIndex();
+            var released = Store.ReleaseGroupedEmbeddings(betweenBatches: () => Thread.Sleep(50));
+            // Compacting holds off writers for minutes, so it takes the read's turn: a read due
+            // meanwhile is skipped rather than failing on a locked database.
+            var compacted = released >= CompactAfterReleasing;
+            if (compacted)
+            {
+                await _running.WaitAsync();
+                try { Store.Compact(); }
+                finally { _running.Release(); }
+            }
+            if (!indexed && released == 0 && !compacted) return;
+            _logger.LogInformation(
+                "World News upkeep done in {Seconds:N0} s: covering index {Indexed}, {Released:N0} grouped reports' embeddings dropped, compacted {Compacted}",
+                started.Elapsed.TotalSeconds, indexed, released, compacted);
             ClearLists();
         }
-        catch (Exception ex) { _logger.LogWarning(ex, "Building the World News covering index failed; it's tried again at the next start"); }
+        catch (Exception ex) { _logger.LogWarning(ex, "World News upkeep failed; it's tried again at the next start"); }
     });
 
     private void ClearLists(bool rebuild = true)
@@ -180,6 +209,55 @@ public sealed class WorldNewsService : IDisposable
     }
 
     private const string RelayKey = "world-news:summary-relay";
+    private const string EmbedRelayKey = "world-news:embed-relay";
+    // The Mac asks every 3 minutes; this long without it and the server embeds again, so grouping
+    // never stalls for long when the app is closed or its model stops answering.
+    public static readonly TimeSpan EmbedRelayFreshness = TimeSpan.FromMinutes(10);
+    public const int MaxEmbedJobs = 128;
+
+    // Headlines waiting for an embedding, for the Mac app (30-10-26): embedding ~15,000 a day was
+    // the droplet's steadiest Ollama load. Only a Mac with the server's own embedding model gets
+    // any (vectors from two models can't be compared), and asking is how the server knows to stand
+    // aside. macModels: what the Mac has installed.
+    public (string Model, IReadOnlyList<WorldArticle> Jobs) EmbedJobsForRelay(IReadOnlyCollection<string> macModels, int limit)
+    {
+        if (InstalledName(macModels, _options.EmbeddingModel) is null) return (_options.EmbeddingModel, []);
+        var now = DateTimeOffset.UtcNow;
+        Store.SetLastFetched(EmbedRelayKey, now);
+        return (_options.EmbeddingModel, Store.RecentArticlesToEmbed(Math.Clamp(limit, 1, MaxEmbedJobs), now - _options.EventWindow));
+    }
+
+    // The Mac's embeddings: saved for the reports still waiting, then grouped straight away unless
+    // a read is running (it groups them itself). An error message, or null.
+    public string? SaveRelayEmbeddings(string model, IReadOnlyList<(string Id, float[] Vector)> embeddings)
+    {
+        if (InstalledName([model], _options.EmbeddingModel) is null)
+            return $"The server groups headlines with {_options.EmbeddingModel}, not {model}.";
+        var dimensions = Store.EmbeddingDimensions() ?? embeddings.FirstOrDefault().Vector?.Length ?? 0;
+        if (embeddings.Any(e => e.Vector is null || e.Vector.Length != dimensions || e.Vector.Any(v => !float.IsFinite(v))))
+            return $"Each embedding needs {dimensions} numbers.";
+        if (Store.FillEmbeddings(embeddings) == 0 || !_running.Wait(0)) return null;
+        try
+        {
+            _pipeline.Group();
+        }
+        finally
+        {
+            _running.Release();
+        }
+        ClearLists();
+        _mapCache?.Clear();
+        Changed?.Invoke();
+        return null;
+    }
+
+    public bool EmbedRelayActive(DateTimeOffset now) => Store.LastFetched(EmbedRelayKey) is { } at && at >= now - EmbedRelayFreshness;
+
+    // "embeddinggemma" is installed as "embeddinggemma" or "embeddinggemma:latest"; a tagged model
+    // has to match its tag.
+    private static string? InstalledName(IEnumerable<string> installed, string model) =>
+        installed.FirstOrDefault(name => name.Equals(model, StringComparison.OrdinalIgnoreCase)
+            || (!model.Contains(':') && name.Equals(model + ":latest", StringComparison.OrdinalIgnoreCase)));
     // How recently the Mac app must have asked for work for the server's model to stand aside.
     public static readonly TimeSpan RelayFreshness = TimeSpan.FromHours(2);
 
