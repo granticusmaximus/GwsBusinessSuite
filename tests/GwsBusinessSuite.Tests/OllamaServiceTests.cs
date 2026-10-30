@@ -295,6 +295,33 @@ public sealed class OllamaServiceTests
         tracker.GetLatest("sentinelgpt").Should().BeNull();
     }
 
+    [Fact]
+    public async Task Generate_ShouldUseTheServersDefaultModel_WhenTheChosenOneIsntInstalled()
+    {
+        var asked = new List<string>();
+        var tagsAnswer = true;
+        var handler = new RecordingHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/api/tags")
+                return tagsAnswer
+                    ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"models":[{"name":"sentinelgpt:latest"},{"name":"llama3.2:latest"}]}""") }
+                    : new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            var body = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            asked.Add(System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("model").GetString()!);
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"response":"ok","done":true}""") };
+        });
+        OllamaService Service() => new(new HttpClient(handler) { BaseAddress = new Uri("http://localhost:11434") }, new OllamaWorkloadScheduler(),
+            new OllamaPerformanceTracker(), new RecordingLogger<OllamaService>(),
+            Microsoft.Extensions.Options.Options.Create(new GwsBusinessSuite.Application.ContentStudio.ContentStudioOptions { Model = "sentinelgpt" }));
+
+        await Service().GenerateAsync("muse-glimmer:latest", "system", "prompt");
+        await Service().GenerateAsync("llama3.2", "system", "prompt");
+        tagsAnswer = false;
+        await Service().GenerateAsync("muse-glimmer:latest", "system", "prompt");
+
+        asked.Should().Equal("sentinelgpt", "llama3.2", "muse-glimmer:latest");
+    }
+
     private static OllamaService CreateService(
         HttpMessageHandler handler,
         ILogger<OllamaService> logger,

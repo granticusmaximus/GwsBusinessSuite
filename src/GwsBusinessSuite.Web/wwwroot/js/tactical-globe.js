@@ -125,8 +125,12 @@ window.tacticalGlobe = (function () {
             fullscreenButton: false,
             infoBox: false,
             selectionIndicator: false,
-            creditContainer: makeCreditContainer(container)
+            creditContainer: makeCreditContainer(container),
+            // Draw only when something changed (see renderOnChange), not 60 times a second.
+            requestRenderMode: true,
+            maximumRenderTimeChange: Infinity
         });
+        const renderTimer = renderOnChange(viewer);
 
         viewer.camera.setView({
             destination: Cesium.Cartesian3.fromDegrees(-98.5, 39.8, 18000000)
@@ -356,7 +360,8 @@ window.tacticalGlobe = (function () {
         viewers.set(containerId, {
             containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities, worldNewsDataSource,
             hazardDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
-            ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null
+            ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null,
+            renderTimer, pulseTimer: null
         });
 
         // Fire once for the initial view so cameras appear without requiring a drag/zoom first.
@@ -1698,6 +1703,42 @@ window.tacticalGlobe = (function () {
         return layer;
     }
 
+    // Render-on-demand (30-10-26): the globe used to redraw 60 times a second while nothing moved,
+    // keeping the Mac app's WebView and the browser's GPU busy on an idle map. Cesium redraws by
+    // itself for camera moves, tiles and finished requests, but not when an entity, a billboard
+    // collection or a layer's opacity changes, so those ask for a frame here (and every exported
+    // call does, see the end of this file); a frame a second catches anything else.
+    function renderOnChange(viewer) {
+        const scene = viewer.scene;
+        const request = function () { if (!viewer.isDestroyed()) scene.requestRender(); };
+        viewer.entities.collectionChanged.addEventListener(request);
+        viewer.dataSources.dataSourceAdded.addEventListener(function (collection, dataSource) {
+            dataSource.entities.collectionChanged.addEventListener(request);
+            request();
+        });
+        viewer.dataSources.dataSourceRemoved.addEventListener(request);
+        scene.primitives.primitiveAdded.addEventListener(request);
+        scene.primitives.primitiveRemoved.addEventListener(request);
+        viewer.imageryLayers.layerShownOrHidden.addEventListener(request);
+        return setInterval(request, 1000);
+    }
+
+    function renderAll() {
+        viewers.forEach(function (entry) {
+            if (!entry.viewer.isDestroyed()) entry.viewer.scene.requestRender();
+        });
+    }
+
+    // The SURGING pulse is a callback, which render-on-demand can't see change: about 20 frames a
+    // second while one is on the globe, none otherwise.
+    function setPulsing(entry, on) {
+        if (on && !entry.pulseTimer) entry.pulseTimer = setInterval(function () { entry.viewer.scene.requestRender(); }, 50);
+        if (!on && entry.pulseTimer) {
+            clearInterval(entry.pulseTimer);
+            entry.pulseTimer = null;
+        }
+    }
+
     function showRadarFrame(entry, index) {
         const radar = entry.radar;
         if (radar.frames.length === 0) return;
@@ -1716,6 +1757,7 @@ window.tacticalGlobe = (function () {
             next.show = true;
         }
         radar.index = index;
+        entry.viewer.scene.requestRender();
         updateRadarBarState(entry);
         updateRadarForecastLine(entry);
     }
@@ -2049,11 +2091,14 @@ window.tacticalGlobe = (function () {
             entity._tacticalGlobeWorldNews = signal;
         });
         entry.worldNewsDataSource.entities.resumeEvents();
+        setPulsing(entry, !reduced && (signals || []).some(function (signal) { return signal.surge; }));
     }
 
     function clearWorldNews(containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
-        if (entry) entry.worldNewsDataSource.entities.removeAll();
+        if (!entry) return;
+        entry.worldNewsDataSource.entities.removeAll();
+        setPulsing(entry, false);
     }
 
     function placementLabel(precision) {
@@ -3404,6 +3449,8 @@ window.tacticalGlobe = (function () {
         stopRadarPlayback(entry.radar);
         if (entry.radar.bar) entry.radar.bar.remove();
         if (entry.hoverIdentify) entry.hoverIdentify.dispose();
+        clearInterval(entry.renderTimer);
+        setPulsing(entry, false);
         entry.viewer.dataSources.remove(entry.cameraDataSource, true);
         entry.viewer.destroy();
         viewers.delete(containerId || 'tg-viewport');
@@ -3431,7 +3478,7 @@ window.tacticalGlobe = (function () {
         }
     }
 
-    return {
+    const api = {
         init: init,
         flyTo: flyTo,
         zoom: zoom,
@@ -3498,5 +3545,18 @@ window.tacticalGlobe = (function () {
         isCoverageBannerDismissed: isCoverageBannerDismissed,
         dismissCoverageBanner: dismissCoverageBanner
     };
+
+    // Whatever the page changes through these is drawn on the next frame, including what an
+    // async one changes before it settles (see renderOnChange).
+    Object.keys(api).forEach(function (name) {
+        const call = api[name];
+        api[name] = function () {
+            const result = call.apply(this, arguments);
+            renderAll();
+            if (result && typeof result.then === 'function') result.then(renderAll, renderAll);
+            return result;
+        };
+    });
+    return api;
 })();
 }

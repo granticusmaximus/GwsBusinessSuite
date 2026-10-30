@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -20,12 +21,23 @@ public sealed partial class Platform511CameraProvider(
     ILogger<Platform511CameraProvider> logger,
     string host,
     string sourceName,
-    BoundingBox coverage) : ICameraFeedProvider
+    BoundingBox coverage,
+    TimeProvider? time = null) : ICameraFeedProvider
 {
     private const int PageSize = 100;
     // Utah, the biggest, is 21 pages; this stops a site that misreports its total from looping.
     private const int MaxPages = 60;
-    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(30);
+    private const int PagesAtOnce = 4;
+    // After this a site's list is refreshed in the background while the old one keeps serving;
+    // a list nobody asks for in KeepFor is dropped.
+    public static readonly TimeSpan FreshFor = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan KeepFor = TimeSpan.FromHours(6);
+    // One download per site (and cache) at a time, shared by every view that asks while it runs (a
+    // pan used to start another 20 requests whenever the cache had just expired).
+    private static readonly ConcurrentDictionary<(IMemoryCache Cache, string Host), Task<IReadOnlyList<CameraFeed>>> Downloads = new();
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
+
+    private sealed record Snapshot(DateTimeOffset At, IReadOnlyList<CameraFeed> Cameras);
 
     public string SourceName => sourceName;
 
@@ -34,42 +46,89 @@ public sealed partial class Platform511CameraProvider(
     public async Task<IReadOnlyList<CameraFeed>> GetCamerasAsync(BoundingBox bbox, CancellationToken cancellationToken = default)
     {
         var cacheKey = $"camera-intel:511-platform:{host}";
-        if (!cache.TryGetValue(cacheKey, out IReadOnlyList<CameraFeed>? allCameras) || allCameras is null)
+        IReadOnlyList<CameraFeed> allCameras;
+        if (cache.TryGetValue(cacheKey, out Snapshot? snapshot) && snapshot is not null)
         {
-            allCameras = await FetchAllAsync(cancellationToken);
-            if (allCameras.Count > 0) cache.Set(cacheKey, allCameras, CacheDuration);
+            // An old list serves at once; a fresh one is fetched behind it for the next view.
+            if (_time.GetUtcNow() - snapshot.At > FreshFor)
+                _ = DownloadAsync(cacheKey).ContinueWith(
+                    failed => logger.LogWarning(failed.Exception, "{Source} couldn't refresh its cameras; still showing the last list.", sourceName),
+                    CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+            allCameras = snapshot.Cameras;
+        }
+        else
+        {
+            // Nothing yet: this view waits, but on the one shared download.
+            allCameras = await DownloadAsync(cacheKey).WaitAsync(cancellationToken);
         }
 
         return allCameras.Where(camera => bbox.Contains(camera.Latitude, camera.Longitude)).ToList();
     }
 
-    private async Task<IReadOnlyList<CameraFeed>> FetchAllAsync(CancellationToken cancellationToken)
+    private Task<IReadOnlyList<CameraFeed>> DownloadAsync(string cacheKey)
     {
-        var cameras = new List<CameraFeed>();
-        for (var page = 0; page < MaxPages; page++)
+        var key = (cache, host);
+        var mine = new TaskCompletionSource<IReadOnlyList<CameraFeed>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var download = Downloads.GetOrAdd(key, mine.Task);
+        if (download != mine.Task) return download;
+
+        _ = Task.Run(async () =>
         {
-            Platform511Page? result;
             try
             {
-                using var request = new HttpRequestMessage(HttpMethod.Get, PageUrl(page * PageSize));
-                request.Headers.Add("X-Requested-With", "XMLHttpRequest");
-                using var response = await httpClient.SendAsync(request, cancellationToken);
-                response.EnsureSuccessStatusCode();
-                result = await response.Content.ReadFromJsonAsync<Platform511Page>(cancellationToken);
+                // Not the asking view's token: a pan away mustn't cancel the download others share.
+                var cameras = await FetchAllAsync(CancellationToken.None);
+                if (cameras.Count > 0) cache.Set(cacheKey, new Snapshot(_time.GetUtcNow(), cameras), KeepFor);
+                Downloads.TryRemove(new KeyValuePair<(IMemoryCache, string), Task<IReadOnlyList<CameraFeed>>>(key, mine.Task));
+                mine.SetResult(cameras);
             }
-            // The first page failing is the source being down (the directory records it); a later
-            // one still leaves the cameras already read.
-            catch (Exception ex) when (page > 0 && ex is HttpRequestException or JsonException or TaskCanceledException)
+            catch (Exception ex)
             {
-                logger.LogWarning(ex, "{Source} stopped answering after {Count} cameras.", sourceName, cameras.Count);
-                break;
+                Downloads.TryRemove(new KeyValuePair<(IMemoryCache, string), Task<IReadOnlyList<CameraFeed>>>(key, mine.Task));
+                mine.SetException(ex);
             }
+        });
+        return mine.Task;
+    }
 
-            foreach (var site in result?.Data ?? [])
-                cameras.AddRange(ToCameras(site));
-            if (result?.Data is not { Count: > 0 } || (page + 1) * PageSize >= result.RecordsTotal) break;
-        }
+    // The first page says how many there are; the rest come a few at a time.
+    private async Task<IReadOnlyList<CameraFeed>> FetchAllAsync(CancellationToken cancellationToken)
+    {
+        var first = await PageAsync(0, cancellationToken);
+        var cameras = new List<CameraFeed>((first?.Data ?? []).SelectMany(ToCameras));
+        if (first?.Data is not { Count: > 0 } || first.RecordsTotal <= PageSize) return cameras;
+
+        var pages = Math.Min(MaxPages, (first.RecordsTotal + PageSize - 1) / PageSize);
+        using var gate = new SemaphoreSlim(PagesAtOnce);
+        var rest = await Task.WhenAll(Enumerable.Range(1, pages - 1).Select(async page =>
+        {
+            await gate.WaitAsync(cancellationToken);
+            try
+            {
+                return await PageAsync(page, cancellationToken);
+            }
+            // A later page failing still leaves the cameras already read.
+            catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "{Source} didn't return page {Page}.", sourceName, page + 1);
+                return null;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }));
+        foreach (var page in rest) cameras.AddRange((page?.Data ?? []).SelectMany(ToCameras));
         return cameras;
+    }
+
+    private async Task<Platform511Page?> PageAsync(int page, CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, PageUrl(page * PageSize));
+        request.Headers.Add("X-Requested-With", "XMLHttpRequest");
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<Platform511Page>(cancellationToken);
     }
 
     private IEnumerable<CameraFeed> ToCameras(Platform511Site site)

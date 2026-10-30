@@ -796,6 +796,56 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         panelText.Should().Contain("I-85 Northbound").And.Contain("Multi-vehicle crash").And.Contain("ACCIDENT");
     }
 
+    // Render-on-demand (30-10-26): an idle globe draws about once a second instead of every frame,
+    // and a SURGING marker's pulse keeps it drawing only while one is on the globe.
+    [Fact]
+    public async Task IdleGlobe_ShouldDrawOnlyOnChanges_AndKeepDrawingWhileANewsMarkerPulses()
+    {
+        var (page, _) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        await page.EvaluateAsync("""
+            () => {
+              // Cesium's exports are read-only, but its prototypes aren't; render() runs every
+              // animation frame and postRender only when a frame is actually drawn.
+              window.__frames = 0;
+              const render = Cesium.Scene.prototype.render;
+              Cesium.Scene.prototype.render = function (time) {
+                if (!this.__counted) {
+                  this.__counted = true;
+                  this.postRender.addEventListener(function () { window.__frames++; });
+                }
+                return render.call(this, time);
+              };
+            }
+            """);
+        await InitAsync(page);
+        await page.WaitForTimeoutAsync(1500);
+
+        async Task<int> FramesOverAsync(int milliseconds)
+        {
+            var before = await page.EvaluateAsync<int>("() => window.__frames");
+            await page.WaitForTimeoutAsync(milliseconds);
+            return await page.EvaluateAsync<int>("() => window.__frames") - before;
+        }
+
+        (await page.EvaluateAsync<int>("() => window.__frames")).Should().BePositive("the count has to see frames at all");
+        (await FramesOverAsync(3000)).Should().BeLessThan(15, "nothing changed, so only the once-a-second frame draws");
+
+        await page.EvaluateAsync("""
+            () => window.tacticalGlobe.setWorldNews([{
+              id: 'situation-1', title: 'United States rail disruption', latest: 'Services begin to recover',
+              country: 'United States', lat: 39.8, lon: -98.5, eventCount: 3, outletCount: 12,
+              reportCount: 18, lastSeen: '29-10-26 10:30', surge: 'Coverage doubled in 2 hours',
+              href: '/admin/world-news?situation=situation-1', sources: []
+            }])
+            """);
+        (await FramesOverAsync(1500)).Should().BeGreaterThan(8, "the SURGING pulse needs frames while it's there");
+
+        await page.EvaluateAsync("() => window.tacticalGlobe.clearWorldNews()");
+        await page.WaitForTimeoutAsync(300);
+        (await FramesOverAsync(3000)).Should().BeLessThan(15, "the pulse stopped with the marker");
+    }
+
     [Fact]
     public async Task WorldNewsClick_ShouldOpenReportedNewsPanel_WithSourcesAndDeepLink()
     {

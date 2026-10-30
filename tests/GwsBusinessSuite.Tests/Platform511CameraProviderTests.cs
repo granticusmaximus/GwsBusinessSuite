@@ -41,6 +41,42 @@ public sealed class Platform511CameraProviderTests
         (await provider.GetCamerasAsync(new BoundingBox(61.0, 60.0, -148.0, -150.0))).Should().HaveCount(2, "only the view's cameras");
     }
 
+    [Fact]
+    public async Task GetCameras_ShouldShareOneDownloadBetweenViews_AndFetchThePagesAfterTheFirstTogether()
+    {
+        var requests = 0;
+        var provider = Create(request =>
+        {
+            Interlocked.Increment(ref requests);
+            var page = StartOf(request) / 100;
+            return Json(Page(350, Site(page + 1, $"Page {page + 1}", "POINT (-149.1 61.6)", Image(page + 1, "N/A"))));
+        });
+
+        var views = await Task.WhenAll(Enumerable.Range(0, 3).Select(_ => provider.GetCamerasAsync(Alaska)));
+
+        requests.Should().Be(4, "350 cameras is four pages, downloaded once for all three views");
+        views.Should().OnlyContain(cameras => cameras.Count == 4);
+        views[0].Select(c => c.Name).Should().Equal("511 Alaska: Page 1", "511 Alaska: Page 2", "511 Alaska: Page 3", "511 Alaska: Page 4");
+    }
+
+    [Fact]
+    public async Task GetCameras_ShouldKeepServingAnOldList_WhileAFreshOneDownloads()
+    {
+        var clock = new ManualClock();
+        var name = "Seward Highway";
+        var provider = Create(_ => Json(Page(1, Site(1, name, "POINT (-149.1 61.6)", Image(1, "N/A")))), clock);
+        (await provider.GetCamerasAsync(Alaska)).Single().Name.Should().Be("511 Alaska: Seward Highway");
+
+        name = "Seward Highway (renamed)";
+        clock.Advance(Platform511CameraProvider.FreshFor + TimeSpan.FromMinutes(1));
+        (await provider.GetCamerasAsync(Alaska)).Single().Name.Should().Be("511 Alaska: Seward Highway", "the old list answers at once");
+
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while ((await provider.GetCamerasAsync(Alaska)).Single().Name != "511 Alaska: Seward Highway (renamed)" && DateTime.UtcNow < deadline)
+            await Task.Delay(10);
+        (await provider.GetCamerasAsync(Alaska)).Single().Name.Should().Be("511 Alaska: Seward Highway (renamed)", "the refresh landed behind it");
+    }
+
     [Theory]
     [InlineData("POINT (-148.975515 60.818883)", 60.818883, -148.975515)]
     [InlineData("POINT(-75.9 40.3)", 40.3, -75.9)]
@@ -56,9 +92,12 @@ public sealed class Platform511CameraProviderTests
         Platform511CameraProvider.Point(null).Should().BeNull();
     }
 
-    private static Platform511CameraProvider Create(Func<HttpRequestMessage, HttpResponseMessage> respond) =>
+    private static Platform511CameraProvider Create(Func<HttpRequestMessage, HttpResponseMessage> respond, TimeProvider? time = null) =>
         new(new HttpClient(new Handler(respond)), new MemoryCache(new MemoryCacheOptions()),
-            NullLogger<Platform511CameraProvider>.Instance, "511.alaska.gov", "511 Alaska", Alaska);
+            NullLogger<Platform511CameraProvider>.Instance, "511.alaska.gov", "511 Alaska", Alaska, time);
+
+    private static int StartOf(HttpRequestMessage request) =>
+        int.Parse(System.Text.RegularExpressions.Regex.Match(Uri.UnescapeDataString(request.RequestUri!.Query), "\"start\":(\\d+)").Groups[1].Value);
 
     private static string Page(int total, params string[] sites) =>
         "{\"recordsTotal\":" + total + ",\"data\":[" + string.Join(",", sites) + "]}";
@@ -73,6 +112,13 @@ public sealed class Platform511CameraProviderTests
 
     private static HttpResponseMessage Json(string json) =>
         new(HttpStatusCode.OK) { Content = new StringContent(json, System.Text.Encoding.UTF8, "application/json") };
+
+    private sealed class ManualClock : TimeProvider
+    {
+        private DateTimeOffset _now = new(2026, 10, 30, 12, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan by) => _now += by;
+    }
 
     private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {

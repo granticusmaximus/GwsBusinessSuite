@@ -15,7 +15,8 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 public sealed class OllamaModelWarmupBackgroundService(
     IServiceScopeFactory scopeFactory,
     OllamaWorkloadScheduler workloads,
-    ILogger<OllamaModelWarmupBackgroundService> logger) : BackgroundService
+    ILogger<OllamaModelWarmupBackgroundService> logger,
+    Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.ContentStudio.ContentStudioOptions>? options = null) : BackgroundService
 {
     private static readonly TimeSpan InitialDelay = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(15);
@@ -45,6 +46,13 @@ public sealed class OllamaModelWarmupBackgroundService(
                 using var listTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 listTimeoutCts.CancelAfter(PerCallTimeout);
                 var installed = await ollama.ListModelsAsync(listTimeoutCts.Token);
+                // A chosen model this server hasn't got (one only the Mac app's Ollama has) is
+                // swapped for the server default by OllamaService, so that's the one to warm.
+                if (!installed.Any(item => ModelNamesMatch(item, model)) && options?.Value.Model is { Length: > 0 } fallback
+                    && installed.Any(item => ModelNamesMatch(item, fallback)))
+                {
+                    model = fallback;
+                }
                 if (!installed.Any(item => ModelNamesMatch(item, model)))
                 {
                     logger.LogInformation(

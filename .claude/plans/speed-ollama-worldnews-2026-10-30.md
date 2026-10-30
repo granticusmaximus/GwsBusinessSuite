@@ -30,10 +30,17 @@ hand every time he opened the app.
   circuit (`Task.Run`) with a stale-result guard; shading recomputed only on toggle/kind/window,
   and the country shapes are kept and recoloured rather than rebuilt; `Situation(id)` is a direct query.
 
+- [x] Deployed (f47c5b3). Droplet after: Ollama held at ~300% (its cap), the app 1-25%, load 9.6 -> 3.3.
+- [x] The site's model override (`muse-glimmer:latest`) isn't on the droplet, so web SentinelGPT
+  failed: `OllamaService` now falls back to the configured default model when the chosen one isn't
+  installed (logged once per model), and the warmup warms that default instead.
+- [x] 511 cameras: one in-flight download per site, the old list keeps serving while a fresh one
+  downloads (fresh 30 min, kept 6 h), pages after the first fetched 4 at a time.
+- [x] Cesium render-on-demand (requestRenderMode) for the web and the Mac app's WebView: frames on
+  entity/primitive/layer changes and every exported call, a 1 s backstop frame, ~20 fps only while a
+  SURGING marker pulses (browser test counts drawn frames).
+
 ## Next
-- [ ] 511 cameras: one in-flight download per site, keep serving the old list while refreshing,
-  fetch pages a few at a time.
-- [ ] Cesium render-on-demand (requestRenderMode) for the web and the Mac app's WebView.
 - [ ] Timing logs for globe moves and Ollama queue waits.
 - [ ] After deploy: re-check the droplet (docker stats during a read) to confirm the app keeps a core.
 - [ ] Boards K9g (sharing) is paused, nothing written.

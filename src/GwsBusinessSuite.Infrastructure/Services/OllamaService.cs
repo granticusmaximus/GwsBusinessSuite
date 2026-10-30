@@ -14,9 +14,48 @@ public sealed class OllamaService(
     HttpClient http,
     OllamaWorkloadScheduler workloadScheduler,
     OllamaPerformanceTracker performanceTracker,
-    ILogger<OllamaService> logger) : IOllamaService
+    ILogger<OllamaService> logger,
+    Microsoft.Extensions.Options.IOptions<GwsBusinessSuite.Application.ContentStudio.ContentStudioOptions>? options = null) : IOllamaService
 {
     private const string ModelKeepAlive = "30m";
+    // Asked once per instance (a request's worth of calls); a tags request is milliseconds against
+    // a generation's seconds.
+    private Task<IReadOnlyCollection<string>>? _installed;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> WarnedModels = new(StringComparer.OrdinalIgnoreCase);
+
+    // The model setting (Settings > AI) is shared with the Mac app, whose own Ollama has models the
+    // server doesn't: on 30-10-26 it named 'muse-glimmer:latest', so every chat on the website asked
+    // the droplet for a model it hadn't got. A name this server hasn't installed falls back to its
+    // default model (ContentStudio:Model), with one warning per name. Anything uncertain (Ollama not
+    // answering, the default missing too) keeps the name as asked.
+    private async Task<string> ResolveModelAsync(string model, CancellationToken ct)
+    {
+        var fallback = options?.Value.Model;
+        if (string.IsNullOrWhiteSpace(model) || string.IsNullOrWhiteSpace(fallback) || SameModel(model, fallback)) return model;
+        IReadOnlyCollection<string> installed;
+        try
+        {
+            installed = await InstalledModelsAsync(ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
+        {
+            return model;
+        }
+        if (installed.Count == 0 || installed.Any(name => SameModel(name, model)) || !installed.Any(name => SameModel(name, fallback))) return model;
+        if (WarnedModels.TryAdd(model, 0))
+            logger.LogWarning("Model '{Model}' isn't installed on this server's Ollama; using '{Fallback}' instead.", model, fallback);
+        return fallback;
+    }
+
+    private Task<IReadOnlyCollection<string>> InstalledModelsAsync(CancellationToken ct)
+    {
+        var installed = _installed ??= ListModelsAsync(ct);
+        // A failed or cancelled lookup isn't kept, so the next call asks again.
+        if (installed.IsFaulted || installed.IsCanceled) _installed = null;
+        return installed;
+    }
+
+    private static bool SameModel(string a, string b) => OllamaModelWarmupBackgroundService.ModelNamesMatch(a, b);
 
     public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
         GenerateCoreAsync(model, systemPrompt, userPrompt, numCtx: null, ct);
@@ -26,6 +65,7 @@ public sealed class OllamaService(
 
     private async Task<string> GenerateCoreAsync(string model, string systemPrompt, string userPrompt, int? numCtx, CancellationToken ct)
     {
+        model = await ResolveModelAsync(model, ct);
         object payload = numCtx is { } contextSize
             ? new
             {
@@ -124,6 +164,7 @@ public sealed class OllamaService(
         int? maxOutputTokens,
         [EnumeratorCancellation] CancellationToken ct)
     {
+        model = await ResolveModelAsync(model, ct);
         object payload = maxOutputTokens is { } outputLimit
             ? new
             {
@@ -264,6 +305,7 @@ public sealed class OllamaService(
         IReadOnlyList<OllamaToolDefinition>? tools = null,
         CancellationToken ct = default)
     {
+        model = await ResolveModelAsync(model, ct);
         var messagesArray = new JsonArray();
         foreach (var message in messages)
         {
