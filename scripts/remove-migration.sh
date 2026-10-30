@@ -4,7 +4,7 @@
 # Usage: scripts/remove-migration.sh
 set -e
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 
 dotnet ef migrations remove \
   --project "$REPO_ROOT/src/GwsBusinessSuite.Infrastructure" \

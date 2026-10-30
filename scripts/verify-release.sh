@@ -2,7 +2,7 @@
 
 set -uo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 # Git hooks launched from a GUI (VS Code, Xcode, a Git client) inherit a bare login PATH -
 # typically /usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin - not the interactive shell's. npm,

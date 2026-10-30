@@ -18,7 +18,10 @@ set -euo pipefail
 # usual dotnet / Homebrew locations.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/local/share/dotnet:$HOME/.dotnet:$PATH"
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# -P: the real folder, not a symlink to it (the repo moved out of iCloud to ~/Developer on 30-10-26,
+# leaving a link at the old path). MSBuild builds through a symlink with mixed paths, and its
+# incremental clean then deletes outputs it has just written (CS0006: ref/...OllamaKit.dll missing).
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 CONFIGURATION="Release"
 APP_NAME="GWS Business Suite"
 APP_PROJECT_DIR="$REPO_ROOT/src/GwsBusinessSuite.App"

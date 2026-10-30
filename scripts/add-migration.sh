@@ -12,7 +12,7 @@ if [ -z "$1" ]; then
   exit 1
 fi
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 
 dotnet ef migrations add "$1" \
   --project "$REPO_ROOT/src/GwsBusinessSuite.Infrastructure" \

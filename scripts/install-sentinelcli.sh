@@ -3,7 +3,7 @@
 # Usage: ./scripts/install-sentinelcli.sh [--sync-models]
 set -eu
 
-repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+repo_root="$(cd "$(dirname "$0")/.." && pwd -P)"
 project="$repo_root/src/SentinelCLI/SentinelCLI.csproj"
 install_root="${SENTINELCLI_INSTALL_ROOT:-$HOME/.local/share/gws/sentinelcli}"
 bin_dir="${SENTINELCLI_BIN_DIR:-$HOME/.local/bin}"

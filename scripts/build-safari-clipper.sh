@@ -4,7 +4,7 @@
 # Develop > "Allow Unsigned Extensions". See extensions/sentinel-web-clipper/README.md.
 set -euo pipefail
 
-repo="$(cd "$(dirname "$0")/.." && pwd)"
+repo="$(cd "$(dirname "$0")/.." && pwd -P)"
 source_dir="$repo/extensions/sentinel-web-clipper"
 out="$repo/artifacts/safari-clipper"
 app_name="Sentinel Web Clipper"

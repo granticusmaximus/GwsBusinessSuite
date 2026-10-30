@@ -7,7 +7,7 @@
 # Usage: scripts/update-database.sh
 set -e
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 
 dotnet ef database update \
   --project "$REPO_ROOT/src/GwsBusinessSuite.Infrastructure" \

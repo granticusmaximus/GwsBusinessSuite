@@ -4,4 +4,4 @@
 # opens from Spotlight, Launchpad, Finder or the Dock, and updates itself from its
 # "Check for Updates..." menu item - the terminal isn't needed.
 set -eu
-exec "$(cd "$(dirname "$0")" && pwd)/install-gws-mac.sh" --open "$@"
+exec "$(cd "$(dirname "$0")" && pwd -P)/install-gws-mac.sh" --open "$@"
