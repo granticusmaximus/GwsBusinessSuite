@@ -56,6 +56,8 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
     // A plan the person approves (Go) before a bigger job starts; it pauses the turn.
     public const string PlanToolName = "show_plan";
     public const string GoMessage = "Go ahead with the plan.";
+    // Offers another area's tools for the rest of the turn (see SentinelAgentArea).
+    public const string UseToolsName = "use_tools";
     private const int PlanThreshold = 3;
     private const int MemoriesInPrompt = 40;
     private const int ActivityRows = 200;
@@ -73,11 +75,12 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
         var context = new SentinelAgentToolContext(request.User, request.ConversationId);
 
         var messages = new List<OllamaChatMessage> { new("system", await SystemPromptAsync(db, request, cancellationToken)) };
-        messages.AddRange(await HistoryAsync(db, request, cancellationToken));
+        var history = await HistoryAsync(db, request, cancellationToken);
+        messages.AddRange(history);
         messages.Add(new OllamaChatMessage("user", request.Message.Trim()));
-        var definitions = tools.Values
-            .OrderBy(tool => tool.Name is PlanToolName or UndoToolName ? 0 : 1)
-            .Select(tool => new OllamaToolDefinition(tool.Name, tool.Description, tool.ParametersJson)).ToList();
+        var areas = AreasFor(scope.ServiceProvider, request.User);
+        var offered = await OfferedAreasAsync(db, request, areas, history, cancellationToken);
+        var definitions = Definitions(tools, areas, offered);
 
         var actions = new List<SentinelAgentActionView>();
         var done = new HashSet<string>(StringComparer.Ordinal);
@@ -111,6 +114,11 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
                 {
                     planRequired = true;
                     result = await RollBackForPlanAsync(db, tools, context, actions, onEvent, cancellationToken);
+                }
+                else if (call.Name == UseToolsName)
+                {
+                    result = UseTools(call, areas, offered);
+                    definitions = Definitions(tools, areas, offered);
                 }
                 else
                 {
@@ -458,6 +466,83 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             .Select(memory => new SentinelAgentMemoryView(memory.Id, memory.Fact, memory.CreatedAt))
             .ToList();
 
+    private sealed record AgentArea(SentinelAgentArea Area, IReadOnlyList<ISentinelAgentTool> Tools);
+
+    // The areas this person's role reaches, each with the tools they may use there.
+    private static IReadOnlyList<AgentArea> AreasFor(IServiceProvider services, SentinelAgentUser user) =>
+        services.GetServices<ISentinelAgentToolset>()
+            .Select(toolset => new AgentArea(toolset.Area, toolset.Tools.Where(user.MayUse).ToList()))
+            .Where(area => area.Tools.Count > 0)
+            .ToList();
+
+    // Always areas, plus those the request, the screen, the chat so far or this chat's changes
+    // point at. A "Go" carries no words of its own, so the plan it approves counts as the chat.
+    private static async Task<HashSet<string>> OfferedAreasAsync(
+        IAppDbContext db, SentinelAgentRequest request, IReadOnlyList<AgentArea> areas, IReadOnlyList<OllamaChatMessage> history, CancellationToken cancellationToken)
+    {
+        var made = await db.SentinelAgentActions.AsNoTracking()
+            .Where(action => action.ConversationId == request.ConversationId && action.CreatedBy == request.User.Username)
+            .Select(action => new { action.Tool, action.Summary })
+            .ToListAsync(cancellationToken);
+        var text = string.Join("\n", new[] { request.Message, request.PageContext ?? string.Empty }
+            .Concat(history.Where(message => message.Role == "user").Select(message => message.Content))
+            .Concat(made.Select(action => action.Summary)));
+        var used = made.Select(action => action.Tool).ToHashSet(StringComparer.Ordinal);
+        return areas
+            .Where(area => area.Area.Always || area.Area.IsNamedIn(text) || area.Tools.Any(tool => used.Contains(tool.Name)))
+            .Select(area => area.Area.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static List<OllamaToolDefinition> Definitions(
+        IReadOnlyDictionary<string, ISentinelAgentTool> tools, IReadOnlyList<AgentArea> areas, IReadOnlySet<string> offered)
+    {
+        var definitions = new List<ISentinelAgentTool> { tools[PlanToolName], tools[UndoToolName] }
+            .Select(tool => new OllamaToolDefinition(tool.Name, tool.Description, tool.ParametersJson))
+            .ToList();
+        var others = areas.Where(area => !offered.Contains(area.Area.Name)).ToList();
+        if (others.Count > 0)
+        {
+            definitions.Add(new OllamaToolDefinition(
+                UseToolsName,
+                "Get the tools for another part of the app when the job needs one you don't have here: " +
+                string.Join("; ", others.Select(area => $"{area.Area.Name} ({area.Area.About})")) + ".",
+                SentinelAgentJson.Schema(("area", "string", "The area's name, or several separated by commas", true))));
+        }
+
+        definitions.AddRange(areas.Where(area => offered.Contains(area.Area.Name))
+            .SelectMany(area => area.Tools)
+            .Select(tool => new OllamaToolDefinition(tool.Name, tool.Description, tool.ParametersJson)));
+        return definitions;
+    }
+
+    private static string UseTools(OllamaToolCall call, IReadOnlyList<AgentArea> areas, HashSet<string> offered)
+    {
+        JsonObject arguments;
+        try
+        {
+            arguments = JsonNode.Parse(string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson) as JsonObject ?? [];
+        }
+        catch (JsonException)
+        {
+            return Problem("use_tools needs {\"area\": \"name\"}.");
+        }
+
+        var asked = (arguments.OptionalText("area") ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var found = areas.Where(area => asked.Any(name =>
+                string.Equals(area.Area.Name, name, StringComparison.OrdinalIgnoreCase) || area.Area.IsNamedIn(name)))
+            .ToList();
+        if (found.Count == 0)
+            return Problem($"There's no area called '{string.Join(", ", asked)}'. The areas are: {string.Join(", ", areas.Select(area => area.Area.Name))}.");
+        foreach (var area in found) offered.Add(area.Area.Name);
+        return SentinelAgentJson.Serialize(new
+        {
+            added = found.Select(area => area.Area.Name),
+            tools = found.SelectMany(area => area.Tools).Select(tool => tool.Name),
+            note = "These tools are yours now; carry on with the job."
+        });
+    }
+
     // A scope for work done as this person, so services that record who did it see them.
     private AsyncServiceScope ScopeFor(SentinelAgentUser user)
     {
@@ -503,6 +588,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             - Use ids exactly as the tools return them. Never make up an id.
             - Deleting, publishing, and running or switching on an automation only propose: say it's waiting for their Confirm.
             - When asked to remember something for later, call remember. Use what's under "What you've been asked to remember"; if the tools show otherwise, trust the tools and say so.
+            - Your tools cover what this request seems to need. If the job needs another part of the app, call use_tools for it first.
             - If a tool returns an error, fix the call and try again, or say plainly what's stopping you.
             - For facts, use only what the tools and the page give you. If you don't know, say so.
             - When you've finished, answer in one to three short sentences saying what you did. The app shows links and Undo buttons, so don't paste ids or links.

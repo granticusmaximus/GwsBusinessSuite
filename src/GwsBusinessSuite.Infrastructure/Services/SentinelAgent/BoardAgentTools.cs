@@ -15,6 +15,8 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
     private static readonly string[] Roles = [AppRoles.Admin];
     private const int CardsPerColumn = 20;
 
+    public SentinelAgentArea Area { get; } = new("boards", "Kanban boards and cards", ["board", "card", "kanban", "column", "backlog", "sprint"]);
+
     public IEnumerable<ISentinelAgentTool> Tools =>
     [
         new SentinelAgentTool(

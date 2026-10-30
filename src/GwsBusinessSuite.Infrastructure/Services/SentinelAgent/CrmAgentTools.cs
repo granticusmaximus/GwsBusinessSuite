@@ -17,6 +17,8 @@ public sealed class CrmAgentTools(ICrmService crm, IAppDbContext db) : ISentinel
     private const int NotesShown = 10;
     private const int DealsShown = 30;
 
+    public SentinelAgentArea Area { get; } = new("crm", "CRM contacts, notes and deals", ["crm", "contact", "deal", "lead", "customer", "client", "prospect", "pipeline", "company", "follow"]);
+
     public IEnumerable<ISentinelAgentTool> Tools =>
     [
         new SentinelAgentTool(

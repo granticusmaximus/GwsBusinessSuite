@@ -13,6 +13,8 @@ public sealed class SentinelPageAgentTools(IWikiService wiki) : ISentinelAgentTo
     private static readonly string[] Roles = [AppRoles.Admin, AppRoles.Author, AppRoles.Contributor];
     private const int MaxMarkdown = 6_000;
 
+    public SentinelAgentArea Area { get; } = new("sentinel", "Sentinel pages, notes and to-do lists", [], Always: true);
+
     public IEnumerable<ISentinelAgentTool> Tools =>
     [
         new SentinelAgentTool(

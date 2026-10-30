@@ -62,7 +62,23 @@ public interface ISentinelAgentTool
 // own scope, so they never share the page's DbContext (see feedback on circuit-shared contexts).
 public interface ISentinelAgentToolset
 {
+    SentinelAgentArea Area { get; }
+
     IEnumerable<ISentinelAgentTool> Tools { get; }
+}
+
+// A part of the app the agent works in. By Phase D (30-10-26) 64 tools were about 23,000
+// characters of definitions on every round of a 16k-token local model, so an area's tools are
+// offered only when the turn points at it: one of its Words in the request, on screen or earlier
+// in the chat, a change this chat made there, or the model asking with use_tools. Always areas
+// are offered on every turn. Offering only decides what the model is shown: any tool the person's
+// role allows still runs when called.
+public sealed record SentinelAgentArea(string Name, string About, IReadOnlyList<string> Words, bool Always = false)
+{
+    // Words match at the start of a word, so "contact" finds "contacts" but "mail" isn't "email".
+    public bool IsNamedIn(string text) =>
+        Words.Any(word => System.Text.RegularExpressions.Regex.IsMatch(
+            text, $@"\b{System.Text.RegularExpressions.Regex.Escape(word)}", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
 }
 
 public delegate Task<SentinelAgentToolResult> SentinelAgentRun(JsonObject arguments, SentinelAgentToolContext context, CancellationToken cancellationToken);

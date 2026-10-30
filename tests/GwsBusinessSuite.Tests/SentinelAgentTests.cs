@@ -7,8 +7,14 @@ using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Boards;
 using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Application.ClientPortal;
+using GwsBusinessSuite.Application.ContentCalendar;
 using GwsBusinessSuite.Application.Crm;
+using GwsBusinessSuite.Application.Growth;
 using GwsBusinessSuite.Application.SentinelAgent;
+using GwsBusinessSuite.Application.Settings;
+using GwsBusinessSuite.Application.Support;
+using GwsBusinessSuite.Application.TimeTracking;
 using GwsBusinessSuite.Application.SuiteSearch;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
@@ -20,6 +26,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
+using MimeKit;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -75,7 +83,14 @@ public sealed class SentinelAgentTests
         authorTools.Should().Contain(["create_todo_list", "find_sentinel_pages", SentinelAgentRunner.UndoToolName])
             .And.NotContain(["add_card", "list_boards", "create_site_page_draft", "search_app", "find_contacts", "list_automations"],
                 "boards, the CRM, automations and app-wide search are Admin pages; site pages are Admin/Contributor");
-        asAdmin.Tools[0].Select(tool => tool.Name).Should().Contain(["add_card", "create_site_page_draft", "search_app", "create_deal", "create_automation"]);
+        var authorMore = asAuthor.Tools[0].Single(tool => tool.Name == SentinelAgentRunner.UseToolsName).Description;
+        authorMore.Should().Contain("blog (").And.NotContain("crm (").And.NotContain("boards (").And.NotContain("site (");
+
+        var adminTools = asAdmin.Tools[0].Select(tool => tool.Name).ToList();
+        adminTools.Should().Contain(["create_todo_list", "search_app", SentinelAgentRunner.UseToolsName])
+            .And.NotContain(["add_card", "create_deal"], "an area's tools are offered when the turn points at it");
+        asAdmin.Tools[0].Single(tool => tool.Name == SentinelAgentRunner.UseToolsName).Description.Should()
+            .Contain("boards (").And.Contain("crm (").And.Contain("automations (").And.Contain("site (");
     }
 
     [Fact]
@@ -548,6 +563,158 @@ public sealed class SentinelAgentTests
         ran.CanUndo.Should().BeFalse("a run can't be taken back");
     }
 
+    [Fact]
+    public async Task Areas_ShouldBeOfferedWhenTheTurnPointsAtThem_AndUseToolsAddsOneMidTurn()
+    {
+        await using var harness = await Harness.CreateAsync();
+        IReadOnlyList<string> Offered(ScriptedModel model, int call = 0) => model.Tools[call].Select(tool => tool.Name).ToList();
+
+        var asked = new ScriptedModel(_ => Say("ok"));
+        await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin, "Add Ada Lovelace to the CRM", null, asked, "test"), _ => Task.CompletedTask, default);
+        Offered(asked).Should().Contain(["find_contacts", "create_deal", "create_todo_list"]).And.NotContain(["update_ticket", "add_card"]);
+
+        var onScreen = new ScriptedModel(_ => Say("ok"));
+        var page = GwsBusinessSuite.Application.Assistant.AssistantPrompt.DescribeContext(
+            new GwsBusinessSuite.Application.Assistant.AssistantPageContext("Support", "Ticket", "Invoice PDF won't open", RecordId: Guid.NewGuid().ToString()), null);
+        await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin, "Mark this one urgent", page, onScreen, "test"), _ => Task.CompletedTask, default);
+        Offered(onScreen).Should().Contain("update_ticket", "the open page is a ticket");
+
+        var chat = Guid.NewGuid();
+        await harness.TurnAsync(chat, Admin, "Add Ada to the CRM", Call("create_contact", new { fullName = "Ada Lovelace" }), Say("Added."));
+        var later = new ScriptedModel(_ => Say("ok"));
+        await harness.Runner.RunAsync(new SentinelAgentRequest(chat, Admin, "Make her a customer now", null, later, "test"), _ => Task.CompletedTask, default);
+        Offered(later).Should().Contain("update_contact", "this chat already changed something in the CRM");
+
+        var reaching = new ScriptedModel(
+            _ => Call(SentinelAgentRunner.UseToolsName, new { area = "support" }),
+            _ => Say("I have them now."));
+        await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin, "What's waiting on me?", null, reaching, "test"), _ => Task.CompletedTask, default);
+        Offered(reaching, 0).Should().NotContain("find_tickets");
+        Offered(reaching, 1).Should().Contain("find_tickets", "use_tools adds the area for the rest of the turn");
+    }
+
+    [Fact]
+    public async Task Support_ShouldTriageWithAnExactUndo_AndReplyOnlyAfterAConfirm()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var ticketId = await harness.TicketAsync("Invoice PDF won't open");
+        var chat = Guid.NewGuid();
+
+        var updated = await harness.TurnAsync(chat, Admin, "Resolve the invoice ticket and make it high priority",
+            Call("update_ticket", new { ticketId, status = "resolved", priority = "high" }), Say("Done."));
+        updated.Actions.Should().ContainSingle().Which.Summary.Should().Be("Updated the ticket 'Invoice PDF won't open' (Resolved, High, unassigned)");
+        (await harness.TicketViewAsync(ticketId)).Status.Should().Be(SupportTicketStatuses.Resolved);
+        await harness.Runner.UndoAsync(updated.Actions[0].Id, Admin, default);
+        var restored = await harness.TicketViewAsync(ticketId);
+        (restored.Status, restored.Priority).Should().Be((SupportTicketStatuses.Open, SupportTicketPriorities.Normal), "Undo puts back both changes, not just the last");
+
+        var reply = await harness.TurnAsync(chat, Admin, "Tell them it's fixed",
+            Call("reply_to_ticket", new { ticketId, message = "We've fixed the PDF; please try again." }), Say("Waiting for your Confirm."));
+        reply.Actions.Should().ContainSingle().Which.Summary.Should().Be("Reply to 'Invoice PDF won't open' (emails Ada Customer): We've fixed the PDF; please try again.");
+        harness.PortalMail.Sent.Should().BeEmpty("nothing is emailed before the Confirm");
+        await harness.Runner.ConfirmAsync(reply.Actions[0].Id, Admin, approve: true, default);
+        harness.PortalMail.Sent.Should().ContainSingle().Which.To.Should().Be("ada.customer@example.com");
+        (await harness.TicketViewAsync(ticketId)).Messages.Should().ContainSingle(message => message.AuthorName == "grant");
+    }
+
+    [Fact]
+    public async Task Time_ShouldLogAndTimeWorkForAContact_AndUndoAnEntry()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var chat = Guid.NewGuid();
+        await harness.TurnAsync(chat, Admin, "Add Ada", Call("create_contact", new { fullName = "Ada Lovelace", email = "ada@example.com" }), Say("Added."));
+        var contactId = (await harness.ContactAsync("ada@example.com")).Id;
+
+        var logged = await harness.TurnAsync(chat, Admin, "Log an hour and a half on Ada's design review yesterday",
+            Call("log_time", new { contactId, description = "Design review", hours = 1.5, date = "2026-10-29" }), Say("Logged."));
+        logged.Actions.Should().ContainSingle().Which.Summary.Should().Be("Logged 1 h 30 min for 'Design review' (Ada Lovelace, 29-10-26)");
+
+        var timed = await harness.TurnAsync(chat, Admin, "Start a timer for Ada's call, then stop it",
+            Call("start_timer", new { contactId, description = "Call" }), Call("stop_timer", new { }), Say("Stopped."));
+        timed.Actions.Select(action => action.Summary).Should().Equal("Started a timer for 'Call' (Ada Lovelace)", "Stopped the timer for 'Call' (1 min)");
+        timed.Actions[1].CanUndo.Should().BeFalse();
+
+        await harness.Runner.UndoAsync(logged.Actions[0].Id, Admin, default);
+        (await harness.TimeEntriesAsync()).Should().Equal("Call");
+    }
+
+    [Fact]
+    public async Task Blog_ShouldDraftAndEditPrivately_PublishOnlyAfterAConfirm_AndUndoBackToDraft()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var chat = Guid.NewGuid();
+        await harness.TurnAsync(chat, Author, "Draft a launch post", Call("create_blog_post_draft", new { title = "We launched!", body = "First line." }), Say("Drafted."));
+        var second = await harness.TurnAsync(chat, Author, "And another with the same title", Call("create_blog_post_draft", new { title = "We launched!", body = "Second." }), Say("Drafted."));
+        var post = await harness.PostAsync("we-launched");
+        post.Status.Should().Be(ArticleStatuses.Draft);
+        post.CreatedBy.Should().Be("writer");
+        (await harness.PostAsync("we-launched-2")).Id.ToString().Should().Be(second.Actions[0].Link!.Split('/').Last());
+
+        var edited = await harness.TurnAsync(chat, Author, "Add a thank-you to the first", Call("edit_blog_post_draft", new { postId = post.Id, addToEnd = "Thank you!" }), Say("Added."));
+        (await harness.PostAsync("we-launched")).BodyMarkdown.Should().Be("First line.\n\nThank you!");
+        await harness.Runner.UndoAsync(edited.Actions[0].Id, Author, default);
+        (await harness.PostAsync("we-launched")).BodyMarkdown.Should().Be("First line.");
+
+        var proposed = await harness.TurnAsync(chat, Author, "Publish it", Call("publish_blog_post", new { postId = post.Id }), Say("Waiting."));
+        proposed.Actions.Should().ContainSingle().Which.Summary.Should().StartWith("Publish the blog post 'We launched!' now");
+        (await harness.PostAsync("we-launched")).Status.Should().Be(ArticleStatuses.Draft, "nothing goes live before the Confirm");
+        var published = await harness.Runner.ConfirmAsync(proposed.Actions[0].Id, Author, approve: true, default);
+        published.Link.Should().Be("/blog/we-launched");
+        (await harness.PostAsync("we-launched")).Status.Should().Be(ArticleStatuses.Published);
+
+        var editLive = await harness.TurnAsync(chat, Author, "Change its title", Call("edit_blog_post_draft", new { postId = post.Id, title = "Changed" }), Say("Can't."));
+        editLive.Actions.Should().BeEmpty("only drafts are edited here");
+        await harness.Runner.UndoAsync(published.Id, Author, default);
+        (await harness.PostAsync("we-launched")).Status.Should().Be(ArticleStatuses.Draft);
+    }
+
+    [Fact]
+    public async Task ContentCalendar_ShouldMoveAScheduledPost_AndUndoTheMove()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var at = DateTimeOffset.UtcNow.AddDays(3);
+        var postId = await harness.ScheduledPostAsync("Autumn sale", at);
+        var newTime = DateTime.Now.Date.AddDays(5).AddHours(9);
+
+        var moved = await harness.TurnAsync(Guid.NewGuid(), Admin, "Push the autumn sale post to 9am in five days",
+            Call("reschedule_content", new { kind = "post", id = postId, at = newTime.ToString("yyyy-MM-dd HH:mm") }), Say("Moved."));
+        moved.Actions.Should().ContainSingle().Which.Summary.Should().Be($"Moved 'Autumn sale' to {newTime:dd-MM-yy HH:mm}");
+        (await harness.PostByIdAsync(postId)).PublishedAt.Should().Be(new DateTimeOffset(newTime).ToUniversalTime());
+
+        await harness.Runner.UndoAsync(moved.Actions[0].Id, Admin, default);
+        (await harness.PostByIdAsync(postId)).PublishedAt!.Value.Should().BeCloseTo(at, TimeSpan.FromSeconds(1));
+    }
+
+    [Fact]
+    public async Task EmailSettingsAndMedia_ShouldConfirmWhatLeavesOrChangesTheApp_AndUndoTheRest()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var chat = Guid.NewGuid();
+        await harness.TurnAsync(chat, Admin, "Add Ada", Call("create_contact", new { fullName = "Ada Lovelace", email = "ada@example.com" }), Say("Added."));
+        var contact = await harness.ContactAsync("ada@example.com");
+
+        var email = await harness.TurnAsync(chat, Admin, "Email Ada the quote",
+            Call("send_email", new { contactId = contact.Id, subject = "Your quote", body = "It's $12,500." }), Say("Waiting."));
+        email.Actions.Should().ContainSingle().Which.Summary.Should().Be("Email Ada Lovelace <ada@example.com>: 'Your quote'");
+        harness.Mail.Sent.Should().BeEmpty();
+        await harness.Runner.ConfirmAsync(email.Actions[0].Id, Admin, approve: true, default);
+        harness.Mail.Sent.Should().ContainSingle().Which.Subject.Should().Be("Your quote");
+        (await harness.NotesAsync(contact.Id)).Should().Be(1, "an email to a contact goes on their activity log");
+
+        var setting = await harness.TurnAsync(chat, Admin, "Show 25 posts per page", Call("change_setting", new { name = "postsPerPage", value = "25" }), Say("Waiting."));
+        setting.Actions.Should().ContainSingle().Which.Summary.Should().Be("Change the setting postsPerPage from '12' to '25'");
+        var changed = await harness.Runner.ConfirmAsync(setting.Actions[0].Id, Admin, approve: true, default);
+        (await harness.SettingsAsync()).PostsPerPage.Should().Be(25);
+        await harness.Runner.UndoAsync(changed.Id, Admin, default);
+        (await harness.SettingsAsync()).PostsPerPage.Should().Be(12);
+
+        var imageId = await harness.ImageAsync("harbour.jpg");
+        var alt = await harness.TurnAsync(chat, Admin, "Describe the harbour image", Call("set_media_alt_text", new { mediaId = imageId, altText = "Boats in the harbour at dusk" }), Say("Done."));
+        alt.Actions.Should().ContainSingle().Which.Summary.Should().Be("Wrote alt text for 'harbour.jpg'");
+        await harness.Runner.UndoAsync(alt.Actions[0].Id, Admin, default);
+        (await harness.ImageAltTextAsync(imageId)).Should().BeEmpty();
+    }
+
     private static string ToolCallReply(string name, object arguments) =>
         JsonSerializer.Serialize(new { message = new { role = "assistant", content = "", tool_calls = new[] { new { function = new { name, arguments } } } } });
 
@@ -610,6 +777,8 @@ public sealed class SentinelAgentTests
             var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
             await using (var db = new ApplicationDbContext(options)) await db.Database.EnsureCreatedAsync();
 
+            var portalMail = new RecordingPortalMail();
+            var mail = new RecordingMail();
             var services = new ServiceCollection()
                 .AddScoped(_ => new ApplicationDbContext(options))
                 .AddScoped<IAppDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>())
@@ -635,12 +804,32 @@ public sealed class SentinelAgentTests
                     provider.GetRequiredService<IAutomationNodeRegistry>(), provider.GetRequiredService<IAutomationCredentialService>(), TimeProvider.System))
                 .AddScoped<ISentinelAgentToolset, CrmAgentTools>()
                 .AddScoped<ISentinelAgentToolset, AutomationAgentTools>()
+                .AddSingleton(portalMail)
+                .AddSingleton(mail)
+                .AddSingleton<IMailTransport>(mail)
+                .AddSingleton(Options.Create(new GrowthReportEmailOptions { FromAddress = "suite@example.com" }))
+                .AddScoped<ISupportTicketService>(provider => new SupportTicketService(provider.GetRequiredService<IAppDbContext>(), TimeProvider.System,
+                    new NoAdminEmail(), portalMail, Options.Create(new SupportNotificationOptions()), NullLogger<SupportTicketService>.Instance))
+                .AddScoped<ITimeTrackingService>(provider => new TimeTrackingService(provider.GetRequiredService<IAppDbContext>(), null!, TimeProvider.System))
+                .AddScoped<IContentCalendarService>(_ => new ContentCalendarService(new DbFactory(options), TimeProvider.System))
+                .AddScoped<ISiteSettingsService>(provider => new SiteSettingsService(provider.GetRequiredService<IAppDbContext>(), provider.GetRequiredService<ICurrentUserAccessor>()))
+                .AddScoped<IMediaLibraryService>(provider => new MediaLibraryService(provider.GetRequiredService<IAppDbContext>(), provider.GetRequiredService<ISiteSettingsService>()))
+                .AddScoped<ISentinelAgentToolset, SupportAgentTools>()
+                .AddScoped<ISentinelAgentToolset, TimeAgentTools>()
+                .AddScoped<ISentinelAgentToolset, BlogAgentTools>()
+                .AddScoped<ISentinelAgentToolset, MediaAgentTools>()
+                .AddScoped<ISentinelAgentToolset, EmailAgentTools>()
+                .AddScoped<ISentinelAgentToolset, SettingsAgentTools>()
                 .AddSingleton(TimeProvider.System)
                 .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>))
                 .AddSingleton<SentinelAgentRunner>()
                 .BuildServiceProvider();
             return new Harness(connection, services);
         }
+
+        public RecordingPortalMail PortalMail => _services.GetRequiredService<RecordingPortalMail>();
+
+        public RecordingMail Mail => _services.GetRequiredService<RecordingMail>();
 
         // A turn whose model replies are fixed in advance, one per round.
         public Task<SentinelAgentTurn> TurnAsync(Guid chat, SentinelAgentUser user, string message, params OllamaChatResponse[] replies) =>
@@ -709,7 +898,7 @@ public sealed class SentinelAgentTests
         {
             await using var scope = _services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
-            var contact = new Contact { FullName = "Ada Customer" };
+            var contact = new Contact { FullName = "Ada Customer", Email = "ada.customer@example.com" };
             db.Contacts.Add(contact);
             var ticket = new SupportTicket { ContactId = contact.Id, Subject = subject };
             db.SupportTickets.Add(ticket);
@@ -751,6 +940,62 @@ public sealed class SentinelAgentTests
         {
             await using var scope = _services.CreateAsyncScope();
             await scope.ServiceProvider.GetRequiredService<ICrmService>().SetContactStatusAsync(contactId, status);
+        }
+
+        public async Task<SupportTicketView> TicketViewAsync(Guid id)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            return (await scope.ServiceProvider.GetRequiredService<ISupportTicketService>().GetTicketAsync(id))!;
+        }
+
+        public async Task<IReadOnlyList<string>> TimeEntriesAsync()
+        {
+            await using var scope = _services.CreateAsyncScope();
+            return await scope.ServiceProvider.GetRequiredService<IAppDbContext>().TimeEntries.Select(entry => entry.Description).ToListAsync();
+        }
+
+        public async Task<Article> PostAsync(string slug)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            return await scope.ServiceProvider.GetRequiredService<IAppDbContext>().Articles.AsNoTracking().SingleAsync(article => article.Slug == slug);
+        }
+
+        public async Task<Article> PostByIdAsync(Guid id)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            return await scope.ServiceProvider.GetRequiredService<IAppDbContext>().Articles.AsNoTracking().SingleAsync(article => article.Id == id);
+        }
+
+        public async Task<Guid> ScheduledPostAsync(string title, DateTimeOffset at)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+            var post = new Article { Title = title, Slug = "autumn-sale", Status = ArticleStatuses.Published, PublishedAt = at };
+            db.Articles.Add(post);
+            await db.SaveChangesAsync();
+            return post.Id;
+        }
+
+        public async Task<SiteSettingsView> SettingsAsync()
+        {
+            await using var scope = _services.CreateAsyncScope();
+            return await scope.ServiceProvider.GetRequiredService<ISiteSettingsService>().GetSettingsAsync();
+        }
+
+        public async Task<Guid> ImageAsync(string fileName)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+            var image = new MediaAsset { FileName = fileName, ContentType = "image/jpeg", DataUri = "data:image/jpeg;base64,AA==", SizeBytes = 1 };
+            db.MediaAssets.Add(image);
+            await db.SaveChangesAsync();
+            return image.Id;
+        }
+
+        public async Task<string> ImageAltTextAsync(Guid id)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            return (await scope.ServiceProvider.GetRequiredService<IAppDbContext>().MediaAssets.AsNoTracking().SingleAsync(image => image.Id == id)).AltText;
         }
 
         public async Task<IReadOnlyList<AutomationWorkflowSummary>> WorkflowsAsync()
@@ -814,6 +1059,47 @@ public sealed class SentinelAgentTests
     {
         public string Protect(string plaintext) => plaintext;
         public string Unprotect(string protectedValue) => protectedValue;
+    }
+
+    private sealed class DbFactory(DbContextOptions<ApplicationDbContext> options) : IAppDbContextFactory
+    {
+        public Task<IAppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IAppDbContext>(new ApplicationDbContext(options));
+    }
+
+    private sealed class NoAdminEmail : IGrowthReportEmailSender
+    {
+        public GrowthReportDeliveryConfiguration Configuration { get; } = new(true, "ready");
+        public Task SendAsync(GrowthReportEmail email, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class RecordingPortalMail : IClientPortalEmailSender
+    {
+        public List<(string To, string Subject)> Sent { get; } = [];
+
+        public Task SendLoginLinkAsync(string toEmail, string contactName, string loginUrl, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task SendTicketReplyNotificationAsync(string toEmail, string contactName, string ticketSubject, string portalUrl,
+            CancellationToken cancellationToken = default, TicketReplyEmail? reply = null)
+        {
+            Sent.Add((toEmail, ticketSubject));
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class RecordingMail : IMailTransport
+    {
+        public List<MimeMessage> Sent { get; } = [];
+
+        public MailRoute Describe(ISmtpTransportOptions options) => new(MailRouteKind.Smtp, "test");
+
+        public Task SendAsync(MimeMessage message, ISmtpTransportOptions options, string filePrefix, CancellationToken cancellationToken = default)
+        {
+            Sent.Add(message);
+            return Task.CompletedTask;
+        }
+
+        public Task RefreshGmailStatusAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class NoSuiteSearch : ISuiteSearchService

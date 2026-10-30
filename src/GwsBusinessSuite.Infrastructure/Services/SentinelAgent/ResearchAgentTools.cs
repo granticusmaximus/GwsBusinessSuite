@@ -22,6 +22,8 @@ public sealed class ResearchAgentTools(
     private const int WebPageCharacters = 6_000;
     private const int WebResultCharacters = 600;
 
+    public SentinelAgentArea Area { get; } = new("research", "searching the app, World News and the web", [], Always: true);
+
     public IEnumerable<ISentinelAgentTool> Tools
     {
         get

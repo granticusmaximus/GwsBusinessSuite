@@ -173,6 +173,29 @@ plans, memory, roll-back, Confirm and Undo are the same everywhere.
 - [x] User guides: Sentinel guide's SentinelGPT section, Automation guide's agentic section.
 - [ ] Live check on the local sentinelgpt model (CRM scenario + "make an automation").
 
-## Phase D: the rest
-- [ ] Media, support tickets, time tracking, content calendar, blog post drafts, email (Confirm),
-  settings (Confirm), Overwatch/World News reads.
+## Phase D: the rest (built 30-10-26)
+- [x] Support (`SupportAgentTools`, Admin): find/read tickets; update_ticket (status, priority,
+  assignee through ApplyTriageAsync; Undo restores the first snapshot, SLA clock included);
+  tag_ticket (Undo); reply_to_ticket (Confirm: it emails the contact).
+- [x] Time (`TimeAgentTools`, Admin, always the person's own): my_time, start_timer, stop_timer
+  (no Undo), log_time (minutes or hours, a day); Undo deletes the entry.
+- [x] Blog + content calendar (`BlogAgentTools`): posts for ContentAccess like the editor (Articles
+  have no service; written directly with the editor's defaults; unique slug); Drafts only;
+  publish_blog_post (Confirm; goes live + alert emails; affiliate suggestions as the editor does;
+  Undo -> Draft). content_calendar + reschedule_content (Admin; Undo while the old time is ahead).
+- [x] Media (`MediaAgentTools`, Admin/Contributor): find_media, set_media_alt_text (Undo).
+- [x] Email (`EmailAgentTools`, Admin): send_email to a contact or address (Confirm) via
+  IMailTransport; noted on the contact's activity log.
+- [x] Settings (`SettingsAgentTools`, Admin): read_settings, change_setting for 7 plain values
+  (Confirm, Undo).
+- [x] Overwatch (`OverwatchAgentTools`, Admin): overwatch_briefing for a place (geocoded, ~30 km
+  box) or the person's watched areas and trips. World News stays search_world_news.
+- [x] **Tools offered by area.** 64 tools were ~23,400 characters of definitions every round of a
+  16k-token context. Each toolset has a `SentinelAgentArea` (name, words, Always). A turn is
+  offered the Always areas (Sentinel, research, memory) plus areas named in the request, on screen,
+  in the chat's earlier messages or changes (a Go counts its plan), or used by this chat's changes.
+  `use_tools` adds an area mid-turn. Offering only limits what's shown: any role-allowed tool still runs.
+- [x] Tests: `SentinelAgentTests` 28 (areas, support, time, blog, calendar, email/settings/media);
+  `SentinelAgentToolboxTests` resolves every toolset from AddInfrastructure and checks unique names.
+- [x] User guide: Sentinel guide's SentinelGPT section.
+- [ ] Live check on the local sentinelgpt model, including whether it reaches for use_tools.

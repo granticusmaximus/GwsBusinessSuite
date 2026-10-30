@@ -13,6 +13,8 @@ public sealed class MemoryAgentTools(IAppDbContext db, TimeProvider time) : ISen
 {
     public const string Link = "/admin/sentinelgpt/activity?tab=memories";
 
+    public SentinelAgentArea Area { get; } = new("memory", "what you've been asked to remember", [], Always: true);
+
     public IEnumerable<ISentinelAgentTool> Tools =>
     [
         new SentinelAgentTool(

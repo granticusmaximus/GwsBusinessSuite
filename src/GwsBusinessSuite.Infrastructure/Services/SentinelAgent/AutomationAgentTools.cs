@@ -22,6 +22,8 @@ public sealed class AutomationAgentTools(
     private const int NodeTypesShown = 25;
     private const int RunsShown = 5;
 
+    public SentinelAgentArea Area { get; } = new("automations", "automation workflows: list, make, run, switch on or off", ["automat", "workflow", "trigger", "webhook", "every day", "every week", "every monday"]);
+
     public IEnumerable<ISentinelAgentTool> Tools =>
     [
         new SentinelAgentTool(

@@ -16,6 +16,8 @@ public sealed class SitePageAgentTools(ICmsBuilderService cms) : ISentinelAgentT
         "The page's sections, in order. Each is an object: {\"heading\": \"...\", \"text\": \"markdown paragraphs\"}, " +
         "or {\"template\": \"feature-grid\"} for a ready-made section (feature-grid, testimonial-row, cta-banner, team-grid, pricing-table, newsletter-signup).";
 
+    public SentinelAgentArea Area { get; } = new("site", "website pages (drafts and publishing)", ["site", "website", "web page", "landing", "homepage", "page"]);
+
     public IEnumerable<ISentinelAgentTool> Tools =>
     [
         new SentinelAgentTool(
