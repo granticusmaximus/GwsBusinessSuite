@@ -24,6 +24,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
     private static readonly string[] AssigneeNames = ["Assignee", "Assignees", "Owner"];
     private static readonly string[] EstimateNames = ["Estimate", "Points", "Story points"];
     private static readonly string[] SprintNames = ["Sprint", "Cycle", "Iteration"];
+    private static readonly string[] EpicNames = ["Epic", "Epics"];
     private const string BlockedName = "Blocked";
     private const string BlockedReasonName = "Blocked reason";
     private const string WaitingOnName = "Waiting on";
@@ -128,7 +129,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         var color = KanbanColumnEdits.Colors.FirstOrDefault(c => options.All(o => !string.Equals(o.Color, c, StringComparison.OrdinalIgnoreCase)))
             ?? KanbanColumnEdits.Colors[options.Count % KanbanColumnEdits.Colors.Count];
         var option = new WikiDatabasePropertyOption(Guid.NewGuid().ToString(), name, color, ColumnGroup(status, group));
-        await SaveColumnOptionsAsync(databaseId, status, [.. options, option], performedBy, cancellationToken);
+        await SaveOptionsAsync(databaseId, status, [.. options, option], performedBy, cancellationToken);
         return option.Id;
     }
 
@@ -147,7 +148,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         var list = options.Where(o => o.Id != optionId).ToList();
         if (newGroup == current.Group) list.Insert(options.ToList().FindIndex(o => o.Id == optionId), updated);
         else list.Add(updated);
-        await SaveColumnOptionsAsync(databaseId, status, list, performedBy, cancellationToken);
+        await SaveOptionsAsync(databaseId, status, list, performedBy, cancellationToken);
     }
 
     public async Task MoveColumnAsync(Guid databaseId, string optionId, int offset, string performedBy, CancellationToken cancellationToken = default)
@@ -163,7 +164,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         var list = options.ToList();
         var (a, b) = (list.FindIndex(o => o.Id == optionId), list.FindIndex(o => o.Id == shown[target].Id));
         (list[a], list[b]) = (list[b], list[a]);
-        await SaveColumnOptionsAsync(databaseId, status, list, performedBy, cancellationToken);
+        await SaveOptionsAsync(databaseId, status, list, performedBy, cancellationToken);
     }
 
     public async Task DeleteColumnAsync(Guid databaseId, string optionId, string? moveCardsTo, string performedBy,
@@ -191,7 +192,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
                 : throw new ArgumentException("Choose another column on this board for its cards.", nameof(moveCardsTo));
             await SetCardsValueAsync(databaseId, rows, status.Id, _ => JsonValue.Create(target), performedBy, cancellationToken);
         }
-        await SaveColumnOptionsAsync(databaseId, status, options.Where(o => o.Id != optionId).ToList(), performedBy, cancellationToken);
+        await SaveOptionsAsync(databaseId, status, options.Where(o => o.Id != optionId).ToList(), performedBy, cancellationToken);
 
         // Its WIP limit and its place on the public roadmap go with it.
         var settings = await GetSettingsAsync(databaseId, cancellationToken);
@@ -207,6 +208,88 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         }
     }
 
+    // ---- Email to a board (K9f) ----
+
+    public async Task<string?> SetEmailTokenAsync(Guid databaseId, bool on, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var settings = await GetSettingsAsync(databaseId, cancellationToken);
+        // Ten lower-case letters and digits: unguessable enough for an address that only accepts
+        // mail from known, verified senders who can edit the board anyway.
+        var token = on ? string.Concat(System.Security.Cryptography.RandomNumberGenerator.GetItems("abcdefghjkmnpqrstuvwxyz23456789".AsSpan(), 10)) : null;
+        await SaveSettingsAsync(databaseId, settings with { EmailToken = token }, performedBy, cancellationToken);
+        return token;
+    }
+
+    // ---- Epics (K9e) ----
+
+    public async Task<IReadOnlyList<KanbanEpicView>> ListEpicsAsync(Guid databaseId, CancellationToken cancellationToken = default)
+    {
+        if (await LoadBoardAsync(databaseId, includeArchived: true, cancellationToken) is not { EpicOptions.Count: > 0 } board) return [];
+        var cards = board.Columns.SelectMany(column => column.Cards.Select(card => (Card: card, Done: column.Group == WikiDatabaseStatusGroups.Complete))).ToList();
+        var dailyDone = (await GetInsightsAsync(databaseId, 90, cancellationToken))?.DailyDone ?? [];
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        return board.EpicOptions!.Select(option =>
+        {
+            var mine = cards.Where(entry => entry.Card.EpicOptionId == option.Id).ToList();
+            var open = mine.Count(entry => !entry.Done);
+            return new KanbanEpicView(option.Id, option.Label, option.Color, mine.Count, mine.Count - open,
+                open > 0 ? KanbanForecasting.Forecast(dailyDone, open, today) : null);
+        }).ToList();
+    }
+
+    public async Task<string> CreateEpicAsync(Guid databaseId, string name, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var database = await databases.GetDatabaseAsync(databaseId, cancellationToken) ?? throw new KeyNotFoundException("That board isn't there any more.");
+        var properties = database.Properties.ToList();
+        var epicProperty = Find(properties, WikiDatabasePropertyTypes.Select, EpicNames);
+        var existing = epicProperty is null ? [] : WikiDatabasePropertyConfig.GetOptions(epicProperty);
+        var label = ColumnLabel(name, existing, exceptId: null, what: "epic");
+        var color = KanbanColumnEdits.Colors.Skip(1).FirstOrDefault(c => existing.All(o => !string.Equals(o.Color, c, StringComparison.OrdinalIgnoreCase)))
+            ?? KanbanColumnEdits.Colors[1 + existing.Count % (KanbanColumnEdits.Colors.Count - 1)];
+        var option = new WikiDatabasePropertyOption(Guid.NewGuid().ToString(), label, color);
+        if (epicProperty is null)
+            await databases.SavePropertyAsync(databaseId, new WikiDatabasePropertyEditor
+            {
+                Name = "Epic", Type = WikiDatabasePropertyTypes.Select, Options = [option]
+            }, performedBy, cancellationToken);
+        else
+            await SaveOptionsAsync(databaseId, epicProperty, [.. existing, option], performedBy, cancellationToken);
+        return option.Id;
+    }
+
+    public async Task UpdateEpicAsync(Guid databaseId, string optionId, string name, string color, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var (epicProperty, options) = await EpicOptionsAsync(databaseId, cancellationToken);
+        var current = options.FirstOrDefault(o => o.Id == optionId) ?? throw new KeyNotFoundException("That epic isn't on the board any more.");
+        if (!SafeColorPattern().IsMatch(color ?? string.Empty)) throw new ArgumentException("Pick a colour for the epic.", nameof(color));
+        var updated = current with { Label = ColumnLabel(name, options, exceptId: optionId, what: "epic"), Color = color! };
+        await SaveOptionsAsync(databaseId, epicProperty, options.Select(o => o.Id == optionId ? updated : o).ToList(), performedBy, cancellationToken);
+    }
+
+    public async Task DeleteEpicAsync(Guid databaseId, string optionId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        var database = await databases.GetDatabaseAsync(databaseId, cancellationToken) ?? throw new KeyNotFoundException("That board isn't there any more.");
+        var epicProperty = Find(database.Properties.ToList(), WikiDatabasePropertyTypes.Select, EpicNames)
+            ?? throw new KeyNotFoundException("That board has no epics.");
+        var options = WikiDatabasePropertyConfig.GetOptions(epicProperty);
+        if (options.All(o => o.Id != optionId)) throw new KeyNotFoundException("That epic isn't on the board any more.");
+        // Its cards stay where they are, just no longer in an epic.
+        var rows = database.Rows
+            .Where(row => WikiPropertyValues.GetText(WikiPropertyValues.ParseObject(row.PropertyValuesJson), epicProperty.Id) == optionId)
+            .Select(row => row.Id).ToList();
+        if (rows.Count > 0) await SetCardsValueAsync(databaseId, rows, epicProperty.Id, _ => null, performedBy, cancellationToken);
+        await SaveOptionsAsync(databaseId, epicProperty, options.Where(o => o.Id != optionId).ToList(), performedBy, cancellationToken);
+    }
+
+    private async Task<(WikiDatabaseProperty Property, IReadOnlyList<WikiDatabasePropertyOption> Options)> EpicOptionsAsync(Guid databaseId,
+        CancellationToken cancellationToken)
+    {
+        var database = await databases.GetDatabaseAsync(databaseId, cancellationToken) ?? throw new KeyNotFoundException("That board isn't there any more.");
+        var epicProperty = Find(database.Properties.ToList(), WikiDatabasePropertyTypes.Select, EpicNames)
+            ?? throw new KeyNotFoundException("That board has no epics.");
+        return (epicProperty, WikiDatabasePropertyConfig.GetOptions(epicProperty));
+    }
+
     private async Task<(WikiDatabaseProperty Status, IReadOnlyList<WikiDatabasePropertyOption> Options)> ColumnOptionsAsync(Guid databaseId,
         CancellationToken cancellationToken)
     {
@@ -215,29 +298,30 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         return (status, WikiDatabasePropertyConfig.GetOptions(status));
     }
 
-    // Through Sentinel, as the database editor saves it, keeping the property's other settings.
-    private async Task SaveColumnOptionsAsync(Guid databaseId, WikiDatabaseProperty status, IReadOnlyList<WikiDatabasePropertyOption> options,
+    // A select's options through Sentinel, as the database editor saves them, keeping the
+    // property's other settings. Columns (the Status property) and epics both edit this way.
+    private async Task SaveOptionsAsync(Guid databaseId, WikiDatabaseProperty property, IReadOnlyList<WikiDatabasePropertyOption> options,
         string performedBy, CancellationToken cancellationToken)
     {
-        var config = WikiDatabasePropertyConfig.Parse(status);
+        var config = WikiDatabasePropertyConfig.Parse(property);
         await databases.SavePropertyAsync(databaseId, new WikiDatabasePropertyEditor
         {
-            Id = status.Id,
-            Name = status.Name,
-            Type = status.Type,
+            Id = property.Id,
+            Name = property.Name,
+            Type = property.Type,
             Options = options,
             IsRequired = config.IsRequired
         }, performedBy, cancellationToken);
     }
 
-    private static string ColumnLabel(string label, IReadOnlyList<WikiDatabasePropertyOption> options, string? exceptId)
+    private static string ColumnLabel(string label, IReadOnlyList<WikiDatabasePropertyOption> options, string? exceptId, string what = "column")
     {
         var name = (label ?? string.Empty).Trim();
-        if (name.Length == 0) throw new ArgumentException("Give the column a name.", nameof(label));
+        if (name.Length == 0) throw new ArgumentException($"Give the {what} a name.", nameof(label));
         if (name.Length > KanbanColumnEdits.MaxLabelLength)
-            throw new ArgumentException($"Keep column names under {KanbanColumnEdits.MaxLabelLength} characters.", nameof(label));
+            throw new ArgumentException($"Keep {what} names under {KanbanColumnEdits.MaxLabelLength} characters.", nameof(label));
         if (options.Any(o => o.Id != exceptId && string.Equals(o.Label.Trim(), name, StringComparison.CurrentCultureIgnoreCase)))
-            throw new ArgumentException($"There's already a column called \"{name}\".", nameof(label));
+            throw new ArgumentException($"There's already {(what == "epic" ? "an" : "a")} {what} called \"{name}\".", nameof(label));
         return name;
     }
 
@@ -268,7 +352,8 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             Find(properties, WikiDatabasePropertyTypes.Checkbox, [BlockedName])?.Id,
             Find(properties, WikiDatabasePropertyTypes.Text, [BlockedReasonName])?.Id,
             Find(properties, WikiDatabasePropertyTypes.Date, [KanbanArchive.PropertyName])?.Id,
-            Find(properties, WikiDatabasePropertyTypes.Relation, [WaitingOnName])?.Id);
+            Find(properties, WikiDatabasePropertyTypes.Relation, [WaitingOnName])?.Id,
+            Find(properties, WikiDatabasePropertyTypes.Select, EpicNames)?.Id);
         var settings = await GetSettingsAsync(databaseId, cancellationToken);
 
         // When each card last moved into the column it's in now; a row from before the log, or
@@ -342,7 +427,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             .OrderBy(property => property.SortOrder)
             .Select(property => new KanbanFaceField(property.Id, property.Name, property.Type)).ToList();
         return new KanbanBoard(database.Id, database.Title, database.Icon, fields, columns, OptionsOf(fields.PriorityPropertyId), OptionsOf(fields.LabelsPropertyId),
-            settings, OptionsOf(fields.SprintPropertyId), archived.Count, faceFields);
+            settings, OptionsOf(fields.SprintPropertyId), archived.Count, faceFields, OptionsOf(fields.EpicPropertyId));
     }
 
     // ---- Archive (K9a) ----
@@ -1070,7 +1155,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         return new KanbanPublicRoadmap(share.Id, board.Title, board.Icon,
             shown.Select(column => new KanbanPublicColumn(column.Label, column.Color, column.Group, column.Cards
                 .Select(card => new KanbanPublicCard(card.RowId, card.Title, card.Labels, descriptions.GetValueOrDefault(card.RowId),
-                    counts.TryGetValue(card.RowId, out var count) ? count.Count : 0, counts.TryGetValue(card.RowId, out var mine) && mine.Mine))
+                    counts.TryGetValue(card.RowId, out var count) ? count.Count : 0, counts.TryGetValue(card.RowId, out var mine) && mine.Mine, card.Epic))
                 .ToList())).ToList(),
             roadmap.Votes);
     }
@@ -1435,6 +1520,15 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
                 ? new KanbanLabel(sprintOption.Label, SafeColor(sprintOption.Color)) : null;
         }
 
+        KanbanLabel? epic = null;
+        string? epicId = null;
+        if (Property(fields.EpicPropertyId) is { } epicProperty && WikiPropertyValues.GetText(values, epicProperty.Id) is { } chosenEpic)
+        {
+            epicId = chosenEpic;
+            epic = WikiDatabasePropertyConfig.GetOptions(epicProperty).FirstOrDefault(option => option.Id == chosenEpic) is { } epicOption
+                ? new KanbanLabel(epicOption.Label, SafeColor(epicOption.Color)) : null;
+        }
+
         var blocks = WikiBlockJson.ParseBlocks(row.BlocksJson);
         var checklist = blocks.Where(block => block.Type == WikiBlockTypes.ToDo && block.PlainText.Trim().Length > 0).ToList();
         // K7: no cover of its own, so the first picture in the card's page.
@@ -1468,7 +1562,9 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             fields.BlockedPropertyId is { } blockedId && WikiPropertyValues.GetCheckbox(values, blockedId),
             fields.BlockedReasonPropertyId is { } reasonId ? WikiPropertyValues.GetText(values, reasonId) : null,
             Snippet: withSnippet ? SnippetOf(blocks) : null,
-            Properties: cardProperties);
+            Properties: cardProperties,
+            Epic: epic,
+            EpicOptionId: epicId);
     }
 
     private static bool IsPictureUrl(string? url) =>

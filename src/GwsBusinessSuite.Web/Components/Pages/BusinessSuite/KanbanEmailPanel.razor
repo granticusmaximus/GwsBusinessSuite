@@ -1,0 +1,111 @@
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Application.Wiki
+@inject IKanbanBoardService BoardService
+@inject ISentinelEmailInService EmailIn
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
+
+@* Email to this board (Boards K9f): the board's own address on the server's mail account. An
+   email to it becomes a card in the first open column: the subject read like quick add, the email
+   (with its attachments) as the card's page. Same sender checks as Sentinel's email-in. *@
+<div class="kb-modal-backdrop" @onclick="Close"></div>
+<section class="kb-modal kb-email" role="dialog" aria-modal="true" aria-labelledby="kb-email-title" tabindex="-1" @ref="_dialog" @onkeydown="CloseOnEscape">
+    <header class="kb-modal-head">
+        <h2 id="kb-email-title"><i class="bi bi-envelope me-2" aria-hidden="true"></i>Email to this board</h2>
+        <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Close" @onclick="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+    </header>
+    @if (!CanReceive)
+    {
+        <p class="kb-email-note">
+            Boards receive email on the server's own mail account, which isn't a Google account this can read. Set one in
+            Settings &gt; Email, then come back here.
+        </p>
+    }
+    else if (_token is null)
+    {
+        <p class="kb-email-note">Give @Board.Title an email address: anything sent to it becomes a card here.</p>
+        <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="() => SetAsync(true)">Give this board an address</button>
+    }
+    else
+    {
+        <div class="kb-email-address">
+            <code>@Address</code>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CopyAsync"><i class="bi bi-clipboard me-1" aria-hidden="true"></i>Copy</button>
+        </div>
+        <ul class="kb-email-rules">
+            <li>The <strong>subject</strong> is the card, read like quick add: <code>Fix the login !high #bug fri</code> sets its priority, label and due date.</li>
+            <li>The <strong>email</strong> becomes the card's page, attachments included (up to 10, 10 MB each). The card lands in the first open column.</li>
+            <li>Only people with an account here can send: from the address on their member profile, through a mail server that verifies them, and with edit access to this board.</li>
+        </ul>
+        <div class="kb-email-actions">
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => SetAsync(true)">New address</button>
+            <button type="button" class="btn btn-sm btn-link kb-email-off" disabled="@_busy" @onclick="() => SetAsync(false)">Turn off</button>
+        </div>
+        <p class="kb-email-note">A new address stops the old one working. Mail is checked every few minutes; Sentinel's Email in panel lists what arrived and why anything was turned away.</p>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public KanbanBoard Board { get; set; } = null!;
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private ElementReference _dialog;
+    private string? _token;
+    private bool _busy;
+    private bool _refocus;
+
+    private bool CanReceive => EmailIn.BoardAddress("probe") is not null;
+
+    private string Address => _token is null ? string.Empty : EmailIn.BoardAddress(_token) ?? string.Empty;
+
+    protected override void OnInitialized() => _token = Board.Settings?.EmailToken;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender && !_refocus) return;
+        _refocus = false;
+        await _dialog.FocusAsync();
+    }
+
+    private async Task SetAsync(bool on)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            var hadOne = _token is not null;
+            _token = await BoardService.SetEmailTokenAsync(Board.DatabaseId, on, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            Toasts.Show(!on ? "This board no longer takes email." : hadOne ? "New address made; the old one no longer works." : "This board takes email now.",
+                tone: StatusTone.Success);
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            Toasts.Show($"Couldn't change the board's address. {ex.Message}", tone: StatusTone.Danger);
+        }
+        finally
+        {
+            _busy = false;
+            _refocus = true;
+        }
+    }
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("gwsAssistant.copy", Address);
+            Toasts.Show("Address copied.", tone: StatusTone.Success);
+        }
+        catch (JSException) { /* the browser refused the clipboard */ }
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task CloseOnEscape(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await Close();
+    }
+}

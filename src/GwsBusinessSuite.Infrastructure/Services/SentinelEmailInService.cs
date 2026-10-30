@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Boards;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using MailKit;
@@ -23,7 +24,9 @@ public sealed class SentinelEmailInService(
     ISecretProtector secretProtector,
     TimeProvider timeProvider,
     ILogger<SentinelEmailInService> logger,
-    ServerMailAccount? serverAccount = null) : ISentinelEmailInService
+    ServerMailAccount? serverAccount = null,
+    IKanbanBoardService? boards = null,
+    IWikiDatabaseService? databases = null) : ISentinelEmailInService
 {
     private readonly List<SentinelImportedFile> _pendingFiles = [];
     private const string ServerAccountTag = "sentinel";
@@ -125,7 +128,10 @@ public sealed class SentinelEmailInService(
             .Select(item => new SentinelInboundEmailView(item.Id, item.FromAddress, item.Subject, item.Status, item.Reason, item.Username, item.WikiPageId, item.AttachmentCount, item.ProcessedAtUnix))
             .ToListAsync(cancellationToken);
 
-    public async Task<int> PollAsync(CancellationToken cancellationToken = default)
+    public async Task<int> PollAsync(CancellationToken cancellationToken = default) =>
+        await PollInboxAsync(cancellationToken) + await PollBoardsAsync(cancellationToken);
+
+    private async Task<int> PollInboxAsync(CancellationToken cancellationToken)
     {
         var settings = await db.SentinelMailboxSettings.FirstOrDefaultAsync(cancellationToken);
         if (Effective(settings) is not { Enabled: true } mailbox) return 0;
@@ -232,6 +238,20 @@ public sealed class SentinelEmailInService(
     {
         var (subjectTitle, tags) = SentinelEmailIn.ParseSubject(message.Subject);
         var title = subjectTitle.Length > 0 ? Truncate(subjectTitle, 200) : $"Email from {from.Name ?? from.Address}";
+        var markdown = await EmailMarkdownAsync(message, from, tags, log, cancellationToken);
+        return await wikiService.SavePageAsync(new WikiPageEditorModel
+        {
+            Title = title,
+            Icon = "✉️",
+            ParentWikiPageId = folderId,
+            BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(markdown))
+        }, username, cancellationToken: cancellationToken);
+    }
+
+    // The email as a page: who sent it and when, its body, and its attachments saved as files.
+    private async Task<string> EmailMarkdownAsync(MimeMessage message, MailboxAddress from, IReadOnlyList<string> tags, SentinelInboundEmail log,
+        CancellationToken cancellationToken)
+    {
         var sent = message.Date == DateTimeOffset.MinValue ? timeProvider.GetLocalNow() : message.Date.ToOffset(timeProvider.GetLocalNow().Offset);
 
         var markdown = new StringBuilder();
@@ -260,14 +280,131 @@ public sealed class SentinelEmailInService(
             }
             foreach (var skipped in attachments.Skipped) markdown.Append("*Not saved: ").Append(Escape(skipped)).Append("*\n\n");
         }
+        return markdown.ToString().TrimEnd();
+    }
 
-        return await wikiService.SavePageAsync(new WikiPageEditorModel
+    // ---- Email to a board (Boards K9f) ----
+
+    // A board's own address, a plus-address on the server's mail account; null when that account
+    // isn't a Google one this can read.
+    public string? BoardAddress(string token) => serverAccount?.For($"{SentinelEmailIn.BoardTagPrefix}{token}")?.Address;
+
+    // Mail to a board's address becomes a card on it. Read on the server's account whether or not
+    // Sentinel's own inbox is on, since a board turns it on for itself.
+    private async Task<int> PollBoardsAsync(CancellationToken cancellationToken)
+    {
+        if (boards is null || databases is null || serverAccount?.For(ServerAccountTag) is not { } server) return 0;
+        var tokens = await BoardTokensAsync(cancellationToken);
+        if (tokens.Count == 0) return 0;
+        var handled = 0;
+        try
         {
-            Title = title,
-            Icon = "✉️",
-            ParentWikiPageId = folderId,
-            BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(markdown.ToString().TrimEnd()))
-        }, username, cancellationToken: cancellationToken);
+            var mailbox = new Mailbox(server.Host, server.Port, server.Username, server.Password, "INBOX", server.AuthServId, server.Address, true, true);
+            using var client = await ConnectAsync(mailbox, cancellationToken);
+            var folder = await client.GetFolderAsync("INBOX", cancellationToken);
+            await folder.OpenAsync(FolderAccess.ReadWrite, cancellationToken);
+            foreach (var (databaseId, token) in tokens)
+            {
+                if (BoardAddress(token) is not { } address) continue;
+                foreach (var uid in (await folder.SearchAsync(ServerMailAccount.UnreadFor(address), cancellationToken)).Take(SentinelEmailIn.MaxMessagesPerPoll))
+                {
+                    var message = await folder.GetMessageAsync(uid, cancellationToken);
+                    if (!ServerMailAccount.IsAddressedTo(message, address)) continue;
+                    await ImportToBoardAsync(message, databaseId, server.AuthServId, cancellationToken);
+                    await folder.AddFlagsAsync(uid, MessageFlags.Seen, true, cancellationToken);
+                    handled++;
+                }
+            }
+            await client.DisconnectAsync(true, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Board email-in poll failed");
+        }
+        return handled;
+    }
+
+    private async Task<List<(Guid DatabaseId, string Token)>> BoardTokensAsync(CancellationToken cancellationToken)
+    {
+        var rows = await db.KanbanBoardSettings.AsNoTracking()
+            .Where(row => row.SettingsJson.Contains("emailToken"))
+            .Select(row => new { row.WikiDatabaseId, row.SettingsJson })
+            .ToListAsync(cancellationToken);
+        var live = await db.WikiDatabases.AsNoTracking().Where(database => database.TrashedAt == null).Select(database => database.Id).ToListAsync(cancellationToken);
+        return rows
+            .Select(row => (row.WikiDatabaseId, Token: KanbanSettings.EmailTokenOf(row.SettingsJson)))
+            .Where(row => row.Token is not null && live.Contains(row.WikiDatabaseId))
+            .Select(row => (row.WikiDatabaseId, row.Token!))
+            .ToList();
+    }
+
+    // One message -> one log row, and a card when it's accepted: its subject read like the board's
+    // quick add ("Fix login !high #bug fri"), the email as the card's page. Public for tests.
+    public async Task<SentinelInboundEmail> ImportToBoardAsync(MimeMessage message, Guid databaseId, string authServId, CancellationToken cancellationToken = default)
+    {
+        var messageId = Truncate(string.IsNullOrWhiteSpace(message.MessageId)
+            ? $"no-id:{message.Date.ToUnixTimeSeconds()}:{message.From}:{message.Subject}"
+            : message.MessageId, 500);
+        // The same message sent to Sentinel and a board is two imports.
+        var logId = Truncate($"board:{databaseId:N}:{messageId}", 500);
+        if (await db.SentinelInboundEmails.FirstOrDefaultAsync(item => item.MessageId == logId, cancellationToken) is { } existing) return existing;
+
+        var from = message.From.Mailboxes.FirstOrDefault();
+        var log = new SentinelInboundEmail
+        {
+            MessageId = logId,
+            FromAddress = Truncate(from?.Address ?? string.Empty, 320),
+            Subject = Truncate(message.Subject ?? string.Empty, 300),
+            Status = SentinelEmailIn.Statuses.Rejected,
+            ProcessedAtUnix = timeProvider.GetUtcNow().ToUnixTimeSeconds(),
+            CreatedBy = SentinelEmailIn.SystemUser
+        };
+        db.SentinelInboundEmails.Add(log);
+        try
+        {
+            var username = from is null ? null : await FindUserAsync(from.Address, cancellationToken);
+            var board = boards is null ? null : await boards.GetBoardAsync(databaseId, cancellationToken);
+            if (board is null || databases is null)
+                log.Reason = "That board isn't there any more.";
+            else if (from is null || message.From.Mailboxes.Count() != 1)
+                log.Reason = "The message didn't have exactly one sender.";
+            else if (username is null)
+                log.Reason = "The sender isn't a known user (no active account has this email on its member profile).";
+            else if (!SentinelEmailIn.IsAuthenticated(
+                         message.Headers.Where(h => h.Field.Equals("Authentication-Results", StringComparison.OrdinalIgnoreCase)).Select(h => h.Value),
+                         authServId, from.Domain))
+                log.Reason = "The mail server couldn't confirm the sender (no DMARC or DKIM pass for their domain), so it may be forged.";
+            else if (!await accessService.CanAccessAsync(databaseId, true, username, SentinelAccessLevels.Edit, cancellationToken))
+                log.Reason = $"The sender can't edit the board {board.Title}.";
+            else
+            {
+                log.Username = username;
+                var subject = (message.Subject ?? string.Empty).Trim();
+                var card = KanbanQuickParse.Parse(subject, board, DateOnly.FromDateTime(timeProvider.GetLocalNow().DateTime), username);
+                if (card.Title.Length == 0) card = card with { Title = Truncate($"Email from {from.Name ?? from.Address}", 200) };
+                var column = board.Columns.FirstOrDefault(c => c.OptionId is not null && c.Group != WikiDatabaseStatusGroups.Complete) ?? board.Columns.First();
+                var rowId = await boards!.AddQuickCardAsync(databaseId, column.OptionId, card with { Title = Truncate(card.Title, 300) }, username, cancellationToken);
+                var markdown = await EmailMarkdownAsync(message, from, [], log, cancellationToken);
+                await databases.SaveRowAsync(databaseId, new WikiDatabaseRowEditor
+                {
+                    Id = rowId,
+                    KeepPropertyValues = true,
+                    BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(markdown))
+                }, username, cancellationToken);
+                log.Status = SentinelEmailIn.Statuses.Imported;
+                log.Reason = Truncate($"Card \"{card.Title}\" on the board {board.Title} ({column.Label}).", 500);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Importing email {MessageId} onto board {Board} failed", messageId, databaseId);
+            log.Status = SentinelEmailIn.Statuses.Failed;
+            log.Reason = Truncate(ex.Message, 500);
+            foreach (var file in _pendingFiles) db.SentinelImportedFiles.Remove(file);
+            _pendingFiles.Clear();
+        }
+        await db.SaveChangesAsync(cancellationToken);
+        return log;
     }
 
     // The HTML part through the same converter as web clips (links and images limited to

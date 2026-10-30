@@ -46,7 +46,10 @@ public sealed record KanbanCard(
     // Sentinel Timeline rather than copied into board-only storage.
     IReadOnlyList<Guid>? WaitingOn = null,
     int WaitingOnOpen = 0,
-    IReadOnlyList<KanbanCardProperty>? Properties = null);
+    IReadOnlyList<KanbanCardProperty>? Properties = null,
+    // K9e: the epic it's part of (the board's Epic select).
+    KanbanLabel? Epic = null,
+    string? EpicOptionId = null);
 
 // OptionId null is the "No status" column (cards with no value yet), shown only when it has cards.
 public sealed record KanbanColumn(string? OptionId, string Label, string Color, string? Group, IReadOnlyList<KanbanCard> Cards, int? WipLimit = null);
@@ -55,7 +58,7 @@ public sealed record KanbanColumn(string? OptionId, string Label, string Color, 
 public sealed record KanbanFields(Guid StatusPropertyId, Guid? PriorityPropertyId, Guid? LabelsPropertyId, Guid? DuePropertyId,
     Guid? AssigneePropertyId, Guid? EstimatePropertyId, Guid? KeyPropertyId,
     Guid? SprintPropertyId = null, Guid? BlockedPropertyId = null, Guid? BlockedReasonPropertyId = null,
-    Guid? ArchivedPropertyId = null, Guid? WaitingOnPropertyId = null);
+    Guid? ArchivedPropertyId = null, Guid? WaitingOnPropertyId = null, Guid? EpicPropertyId = null);
 
 public sealed record KanbanOption(string Id, string Label, string Color);
 
@@ -63,7 +66,14 @@ public sealed record KanbanOption(string Id, string Label, string Color);
 public sealed record KanbanBoard(Guid DatabaseId, string Title, string? Icon, KanbanFields Fields, IReadOnlyList<KanbanColumn> Columns,
     IReadOnlyList<KanbanOption> PriorityOptions, IReadOnlyList<KanbanOption> LabelOptions,
     KanbanSettings? Settings = null, IReadOnlyList<KanbanOption>? SprintOptions = null, int ArchivedCount = 0,
-    IReadOnlyList<KanbanFaceField>? FaceFields = null);
+    IReadOnlyList<KanbanFaceField>? FaceFields = null, IReadOnlyList<KanbanOption>? EpicOptions = null);
+
+// K9e: an epic and how it's going. Cards counts its archived ones too; Forecast is for the open ones.
+public sealed record KanbanEpicView(string OptionId, string Name, string Color, int Cards, int Done, KanbanForecast? Forecast)
+{
+    public int Open => Cards - Done;
+    public int Percent => Cards == 0 ? 0 : (int)Math.Round(100.0 * Done / Cards);
+}
 
 // K9a: a card taken off the board by auto-archive or by hand; restoring puts it back in its column.
 public sealed record KanbanArchivedCard(Guid RowId, string Title, string? Key, string? Column, DateTimeOffset ArchivedAt);
@@ -101,11 +111,30 @@ public sealed record KanbanSettings
     // K9b: when this board's notifications started (Unix seconds). The first sweep records the
     // assignments and due dates already there as read, so turning it on doesn't flood the bell.
     public long? NotificationsSince { get; init; }
+    // K9f: the board's email token; mail to the server account's "board-{token}" plus-address
+    // becomes a card. Null when the board has no address.
+    public string? EmailToken { get; init; }
     // Null preserves the familiar default face for boards saved before K9d. An explicit list,
     // including an empty one, is the board's chosen property set.
     public List<Guid>? CardFaceFields { get; init; }
 
     public static KanbanSettings Default { get; } = new();
+
+    // Just the email token from stored settings JSON, for the mail poller.
+    public static string? EmailTokenOf(string json)
+    {
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(json);
+            return document.RootElement.TryGetProperty("emailToken", out var token) && token.ValueKind == System.Text.Json.JsonValueKind.String
+                ? token.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
 }
 
 public static class KanbanSprintStates
@@ -174,7 +203,8 @@ public sealed record KanbanRoadmap
 public sealed record KanbanRoadmapView(bool Published, string? Url, IReadOnlyList<string> Columns, bool Votes, bool Descriptions, int Views, int TotalVotes);
 
 // What a visitor sees: titles and labels, a description only if the board shares them, votes.
-public sealed record KanbanPublicCard(Guid RowId, string Title, IReadOnlyList<KanbanLabel> Labels, string? Description, int Votes, bool Voted);
+public sealed record KanbanPublicCard(Guid RowId, string Title, IReadOnlyList<KanbanLabel> Labels, string? Description, int Votes, bool Voted,
+    KanbanLabel? Epic = null);
 public sealed record KanbanPublicColumn(string Label, string Color, string? Group, IReadOnlyList<KanbanPublicCard> Cards);
 public sealed record KanbanPublicRoadmap(Guid ShareId, string Title, string? Icon, IReadOnlyList<KanbanPublicColumn> Columns, bool Votes);
 
@@ -229,7 +259,8 @@ public static class KanbanSwimlanes
     public const string Priority = "priority";
     public const string Assignee = "assignee";
     public const string Sprint = "sprint";
-    public static readonly IReadOnlyList<string> All = [Priority, Assignee, Sprint];
+    public const string Epic = "epic";
+    public static readonly IReadOnlyList<string> All = [Priority, Assignee, Sprint, Epic];
 }
 
 public static class KanbanCardSizes
@@ -319,6 +350,16 @@ public interface IKanbanBoardService
     Task UpdateColumnAsync(Guid databaseId, string optionId, string label, string color, string? group, string performedBy, CancellationToken cancellationToken = default);
     // offset -1 moves it one place left, +1 one place right, within its group.
     Task MoveColumnAsync(Guid databaseId, string optionId, int offset, string performedBy, CancellationToken cancellationToken = default);
+
+    // K9f: gives the board a new email token (replacing any old one, whose address stops working),
+    // or removes it. Returns the new token, or null when turned off.
+    Task<string?> SetEmailTokenAsync(Guid databaseId, bool on, string performedBy, CancellationToken cancellationToken = default);
+
+    // Epics (K9e): the board's Epic select, made on the first epic. Deleting one clears it from its cards.
+    Task<IReadOnlyList<KanbanEpicView>> ListEpicsAsync(Guid databaseId, CancellationToken cancellationToken = default);
+    Task<string> CreateEpicAsync(Guid databaseId, string name, string performedBy, CancellationToken cancellationToken = default);
+    Task UpdateEpicAsync(Guid databaseId, string optionId, string name, string color, string performedBy, CancellationToken cancellationToken = default);
+    Task DeleteEpicAsync(Guid databaseId, string optionId, string performedBy, CancellationToken cancellationToken = default);
     Task DeleteColumnAsync(Guid databaseId, string optionId, string? moveCardsTo, string performedBy, CancellationToken cancellationToken = default);
 
     // Deleting a board moves its Sentinel database (cards and all) to Sentinel's Trash, where it

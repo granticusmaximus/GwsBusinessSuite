@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GwsBusinessSuite.Application.Boards;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
@@ -136,6 +137,42 @@ public sealed class SentinelEmailInTests
         var (_, service) = await CreateAsync();
 
         (await service.PollAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ImportToBoard_ShouldMakeACardFromTheSubject_WithTheEmailAsItsPage()
+    {
+        var (db, _) = await CreateAsync();
+        var databases = new WikiDatabaseService(db);
+        var boards = new KanbanBoardService(db, databases, new SentinelAccessService(db));
+        var service = new SentinelEmailInService(db, new WikiService(db), new SentinelAccessService(db), new PrefixProtector(),
+            TimeProvider.System, NullLogger<SentinelEmailInService>.Instance, boards: boards, databases: databases);
+        var id = await boards.CreateBoardAsync("Website relaunch", "personal", "grant");
+
+        var message = Message("grant@acme.com", "Fix the login page !high #bug", Pass, text: "It times out after the password step.");
+        var log = await service.ImportToBoardAsync(message, id, AuthServ);
+
+        log.Status.Should().Be(SentinelEmailIn.Statuses.Imported, log.Reason);
+        log.Reason.Should().Contain("on the board Website relaunch");
+        var board = (await boards.GetBoardAsync(id))!;
+        var card = board.Columns.SelectMany(column => column.Cards).Should().ContainSingle().Subject;
+        card.Should().Match<KanbanCard>(c => c.Title == "Fix the login page" && c.Priority!.Label == "High" && c.Labels.Single().Label == "Bug");
+        board.Columns.First(column => column.Cards.Count > 0).Label.Should().Be("Backlog", "the first open column");
+        var row = await db.WikiDatabaseRows.SingleAsync(r => r.Id == card.RowId);
+        row.BlocksJson.Should().Contain("It times out after the password step.").And.Contain("Emailed by");
+
+        (await service.ImportToBoardAsync(message, id, AuthServ)).Id.Should().Be(log.Id, "the same message is only imported once");
+        var denied = await service.ImportToBoardAsync(Message("sam@acme.com", "Idea", Pass.Replace("grant@", "sam@"), text: "x"), id, AuthServ);
+        denied.Status.Should().Be(SentinelEmailIn.Statuses.Rejected);
+        denied.Reason.Should().Be("The sender can't edit the board Website relaunch.");
+    }
+
+    [Fact]
+    public void EmailToken_ShouldBeReadFromStoredSettings()
+    {
+        KanbanSettings.EmailTokenOf("""{"emailToken":"abc234defg","agingDays":5}""").Should().Be("abc234defg");
+        KanbanSettings.EmailTokenOf("""{"agingDays":5}""").Should().BeNull();
+        KanbanSettings.EmailTokenOf("not json").Should().BeNull();
     }
 
     private static MimeMessage Message(string from, string subject, string authResults, string? html = null, string? text = null)

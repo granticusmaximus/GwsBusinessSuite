@@ -44,7 +44,13 @@
                         <p class="rm-empty">Nothing here yet.</p>
                     }
                     <ol class="rm-cards">
-                        @foreach (var card in column.Cards)
+                        @foreach (var group in ByEpic(column.Cards))
+                        {
+                        @if (group.Heading is not null)
+                        {
+                            <li class="rm-epic" style="--tone: @group.Color"><span class="rm-dot" aria-hidden="true"></span>@group.Heading</li>
+                        }
+                        @foreach (var card in group.Cards)
                         {
                             <li class="rm-card" id="@($"card-{card.RowId}")">
                                 <div class="rm-card-body">
@@ -68,6 +74,7 @@
                                 }
                             </li>
                         }
+                        }
                     </ol>
                 </section>
             }
@@ -77,6 +84,21 @@
 </main>
 
 @code {
+    // K9e: a column's cards under their epics, in the order the epics first appear, then the
+    // cards in none. A board without epics is one group with no heading.
+    private static IEnumerable<(string? Heading, string? Color, IReadOnlyList<KanbanPublicCard> Cards)> ByEpic(IReadOnlyList<KanbanPublicCard> cards)
+    {
+        if (cards.All(card => card.Epic is null))
+        {
+            yield return (null, null, cards);
+            yield break;
+        }
+        foreach (var group in cards.Where(card => card.Epic is not null).GroupBy(card => card.Epic!.Label))
+            yield return (group.Key, group.First().Epic!.Color, group.ToList());
+        var rest = cards.Where(card => card.Epic is null).ToList();
+        if (rest.Count > 0) yield return ("Not in an epic", "#78716c", rest);
+    }
+
     [Parameter] public string Token { get; set; } = string.Empty;
     [SupplyParameterFromQuery(Name = "voted")] public string? Voted { get; set; }
     [CascadingParameter] public HttpContext? HttpContext { get; set; }

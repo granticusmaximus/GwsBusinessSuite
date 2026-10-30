@@ -1,0 +1,7 @@
+.kb-email { width: min(34rem, calc(100vw - 2rem)); }
+.kb-email-note { margin: 0; font-size: .8125rem; color: var(--gws-text-soft); }
+.kb-email-address { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gws-step-2); }
+.kb-email-address code { flex: 1 1 14rem; min-width: 0; padding: 6px 8px; border-radius: var(--gws-radius-sm, 8px); background: var(--gws-panel-bg-2); overflow-wrap: anywhere; }
+.kb-email-rules { display: grid; gap: 6px; margin: 0; padding-inline-start: 1.1rem; font-size: .8125rem; }
+.kb-email-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gws-step-2); }
+.kb-email-off { margin-inline-start: auto; color: var(--gws-status-danger-fill); }

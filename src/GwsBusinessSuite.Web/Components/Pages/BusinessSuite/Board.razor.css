@@ -486,6 +486,9 @@
 /* Column settings and the add slot (29-10-26): their own components bring their styles. */
 .kb-column-menu ::deep .kb-coledit input { width: 100%; }
 
+/* K9e: an epic on a card, in its own colour. */
+.kb-epic i { color: var(--epic); }
+
 .kb-column-new {
     flex: 0 0 var(--kb-column-width);
     align-self: flex-start;

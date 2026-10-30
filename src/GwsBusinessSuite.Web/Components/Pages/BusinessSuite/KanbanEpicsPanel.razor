@@ -1,0 +1,162 @@
+@using GwsBusinessSuite.Application.Boards
+@inject IKanbanBoardService BoardService
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
+
+@* The board's epics (Boards K9e): bigger pieces of work whose cards sit in any column. Each shows
+   how far along it is and when its open cards are likely done (the board's own pace, as the
+   selection forecast). A card joins one in its drawer; "Show only" filters the board to it. *@
+<div class="kb-modal-backdrop" @onclick="Close"></div>
+<section class="kb-modal kb-epics" role="dialog" aria-modal="true" aria-labelledby="kb-epics-title" tabindex="-1" @ref="_dialog" @onkeydown="CloseOnEscape">
+    <header class="kb-modal-head">
+        <h2 id="kb-epics-title"><i class="bi bi-collection me-2" aria-hidden="true"></i>Epics</h2>
+        <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Close" @onclick="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+    </header>
+    <form class="kb-epics-new" @onsubmit="CreateAsync" @onsubmit:preventDefault>
+        <label class="visually-hidden" for="kb-epic-new">New epic</label>
+        <input id="kb-epic-new" class="form-control form-control-sm" maxlength="@KanbanColumnEdits.MaxLabelLength" autocomplete="off"
+               placeholder="New epic, e.g. Checkout redesign" @bind="_newName" @bind:event="oninput" />
+        <button type="submit" class="btn btn-sm btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_newName))">Add epic</button>
+    </form>
+    @if (_epics is null)
+    {
+        <p class="kb-epics-note">Loading…</p>
+    }
+    else if (_epics.Count == 0)
+    {
+        <p class="kb-epics-empty">No epics yet. Add one, then choose it in a card's Epic field.</p>
+    }
+    else
+    {
+        <ul class="kb-epics-list">
+            @foreach (var epic in _epics)
+            {
+                <li @key="epic.OptionId" style="--epic: @epic.Color">
+                    @if (_editing == epic.OptionId)
+                    {
+                        <form class="kb-epics-edit" @onsubmit="() => SaveAsync(epic)" @onsubmit:preventDefault>
+                            <label class="visually-hidden" for="@($"kb-epic-{epic.OptionId}")">Epic name</label>
+                            <input id="@($"kb-epic-{epic.OptionId}")" class="form-control form-control-sm" maxlength="@KanbanColumnEdits.MaxLabelLength"
+                                   autocomplete="off" @bind="_editName" @bind:event="oninput" />
+                            <div class="kb-epics-swatches" role="radiogroup" aria-label="Epic colour">
+                                @foreach (var color in KanbanColumnEdits.Colors)
+                                {
+                                    var chosen = string.Equals(color, _editColor, StringComparison.OrdinalIgnoreCase);
+                                    <button type="button" role="radio" aria-checked="@(chosen ? "true" : "false")" aria-label="@color"
+                                            class="kb-epics-swatch @(chosen ? "is-chosen" : "")" style="--swatch: @color" @onclick="() => _editColor = color"></button>
+                                }
+                            </div>
+                            <div class="kb-epics-actions">
+                                <button type="submit" class="btn btn-sm btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_editName))">Save</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => _editing = null">Cancel</button>
+                                <button type="button" class="btn btn-sm btn-link kb-epics-delete" disabled="@_busy" @onclick="() => DeleteAsync(epic)">Delete epic</button>
+                            </div>
+                        </form>
+                    }
+                    else
+                    {
+                        <div class="kb-epics-head">
+                            <span class="kb-epics-dot" aria-hidden="true"></span>
+                            <strong class="kb-epics-name">@epic.Name</strong>
+                            <span class="kb-epics-count">@epic.Done of @epic.Cards done</span>
+                        </div>
+                        <div class="kb-epics-bar" role="progressbar" aria-label="@epic.Name progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@epic.Percent">
+                            <span style="width: @(epic.Percent)%"></span>
+                        </div>
+                        <p class="kb-epics-note">@ForecastText(epic)</p>
+                        <div class="kb-epics-actions">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OnShowOnly.InvokeAsync(epic.OptionId)">Show only this</button>
+                            <button type="button" class="btn btn-sm btn-link" @onclick="() => StartEdit(epic)">Rename or recolour</button>
+                        </div>
+                    }
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public KanbanBoard Board { get; set; } = null!;
+    [Parameter] public EventCallback OnChanged { get; set; }
+    [Parameter] public EventCallback<string> OnShowOnly { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private ElementReference _dialog;
+    private IReadOnlyList<KanbanEpicView>? _epics;
+    private string _newName = string.Empty;
+    private string? _editing;
+    private string _editName = string.Empty;
+    private string _editColor = string.Empty;
+    private bool _busy;
+    // As the archive panel: a control disabled while busy drops focus to the page, so take it back.
+    private bool _refocus;
+
+    protected override async Task OnInitializedAsync() => _epics = await BoardService.ListEpicsAsync(Board.DatabaseId);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender && !_refocus) return;
+        _refocus = false;
+        await _dialog.FocusAsync();
+    }
+
+    private static string ForecastText(KanbanEpicView epic) => epic.Cards == 0 ? "No cards in it yet."
+        : epic.Open == 0 ? "All done."
+        : epic.Forecast is not { CanForecast: true } forecast ? $"{epic.Open} open. Not enough finished work yet to forecast."
+        : $"{epic.Open} open: 50% likely done by {forecast.P50!.Value.ToGwsDate()}, 85% by {forecast.P85!.Value.ToGwsDate()}.";
+
+    private void StartEdit(KanbanEpicView epic)
+    {
+        _editing = epic.OptionId;
+        _editName = epic.Name;
+        _editColor = epic.Color;
+    }
+
+    private Task CreateAsync() => RunAsync(async me =>
+    {
+        await BoardService.CreateEpicAsync(Board.DatabaseId, _newName, me);
+        Toasts.Show($"Added the epic {_newName.Trim()}. Choose it in a card's Epic field.", tone: StatusTone.Success);
+        _newName = string.Empty;
+    });
+
+    private Task SaveAsync(KanbanEpicView epic) => RunAsync(async me =>
+    {
+        await BoardService.UpdateEpicAsync(Board.DatabaseId, epic.OptionId, _editName, _editColor, me);
+        _editing = null;
+    });
+
+    private Task DeleteAsync(KanbanEpicView epic) => RunAsync(async me =>
+    {
+        await BoardService.DeleteEpicAsync(Board.DatabaseId, epic.OptionId, me);
+        _editing = null;
+        Toasts.Show($"Deleted the epic {epic.Name}; its cards stay where they are.", tone: StatusTone.Success);
+    });
+
+    private async Task RunAsync(Func<string, Task> action)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            await action(await CurrentUserAccessor.GetCurrentUsernameAsync());
+            _epics = await BoardService.ListEpicsAsync(Board.DatabaseId);
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)
+        {
+            Toasts.Show($"Couldn't change the epics. {ex.Message}", tone: StatusTone.Danger);
+        }
+        finally
+        {
+            _busy = false;
+            _refocus = true;
+        }
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+
+    private async Task CloseOnEscape(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await Close();
+    }
+}

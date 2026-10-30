@@ -89,6 +89,8 @@ else
                             <button type="button" role="menuitem" @onclick="OpenAssistant"><i class="bi bi-stars" aria-hidden="true"></i><span><strong>Ask SentinelGPT</strong><small>Standup and stuck work</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenBoardAutomations"><i class="bi bi-magic" aria-hidden="true"></i><span><strong>Automate</strong><small>Rules, templates and repeats</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenRoadmap"><i class="bi bi-broadcast" aria-hidden="true"></i><span><strong>Public roadmap</strong><small>@(_board.Settings?.Roadmap is null ? "Share it read-only, with votes" : "Live - copy the link or change it")</small></span></button>
+                            <button type="button" role="menuitem" @onclick="OpenEmail"><i class="bi bi-envelope" aria-hidden="true"></i><span><strong>Email to this board</strong><small>@(_board.Settings?.EmailToken is null ? "Turn emails into cards" : "On - copy its address")</small></span></button>
+                            <button type="button" role="menuitem" @onclick="OpenEpics"><i class="bi bi-collection" aria-hidden="true"></i><span><strong>Epics</strong><small>@EpicsSummary</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenArchive"><i class="bi bi-archive" aria-hidden="true"></i><span><strong>Archived cards</strong><small>@ArchiveSummary</small></span></button>
                             <a role="menuitem" href="admin/sentinel?database=@_board.DatabaseId"><i class="bi bi-journal-bookmark" aria-hidden="true"></i><span><strong>Open in Sentinel</strong><small>Table, calendar and timeline</small></span></a>
                             <button type="button" role="menuitem" @onclick="ToggleZoom"><i class="bi @(_zoomed ? "bi-zoom-in" : "bi-zoom-out")" aria-hidden="true"></i><span><strong>@(_zoomed ? "Full-size cards" : "Zoom out")</strong><small>@(_zoomed ? "Return to the comfortable view" : "See more of the board")</small></span></button>
@@ -225,6 +227,15 @@ else
                     @foreach (var option in LabelOptions) { <option value="@option.Label">@option.Label</option> }
                 </select>
             }
+            @if ((_board.EpicOptions ?? []).Count > 0)
+            {
+                <select class="form-select form-select-sm kb-filter-select @(_filters.Epic is null ? "" : "is-on")" aria-label="Filter by epic" value="@(_filters.Epic ?? "")"
+                        @onchange="e => SetFiltersAsync(_filters with { Epic = Chosen(e.Value) })">
+                    <option value="">Any epic</option>
+                    @foreach (var option in _board.EpicOptions!) { <option value="@option.Id">@option.Label</option> }
+                    <option value="none">No epic</option>
+                </select>
+            }
             @if (_board.Fields.AssigneePropertyId is not null)
             {
                 <select class="form-select form-select-sm kb-filter-select @(_filters.Assignee is null ? "" : "is-on")" aria-label="Filter by assignee" value="@(_filters.Assignee ?? "")"
@@ -255,6 +266,7 @@ else
                     @if (_board.Fields.PriorityPropertyId is not null) { <option value="@KanbanSwimlanes.Priority">Priority</option> }
                     @if (_board.Fields.AssigneePropertyId is not null) { <option value="@KanbanSwimlanes.Assignee">Assignee</option> }
                     @if (_board.Fields.SprintPropertyId is not null) { <option value="@KanbanSwimlanes.Sprint">Sprint</option> }
+                    @if (_board.Fields.EpicPropertyId is not null) { <option value="@KanbanSwimlanes.Epic">Epic</option> }
                 </select>
             </span>
         </div>
@@ -408,6 +420,16 @@ else
     {
         <KanbanRoadmapPanel Board="_board" OnChanged="RefreshAsync" OnClose="() => _sharing = false" />
     }
+    @if (_emailOpen)
+    {
+        <KanbanEmailPanel Board="_board" OnChanged="RefreshAsync" OnClose="() => _emailOpen = false" />
+    }
+
+    @if (_epicsOpen)
+    {
+        <KanbanEpicsPanel Board="_board" OnChanged="RefreshAsync" OnShowOnly="ShowEpicAsync" OnClose="() => _epicsOpen = false" />
+    }
+
     @if (_archiving)
     {
         <KanbanArchivePanel Board="_board" OnChanged="RefreshAsync" OnClose="() => _archiving = false" />
@@ -678,6 +700,7 @@ else
             && (!_filters.Blocked || card.Blocked)
             && (!_filters.SprintOnly || ActiveSprint is not { } sprint || card.SprintOptionId == sprint.OptionId)
             && (_filters.Priority is null || (_filters.Priority == "none" ? card.PriorityOptionId is null : card.PriorityOptionId == _filters.Priority))
+            && (_filters.Epic is null || (_filters.Epic == "none" ? card.EpicOptionId is null : card.EpicOptionId == _filters.Epic))
             && (_filters.Label is null || card.Labels.Any(label => label.Label == _filters.Label))
             && (_filters.Assignee is null || (_filters.Assignee == "none" ? card.Assignees.Count == 0 : card.Assignees.Contains(_filters.Assignee, StringComparer.OrdinalIgnoreCase)))
             && (_filters.Due switch
@@ -699,7 +722,7 @@ else
     {
         _board.Fields.KeyPropertyId, _board.Fields.PriorityPropertyId, _board.Fields.LabelsPropertyId,
         _board.Fields.DuePropertyId, _board.Fields.AssigneePropertyId, _board.Fields.EstimatePropertyId,
-        _board.Fields.SprintPropertyId
+        _board.Fields.SprintPropertyId, _board.Fields.EpicPropertyId
     }.Where(id => id is not null).Select(id => id!.Value).ToList();
 
     private bool ShowFace(Guid? propertyId) => propertyId is { } id && FaceFieldIds.Contains(id);
@@ -936,7 +959,7 @@ else
 
     // Your filters for this board, kept as a preference so they follow you to any device.
     private sealed record BoardFilters(bool Mine = false, bool Blocked = false, string? Priority = null, string? Label = null, string? Assignee = null, string? Due = null,
-        bool SprintOnly = false)
+        bool SprintOnly = false, string? Epic = null)
     {
         public static BoardFilters None { get; } = new();
         public bool IsActive => this != None;
@@ -979,6 +1002,8 @@ else
             [.. (_board.SprintOptions ?? []).Select(option => new LaneInfo(option.Id, option.Label, option.Color)), new LaneInfo(string.Empty, "No sprint", "#78716c")],
         KanbanSwimlanes.Assignee when _board?.Fields.AssigneePropertyId is not null =>
             [.. KnownAssignees.Select(person => new LaneInfo(person, person, $"hsl({Hue(person)} 55% 45%)")), new LaneInfo(string.Empty, "Unassigned", "#78716c")],
+        KanbanSwimlanes.Epic when _board?.Fields.EpicPropertyId is not null =>
+            [.. (_board.EpicOptions ?? []).Select(option => new LaneInfo(option.Id, option.Label, option.Color)), new LaneInfo(string.Empty, "No epic", "#78716c")],
         _ => null
     };
 
@@ -986,6 +1011,7 @@ else
     {
         KanbanSwimlanes.Priority => card.PriorityOptionId ?? string.Empty,
         KanbanSwimlanes.Sprint => card.SprintOptionId ?? string.Empty,
+        KanbanSwimlanes.Epic => card.EpicOptionId ?? string.Empty,
         KanbanSwimlanes.Assignee => card.Assignees.FirstOrDefault() ?? string.Empty,
         _ => string.Empty
     };
@@ -1240,6 +1266,10 @@ else
                 {
                     <span class="kb-meta" title="Sprint"><i class="bi bi-lightning-charge" aria-hidden="true"></i>@sprint.Label</span>
                 }
+                @if (ShowFace(_board!.Fields.EpicPropertyId) && card.Epic is { } epic && Settings.SwimlaneBy != KanbanSwimlanes.Epic)
+                {
+                    <span class="kb-meta kb-epic" title="Epic" style="--epic: @epic.Color"><i class="bi bi-collection" aria-hidden="true"></i>@epic.Label</span>
+                }
                 @if (ShowFace(_board!.Fields.EstimatePropertyId) && card.Estimate is { } estimate)
                 {
                     <span class="kb-meta kb-estimate" title="Estimate">@estimate.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)</span>
@@ -1351,6 +1381,39 @@ else
     private string ArchiveSummary => (_board?.ArchivedCount ?? 0) is var count && (_board?.Settings?.ArchiveAfterDays ?? KanbanArchive.DefaultDays) is var days
         ? $"{count} archived · {(days == 0 ? "auto-archive off" : $"after {days} days done")}"
         : string.Empty;
+
+    // ---- Email to the board (K9f) ----
+
+    private bool _emailOpen;
+
+    private void OpenEmail()
+    {
+        _showMore = false;
+        _emailOpen = true;
+    }
+
+    // ---- Epics (K9e) ----
+
+    private bool _epicsOpen;
+
+    private string EpicsSummary => (_board?.EpicOptions ?? []).Count switch
+    {
+        0 => "Group cards across columns",
+        1 => "1 epic, with progress",
+        var count => $"{count} epics, with progress"
+    };
+
+    private void OpenEpics()
+    {
+        _showMore = false;
+        _epicsOpen = true;
+    }
+
+    private Task ShowEpicAsync(string optionId)
+    {
+        _epicsOpen = false;
+        return SetFiltersAsync(_filters with { Epic = optionId });
+    }
 
     private void OpenArchive()
     {
@@ -1667,6 +1730,7 @@ else
     {
         KanbanSwimlanes.Priority => _board?.Fields.PriorityPropertyId,
         KanbanSwimlanes.Sprint => _board?.Fields.SprintPropertyId,
+        KanbanSwimlanes.Epic => _board?.Fields.EpicPropertyId,
         KanbanSwimlanes.Assignee => _board?.Fields.AssigneePropertyId,
         _ => null
     };
@@ -1682,6 +1746,7 @@ else
         || (ShowFace(_board.Fields.EstimatePropertyId) && card.Estimate is not null)
         || (ShowFace(_board.Fields.AssigneePropertyId) && card.Assignees.Count > 0)
         || (ShowFace(_board.Fields.SprintPropertyId) && card.Sprint is not null)
+        || (ShowFace(_board.Fields.EpicPropertyId) && card.Epic is not null)
         || card.LinkKinds is { Count: > 0 } || card.Votes > 0;
 
     // A due date as written: Sentinel stores a picked date at UTC midnight, which local time would

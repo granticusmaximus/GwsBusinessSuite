@@ -11,6 +11,8 @@ public static partial class SentinelEmailIn
     public const string FolderSystemKey = "email-inbox";
     public const string SystemUser = "email-in";
     public const int MaxMessagesPerPoll = 20;
+    // Boards K9f: a board's address is the server account's plus-address "board-{token}".
+    public const string BoardTagPrefix = "board-";
     public const int MaxAttachments = 10;
     public const long MaxAttachmentBytes = 10 * 1024 * 1024;
     public const long MaxTotalAttachmentBytes = 25 * 1024 * 1024;
@@ -97,4 +99,7 @@ public interface ISentinelEmailInService
     Task<IReadOnlyList<SentinelInboundEmailView>> ListRecentAsync(int count, CancellationToken cancellationToken = default);
     // Fetches and imports unread mail when enabled; returns how many messages were handled.
     Task<int> PollAsync(CancellationToken cancellationToken = default);
+    // Boards K9f: the address for a board's email token, or null when the server's mail account
+    // can't receive it (not a Google account).
+    string? BoardAddress(string token);
 }
