@@ -125,6 +125,7 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<ILiveShowIceServerProvider, LiveShowIceServerProvider>();
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ActingUser>();
 builder.Services.AddScoped<ICurrentUserAccessor, CurrentUserAccessor>();
 builder.Services.AddScoped<GwsBusinessSuite.Web.Services.CurrentCmsSiteAccessor>();
 builder.Services.AddSingleton<GwsBusinessSuite.Web.Services.AdminThemeProvider>();

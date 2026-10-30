@@ -67,7 +67,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
     public async Task<SentinelAgentTurn> RunAsync(SentinelAgentRequest request, Func<SentinelAgentEvent, Task> onEvent, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(request.Message);
-        await using var scope = scopes.CreateAsyncScope();
+        await using var scope = ScopeFor(request.User);
         var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
         var tools = ToolsFor(scope.ServiceProvider, request.User);
         var context = new SentinelAgentToolContext(request.User, request.ConversationId);
@@ -153,7 +153,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
     // The person's answer to a Confirm card. Approving runs exactly the call that was shown.
     public async Task<SentinelAgentActionView> ConfirmAsync(Guid actionId, SentinelAgentUser user, bool approve, CancellationToken cancellationToken)
     {
-        await using var scope = scopes.CreateAsyncScope();
+        await using var scope = ScopeFor(user);
         var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
         var action = await FindAsync(db, actionId, user, cancellationToken);
         if (action.Status != SentinelAgentActionStatuses.AwaitingConfirm)
@@ -194,7 +194,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
 
     public async Task<SentinelAgentActionView> UndoAsync(Guid actionId, SentinelAgentUser user, CancellationToken cancellationToken)
     {
-        await using var scope = scopes.CreateAsyncScope();
+        await using var scope = ScopeFor(user);
         var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
         var tools = ToolsFor(scope.ServiceProvider, user);
         var action = await FindAsync(db, actionId, user, cancellationToken);
@@ -458,6 +458,14 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             .Select(memory => new SentinelAgentMemoryView(memory.Id, memory.Fact, memory.CreatedAt))
             .ToList();
 
+    // A scope for work done as this person, so services that record who did it see them.
+    private AsyncServiceScope ScopeFor(SentinelAgentUser user)
+    {
+        var scope = scopes.CreateAsyncScope();
+        if (scope.ServiceProvider.GetService<ActingUser>() is { } acting) acting.Username = user.Username;
+        return scope;
+    }
+
     private static Dictionary<string, ISentinelAgentTool> ToolsFor(IServiceProvider services, SentinelAgentUser user)
     {
         var tools = services.GetServices<ISentinelAgentToolset>()
@@ -486,14 +494,14 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             You are SentinelGPT, the assistant inside GWS Business Suite. You can look things up and make changes in the app with your tools, acting as {request.User.Username} ({request.User.RoleLabel}). Today is {now.ToString("dddd dd-MM-yy", CultureInfo.InvariantCulture)}, {now:HH:mm}.
 
             How to work:
-            - Before your first change, count the changes the whole job needs (each new board, card, list, page or edit is one). More than {PlanThreshold}: call show_plan with every step and stop, so the person can check it and press Go. When they say "{GoMessage}", carry the plan out without showing it again.
+            - Before your first change, count the changes the whole job needs (each new board, card, list, page, contact, note, deal or edit is one). More than {PlanThreshold}: call show_plan with every step and stop, so the person can check it and press Go. When they say "{GoMessage}", carry the plan out without showing it again.
             - When asked to do something, research first, then do it. Look up what you need (Sentinel, the app, World News, the web) so what you write is right, then make the change with the tools. Don't tell the person how to do it themselves.
             - Write from what you found, not from memory, and say where facts came from when it matters.
             - Find things before changing them, unless "What this chat has changed" below already gives the id.
             - "This", "it" or "here", with nothing else named, mean the open record on the person's screen (its id is given under "What's on the person's screen").
             - "That list", "the page", "the board" and the like mean the most recent matching item below.
             - Use ids exactly as the tools return them. Never make up an id.
-            - Deleting and publishing only propose: say it's waiting for their Confirm.
+            - Deleting, publishing, and running or switching on an automation only propose: say it's waiting for their Confirm.
             - When asked to remember something for later, call remember. Use what's under "What you've been asked to remember"; if the tools show otherwise, trust the tools and say so.
             - If a tool returns an error, fix the call and try again, or say plainly what's stopping you.
             - For facts, use only what the tools and the page give you. If you don't know, say so.

@@ -1144,6 +1144,8 @@ public static class DependencyInjection
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.SitePageAgentTools>();
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.ResearchAgentTools>();
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.MemoryAgentTools>();
+        services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.CrmAgentTools>();
+        services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.AutomationAgentTools>();
         services.AddScoped<IQuickNoteService, QuickNoteService>();
         services.AddScoped<IDailyNoteService, DailyNoteService>();
         services.AddScoped<ISentinelWebClipService, SentinelWebClipService>();

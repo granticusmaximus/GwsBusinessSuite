@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
@@ -200,6 +201,38 @@ public static class SentinelAgentArgs
                 .Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item!.Trim()).ToList()
             : [];
     }
+
+    // An array of objects (a workflow's nodes), or the same array sent as one JSON string.
+    public static IReadOnlyList<JsonObject> Objects(this JsonObject arguments, string name)
+    {
+        var node = arguments[name];
+        if (node is JsonValue value && value.TryGetValue(out string? text) && TryParseArray(text.Trim()) is { } parsed) node = parsed;
+        return node is JsonArray array ? array.OfType<JsonObject>().ToList() : [];
+    }
+
+    // 15000, "15000" or "$15,000".
+    public static decimal? OptionalNumber(this JsonObject arguments, string name)
+    {
+        var text = arguments.OptionalText(name)?.Replace("$", string.Empty).Replace(",", string.Empty).Trim();
+        if (text is null) return null;
+        return decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var number)
+            ? number
+            : throw new SentinelAgentToolException($"'{name}' should be a number, not '{text}'.");
+    }
+
+    // A calendar date as the tools ask for it (2026-11-04), as the app shows it (04-11-26), or an
+    // ISO date and time (only the date is kept).
+    public static DateTimeOffset? OptionalDate(this JsonObject arguments, string name)
+    {
+        var text = arguments.OptionalText(name);
+        if (text is null) return null;
+        var date = text.Length > 10 && text[4] == '-' ? text[..10] : text;
+        return DateTime.TryParseExact(date, DateFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+            ? new DateTimeOffset(parsed.Date, TimeSpan.Zero)
+            : throw new SentinelAgentToolException($"'{name}' should be a date like 2026-11-04, not '{text}'.");
+    }
+
+    private static readonly string[] DateFormats = ["yyyy-MM-dd", "dd-MM-yy", "dd-MM-yyyy"];
 
     private static JsonArray? TryParseArray(string text)
     {

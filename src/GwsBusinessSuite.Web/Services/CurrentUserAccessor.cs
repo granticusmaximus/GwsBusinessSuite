@@ -5,10 +5,14 @@ namespace GwsBusinessSuite.Web.Services;
 
 public sealed class CurrentUserAccessor(
     IHttpContextAccessor httpContextAccessor,
-    AuthenticationStateProvider authenticationStateProvider) : ICurrentUserAccessor
+    AuthenticationStateProvider authenticationStateProvider,
+    ActingUser? actingUser = null) : ICurrentUserAccessor
 {
     public async Task<string> GetCurrentUsernameAsync(CancellationToken cancellationToken = default)
     {
+        // Set for work done on someone's behalf in its own scope (a SentinelGPT agent turn).
+        if (!string.IsNullOrWhiteSpace(actingUser?.Username)) return actingUser.Username;
+
         var httpUsername = httpContextAccessor.HttpContext?.User.Identity?.IsAuthenticated == true
             ? httpContextAccessor.HttpContext.User.Identity?.Name
             : null;

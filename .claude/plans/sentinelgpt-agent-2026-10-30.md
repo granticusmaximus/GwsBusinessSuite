@@ -150,10 +150,28 @@ plans, memory, roll-back, Confirm and Undo are the same everywhere.
   timeout, Mac-tab turns, and the JSON fields the app reads.
 - [ ] Live check of the relay end to end: needs Grant's updated Mac app signed in.
 
-## Phase C: CRM and automations
-- [ ] CRM: find/create/update contacts, companies and deals, add notes, move deal stage (Admin).
-- [ ] Automations: list, run, enable/disable, create from description (the existing proposal, now a
-  Confirm card).
+## Phase C: CRM and automations (built 30-10-26)
+- [x] **Acting user.** CrmService and the security audit record "who" through ICurrentUserAccessor,
+  which read "unknown" in an agent turn's fresh scope. `ActingUser` (scoped) is set by the runner
+  on each turn, Confirm and Undo scope; CurrentUserAccessor reads it first.
+- [x] CRM (`CrmAgentTools`, Admin like the CRM pages). A company is the Company field on a contact,
+  not a separate record.
+  - find_contacts, read_contact (notes, deals), find_deals
+  - create_contact (refuses an email already in the CRM and hands back that contact's id)
+  - update_contact, add_contact_note, create_deal, update_deal, set_deal_stage (all with Undo;
+    undoing an edit or stage move refuses when it has changed since)
+  - trash_contact (Confirm)
+- [x] Automations (`AutomationAgentTools`, Admin; the editor's per-workflow grants aren't repeated):
+  - list_automations, read_automation, automation_node_types (search; no search = typeKeys by category)
+  - create_automation (Confirm; checked against the registry at proposal time so mistakes go back to
+    the model; connections left out chain the steps in order; made switched off; Undo deletes it
+    unless it's been switched on)
+  - run_automation (Confirm, no Undo), turn_on_automation (Confirm; validates and publishes first,
+    like the editor's Activate), turn_off_automation (Undo)
+- [x] Prompt: counts contacts/notes/deals as changes; running/switching on an automation proposes.
+- [x] Tests: `SentinelAgentTests` now 22, plus the ActingUser case in `CurrentUserAccessorTests`.
+- [x] User guides: Sentinel guide's SentinelGPT section, Automation guide's agentic section.
+- [ ] Live check on the local sentinelgpt model (CRM scenario + "make an automation").
 
 ## Phase D: the rest
 - [ ] Media, support tickets, time tracking, content calendar, blog post drafts, email (Confirm),

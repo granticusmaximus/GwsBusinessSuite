@@ -4,8 +4,10 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Boards;
 using GwsBusinessSuite.Application.CmsBuilder;
+using GwsBusinessSuite.Application.Crm;
 using GwsBusinessSuite.Application.SentinelAgent;
 using GwsBusinessSuite.Application.SuiteSearch;
 using GwsBusinessSuite.Application.Wiki;
@@ -71,8 +73,9 @@ public sealed class SentinelAgentTests
 
         var authorTools = asAuthor.Tools[0].Select(tool => tool.Name).ToList();
         authorTools.Should().Contain(["create_todo_list", "find_sentinel_pages", SentinelAgentRunner.UndoToolName])
-            .And.NotContain(["add_card", "list_boards", "create_site_page_draft", "search_app"], "boards and app-wide search are Admin pages; site pages are Admin/Contributor");
-        asAdmin.Tools[0].Select(tool => tool.Name).Should().Contain(["add_card", "create_site_page_draft", "search_app"]);
+            .And.NotContain(["add_card", "list_boards", "create_site_page_draft", "search_app", "find_contacts", "list_automations"],
+                "boards, the CRM, automations and app-wide search are Admin pages; site pages are Admin/Contributor");
+        asAdmin.Tools[0].Select(tool => tool.Name).Should().Contain(["add_card", "create_site_page_draft", "search_app", "create_deal", "create_automation"]);
     }
 
     [Fact]
@@ -440,6 +443,111 @@ public sealed class SentinelAgentTests
         await mac.Invoking(task => task).Should().ThrowAsync<OperationCanceledException>();
     }
 
+    [Fact]
+    public async Task Crm_ShouldAddAContactNoteAndDeal_AsThePerson_AndUndoAStageMove()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var chat = Guid.NewGuid();
+        string? contactId = null;
+        var model = new ScriptedModel(
+            _ => Call("create_contact", new { fullName = "Ada Lovelace", email = "ada@example.com", company = "Engines Ltd", followUpDate = "04-11-26" }),
+            messages =>
+            {
+                contactId = LastResult(messages)["contactId"]!.GetValue<string>();
+                return Call("add_contact_note", new { contactId, note = "Wants a quote for the redesign." });
+            },
+            _ => Call("create_deal", new { contactId, title = "Site redesign", valueUsd = "$12,500" }),
+            _ => Say("Added Ada, noted the call and opened the deal."));
+        var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(chat, Admin, "Add Ada, note she wants a quote, open a deal", null, model, "test"), _ => Task.CompletedTask, default);
+
+        turn.Actions.Select(action => action.Summary).Should().Equal(
+            "Added the contact 'Ada Lovelace'", "Added a note to 'Ada Lovelace'", "Added the deal 'Site redesign' for 'Ada Lovelace' (Lead, $12,500)");
+        var contact = await harness.ContactAsync("ada@example.com");
+        contact.CreatedBy.Should().Be("grant", "the CRM records who the agent acted for, not 'unknown'");
+        contact.FollowUpDate.Should().Be(new DateTimeOffset(2026, 11, 4, 0, 0, 0, TimeSpan.Zero));
+        turn.Actions[0].Link.Should().Be($"/admin/crm/contacts/{contact.Id}");
+
+        var deal = await harness.DealAsync("Site redesign");
+        deal.ValueUsd.Should().Be(12_500);
+        var moved = await harness.TurnAsync(chat, Admin, "Move it to proposal sent", Call("set_deal_stage", new { dealId = deal.Id, stage = "proposal sent" }), Say("Moved."));
+        moved.Actions.Should().ContainSingle().Which.Summary.Should().Be("Moved the deal 'Site redesign' from Lead to ProposalSent");
+        (await harness.DealAsync("Site redesign")).Stage.Should().Be(DealStages.ProposalSent);
+
+        await harness.Runner.UndoAsync(moved.Actions[0].Id, Admin, default);
+        (await harness.DealAsync("Site redesign")).Stage.Should().Be(DealStages.Lead);
+        await harness.Runner.UndoAsync(turn.Actions[1].Id, Admin, default);
+        (await harness.NotesAsync(contact.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Crm_ShouldNotAddAnEmailTwice_NorUndoOverALaterEdit_AndTrashOnlyAfterAConfirm()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var chat = Guid.NewGuid();
+        await harness.TurnAsync(chat, Admin, "Add Ada", Call("create_contact", new { fullName = "Ada Lovelace", email = "ada@example.com" }), Say("Added."));
+        var contact = await harness.ContactAsync("ada@example.com");
+
+        var again = await harness.TurnAsync(chat, Admin, "Add Ada L", Call("create_contact", new { fullName = "Ada L", email = "ADA@example.com" }), Say("She's already there."));
+        again.Actions.Should().BeEmpty("the existing contact's id goes back to the model instead");
+
+        var updated = await harness.TurnAsync(chat, Admin, "She's a customer now", Call("update_contact", new { contactId = contact.Id, status = "customer" }), Say("Updated."));
+        updated.Actions.Should().ContainSingle().Which.Summary.Should().Be("Updated the contact 'Ada Lovelace' (status Customer)");
+        await harness.SetStatusByHandAsync(contact.Id, ContactStatuses.Inactive);
+        var undo = () => harness.Runner.UndoAsync(updated.Actions[0].Id, Admin, default);
+        (await undo.Should().ThrowAsync<InvalidOperationException>()).WithMessage("*changed since*");
+
+        var trash = await harness.TurnAsync(chat, Admin, "Delete her", Call("trash_contact", new { contactId = contact.Id }), Say("Waiting for your Confirm."));
+        trash.Actions.Should().ContainSingle().Which.Summary.Should().Be("Move the CRM contact 'Ada Lovelace' to the trash");
+        (await harness.ContactAsync("ada@example.com")).TrashedAt.Should().BeNull("nothing happens before the Confirm");
+        await harness.Runner.ConfirmAsync(trash.Actions[0].Id, Admin, approve: true, default);
+        (await harness.ContactAsync("ada@example.com")).TrashedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Automations_ShouldBeProposedThenMadeSwitchedOff_AndOnlySwitchedOnOrRunAfterAConfirm()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var chat = Guid.NewGuid();
+        var nodes = new object[]
+        {
+            new { name = "Start", typeKey = "core.manualTrigger" },
+            new { name = "Greet", typeKey = "core.set", parameters = new { values = new { message = "Hi" } } }
+        };
+        var proposed = await harness.TurnAsync(chat, Admin, "Make a greeting automation",
+            Call("create_automation", new { name = "Greeting", nodes = new object[] { new { name = "Start", typeKey = "core.nope" } } }),
+            Call("create_automation", new { name = "Greeting", nodes = JsonSerializer.Serialize(nodes) }),
+            Say("It's waiting for your Confirm."));
+        var proposal = proposed.Actions.Should().ContainSingle("the unknown step went back to the model, not to the person").Subject;
+        proposal.Summary.Should().Be("Make the automation 'Greeting', switched off: Start -> Greet");
+        (await harness.WorkflowsAsync()).Should().BeEmpty("nothing is made before the Confirm");
+
+        var made = await harness.Runner.ConfirmAsync(proposal.Id, Admin, approve: true, default);
+        var workflow = (await harness.WorkflowsAsync()).Should().ContainSingle().Subject;
+        made.Link.Should().Be($"/admin/automation/{workflow.Id}");
+        workflow.Status.Should().NotBe(AutomationWorkflowStatuses.Active);
+        var graph = await harness.WorkflowAsync(workflow.Id);
+        graph.Connections.Should().ContainSingle("steps without connections run in the order given");
+        graph.Nodes.Single(node => node.Name == "Greet").ParametersJson.Should().Contain("Hi");
+
+        var on = await harness.TurnAsync(chat, Admin, "Switch it on", Call("turn_on_automation", new { workflowId = workflow.Id }), Say("Waiting."));
+        on.Actions.Should().ContainSingle().Which.AwaitingConfirm.Should().BeTrue();
+        (await harness.WorkflowAsync(workflow.Id)).Status.Should().NotBe(AutomationWorkflowStatuses.Active);
+        await harness.Runner.ConfirmAsync(on.Actions[0].Id, Admin, approve: true, default);
+        (await harness.WorkflowAsync(workflow.Id)).Status.Should().Be(AutomationWorkflowStatuses.Active);
+
+        var off = await harness.TurnAsync(chat, Admin, "Switch it off", Call("turn_off_automation", new { workflowId = workflow.Id }), Say("Off."));
+        off.Actions.Should().ContainSingle().Which.Summary.Should().Be("Switched off the automation 'Greeting'");
+        (await harness.WorkflowAsync(workflow.Id)).Status.Should().Be(AutomationWorkflowStatuses.Inactive);
+        await harness.Runner.UndoAsync(off.Actions[0].Id, Admin, default);
+        (await harness.WorkflowAsync(workflow.Id)).Status.Should().Be(AutomationWorkflowStatuses.Active);
+
+        var run = await harness.TurnAsync(chat, Admin, "Run it", Call("run_automation", new { workflowId = workflow.Id }), Say("Waiting."));
+        run.Actions.Should().ContainSingle().Which.Summary.Should().Be("Run the automation 'Greeting' now");
+        var ran = await harness.Runner.ConfirmAsync(run.Actions[0].Id, Admin, approve: true, default);
+        ran.Summary.Should().Be("Ran the automation 'Greeting' (it finished)");
+        ran.CanUndo.Should().BeFalse("a run can't be taken back");
+    }
+
     private static string ToolCallReply(string name, object arguments) =>
         JsonSerializer.Serialize(new { message = new { role = "assistant", content = "", tool_calls = new[] { new { function = new { name, arguments } } } } });
 
@@ -515,6 +623,18 @@ public sealed class SentinelAgentTests
                 .AddScoped<ISentinelAgentToolset, SitePageAgentTools>()
                 .AddScoped<ISentinelAgentToolset>(provider => new ResearchAgentTools(provider.GetRequiredService<ISuiteSearchService>()))
                 .AddScoped<ISentinelAgentToolset, MemoryAgentTools>()
+                .AddScoped<ActingUser>()
+                .AddScoped<ICurrentUserAccessor, ActingUserAccessor>()
+                .AddScoped<ICrmService>(provider => new CrmService(provider.GetRequiredService<IAppDbContext>(), provider.GetRequiredService<ICurrentUserAccessor>()))
+                .AddScoped<IAutomationNodeRegistry>(_ => new AutomationNodeRegistry(new NoHttp()))
+                .AddScoped<IAutomationWorkflowService>(provider => new AutomationWorkflowService(
+                    provider.GetRequiredService<IAppDbContext>(), provider.GetRequiredService<IAutomationNodeRegistry>(), TimeProvider.System))
+                .AddScoped<IAutomationCredentialService>(provider => new AutomationCredentialService(provider.GetRequiredService<IAppDbContext>(), new NoSecrets(), TimeProvider.System))
+                .AddScoped<IAutomationExecutionService>(provider => new AutomationExecutionService(
+                    provider.GetRequiredService<IAppDbContext>(), provider.GetRequiredService<IAutomationWorkflowService>(),
+                    provider.GetRequiredService<IAutomationNodeRegistry>(), provider.GetRequiredService<IAutomationCredentialService>(), TimeProvider.System))
+                .AddScoped<ISentinelAgentToolset, CrmAgentTools>()
+                .AddScoped<ISentinelAgentToolset, AutomationAgentTools>()
                 .AddSingleton(TimeProvider.System)
                 .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>))
                 .AddSingleton<SentinelAgentRunner>()
@@ -609,6 +729,42 @@ public sealed class SentinelAgentTests
             return (await scope.ServiceProvider.GetRequiredService<ICmsBuilderService>().GetPageAsync(id))!;
         }
 
+        public async Task<Contact> ContactAsync(string email)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            return await scope.ServiceProvider.GetRequiredService<IAppDbContext>().Contacts.AsNoTracking().SingleAsync(contact => contact.Email == email);
+        }
+
+        public async Task<Deal> DealAsync(string title)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            return await scope.ServiceProvider.GetRequiredService<IAppDbContext>().Deals.AsNoTracking().SingleAsync(deal => deal.Title == title);
+        }
+
+        public async Task<int> NotesAsync(Guid contactId)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            return await scope.ServiceProvider.GetRequiredService<IAppDbContext>().ContactActivities.CountAsync(note => note.ContactId == contactId);
+        }
+
+        public async Task SetStatusByHandAsync(Guid contactId, string status)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<ICrmService>().SetContactStatusAsync(contactId, status);
+        }
+
+        public async Task<IReadOnlyList<AutomationWorkflowSummary>> WorkflowsAsync()
+        {
+            await using var scope = _services.CreateAsyncScope();
+            return await scope.ServiceProvider.GetRequiredService<IAutomationWorkflowService>().ListAsync();
+        }
+
+        public async Task<AutomationWorkflowView> WorkflowAsync(Guid id)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            return (await scope.ServiceProvider.GetRequiredService<IAutomationWorkflowService>().GetAsync(id))!;
+        }
+
         public async ValueTask DisposeAsync()
         {
             await _services.DisposeAsync();
@@ -641,6 +797,23 @@ public sealed class SentinelAgentTests
         public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
         public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) => Task.FromResult(string.Empty);
+    }
+
+    // What CurrentUserAccessor does first in the app: the person the runner set on the scope.
+    private sealed class ActingUserAccessor(ActingUser acting) : ICurrentUserAccessor
+    {
+        public Task<string> GetCurrentUsernameAsync(CancellationToken cancellationToken = default) => Task.FromResult(acting.Username ?? "unknown");
+    }
+
+    private sealed class NoHttp : IAutomationHttpClient
+    {
+        public Task<AutomationHttpResponse> SendAsync(AutomationHttpRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class NoSecrets : ISecretProtector
+    {
+        public string Protect(string plaintext) => plaintext;
+        public string Unprotect(string protectedValue) => protectedValue;
     }
 
     private sealed class NoSuiteSearch : ISuiteSearchService

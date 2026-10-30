@@ -50,6 +50,21 @@ public sealed class CurrentUserAccessorTests
         username.Should().Be("grant");
     }
 
+    [Fact]
+    public async Task GetCurrentUsernameAsync_ShouldUseTheActingUser_ForWorkDoneOnSomeonesBehalfInItsOwnScope()
+    {
+        // A SentinelGPT agent turn runs in a fresh scope with no request or circuit; the runner
+        // sets ActingUser so the CRM and the audit stream record the person, not "unknown".
+        var accessor = new CurrentUserAccessor(
+            new NoHttpContextAccessor(),
+            new ThrowingAuthenticationStateProvider(),
+            new GwsBusinessSuite.Application.Abstractions.ActingUser { Username = "grant" });
+
+        var username = await accessor.GetCurrentUsernameAsync();
+
+        username.Should().Be("grant");
+    }
+
     private sealed class NoHttpContextAccessor : IHttpContextAccessor
     {
         public HttpContext? HttpContext { get; set; }
