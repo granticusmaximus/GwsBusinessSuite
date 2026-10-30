@@ -171,8 +171,7 @@
 @if (_isLoading)
 {
     <div class="canvas-loading">
-        <div class="spinner-border text-secondary" role="status"></div>
-        <p class="mt-3 text-secondary">Loading…</p>
+        <LoadingIndicator Message="Loading the page editor…" CssClass="w-100" />
     </div>
 }
 else if (_page is null)

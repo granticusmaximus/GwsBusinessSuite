@@ -24,7 +24,7 @@
 
 @if (_loading)
 {
-    <div class="text-secondary py-5 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Opening workflow…</div>
+    <LoadingIndicator Message="Opening workflow…" />
 }
 else if (_accessDenied)
 {

@@ -14,7 +14,7 @@
 
 @if (_loading)
 {
-    <div class="text-secondary py-5 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Loading database…</div>
+    <LoadingIndicator Message="Loading database…" />
 }
 else if (Database is null)
 {

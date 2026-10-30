@@ -33,6 +33,8 @@ public sealed class WorldNewsService : IDisposable
     private readonly EventSummarizer _summarizer;
     private readonly EventListCache _eventLists;
     private readonly RangeListCache<SituationOverview> _situationLists;
+    // The World view's snapshot by range, held like the lists (a list of one).
+    private readonly RangeListCache<WorldSnapshot> _worldSnapshots;
     private readonly ILogger<WorldNewsService> _logger;
     private readonly WorldNewsOptions _options;
     private readonly WorldNewsMapCache? _mapCache;
@@ -82,8 +84,10 @@ public sealed class WorldNewsService : IDisposable
             new SummaryOptions { PerRun = configuration.GetValue("WorldNews:SummariesPerRead", 1) });
         LastRefreshed = Store.LastFetched(LastReadKey);
         if (LastRefreshed is not null) Status = string.Empty;
-        _eventLists = new EventListCache(since => Store.TopEvents(since, MaxEvents), TimeProvider.System, Interval);
-        _situationLists = new RangeListCache<SituationOverview>(since => Store.TopSituations(since, MaxEvents), TimeProvider.System, Interval);
+        void RebuildFailed(Exception ex) => _logger.LogWarning(ex, "Rebuilding a World News list failed");
+        _eventLists = new EventListCache(since => Store.TopEvents(since, MaxEvents), TimeProvider.System, Interval, onError: RebuildFailed);
+        _situationLists = new RangeListCache<SituationOverview>(since => Store.TopSituations(since, MaxEvents), TimeProvider.System, Interval, onError: RebuildFailed);
+        _worldSnapshots = new RangeListCache<WorldSnapshot>(since => [Store.World(since)], TimeProvider.System, Interval, onError: RebuildFailed);
         // Built at startup, so the first visit after a deploy doesn't wait for it.
         WarmEventLists();
     }
@@ -94,13 +98,31 @@ public sealed class WorldNewsService : IDisposable
     // Developing stories with news in the last rangeHours, likewise kept in memory between reads.
     public IReadOnlyList<SituationOverview> TopSituations(int rangeHours) => _situationLists.Get(rangeHours);
 
-    public WorldSnapshot World(int rangeHours) => Store.World(DateTimeOffset.UtcNow.AddHours(-rangeHours));
+    public WorldSnapshot World(int rangeHours) => _worldSnapshots.Get(rangeHours)[0];
 
+    // The list first, so the page has it soon after a deploy; then, once, the covering index a
+    // database from before it needs (minutes over the droplet's 2 GB of reports), and the lists
+    // rebuilt on it.
     private void WarmEventLists() => _ = Task.Run(() =>
     {
         try { _eventLists.Get(24); }
         catch (Exception ex) { _logger.LogWarning(ex, "Building the world news event list failed"); }
+        try
+        {
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            if (!Store.EnsureCoveringIndex()) return;
+            _logger.LogInformation("World News covering index built in {Seconds:N0} s", started.Elapsed.TotalSeconds);
+            ClearLists();
+        }
+        catch (Exception ex) { _logger.LogWarning(ex, "Building the World News covering index failed; it's tried again at the next start"); }
     });
+
+    private void ClearLists(bool rebuild = true)
+    {
+        _eventLists.Clear(rebuild);
+        _situationLists.Clear(rebuild);
+        _worldSnapshots.Clear(rebuild);
+    }
 
     public WorldNewsStore Store { get; }
     public string Status { get; private set; } = "Not read yet.";
@@ -124,8 +146,7 @@ public sealed class WorldNewsService : IDisposable
             foreach (var alert in alerts) AlertCreated?.Invoke(alert.Username, alert);
             LastRefreshed = DateTimeOffset.UtcNow;
             Store.SetLastFetched(LastReadKey, LastRefreshed.Value);
-            _eventLists.Clear();
-            _situationLists.Clear();
+            ClearLists();
             // While the Mac app writes summaries with its bigger local model, the server's small
             // one stays out of it; it takes over again if the Mac hasn't asked for work in a while.
             var relayActive = RelayActive(DateTimeOffset.UtcNow);
@@ -152,8 +173,7 @@ public sealed class WorldNewsService : IDisposable
         {
             _running.Release();
             // Summaries add English headlines, so the lists are rebuilt once more.
-            _eventLists.Clear();
-            _situationLists.Clear();
+            ClearLists();
             _mapCache?.Clear();
             Changed?.Invoke();
         }
@@ -176,8 +196,7 @@ public sealed class WorldNewsService : IDisposable
         var error = _summarizer.Save(eventId, answer, $"{model.Trim()} on the Mac", articleCount);
         if (error is null)
         {
-            _eventLists.Clear();
-            _situationLists.Clear();
+            ClearLists(rebuild: false);
             _mapCache?.Clear();
         }
         return error;

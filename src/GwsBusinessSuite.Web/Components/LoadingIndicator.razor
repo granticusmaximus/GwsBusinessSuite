@@ -1,12 +1,19 @@
 @* Shared "data is loading" treatment - replaces the mix of bare spinners, ad hoc "Loading X…"
-   text, or nothing at all that pages showed while their OnInitializedAsync was still running. *@
+   text, or nothing at all that pages showed while their OnInitializedAsync was still running.
+   Since 30-10-26 it's the Overwatch boot screen (Grant: the same loading screen across the admin
+   portal). Message is what a screen reader hears; the screen reads as Overwatch's does. *@
 
-<div class="gws-loading-indicator @CssClass" role="status">
-    <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-    <span>@Message</span>
+<div class="@CssClass">
+    <div class="gws-boot gws-boot-panel" role="status" aria-live="polite">
+        <div class="gws-boot-line" aria-hidden="true">INITIALIZING TACTICAL UPLINK...</div>
+        <div class="gws-boot-bar" aria-hidden="true"><div class="gws-boot-bar-fill"></div></div>
+        <div class="gws-boot-line" aria-hidden="true">STANDBY</div>
+        <span class="visually-hidden">@Message</span>
+    </div>
 </div>
 
 @code {
     [Parameter] public string Message { get; set; } = "Loading…";
-    [Parameter] public string CssClass { get; set; } = "p-4 text-secondary";
+    // Spacing around the screen; it keeps its own colours whatever else is passed.
+    [Parameter] public string CssClass { get; set; } = "py-3";
 }

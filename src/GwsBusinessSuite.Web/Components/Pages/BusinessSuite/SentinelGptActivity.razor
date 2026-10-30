@@ -55,7 +55,7 @@
 
     @if (_rows is null)
     {
-        <p class="text-body-secondary"><span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Loading…</p>
+        <LoadingIndicator Message="Loading SentinelGPT's activity…" />
     }
     else if (!Filtered.Any())
     {

@@ -48,7 +48,6 @@ public sealed class WorldNewsStore
                 language TEXT NOT NULL, country TEXT NOT NULL, seen_at INTEGER NOT NULL, feed TEXT NOT NULL,
                 group_hint TEXT, embedding BLOB, event_id TEXT, snippet TEXT);
             CREATE INDEX IF NOT EXISTS ix_articles_seen ON articles (seen_at);
-            CREATE INDEX IF NOT EXISTS ix_articles_event ON articles (event_id);
             CREATE TABLE IF NOT EXISTS events (
                 id TEXT PRIMARY KEY, title TEXT NOT NULL, title_language TEXT NOT NULL, vector_sum BLOB NOT NULL,
                 article_count INTEGER NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL);
@@ -82,6 +81,46 @@ public sealed class WorldNewsStore
         // Nor situations.kind, from before Overwatch's kinds (29-10-26).
         columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('situations') WHERE name = 'kind'";
         if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE situations ADD COLUMN kind TEXT");
+        // A new or small database gets the covering index straight away; building it over a big one
+        // takes minutes, so that's EnsureCoveringIndex's job, off the startup path.
+        columns.CommandText = $"SELECT COUNT(*) FROM (SELECT 1 FROM articles LIMIT {SmallArticleTable + 1})";
+        if (!HasCoveringIndex(connection) && (long)columns.ExecuteScalar()! <= SmallArticleTable) CreateCoveringIndex(connection);
+    }
+
+    // The event lists read each report's outlet, country and language. With an index on event_id
+    // alone that meant fetching every report's row, about 4.5 KB with its embedding: the 24-hour
+    // list read ~180,000 rows of a 2 GB table, 50-70 s on the droplet (30-10-26). This index holds
+    // those columns, so the lists read it instead. It replaces ix_articles_event (its first column).
+    private const string CoveringIndex = "ix_articles_event_cover";
+    private const int SmallArticleTable = 10_000;
+
+    // Builds the covering index on a database that was too big to build it at open. True if it did.
+    public bool EnsureCoveringIndex()
+    {
+        using var connection = Open();
+        if (HasCoveringIndex(connection)) return false;
+        CreateCoveringIndex(connection);
+        return true;
+    }
+
+    private static bool HasCoveringIndex(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = $name";
+        command.Parameters.AddWithValue("$name", CoveringIndex);
+        return (long)command.ExecuteScalar()! > 0;
+    }
+
+    private static void CreateCoveringIndex(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        // The timeout only counts waiting on other writers; the build itself may take minutes.
+        command.CommandTimeout = 0;
+        command.CommandText = $"""
+            CREATE INDEX IF NOT EXISTS {CoveringIndex} ON articles (event_id, outlet, country, language, seen_at);
+            DROP INDEX IF EXISTS ix_articles_event;
+            """;
+        command.ExecuteNonQuery();
     }
 
     // New reports only (a report already stored, by canonical URL, is skipped). Returns how many were new.
@@ -324,7 +363,7 @@ public sealed class WorldNewsStore
         using (var command = connection.CreateCommand())
         {
             command.CommandText = """
-                SELECT e.situation_id, COUNT(DISTINCT e.id), COUNT(a.id), COUNT(DISTINCT a.outlet),
+                SELECT e.situation_id, COUNT(DISTINCT e.id), COUNT(*), COUNT(DISTINCT a.outlet),
                        GROUP_CONCAT(DISTINCT a.country), GROUP_CONCAT(DISTINCT a.language), MIN(e.first_seen), MAX(e.last_seen),
                        (SELECT kind FROM situations s WHERE s.id = e.situation_id)
                 FROM events e JOIN articles a ON a.event_id = e.id
@@ -684,44 +723,76 @@ public sealed class WorldNewsStore
             while (reader.Read()) countryRows.Add((reader.GetString(0), reader.GetInt32(1), reader.GetInt32(2), reader.GetInt32(3)));
         }
 
+        // Every country from one pass over the recent reports. It used to be a query per country,
+        // each joining an event's recent reports to all of its reports (thousands by thousands for
+        // a big story).
+        var events = ReadWorldEvents(connection, since);
+        var recent = ReadRecentReports(connection, since).Where(report => events.ContainsKey(report.EventId)).ToList();
+        WorldStory Story(string eventId, IReadOnlyCollection<(string EventId, string Country, string Outlet, int Reports)> reports)
+        {
+            var (overview, situationId) = events[eventId];
+            var outlets = reports.Select(report => report.Outlet).Distinct().Count();
+            return new WorldStory(overview with { OutletCount = outlets }, reports.Sum(report => report.Reports), outlets, situationId);
+        }
+
+        IEnumerable<WorldStory> Ranked(IEnumerable<WorldStory> stories) => stories
+            .OrderByDescending(story => story.RecentOutlets).ThenByDescending(story => story.RecentReports)
+            .ThenByDescending(story => story.Event.LastSeen);
+
         var countries = countryRows.Select(row => new WorldCountry(row.Country, row.Reports, row.Events, row.Outlets,
-            ReadWorldStories(connection, since, row.Country)
-                .OrderByDescending(story => story.RecentOutlets).ThenByDescending(story => story.RecentReports)
-                .ThenByDescending(story => story.Event.LastSeen).Take(storiesPerCountry).ToList())).ToList();
-        var recent = ReadWorldStories(connection, since, null);
-        var biggest = recent.OrderByDescending(story => story.RecentOutlets).ThenByDescending(story => story.RecentReports)
-            .ThenByDescending(story => story.Event.LastSeen).Take(biggestStories).ToList();
+            Ranked(recent.Where(report => report.Country == row.Country).GroupBy(report => report.EventId)
+                    .Select(group => Story(group.Key, group.ToList())))
+                .Take(storiesPerCountry).ToList())).ToList();
+        var biggest = Ranked(recent.GroupBy(report => report.EventId).Select(group => Story(group.Key, group.ToList())))
+            .Take(biggestStories).ToList();
         return new WorldSnapshot(since, countries, biggest);
     }
 
-    private static IReadOnlyList<WorldStory> ReadWorldStories(SqliteConnection connection, DateTimeOffset since, string? country)
+    // Events with reports since a time (an event's last_seen is its newest report's), with every
+    // country and language they've ever been reported in.
+    private static Dictionary<string, (EventOverview Overview, string? SituationId)> ReadWorldEvents(SqliteConnection connection, DateTimeOffset since)
     {
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT e.id, e.title, e.article_count, COUNT(DISTINCT recent.outlet),
-                   GROUP_CONCAT(DISTINCT all_articles.country), GROUP_CONCAT(DISTINCT all_articles.language),
+            WITH chosen AS MATERIALIZED (SELECT id, title, article_count, first_seen, last_seen, situation_id FROM events WHERE last_seen >= $since)
+            SELECT e.id, e.title, e.article_count, GROUP_CONCAT(DISTINCT a.country), GROUP_CONCAT(DISTINCT a.language),
                    e.first_seen, e.last_seen,
                    (SELECT headline FROM summaries WHERE event_id = e.id AND headline IS NOT NULL ORDER BY version DESC LIMIT 1),
-                   COUNT(DISTINCT recent.id), e.situation_id
-            FROM events e
-            JOIN articles recent ON recent.event_id = e.id AND recent.seen_at >= $since
-            JOIN articles all_articles ON all_articles.event_id = e.id
-            WHERE ($country IS NULL OR recent.country = $country)
+                   e.situation_id
+            FROM chosen e JOIN articles a ON a.event_id = e.id
             GROUP BY e.id
             """;
         command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
-        command.Parameters.AddWithValue("$country", (object?)country ?? DBNull.Value);
         using var reader = command.ExecuteReader();
-        var stories = new List<WorldStory>();
+        var events = new Dictionary<string, (EventOverview, string?)>();
         while (reader.Read())
         {
-            var overview = new EventOverview(reader.GetString(0), reader.GetString(1), reader.GetInt32(2), reader.GetInt32(3),
-                Split(reader.IsDBNull(4) ? null : reader.GetString(4)), Split(reader.IsDBNull(5) ? null : reader.GetString(5)),
-                DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(6)), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(7)),
-                reader.IsDBNull(8) ? null : reader.GetString(8));
-            stories.Add(new WorldStory(overview, reader.GetInt32(9), reader.GetInt32(3), reader.IsDBNull(10) ? null : reader.GetString(10)));
+            events[reader.GetString(0)] = (new EventOverview(reader.GetString(0), reader.GetString(1), reader.GetInt32(2), 0,
+                Split(reader.IsDBNull(3) ? null : reader.GetString(3)), Split(reader.IsDBNull(4) ? null : reader.GetString(4)),
+                DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(5)), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(6)),
+                reader.IsDBNull(7) ? null : reader.GetString(7)), reader.IsDBNull(8) ? null : reader.GetString(8));
         }
-        return stories;
+        return events;
+    }
+
+    // Reports since a time, counted by event, country and outlet. CROSS JOIN keeps SQLite starting
+    // from the recent events; left to choose, it scanned every report's index entry for seen_at.
+    private static IReadOnlyList<(string EventId, string Country, string Outlet, int Reports)> ReadRecentReports(
+        SqliteConnection connection, DateTimeOffset since)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            WITH chosen AS MATERIALIZED (SELECT id FROM events WHERE last_seen >= $since)
+            SELECT a.event_id, a.country, a.outlet, COUNT(*)
+            FROM chosen e CROSS JOIN articles a ON a.event_id = e.id
+            WHERE a.seen_at >= $since
+            GROUP BY a.event_id, a.country, a.outlet
+            """;
+        command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+        using var reader = command.ExecuteReader();
+        var reports = new List<(string, string, string, int)>();
+        while (reader.Read()) reports.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3)));
+        return reports;
     }
 
     // The busiest events since a time, covered by at least minOutlets outlets, that have no summary
@@ -818,12 +889,14 @@ public sealed class WorldNewsStore
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
+        // The events are picked first, so `where` uses their index (last_seen, situation_id). Joined
+        // straight to articles, SQLite walked every event by id to group them.
         command.CommandText = $"""
+            WITH chosen AS MATERIALIZED (SELECT e.id, e.title, e.article_count, e.first_seen, e.last_seen FROM events e {where})
             SELECT e.id, e.title, e.article_count, COUNT(DISTINCT a.outlet),
                    GROUP_CONCAT(DISTINCT a.country), GROUP_CONCAT(DISTINCT a.language), e.first_seen, e.last_seen,
                    (SELECT headline FROM summaries WHERE event_id = e.id AND headline IS NOT NULL ORDER BY version DESC LIMIT 1)
-            FROM events e JOIN articles a ON a.event_id = e.id
-            {where}
+            FROM chosen e JOIN articles a ON a.event_id = e.id
             GROUP BY e.id {having}
             ORDER BY COUNT(DISTINCT a.outlet) DESC, e.last_seen DESC LIMIT $limit
             """;

@@ -253,6 +253,46 @@ public sealed class WorldNewsKitTests : IDisposable
     }
 
     [Fact]
+    public void Store_ShouldGiveAnOldDatabaseTheCoveringIndex_InPlaceOfTheEventIdOne()
+    {
+        // From before 30-10-26: reports indexed by event id alone.
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath};Pooling=False"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE articles (
+                    id TEXT PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL, outlet TEXT NOT NULL,
+                    language TEXT NOT NULL, country TEXT NOT NULL, seen_at INTEGER NOT NULL, feed TEXT NOT NULL,
+                    group_hint TEXT, embedding BLOB, event_id TEXT);
+                CREATE INDEX ix_articles_event ON articles (event_id);
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var store = new WorldNewsStore(_dbPath);
+
+        ArticleIndexes().Should().Contain("ix_articles_event_cover").And.NotContain("ix_articles_event", "a small table gets it as it opens");
+        store.EnsureCoveringIndex().Should().BeFalse("it's already there, so a later start does nothing");
+        new WorldNewsStore(_dbPath);
+        ArticleIndexes().Should().NotContain("ix_articles_event", "opening it again doesn't bring the old one back");
+        SeedEvent(store, "flood", Reports("flood", 3));
+        store.TopEvents(Now.AddDays(-1), 5).Should().ContainSingle().Which.OutletCount.Should().Be(3);
+    }
+
+    private IReadOnlyList<string> ArticleIndexes()
+    {
+        using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath};Pooling=False");
+        connection.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'articles'";
+        using var reader = command.ExecuteReader();
+        var names = new List<string>();
+        while (reader.Read()) names.Add(reader.GetString(0));
+        return names;
+    }
+
+    [Fact]
     public void Store_ShouldAlertAWatcherOnlyWhenTheirSituationGainsAnEvent()
     {
         var store = new WorldNewsStore(_dbPath);

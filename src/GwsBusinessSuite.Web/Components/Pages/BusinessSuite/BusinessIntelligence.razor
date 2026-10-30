@@ -180,7 +180,7 @@
 
 @if (!_loaded)
 {
-    <div class="text-secondary py-5 text-center"><span class="spinner-border spinner-border-sm me-2"></span>Loading your dashboard...</div>
+    <LoadingIndicator Message="Loading your dashboard…" />
 }
 else if (_widgets.Count == 0)
 {
