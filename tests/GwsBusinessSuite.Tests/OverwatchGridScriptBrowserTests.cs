@@ -797,7 +797,9 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     }
 
     // Render-on-demand (30-10-26): an idle globe draws about once a second instead of every frame,
-    // and a SURGING marker's pulse keeps it drawing only while one is on the globe.
+    // and a SURGING marker's pulse keeps it drawing only while one is on the globe. Measured as the
+    // share of animation ticks that drew, not frames per second: CI's software WebGL draws only a few
+    // frames a second (it managed 4 in 1.5 s), so a frame count says more about the machine.
     [Fact]
     public async Task IdleGlobe_ShouldDrawOnlyOnChanges_AndKeepDrawingWhileANewsMarkerPulses()
     {
@@ -805,31 +807,45 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await using var pageScope = page;
         await page.EvaluateAsync("""
             () => {
-              // Cesium's exports are read-only, but its prototypes aren't; render() runs every
-              // animation frame and postRender only when a frame is actually drawn.
-              window.__frames = 0;
+              // Cesium's exports are read-only, but its prototypes aren't; render() runs on every
+              // animation tick and postRender only when a frame is actually drawn.
+              window.__ticks = 0;
+              window.__drawn = 0;
               const render = Cesium.Scene.prototype.render;
               Cesium.Scene.prototype.render = function (time) {
                 if (!this.__counted) {
                   this.__counted = true;
-                  this.postRender.addEventListener(function () { window.__frames++; });
+                  window.__scene = this;
+                  this.postRender.addEventListener(function () { window.__drawn++; });
                 }
+                window.__ticks++;
                 return render.call(this, time);
               };
             }
             """);
         await InitAsync(page);
-        await page.WaitForTimeoutAsync(1500);
-
-        async Task<int> FramesOverAsync(int milliseconds)
+        // Tile loads draw frames too, so measure once they've landed (or after 15 s if one never does).
+        try
         {
-            var before = await page.EvaluateAsync<int>("() => window.__frames");
-            await page.WaitForTimeoutAsync(milliseconds);
-            return await page.EvaluateAsync<int>("() => window.__frames") - before;
+            await page.WaitForFunctionAsync("() => window.__scene && window.__scene.globe.tilesLoaded", null,
+                new PageWaitForFunctionOptions { Timeout = 15000 });
+        }
+        catch (TimeoutException)
+        {
+        }
+        await page.WaitForTimeoutAsync(500);
+
+        async Task<double> DrawnShareAsync()
+        {
+            var before = await page.EvaluateAsync<int[]>("() => [window.__ticks, window.__drawn]");
+            await page.WaitForTimeoutAsync(3000);
+            var after = await page.EvaluateAsync<int[]>("() => [window.__ticks, window.__drawn]");
+            var ticks = after[0] - before[0];
+            ticks.Should().BeGreaterThan(5, "the animation loop has to be running to measure anything");
+            return (after[1] - before[1]) / (double)ticks;
         }
 
-        (await page.EvaluateAsync<int>("() => window.__frames")).Should().BePositive("the count has to see frames at all");
-        (await FramesOverAsync(3000)).Should().BeLessThan(15, "nothing changed, so only the once-a-second frame draws");
+        (await DrawnShareAsync()).Should().BeLessThan(0.15, "nothing changed, so only the once-a-second frame draws (it was every tick)");
 
         await page.EvaluateAsync("""
             () => window.tacticalGlobe.setWorldNews([{
@@ -839,11 +855,11 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
               href: '/admin/world-news?situation=situation-1', sources: []
             }])
             """);
-        (await FramesOverAsync(1500)).Should().BeGreaterThan(8, "the SURGING pulse needs frames while it's there");
+        (await DrawnShareAsync()).Should().BeGreaterThan(0.2, "the SURGING pulse asks for about 20 frames a second while it's there");
 
         await page.EvaluateAsync("() => window.tacticalGlobe.clearWorldNews()");
         await page.WaitForTimeoutAsync(300);
-        (await FramesOverAsync(3000)).Should().BeLessThan(15, "the pulse stopped with the marker");
+        (await DrawnShareAsync()).Should().BeLessThan(0.15, "the pulse stopped with the marker");
     }
 
     [Fact]

@@ -12,8 +12,9 @@ hand every time he opened the app.
   catching up on stale news), while llama3.2 wrote summaries.
 - The app's Ollama HTTP client times out after 2 hours, and every AI call shares one slot.
 - Removed at Grant's request: podcast-directory, heimdall, code-server, GWS Connect (repo-client-1,
-  repo-server-1). Data left on disk. connect.gwsapp.net still has a route in
-  /etc/cloudflared/config.yml (Grant to decide; removing it restarts the tunnel).
+  repo-server-1). Data left on disk. connect.gwsapp.net's tunnel route removed at Grant's request
+  (30-10-26, backup config.yml.bak-20261030; its Cloudflare DNS record remains, answers 404).
+  pods/home/code.gwsapp.net routes still point at ports nothing serves since those removals.
 
 ## Done (30-10-26)
 - [x] docker-compose: Ollama `cpus: 3`, `cpu_shares: 256` (the app always has a core and wins contention).
