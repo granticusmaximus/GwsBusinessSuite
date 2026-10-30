@@ -14,6 +14,8 @@ public static class SentinelAiActions
     // that set gates the generic action-dispatch methods (StreamAsync/StreamConversationAsync),
     // which the tool-calling loop doesn't go through.
     public const string Tools = "tools";
+    // A turn of the in-app agent (SentinelAgentRunner); its changes are SentinelAgentActions.
+    public const string Agent = "agent";
 }
 
 public static class SentinelGptDefaults

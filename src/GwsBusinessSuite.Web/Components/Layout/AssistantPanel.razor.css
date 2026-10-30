@@ -134,6 +134,67 @@
     color: var(--bs-danger, #dc3545);
 }
 
+/* The agent's steps (what it looked up and did) and its change cards (30-10-26). */
+.gws-assistant-steps {
+    margin: 0 0 .4rem;
+    padding-left: 1.1rem;
+    font-size: .78rem;
+    color: var(--gws-text-soft);
+}
+
+.gws-assistant-steps li + li {
+    margin-top: .1rem;
+}
+
+.gws-assistant-action {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .25rem .5rem;
+    margin-top: .4rem;
+    padding: .4rem .55rem;
+    border: 1px solid var(--gws-border, rgba(255, 255, 255, .12));
+    border-radius: 8px;
+    font-size: .85rem;
+}
+
+.gws-assistant-action > .bi {
+    color: var(--bs-success, #198754);
+}
+
+.gws-assistant-action.is-awaiting-confirm {
+    border-color: var(--bs-warning, #ffc107);
+}
+
+.gws-assistant-action.is-awaiting-confirm > .bi {
+    color: var(--bs-warning, #ffc107);
+}
+
+.gws-assistant-action.is-undone,
+.gws-assistant-action.is-declined {
+    opacity: .7;
+}
+
+.gws-assistant-action.is-undone > .bi,
+.gws-assistant-action.is-declined > .bi {
+    color: var(--gws-text-soft);
+}
+
+.gws-assistant-action-text {
+    flex: 1 1 12rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.gws-assistant-action-buttons {
+    display: flex;
+    gap: .25rem;
+}
+
+.gws-assistant-action .btn-link {
+    padding: 0 .25rem;
+}
+
 .gws-assistant-meta {
     display: flex;
     flex-wrap: wrap;

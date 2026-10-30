@@ -95,6 +95,7 @@ public interface IAppDbContext : IAsyncDisposable
     DbSet<SentinelPublicShare> SentinelPublicShares { get; }
     DbSet<SentinelPresenceLease> SentinelPresenceLeases { get; }
     DbSet<SentinelAiRun> SentinelAiRuns { get; }
+    DbSet<SentinelAgentAction> SentinelAgentActions { get; }
     DbSet<SentinelImportedFile> SentinelImportedFiles { get; }
     DbSet<WikiDatabase> WikiDatabases { get; }
     DbSet<WikiDatabaseProperty> WikiDatabaseProperties { get; }

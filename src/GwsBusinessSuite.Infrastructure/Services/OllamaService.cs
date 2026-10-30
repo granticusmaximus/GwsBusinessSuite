@@ -306,73 +306,7 @@ public sealed class OllamaService(
         CancellationToken ct = default)
     {
         model = await ResolveModelAsync(model, ct);
-        var messagesArray = new JsonArray();
-        foreach (var message in messages)
-        {
-            var messageObject = new JsonObject
-            {
-                ["role"] = message.Role,
-                ["content"] = message.Content
-            };
-            if (message.ToolCalls is { Count: > 0 } toolCalls)
-            {
-                var toolCallsArray = new JsonArray();
-                foreach (var toolCall in toolCalls)
-                {
-                    toolCallsArray.Add(new JsonObject
-                    {
-                        ["function"] = new JsonObject
-                        {
-                            ["name"] = toolCall.Name,
-                            ["arguments"] = ParseJsonOrEmptyObject(toolCall.ArgumentsJson)
-                        }
-                    });
-                }
-                messageObject["tool_calls"] = toolCallsArray;
-            }
-            if (message.Images is { Count: > 0 } images)
-            {
-                messageObject["images"] = new JsonArray(images.Select(image => (JsonNode)JsonValue.Create(image)!).ToArray());
-            }
-            messagesArray.Add(messageObject);
-        }
-
-        var payload = new JsonObject
-        {
-            ["model"] = model,
-            ["stream"] = false,
-            ["messages"] = messagesArray,
-            ["keep_alive"] = ModelKeepAlive,
-            // Mirrors GwsBusinessSuite.OllamaKit.OllamaClient's tool-calling payload (the CLI and
-            // Mac app's client), which had these tuned and this one didn't: Ollama's stock
-            // context window is often small enough (2048-4096) to silently truncate a multi-turn
-            // tool-calling transcript with no error, and a lower temperature measurably reduces
-            // hallucinated tool arguments versus a chat-tuned default. think:false is safe to
-            // send even to models without a "thinking" capability (they ignore it) and to
-            // reasoning models that think anyway (they accept it without erroring) - verified
-            // against llama3.2, qwen2.5-coder, and deepseek-r1 there; kept here rather than
-            // gated on a per-model capability lookup for the same reason.
-            ["options"] = new JsonObject { ["num_ctx"] = 16_384, ["temperature"] = 0.2 },
-            ["think"] = false
-        };
-        if (tools is { Count: > 0 })
-        {
-            var toolsArray = new JsonArray();
-            foreach (var tool in tools)
-            {
-                toolsArray.Add(new JsonObject
-                {
-                    ["type"] = "function",
-                    ["function"] = new JsonObject
-                    {
-                        ["name"] = tool.Name,
-                        ["description"] = tool.Description,
-                        ["parameters"] = ParseJsonOrEmptyObject(tool.ParametersJsonSchema)
-                    }
-                });
-            }
-            payload["tools"] = toolsArray;
-        }
+        var payload = OllamaChatPayload.Build(model, messages, tools, ModelKeepAlive);
 
         try
         {
@@ -432,18 +366,6 @@ public sealed class OllamaService(
             string.IsNullOrWhiteSpace(detail) ? message : $"{message}: {detail}",
             inner: null,
             response.StatusCode);
-    }
-
-    private static JsonNode ParseJsonOrEmptyObject(string json)
-    {
-        try
-        {
-            return JsonNode.Parse(json) ?? new JsonObject();
-        }
-        catch (JsonException)
-        {
-            return new JsonObject();
-        }
     }
 
     public async Task PullModelAsync(string model, CancellationToken ct = default)

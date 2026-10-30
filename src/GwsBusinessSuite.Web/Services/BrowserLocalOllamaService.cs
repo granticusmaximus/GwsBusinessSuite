@@ -13,7 +13,7 @@ public sealed record LocalOllamaStatus(bool IsReachable, IReadOnlyList<string> M
 /// browser is on, relayed through this circuit's JS interop (wwwroot/js/local-ollama.js). Handing
 /// it to Content Studio keeps prompt-building, compile-and-repair, and persistence on the server
 /// while the expensive generation itself happens on the user's own hardware. Only text
-/// generation is relayed; everything else is deliberately unsupported.
+/// generation and tool-calling chat (SentinelGPT's agent) are relayed; everything else is deliberately unsupported.
 /// </summary>
 public sealed class BrowserLocalOllamaService(IJSRuntime js) : IOllamaService, IAsyncDisposable
 {
@@ -104,6 +104,43 @@ public sealed class BrowserLocalOllamaService(IJSRuntime js) : IOllamaService, I
 
     public Task DeleteModelAsync(string model, CancellationToken ct = default) =>
         throw new NotSupportedException("Remove local models from the Mac app or with `ollama rm`.");
+
+    // A tool-calling round on this computer's Ollama, for SentinelGPT's agent: the request is the
+    // server's own (OllamaChatPayload), and the reply comes back through OnChunk like a generation.
+    public async Task<OllamaChatResponse> ChatAsync(
+        string model,
+        IReadOnlyList<OllamaChatMessage> messages,
+        IReadOnlyList<OllamaToolDefinition>? tools = null,
+        CancellationToken ct = default)
+    {
+        var module = await GetModuleAsync();
+        _selfReference ??= DotNetObjectReference.Create(this);
+        var requestId = Guid.NewGuid().ToString("N");
+        var channel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions { SingleReader = true });
+        _requests[requestId] = channel;
+        var completed = false;
+        try
+        {
+            var payload = OllamaChatPayload.Build(model, messages, tools, "30m").ToJsonString();
+            await module.InvokeVoidAsync("startChat", ct, requestId, BaseUrl, payload, _selfReference);
+            var body = new System.Text.StringBuilder();
+            await foreach (var piece in channel.Reader.ReadAllAsync(ct))
+            {
+                body.Append(piece);
+            }
+
+            completed = true;
+            return OllamaChatPayload.Parse(body.ToString());
+        }
+        finally
+        {
+            _requests.TryRemove(requestId, out _);
+            if (!completed)
+            {
+                await TryAbortAsync(module, requestId);
+            }
+        }
+    }
 
     public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) =>
         throw new NotSupportedException("Image generation is not relayed to the local Ollama.");

@@ -11,8 +11,9 @@ namespace GwsBusinessSuite.App;
 // to this handler (window.webkit.messageHandlers.gwsOllama), the app makes the call natively, and
 // streams the response bytes back to window.gwsOllamaNative.
 //
-// Kept narrow on purpose: only the trusted site's main frame, only GET /api/tags and
-// POST /api/generate, and only to Ollama on this machine - never a general-purpose proxy.
+// Kept narrow on purpose: only the trusted site's main frame, only GET /api/tags, POST
+// /api/generate and POST /api/chat (SentinelGPT's agent, 30-10-26), and only to Ollama on this
+// machine - never a general-purpose proxy.
 internal sealed class LocalOllamaBridge(WKWebView webView) : WKScriptMessageHandler
 {
     public const string Name = "gwsOllama";
@@ -52,7 +53,7 @@ internal sealed class LocalOllamaBridge(WKWebView webView) : WKScriptMessageHand
         var method = (body["method"] as NSString)?.ToString() ?? "GET";
         var port = (body["port"] as NSNumber)?.Int32Value ?? 11434;
         var content = (body["body"] as NSString)?.ToString();
-        if (!((path == "/api/tags" && method == "GET") || (path == "/api/generate" && method == "POST")) || port is < 1 or > 65535)
+        if (!((path == "/api/tags" && method == "GET") || (path is "/api/generate" or "/api/chat" && method == "POST")) || port is < 1 or > 65535)
         {
             _ = SendAsync($"window.gwsOllamaNative && window.gwsOllamaNative.fail({Js(id)}, {Js("That request isn't allowed.")})");
             return;

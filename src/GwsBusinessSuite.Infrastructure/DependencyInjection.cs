@@ -1134,6 +1134,13 @@ public static class DependencyInjection
         services.AddHostedService<CmsScheduledPublishBackgroundService>();
         services.AddScoped<IWikiSyncedBlockService, WikiSyncedBlockService>();
         services.AddScoped<IWikiService, WikiService>();
+        // SentinelGPT's agent (30-10-26): the runner is a singleton that opens a scope per turn, so
+        // the toolsets (scoped) never share a page's DbContext.
+        services.AddSingleton<GwsBusinessSuite.Application.SentinelAgent.SentinelAgentRunner>();
+        services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.SentinelPageAgentTools>();
+        services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.BoardAgentTools>();
+        services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.SitePageAgentTools>();
+        services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.ResearchAgentTools>();
         services.AddScoped<IQuickNoteService, QuickNoteService>();
         services.AddScoped<IDailyNoteService, DailyNoteService>();
         services.AddScoped<ISentinelWebClipService, SentinelWebClipService>();

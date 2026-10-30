@@ -1,19 +1,28 @@
 @implements IAsyncDisposable
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Application.Assistant
+@using GwsBusinessSuite.Application.SentinelAgent
+@using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
 @inject AssistantContext Assistant
 @inject RightPanelState RightPanels
+@inject SentinelAgentRunner AgentRunner
 @inject SentinelGptGenerationCoordinator Coordinator
+@inject AuthenticationStateProvider AuthState
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 
-@* One SentinelGPT panel for every admin page. It answers from what the page shows (title,
-   heading, text, the user's selection) plus whatever record the page describes through
-   AssistantContext. It never changes anything: a draft only lands in the page when the user
-   presses the page's own "Use..." button, and the page's normal Save/Send still applies.
-   The local model on this machine answers first; the server's SentinelGPT is the fallback. *@
+@* One SentinelGPT panel for every admin page. Since 30-10-26 it's an agent: asked to do
+   something, it researches, then acts through the app's own services as this user (only what
+   their role allows), and each change shows with Open and Undo; deleting and publishing wait for
+   a Confirm. It knows what the page shows (title, heading, text, the selection, the record from
+   AssistantContext) and what this chat has changed. The agent thinks on this computer's Ollama
+   (the Mac app's bridge, or a browser Ollama allows); with no model there that uses tools, the
+   server's SentinelGPT answers questions but doesn't act, since its small model claimed changes
+   it never made in the 30-10-26 live check. A draft answer still only lands in the page through
+   the page's own "Use..." button. *@
 <button type="button" class="gws-assistant-toggle @(_open ? "is-active" : string.Empty)" @onclick="ToggleAsync"
         title="SentinelGPT" aria-label="SentinelGPT assistant" aria-expanded="@(_open ? "true" : "false")" aria-controls="gws-assistant">
     <i class="bi bi-stars" aria-hidden="true"></i>
@@ -36,15 +45,57 @@
         <div class="gws-assistant-thread" @ref="_thread" aria-live="polite">
             @if (_turns.Count == 0)
             {
-                <p class="gws-assistant-intro">Ask about this page. Answers use what's on screen, any text you select, and the record that's open. Nothing in the app changes unless you choose to use a draft.</p>
+                <p class="gws-assistant-intro">Ask about this page, or tell me what to do: make a to-do list, add a card to a board, draft a site page. I look things up first, then do it. Changes come with Undo; deleting and publishing wait for your Confirm. Doing things uses your Mac's model, in the Mac app; elsewhere I answer questions.</p>
             }
             @foreach (var turn in _turns)
             {
                 <div class="gws-assistant-question">@turn.Question</div>
                 <div class="gws-assistant-answer">
+                    @if (turn.Steps.Count > 0)
+                    {
+                        <ol class="gws-assistant-steps" aria-label="What SentinelGPT did">
+                            @foreach (var step in turn.Steps)
+                            {
+                                <li>@step</li>
+                            }
+                        </ol>
+                    }
                     @if (turn.Answer.Length > 0)
                     {
                         <div class="gws-assistant-text">@((MarkupString)AssistantMarkdown.ToSafeHtml(turn.Answer))</div>
+                    }
+                    @foreach (var action in turn.Actions)
+                    {
+                        <div class="gws-assistant-action is-@action.Status">
+                            <i class="bi @ActionIcon(action)" aria-hidden="true"></i>
+                            <span class="gws-assistant-action-text">@action.Summary@ActionSuffix(action)</span>
+                            <span class="gws-assistant-action-buttons">
+                                @if (action.AwaitingConfirm)
+                                {
+                                    <button type="button" class="btn btn-sm btn-primary" disabled="@_acting" @onclick="() => ResolveAsync(turn, action, true)">Confirm</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_acting" @onclick="() => ResolveAsync(turn, action, false)">Decline</button>
+                                }
+                                else
+                                {
+                                    @if (action.Link is not null && action.Status != SentinelAgentActionStatuses.Undone)
+                                    {
+                                        <a class="btn btn-sm btn-link" href="@action.Link">Open</a>
+                                    }
+                                    @if (action.CanUndo)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_acting" @onclick="() => UndoAsync(turn, action)">Undo</button>
+                                    }
+                                }
+                            </span>
+                        </div>
+                    }
+                    @if (turn.ActionError is not null)
+                    {
+                        <div class="gws-assistant-error">@turn.ActionError</div>
+                    }
+                    @if (turn.AnswersOnlyNote)
+                    {
+                        <div class="gws-assistant-activity">Answered on the server, which doesn't make changes. To have SentinelGPT do things, use it in the Mac app, where it runs on your Mac's model.</div>
                     }
                     @if (turn.Activity is not null)
                     {
@@ -89,7 +140,7 @@
             }
             <form class="gws-assistant-form" @onsubmit="SendAsync" @onsubmit:preventDefault>
                 <label class="visually-hidden" for="gws-assistant-input">Ask SentinelGPT</label>
-                <textarea id="gws-assistant-input" class="form-control" rows="2" maxlength="2000" placeholder="Ask about this page…"
+                <textarea id="gws-assistant-input" class="form-control" rows="2" maxlength="2000" placeholder="Ask, or tell SentinelGPT what to do…"
                           @bind="_input" @bind:event="oninput" @onfocus="RefreshSelectionAsync" disabled="@_busy"></textarea>
                 @if (_busy)
                 {
@@ -105,8 +156,6 @@
 }
 
 @code {
-    // A local model that hasn't started answering by then is treated as unavailable.
-    private static readonly TimeSpan LocalFirstTokenTimeout = TimeSpan.FromMinutes(2);
     private static readonly TimeSpan LocalRetryAfter = TimeSpan.FromMinutes(5);
 
     private readonly List<Turn> _turns = [];
@@ -117,7 +166,12 @@
     private string _heading = string.Empty;
     private Guid _conversationId = Guid.NewGuid();
     private Guid? _generationId;
+    private bool _answersOnlyNoted;
     private string? _username;
+    private bool _acting;
+    // The local model that last worked, tried first; ones that turned out not to use tools are skipped.
+    private string? _localModel;
+    private readonly HashSet<string> _skipLocal = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _stop;
     private BrowserLocalOllamaService? _local;
     private DateTimeOffset _localUnavailableUntil;
@@ -195,10 +249,7 @@
             var registration = Assistant.Current;
             turn.RecordKey = registration is null ? null : RecordKey(registration);
             var context = AssistantPrompt.DescribeContext(registration?.Page, capture);
-            if (!await TryLocalAsync(turn, context, _stop.Token))
-            {
-                await AskServerAsync(turn, context, _stop.Token);
-            }
+            await RunAgentAsync(turn, context, _stop.Token);
         }
         catch (OperationCanceledException)
         {
@@ -221,48 +272,41 @@
         }
     }
 
-    // The machine's own Ollama, through the browser (the Mac app's native bridge, or a browser
-    // Ollama allows). False means "use the server instead"; once local answering has started,
-    // failures are real errors rather than a reason to ask again elsewhere.
-    private async Task<bool> TryLocalAsync(Turn turn, string context, CancellationToken stop)
+    // The agent thinks on this computer's Ollama when it has a model that uses tools (the Mac app's
+    // bridge, or a browser Ollama allows); its tools act on the server as this user. Otherwise the
+    // server's SentinelGPT answers, without acting.
+    private async Task RunAgentAsync(Turn turn, string context, CancellationToken stop)
     {
-        if (DateTimeOffset.UtcNow < _localUnavailableUntil) return false;
-        _local ??= new BrowserLocalOllamaService(JS);
-        var status = await _local.ProbeAsync(stop);
-        var model = status.IsReachable ? LocalModels.PickChatModel(status.Models) : null;
-        if (model is null)
+        var user = await AgentUserAsync();
+        foreach (var model in await LocalCandidatesAsync(stop))
         {
-            _localUnavailableUntil = DateTimeOffset.UtcNow + LocalRetryAfter;
-            return false;
-        }
-
-        turn.Activity = $"Asking your local {model}…";
-        StateHasChanged();
-        var history = _turns.Where(item => item.Done && item.Error is null && item.Answer.Length > 0)
-            .Select(item => new AssistantTurn(item.Question, item.Answer)).ToList();
-        var (system, prompt) = AssistantPrompt.ForLocalModel(context, history, turn.Question);
-        using var firstToken = CancellationTokenSource.CreateLinkedTokenSource(stop);
-        firstToken.CancelAfter(LocalFirstTokenTimeout);
-        try
-        {
-            await foreach (var fragment in _local.GenerateStreamAsync(model, system, prompt, firstToken.Token))
+            turn.Activity = $"Thinking on your local {model}…";
+            StateHasChanged();
+            try
             {
-                if (turn.Answer.Length == 0) firstToken.CancelAfter(Timeout.InfiniteTimeSpan);
-                turn.Answer += fragment;
-                turn.Activity = null;
-                _scrollToEnd = true;
-                StateHasChanged();
+                await RunTurnAsync(turn, user, context, _local!, model, SentinelAgentRunner.LocalRounds, $"Local · {model}", stop);
+                _localModel = model;
+                return;
+            }
+            catch (Exception ex) when (!stop.IsCancellationRequested && turn.Actions.Count == 0
+                                       && ex is JSException or InvalidOperationException or System.Text.Json.JsonException)
+            {
+                // A model whose template has no tools answers 400 and the next may do; anything
+                // else local goes to the server, and local is left alone for a few minutes.
+                if (SentinelAgentModels.IsNoToolsError(ex))
+                {
+                    _skipLocal.Add(model);
+                    continue;
+                }
+                _localUnavailableUntil = DateTimeOffset.UtcNow + LocalRetryAfter;
+                turn.Steps.Clear();
+                break;
             }
         }
-        catch (Exception ex) when (turn.Answer.Length == 0 && !stop.IsCancellationRequested
-                                   && ex is JSException or InvalidOperationException or OperationCanceledException)
-        {
-            _localUnavailableUntil = DateTimeOffset.UtcNow + LocalRetryAfter;
-            return false;
-        }
-        turn.Answer = turn.Answer.Trim();
-        turn.Source = $"Local · {model}";
-        return true;
+
+        await AskServerAsync(turn, context, stop);
+        turn.AnswersOnlyNote = !_answersOnlyNoted;
+        _answersOnlyNoted = true;
     }
 
     // The server's SentinelGPT through the shared generation coordinator (one job per user,
@@ -291,7 +335,7 @@
                     throw new OperationCanceledException();
                 case SentinelGptGenerationStatuses.Completed:
                     turn.Answer = (snapshot.CompletedRun?.Output ?? snapshot.Output).Trim();
-                    turn.Source = $"Server · {snapshot.CompletedRun?.Model ?? "SentinelGPT"}";
+                    turn.Source = $"Server · {snapshot.CompletedRun?.Model ?? "SentinelGPT"} · answers only";
                     return;
             }
             _scrollToEnd = true;
@@ -299,6 +343,122 @@
             await Task.Delay(150, stop);
         }
     }
+
+    private async Task RunTurnAsync(
+        Turn turn, SentinelAgentUser user, string context, IOllamaService model, string modelName, int rounds, string source, CancellationToken stop)
+    {
+        var result = await AgentRunner.RunAsync(
+            new SentinelAgentRequest(_conversationId, user, turn.Question, context, model, modelName, rounds),
+            agentEvent => InvokeAsync(() =>
+            {
+                switch (agentEvent)
+                {
+                    case SentinelAgentStep step:
+                        turn.Steps.Add(step.Text);
+                        turn.Activity = step.Text + "…";
+                        break;
+                    case SentinelAgentActed acted:
+                        turn.Upsert(acted.Action);
+                        break;
+                }
+                _scrollToEnd = true;
+                StateHasChanged();
+            }),
+            stop);
+        turn.Answer = result.Answer;
+        turn.Source = source;
+        RefreshIfShowing(result.Actions);
+    }
+
+    private async Task<IReadOnlyList<string>> LocalCandidatesAsync(CancellationToken stop)
+    {
+        if (DateTimeOffset.UtcNow < _localUnavailableUntil) return [];
+        _local ??= new BrowserLocalOllamaService(JS);
+        LocalOllamaStatus status;
+        try
+        {
+            status = await _local.ProbeAsync(stop);
+        }
+        catch (JSException)
+        {
+            status = new LocalOllamaStatus(false, [], null);
+        }
+        var candidates = status.IsReachable
+            ? SentinelAgentModels.LocalCandidates(status.Models).Where(model => !_skipLocal.Contains(model)).ToList()
+            : [];
+        if (candidates.Count == 0)
+        {
+            _localUnavailableUntil = DateTimeOffset.UtcNow + LocalRetryAfter;
+            return [];
+        }
+        if (_localModel is not null && candidates.Remove(_localModel)) candidates.Insert(0, _localModel);
+        return candidates;
+    }
+
+    private async Task<SentinelAgentUser> AgentUserAsync()
+    {
+        _username ??= await CurrentUserAccessor.GetCurrentUsernameAsync();
+        var principal = (await AuthState.GetAuthenticationStateAsync()).User;
+        return new SentinelAgentUser(_username, AppRoles.All.Where(principal.IsInRole).ToList());
+    }
+
+    // A Confirm card's answer: approving runs exactly what the card showed.
+    private async Task ResolveAsync(Turn turn, SentinelAgentActionView action, bool approve)
+    {
+        await ActOnAsync(turn, async user => await AgentRunner.ConfirmAsync(action.Id, user, approve, CancellationToken.None));
+    }
+
+    private async Task UndoAsync(Turn turn, SentinelAgentActionView action)
+    {
+        await ActOnAsync(turn, async user => await AgentRunner.UndoAsync(action.Id, user, CancellationToken.None));
+    }
+
+    private async Task ActOnAsync(Turn turn, Func<SentinelAgentUser, Task<SentinelAgentActionView>> act)
+    {
+        if (_acting) return;
+        _acting = true;
+        turn.ActionError = null;
+        try
+        {
+            var updated = await act(await AgentUserAsync());
+            turn.Upsert(updated);
+            RefreshIfShowing([updated]);
+        }
+        catch (InvalidOperationException ex)
+        {
+            turn.ActionError = ex.Message;
+        }
+        finally
+        {
+            _acting = false;
+        }
+    }
+
+    // The page on screen is the one that just changed: show the change.
+    private void RefreshIfShowing(IEnumerable<SentinelAgentActionView> actions)
+    {
+        var here = Navigation.ToBaseRelativePath(Navigation.Uri);
+        if (actions.Any(action => action.Link is { } link && string.Equals(link.TrimStart('/'), here, StringComparison.OrdinalIgnoreCase)))
+        {
+            Navigation.Refresh();
+        }
+    }
+
+    private static string ActionIcon(SentinelAgentActionView action) => action.Status switch
+    {
+        SentinelAgentActionStatuses.AwaitingConfirm => "bi-question-circle",
+        SentinelAgentActionStatuses.Undone or SentinelAgentActionStatuses.Declined => "bi-arrow-counterclockwise",
+        SentinelAgentActionStatuses.Failed => "bi-exclamation-triangle",
+        _ => "bi-check2-circle"
+    };
+
+    private static string ActionSuffix(SentinelAgentActionView action) => action.Status switch
+    {
+        SentinelAgentActionStatuses.AwaitingConfirm => "?",
+        SentinelAgentActionStatuses.Undone => " (undone)",
+        SentinelAgentActionStatuses.Declined => " (declined)",
+        _ => string.Empty
+    };
 
     private void Stop()
     {
@@ -426,5 +586,16 @@
         public bool Done { get; set; }
         public bool Copied { get; set; }
         public bool Applied { get; set; }
+        public List<string> Steps { get; } = [];
+        public List<SentinelAgentActionView> Actions { get; } = [];
+        public string? ActionError { get; set; }
+        public bool AnswersOnlyNote { get; set; }
+
+        public void Upsert(SentinelAgentActionView action)
+        {
+            var index = Actions.FindIndex(item => item.Id == action.Id);
+            if (index >= 0) Actions[index] = action;
+            else Actions.Add(action);
+        }
     }
 }

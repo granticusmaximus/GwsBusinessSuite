@@ -148,6 +148,42 @@ export function startGenerate(requestId, baseUrl, request, receiver) {
     run(requestId, baseUrl, request, receiver, controller).finally(() => active.delete(requestId));
 }
 
+// One tool-calling chat round (/api/chat, not streamed) for SentinelGPT's agent. The reply goes up
+// as OnChunk pieces then OnCompleted, like a generation, so a long tool call (a whole page of
+// markdown) never exceeds Blazor Server's 32 KB browser->server message cap.
+export function startChat(requestId, baseUrl, payloadJson, receiver) {
+    const controller = new AbortController();
+    active.set(requestId, controller);
+    runChat(requestId, baseUrl, payloadJson, receiver, controller).finally(() => active.delete(requestId));
+}
+
+async function runChat(requestId, baseUrl, payloadJson, receiver, controller) {
+    try {
+        const response = await localFetch(`${baseUrl}/api/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: payloadJson,
+            signal: controller.signal
+        });
+        const body = await response.text();
+        if (!response.ok) {
+            let detail = body;
+            try { detail = JSON.parse(body).error || body; } catch { /* not JSON */ }
+            throw new Error(`Local Ollama answered HTTP ${response.status}. ${detail}`.trim());
+        }
+        for (let start = 0; start < body.length; start += maxBatchChars) {
+            await receiver.invokeMethodAsync("OnChunk", requestId, body.slice(start, start + maxBatchChars));
+        }
+        await receiver.invokeMethodAsync("OnCompleted", requestId);
+    } catch (error) {
+        try {
+            await receiver.invokeMethodAsync("OnFailed", requestId, describeFailure(baseUrl, error));
+        } catch {
+            // The circuit is gone (tab closed or disconnected) - there is no one left to tell.
+        }
+    }
+}
+
 export function abort(requestId) {
     const controller = active.get(requestId);
     if (controller) {

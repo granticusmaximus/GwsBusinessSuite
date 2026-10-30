@@ -1293,6 +1293,35 @@ public sealed class SentinelAiRun : AuditableEntity
     public string? PendingToolArgumentsJson { get; set; }
 }
 
+// One thing SentinelGPT's agent did, or proposes to do, in a chat (30-10-26): what the chat's
+// "working set" lists back to the model ("the to-do list you made" -> its id) and what Undo and
+// Confirm act on. ArgumentsJson is the exact tool call, so a Confirm runs precisely what was shown.
+public sealed class SentinelAgentAction : AuditableEntity
+{
+    public Guid ConversationId { get; set; }
+    public required string Tool { get; set; }
+    public string ArgumentsJson { get; set; } = "{}";
+    public string Status { get; set; } = SentinelAgentActionStatuses.Done;
+    // One line for the person: "Created to-do list 'Droplet clean-up' with 3 tasks".
+    public string Summary { get; set; } = string.Empty;
+    // What it touched: a kind (sentinel-page, board, board-card, site-page), its id, its title then.
+    public string? ObjectKind { get; set; }
+    public string? ObjectId { get; set; }
+    public string? ObjectTitle { get; set; }
+    public string? Link { get; set; }
+    // What the tool needs to reverse it; null when it can't be undone.
+    public string? UndoJson { get; set; }
+}
+
+public static class SentinelAgentActionStatuses
+{
+    public const string Done = "done";
+    public const string AwaitingConfirm = "awaiting-confirm";
+    public const string Declined = "declined";
+    public const string Undone = "undone";
+    public const string Failed = "failed";
+}
+
 // Durable copy of a Notion-hosted file. Notion API file URLs are signed and expire, so
 // imported page blocks point at this local record instead of retaining the temporary URL.
 public sealed class SentinelImportedFile : AuditableEntity

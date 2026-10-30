@@ -6143,6 +6143,68 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("SemanticSearchDocuments");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelAgentAction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ArgumentsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Link")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ObjectId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ObjectKind")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ObjectTitle")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Summary")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Tool")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UndoJson")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId", "CreatedAt");
+
+                    b.HasIndex("CreatedBy", "CreatedAt");
+
+                    b.ToTable("SentinelAgentActions");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelAiRun", b =>
                 {
                     b.Property<Guid>("Id")
