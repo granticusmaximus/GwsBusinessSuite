@@ -11,7 +11,9 @@ public sealed record AssistantPageContext(
     string? RecordKind = null,
     string? RecordTitle = null,
     string? Details = null,
-    IReadOnlyList<string>? Suggestions = null);
+    IReadOnlyList<string>? Suggestions = null,
+    // The open record's id, so SentinelGPT's agent can act on "this" (30-10-26).
+    string? RecordId = null);
 
 // Read from the browser each time a question is sent.
 public sealed record AssistantCapture(string? Title, string? Heading, string? Selection, string? VisibleText);
@@ -46,7 +48,8 @@ public static partial class AssistantPrompt
     {
         var text = new StringBuilder();
         text.AppendLine($"Page: {page?.PageName ?? Clean(capture?.Heading) ?? Clean(capture?.Title) ?? "an admin page"}");
-        if (page?.RecordKind is { } kind && page.RecordTitle is { } title) text.AppendLine($"Open record: {kind} \"{title}\"");
+        if (page?.RecordKind is { } kind && page.RecordTitle is { } title)
+            text.AppendLine($"Open record: {kind} \"{title}\"" + (page.RecordId is { } id ? $" (id {id})" : string.Empty));
         if (Clip(page?.Details, MaxDetails) is { } details)
         {
             text.AppendLine("Record details:").AppendLine(details);

@@ -36,7 +36,15 @@ public sealed record SentinelAgentStep(string Text) : SentinelAgentEvent;
 // A change made, or a Confirm card waiting.
 public sealed record SentinelAgentActed(SentinelAgentActionView Action) : SentinelAgentEvent;
 
+// A change rolled back so the job can be planned first: no longer one of this turn's.
+public sealed record SentinelAgentWithdrawn(Guid ActionId) : SentinelAgentEvent;
+
 public sealed record SentinelAgentTurn(string Answer, IReadOnlyList<SentinelAgentActionView> Actions, string Model);
+
+// A row on the What SentinelGPT did page.
+public sealed record SentinelAgentActivity(SentinelAgentActionView Action, DateTimeOffset At, string Who, bool Mine);
+
+public sealed record SentinelAgentMemoryView(Guid Id, string Fact, DateTimeOffset At);
 
 public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvider time, ILogger<SentinelAgentRunner> logger)
 {
@@ -45,6 +53,12 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
     // site page from nothing, so without one the panel answers on the server instead.
     public const int LocalRounds = 8;
     public const string UndoToolName = "undo_change";
+    // A plan the person approves (Go) before a bigger job starts; it pauses the turn.
+    public const string PlanToolName = "show_plan";
+    public const string GoMessage = "Go ahead with the plan.";
+    private const int PlanThreshold = 3;
+    private const int MemoriesInPrompt = 40;
+    private const int ActivityRows = 200;
     private const int HistoryTurns = 6;
     private const int HistoryCharacters = 1_500;
     private const int WorkingSetSize = 20;
@@ -61,10 +75,17 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
         var messages = new List<OllamaChatMessage> { new("system", await SystemPromptAsync(db, request, cancellationToken)) };
         messages.AddRange(await HistoryAsync(db, request, cancellationToken));
         messages.Add(new OllamaChatMessage("user", request.Message.Trim()));
-        var definitions = tools.Values.Select(tool => new OllamaToolDefinition(tool.Name, tool.Description, tool.ParametersJson)).ToList();
+        var definitions = tools.Values
+            .OrderBy(tool => tool.Name is PlanToolName or UndoToolName ? 0 : 1)
+            .Select(tool => new OllamaToolDefinition(tool.Name, tool.Description, tool.ParametersJson)).ToList();
 
         var actions = new List<SentinelAgentActionView>();
         var done = new HashSet<string>(StringComparer.Ordinal);
+        // Without a Go, a turn that reaches more than PlanThreshold changes is rolled back and the
+        // model plans the whole job: in the 30-10-26 live check it went straight into a 5-change
+        // job, and planning only "the rest" made it redo the first three after Go.
+        var planApproved = request.Message.Trim() == GoMessage;
+        var planRequired = false;
         string? answer = null;
         for (var round = 0; round < Math.Max(1, request.MaxRounds) && answer is null; round++)
         {
@@ -78,8 +99,32 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             messages.Add(new OllamaChatMessage("assistant", response.Content, ToolCalls: response.ToolCalls));
             foreach (var call in response.ToolCalls)
             {
-                var result = await CallAsync(db, tools, call, context, actions, done, onEvent, cancellationToken);
+                var changes = actions.Count(action => action.Tool != PlanToolName && action.Status == SentinelAgentActionStatuses.Done);
+                var isChange = tools.GetValueOrDefault(call.Name) is { Risk: not SentinelAgentRisk.Read } && call.Name != PlanToolName && call.Name != UndoToolName;
+                string result;
+                if (isChange && planRequired)
+                {
+                    // Rolled back already: nothing more changes until the plan is shown.
+                    result = Problem("Not yet: call show_plan with every step of the whole job first, then stop.");
+                }
+                else if (isChange && !planApproved && changes >= PlanThreshold)
+                {
+                    planRequired = true;
+                    result = await RollBackForPlanAsync(db, tools, context, actions, onEvent, cancellationToken);
+                }
+                else
+                {
+                    result = await CallAsync(db, tools, call, context, actions, done, onEvent, cancellationToken);
+                }
                 messages.Add(new OllamaChatMessage("tool", result, Name: call.Name));
+            }
+
+            // A plan waits for Go: nothing more happens this turn.
+            if (actions.Any(action => action.Tool == PlanToolName && action.AwaitingConfirm))
+            {
+                answer = string.IsNullOrWhiteSpace(response.Content)
+                    ? "Here's my plan. Press Go and I'll start, or tell me what to change."
+                    : response.Content.Trim();
             }
         }
 
@@ -119,6 +164,11 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
         if (!approve)
         {
             action.Status = SentinelAgentActionStatuses.Declined;
+        }
+        else if (action.Tool == PlanToolName)
+        {
+            // Go: the plan is agreed. The panel then sends GoMessage and the next turn carries it out.
+            action.Status = SentinelAgentActionStatuses.Done;
         }
         else
         {
@@ -186,6 +236,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
         CancellationToken cancellationToken)
     {
         if (call.Name == UndoToolName) return await UndoForModelAsync(db, tools, call, context, actions, onEvent, cancellationToken);
+        if (call.Name == PlanToolName) return await ShowPlanAsync(db, call, context, actions, onEvent, cancellationToken);
         if (!tools.TryGetValue(call.Name, out var tool)) return Problem($"There's no tool called {call.Name}.");
         JsonObject arguments;
         try
@@ -288,6 +339,125 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
         }
     }
 
+    // Undoes this turn's changes, newest first, so the plan can start from nothing.
+    private async Task<string> RollBackForPlanAsync(
+        IAppDbContext db, IReadOnlyDictionary<string, ISentinelAgentTool> tools, SentinelAgentToolContext context,
+        List<SentinelAgentActionView> actions, Func<SentinelAgentEvent, Task> onEvent, CancellationToken cancellationToken)
+    {
+        await onEvent(new SentinelAgentStep($"That's more than {PlanThreshold} changes, so making a plan first"));
+        var kept = new List<string>();
+        foreach (var view in actions.Where(action => action.Status == SentinelAgentActionStatuses.Done && action.Tool != PlanToolName).Reverse().ToList())
+        {
+            var action = await db.SentinelAgentActions.FirstAsync(item => item.Id == view.Id, cancellationToken);
+            try
+            {
+                if (action.UndoJson is null) throw new InvalidOperationException("It can't be undone.");
+                await UndoCoreAsync(db, tools, action, context.User, cancellationToken);
+                actions.Remove(view);
+                await onEvent(new SentinelAgentWithdrawn(view.Id));
+            }
+            catch (InvalidOperationException ex)
+            {
+                logger.LogWarning(ex, "Rolling back {Tool} before a plan failed.", action.Tool);
+                kept.Add(action.Summary);
+            }
+        }
+
+        return Problem($"Stop: this job needs more than {PlanThreshold} changes, so it needs a plan first. "
+            + (kept.Count == 0
+                ? "The changes you made this turn have been undone. Call show_plan now with every step of the whole job, then stop."
+                : $"Your changes this turn were undone except: {string.Join("; ", kept)}. Call show_plan now with every other step still needed, then stop."));
+    }
+
+    private async Task<string> ShowPlanAsync(
+        IAppDbContext db, OllamaToolCall call, SentinelAgentToolContext context, List<SentinelAgentActionView> actions,
+        Func<SentinelAgentEvent, Task> onEvent, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<string> steps;
+        try
+        {
+            steps = (JsonNode.Parse(string.IsNullOrWhiteSpace(call.ArgumentsJson) ? "{}" : call.ArgumentsJson) as JsonObject ?? []).Texts("steps");
+        }
+        catch (JsonException)
+        {
+            return Problem("The arguments weren't valid JSON.");
+        }
+
+        if (steps.Count == 0) return Problem("'steps' needs the plan's steps.");
+        var plan = new SentinelAgentAction
+        {
+            ConversationId = context.ConversationId,
+            Tool = PlanToolName,
+            ArgumentsJson = call.ArgumentsJson,
+            Status = SentinelAgentActionStatuses.AwaitingConfirm,
+            Summary = string.Join("\n", steps.Select((step, index) => $"{index + 1}. {step}")),
+            CreatedAt = time.GetUtcNow(),
+            CreatedBy = context.User.Username
+        };
+        db.SentinelAgentActions.Add(plan);
+        await db.SaveChangesAsync(cancellationToken);
+        var view = View(plan, null);
+        actions.Add(view);
+        await onEvent(new SentinelAgentActed(view));
+        return SentinelAgentJson.Serialize(new { status = "shown; waiting for the person to press Go", note = "Stop here. Don't start the steps yet." });
+    }
+
+    // The What SentinelGPT did page: this person's changes and proposals (or everyone's, for an
+    // Admin), newest first.
+    public async Task<IReadOnlyList<SentinelAgentActivity>> ListActivityAsync(SentinelAgentUser user, bool everyone, CancellationToken cancellationToken)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        var tools = ToolsFor(scope.ServiceProvider, user);
+        var all = everyone && user.Roles.Contains(AppRoles.Admin, StringComparer.OrdinalIgnoreCase);
+        var actions = await db.SentinelAgentActions.AsNoTracking()
+            .Where(action => all || action.CreatedBy == user.Username)
+            .ToListAsync(cancellationToken);
+        return actions
+            .OrderByDescending(action => action.CreatedAt)
+            .Take(ActivityRows)
+            .Select(action =>
+            {
+                var mine = action.CreatedBy == user.Username;
+                var view = View(action, mine ? tools.GetValueOrDefault(action.Tool) : null);
+                return new SentinelAgentActivity(view, action.CreatedAt, action.CreatedBy, mine);
+            })
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<SentinelAgentMemoryView>> ListMemoriesAsync(SentinelAgentUser user, CancellationToken cancellationToken)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        return await MemoriesAsync(scope.ServiceProvider.GetRequiredService<IAppDbContext>(), user.Username, cancellationToken);
+    }
+
+    public async Task<SentinelAgentMemoryView> RememberAsync(SentinelAgentUser user, string fact, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fact);
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        var memory = new SentinelAgentMemory { Fact = fact.Trim(), CreatedAt = time.GetUtcNow(), CreatedBy = user.Username };
+        db.SentinelAgentMemories.Add(memory);
+        await db.SaveChangesAsync(cancellationToken);
+        return new SentinelAgentMemoryView(memory.Id, memory.Fact, memory.CreatedAt);
+    }
+
+    public async Task ForgetAsync(SentinelAgentUser user, Guid memoryId, CancellationToken cancellationToken)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+        var memory = await db.SentinelAgentMemories.FirstOrDefaultAsync(item => item.Id == memoryId && item.CreatedBy == user.Username, cancellationToken)
+            ?? throw new InvalidOperationException("That memory isn't yours, or is already gone.");
+        db.SentinelAgentMemories.Remove(memory);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task<IReadOnlyList<SentinelAgentMemoryView>> MemoriesAsync(IAppDbContext db, string username, CancellationToken cancellationToken) =>
+        (await db.SentinelAgentMemories.AsNoTracking().Where(memory => memory.CreatedBy == username).ToListAsync(cancellationToken))
+            .OrderByDescending(memory => memory.CreatedAt)
+            .Select(memory => new SentinelAgentMemoryView(memory.Id, memory.Fact, memory.CreatedAt))
+            .ToList();
+
     private static Dictionary<string, ISentinelAgentTool> ToolsFor(IServiceProvider services, SentinelAgentUser user)
     {
         var tools = services.GetServices<ISentinelAgentToolset>()
@@ -300,6 +470,12 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             SentinelAgentJson.Schema(("actionId", "string", "The action id from the list of changes in this chat", true)),
             SentinelAgentRisk.Change, [], _ => "Undoing a change",
             (_, _, _) => throw new SentinelAgentToolException("Undo runs through the runner."));
+        tools[PlanToolName] = new SentinelAgentTool(
+            PlanToolName,
+            $"Show the person your plan before a job that needs more than {PlanThreshold} changes. List the steps as short sentences. The turn then waits for them to press Go.",
+            SentinelAgentJson.Schema(("steps", "string[]", "The steps, in order", true)),
+            SentinelAgentRisk.Confirm, [], _ => "Making a plan",
+            (_, _, _) => throw new SentinelAgentToolException("Plans run through the runner."));
         return tools;
     }
 
@@ -310,12 +486,15 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             You are SentinelGPT, the assistant inside GWS Business Suite. You can look things up and make changes in the app with your tools, acting as {request.User.Username} ({request.User.RoleLabel}). Today is {now.ToString("dddd dd-MM-yy", CultureInfo.InvariantCulture)}, {now:HH:mm}.
 
             How to work:
+            - Before your first change, count the changes the whole job needs (each new board, card, list, page or edit is one). More than {PlanThreshold}: call show_plan with every step and stop, so the person can check it and press Go. When they say "{GoMessage}", carry the plan out without showing it again.
             - When asked to do something, research first, then do it. Look up what you need (Sentinel, the app, World News, the web) so what you write is right, then make the change with the tools. Don't tell the person how to do it themselves.
             - Write from what you found, not from memory, and say where facts came from when it matters.
             - Find things before changing them, unless "What this chat has changed" below already gives the id.
+            - "This", "it" or "here", with nothing else named, mean the open record on the person's screen (its id is given under "What's on the person's screen").
             - "That list", "the page", "the board" and the like mean the most recent matching item below.
             - Use ids exactly as the tools return them. Never make up an id.
             - Deleting and publishing only propose: say it's waiting for their Confirm.
+            - When asked to remember something for later, call remember. Use what's under "What you've been asked to remember"; if the tools show otherwise, trust the tools and say so.
             - If a tool returns an error, fix the call and try again, or say plainly what's stopping you.
             - For facts, use only what the tools and the page give you. If you don't know, say so.
             - When you've finished, answer in one to three short sentences saying what you did. The app shows links and Undo buttons, so don't paste ids or links.
@@ -332,9 +511,17 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
         if (changes.Count == 0) prompt.AppendLine("- Nothing yet.");
         foreach (var action in changes)
         {
-            prompt.Append($"- [{Describe(action.Status)}] {action.Summary}");
+            var summary = action.Tool == PlanToolName ? "Plan: " + action.Summary.Replace("\n", "; ") : action.Summary;
+            prompt.Append($"- [{(action.Tool == PlanToolName && action.Status == SentinelAgentActionStatuses.Done ? "approved, Go pressed" : Describe(action.Status))}] {summary}");
             if (action.ObjectId is not null) prompt.Append($" ({action.ObjectKind} id {action.ObjectId})");
             prompt.AppendLine($" - action id {action.Id}");
+        }
+
+        var memories = await MemoriesAsync(db, request.User.Username, cancellationToken);
+        if (memories.Count > 0)
+        {
+            prompt.AppendLine().AppendLine("What you've been asked to remember (newest first):");
+            foreach (var memory in memories.Take(MemoriesInPrompt)) prompt.AppendLine($"- {memory.Fact} (memory id {memory.Id})");
         }
 
         if (!string.IsNullOrWhiteSpace(request.PageContext))

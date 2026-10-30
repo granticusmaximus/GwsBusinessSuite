@@ -106,6 +106,24 @@ elsewhere will get the agent.
   - llama3.2 failed (see above)
 - [ ] User guide: SentinelGPT section in docs (on disk; docs/ is untracked).
 
+## Phase B+: dependable before capable (Grant: "Do what you recommend", 30-10-26)
+- [x] **"This" is the open record.** `AssistantPageContext.RecordId` is passed by Support tickets,
+  CRM contacts, boards, Sentinel pages and the site-page editor. The prompt rule says "this/it/here"
+  means that record. add_ticket_card makes a board card linked to the open ticket.
+- [x] **Plan before big jobs.** `show_plan` card with Go/Cancel; Go sends `GoMessage`. The model
+  ignored the prompt rule in the live check, so the runner enforces it:
+  - At the 4th change without Go, it rolls back the turn's changes (Withdrawn events) and blocks
+    further changes until the model plans the whole job.
+  - Live result: plan, then Go, then each item made exactly once.
+- [x] **Memory.** `SentinelAgentMemory` (migration AddSentinelAgentMemories) holds remember/forget
+  tools with Undo. Memories go into every turn's prompt, each person's own. Live: "Where do we
+  host?" was answered from memory in a new chat.
+- [x] **What SentinelGPT did page.** `/admin/sentinelgpt/activity`:
+  - Changes (Open/Undo/Confirm; Admins can see everyone's but act only on their own)
+  - Memories (add/forget)
+  - Linked from the panel header and Knowledge > SentinelGPT activity.
+- [x] Tests: `SentinelAgentTests` now 16.
+
 ## Phase B: the Mac app's own SentinelGPT tab, and the web handing off to the Mac
 - [ ] Native endpoints so the Mac tab's agent can list and run tools as the signed-in user:
   `/admin/api/native/agent/tools`, `/run`, `/confirm`, `/undo`.

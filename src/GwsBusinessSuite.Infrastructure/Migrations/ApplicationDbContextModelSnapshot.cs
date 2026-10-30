@@ -6205,6 +6205,39 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
                     b.ToTable("SentinelAgentActions");
                 });
 
+            modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelAgentMemory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("ConversationId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Fact")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedBy");
+
+                    b.ToTable("SentinelAgentMemories");
+                });
+
             modelBuilder.Entity("GwsBusinessSuite.Domain.Entities.SentinelAiRun", b =>
                 {
                     b.Property<Guid>("Id")

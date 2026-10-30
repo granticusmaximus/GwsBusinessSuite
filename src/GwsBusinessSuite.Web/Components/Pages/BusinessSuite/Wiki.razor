@@ -9,6 +9,7 @@
 @using System.Text.Json
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.WebUtilities
+@inject GwsBusinessSuite.Web.Services.AssistantContext Assistant
 @inject IWikiService WikiService
 @inject IWikiDatabaseService WikiDatabaseService
 @inject IWikiSyncedBlockService WikiSyncedBlockService
@@ -4122,6 +4123,8 @@
             SelectedDatabaseId = null;
             LeaveCursorTracking();
             SelectedPageId = page.Id;
+            // SentinelGPT's agent: "this page" is the one open here (the panel still reads the text on screen).
+            Assistant.Set(new GwsBusinessSuite.Application.Assistant.AssistantPageContext("Sentinel", "Sentinel page", page.Title, RecordId: page.Id.ToString()));
             _dailyNoteDate = DailyNotes.DateFromSystemKey(page.SystemKey);
             _dailyNotePageId = _dailyNoteDate is null ? null : page.Id;
             ExpandAncestorPath(page.Id);

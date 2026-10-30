@@ -215,6 +215,135 @@ public sealed class SentinelAgentTests
     }
 
     [Fact]
+    public async Task BigJobs_ShouldShowAPlanFirst_AndOnlyStartWhenThePersonPressesGo()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var chat = Guid.NewGuid();
+        // One scripted reply only: the turn must stop at the plan, not ask the model again.
+        var planned = await harness.TurnAsync(chat, Admin, "Set up the launch: a board, two cards and a checklist",
+            Call(SentinelAgentRunner.PlanToolName, new { steps = new[] { "Create the Launch board", "Add two cards", "Make a launch checklist" } }));
+
+        var plan = planned.Actions.Should().ContainSingle().Subject;
+        plan.AwaitingConfirm.Should().BeTrue();
+        plan.Summary.Should().Be("1. Create the Launch board\n2. Add two cards\n3. Make a launch checklist");
+        planned.Answer.Should().Contain("Press Go");
+        (await harness.PagesTitledAsync("Launch checklist")).Should().Be(0, "nothing happens before Go");
+
+        (await harness.Runner.ConfirmAsync(plan.Id, Admin, approve: true, default)).Status.Should().Be(SentinelAgentActionStatuses.Done);
+        var model = new ScriptedModel(
+            messages =>
+            {
+                messages[0].Content.Should().Contain("[approved, Go pressed] Plan: 1. Create the Launch board; 2. Add two cards");
+                return Call("create_todo_list", new { title = "Launch checklist" });
+            },
+            _ => Say("Started."));
+        await harness.Runner.RunAsync(new SentinelAgentRequest(chat, Admin, SentinelAgentRunner.GoMessage, null, model, "test"), _ => Task.CompletedTask, default);
+        (await harness.PagesTitledAsync("Launch checklist")).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task BigJobs_ThatStartWithoutAPlan_ShouldBeRolledBack_AndPlannedWhole()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var events = new List<SentinelAgentEvent>();
+        var model = new ScriptedModel(
+            _ => Call("create_todo_list", new { title = "A" }),
+            _ => Call("create_todo_list", new { title = "B" }),
+            _ => Call("create_todo_list", new { title = "C" }),
+            _ => new OllamaChatResponse(string.Empty, [
+                new OllamaToolCall("create_todo_list", JsonSerializer.Serialize(new { title = "D" })),
+                new OllamaToolCall("create_todo_list", JsonSerializer.Serialize(new { title = "E" }))]),
+            messages =>
+            {
+                var results = messages.Where(message => message.Role == "tool").TakeLast(2).Select(message => message.Content).ToList();
+                results[0].Should().Contain("needs a plan first").And.Contain("have been undone");
+                results[1].Should().Contain("call show_plan", "nothing more changes in the turn until the plan is shown");
+                return Call(SentinelAgentRunner.PlanToolName, new { steps = new[] { "A", "B", "C", "D", "E" } });
+            });
+        var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin, "Make five lists", null, model, "test"),
+            agentEvent => { events.Add(agentEvent); return Task.CompletedTask; }, default);
+
+        turn.Actions.Should().ContainSingle().Which.Tool.Should().Be(SentinelAgentRunner.PlanToolName);
+        events.OfType<SentinelAgentWithdrawn>().Should().HaveCount(3);
+        foreach (var title in new[] { "A", "B", "C" }) (await harness.TrashedAsync(title)).Should().BeTrue($"'{title}' was rolled back");
+        (await harness.PagesTitledAsync("D")).Should().Be(0);
+        (await harness.PagesTitledAsync("E")).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Memories_ShouldReachEveryLaterChat_AndBeForgettable()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var remembered = await harness.TurnAsync(Guid.NewGuid(), Admin, "Remember that we host on DigitalOcean",
+            Call("remember", new { fact = "We host on DigitalOcean" }), Say("Got it."));
+        remembered.Actions[0].Summary.Should().Be("Remembered: We host on DigitalOcean");
+
+        var model = new ScriptedModel(messages =>
+        {
+            messages[0].Content.Should().Contain("What you've been asked to remember").And.Contain("- We host on DigitalOcean (memory id");
+            return Say("DigitalOcean.");
+        });
+        await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin, "Where do we host?", null, model, "test"), _ => Task.CompletedTask, default);
+
+        var others = new ScriptedModel(messages =>
+        {
+            messages[0].Content.Should().NotContain("DigitalOcean", "memories are each person's own");
+            return Say("I don't know.");
+        });
+        await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Author, "Where do we host?", null, others, "test"), _ => Task.CompletedTask, default);
+
+        await harness.Runner.UndoAsync(remembered.Actions[0].Id, Admin, default);
+        (await harness.Runner.ListMemoriesAsync(Admin, default)).Should().BeEmpty();
+
+        var added = await harness.Runner.RememberAsync(Admin, "Boards' last column is Shipped", default);
+        (await harness.Runner.ListMemoriesAsync(Admin, default)).Select(memory => memory.Fact).Should().Equal("Boards' last column is Shipped");
+        await harness.Runner.ForgetAsync(Admin, added.Id, default);
+        (await harness.Runner.ListMemoriesAsync(Admin, default)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Activity_ShouldListYourChangesNewestFirst_AndEveryonesOnlyForAnAdmin()
+    {
+        await using var harness = await Harness.CreateAsync();
+        await harness.TurnAsync(Guid.NewGuid(), Admin, "a", Call("create_todo_list", new { title = "First" }), Say("ok"));
+        await harness.TurnAsync(Guid.NewGuid(), Admin, "b", Call("create_todo_list", new { title = "Second" }), Say("ok"));
+        await harness.TurnAsync(Guid.NewGuid(), Author, "c", Call("create_todo_list", new { title = "Theirs" }), Say("ok"));
+
+        var mine = await harness.Runner.ListActivityAsync(Admin, everyone: false, default);
+        mine.Select(row => row.Action.Summary).Should().Equal("Created to-do list 'Second'", "Created to-do list 'First'");
+        mine.Should().OnlyContain(row => row.Mine && row.Action.CanUndo);
+
+        var all = await harness.Runner.ListActivityAsync(Admin, everyone: true, default);
+        all.Should().HaveCount(3);
+        all.Single(row => row.Who == "writer").Action.CanUndo.Should().BeFalse("an Admin sees others' changes but only undoes their own");
+        (await harness.Runner.ListActivityAsync(Author, everyone: true, default)).Should().ContainSingle("only an Admin sees everyone's");
+    }
+
+    [Fact]
+    public async Task ThisTicket_ShouldBecomeALinkedCard_FromTheOpenRecordsId()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var ticketId = await harness.TicketAsync("Invoice PDF won't open");
+        var page = GwsBusinessSuite.Application.Assistant.AssistantPrompt.DescribeContext(
+            new GwsBusinessSuite.Application.Assistant.AssistantPageContext("Support", "Ticket", "Invoice PDF won't open", RecordId: ticketId.ToString()), null);
+        page.Should().Contain($"Open record: Ticket \"Invoice PDF won't open\" (id {ticketId})");
+
+        var created = await harness.TurnAsync(Guid.NewGuid(), Admin, "Make a support board", Call("create_board", new { title = "Support" }), Say("ok"));
+        var boardId = created.Actions[0].Link!.Split('/').Last();
+        var model = new ScriptedModel(
+            messages =>
+            {
+                var id = Regex.Match(messages[0].Content, @"Ticket ""[^""]+"" \(id ([0-9a-f-]{36})\)").Groups[1].Value;
+                return Call("add_ticket_card", new { boardId, ticketId = id, column = "To do" });
+            },
+            _ => Say("Added."));
+        var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin, "Add this ticket to the support board", page, model, "test"), _ => Task.CompletedTask, default);
+
+        turn.Actions.Should().ContainSingle().Which.Summary.Should().Be("Added the ticket 'Invoice PDF won't open' to To do on 'Support'");
+        (await harness.ColumnOfAsync(boardId, "Invoice PDF won't open")).Should().Be("To do");
+    }
+
+    [Fact]
     public void LocalCandidates_ShouldPutToolCapableModelsFirst_AndLeaveOutTheRest()
     {
         string[] installed = ["gemma4:latest", "sentinelgpt:latest", "embeddinggemma:latest", "deepseek-r1:latest", "qwen2.5-coder:latest",
@@ -276,6 +405,7 @@ public sealed class SentinelAgentTests
                 .AddScoped<ISentinelAgentToolset, BoardAgentTools>()
                 .AddScoped<ISentinelAgentToolset, SitePageAgentTools>()
                 .AddScoped<ISentinelAgentToolset>(provider => new ResearchAgentTools(provider.GetRequiredService<ISuiteSearchService>()))
+                .AddScoped<ISentinelAgentToolset, MemoryAgentTools>()
                 .AddSingleton(TimeProvider.System)
                 .AddSingleton(typeof(ILogger<>), typeof(NullLogger<>))
                 .AddSingleton<SentinelAgentRunner>()
@@ -302,6 +432,12 @@ public sealed class SentinelAgentTests
             await using var scope = _services.CreateAsyncScope();
             await scope.ServiceProvider.GetRequiredService<IWikiService>().SavePageAsync(
                 new WikiPageEditorModel { Title = title, BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(text)) }, "grant");
+        }
+
+        public async Task<bool> TrashedAsync(string title)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            return (await scope.ServiceProvider.GetRequiredService<IAppDbContext>().WikiPages.AsNoTracking().SingleAsync(item => item.Title == title)).TrashedAt is not null;
         }
 
         public async Task<int> PagesTitledAsync(string title)
@@ -338,6 +474,18 @@ public sealed class SentinelAgentTests
             await using var scope = _services.CreateAsyncScope();
             var board = (await scope.ServiceProvider.GetRequiredService<IKanbanBoardService>().GetBoardAsync(Guid.Parse(boardId)))!;
             return board.Columns.FirstOrDefault(column => column.Cards.Any(card => card.Title == cardTitle))?.Label;
+        }
+
+        public async Task<Guid> TicketAsync(string subject)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
+            var contact = new Contact { FullName = "Ada Customer" };
+            db.Contacts.Add(contact);
+            var ticket = new SupportTicket { ContactId = contact.Id, Subject = subject };
+            db.SupportTickets.Add(ticket);
+            await db.SaveChangesAsync();
+            return ticket.Id;
         }
 
         public async Task SiteAsync()

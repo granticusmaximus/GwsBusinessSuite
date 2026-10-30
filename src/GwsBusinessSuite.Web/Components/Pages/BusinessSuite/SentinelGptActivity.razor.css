@@ -1,0 +1,35 @@
+.sga-filters,
+.sga-remember {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+    margin-bottom: 1rem;
+}
+
+.sga-filters .form-control,
+.sga-remember .form-control {
+    flex: 1 1 16rem;
+    min-width: 0;
+}
+
+.sga-filters .form-select {
+    flex: 0 1 12rem;
+}
+
+.sga-what {
+    overflow-wrap: anywhere;
+}
+
+.sga-memories .list-group-item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+}
+
+.sga-memory-fact {
+    flex: 1 1 14rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}

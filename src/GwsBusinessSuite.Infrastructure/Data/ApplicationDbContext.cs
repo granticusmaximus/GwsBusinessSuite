@@ -166,6 +166,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelPresenceLease> SentinelPresenceLeases => Set<SentinelPresenceLease>();
     public DbSet<SentinelAiRun> SentinelAiRuns => Set<SentinelAiRun>();
     public DbSet<SentinelAgentAction> SentinelAgentActions => Set<SentinelAgentAction>();
+    public DbSet<SentinelAgentMemory> SentinelAgentMemories => Set<SentinelAgentMemory>();
     public DbSet<SentinelImportedFile> SentinelImportedFiles => Set<SentinelImportedFile>();
     public DbSet<WikiDatabase> WikiDatabases => Set<WikiDatabase>();
     public DbSet<WikiDatabaseProperty> WikiDatabaseProperties => Set<WikiDatabaseProperty>();
@@ -572,6 +573,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelAiRun>().HasIndex(x => new { x.Status, x.CreatedAt });
         modelBuilder.Entity<SentinelAgentAction>().HasIndex(x => new { x.ConversationId, x.CreatedAt });
         modelBuilder.Entity<SentinelAgentAction>().HasIndex(x => new { x.CreatedBy, x.CreatedAt });
+        modelBuilder.Entity<SentinelAgentMemory>().HasIndex(x => x.CreatedBy);
         modelBuilder.Entity<WikiDatabaseProperty>()
             .HasOne(x => x.WikiDatabase)
             .WithMany(x => x.Properties)

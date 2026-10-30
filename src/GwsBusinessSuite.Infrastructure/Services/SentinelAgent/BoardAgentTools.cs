@@ -53,6 +53,17 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
             AddCardAsync,
             UndoAddCardAsync),
         new SentinelAgentTool(
+            "add_ticket_card",
+            "Add a card for a support ticket to a board, linked to the ticket (titled from it). Use for 'add this ticket to the board' when a ticket is open.",
+            SentinelAgentJson.Schema(
+                ("boardId", "string", "The board id", true),
+                ("ticketId", "string", "The support ticket's id", true),
+                ("column", "string", "The column's name (the first column when left out)", false)),
+            SentinelAgentRisk.Change, Roles,
+            _ => "Adding the ticket to a board",
+            AddTicketCardAsync,
+            UndoAddCardAsync),
+        new SentinelAgentTool(
             "move_card",
             "Move a card to another column of its board.",
             SentinelAgentJson.Schema(
@@ -142,6 +153,20 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
         return SentinelAgentToolResult.Of(
             new { added = true, cardId = rowId, title, column = column.Label, board = board.Title },
             new SentinelAgentChange($"Added '{title}' to {column.Label} on '{board.Title}'", "board-card", rowId.ToString(), title, LinkTo(board.DatabaseId),
+                SentinelAgentJson.Serialize(new CardUndo(board.DatabaseId, rowId, null))));
+    }
+
+    private async Task<SentinelAgentToolResult> AddTicketCardAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var board = await BoardAsync(args.Id("boardId"), ct);
+        var column = args.OptionalText("column") is { } name ? Column(board, name) : board.Columns.FirstOrDefault(c => c.OptionId is not null) ?? board.Columns[0];
+        var ticketId = args.Id("ticketId");
+        var subject = await db.SupportTickets.AsNoTracking().Where(ticket => ticket.Id == ticketId).Select(ticket => ticket.Subject).FirstOrDefaultAsync(ct)
+            ?? throw new SentinelAgentToolException($"There's no support ticket with id {ticketId}.");
+        var rowId = await boards.AddCardFromTicketAsync(board.DatabaseId, ticketId, column.OptionId, context.User.Username, ct);
+        return SentinelAgentToolResult.Of(
+            new { added = true, cardId = rowId, ticket = subject, column = column.Label, board = board.Title },
+            new SentinelAgentChange($"Added the ticket '{subject}' to {column.Label} on '{board.Title}'", "board-card", rowId.ToString(), subject, LinkTo(board.DatabaseId),
                 SentinelAgentJson.Serialize(new CardUndo(board.DatabaseId, rowId, null))));
     }
 

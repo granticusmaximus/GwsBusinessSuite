@@ -1322,6 +1322,14 @@ public static class SentinelAgentActionStatuses
     public const string Failed = "failed";
 }
 
+// Something the person asked SentinelGPT's agent to remember ("we host on DigitalOcean"), for
+// every later chat. Their own: listed, added and forgotten on the What SentinelGPT did page.
+public sealed class SentinelAgentMemory : AuditableEntity
+{
+    public required string Fact { get; set; }
+    public Guid? ConversationId { get; set; }
+}
+
 // Durable copy of a Notion-hosted file. Notion API file URLs are signed and expire, so
 // imported page blocks point at this local record instead of retaining the temporary URL.
 public sealed class SentinelImportedFile : AuditableEntity

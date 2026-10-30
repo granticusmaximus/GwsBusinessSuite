@@ -1,0 +1,240 @@
+@page "/admin/sentinelgpt/activity"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "ContentAccess")]
+@using GwsBusinessSuite.Application.SentinelAgent
+@using GwsBusinessSuite.Domain.Entities
+@using Microsoft.AspNetCore.Components.Authorization
+@inject SentinelAgentRunner AgentRunner
+@inject AuthenticationStateProvider AuthState
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@* What SentinelGPT's agent did (30-10-26): every change it made or proposed for you, newest
+   first, with Open, Undo and Confirm, and what you've asked it to remember. An Admin can also
+   see everyone's changes, but only acts on their own. *@
+
+<PageTitle>What SentinelGPT did</PageTitle>
+
+<PageHeader Title="What SentinelGPT did" Icon="bi-clock-history"
+            Description="Every change SentinelGPT made or proposed for you, and what you've asked it to remember. Undo works here too.">
+    <Actions>
+        <div class="btn-group" role="group" aria-label="Show">
+            <button type="button" class="btn @(_tab == ActivityTab.Changes ? "btn-primary" : "btn-outline-secondary")"
+                    aria-pressed="@(_tab == ActivityTab.Changes ? "true" : "false")" @onclick="() => _tab = ActivityTab.Changes">Changes</button>
+            <button type="button" class="btn @(_tab == ActivityTab.Memories ? "btn-primary" : "btn-outline-secondary")"
+                    aria-pressed="@(_tab == ActivityTab.Memories ? "true" : "false")" @onclick="() => _tab = ActivityTab.Memories">Memories (@_memories.Count)</button>
+        </div>
+    </Actions>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger" role="alert">@_error</div>
+}
+
+@if (_tab == ActivityTab.Changes)
+{
+    <div class="sga-filters">
+        <label class="visually-hidden" for="sga-search">Search</label>
+        <input id="sga-search" class="form-control" placeholder="Search what it did…" @bind="_search" @bind:event="oninput" />
+        <label class="visually-hidden" for="sga-status">Status</label>
+        <select id="sga-status" class="form-select" @bind="_status">
+            <option value="">Everything</option>
+            <option value="@SentinelAgentActionStatuses.Done">Done</option>
+            <option value="@SentinelAgentActionStatuses.AwaitingConfirm">Waiting for you</option>
+            <option value="@SentinelAgentActionStatuses.Undone">Undone</option>
+            <option value="@SentinelAgentActionStatuses.Declined">Declined</option>
+        </select>
+        @if (_isAdmin)
+        {
+            <div class="form-check form-switch">
+                <input id="sga-everyone" class="form-check-input" type="checkbox" checked="@_everyone" @onchange="ToggleEveryoneAsync" />
+                <label class="form-check-label" for="sga-everyone">Everyone's</label>
+            </div>
+        }
+    </div>
+
+    @if (_rows is null)
+    {
+        <p class="text-body-secondary"><span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>Loading…</p>
+    }
+    else if (!Filtered.Any())
+    {
+        <p class="text-body-secondary">Nothing here yet. Ask SentinelGPT (the ✦ button) to do something, and it shows up here.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table align-middle sga-table">
+                <thead>
+                    <tr>
+                        <th scope="col">When</th>
+                        @if (_everyone)
+                        {
+                            <th scope="col">Who</th>
+                        }
+                        <th scope="col">What</th>
+                        <th scope="col">Status</th>
+                        <th scope="col"><span class="visually-hidden">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in Filtered)
+                    {
+                        <tr>
+                            <td class="text-nowrap">@row.At.ToLocalTime().ToString("dd-MM-yy HH:mm")</td>
+                            @if (_everyone)
+                            {
+                                <td>@row.Who</td>
+                            }
+                            <td class="sga-what">@What(row.Action)</td>
+                            <td><span class="badge @StatusClass(row.Action.Status)">@StatusLabel(row.Action)</span></td>
+                            <td class="text-end text-nowrap">
+                                @if (row.Action.Link is not null && row.Action.Status != SentinelAgentActionStatuses.Undone)
+                                {
+                                    <a class="btn btn-sm btn-link" href="@row.Action.Link">Open</a>
+                                }
+                                @if (row.Mine && row.Action.AwaitingConfirm && row.Action.Tool != SentinelAgentRunner.PlanToolName)
+                                {
+                                    <button type="button" class="btn btn-sm btn-primary" disabled="@_acting" @onclick="() => ConfirmAsync(row, true)">Confirm</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1" disabled="@_acting" @onclick="() => ConfirmAsync(row, false)">Decline</button>
+                                }
+                                @if (row.Mine && row.Action.CanUndo)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_acting" @onclick="() => UndoAsync(row)">Undo</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+else
+{
+    <form class="sga-remember" @onsubmit="RememberAsync" @onsubmit:preventDefault>
+        <label class="visually-hidden" for="sga-fact">Something for SentinelGPT to remember</label>
+        <input id="sga-fact" class="form-control" maxlength="300" placeholder="Something to remember, e.g. We host on DigitalOcean"
+               @bind="_fact" @bind:event="oninput" />
+        <button type="submit" class="btn btn-primary" disabled="@(string.IsNullOrWhiteSpace(_fact) || _acting)">Remember</button>
+    </form>
+    <p class="text-body-secondary small">SentinelGPT uses these in every chat with you. You can also say "remember that…" or "forget that…" in the panel.</p>
+    @if (_memories.Count == 0)
+    {
+        <p class="text-body-secondary">Nothing remembered yet.</p>
+    }
+    else
+    {
+        <ul class="list-group sga-memories">
+            @foreach (var memory in _memories)
+            {
+                <li class="list-group-item">
+                    <span class="sga-memory-fact">@memory.Fact</span>
+                    <small class="text-body-secondary text-nowrap">@memory.At.ToLocalTime().ToString("dd-MM-yy")</small>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_acting" @onclick="() => ForgetAsync(memory)">Forget</button>
+                </li>
+            }
+        </ul>
+    }
+}
+
+@code {
+    private enum ActivityTab { Changes, Memories }
+
+    [SupplyParameterFromQuery(Name = "tab")]
+    public string? TabName { get; set; }
+
+    private ActivityTab _tab;
+    private IReadOnlyList<SentinelAgentActivity>? _rows;
+    private IReadOnlyList<SentinelAgentMemoryView> _memories = [];
+    private SentinelAgentUser? _user;
+    private bool _isAdmin;
+    private bool _everyone;
+    private bool _acting;
+    private string _search = string.Empty;
+    private string _status = string.Empty;
+    private string _fact = string.Empty;
+    private string? _error;
+
+    private IEnumerable<SentinelAgentActivity> Filtered => (_rows ?? [])
+        .Where(row => _status.Length == 0 || row.Action.Status == _status)
+        .Where(row => _search.Length == 0 || row.Action.Summary.Contains(_search, StringComparison.OrdinalIgnoreCase)
+                      || (_everyone && row.Who.Contains(_search, StringComparison.OrdinalIgnoreCase)));
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tab = string.Equals(TabName, "memories", StringComparison.OrdinalIgnoreCase) ? ActivityTab.Memories : ActivityTab.Changes;
+        var principal = (await AuthState.GetAuthenticationStateAsync()).User;
+        _user = new SentinelAgentUser(await CurrentUserAccessor.GetCurrentUsernameAsync(), AppRoles.All.Where(principal.IsInRole).ToList());
+        _isAdmin = principal.IsInRole(AppRoles.Admin);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _rows = await AgentRunner.ListActivityAsync(_user!, _everyone, CancellationToken.None);
+        _memories = await AgentRunner.ListMemoriesAsync(_user!, CancellationToken.None);
+    }
+
+    private async Task ToggleEveryoneAsync(ChangeEventArgs e)
+    {
+        _everyone = e.Value is true;
+        _rows = null;
+        await LoadAsync();
+    }
+
+    private Task ConfirmAsync(SentinelAgentActivity row, bool approve) =>
+        ActAsync(() => AgentRunner.ConfirmAsync(row.Action.Id, _user!, approve, CancellationToken.None));
+
+    private Task UndoAsync(SentinelAgentActivity row) =>
+        ActAsync(() => AgentRunner.UndoAsync(row.Action.Id, _user!, CancellationToken.None));
+
+    private Task RememberAsync() => ActAsync(async () =>
+    {
+        await AgentRunner.RememberAsync(_user!, _fact, CancellationToken.None);
+        _fact = string.Empty;
+    });
+
+    private Task ForgetAsync(SentinelAgentMemoryView memory) =>
+        ActAsync(() => AgentRunner.ForgetAsync(_user!, memory.Id, CancellationToken.None));
+
+    private async Task ActAsync(Func<Task> act)
+    {
+        if (_acting) return;
+        _acting = true;
+        _error = null;
+        try
+        {
+            await act();
+            await LoadAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _acting = false;
+        }
+    }
+
+    private static string What(SentinelAgentActionView action) =>
+        action.Tool == SentinelAgentRunner.PlanToolName ? "Plan: " + action.Summary.Replace("\n", "; ") : action.Summary;
+
+    private static string StatusLabel(SentinelAgentActionView action) => action.Status switch
+    {
+        SentinelAgentActionStatuses.AwaitingConfirm => action.Tool == SentinelAgentRunner.PlanToolName ? "Waiting for Go" : "Waiting for you",
+        SentinelAgentActionStatuses.Undone => "Undone",
+        SentinelAgentActionStatuses.Declined => action.Tool == SentinelAgentRunner.PlanToolName ? "Cancelled" : "Declined",
+        SentinelAgentActionStatuses.Failed => "Failed",
+        _ => action.Tool == SentinelAgentRunner.PlanToolName ? "Started" : "Done"
+    };
+
+    private static string StatusClass(string status) => status switch
+    {
+        SentinelAgentActionStatuses.AwaitingConfirm => "text-bg-warning",
+        SentinelAgentActionStatuses.Undone or SentinelAgentActionStatuses.Declined => "text-bg-secondary",
+        SentinelAgentActionStatuses.Failed => "text-bg-danger",
+        _ => "text-bg-success"
+    };
+}

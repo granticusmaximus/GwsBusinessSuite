@@ -7,6 +7,7 @@
 @using GwsBusinessSuite.Application.Wiki
 @using GwsBusinessSuite.Domain.Entities
 @inject IKanbanBoardService BoardService
+@inject GwsBusinessSuite.Web.Services.AssistantContext Assistant
 @inject IWikiDatabaseService Databases
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
@@ -642,6 +643,13 @@ else
             _rules = _board is not null ? await RuleService.ListAsync(DatabaseId) : [];
             _templates = _board is not null ? await Databases.ListRowTemplatesAsync(DatabaseId) : [];
             _selection.Retain(_columns.SelectMany(column => column.Cards).Select(card => card.RowId));
+            // SentinelGPT's agent: "this board" is this one.
+            if (_board is not null)
+            {
+                Assistant.Set(new GwsBusinessSuite.Application.Assistant.AssistantPageContext("Boards", "Board", _board.Title,
+                    "Columns: " + string.Join(", ", _board.Columns.Select(column => $"{column.Label} ({column.Cards.Count})")),
+                    RecordId: _board.DatabaseId.ToString()));
+            }
         }
         catch (Exception ex)
         {

@@ -35,6 +35,9 @@
                 <div class="fw-semibold"><i class="bi bi-stars me-1" aria-hidden="true"></i>SentinelGPT</div>
                 <div class="gws-assistant-context" title="@ContextLabel">@ContextLabel</div>
             </div>
+            <a class="btn btn-sm btn-outline-secondary" href="admin/sentinelgpt/activity" title="What SentinelGPT did" aria-label="What SentinelGPT did">
+                <i class="bi bi-clock-history" aria-hidden="true"></i>
+            </a>
             @if (_turns.Count > 0)
             {
                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="NewChat" disabled="@_busy">New chat</button>
@@ -64,7 +67,26 @@
                     {
                         <div class="gws-assistant-text">@((MarkupString)AssistantMarkdown.ToSafeHtml(turn.Answer))</div>
                     }
-                    @foreach (var action in turn.Actions)
+                    @foreach (var action in turn.Actions.Where(action => action.Tool == SentinelAgentRunner.PlanToolName))
+                    {
+                        <div class="gws-assistant-action gws-assistant-plan is-@action.Status">
+                            <div class="gws-assistant-plan-head"><i class="bi bi-list-check" aria-hidden="true"></i>Plan@(PlanSuffix(action))</div>
+                            <ol>
+                                @foreach (var step in PlanSteps(action))
+                                {
+                                    <li>@step</li>
+                                }
+                            </ol>
+                            @if (action.AwaitingConfirm)
+                            {
+                                <span class="gws-assistant-action-buttons">
+                                    <button type="button" class="btn btn-sm btn-primary" disabled="@(_acting || _busy)" @onclick="() => ResolvePlanAsync(turn, action, true)">Go</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_acting || _busy)" @onclick="() => ResolvePlanAsync(turn, action, false)">Cancel</button>
+                                </span>
+                            }
+                        </div>
+                    }
+                    @foreach (var action in turn.Actions.Where(action => action.Tool != SentinelAgentRunner.PlanToolName))
                     {
                         <div class="gws-assistant-action is-@action.Status">
                             <i class="bi @ActionIcon(action)" aria-hidden="true"></i>
@@ -360,6 +382,9 @@
                     case SentinelAgentActed acted:
                         turn.Upsert(acted.Action);
                         break;
+                    case SentinelAgentWithdrawn withdrawn:
+                        turn.Actions.RemoveAll(action => action.Id == withdrawn.ActionId);
+                        break;
                 }
                 _scrollToEnd = true;
                 StateHasChanged();
@@ -407,6 +432,24 @@
     {
         await ActOnAsync(turn, async user => await AgentRunner.ConfirmAsync(action.Id, user, approve, CancellationToken.None));
     }
+
+    // Go agrees the plan, then asks for it to be carried out as the next turn.
+    private async Task ResolvePlanAsync(Turn turn, SentinelAgentActionView plan, bool go)
+    {
+        await ResolveAsync(turn, plan, go);
+        if (go && turn.ActionError is null) await AskAsync(SentinelAgentRunner.GoMessage);
+    }
+
+    private static IEnumerable<string> PlanSteps(SentinelAgentActionView plan) =>
+        plan.Summary.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(line => System.Text.RegularExpressions.Regex.Replace(line, @"^\d+\.\s*", string.Empty));
+
+    private static string PlanSuffix(SentinelAgentActionView plan) => plan.Status switch
+    {
+        SentinelAgentActionStatuses.Done => " (started)",
+        SentinelAgentActionStatuses.Declined => " (cancelled)",
+        _ => string.Empty
+    };
 
     private async Task UndoAsync(Turn turn, SentinelAgentActionView action)
     {

@@ -36,7 +36,7 @@ public static class AssistantDescriptions
         AppendActivity(text, "Other recent activity with this customer (newest first):", otherActivity);
 
         return new AssistantPageContext("Support", "Ticket", ticket.Subject, text.ToString().TrimEnd(),
-            ["Draft a reply to the customer", "Summarize this thread", "What does the customer need?"]);
+            ["Draft a reply to the customer", "Summarize this thread", "What does the customer need?"], ticket.Id.ToString());
     }
 
     public static AssistantPageContext Contact(Contact contact, IReadOnlyList<ContactTimelineEntry> history)
@@ -49,7 +49,7 @@ public static class AssistantDescriptions
         AppendActivity(text, "History (newest first):", history);
 
         return new AssistantPageContext("CRM", "Contact", contact.FullName, text.ToString().TrimEnd(),
-            ["Summarize this customer", "Draft a follow-up email", "What should I do next with them?"]);
+            ["Summarize this customer", "Draft a follow-up email", "What should I do next with them?"], contact.Id.ToString());
     }
 
     private static void AppendActivity(StringBuilder text, string heading, IReadOnlyList<ContactTimelineEntry> entries)
