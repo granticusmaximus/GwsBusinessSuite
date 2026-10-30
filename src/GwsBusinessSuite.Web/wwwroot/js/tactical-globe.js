@@ -2271,33 +2271,51 @@ window.tacticalGlobe = (function () {
         }
         const byCode = new Map((totals || []).map(function (t) { return [t.code, t]; }));
         const most = Math.max(1, ...(totals || []).map(function (t) { return t.outlets; }));
+        // Each country's shapes are built once (draping them on the terrain is the expensive part)
+        // and then only recoloured, shown or hidden as the news changes.
+        if (!entry.newsShapes) entry.newsShapes = new Map();
         const entities = entry.newsShading.entities;
         entities.suspendEvents();
-        entities.removeAll();
         outlines.features.forEach(function (feature) {
-            const total = byCode.get(feature.properties.iso);
-            if (!total) return;
+            const iso = feature.properties.iso;
+            const total = byCode.get(iso);
+            let shapes = entry.newsShapes.get(iso);
+            if (!total) {
+                if (shapes) shapes.forEach(function (shape) { shape.show = false; });
+                return;
+            }
             // Log scale, so one huge story doesn't wash every other country out to the palest step.
             const step = Math.min(4, Math.floor(5 * Math.log(1 + total.outlets) / Math.log(1 + most)));
-            const polygons = feature.geometry.type === 'MultiPolygon' ? feature.geometry.coordinates : [feature.geometry.coordinates];
-            polygons.forEach(function (rings) {
+            if (!shapes) {
+                const polygons = feature.geometry.type === 'MultiPolygon' ? feature.geometry.coordinates : [feature.geometry.coordinates];
                 const toPositions = function (ring) { return Cesium.Cartesian3.fromDegreesArray(ring.flat()); };
-                const entity = entities.add({
-                    polygon: {
-                        hierarchy: new Cesium.PolygonHierarchy(toPositions(rings[0]),
-                            rings.slice(1).map(function (hole) { return new Cesium.PolygonHierarchy(toPositions(hole)); })),
-                        material: newsShades[step]
-                    }
+                shapes = polygons.map(function (rings) {
+                    return entities.add({
+                        polygon: {
+                            hierarchy: new Cesium.PolygonHierarchy(toPositions(rings[0]),
+                                rings.slice(1).map(function (hole) { return new Cesium.PolygonHierarchy(toPositions(hole)); })),
+                            material: newsShades[step]
+                        }
+                    });
                 });
-                entity._tacticalGlobeNewsCountry = total;
+                entry.newsShapes.set(iso, shapes);
+            }
+            shapes.forEach(function (shape) {
+                if (shape._tgShade !== step) {
+                    shape.polygon.material = newsShades[step];
+                    shape._tgShade = step;
+                }
+                shape._tacticalGlobeNewsCountry = total;
+                shape.show = true;
             });
         });
         entities.resumeEvents();
     }
 
+    // Hidden, not removed, so turning shading back on doesn't rebuild every country.
     function clearNewsShading() {
         const entry = viewers.get('tg-viewport');
-        if (entry && entry.newsShading) entry.newsShading.entities.removeAll();
+        if (entry && entry.newsShapes) entry.newsShapes.forEach(function (shapes) { shapes.forEach(function (shape) { shape.show = false; }); });
     }
 
     function openNewsCountryPanel(total) {

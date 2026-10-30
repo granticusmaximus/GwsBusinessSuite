@@ -41,7 +41,8 @@ public sealed record WorldNewsCoverage(string Country, double Latitude, double L
 // One event of a situation in the order they broke, placed where its own headline says.
 public sealed record WorldNewsTimelineStep(string Title, DateTimeOffset FirstSeen, int Outlets, WorldNewsLocation Location);
 
-public sealed class WorldNewsMapService(WorldNewsStore store)
+// Everything a globe move reads goes through Cached (WorldNewsMapCache) when the host gives it one.
+public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache? cache = null)
 {
     public const int MinimumOutlets = 3;
     public const int MaximumSignals = 50;
@@ -55,7 +56,7 @@ public sealed class WorldNewsMapService(WorldNewsStore store)
         IReadOnlyCollection<string>? kinds = null, int limit = MaximumSignals)
     {
         if (limit <= 0) return [];
-        var growth = store.SituationGrowth(DateTimeOffset.UtcNow - SituationSurge.Window);
+        var growth = Growth();
         return Placed(since, kinds)
             .Where(item => bounds.Contains(item.Location.Latitude, item.Location.Longitude))
             .OrderByDescending(item => item.Situation.OutletCount)
@@ -96,7 +97,7 @@ public sealed class WorldNewsMapService(WorldNewsStore store)
                 near.Add((situation, location, $"in {location.Country}, which the route crosses", double.MaxValue));
             }
         }
-        var growth = store.SituationGrowth(DateTimeOffset.UtcNow - SituationSurge.Window);
+        var growth = Growth();
         return near.OrderBy(item => item.Miles).ThenByDescending(item => item.Situation.OutletCount).Take(limit)
             .Select(item => new WorldNewsRouteItem(Project(item.Situation, item.Location, growth), item.Reason))
             .ToList();
@@ -134,8 +135,8 @@ public sealed class WorldNewsMapService(WorldNewsStore store)
     // the latest event, summary and sources are read later, for the few that are kept.
     private IEnumerable<(SituationOverview Situation, WorldNewsLocation Location)> Placed(DateTimeOffset since, IReadOnlyCollection<string>? kinds)
     {
-        var corrections = store.Placements();
-        foreach (var situation in store.TopSituations(since, 300))
+        var corrections = Corrections();
+        foreach (var situation in Cached($"top:{since:yyyyMMddHHmm}", () => store.TopSituations(since, 300)))
         {
             if (situation.OutletCount < MinimumOutlets || (kinds is not null && !kinds.Contains(KindOf(situation)))) continue;
             if (Locate(situation, corrections) is { } location) yield return (situation, location);
@@ -145,7 +146,7 @@ public sealed class WorldNewsMapService(WorldNewsStore store)
     // The situation a World News link points at, or null when the layer wouldn't show it.
     public WorldNewsMapSignal? Signal(string situationId, DateTimeOffset since) =>
         store.Situation(situationId) is { } situation && Place(situation, since) is { } location
-            ? Project(situation, location, store.SituationGrowth(DateTimeOffset.UtcNow - SituationSurge.Window))
+            ? Project(situation, location, Growth())
             : null;
 
     // A situation the last read hasn't classified yet (straight after a deploy) goes by its words.
@@ -154,12 +155,23 @@ public sealed class WorldNewsMapService(WorldNewsStore store)
 
     // Where the layer would put a situation, or null when it stays off the globe.
     public WorldNewsLocation? Place(SituationOverview situation, DateTimeOffset since) =>
-        situation.OutletCount >= MinimumOutlets && situation.LastSeen >= since ? Locate(situation, store.Placements()) : null;
+        situation.OutletCount >= MinimumOutlets && situation.LastSeen >= since ? Locate(situation, Corrections()) : null;
 
     // Where the headlines alone put it, ignoring any correction (for "Wrong place?").
     public static WorldNewsLocation? Named(SituationOverview situation) => Locate(situation.Title, situation.Latest);
 
     public SituationPlacement? Correction(string situationId) => store.Placements().GetValueOrDefault(situationId);
+
+    // The cache, or straight through without one (tests, the Mac).
+    private T Cached<T>(string key, Func<T> load) => cache is null ? load() : cache.GetOrAdd(key, load);
+
+    private IReadOnlyDictionary<string, SituationPlacement> Corrections() => Cached("corrections", store.Placements);
+
+    private IReadOnlyDictionary<string, (int Outlets, int OutletsBefore)> Growth()
+    {
+        var cut = DateTimeOffset.UtcNow - SituationSurge.Window;
+        return Cached($"growth:{cut:yyyyMMddHHmm}", () => store.SituationGrowth(cut));
+    }
 
     // "Wrong place?" on World News: pin to a country and optionally one of its cities. Returns what
     // to tell the person, or null once saved.
@@ -170,24 +182,54 @@ public sealed class WorldNewsMapService(WorldNewsStore store)
         if (!string.IsNullOrWhiteSpace(city) && found is null)
             return $"No city called \"{city.Trim()}\" in {country.Name} is in the place list (cities of 50,000+ people). Leave the city blank to place it at the country.";
         store.SetPlacement(new SituationPlacement(situationId, country.Code, found?.Name, false, username, now));
+        cache?.Clear();
         return null;
     }
 
-    public void Hide(string situationId, string username, DateTimeOffset now) =>
+    public void Hide(string situationId, string username, DateTimeOffset now)
+    {
         store.SetPlacement(new SituationPlacement(situationId, null, null, true, username, now));
+        cache?.Clear();
+    }
 
-    public void ClearCorrection(string situationId) => store.ClearPlacement(situationId);
+    public void ClearCorrection(string situationId)
+    {
+        store.ClearPlacement(situationId);
+        cache?.Clear();
+    }
 
     // A correction from World News wins over what the headlines name.
-    private static WorldNewsLocation? Locate(SituationOverview situation, IReadOnlyDictionary<string, SituationPlacement> corrections)
+    private WorldNewsLocation? Locate(SituationOverview situation, IReadOnlyDictionary<string, SituationPlacement> corrections)
     {
-        if (!corrections.TryGetValue(situation.Id, out var fix)) return Named(situation);
+        if (!corrections.TryGetValue(situation.Id, out var fix)) return NamedCached(situation);
         if (fix.Hidden || WorldNewsPlaces.Instance.Country(fix.CountryCode) is not { } country) return null;
         return WorldNewsPlaces.Instance.At(country, WorldNewsPlaces.Instance.FindCity(country.Code, fix.City), WorldNewsPrecision.Corrected);
     }
 
+    // Placing is cheap but not free (every word of 300 headlines against 12,000 city names), and a
+    // headline doesn't change, so it's done once per headline.
+    private WorldNewsLocation? NamedCached(SituationOverview situation) =>
+        Cached($"named:{situation.Id}:{situation.Title}|{situation.Latest}", () => Named(situation));
+
+    private sealed record Details(string? Summary, IReadOnlyList<WorldNewsMapSource> Sources, WorldNewsLocation Location);
+
     private WorldNewsMapSignal Project(SituationOverview situation, WorldNewsLocation location,
         IReadOnlyDictionary<string, (int Outlets, int OutletsBefore)> growth)
+    {
+        // Summary, sources and a sharper place change only when the situation does.
+        var details = Cached($"details:{situation.Id}:{situation.LastSeen.ToUnixTimeSeconds()}:{location.Label}:{location.Precision}",
+            () => LoadDetails(situation, location));
+        location = details.Location;
+        var summary = details.Summary;
+        var sources = details.Sources;
+        var (outlets, before) = growth.GetValueOrDefault(situation.Id);
+        return new WorldNewsMapSignal(situation.Id, situation.Title, situation.Latest, location, situation.EventCount,
+            situation.OutletCount, situation.ArticleCount, situation.LastSeen, summary, sources, KindOf(situation),
+            situation.LastSeen >= DateTimeOffset.UtcNow - SituationLinker.QuietAfter,
+            SituationSurge.IsSurging(outlets, before) ? SituationSurge.Message(outlets, before) : null);
+    }
+
+    private Details LoadDetails(SituationOverview situation, WorldNewsLocation location)
     {
         var latestEvent = store.EventsForSituation(situation.Id).OrderByDescending(e => e.LastSeen).FirstOrDefault();
         var summary = latestEvent is null ? null : store.LatestSummary(latestEvent.Id)?.Text;
@@ -201,11 +243,7 @@ public sealed class WorldNewsMapService(WorldNewsStore store)
         if (location.Precision == WorldNewsPrecision.Country && summary is not null
             && Locate(situation.Title, situation.Latest, summary) is { City: not null } sharper && sharper.CountryCode == location.CountryCode)
             location = sharper;
-        var (outlets, before) = growth.GetValueOrDefault(situation.Id);
-        return new WorldNewsMapSignal(situation.Id, situation.Title, situation.Latest, location, situation.EventCount,
-            situation.OutletCount, situation.ArticleCount, situation.LastSeen, summary, sources, KindOf(situation),
-            situation.LastSeen >= DateTimeOffset.UtcNow - SituationLinker.QuietAfter,
-            SituationSurge.IsSurging(outlets, before) ? SituationSurge.Message(outlets, before) : null);
+        return new Details(summary, sources, location);
     }
 
     public static WorldNewsLocation? Locate(string title, string latest, string? detail = null) =>

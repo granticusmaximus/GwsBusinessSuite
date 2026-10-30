@@ -109,6 +109,12 @@ services:
     # Keep a model load from exhausting the droplet and dropping the Cloudflare
     # tunnel. The current 8 GiB host cannot fit gemma4 alongside the web app.
     mem_limit: 5g
+    # The droplet has 4 vCPUs, and inference will take every one of them (30-10-26: Ollama at
+    # 371% of 400% while the web app got 3.5% and its page connections kept dropping to
+    # "Reconnecting"). Three cores at most, and a quarter of the default weight when the CPU is
+    # contended: the app always has a core and wins any contest for the rest.
+    cpus: 3
+    cpu_shares: 256
     environment:
       # Light model set: llama3.2 (~2 GB) for summaries plus embeddinggemma (~0.6 GB) for
       # search. The full desktop set in required-models.txt is for the Mac app/SentinelCLI.

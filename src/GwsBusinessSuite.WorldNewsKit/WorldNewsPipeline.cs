@@ -21,6 +21,9 @@ public sealed record WorldNewsOptions
     public int OutletConcurrency { get; init; } = 6;
     public IReadOnlyList<string> GdeltQueries { get; init; } = [];
     public int EmbedBatchSize { get; init; } = 64;
+    // Taken for each embedding batch and released after it, so a host can queue embedding with its
+    // other model work (the server's one-at-a-time Ollama scheduler) instead of running alongside it.
+    public Func<CancellationToken, Task<IAsyncDisposable>>? EmbedSlot { get; init; }
     // Caps one cycle's embedding work, so a backlog (the first read is about 6,000 reports) is
     // spread over several cycles instead of holding a small server's CPU for minutes.
     public int MaxEmbedPerCycle { get; init; } = int.MaxValue;
@@ -100,10 +103,20 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         try
         {
             IReadOnlyList<WorldArticle> batch;
+            var embedSince = time.GetUtcNow() - options.EventWindow;
             while (embedded < options.MaxEmbedPerCycle
-                   && (batch = store.ArticlesToEmbed(Math.Min(options.EmbedBatchSize, options.MaxEmbedPerCycle - embedded))).Count > 0)
+                   && (batch = store.RecentArticlesToEmbed(Math.Min(options.EmbedBatchSize, options.MaxEmbedPerCycle - embedded), embedSince)).Count > 0)
             {
-                var vectors = await ollama.EmbedAsync(options.EmbeddingModel, batch.Select(a => a.Title).ToList(), ct);
+                IReadOnlyList<float[]> vectors;
+                var slot = options.EmbedSlot is null ? null : await options.EmbedSlot(ct);
+                try
+                {
+                    vectors = await ollama.EmbedAsync(options.EmbeddingModel, batch.Select(a => a.Title).ToList(), ct);
+                }
+                finally
+                {
+                    if (slot is not null) await slot.DisposeAsync();
+                }
                 store.SaveEmbeddings(batch.Select((a, i) => (a.Id, vectors[i])).ToList());
                 embedded += batch.Count;
             }

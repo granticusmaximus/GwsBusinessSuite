@@ -160,5 +160,23 @@ public sealed class WorldNewsMapServiceTests
         map.Timeline("quake", japan).Select(step => step.Location.City).Should().Equal("Tokyo", "Sendai");
     }
 
+    [Fact]
+    public void Cache_ShouldServeGlobeMovesFromMemory_UntilACorrectionClearsIt()
+    {
+        using var temp = new WorldNewsTestStore();
+        temp.SeedSituation("ebola", "Ebola cases exceed 10,000 in Congo", "Health workers race to contain the outbreak");
+        var cache = new WorldNewsMapCache(TimeProvider.System);
+        var map = new WorldNewsMapService(temp.Store, cache);
+        var world = new BoundingBox(90, -90, 180, -180);
+        var since = Now.AddDays(-1);
+
+        map.Signals(world, since).Should().BeEmpty();
+        temp.SeedSituation("quake", "Earthquake shakes Tokyo, Japan", "Tokyo aftershocks");
+        map.Signals(world, since).Should().BeEmpty("the same minute's list comes from memory");
+
+        map.Correct("ebola", "CD", "Kinshasa", "grant", Now);
+        map.Signals(world, since).Select(s => s.SituationId).Should().BeEquivalentTo(["ebola", "quake"], "a correction clears the cache");
+    }
+
     private static readonly DateTimeOffset Now = WorldNewsTestStore.Now;
 }

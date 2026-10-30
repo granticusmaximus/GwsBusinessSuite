@@ -35,10 +35,13 @@ public sealed class WorldNewsService : IDisposable
     private readonly RangeListCache<SituationOverview> _situationLists;
     private readonly ILogger<WorldNewsService> _logger;
     private readonly WorldNewsOptions _options;
+    private readonly WorldNewsMapCache? _mapCache;
 
     public WorldNewsService(IConfiguration configuration, IOptions<ContentStudioOptions> ollamaOptions,
-        IHttpClientFactory httpClientFactory, IServiceScopeFactory scopes, ILogger<WorldNewsService> logger)
+        IHttpClientFactory httpClientFactory, IServiceScopeFactory scopes, ILogger<WorldNewsService> logger,
+        OllamaWorkloadScheduler? workloads = null, WorldNewsMapCache? mapCache = null)
     {
+        _mapCache = mapCache;
         _logger = logger;
         var path = Path.GetFullPath(configuration["WorldNews:DatabasePath"] ?? "/app/data/worldnews.db");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -46,17 +49,37 @@ public sealed class WorldNewsService : IDisposable
         var baseUrl = string.IsNullOrWhiteSpace(ollamaOptions.Value.BaseUrl) ? ContentStudioOptions.DefaultBaseUrl : ollamaOptions.Value.BaseUrl;
         _ollama = new OllamaClient(new Uri(baseUrl.TrimEnd('/') + "/"), new HttpClient { Timeout = TimeSpan.FromMinutes(5) });
         var http = httpClientFactory.CreateClient(HttpClientName);
-        _options = new WorldNewsOptions { MaxEmbedPerCycle = configuration.GetValue("WorldNews:MaxEmbedPerCycle", 1500) };
+        // Embedding takes the server's one Ollama slot a batch at a time, behind interactive work, so
+        // the two models no longer run at once and saturate every core (seen 30-10-26: Ollama at
+        // 371% of the droplet's 400% while the web app got 3.5%).
+        _options = new WorldNewsOptions
+        {
+            MaxEmbedPerCycle = configuration.GetValue("WorldNews:MaxEmbedPerCycle", 1500),
+            EmbedSlot = workloads is null ? null : ct => workloads.AcquireAsync(OllamaWorkloadPriority.Background, ct).AsTask()
+        };
         _pipeline = new WorldNewsPipeline(Store, http, new GdeltDocClient(http, TimeProvider.System), _ollama, TimeProvider.System, _options);
         // IOllamaService is a typed HttpClient, so each summary takes a fresh one rather than this
         // singleton holding one for the app's lifetime. 8k context fits SummaryOptions.MaxPromptChars.
         var model = ollamaOptions.Value.Model;
+        // Server summaries are the fallback for when the Mac app isn't writing them: one a read, at
+        // background priority, and one that's running stops the moment someone starts a chat (it's
+        // summarized on a later read), so nobody waits behind it.
         _summarizer = new EventSummarizer(Store, async (system, prompt, ct) =>
             {
+                using var standAside = workloads is null ? CancellationTokenSource.CreateLinkedTokenSource(ct)
+                    : CancellationTokenSource.CreateLinkedTokenSource(ct, workloads.InteractiveArrivedToken);
+                using var background = workloads?.UseBackgroundPriority();
                 await using var scope = scopes.CreateAsyncScope();
-                return await scope.ServiceProvider.GetRequiredService<IOllamaService>().GenerateAsync(model, system, prompt, 8192, ct);
+                try
+                {
+                    return await scope.ServiceProvider.GetRequiredService<IOllamaService>().GenerateAsync(model, system, prompt, 8192, standAside.Token);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested && standAside.IsCancellationRequested)
+                {
+                    throw new InvalidOperationException("it stood aside for someone using the AI and will be summarized on a later read");
+                }
             }, model, TimeProvider.System, at => at.ToLocalGwsDateTime(),
-            new SummaryOptions { PerRun = configuration.GetValue("WorldNews:SummariesPerRead", 3) });
+            new SummaryOptions { PerRun = configuration.GetValue("WorldNews:SummariesPerRead", 1) });
         LastRefreshed = Store.LastFetched(LastReadKey);
         if (LastRefreshed is not null) Status = string.Empty;
         _eventLists = new EventListCache(since => Store.TopEvents(since, MaxEvents), TimeProvider.System, Interval);
@@ -131,6 +154,7 @@ public sealed class WorldNewsService : IDisposable
             // Summaries add English headlines, so the lists are rebuilt once more.
             _eventLists.Clear();
             _situationLists.Clear();
+            _mapCache?.Clear();
             Changed?.Invoke();
         }
     }
@@ -154,6 +178,7 @@ public sealed class WorldNewsService : IDisposable
         {
             _eventLists.Clear();
             _situationLists.Clear();
+            _mapCache?.Clear();
         }
         return error;
     }

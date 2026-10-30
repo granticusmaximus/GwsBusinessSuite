@@ -1908,25 +1908,38 @@
 
     private DateTimeOffset WorldNewsSince => DateTimeOffset.UtcNow.AddHours(-_worldNewsHours);
 
-    private Task ToggleWorldNewsKindAsync(string kind)
+    private async Task ToggleWorldNewsKindAsync(string kind)
     {
         if (!_worldNewsKinds.Remove(kind)) _worldNewsKinds.Add(kind);
-        return PushWorldNewsAsync();
+        await PushWorldNewsAsync();
+        if (_worldNewsShading) await PushWorldNewsShadingAsync();
     }
 
-    private Task SetWorldNewsWindowAsync(int hours)
+    private async Task SetWorldNewsWindowAsync(int hours)
     {
         _worldNewsHours = hours;
-        return PushWorldNewsAsync();
+        await PushWorldNewsAsync();
+        if (_worldNewsShading) await PushWorldNewsShadingAsync();
     }
 
+    // Runs on every globe move. The reads go off the page's connection (Task.Run) so a busy server
+    // never freezes the page while they run; shading isn't redone here, since it doesn't depend on
+    // the view (only on the kinds and window, which redo it themselves).
     private async Task PushWorldNewsAsync()
     {
-        var signals = WorldNewsMap.Signals(_lastBbox, WorldNewsSince, _worldNewsKinds);
-        if (!_worldNewsOn) return;
+        var (bounds, since, kinds, generation) = (_lastBbox, WorldNewsSince, _worldNewsKinds.ToList(), _viewGeneration);
+        var signals = await Task.Run(() => WorldNewsMap.Signals(bounds, since, kinds));
+        // A later move's markers win over this one's, whichever read finishes first.
+        if (!_worldNewsOn || generation != _viewGeneration) return;
         _worldNewsCount = signals.Count;
         await JS.InvokeVoidAsync("tacticalGlobe.setWorldNews", signals.Select(ToWorldNewsPayload).ToList());
-        if (_worldNewsShading) await PushWorldNewsShadingAsync();
+    }
+
+    // A situation the layer would show, read off the page's connection.
+    private Task<GwsBusinessSuite.Infrastructure.Services.WorldNewsMapSignal?> WorldNewsSignalAsync(string situationId)
+    {
+        var since = WorldNewsSince;
+        return Task.Run(() => WorldNewsMap.Signal(situationId, since));
     }
 
     private bool _worldNewsShading;
@@ -1941,7 +1954,8 @@
     // The whole world, not just the view: shading is the overview before any one story is in sight.
     private async Task PushWorldNewsShadingAsync()
     {
-        var totals = WorldNewsMap.CountryTotals(WorldNewsSince, _worldNewsKinds);
+        var (since, kinds) = (WorldNewsSince, _worldNewsKinds.ToList());
+        var totals = await Task.Run(() => WorldNewsMap.CountryTotals(since, kinds));
         await JS.InvokeVoidAsync("tacticalGlobe.setNewsShading", totals.Select(t => new
         {
             code = t.Code,
@@ -1955,22 +1969,23 @@
     [JSInvokable]
     public async Task OpenWorldNewsStoryAsync(string situationId)
     {
-        if (WorldNewsMap.Signal(situationId, WorldNewsSince) is not { } signal) return;
+        if (await WorldNewsSignalAsync(situationId) is not { } signal) return;
         await FlyToNewsAsync(signal);
         await JS.InvokeVoidAsync("tacticalGlobe.openWorldNews", ToWorldNewsPayload(signal));
     }
 
     // The news panel's "Who's reporting" lines: each edition country's outlets, to the story.
     [JSInvokable]
-    public object WorldNewsCoverage(string situationId) =>
-        WorldNewsMap.Coverage(situationId).Select(c => new { country = c.Country, lat = c.Latitude, lon = c.Longitude, outlets = c.Outlets }).ToList();
+    public async Task<object> WorldNewsCoverage(string situationId) =>
+        (await Task.Run(() => WorldNewsMap.Coverage(situationId)))
+            .Select(c => new { country = c.Country, lat = c.Latitude, lon = c.Longitude, outlets = c.Outlets }).ToList();
 
     // The news panel's playback: the situation's events in the order they broke.
     [JSInvokable]
-    public object? WorldNewsTimeline(string situationId)
+    public async Task<object?> WorldNewsTimeline(string situationId)
     {
-        if (WorldNewsMap.Signal(situationId, WorldNewsSince) is not { } signal) return null;
-        return WorldNewsMap.Timeline(situationId, signal.Location).Select(step => new
+        if (await WorldNewsSignalAsync(situationId) is not { } signal) return null;
+        return (await Task.Run(() => WorldNewsMap.Timeline(situationId, signal.Location))).Select(step => new
         {
             title = step.Title,
             at = step.FirstSeen.ToLocalGwsDateTime(),
@@ -1984,7 +1999,7 @@
     // World News's "Show on Overwatch": layer on, country in view, that situation's panel open.
     private async Task OpenLinkedWorldNewsAsync(string situationId)
     {
-        if (WorldNewsMap.Signal(situationId, WorldNewsSince) is not { } signal) return;
+        if (await WorldNewsSignalAsync(situationId) is not { } signal) return;
         _worldNewsOn = true;
         // A link to a sports story should still show its marker.
         _worldNewsKinds.Add(signal.Kind);
@@ -1997,7 +2012,7 @@
     [JSInvokable]
     public async Task<object?> WorldNewsContextAsync(string situationId)
     {
-        if (WorldNewsMap.Signal(situationId, WorldNewsSince) is not { } signal) return null;
+        if (await WorldNewsSignalAsync(situationId) is not { } signal) return null;
         var context = await NewsContext.ForAsync(signal);
         return new
         {
@@ -2013,7 +2028,7 @@
     [JSInvokable]
     public async Task<string> CaptureWorldNewsAsync(string situationId)
     {
-        if (WorldNewsMap.Signal(situationId, WorldNewsSince) is not { } signal) return "That story isn't on the globe any more.";
+        if (await WorldNewsSignalAsync(situationId) is not { } signal) return "That story isn't on the globe any more.";
         if (signal.Location.City is null) return "Capture needs a city-level place; this story is placed at a country's centre.";
         var capture = await NewsContext.CaptureAsync(_username, signal);
         if (capture is null)

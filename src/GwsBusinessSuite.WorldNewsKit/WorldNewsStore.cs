@@ -110,6 +110,12 @@ public sealed class WorldNewsStore
     public IReadOnlyList<WorldArticle> ArticlesToEmbed(int limit) =>
         QueryArticles("WHERE embedding IS NULL ORDER BY seen_at LIMIT $limit", ("$limit", limit));
 
+    // Newest first, and none older than since: a report too old to join a live event isn't worth
+    // the CPU, and on a busy server the oldest-first order spent every read catching up on stale news.
+    public IReadOnlyList<WorldArticle> RecentArticlesToEmbed(int limit, DateTimeOffset since) =>
+        QueryArticles("WHERE embedding IS NULL AND seen_at >= $since ORDER BY seen_at DESC LIMIT $limit",
+            ("$limit", limit), ("$since", since.ToUnixTimeSeconds()));
+
     public void SaveEmbeddings(IReadOnlyList<(string Id, float[] Vector)> embeddings)
     {
         using var connection = Open();
@@ -305,7 +311,13 @@ public sealed class WorldNewsStore
         Overviews("WHERE e.last_seen >= $since", "", ("$since", since.ToUnixTimeSeconds()), ("$limit", limit));
 
     // Situations of two or more events with news since a time, busiest (by distinct outlets) first.
-    public IReadOnlyList<SituationOverview> TopSituations(DateTimeOffset since, int limit)
+    public IReadOnlyList<SituationOverview> TopSituations(DateTimeOffset since, int limit) => Situations(since, limit, onlyId: null);
+
+    // One situation straight from its id (a link, a panel), rather than ranking every one.
+    public SituationOverview? Situation(string situationId) =>
+        Situations(DateTimeOffset.UnixEpoch, 1, onlyId: situationId).FirstOrDefault();
+
+    private IReadOnlyList<SituationOverview> Situations(DateTimeOffset since, int limit, string? onlyId)
     {
         using var connection = Open();
         var rows = new List<(string Id, int Events, int Articles, int Outlets, string? Countries, string? Languages, long First, long Last, string? Kind)>();
@@ -317,12 +329,14 @@ public sealed class WorldNewsStore
                        (SELECT kind FROM situations s WHERE s.id = e.situation_id)
                 FROM events e JOIN articles a ON a.event_id = e.id
                 WHERE e.situation_id IN (SELECT situation_id FROM events WHERE situation_id IS NOT NULL
+                                         AND ($only IS NULL OR situation_id = $only)
                                          GROUP BY situation_id HAVING COUNT(*) >= 2 AND MAX(last_seen) >= $since)
                 GROUP BY e.situation_id
                 ORDER BY COUNT(DISTINCT a.outlet) DESC, MAX(e.last_seen) DESC LIMIT $limit
                 """;
             command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
             command.Parameters.AddWithValue("$limit", limit);
+            command.Parameters.AddWithValue("$only", (object?)onlyId ?? DBNull.Value);
             using var reader = command.ExecuteReader();
             while (reader.Read())
                 rows.Add((reader.GetString(0), reader.GetInt32(1), reader.GetInt32(2), reader.GetInt32(3),
@@ -361,8 +375,6 @@ public sealed class WorldNewsStore
         }).ToList();
     }
 
-    public SituationOverview? Situation(string situationId) =>
-        TopSituations(DateTimeOffset.UnixEpoch, int.MaxValue).FirstOrDefault(s => s.Id == situationId);
 
     // Recent events worth searching, with their meaning vectors and situations.
     public IReadOnlyList<WorldNewsCandidate> SearchCandidates(DateTimeOffset since, int minArticles)

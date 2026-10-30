@@ -723,6 +723,33 @@ public sealed class WorldNewsKitTests : IDisposable
         new(id, $"https://example.com/{id}", title, "Outlet " + id, language, "Somewhere", seen, "test", hint);
 
     [Fact]
+    public void Store_ShouldOfferTheNewestReportsToEmbed_AndNoneTooOldToJoinAnEvent()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        store.AddArticles([
+            Article("stale", "Old news", "English", Now.AddDays(-3)),
+            Article("older", "Yesterday's news", "English", Now.AddHours(-20)),
+            Article("newer", "This morning's news", "English", Now.AddHours(-1))
+        ]);
+
+        store.RecentArticlesToEmbed(10, Now.AddHours(-48)).Select(a => a.Id).Should().Equal("newer", "older");
+        store.ArticlesToEmbed(10).Should().HaveCount(3, "the full list still has the stale one");
+    }
+
+    [Fact]
+    public void Store_ShouldFindOneSituationDirectly()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        SeedEvent(store, "rally", Reports("rally", 3), [1f, 0f]);
+        SeedEvent(store, "results", Reports("results", 3), [1f, 0f]);
+        var situation = new NewsSituation { Id = "election", Sum = [6f, 0f], LastSeen = Now };
+        store.SaveLinks([new SituationLink("rally", situation), new SituationLink("results", situation)]);
+
+        store.Situation("election")!.Should().Match<SituationOverview>(s => s.EventCount == 2 && s.ArticleCount == 6);
+        store.Situation("nope").Should().BeNull();
+    }
+
+    [Fact]
     public void Store_ShouldSendEachSurgeAlertToEveryoneWhoAsked_AtMostOnceADay()
     {
         var store = new WorldNewsStore(_dbPath);

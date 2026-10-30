@@ -28,6 +28,28 @@ public sealed class OllamaWorkloadSchedulerTests
     }
 
     [Fact]
+    public async Task InteractiveArrival_ShouldSignalBackgroundWorkToStandAside_AndHeldSinceShouldTrackTheHolder()
+    {
+        var scheduler = new OllamaWorkloadScheduler();
+        scheduler.HeldSince.Should().BeNull();
+        var running = await scheduler.AcquireAsync(OllamaWorkloadPriority.Background);
+        scheduler.HeldSince.Should().NotBeNull();
+        var standAside = scheduler.InteractiveArrivedToken;
+
+        var queuedBackground = scheduler.AcquireAsync(OllamaWorkloadPriority.Background).AsTask();
+        standAside.IsCancellationRequested.Should().BeFalse("more background work doesn't hurry anyone");
+
+        var interactive = scheduler.AcquireAsync(OllamaWorkloadPriority.Interactive).AsTask();
+        standAside.IsCancellationRequested.Should().BeTrue();
+        scheduler.InteractiveArrivedToken.IsCancellationRequested.Should().BeFalse("a fresh signal for the next arrival");
+
+        await running.DisposeAsync();
+        await (await interactive.WaitAsync(TestTimeout)).DisposeAsync();
+        await (await queuedBackground.WaitAsync(TestTimeout)).DisposeAsync();
+        scheduler.HeldSince.Should().BeNull("nobody holds the model once the queue is empty");
+    }
+
+    [Fact]
     public async Task CancelledWaiter_ShouldBeRemovedWithoutBlockingNextWork()
     {
         var scheduler = new OllamaWorkloadScheduler();

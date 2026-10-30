@@ -177,6 +177,10 @@ public static class DependencyInjection
             });
         });
         services.AddHostedService<OllamaModelWarmupBackgroundService>();
+        // Restarts a wedged Ollama container (see the service); its own short-timeout client, not
+        // the generation client's two-hour one.
+        services.AddHttpClient(OllamaWatchdogBackgroundService.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(10));
+        services.AddHostedService<OllamaWatchdogBackgroundService>();
         services.AddHttpClient<IOllamaWebSearchService, OllamaWebSearchService>((serviceProvider, client) =>
         {
             var options = serviceProvider.GetRequiredService<
@@ -904,7 +908,8 @@ public static class DependencyInjection
         services.AddScoped<OverwatchAreaService>();
         services.AddScoped<OverwatchTripService>();
         services.AddHostedService<OverwatchAreaBackgroundService>();
-        services.AddScoped(sp => new WorldNewsMapService(sp.GetRequiredService<WorldNewsService>().Store));
+        services.AddSingleton<WorldNewsMapCache>();
+        services.AddScoped(sp => new WorldNewsMapService(sp.GetRequiredService<WorldNewsService>().Store, sp.GetRequiredService<WorldNewsMapCache>()));
         services.AddScoped<WorldNewsContextService>();
         // Overwatch briefings: facts for "Brief me" (written by the local model) + the daily morning briefing.
         services.AddScoped<OverwatchBriefingService>();

@@ -11,13 +11,19 @@ public enum OllamaWorkloadPriority
 /// scheduled work. This mirrors the production Ollama one-request limit inside the app,
 /// where workload intent is known, instead of relying on Ollama's FIFO queue.
 /// </summary>
-public sealed class OllamaWorkloadScheduler
+public sealed class OllamaWorkloadScheduler(TimeProvider? time = null)
 {
+    private readonly TimeProvider _time = time ?? TimeProvider.System;
     private readonly object _gate = new();
     private readonly LinkedList<Waiter> _interactiveWaiters = [];
     private readonly LinkedList<Waiter> _backgroundWaiters = [];
     private readonly AsyncLocal<OllamaWorkloadPriority?> _ambientPriority = new();
     private bool _held;
+    // When the current holder got the slot (OllamaWatchdogBackgroundService spots a stuck one).
+    private DateTimeOffset? _heldSince;
+    // Cancelled the moment interactive work starts waiting, then replaced: background work that
+    // can stop part-way (World News summaries) links it so someone typing never waits behind it.
+    private CancellationTokenSource _interactiveArrived = new();
 
     public OllamaWorkloadPriority CurrentPriority =>
         _ambientPriority.Value ?? OllamaWorkloadPriority.Interactive;
@@ -31,6 +37,29 @@ public sealed class OllamaWorkloadScheduler
             lock (_gate)
             {
                 return (_held, _interactiveWaiters.Count + _backgroundWaiters.Count);
+            }
+        }
+    }
+
+    public DateTimeOffset? HeldSince
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _held ? _heldSince : null;
+            }
+        }
+    }
+
+    // Fires when interactive work next queues behind whoever holds the slot.
+    public CancellationToken InteractiveArrivedToken
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _interactiveArrived.Token;
             }
         }
     }
@@ -51,11 +80,13 @@ public sealed class OllamaWorkloadScheduler
     {
         cancellationToken.ThrowIfCancellationRequested();
         Waiter waiter;
+        CancellationTokenSource? arrived = null;
         lock (_gate)
         {
             if (!_held)
             {
                 _held = true;
+                _heldSince = _time.GetUtcNow();
                 return ValueTask.FromResult<IAsyncDisposable>(new Lease(this));
             }
 
@@ -63,7 +94,15 @@ public sealed class OllamaWorkloadScheduler
             waiter.Node = (priority == OllamaWorkloadPriority.Interactive
                 ? _interactiveWaiters
                 : _backgroundWaiters).AddLast(waiter);
+            if (priority == OllamaWorkloadPriority.Interactive)
+            {
+                arrived = _interactiveArrived;
+                _interactiveArrived = new CancellationTokenSource();
+            }
         }
+        // Outside the lock: cancellation runs its callbacks inline. Not disposed, since a holder
+        // may still link its token (a cancelled source without a timer needs no disposal).
+        arrived?.Cancel();
 
         return new ValueTask<IAsyncDisposable>(WaitForLeaseAsync(waiter, cancellationToken));
     }
@@ -105,8 +144,10 @@ public sealed class OllamaWorkloadScheduler
             if (next is null)
             {
                 _held = false;
+                _heldSince = null;
                 return;
             }
+            _heldSince = _time.GetUtcNow();
         }
 
         next.Completion.TrySetResult(new Lease(this));
