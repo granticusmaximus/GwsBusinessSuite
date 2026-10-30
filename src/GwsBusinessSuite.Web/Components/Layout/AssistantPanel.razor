@@ -8,6 +8,7 @@
 @inject AssistantContext Assistant
 @inject RightPanelState RightPanels
 @inject SentinelAgentRunner AgentRunner
+@inject SentinelAgentRelay AgentRelay
 @inject SentinelGptGenerationCoordinator Coordinator
 @inject AuthenticationStateProvider AuthState
 @inject ICurrentUserAccessor CurrentUserAccessor
@@ -117,7 +118,7 @@
                     }
                     @if (turn.AnswersOnlyNote)
                     {
-                        <div class="gws-assistant-activity">Answered on the server, which doesn't make changes. To have SentinelGPT do things, use it in the Mac app, where it runs on your Mac's model.</div>
+                        <div class="gws-assistant-activity">Answered on the server, which doesn't make changes. To have SentinelGPT do things, open the Mac app: it runs on your Mac's model, and while the app is open this browser can use it too.</div>
                     }
                     @if (turn.Activity is not null)
                     {
@@ -295,8 +296,9 @@
     }
 
     // The agent thinks on this computer's Ollama when it has a model that uses tools (the Mac app's
-    // bridge, or a browser Ollama allows); its tools act on the server as this user. Otherwise the
-    // server's SentinelGPT answers, without acting.
+    // bridge, or a browser Ollama allows), else on this person's Mac through the relay while their
+    // Mac app is open; its tools act on the server as this user either way. Otherwise the server's
+    // SentinelGPT answers, without acting.
     private async Task RunAgentAsync(Turn turn, string context, CancellationToken stop)
     {
         var user = await AgentUserAsync();
@@ -321,6 +323,24 @@
                     continue;
                 }
                 _localUnavailableUntil = DateTimeOffset.UtcNow + LocalRetryAfter;
+                turn.Steps.Clear();
+                break;
+            }
+        }
+
+        foreach (var model in AgentRelay.ModelsFor(user.Username))
+        {
+            turn.Activity = $"Thinking on your Mac's {model}…";
+            StateHasChanged();
+            try
+            {
+                await RunTurnAsync(turn, user, context, new RelayedOllamaService(AgentRelay, user.Username), model,
+                    SentinelAgentRunner.LocalRounds, $"Your Mac · {model}", stop);
+                return;
+            }
+            catch (InvalidOperationException ex) when (!stop.IsCancellationRequested && turn.Actions.Count == 0)
+            {
+                if (SentinelAgentModels.IsNoToolsError(ex)) continue;
                 turn.Steps.Clear();
                 break;
             }

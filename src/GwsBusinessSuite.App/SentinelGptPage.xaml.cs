@@ -41,6 +41,10 @@ public partial class SentinelGptPage : ContentPage
     private OllamaToolCallingAgent? _agent;
     private CancellationTokenSource? _turnCts;
     private string? _currentSessionPath;
+    // SentinelGPT's agent (30-10-26): this chat as the server knows it (its working set, history),
+    // and the message the runner expects after a plan's Go (from the server, never hardcoded).
+    private Guid _appAgentConversation = Guid.NewGuid();
+    private string? _goMessage;
     private bool _sending;
     private bool _useDeepAnalysis;
 
@@ -63,6 +67,7 @@ public partial class SentinelGptPage : ContentPage
     // other platforms still require re-picking each time.
     private WorkspaceTools? _devTools;
     private string? _workspaceRoot;
+    private readonly NativeSessionClient _session;
 
     public SentinelGptPage(
         OllamaClient ollama,
@@ -74,7 +79,8 @@ public partial class SentinelGptPage : ContentPage
         DeepAnalysisAdvisor deepAnalysis,
         NativeFallbackChatService fallbackChat,
         DeviceSecretStore deviceSecretStore,
-        OllamaModelInstaller modelInstaller)
+        OllamaModelInstaller modelInstaller,
+        NativeSessionClient session)
     {
         _ollama = ollama;
         _toolExecutor = toolExecutor;
@@ -86,6 +92,7 @@ public partial class SentinelGptPage : ContentPage
         _fallbackChat = fallbackChat;
         _deviceSecretStore = deviceSecretStore;
         _modelInstaller = modelInstaller;
+        _session = session;
 
         InitializeComponent();
         Transcript.ItemsSource = _messages;
@@ -339,6 +346,7 @@ public partial class SentinelGptPage : ContentPage
         if (_sending) return;
         _messages.Clear();
         _currentSessionPath = null;
+        _appAgentConversation = Guid.NewGuid();
         if (SelectedModel is { } model)
             _agent = CreateAgent(model);
         HistoryList.SelectedItem = null;
@@ -767,7 +775,10 @@ public partial class SentinelGptPage : ContentPage
 
         try
         {
-            var localSucceeded = _agent is not null && await TryRunLocalTurnAsync(prompt, answer, _turnCts.Token);
+            // In the app first (it can make changes there), unless a folder is attached or deep
+            // analysis is on - those are this Mac's own agent's work.
+            var localSucceeded = (_devTools is null && !_useDeepAnalysis && await TryRunAppAgentTurnAsync(prompt, answer, _turnCts.Token))
+                || (_agent is not null && await TryRunLocalTurnAsync(prompt, answer, _turnCts.Token));
             if (!localSucceeded)
                 await RunFallbackTurnAsync(prompt, answer, _turnCts.Token);
         }
@@ -787,6 +798,105 @@ public partial class SentinelGptPage : ContentPage
             _sending = false;
             SendButton.IsEnabled = true;
         }
+    }
+
+    // SentinelGPT's agent (30-10-26): the turn runs on the server, where its tools can make changes
+    // in the app as you, and thinks on this Mac through the relay (SentinelAgentMacRelay). False,
+    // with nothing shown, when that isn't available (offline, not signed in, relay not connected
+    // yet), so the turn runs on this Mac's own agent as before.
+    private async Task<bool> TryRunAppAgentTurnAsync(string prompt, ChatMessageViewModel answer, CancellationToken turnToken)
+    {
+        var (turnId, _) = await _session.StartAgentTurnAsync(_appAgentConversation, prompt, SelectedModel?.Name, turnToken);
+        if (turnId is not { } id) return false;
+
+        AgentTurnSnapshot? snapshot = null;
+        var misses = 0;
+        try
+        {
+            while (snapshot is null or { IsRunning: true })
+            {
+                await Task.Delay(400, turnToken);
+                var (latest, error) = await _session.GetAgentTurnAsync(id, turnToken);
+                if (latest is null)
+                {
+                    if (++misses >= 15) throw new InvalidOperationException(error ?? "Lost track of the turn.");
+                    continue;
+                }
+                misses = 0;
+                snapshot = latest;
+                ShowAgentProgress(answer, snapshot);
+            }
+        }
+        catch (OperationCanceledException) when (turnToken.IsCancellationRequested)
+        {
+            _ = _session.StopAgentTurnAsync(id);
+            throw;
+        }
+
+        // A turn that failed before changing anything is retried on this Mac's own agent.
+        if (snapshot.IsFailed && snapshot.Actions.Count == 0)
+        {
+            answer.Steps = string.Empty;
+            return false;
+        }
+
+        _goMessage = snapshot.GoMessage;
+        answer.Text = snapshot.IsFailed ? $"SentinelGPT couldn't finish: {snapshot.Error}" : snapshot.Answer ?? string.Empty;
+        answer.IsError = snapshot.IsFailed;
+        answer.IsComplete = true;
+        // Keep this Mac's own agent in step, so a later local turn knows what happened.
+        if (_agent is not null)
+        {
+            _agent.LoadConversation([.. _agent.Messages, new OllamaChatMessage("user", prompt), new OllamaChatMessage("assistant", answer.Text)]);
+            _currentSessionPath = await _sessions.SaveAsync(
+                _currentSessionPath, snapshot.Model ?? PickerModel(), _agent.Messages, CancellationToken.None,
+                workspaceRoot: _workspaceRoot);
+            RefreshHistory();
+        }
+        return true;
+    }
+
+    private static void ShowAgentProgress(ChatMessageViewModel answer, AgentTurnSnapshot snapshot)
+    {
+        var steps = string.Join("\n", snapshot.Steps.Select(step => "• " + step));
+        if (steps != answer.Steps) answer.Steps = steps;
+        foreach (var action in snapshot.Actions)
+        {
+            var index = answer.Actions.ToList().FindIndex(item => item.Id == action.Id);
+            if (index < 0) answer.Actions.Add(action);
+            else if (answer.Actions[index] != action) answer.Actions[index] = action;
+        }
+        // Rolled back so the job could be planned first.
+        foreach (var gone in answer.Actions.Where(item => snapshot.Actions.All(action => action.Id != item.Id)).ToList())
+            answer.Actions.Remove(gone);
+    }
+
+    private async void OnAgentConfirmClicked(object? sender, EventArgs e) => await ResolveAgentActionAsync(sender, "confirm", approve: true);
+
+    private async void OnAgentDeclineClicked(object? sender, EventArgs e) => await ResolveAgentActionAsync(sender, "confirm", approve: false);
+
+    private async void OnAgentUndoClicked(object? sender, EventArgs e) => await ResolveAgentActionAsync(sender, "undo", approve: false);
+
+    private async void OnAgentOpenClicked(object? sender, EventArgs e)
+    {
+        if ((sender as BindableObject)?.BindingContext is not AgentActionItem { Link: { } link }) return;
+        WorkspaceNavigation.Request(AppEndpoints.BaseUrl.TrimEnd('/') + link);
+        await Shell.Current.GoToAsync("//MainPage");
+    }
+
+    private async Task ResolveAgentActionAsync(object? sender, string verb, bool approve)
+    {
+        if ((sender as BindableObject)?.BindingContext is not AgentActionItem item || _sending) return;
+        var message = _messages.FirstOrDefault(candidate => candidate.Actions.Contains(item));
+        var (updated, error) = await _session.ResolveAgentActionAsync(item.Id, verb, approve);
+        if (updated is null)
+        {
+            Notice(error ?? "That didn't work.");
+            return;
+        }
+        if (message is not null && message.Actions.IndexOf(item) is var index and >= 0) message.Actions[index] = updated;
+        // Go on a plan: the next turn carries it out.
+        if (updated.IsPlan && approve && updated.Status == "done" && _goMessage is { } go) await RunTurnAsync(go);
     }
 
     // Returns true once the local model has answered successfully (the message is already

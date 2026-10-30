@@ -170,6 +170,32 @@
                                         </Grid>
                                     </Grid>
                                 </Border>
+                                <!-- SentinelGPT's agent: its steps, then a card per change with Open/Undo, or
+                                     Confirm/Decline (Go/Cancel for a plan) while one waits for you. -->
+                                <Label Text="{Binding Steps}" IsVisible="{Binding HasSteps}" TextColor="#A8A29E" FontSize="11"
+                                       LineBreakMode="WordWrap" Margin="4,0,0,0" MaximumWidthRequest="560" HorizontalOptions="Start" />
+                                <VerticalStackLayout BindableLayout.ItemsSource="{Binding Actions}" Spacing="4" Margin="4,0,0,0"
+                                                     MaximumWidthRequest="560" HorizontalOptions="Start">
+                                    <BindableLayout.ItemTemplate>
+                                        <DataTemplate x:DataType="local:AgentActionItem">
+                                            <Border Padding="10,6" Stroke="{Binding BorderColor}" StrokeShape="RoundRectangle 10" BackgroundColor="#1C1917">
+                                                <VerticalStackLayout Spacing="4">
+                                                    <Label Text="{Binding Title}" TextColor="#FAFAF9" FontSize="13" LineBreakMode="WordWrap" />
+                                                    <HorizontalStackLayout Spacing="6">
+                                                        <Button Text="{Binding ConfirmLabel}" IsVisible="{Binding AwaitingConfirm}" Clicked="OnAgentConfirmClicked"
+                                                                FontSize="12" Padding="10,2" BackgroundColor="#F59E0B" TextColor="#1C1917" />
+                                                        <Button Text="{Binding DeclineLabel}" IsVisible="{Binding AwaitingConfirm}" Clicked="OnAgentDeclineClicked"
+                                                                FontSize="12" Padding="10,2" BackgroundColor="Transparent" TextColor="#A8A29E" />
+                                                        <Button Text="Open" IsVisible="{Binding ShowOpen}" Clicked="OnAgentOpenClicked"
+                                                                FontSize="12" Padding="10,2" BackgroundColor="Transparent" TextColor="#0B93F6" />
+                                                        <Button Text="Undo" IsVisible="{Binding CanUndo}" Clicked="OnAgentUndoClicked"
+                                                                FontSize="12" Padding="10,2" BackgroundColor="Transparent" TextColor="#A8A29E" />
+                                                    </HorizontalStackLayout>
+                                                </VerticalStackLayout>
+                                            </Border>
+                                        </DataTemplate>
+                                    </BindableLayout.ItemTemplate>
+                                </VerticalStackLayout>
                                 <HorizontalStackLayout IsVisible="{Binding IsComplete}" Spacing="10" Margin="4,0,0,0">
                                     <ImageButton Source="{Binding ApproveIconSource}" HeightRequest="20" WidthRequest="20"
                                                  Padding="0" BackgroundColor="Transparent"

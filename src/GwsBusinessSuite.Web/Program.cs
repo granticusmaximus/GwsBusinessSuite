@@ -1354,6 +1354,91 @@ app.MapPost("/admin/api/native/world-news/summaries", (NativeWorldNewsSummary re
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");
 
+// SentinelGPT's agent on the person's Mac (30-10-26): the Mac app's relay long-polls here for model
+// calls from turns started in a browser with no local model, answers each with its own Ollama and
+// posts the reply. Only calls for the signed-in person are handed out (SentinelAgentRelay).
+app.MapGet("/admin/api/native/agent/chat-jobs", async (HttpContext httpContext, GwsBusinessSuite.Application.SentinelAgent.SentinelAgentRelay relay,
+    string? models, CancellationToken cancellationToken) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    if (httpContext.User.Identity?.Name is not { Length: > 0 } username) return Results.Unauthorized();
+    var installed = (models ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Where(model => model.Length <= 80);
+    var call = await relay.TakeAsync(username, installed, cancellationToken);
+    return call is { } next ? Results.Json(new { id = next.Id, payload = next.PayloadJson }) : Results.NoContent();
+})
+    .RequireAuthorization("ContentAccess");
+
+app.MapPost("/admin/api/native/agent/chat-jobs/{id:guid}", (Guid id, NativeAgentChatReply reply, HttpContext httpContext,
+    GwsBusinessSuite.Application.SentinelAgent.SentinelAgentRelay relay) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    if (httpContext.User.Identity?.Name is not { Length: > 0 } username) return Results.Unauthorized();
+    if (reply.Body is null == reply.Error is null || reply.Body?.Length > 2_000_000 || reply.Error?.Length > 2_000)
+        return Results.BadRequest(new { error = "Send the model's reply or what went wrong." });
+    return relay.Complete(username, id, reply.Body, reply.Error)
+        ? Results.Json(new { delivered = true })
+        : Results.NotFound(new { error = "Nothing is waiting for that any more." });
+})
+    .RequireAuthorization("ContentAccess");
+
+// The Mac app's own SentinelGPT tab (30-10-26): it starts agent turns here and follows them; the
+// agent runs on the server as for the side panel and thinks on that Mac through the relay above.
+static GwsBusinessSuite.Application.SentinelAgent.SentinelAgentUser? NativeAgentUser(HttpContext httpContext) =>
+    httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) && marker == "1" && httpContext.User.Identity?.Name is { Length: > 0 } name
+        ? new GwsBusinessSuite.Application.SentinelAgent.SentinelAgentUser(name, AppRoles.All.Where(httpContext.User.IsInRole).ToList())
+        : null;
+
+app.MapPost("/admin/api/native/agent/turns", (NativeAgentTurnRequest request, HttpContext httpContext,
+    GwsBusinessSuite.Application.SentinelAgent.SentinelAgentTurns turns) =>
+{
+    if (NativeAgentUser(httpContext) is not { } user) return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    if (request.ConversationId == Guid.Empty || string.IsNullOrWhiteSpace(request.Message) || request.Message.Length > 8000)
+        return Results.BadRequest(new { error = "Send the chat and the message." });
+    var (id, problem) = turns.Start(user, request.ConversationId, request.Message, request.Model);
+    return id is { } turnId ? Results.Json(new { id = turnId }) : Results.Conflict(new { error = problem });
+})
+    .RequireAuthorization("ContentAccess")
+    .RequireRateLimiting("admin-mutation");
+
+app.MapGet("/admin/api/native/agent/turns/{id:guid}", (Guid id, HttpContext httpContext, GwsBusinessSuite.Application.SentinelAgent.SentinelAgentTurns turns) =>
+{
+    if (NativeAgentUser(httpContext) is not { } user) return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    return turns.Get(id, user.Username) is { } snapshot ? Results.Json(snapshot) : Results.NotFound(new { error = "That turn is gone." });
+})
+    .RequireAuthorization("ContentAccess");
+
+app.MapPost("/admin/api/native/agent/turns/{id:guid}/stop", (Guid id, HttpContext httpContext, GwsBusinessSuite.Application.SentinelAgent.SentinelAgentTurns turns) =>
+{
+    if (NativeAgentUser(httpContext) is not { } user) return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    return turns.Stop(id, user.Username) ? Results.Json(new { stopped = true }) : Results.NotFound(new { error = "That turn is gone." });
+})
+    .RequireAuthorization("ContentAccess");
+
+app.MapPost("/admin/api/native/agent/actions/{id:guid}/{verb}", async (Guid id, string verb, NativeAgentActionRequest? request, HttpContext httpContext,
+    GwsBusinessSuite.Application.SentinelAgent.SentinelAgentRunner runner, CancellationToken cancellationToken) =>
+{
+    if (NativeAgentUser(httpContext) is not { } user) return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    try
+    {
+        var view = verb switch
+        {
+            "confirm" => await runner.ConfirmAsync(id, user, request?.Approve ?? false, cancellationToken),
+            "undo" => await runner.UndoAsync(id, user, cancellationToken),
+            _ => null
+        };
+        return view is null ? Results.NotFound(new { error = "Use confirm or undo." }) : Results.Json(view);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+    .RequireAuthorization("ContentAccess")
+    .RequireRateLimiting("admin-mutation");
+
 app.MapGet("/admin/api/native/offline-pages", async (
     HttpContext httpContext,
     GwsBusinessSuite.Application.Wiki.ISentinelOfflineService offline,
@@ -5221,6 +5306,10 @@ record NativeLockChallengeRequest(Guid KeyId);
 record NativeLockUnlockRequest(Guid KeyId, string? Signature);
 record NativeQuickNoteRequest(string? Title, string? Markdown, bool? DailyNote = null, Guid? ContactId = null, Guid? BookingId = null);
 record NativeWorldNewsSummary(string? EventId, string? Model, string? Answer, int ArticleCount);
+// The Mac's answer to one relayed agent model call: Ollama's /api/chat body, or what went wrong.
+record NativeAgentChatReply(string? Body, string? Error);
+record NativeAgentTurnRequest(Guid ConversationId, string? Message, string? Model);
+record NativeAgentActionRequest(bool Approve);
 record NativeCameraWatchReading(string? CameraId, string? ModelOutput, string? ImageBase64);
 record NativeContactRequest(string? FullName, string? Email, string? Company);
 record MobileApprovalResolutionRequest(bool Approved, string? Comment);

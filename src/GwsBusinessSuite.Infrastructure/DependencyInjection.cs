@@ -1137,6 +1137,8 @@ public static class DependencyInjection
         // SentinelGPT's agent (30-10-26): the runner is a singleton that opens a scope per turn, so
         // the toolsets (scoped) never share a page's DbContext.
         services.AddSingleton<GwsBusinessSuite.Application.SentinelAgent.SentinelAgentRunner>();
+        services.AddSingleton<GwsBusinessSuite.Application.SentinelAgent.SentinelAgentRelay>();
+        services.AddSingleton<GwsBusinessSuite.Application.SentinelAgent.SentinelAgentTurns>();
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.SentinelPageAgentTools>();
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.BoardAgentTools>();
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.SitePageAgentTools>();

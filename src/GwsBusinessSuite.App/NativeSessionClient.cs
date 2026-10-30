@@ -14,6 +14,34 @@ public sealed record QuickNoteSaveResult(string? Url, string? Error);
 // read from its cookie store, so there's no second sign-in and nothing new stored.
 public sealed record ContactCreateResult(string? Url, string? FullName, string? Error);
 
+// One model call for SentinelGPT's agent, relayed from a browser elsewhere (SentinelAgentMacRelay).
+public sealed record AgentChatJob(Guid Id, string PayloadJson);
+
+// An agent turn started from the SentinelGPT tab, as the server reports it while it runs.
+public sealed record AgentTurnSnapshot(string Status, IReadOnlyList<string> Steps, IReadOnlyList<AgentActionItem> Actions,
+    string? Answer, string? Model, string? Error, string GoMessage)
+{
+    public bool IsRunning => Status == "running";
+    public bool IsFailed => Status == "failed";
+}
+
+// One change or proposal the agent made (the server's SentinelAgentActionView), as a card.
+public sealed record AgentActionItem(Guid Id, string Tool, string Summary, string Status, string? Link, bool CanUndo, bool AwaitingConfirm)
+{
+    public bool IsPlan => Tool == "show_plan";
+    public string Title => (IsPlan ? "Plan\n" : string.Empty) + Summary + Status switch
+    {
+        "undone" => " (undone)",
+        "declined" => IsPlan ? " (cancelled)" : " (declined)",
+        "done" when IsPlan => " (started)",
+        _ => string.Empty
+    };
+    public string ConfirmLabel => IsPlan ? "Go" : "Confirm";
+    public string DeclineLabel => IsPlan ? "Cancel" : "Decline";
+    public bool ShowOpen => Link is not null && !AwaitingConfirm && Status != "undone";
+    public Color BorderColor => AwaitingConfirm ? Color.FromArgb("#F59E0B") : Status == "done" ? Color.FromArgb("#15803D") : Color.FromArgb("#57534E");
+}
+
 // A World News event due a summary, with the prompt to answer (WorldNewsSummaryRelay).
 public sealed record WorldNewsSummaryJob(string EventId, string Title, int ArticleCount, string SystemPrompt, string Prompt);
 
@@ -73,6 +101,76 @@ public sealed class NativeSessionClient(HttpClient httpClient)
         var (json, error) = await PostAsync("/admin/api/native/world-news/summaries",
             new { eventId = job.EventId, model, answer, articleCount = job.ArticleCount }, cancellationToken);
         return json is null ? error : null;
+    }
+
+    // SentinelGPT's agent relay (30-10-26): the server's next model call for this person, after a
+    // long poll; (null, null) when there was none this time.
+    public async Task<(AgentChatJob? Job, string? Error)> TakeAgentChatJobAsync(IEnumerable<string> models, CancellationToken cancellationToken = default)
+    {
+        using var request = await SessionRequestAsync(HttpMethod.Get,
+            "/admin/api/native/agent/chat-jobs?models=" + Uri.EscapeDataString(string.Join(',', models)));
+        if (request is null) return (null, SignInFirst);
+        try
+        {
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent) return (null, null);
+            // An expired session redirects to the sign-in page, which answers 200 with HTML.
+            if (response.Content.Headers.ContentType?.MediaType != "application/json") return (null, SessionExpired);
+            if (!response.IsSuccessStatusCode) return (null, $"The server said no (HTTP {(int)response.StatusCode}).");
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            var root = document.RootElement;
+            return (new AgentChatJob(root.GetProperty("id").GetGuid(), root.GetProperty("payload").GetString() ?? "{}"), null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
+        {
+            return (null, Unreachable);
+        }
+    }
+
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
+    // The SentinelGPT tab's agent turns (30-10-26): started and followed on the server, thinking on
+    // this Mac through the relay. No id means "not available"; the tab then answers locally.
+    public async Task<(Guid? Id, string? Error)> StartAgentTurnAsync(Guid conversationId, string message, string? model, CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await PostAsync("/admin/api/native/agent/turns", new { conversationId, message, model }, cancellationToken);
+        return json is { } root && root.TryGetProperty("id", out var id) && id.TryGetGuid(out var turnId) ? (turnId, null) : (null, error);
+    }
+
+    public async Task<(AgentTurnSnapshot? Turn, string? Error)> GetAgentTurnAsync(Guid turnId, CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await GetJsonAsync($"/admin/api/native/agent/turns/{turnId}", cancellationToken);
+        try
+        {
+            return json is { } root ? (root.Deserialize<AgentTurnSnapshot>(WebJson), null) : (null, error);
+        }
+        catch (JsonException)
+        {
+            return (null, "The server sent something unexpected.");
+        }
+    }
+
+    public async Task<(AgentActionItem? Action, string? Error)> ResolveAgentActionAsync(Guid actionId, string verb, bool approve,
+        CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await PostAsync($"/admin/api/native/agent/actions/{actionId}/{verb}", new { approve }, cancellationToken);
+        try
+        {
+            return json is { } root ? (root.Deserialize<AgentActionItem>(WebJson), null) : (null, error);
+        }
+        catch (JsonException)
+        {
+            return (null, "The server sent something unexpected.");
+        }
+    }
+
+    public Task StopAgentTurnAsync(Guid turnId) => PostAsync($"/admin/api/native/agent/turns/{turnId}/stop", new { }, CancellationToken.None);
+
+    // Null once the server has the reply, otherwise what went wrong.
+    public async Task<string?> ReplyAgentChatJobAsync(AgentChatJob job, string? body, string? error, CancellationToken cancellationToken = default)
+    {
+        var (json, failure) = await PostAsync($"/admin/api/native/agent/chat-jobs/{job.Id}", new { body, error }, cancellationToken);
+        return json is null ? failure : null;
     }
 
     // Bookings around today and recent contacts a meeting note can be linked to.

@@ -104,7 +104,7 @@ elsewhere will get the agent.
   - Grant's list scenario, plus a research-then-do scenario (notes -> list -> site draft -> publish
     proposal), all right on sentinelgpt
   - llama3.2 failed (see above)
-- [ ] User guide: SentinelGPT section in docs (on disk; docs/ is untracked).
+- [x] User guide: SentinelGPT section in docs (on disk; docs/ is untracked).
 
 ## Phase B+: dependable before capable (Grant: "Do what you recommend", 30-10-26)
 - [x] **"This" is the open record.** `AssistantPageContext.RecordId` is passed by Support tickets,
@@ -124,13 +124,31 @@ elsewhere will get the agent.
   - Linked from the panel header and Knowledge > SentinelGPT activity.
 - [x] Tests: `SentinelAgentTests` now 16.
 
-## Phase B: the Mac app's own SentinelGPT tab, and the web handing off to the Mac
-- [ ] Native endpoints so the Mac tab's agent can list and run tools as the signed-in user:
-  `/admin/api/native/agent/tools`, `/run`, `/confirm`, `/undo`.
-- [ ] Mac SentinelGPT tab: the agent loop on local Ollama, with step, change and confirm cards.
-- [ ] Relay: a browser with no local model queues the turn. The Mac app, when running, picks it up
-  (like WorldNewsSummaryRelay), thinks locally, and runs tools through the server, while the browser
-  streams the steps. After a short wait with no Mac, it falls back to simple mode.
+## Phase B: the Mac app's own SentinelGPT tab, and the web handing off to the Mac (built 30-10-26)
+The design changed from the first sketch. Instead of the Mac running the loop and calling tool
+endpoints, the server keeps the one loop (the runner) and the Mac only answers its model calls. So
+plans, memory, roll-back, Confirm and Undo are the same everywhere.
+- [x] Relay (`SentinelAgentRelay` + `RelayedOllamaService`):
+  - per-person queue of /api/chat payloads, handed only to a Mac signed in as that person
+  - the Mac long-polls `GET /admin/api/native/agent/chat-jobs?models=` (25 s) and replies with
+    `POST .../chat-jobs/{id}`
+  - a 3-minute wait per call
+  - `ModelsFor` = the Mac's tool-capable models while it's polling (seen within 60 s)
+- [x] Mac app `SentinelAgentMacRelay`: started with the app; runs each payload on 127.0.0.1:11434
+  as is and returns Ollama's body or error ("does not support tools" moves on to the next model).
+- [x] Side panel order:
+  1. this computer's model
+  2. the person's Mac through the relay ("Your Mac · model")
+  3. the server's answer-only path
+- [x] Mac SentinelGPT tab: with no folder attached and deep analysis off, a turn runs as a server
+  agent turn (`SentinelAgentTurns`; `POST /admin/api/native/agent/turns`, `GET .../turns/{id}`,
+  `.../stop`, `POST .../actions/{id}/confirm|undo`) that thinks on the same Mac through the relay.
+  - The tab shows steps and change cards (Open/Undo, Confirm/Decline, Go/Cancel).
+  - The local agent's history is kept in step.
+  - Otherwise, or when that's unavailable, the tab uses its own local agent as before.
+- [x] Tests (19 in `SentinelAgentTests`): relay round trip with a fake Mac, isolation, silent-Mac
+  timeout, Mac-tab turns, and the JSON fields the app reads.
+- [ ] Live check of the relay end to end: needs Grant's updated Mac app signed in.
 
 ## Phase C: CRM and automations
 - [ ] CRM: find/create/update contacts, companies and deals, add notes, move deal stage (Admin).

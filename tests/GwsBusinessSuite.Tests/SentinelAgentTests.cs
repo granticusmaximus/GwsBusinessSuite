@@ -344,6 +344,115 @@ public sealed class SentinelAgentTests
     }
 
     [Fact]
+    public async Task Relay_ShouldLetATurnThinkOnThePersonsMac_WhileTheMacKeepsAsking()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var clock = new ManualClock();
+        var relay = new SentinelAgentRelay(clock);
+        relay.ModelsFor("grant").Should().BeEmpty("no Mac has asked yet");
+
+        // Grant's Mac: answers each call as Ollama would, a tool call and then the answer.
+        var replies = new Queue<string>([ToolCallReply("create_todo_list", new { title = "From the Mac" }), TextReply("Made it on your Mac.")]);
+        using var closeApp = new CancellationTokenSource();
+        var mac = Task.Run(async () =>
+        {
+            while (true)
+            {
+                if (await relay.TakeAsync("grant", ["embeddinggemma:latest", "sentinelgpt:latest"], closeApp.Token) is not { } call) continue;
+                JsonNode.Parse(call.PayloadJson)!["model"]!.GetValue<string>().Should().Be("sentinelgpt:latest");
+                relay.Complete("grant", call.Id, replies.Dequeue(), null).Should().BeTrue();
+            }
+        });
+        for (var i = 0; i < 200 && relay.ModelsFor("grant").Count == 0; i++) await Task.Delay(10);
+        relay.ModelsFor("grant").Should().Equal(["sentinelgpt:latest"], "only models that can use tools");
+        relay.ModelsFor("writer").Should().BeEmpty("a Mac only serves the person it's signed in as");
+
+        var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin, "Make a list", null,
+            new RelayedOllamaService(relay, "grant"), "sentinelgpt:latest"), _ => Task.CompletedTask, default);
+        turn.Answer.Should().Be("Made it on your Mac.");
+        (await harness.PagesTitledAsync("From the Mac")).Should().Be(1, "the tool ran on the server");
+
+        closeApp.Cancel();
+        await mac.Invoking(task => task).Should().ThrowAsync<OperationCanceledException>();
+        clock.Advance(SentinelAgentRelay.OnlineFor + TimeSpan.FromSeconds(1));
+        relay.ModelsFor("grant").Should().BeEmpty("a Mac that stopped asking is gone");
+    }
+
+    [Fact]
+    public async Task Relay_ShouldNotHandACallToSomeoneElsesMac_AndGiveUpOnASilentOne()
+    {
+        var relay = new SentinelAgentRelay(TimeProvider.System, callTimeout: TimeSpan.FromMilliseconds(400));
+        var waiting = relay.ChatAsync("grant", "{}", default);
+        using var brief = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
+        var otherMac = () => relay.TakeAsync("writer", ["llama3.2:latest"], brief.Token);
+        await otherMac.Should().ThrowAsync<OperationCanceledException>("writer's Mac never gets grant's call");
+
+        var silent = () => waiting;
+        (await silent.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("didn't answer in time");
+        relay.Complete("grant", Guid.NewGuid(), "{}", null).Should().BeFalse("nothing waits for an unknown call");
+    }
+
+    [Fact]
+    public async Task MacTabTurns_ShouldRunOnTheServer_ThinkOnTheMac_AndStayThePersonsOwn()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var relay = new SentinelAgentRelay(TimeProvider.System);
+        var turns = new SentinelAgentTurns(harness.Runner, relay, TimeProvider.System, NullLogger<SentinelAgentTurns>.Instance);
+        turns.Start(Admin, Guid.NewGuid(), "Make a list", null).Problem.Should().Contain("isn't connected", "no Mac is asking yet");
+
+        var replies = new Queue<string>([ToolCallReply("create_todo_list", new { title = "From the tab" }), TextReply("Done from the tab.")]);
+        using var closeApp = new CancellationTokenSource();
+        var mac = Task.Run(async () =>
+        {
+            while (true)
+            {
+                if (await relay.TakeAsync("grant", ["llama3.2:latest", "sentinelgpt:latest"], closeApp.Token) is { } call)
+                {
+                    JsonNode.Parse(call.PayloadJson)!["model"]!.GetValue<string>().Should().Be("llama3.2:latest", "the tab's chosen model goes first");
+                    relay.Complete("grant", call.Id, replies.Dequeue(), null);
+                }
+            }
+        });
+        for (var i = 0; i < 200 && relay.ModelsFor("grant").Count == 0; i++) await Task.Delay(10);
+
+        var (id, problem) = turns.Start(Admin, Guid.NewGuid(), "Make a list", "llama3.2:latest");
+        problem.Should().BeNull();
+        SentinelAgentTurns.Snapshot? snapshot = null;
+        for (var i = 0; i < 300 && snapshot is not { Status: not SentinelAgentTurns.Statuses.Running }; i++)
+        {
+            await Task.Delay(20);
+            snapshot = turns.Get(id!.Value, "grant");
+        }
+
+        snapshot!.Status.Should().Be(SentinelAgentTurns.Statuses.Done);
+        snapshot.Answer.Should().Be("Done from the tab.");
+        snapshot.Steps.Should().Equal("Creating to-do list 'From the tab'");
+        snapshot.Actions.Should().ContainSingle().Which.CanUndo.Should().BeTrue();
+        turns.Get(id!.Value, "writer").Should().BeNull("a turn is only its starter's");
+        turns.Stop(id!.Value, "writer").Should().BeFalse();
+
+        // What the Mac app reads (AgentTurnSnapshot / AgentActionItem in NativeSessionClient).
+        var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        foreach (var field in new[] { "\"status\"", "\"steps\"", "\"answer\"", "\"model\"", "\"goMessage\"", "\"id\"", "\"tool\"", "\"summary\"", "\"link\"", "\"canUndo\"", "\"awaitingConfirm\"" })
+            json.Should().Contain(field);
+
+        closeApp.Cancel();
+        await mac.Invoking(task => task).Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    private static string ToolCallReply(string name, object arguments) =>
+        JsonSerializer.Serialize(new { message = new { role = "assistant", content = "", tool_calls = new[] { new { function = new { name, arguments } } } } });
+
+    private static string TextReply(string text) => JsonSerializer.Serialize(new { message = new { role = "assistant", content = text } });
+
+    private sealed class ManualClock : TimeProvider
+    {
+        private DateTimeOffset _now = new(2026, 10, 30, 12, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan by) => _now += by;
+    }
+
+    [Fact]
     public void LocalCandidates_ShouldPutToolCapableModelsFirst_AndLeaveOutTheRest()
     {
         string[] installed = ["gemma4:latest", "sentinelgpt:latest", "embeddinggemma:latest", "deepseek-r1:latest", "qwen2.5-coder:latest",

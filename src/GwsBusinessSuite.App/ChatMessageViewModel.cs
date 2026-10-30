@@ -11,11 +11,28 @@ public sealed class ChatMessageViewModel(bool isUser) : INotifyPropertyChanged
     private bool _isComplete;
     private string? _retryPrompt;
     private bool _isFromServerFallback;
+    private string _steps = string.Empty;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
     public bool IsUser { get; } = isUser;
     public bool IsAssistant => !IsUser;
+
+    // SentinelGPT's agent (30-10-26): what it looked up and did, and the cards for its changes.
+    public string Steps
+    {
+        get => _steps;
+        set
+        {
+            _steps = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HasSteps));
+        }
+    }
+
+    public bool HasSteps => _steps.Length > 0;
+
+    public System.Collections.ObjectModel.ObservableCollection<AgentActionItem> Actions { get; } = [];
 
     public string Text
     {
