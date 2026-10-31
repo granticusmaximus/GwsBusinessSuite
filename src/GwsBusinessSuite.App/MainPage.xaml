@@ -192,6 +192,72 @@
                 </VerticalStackLayout>
             </Border>
         </Grid>
+
+        <!-- Signing in with Touch ID (31-10-26): the fingerprint screen over a blank window, with
+             Try Again and Use Password when it doesn't go through. -->
+        <Grid x:Name="TouchIdOverlay"
+              BackgroundColor="#141210"
+              IsVisible="False"
+              InputTransparent="False">
+            <VerticalStackLayout HorizontalOptions="Center"
+                                 VerticalOptions="Center"
+                                 MaximumWidthRequest="420"
+                                 Spacing="12">
+                <Grid WidthRequest="140" HeightRequest="140" HorizontalOptions="Center" Margin="0,0,0,8">
+                    <Ellipse x:Name="TouchIdPulseOuter" Stroke="#F59E0B" StrokeThickness="1.5" Opacity="0" />
+                    <Ellipse x:Name="TouchIdPulseInner" Stroke="#F59E0B" StrokeThickness="1.5" Opacity="0" />
+                    <Border x:Name="TouchIdBadge"
+                            WidthRequest="108"
+                            HeightRequest="108"
+                            HorizontalOptions="Center"
+                            VerticalOptions="Center"
+                            BackgroundColor="#231A0E"
+                            Stroke="#66501F"
+                            StrokeThickness="1.5"
+                            StrokeShape="RoundRectangle 54">
+                        <Image Source="fingerprint.png" WidthRequest="62" HeightRequest="62" />
+                    </Border>
+                </Grid>
+                <Label Text="GWS BUSINESS SUITE"
+                       TextColor="#FBBF24"
+                       FontSize="11"
+                       FontAttributes="Bold"
+                       CharacterSpacing="1.4"
+                       HorizontalTextAlignment="Center" />
+                <Label x:Name="TouchIdTitle"
+                       Text="Sign in with Touch ID"
+                       TextColor="#FAFAF9"
+                       FontSize="24"
+                       FontAttributes="Bold"
+                       HorizontalTextAlignment="Center" />
+                <Label x:Name="TouchIdMessage"
+                       TextColor="#A8A29E"
+                       FontSize="14"
+                       LineHeight="1.4"
+                       HorizontalTextAlignment="Center" />
+                <HorizontalStackLayout x:Name="TouchIdButtons"
+                                       Spacing="10"
+                                       Margin="0,10,0,0"
+                                       HorizontalOptions="Center"
+                                       IsVisible="False">
+                    <Button Text="Try Again"
+                            Padding="18,10"
+                            BackgroundColor="#F59E0B"
+                            TextColor="#1C1917"
+                            CornerRadius="8"
+                            FontAttributes="Bold"
+                            Clicked="OnTouchIdRetryClicked" />
+                    <Button Text="Use Password"
+                            Padding="18,10"
+                            BackgroundColor="Transparent"
+                            TextColor="#E7E5E4"
+                            BorderColor="#44403C"
+                            BorderWidth="1"
+                            CornerRadius="8"
+                            Clicked="OnTouchIdPasswordClicked" />
+                </HorizontalStackLayout>
+            </VerticalStackLayout>
+        </Grid>
     </Grid>
 
 </ContentPage>

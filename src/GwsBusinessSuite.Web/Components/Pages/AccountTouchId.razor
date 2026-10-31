@@ -9,20 +9,45 @@
 @* One clear place (account menu) for Touch ID sign-in and page-lock setup - the same controls as
    Sentinel's Page lock settings panel. *@
 <div class="gws-account-touchid">
-    <h1 class="h3 mb-1"><i class="bi bi-fingerprint me-2" aria-hidden="true"></i>Touch ID &amp; page lock</h1>
-    <p class="text-secondary mb-3">
-        Sign in with your fingerprint instead of your password and authenticator code, and open locked Sentinel pages.
-    </p>
-    <ol class="small text-secondary mb-3">
-        <li><strong>In the Mac app:</strong> click <strong>Set up Touch ID for this Mac</strong> below (or the app menu: GWS Business Suite → Set Up Touch ID…).
-            Next time the app opens, it signs you in with Touch ID - that's also what turns on Mac-only tools like Content Studio.</li>
-        <li><strong>In Safari or Chrome:</strong> click <strong>Add</strong> under Touch ID passkeys. The sign-in page then shows <strong>Sign in with Touch ID</strong>.</li>
-        <li><strong>A PIN</strong> is the backup for locked pages when Touch ID isn't available.</li>
-    </ol>
+    <header class="gws-touchid-hero">
+        <div class="gws-touchid-hero-print" aria-hidden="true"><i class="bi bi-fingerprint"></i></div>
+        <div>
+            <h1 class="h3 mb-1">Sign in with your fingerprint</h1>
+            <p class="text-secondary mb-0">No password or authenticator code: Touch ID signs you in, and opens your locked Sentinel pages.</p>
+        </div>
+    </header>
+
+    @* The three ways in (31-10-26). The Mac app's Touch ID also signs browsers in, from anywhere,
+       through "Approve on my Mac" - a browser passkey can't be shared with the app. *@
+    <div class="gws-touchid-ways">
+        <article>
+            <i class="bi bi-laptop" aria-hidden="true"></i>
+            <h2>The Mac app</h2>
+            <p>Set up once in the app, and it opens with Touch ID every time - which also turns on Mac-only tools like Content Studio.</p>
+            <p class="gws-touchid-how">In the Mac app: this page's <strong>Set up Touch ID for this Mac</strong>, or GWS Business Suite → Set Up Touch ID.</p>
+        </article>
+        <article>
+            <i class="bi bi-display" aria-hidden="true"></i>
+            <h2>Any browser, with your Mac</h2>
+            <p>On the sign-in page choose <strong>Approve on my Mac</strong>. Pick the same number in the Mac app and touch the sensor.</p>
+            <p class="gws-touchid-how">Works from any computer while the Mac app is open with Touch ID set up.</p>
+        </article>
+        <article>
+            <i class="bi bi-fingerprint" aria-hidden="true"></i>
+            <h2>This browser</h2>
+            <p>Safari or Chrome on a Mac with Touch ID can keep its own passkey, then sign in with <strong>Touch ID</strong> on the sign-in page.</p>
+            <p class="gws-touchid-how">Add it below, in this browser.</p>
+        </article>
+    </div>
+
     @if (string.IsNullOrEmpty(_sessionId))
     {
         <div class="alert alert-warning small">This sign-in started before Touch ID was added. Sign out and sign in again to set it up.</div>
     }
+    <p class="small text-secondary mb-3">
+        <i class="bi bi-shield-lock me-1" aria-hidden="true"></i>If you already have a PIN or Touch ID, you'll be asked to unlock with it before adding another -
+        so someone who only knows your password can't add their own fingerprint. A PIN is also the backup for locked pages.
+    </p>
     <SentinelLockSettingsPanel SessionId="@_sessionId" TouchIdSettings="TouchIdSettings" ShowClose="false" />
 </div>
 

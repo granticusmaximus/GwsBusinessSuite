@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!-- "Approve on my Mac" (31-10-26): a browser wants to sign in with this Mac's Touch ID. The
+     person picks the number that browser shows; a sign-in someone else started can't be matched. -->
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="GwsBusinessSuite.App.SignInApprovalPage"
+             BackgroundColor="#141210">
+    <Grid Padding="24">
+        <Border MaximumWidthRequest="460"
+                HorizontalOptions="Center"
+                VerticalOptions="Center"
+                Padding="32,28"
+                BackgroundColor="#1C1917"
+                Stroke="#292524"
+                StrokeShape="RoundRectangle 18">
+            <VerticalStackLayout Spacing="12">
+                <Grid WidthRequest="124" HeightRequest="124" HorizontalOptions="Center" Margin="0,0,0,6">
+                    <Ellipse x:Name="PulseOuter" Stroke="#F59E0B" StrokeThickness="1.5" Opacity="0" />
+                    <Ellipse x:Name="PulseInner" Stroke="#F59E0B" StrokeThickness="1.5" Opacity="0" />
+                    <Border x:Name="Badge"
+                            WidthRequest="96"
+                            HeightRequest="96"
+                            HorizontalOptions="Center"
+                            VerticalOptions="Center"
+                            BackgroundColor="#231A0E"
+                            Stroke="#66501F"
+                            StrokeThickness="1.5"
+                            StrokeShape="RoundRectangle 48">
+                        <Image Source="fingerprint.png" WidthRequest="56" HeightRequest="56" />
+                    </Border>
+                </Grid>
+                <Label Text="SIGN-IN REQUEST"
+                       TextColor="#FBBF24"
+                       FontSize="11"
+                       FontAttributes="Bold"
+                       CharacterSpacing="1.4"
+                       HorizontalTextAlignment="Center" />
+                <Label x:Name="TitleLabel"
+                       TextColor="#FAFAF9"
+                       FontSize="22"
+                       FontAttributes="Bold"
+                       HorizontalTextAlignment="Center" />
+                <Label x:Name="DetailLabel"
+                       TextColor="#A8A29E"
+                       FontSize="13"
+                       HorizontalTextAlignment="Center" />
+                <Label x:Name="PromptLabel"
+                       Text="Pick the number that browser shows, then touch the sensor."
+                       TextColor="#E7E5E4"
+                       FontSize="14"
+                       Margin="0,6,0,2"
+                       HorizontalTextAlignment="Center" />
+                <HorizontalStackLayout x:Name="NumberRow" Spacing="12" HorizontalOptions="Center" />
+                <Label x:Name="StatusLabel"
+                       TextColor="#A8A29E"
+                       FontSize="13"
+                       Margin="0,4,0,0"
+                       HorizontalTextAlignment="Center"
+                       IsVisible="False" />
+                <Button x:Name="DeclineButton"
+                        Text="Not me - decline"
+                        Margin="0,6,0,0"
+                        Padding="18,9"
+                        HorizontalOptions="Center"
+                        BackgroundColor="Transparent"
+                        TextColor="#A8A29E"
+                        BorderColor="#44403C"
+                        BorderWidth="1"
+                        CornerRadius="8"
+                        FontSize="13"
+                        Clicked="OnDeclineClicked" />
+            </VerticalStackLayout>
+        </Border>
+    </Grid>
+</ContentPage>

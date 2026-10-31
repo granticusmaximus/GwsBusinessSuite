@@ -1938,6 +1938,84 @@ app.MapGet("/auth/touchid/web-login", async (Guid keyId, string? signature, Http
 })
     .AllowAnonymous().RequireRateLimiting("login");
 
+// "Approve with your Mac" (31-10-26): a browser signs in with the fingerprint on the person's Mac
+// (MacSignInApprovals). The browser starts it and shows a number; the Mac app, signed in as that
+// person, picks the same number with Touch ID; the browser then finishes signing in. Starting
+// counts against the login limit; the secret only the starting browser holds guards the rest.
+app.MapPost("/auth/mac-approval/start", (MacApprovalStartRequest request, HttpContext httpContext,
+    GwsBusinessSuite.Application.NativeApp.MacSignInApprovals approvals) =>
+{
+    var username = request.Username?.Trim();
+    if (string.IsNullOrEmpty(username) || username.Length > 100) return Results.BadRequest(new { error = "Enter your username first." });
+    // The same answer whether or not the person has a Mac set up, so it doesn't reveal accounts.
+    var started = approvals.Start(username, GwsBusinessSuite.Application.NativeApp.MacSignInApprovals.DescribeBrowser(httpContext.Request.Headers.UserAgent.ToString()),
+        httpContext.Connection.RemoteIpAddress?.ToString());
+    return Results.Json(new { id = started.Id, secret = started.Secret, number = started.Number, expiresInSeconds = (int)GwsBusinessSuite.Application.NativeApp.MacSignInApprovals.Lifetime.TotalSeconds });
+})
+    .AllowAnonymous().RequireRateLimiting("login");
+
+app.MapGet("/auth/mac-approval/{id:guid}", (Guid id, string? secret, GwsBusinessSuite.Application.NativeApp.MacSignInApprovals approvals) =>
+    Results.Json(new { state = approvals.State(id, secret ?? string.Empty).ToString().ToLowerInvariant() }))
+    .AllowAnonymous().RequireRateLimiting("public-read");
+
+app.MapGet("/auth/mac-approval/{id:guid}/complete", async (Guid id, string? secret, string? returnUrl, HttpContext httpContext,
+    GwsBusinessSuite.Application.NativeApp.MacSignInApprovals approvals, IUserManagementService users, ISecurityAuditService audit,
+    GwsBusinessSuite.Application.Wiki.ISentinelPageLockService pageLocks) =>
+{
+    var username = approvals.Redeem(id, secret ?? string.Empty);
+    // Not "device-key": this is a browser, so the Mac-only tools stay in the Mac app.
+    var result = await CompleteTouchIdSignInAsync(httpContext, username, "mac-approval", "mac-approval", users, audit, pageLocks, new { ok = true });
+    if (result is IStatusCodeHttpResult { StatusCode: >= 400 }) return Results.LocalRedirect("/admin/login?error=mac");
+    return Results.LocalRedirect(returnUrl is { Length: > 0 } candidate && candidate.StartsWith('/') && !candidate.StartsWith("//", StringComparison.Ordinal)
+        && !candidate.StartsWith("/\\", StringComparison.Ordinal) ? candidate : "/admin");
+})
+    .AllowAnonymous().RequireRateLimiting("public-read");
+
+// The Mac app's side: a long poll for this person's waiting request, then the answer. Approving
+// needs Touch ID on this person's own Mac key just now (a signed /auth/touchid/challenge).
+app.MapGet("/admin/api/native/sign-in-requests", async (HttpContext httpContext,
+    GwsBusinessSuite.Application.NativeApp.MacSignInApprovals approvals, CancellationToken cancellationToken) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    if (httpContext.User.Identity?.Name is not { Length: > 0 } username) return Results.Unauthorized();
+    var request = await approvals.WaitForAsync(username, TimeSpan.FromSeconds(25), cancellationToken);
+    return request is null
+        ? Results.NoContent()
+        : Results.Json(new { id = request.Id, numbers = request.Numbers, browser = request.Browser, address = request.Address, startedAt = request.StartedAt, expiresAt = request.ExpiresAt });
+})
+    .RequireAuthorization("ContentAccess");
+
+app.MapPost("/admin/api/native/sign-in-requests/{id:guid}/approve", async (Guid id, NativeSignInApproval body, HttpContext httpContext,
+    GwsBusinessSuite.Application.NativeApp.MacSignInApprovals approvals, GwsBusinessSuite.Application.Wiki.ISentinelDeviceKeyService deviceKeys,
+    ISecurityAuditService audit) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    if (httpContext.User.Identity?.Name is not { Length: > 0 } username) return Results.Unauthorized();
+    var keyOwner = await deviceKeys.CompleteSignInAsync(body.KeyId, body.Signature ?? string.Empty);
+    var error = string.Equals(keyOwner, username, StringComparison.OrdinalIgnoreCase)
+        ? approvals.Approve(id, username, body.Number)
+        : "Touch ID didn't confirm it on this Mac - nothing was signed in.";
+    await audit.RecordAsync(new SecurityAuditInput(
+        SecurityAuditCategories.Authentication, "MacSignInApproval", error is null ? SecurityAuditOutcomes.Succeeded : SecurityAuditOutcomes.Failed,
+        SecurityAuditSeverities.High, "AppUser", username, new Dictionary<string, string?> { ["request"] = id.ToString(), ["reason"] = error },
+        httpContext.Connection.RemoteIpAddress?.ToString(), username));
+    return error is null ? Results.Json(new { approved = true }) : Results.BadRequest(new { error });
+})
+    .RequireAuthorization("ContentAccess").RequireRateLimiting("admin-mutation");
+
+app.MapPost("/admin/api/native/sign-in-requests/{id:guid}/decline", (Guid id, HttpContext httpContext,
+    GwsBusinessSuite.Application.NativeApp.MacSignInApprovals approvals) =>
+{
+    if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
+        return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    if (httpContext.User.Identity?.Name is not { Length: > 0 } username) return Results.Unauthorized();
+    approvals.Decline(id, username);
+    return Results.Json(new { declined = true });
+})
+    .RequireAuthorization("ContentAccess").RequireRateLimiting("admin-mutation");
+
 app.MapPost("/auth/passkey/options", async (HttpContext httpContext,
     GwsBusinessSuite.Application.Wiki.ISentinelPasskeyService passkeys) =>
 {
@@ -5327,6 +5405,8 @@ record MobileDeviceRegistrationRequest(string Platform, string PushToken, string
 record TouchIdChallengeRequest(Guid KeyId);
 record TouchIdLoginRequest(Guid KeyId, string? Signature);
 record PasskeyLoginRequest(string? CeremonyId, string? Assertion, string? ReturnUrl);
+record MacApprovalStartRequest(string? Username);
+record NativeSignInApproval(Guid KeyId, string? Signature, int Number);
 record NativeLockPinRequest(string? Pin);
 record NativeLockDeviceRequest(string? Name, string? PublicKey, string? Storage);
 record NativeLockChallengeRequest(Guid KeyId);

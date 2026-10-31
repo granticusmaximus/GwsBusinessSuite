@@ -36,7 +36,7 @@ else
     @if (_embedded)
     {
         <div class="fw-semibold small mb-1 mt-2">Touch ID in the Mac app</div>
-        <a class="btn btn-sm btn-primary mb-2" href="gws-native://enroll"><i class="bi bi-fingerprint me-1" aria-hidden="true"></i>Set up Touch ID for this Mac</a>
+        <a class="btn btn-primary mb-2" href="gws-native://enroll"><i class="bi bi-fingerprint me-1" aria-hidden="true"></i>Set up Touch ID for this Mac</a>
     }
     @if (_deviceKeys.Count > 0)
     {
@@ -64,13 +64,15 @@ else
     }
     else
     {
-        <div class="d-flex gap-2 mb-2">
-            <input class="form-control form-control-sm" maxlength="60" placeholder="Name, e.g. MacBook Touch ID" aria-label="Passkey name"
-                   @bind="_name" @bind:event="oninput" />
-            <button type="button" class="btn btn-sm btn-primary text-nowrap" disabled="@_busy" @onclick="AddAsync">
-                <i class="bi bi-fingerprint me-1" aria-hidden="true"></i>Add
+        @* One clear button (31-10-26: the small "Add" read as optional); naming it is optional. *@
+        <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+            <button type="button" class="btn btn-primary text-nowrap" disabled="@_busy" @onclick="AddAsync">
+                <i class="bi bi-fingerprint me-1" aria-hidden="true"></i>Add Touch ID for this browser
             </button>
+            <input class="form-control form-control-sm" style="max-width: 15rem" maxlength="60" placeholder="Name (optional), e.g. MacBook Chrome"
+                   aria-label="Passkey name" @bind="_name" @bind:event="oninput" />
         </div>
+        <p class="small text-secondary mb-2">Your browser then asks for Touch ID. If it offers a phone or security key instead, choose "this device" or iCloud Keychain.</p>
     }
     @if (_keys.Count > 0)
     {

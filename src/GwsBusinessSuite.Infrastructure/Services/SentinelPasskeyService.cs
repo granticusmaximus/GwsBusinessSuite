@@ -19,6 +19,8 @@ public sealed class SentinelPasskeyService(
     TimeProvider timeProvider) : ISentinelPasskeyService
 {
     private static readonly TimeSpan CeremonyLifetime = TimeSpan.FromMinutes(5);
+    // WebAuthn's "client-device" hint: the browser offers this device's Touch ID first.
+    private static readonly IReadOnlyList<PublicKeyCredentialHint> ThisDevice = [PublicKeyCredentialHint.ClientDevice];
     private const int MaxPasskeys = 10;
 
     public async Task<string> BeginRegistrationAsync(string username, string? sessionId, string origin, CancellationToken cancellationToken = default)
@@ -42,6 +44,9 @@ public sealed class SentinelPasskeyService(
             },
             AttestationPreference = AttestationConveyancePreference.None
         });
+        // Leads with Touch ID: without it Chrome opened on "use a phone (QR code) or a security
+        // key", which read as if this Mac couldn't do it (31-10-26).
+        options.Hints = ThisDevice;
         cache.Set(RegistrationKey(username), options.ToJson(), CeremonyLifetime);
         return options.ToJson();
     }
@@ -100,6 +105,7 @@ public sealed class SentinelPasskeyService(
             AllowedCredentials = keys.Select(key => new PublicKeyCredentialDescriptor(System.Buffers.Text.Base64Url.DecodeFromChars(key.CredentialId))).ToList(),
             UserVerification = UserVerificationRequirement.Required
         });
+        options.Hints = ThisDevice;
         cache.Set(UnlockKey(username, sessionId), options.ToJson(), CeremonyLifetime);
         return options.ToJson();
     }
@@ -145,6 +151,7 @@ public sealed class SentinelPasskeyService(
             AllowedCredentials = [],
             UserVerification = UserVerificationRequirement.Required
         });
+        options.Hints = ThisDevice;
         var ceremonyId = Guid.NewGuid().ToString("N");
         cache.Set(SignInKey(ceremonyId), options.ToJson(), CeremonyLifetime);
         return Task.FromResult((ceremonyId, options.ToJson()));

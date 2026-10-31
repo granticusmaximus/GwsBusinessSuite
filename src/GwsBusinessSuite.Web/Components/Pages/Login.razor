@@ -37,6 +37,36 @@
             <div class="alert alert-danger" role="alert">@ErrorMessage</div>
         }
 
+        @* Fingerprint first (31-10-26): Touch ID on this computer (a passkey), the Mac app's Touch ID
+           from any browser ("Approve on my Mac"), or inside the Mac app its own Touch ID.
+           js/sentinel-passkey-login.js shows what this browser can use and runs the scanner. *@
+        <section class="gws-touchid" id="gws-touchid" data-state="idle" data-return-url="@ResolvedReturnUrl" hidden>
+            <div class="gws-touchid-scanner" aria-hidden="true">
+                <span class="gws-touchid-ring"></span>
+                <span class="gws-touchid-ring gws-touchid-ring-late"></span>
+                <i class="bi bi-fingerprint gws-touchid-print"></i>
+                <span class="gws-touchid-sweep"></span>
+                <i class="bi bi-check-lg gws-touchid-check"></i>
+            </div>
+            <div class="gws-touchid-title" id="gws-touchid-title">Sign in with your fingerprint</div>
+            <div class="gws-touchid-number" id="gws-touchid-number" hidden></div>
+            <div class="gws-touchid-status" id="gws-touchid-status" role="status" aria-live="polite"></div>
+            <div class="gws-touchid-actions">
+                <button type="button" class="btn btn-primary" id="gws-touchid-here" hidden>
+                    <i class="bi bi-fingerprint" aria-hidden="true"></i> Touch ID
+                </button>
+                <button type="button" class="btn btn-outline-secondary" id="gws-touchid-mac" hidden>
+                    <i class="bi bi-laptop" aria-hidden="true"></i> Approve on my Mac
+                </button>
+                @* The Mac app handles gws-native:// itself (MainPage.OnWorkspaceNavigating). *@
+                <a class="btn btn-primary" id="gws-touchid-app" href="gws-native://signin" hidden>
+                    <i class="bi bi-fingerprint" aria-hidden="true"></i> Sign in with Touch ID
+                </a>
+                <button type="button" class="btn btn-link btn-sm" id="gws-touchid-cancel" hidden>Cancel</button>
+            </div>
+        </section>
+        <div class="gws-login-divider" id="gws-touchid-divider" hidden><span>or use your password</span></div>
+
         <form method="post" action="auth/login">
             <AntiforgeryToken />
             <input type="hidden" name="returnUrl" value="@ResolvedReturnUrl" />
@@ -56,15 +86,6 @@
             <button type="submit" class="btn btn-primary w-100 gws-login-submit">Sign In</button>
         </form>
 
-        @* Sign in with Touch ID (passkey) - shown by sentinel-passkey-login.js only where this
-           browser can use Touch ID / Face ID. *@
-        <div class="gws-login-passkey mt-3" id="gws-login-passkey" data-return-url="@ResolvedReturnUrl" hidden>
-            <div class="gws-login-divider small text-secondary text-center mb-2">or</div>
-            <button type="button" class="btn btn-outline-secondary w-100" id="gws-login-passkey-button">
-                <i class="bi bi-fingerprint me-1" aria-hidden="true"></i>Sign in with Touch ID
-            </button>
-            <div class="small text-danger mt-2" id="gws-login-passkey-error" role="alert"></div>
-        </div>
 
         <p class="text-secondary small mt-3 mb-0 gws-login-note">
             <i class="bi bi-shield-lock"></i> This area is restricted to administrators.
@@ -73,7 +94,7 @@
 </div>
 
 <script src="js/login-tab-focus.js"></script>
-<script type="module" src="js/sentinel-passkey-login.js?v=1"></script>
+<script type="module" src="js/sentinel-passkey-login.js?v=2"></script>
 
 @code {
     [SupplyParameterFromQuery(Name = "error")]
@@ -127,6 +148,10 @@
         else if (string.Equals(Error, "touchid", StringComparison.OrdinalIgnoreCase))
         {
             ErrorMessage = "Touch ID sign-in didn't work - sign in with your password instead.";
+        }
+        else if (string.Equals(Error, "mac", StringComparison.OrdinalIgnoreCase))
+        {
+            ErrorMessage = "The approval from your Mac didn't go through - try again, or sign in with your password.";
         }
         else if (string.Equals(Error, "device", StringComparison.OrdinalIgnoreCase))
         {
@@ -238,6 +263,84 @@
         padding-top: .85rem;
         color: var(--gws-text-soft);
     }
+
+    /* The fingerprint scanner (31-10-26). States on data-state: idle (a slow pulse), scanning
+       (a sweep while Touch ID is asked), waiting (Mac approval: the number to pick), done, error. */
+    .gws-touchid { display: flex; flex-direction: column; align-items: center; text-align: center; margin-bottom: .4rem; }
+    .gws-touchid-scanner {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 5.5rem;
+        height: 5.5rem;
+        margin-bottom: .9rem;
+        border-radius: 50%;
+        background: radial-gradient(circle at 50% 40%, rgba(245, 158, 11, .16), rgba(245, 158, 11, .04) 70%);
+        box-shadow: inset 0 0 0 1px rgba(245, 158, 11, .35);
+        color: #f59e0b;
+        overflow: hidden;
+        transition: color .3s ease, box-shadow .3s ease, background .3s ease;
+    }
+    .gws-touchid-print { font-size: 2.9rem; line-height: 1; transition: opacity .25s ease, transform .3s ease; }
+    .gws-touchid-check { position: absolute; font-size: 2.6rem; line-height: 1; opacity: 0; transform: scale(.6); transition: opacity .25s ease, transform .3s ease; }
+    .gws-touchid-ring {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        border: 1px solid rgba(245, 158, 11, .45);
+        animation: gws-touchid-pulse 3.2s ease-out infinite;
+    }
+    .gws-touchid-ring-late { animation-delay: 1.6s; }
+    .gws-touchid-sweep {
+        position: absolute;
+        left: 12%;
+        right: 12%;
+        top: 0;
+        height: 2px;
+        border-radius: 2px;
+        background: linear-gradient(90deg, transparent, #fbbf24, transparent);
+        box-shadow: 0 0 10px rgba(251, 191, 36, .9);
+        opacity: 0;
+    }
+    .gws-touchid-title { font-weight: 700; color: var(--gws-text-strong); }
+    .gws-touchid-status { min-height: 1.25rem; margin-top: .2rem; color: var(--gws-text-soft); font-size: .82rem; max-width: 30ch; }
+    .gws-touchid-number { margin-top: .35rem; font: 800 2.6rem/1 var(--gws-font-serif); letter-spacing: .08em; color: var(--gws-text-strong); }
+    .gws-touchid-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; margin-top: .9rem; }
+    .gws-touchid-actions .btn { display: inline-flex; align-items: center; gap: .4rem; font-weight: 700; }
+
+    /* While it's busy only Cancel stays: the two ways in come back on a result. */
+    .gws-touchid:is([data-state="scanning"], [data-state="waiting"], [data-state="done"]) :is(#gws-touchid-here, #gws-touchid-mac, #gws-touchid-app) { display: none; }
+    .gws-touchid[data-state="scanning"] .gws-touchid-sweep { opacity: 1; animation: gws-touchid-sweep 1.4s ease-in-out infinite; }
+    .gws-touchid[data-state="scanning"] .gws-touchid-ring,
+    .gws-touchid[data-state="waiting"] .gws-touchid-ring { animation-duration: 1.6s; }
+    .gws-touchid[data-state="scanning"] .gws-touchid-scanner,
+    .gws-touchid[data-state="waiting"] .gws-touchid-scanner { box-shadow: inset 0 0 0 1px rgba(245, 158, 11, .7), 0 0 26px rgba(245, 158, 11, .28); }
+    .gws-touchid[data-state="done"] .gws-touchid-scanner { color: #22c55e; background: radial-gradient(circle at 50% 40%, rgba(34, 197, 94, .2), rgba(34, 197, 94, .05) 70%); box-shadow: inset 0 0 0 1px rgba(34, 197, 94, .6); }
+    .gws-touchid[data-state="done"] .gws-touchid-print { opacity: 0; transform: scale(.7); }
+    .gws-touchid[data-state="done"] .gws-touchid-check { opacity: 1; transform: none; }
+    .gws-touchid[data-state="done"] .gws-touchid-ring { border-color: rgba(34, 197, 94, .5); }
+    .gws-touchid[data-state="error"] .gws-touchid-scanner { color: #ef4444; background: radial-gradient(circle at 50% 40%, rgba(239, 68, 68, .16), rgba(239, 68, 68, .04) 70%); box-shadow: inset 0 0 0 1px rgba(239, 68, 68, .55); animation: gws-touchid-shake .4s ease; }
+    .gws-touchid[data-state="error"] .gws-touchid-ring { animation: none; opacity: 0; }
+    .gws-touchid[data-state="error"] .gws-touchid-status { color: #ef4444; }
+
+    @@keyframes gws-touchid-pulse { from { transform: scale(1); opacity: .9; } to { transform: scale(1.55); opacity: 0; } }
+    @@keyframes gws-touchid-sweep { 0% { top: 12%; } 50% { top: 86%; } 100% { top: 12%; } }
+    @@keyframes gws-touchid-shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+    @@media (prefers-reduced-motion: reduce) {
+        .gws-touchid-ring, .gws-touchid-sweep, .gws-touchid-scanner { animation: none !important; }
+    }
+
+    .gws-login-divider {
+        display: flex;
+        align-items: center;
+        gap: .75rem;
+        margin: 1.1rem 0 1rem;
+        color: var(--gws-text-soft);
+        font-size: .72rem;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+    }
+    .gws-login-divider::before, .gws-login-divider::after { content: ""; flex: 1; border-top: 1px solid var(--gws-panel-border); }
 
     @@media (max-width: 820px) {
         .gws-login-shell { flex-direction: column; width: min(100%, 28rem); }

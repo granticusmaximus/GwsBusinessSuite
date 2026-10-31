@@ -14,14 +14,22 @@ namespace GwsBusinessSuite.App;
 // see the Aug 2026 SecureStorage note), so the fallback is a key file in the app container that the
 // app only uses after LocalAuthentication confirms Touch ID. The server sees only the public key and
 // verifies signatures over its own one-time challenges, so either storage works the same way.
-public sealed record TouchIdKeyInfo(Guid ServerKeyId, string Storage, string? Username);
+//
+// Setting Touch ID up again makes the new key beside the current one and only switches over once the
+// server has accepted it (31-10-26): it used to overwrite the working key first and then delete it
+// whenever the new one was refused or cancelled, which left the Mac with no key at all. KeyName
+// tells the keys apart; null is a key from before then, under the original names.
+public sealed record TouchIdKeyInfo(Guid ServerKeyId, string Storage, string? Username, string? KeyName = null);
 
 public sealed class TouchIdKeyStore(string folder)
 {
     private const string Tag = "net.gwsapp.sentinel.touchid.v1";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private string InfoPath => Path.Combine(folder, "touchid-key.json");
-    private string KeyFilePath => Path.Combine(folder, "touchid-key.pkcs8");
+
+    private string KeyFilePath(TouchIdKeyInfo key) => Path.Combine(folder, key.KeyName is { } name ? $"touchid-key-{name}.pkcs8" : "touchid-key.pkcs8");
+
+    private static string KeyTag(TouchIdKeyInfo key) => key.KeyName is { } name ? $"{Tag}.{name}" : Tag;
 
     public TouchIdKeyInfo? Info
     {
@@ -40,33 +48,54 @@ public sealed class TouchIdKeyStore(string folder)
 
     public void Forget()
     {
-        foreach (var path in new[] { InfoPath, KeyFilePath }) if (File.Exists(path)) File.Delete(path);
-#if MACCATALYST
-        SecKeyChain.Remove(new SecRecord(SecKind.Key) { ApplicationTag = NSData.FromString(Tag) });
-#endif
+        if (Info is { } current) Delete(current);
+        if (File.Exists(InfoPath)) File.Delete(InfoPath);
     }
 
-    // Creates a new key (replacing any old one); returns its public key (SubjectPublicKeyInfo) and
-    // where it lives.
-    public (byte[] PublicKeySpki, string Storage) CreateKey()
+    // A new key beside the current one, which stays in use until Commit; its public key
+    // (SubjectPublicKeyInfo) is what the server registers.
+    public (TouchIdKeyInfo Key, byte[] PublicKeySpki) CreateKey()
     {
-        Forget();
+        var key = new TouchIdKeyInfo(Guid.Empty, "file", null, Guid.NewGuid().ToString("N"));
 #if MACCATALYST
-        if (TryCreateSecureEnclaveKey(out var spki, out _)) return (spki, "secure-enclave");
+        if (TryCreateSecureEnclaveKey(KeyTag(key), out var spki, out _)) return (key with { Storage = "secure-enclave" }, spki);
 #endif
-        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         Directory.CreateDirectory(folder);
-        File.WriteAllBytes(KeyFilePath, key.ExportPkcs8PrivateKey());
-        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(KeyFilePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        return (key.ExportSubjectPublicKeyInfo(), "file");
+        File.WriteAllBytes(KeyFilePath(key), ecdsa.ExportPkcs8PrivateKey());
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(KeyFilePath(key), UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        return (key, ecdsa.ExportSubjectPublicKeyInfo());
     }
 
-    // Signs the challenge after Touch ID (DER ECDSA over SHA-256). Null with a message when the
-    // person cancels or Touch ID isn't available.
-    public async Task<(byte[]? Signature, string? Error)> SignAsync(byte[] challenge, string reason)
+    // The new key, registered, becomes this Mac's key; the one before it goes.
+    public void Commit(TouchIdKeyInfo key)
     {
-        var info = Info;
-        if (info is null) return (null, "Touch ID isn't set up on this Mac yet.");
+        var previous = Info;
+        SaveInfo(key);
+        if (previous is not null && previous.KeyName != key.KeyName) Delete(previous);
+    }
+
+    // A new key that wasn't registered (cancelled, or refused): the current key stays as it was.
+    public void Discard(TouchIdKeyInfo key)
+    {
+        if (Info?.KeyName != key.KeyName) Delete(key);
+    }
+
+    private void Delete(TouchIdKeyInfo key)
+    {
+        if (File.Exists(KeyFilePath(key))) File.Delete(KeyFilePath(key));
+#if MACCATALYST
+        SecKeyChain.Remove(new SecRecord(SecKind.Key) { ApplicationTag = NSData.FromString(KeyTag(key)) });
+#endif
+    }
+
+    public Task<(byte[]? Signature, string? Error)> SignAsync(byte[] challenge, string reason) =>
+        Info is { } info ? SignAsync(info, challenge, reason) : Task.FromResult<(byte[]?, string?)>((null, "Touch ID isn't set up on this Mac yet."));
+
+    // Signs the challenge with the key after Touch ID (DER ECDSA over SHA-256). Null with a message
+    // when the person cancels or Touch ID isn't available.
+    public async Task<(byte[]? Signature, string? Error)> SignAsync(TouchIdKeyInfo info, byte[] challenge, string reason)
+    {
 #if MACCATALYST
         if (info.Storage == "secure-enclave")
         {
@@ -75,7 +104,7 @@ public sealed class TouchIdKeyStore(string folder)
             using var promptContext = new LAContext { LocalizedReason = reason };
             var key = SecKeyChain.QueryAsConcreteType(new SecRecord(SecKind.Key)
             {
-                ApplicationTag = NSData.FromString(Tag),
+                ApplicationTag = NSData.FromString(KeyTag(info)),
                 KeyType = SecKeyType.ECSecPrimeRandom,
                 AuthenticationContext = promptContext
             }, out var status) as SecKey;
@@ -91,9 +120,9 @@ public sealed class TouchIdKeyStore(string folder)
         return (null, "Touch ID needs the Mac app.");
 #endif
 #if MACCATALYST
-        if (!File.Exists(KeyFilePath)) return (null, "This Mac's Touch ID key is missing - set Touch ID up again.");
+        if (!File.Exists(KeyFilePath(info))) return (null, "This Mac's Touch ID key is missing - set Touch ID up again.");
         using var fileKey = ECDsa.Create();
-        fileKey.ImportPkcs8PrivateKey(File.ReadAllBytes(KeyFilePath), out _);
+        fileKey.ImportPkcs8PrivateKey(File.ReadAllBytes(KeyFilePath(info)), out _);
         return (fileKey.SignData(challenge, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence), null);
 #endif
     }
@@ -101,7 +130,7 @@ public sealed class TouchIdKeyStore(string folder)
 #if MACCATALYST
     // Secure Enclave key with Touch ID required for every use. Returns false (with the reason)
     // when this build isn't allowed to create one.
-    public static bool TryCreateSecureEnclaveKey(out byte[] publicKeySpki, out string? failure)
+    public static bool TryCreateSecureEnclaveKey(string tag, out byte[] publicKeySpki, out string? failure)
     {
         publicKeySpki = [];
         failure = null;
@@ -117,7 +146,7 @@ public sealed class TouchIdKeyStore(string folder)
                 PrivateKeyAttrs = new SecKeyParameters
                 {
                     IsPermanent = true,
-                    ApplicationTag = NSData.FromString(Tag),
+                    ApplicationTag = NSData.FromString(tag),
                     AccessControl = access
                 }
             };

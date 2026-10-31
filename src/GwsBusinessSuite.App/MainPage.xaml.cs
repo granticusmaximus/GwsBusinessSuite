@@ -98,16 +98,29 @@ public partial class MainPage : ContentPage
 #if MACCATALYST
         await ClearStaleWebViewCacheAsync();
 
-        // Sign in with Touch ID when this Mac has a key; any failure or cancel falls through to
-        // the device-secret / browser sign-in below.
-        if (_touchIdLock.IsSetUp && await SignInWithTouchIdAsync(reportProblems: false)) return;
+        // Sign in with Touch ID when this Mac has a key. If it doesn't go through, the Touch ID
+        // screen stays up with Try Again and Use Password (the sign-in below).
+        if (_touchIdLock.IsSetUp)
+        {
+            await SignInWithTouchIdAsync(reportProblems: false);
+            return;
+        }
+#endif
+        await StartPasswordSignInAsync();
+    }
 
+    // The device-secret sign-in when there is one, otherwise the sign-in page in the web view.
+    private async Task StartPasswordSignInAsync()
+    {
+#if MACCATALYST
         var deviceSecret = await _deviceSecretStore.GetAsync();
         if (!string.IsNullOrWhiteSpace(deviceSecret) && await TryDeviceLoginAsync(deviceSecret) is { } signInUrl)
         {
             WorkspaceView.Source = signInUrl;
             return;
         }
+#else
+        await Task.CompletedTask;
 #endif
         // No device secret configured, device login failed/was cancelled, or a non-MacCatalyst
         // platform - fall back to today's behavior exactly: load the WebView and let the user
@@ -261,10 +274,16 @@ public partial class MainPage : ContentPage
     // trust the event: it asks the server whether the unlock or the new key is really there.
     private async Task HandleNativeRequestAsync(string action)
     {
+        // The sign-in page's Touch ID button: the Touch ID screen takes it from here.
+        if (action == "signin")
+        {
+            await SignInWithTouchIdAsync(reportProblems: true);
+            return;
+        }
         var (ok, message) = action switch
         {
             "unlock" => await _touchIdLock.UnlockAsync(),
-            "enroll" => await _touchIdLock.EnrollAsync(),
+            "enroll" => await EnrollTouchIdAsync(),
             _ => (false, "Unknown request.")
         };
         var detail = System.Text.Json.JsonSerializer.Serialize(new { action, ok, message });
@@ -278,26 +297,41 @@ public partial class MainPage : ContentPage
         }
     }
 
+    // Setting Touch ID up, from the app menu or the web page's button (both used to differ: the
+    // button had no PIN step, so it always failed once a PIN existed). The server asks for the
+    // page-lock PIN first when there's another way to unlock; the app asks for it and tries again.
+    // Once at a time: on 29-10-26 two clicks on the button ran it twice. A failure or cancel leaves
+    // the current key as it was (TouchIdLockService.EnrollAsync).
+    private bool _enrolling;
+
+    private async Task<(bool Ok, string Message)> EnrollTouchIdAsync()
+    {
+        if (_enrolling) return (false, "Touch ID set-up is already open - finish that one first.");
+        _enrolling = true;
+        try
+        {
+            var (ok, message) = await _touchIdLock.EnrollAsync();
+            if (ok || !message.StartsWith("Unlock first", StringComparison.Ordinal)) return (ok, message);
+            var pin = await DisplayPromptAsync("Set Up Touch ID",
+                "You already have a page-lock PIN. Enter it to confirm it's you.", accept: "Continue", cancel: "Cancel",
+                maxLength: 8, keyboard: Keyboard.Numeric);
+            if (string.IsNullOrWhiteSpace(pin)) return (false, "Set-up cancelled. Touch ID on this Mac is as it was.");
+            if (await _session.UnlockWithPinAsync(pin.Trim()) is { } pinError) return (false, pinError);
+            return await _touchIdLock.EnrollAsync();
+        }
+        finally
+        {
+            _enrolling = false;
+        }
+    }
+
     // Set Up Touch ID: creates this Mac's key (Touch ID asked), registers it with Sentinel - after
     // the page-lock PIN when one exists - and then offers to sign in with it straight away, which
     // gives the session the Mac-app sign-in that Content Studio needs.
     private async Task SetUpTouchIdAsync()
     {
 #if MACCATALYST
-        var (ok, message) = await _touchIdLock.EnrollAsync();
-        if (!ok && message.StartsWith("Unlock first", StringComparison.Ordinal))
-        {
-            var pin = await DisplayPromptAsync("Set Up Touch ID",
-                "You already have a page-lock PIN. Enter it to confirm it's you.", accept: "Continue", cancel: "Cancel",
-                maxLength: 8, keyboard: Keyboard.Numeric);
-            if (string.IsNullOrWhiteSpace(pin)) return;
-            if (await _session.UnlockWithPinAsync(pin.Trim()) is { } pinError)
-            {
-                await DisplayAlertAsync("Set Up Touch ID", pinError, "OK");
-                return;
-            }
-            (ok, message) = await _touchIdLock.EnrollAsync();
-        }
+        var (ok, message) = await EnrollTouchIdAsync();
         if (!ok)
         {
             await DisplayAlertAsync("Set Up Touch ID", message.Contains("Sign in", StringComparison.OrdinalIgnoreCase) || message.Contains("session", StringComparison.OrdinalIgnoreCase)
@@ -327,16 +361,20 @@ public partial class MainPage : ContentPage
             if (reportProblems) await DisplayAlertAsync("Sign In with Touch ID", "Touch ID isn't set up on this Mac yet - choose GWS Business Suite > Set Up Touch ID first.", "OK");
             return false;
         }
-        // Touch ID + signature here; the web view itself opens the sign-in address, so the session
-        // cookie is set in its own store (an HTTP-client cookie can't be handed over on macOS).
+        // Touch ID + signature here, on the Touch ID screen; the web view itself opens the sign-in
+        // address, so the session cookie is set in its own store (an HTTP-client cookie can't be
+        // handed over on macOS).
+        ShowTouchIdScreen("Sign in with Touch ID", "Touch the sensor to open GWS Business Suite.", scanning: true);
         var (url, error) = await _nativeAppAuthService.PrepareTouchIdWebSignInAsync(_touchIdKeys);
         DebugLog($"TouchId sign-in: prepared={url is not null} error={error}");
         if (url is null)
         {
-            if (reportProblems) await DisplayAlertAsync("Sign In with Touch ID", error ?? "Touch ID sign-in didn't work.", "OK");
+            ShowTouchIdScreen("Touch ID didn't sign you in", error ?? "Touch ID sign-in didn't work.", scanning: false);
             return false;
         }
         _verifyTouchIdSessionAfterLoad = reportProblems;
+        _touchIdSigningIn = true;
+        TouchIdMessage.Text = "Opening your workspace…";
         BeginBlockingNavigation();
         WorkspaceView.Source = url;
         return true;
@@ -354,15 +392,68 @@ public partial class MainPage : ContentPage
     {
         if (!_verifyTouchIdSessionAfterLoad || !url.Contains("/admin", StringComparison.OrdinalIgnoreCase)) return;
         _verifyTouchIdSessionAfterLoad = false;
-        if (url.Contains("/login", StringComparison.OrdinalIgnoreCase))
-        {
-            await DisplayAlertAsync("Sign In with Touch ID", "Sentinel didn't accept the Touch ID sign-in. Sign in with your password, then choose GWS Business Suite > Set Up Touch ID again.", "OK");
-            return;
-        }
+        // A refused sign-in lands on the sign-in page, which the Touch ID screen explains.
+        if (url.Contains("/login", StringComparison.OrdinalIgnoreCase)) return;
         var (signedIn, macApp, method) = await _session.GetSessionInfoAsync();
         DebugLog($"TouchId sign-in: web view session signedIn={signedIn} macApp={macApp} amr={method}");
         if (signedIn && !macApp)
             await DisplayAlertAsync("Sign In with Touch ID", $"This window is still using a '{method}' sign-in, so Mac-only tools like Content Studio stay hidden.", "OK");
+    }
+
+    // The Touch ID screen (31-10-26): while Touch ID is asked the fingerprint pulses; when it doesn't
+    // go through it says why and offers Try Again and Use Password.
+    private CancellationTokenSource? _touchIdPulse;
+    private bool _touchIdSigningIn;
+
+    private void ShowTouchIdScreen(string title, string message, bool scanning)
+    {
+        TouchIdTitle.Text = title;
+        TouchIdMessage.Text = message;
+        TouchIdButtons.IsVisible = !scanning;
+        TouchIdBadge.Stroke = Color.FromArgb(scanning ? "#66501F" : "#7F1D1D");
+        TouchIdOverlay.IsVisible = true;
+        if (scanning && _touchIdPulse is null)
+        {
+            _touchIdPulse = new CancellationTokenSource();
+            _ = TouchIdPulse.RunAsync(TouchIdPulseOuter, TimeSpan.Zero, _touchIdPulse.Token);
+            _ = TouchIdPulse.RunAsync(TouchIdPulseInner, TimeSpan.FromMilliseconds(800), _touchIdPulse.Token);
+        }
+        else if (!scanning)
+        {
+            StopTouchIdPulse();
+        }
+    }
+
+    private void HideTouchIdScreen()
+    {
+        StopTouchIdPulse();
+        TouchIdOverlay.IsVisible = false;
+    }
+
+    private void StopTouchIdPulse()
+    {
+        _touchIdPulse?.Cancel();
+        _touchIdPulse = null;
+    }
+
+    // Where the Touch ID sign-in landed: the workspace (done) or the sign-in page (refused).
+    private void FinishTouchIdSignIn(string url, bool loaded)
+    {
+        if (!_touchIdSigningIn) return;
+        _touchIdSigningIn = false;
+        if (loaded && url.Contains("/login", StringComparison.OrdinalIgnoreCase))
+            ShowTouchIdScreen("Sentinel didn't accept Touch ID",
+                "Sign in with your password, then set Touch ID up again (GWS Business Suite > Set Up Touch ID).", scanning: false);
+        else
+            HideTouchIdScreen();
+    }
+
+    private void OnTouchIdRetryClicked(object? sender, EventArgs e) => _ = SignInWithTouchIdAsync(reportProblems: false);
+
+    private void OnTouchIdPasswordClicked(object? sender, EventArgs e)
+    {
+        HideTouchIdScreen();
+        _ = StartPasswordSignInAsync();
     }
 
     // Offered once, after the first ordinary sign-in on a Mac without Touch ID set up.
@@ -390,6 +481,7 @@ public partial class MainPage : ContentPage
         NavigationProgress.IsVisible = false;
         SlowNavigationNotice.IsVisible = false;
         LoadingOverlay.IsVisible = false;
+        FinishTouchIdSignIn(args.Url, args.Result == WebNavigationResult.Success);
         if (args.Result == WebNavigationResult.Success)
         {
             StatusOverlay.IsVisible = false;

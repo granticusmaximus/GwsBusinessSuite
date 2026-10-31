@@ -1220,6 +1220,7 @@ public static class DependencyInjection
         services.AddScoped<ISentinelPageLockService, SentinelPageLockService>();
         services.AddScoped<ISentinelPasskeyService, SentinelPasskeyService>();
         services.AddScoped<ISentinelDeviceKeyService, SentinelDeviceKeyService>();
+        services.AddSingleton<GwsBusinessSuite.Application.NativeApp.MacSignInApprovals>();
         services.AddHostedService<SentinelEmailInBackgroundService>();
         services.AddHostedService<SupportEmailInBackgroundService>();
         services.AddScoped<ISentinelAiService, SentinelAiService>();

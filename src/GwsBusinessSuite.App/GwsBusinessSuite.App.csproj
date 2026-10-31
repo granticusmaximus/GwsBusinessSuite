@@ -61,6 +61,9 @@
 		<!-- Splash Screen -->
 		<MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#141210" BaseSize="128,128" />
 
+		<!-- Images (SVGs drawn at BaseSize, then scaled) -->
+		<MauiImage Include="Resources\Images\fingerprint.svg" BaseSize="96,96" />
+
 		<!-- Custom Fonts -->
 		<MauiFont Include="Resources\Fonts\*" />
 

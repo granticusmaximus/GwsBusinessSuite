@@ -7,26 +7,26 @@ public sealed class TouchIdLockService(NativeSessionClient session, TouchIdKeySt
 {
     public bool IsSetUp => store.Info is not null;
 
-    // Creates this Mac's key and registers it. Touch ID is asked once first, so a Mac without
-    // working Touch ID doesn't get a key it can't use.
+    // Creates a new key for this Mac and registers it. Touch ID is asked once first, so a Mac without
+    // working Touch ID doesn't get a key it can't use. Until the server accepts the new key the
+    // current one stays in use, so a cancel or a refusal never leaves the Mac without one.
     public async Task<(bool Ok, string Message)> EnrollAsync()
     {
-        var (publicKey, storage) = store.CreateKey();
-        // A provisional record so SignAsync can use the new key for the check below.
-        store.SaveInfo(new TouchIdKeyInfo(Guid.Empty, storage, null));
-        var (signature, error) = await store.SignAsync(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32), "Set up Touch ID for Sentinel");
+        var (key, publicKey) = store.CreateKey();
+        var (signature, error) = await store.SignAsync(key, System.Security.Cryptography.RandomNumberGenerator.GetBytes(32), "Set up Touch ID for Sentinel");
         if (signature is null)
         {
-            store.Forget();
+            store.Discard(key);
             return (false, error ?? "Touch ID didn't work.");
         }
-        var (keyId, username, registerError) = await session.RegisterTouchIdKeyAsync(Environment.MachineName, publicKey, storage);
+        var (keyId, username, registerError) = await session.RegisterTouchIdKeyAsync(Environment.MachineName, publicKey, key.Storage);
         if (keyId is null)
         {
-            store.Forget();
+            store.Discard(key);
             return (false, registerError ?? "The server didn't accept this Mac's key.");
         }
-        store.SaveInfo(new TouchIdKeyInfo(keyId.Value, storage, username));
+        store.Commit(key with { ServerKeyId = keyId.Value, Username = username });
+        var storage = key.Storage;
         return (true, storage == "secure-enclave"
             ? "Touch ID is set up on this Mac (key in the Secure Enclave)."
             : "Touch ID is set up on this Mac.");

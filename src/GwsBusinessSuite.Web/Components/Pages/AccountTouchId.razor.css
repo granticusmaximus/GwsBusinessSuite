@@ -1,0 +1,33 @@
+/* Touch ID page (31-10-26): a fingerprint hero and the three ways in, in the sign-in page's amber. */
+.gws-account-touchid { max-width: 60rem; }
+
+.gws-touchid-hero { display: flex; align-items: center; gap: 1.1rem; margin-bottom: 1.25rem; }
+.gws-touchid-hero-print {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 4.25rem;
+    height: 4.25rem;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 40%, rgba(245, 158, 11, .18), rgba(245, 158, 11, .04) 70%);
+    box-shadow: inset 0 0 0 1px rgba(245, 158, 11, .4), 0 0 24px rgba(245, 158, 11, .14);
+    color: #f59e0b;
+    font-size: 2.2rem;
+}
+
+.gws-touchid-ways {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: .85rem;
+    margin-bottom: 1.1rem;
+}
+.gws-touchid-ways article {
+    padding: 1rem 1.1rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: 12px;
+    background: var(--gws-panel-bg);
+}
+.gws-touchid-ways article > i { display: inline-block; margin-bottom: .45rem; color: #f59e0b; font-size: 1.35rem; }
+.gws-touchid-ways h2 { margin: 0 0 .35rem; font-size: .98rem; font-weight: 700; color: var(--gws-text-strong); }
+.gws-touchid-ways p { margin: 0 0 .5rem; font-size: .84rem; color: var(--gws-text-soft); }
+.gws-touchid-ways .gws-touchid-how { margin: 0; font-size: .78rem; }

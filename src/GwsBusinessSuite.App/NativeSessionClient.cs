@@ -45,6 +45,10 @@ public sealed record AgentActionItem(Guid Id, string Tool, string Summary, strin
 // A World News event due a summary, with the prompt to answer (WorldNewsSummaryRelay).
 public sealed record WorldNewsSummaryJob(string EventId, string Title, int ArticleCount, string SystemPrompt, string Prompt);
 
+// A browser asking to sign in with this Mac's Touch ID (SignInApprovalRelay): one of Numbers is on
+// the browser's screen.
+public sealed record SignInApprovalRequest(Guid Id, IReadOnlyList<int> Numbers, string Browser, string? Address, DateTimeOffset StartedAt, DateTimeOffset ExpiresAt);
+
 // A World News headline waiting for its embedding (WorldNewsEmbedRelay).
 public sealed record WorldNewsEmbedJob(string Id, string Title);
 
@@ -127,6 +131,53 @@ public sealed class NativeSessionClient(HttpClient httpClient)
             new { model, items = embeddings.Select(embedding => new { id = embedding.Id, vector = embedding.Vector }) }, cancellationToken);
         return json is null ? error : null;
     }
+
+    // "Approve on my Mac" (31-10-26): a browser's waiting sign-in for this person, after a long poll;
+    // (null, null) when there was none this time.
+    public async Task<(SignInApprovalRequest? Request, string? Error)> TakeSignInRequestAsync(CancellationToken cancellationToken = default)
+    {
+        using var request = await SessionRequestAsync(HttpMethod.Get, "/admin/api/native/sign-in-requests");
+        if (request is null) return (null, SignInFirst);
+        try
+        {
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent) return (null, null);
+            if (response.Content.Headers.ContentType?.MediaType != "application/json") return (null, SessionExpired);
+            if (!response.IsSuccessStatusCode) return (null, $"The server said no (HTTP {(int)response.StatusCode}).");
+            var body = JsonSerializer.Deserialize<SignInApprovalRequest>(await response.Content.ReadAsStringAsync(cancellationToken), WebJson);
+            return (body, body is null ? "The server sent something unexpected." : null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or InvalidOperationException)
+        {
+            return (null, Unreachable);
+        }
+    }
+
+    // A one-time challenge for this Mac's key to sign after Touch ID (/auth/touchid/challenge).
+    public async Task<(byte[]? Challenge, string? Error)> GetTouchIdChallengeAsync(Guid keyId, CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await PostAsync("/auth/touchid/challenge", new { keyId }, cancellationToken);
+        if (json is not { } root || !root.TryGetProperty("challenge", out var challenge)) return (null, error ?? "Sentinel didn't answer.");
+        try
+        {
+            return (Convert.FromBase64String(challenge.GetString() ?? string.Empty), null);
+        }
+        catch (FormatException)
+        {
+            return (null, "Sentinel sent an odd challenge.");
+        }
+    }
+
+    // Null once the browser is approved, otherwise why not.
+    public async Task<string?> ApproveSignInAsync(Guid requestId, Guid keyId, byte[] signature, int number, CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await PostAsync($"/admin/api/native/sign-in-requests/{requestId}/approve",
+            new { keyId, signature = Convert.ToBase64String(signature), number }, cancellationToken);
+        return json is null ? error : null;
+    }
+
+    public async Task DeclineSignInAsync(Guid requestId, CancellationToken cancellationToken = default) =>
+        await PostAsync($"/admin/api/native/sign-in-requests/{requestId}/decline", new { }, cancellationToken);
 
     // SentinelGPT's agent relay (30-10-26): the server's next model call for this person, after a
     // long poll; (null, null) when there was none this time.
