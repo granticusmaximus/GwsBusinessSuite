@@ -208,6 +208,22 @@
     min-height: 100%;
 }
 
+.mail-compose-files {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .35rem;
+}
+
+.mail-compose-file {
+    display: inline-flex;
+    align-items: center;
+    font-weight: 400;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
 .mail-compose-body {
     flex: 1;
     min-height: 15rem;

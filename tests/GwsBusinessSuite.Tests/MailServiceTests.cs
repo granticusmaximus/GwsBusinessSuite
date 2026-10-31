@@ -161,6 +161,74 @@ public sealed class MailServiceTests
     }
 
     [Fact]
+    public async Task WhatsSent_ShouldBeTextAndFormattedHtml_WithTheFilesAttached()
+    {
+        var f = await CreateAsync();
+        await f.UseImapAsync();
+        var files = new[] { new MailAttachmentUpload("../../quote.pdf", "application/pdf", new byte[] { 1, 2, 3 }) };
+
+        await f.Service.SendAsync("grant", new MailDraft(["sam@example.com"], [], [], "Quote", "Here's **the quote**.\n\n> your question", Attachments: files));
+
+        var sent = f.Imap.Sent.Single();
+        sent.TextBody.Should().Be("Here's **the quote**.\n\n> your question");
+        sent.HtmlBody.Should().Contain("<strong>the quote</strong>").And.Contain("<blockquote style=");
+        sent.Attachments.OfType<MimePart>().Single().Should().BeEquivalentTo(new { FileName = "quote.pdf" }, "a path in the name is dropped");
+        (await f.Service.GetUnreadCountAsync("grant")).Should().Be(7);
+        (await f.Service.GetUnreadCountAsync("sam")).Should().BeNull("no mailbox");
+
+        var tooBig = new MailAttachmentUpload("big.bin", "application/octet-stream", new byte[MailLimits.MaxAttachmentBytes + 1]);
+        await f.Service.Invoking(s => s.SendAsync("grant", new MailDraft(["sam@example.com"], [], [], "x", "y", Attachments: [tooBig])))
+            .Should().ThrowAsync<MailException>().WithMessage("*25 MB*");
+    }
+
+    [Fact]
+    public void Formatting_ShouldShowTypedHtmlAsText()
+    {
+        var html = MailFormatting.ToHtml("Hi <script>alert(1)</script> _there_\nnext line");
+
+        html.Should().NotContain("<script>").And.Contain("&lt;script&gt;").And.Contain("<em>there</em>").And.Contain("<br");
+    }
+
+    [Fact]
+    public async Task TheMenusUnreadCount_ShouldNeverWait_AndRefreshInTheBackgroundWhenStale()
+    {
+        var clock = new ManualClock();
+        var asked = 0;
+        var answer = new TaskCompletionSource<int?>();
+        var counter = MailUnreadCounter.Create((_, _) => { asked++; return answer.Task; }, clock);
+
+        counter.Peek("grant").Should().BeNull("nothing known yet - and it doesn't wait for the mailbox");
+        counter.Peek("grant").Should().BeNull();
+        asked.Should().Be(1, "one check at a time");
+        answer.SetResult(4);
+        await Task.Yield();
+        counter.Peek("grant").Should().Be(4);
+
+        answer = new TaskCompletionSource<int?>();
+        answer.SetResult(2);
+        counter.Peek("grant");
+        asked.Should().Be(1, "fresh for two minutes");
+        counter.Invalidate("grant");
+        counter.Peek("grant").Should().Be(4, "the last count shows while the new one comes in");
+        await Task.Yield();
+        counter.Peek("grant").Should().Be(2);
+        asked.Should().Be(2);
+
+        clock.Now += MailUnreadCounter.FreshFor;
+        answer = new TaskCompletionSource<int?>();
+        answer.SetException(new MailException("The server is busy."));
+        counter.Peek("grant");
+        await Task.Yield();
+        counter.Peek("grant").Should().Be(2, "a failed check keeps the last count");
+    }
+
+    private sealed class ManualClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = new(2026, 10, 31, 9, 0, 0, TimeSpan.Zero);
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    [Fact]
     public void ImapIds_ShouldRoundTrip_AndRejectGarbage()
     {
         var id = ImapMessageId.Encode("INBOX/Clients: 2026", 77, 4012);
@@ -224,6 +292,7 @@ public sealed class MailServiceTests
         public Task SetStarredAsync(MailAccount account, string id, bool starred, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task ArchiveAsync(MailAccount account, string id, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task TrashAsync(MailAccount account, string id, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken) => Task.FromResult(7);
     }
 
     private sealed class FakeCredentials : IAutomationCredentialService

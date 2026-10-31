@@ -143,8 +143,17 @@ public sealed class MailService(
             if (message.To.Count + message.Cc.Count + message.Bcc.Count == 0) throw new MailException("Add who it's to.");
             if (message.To.Count + message.Cc.Count + message.Bcc.Count > MaxRecipients) throw new MailException($"At most {MaxRecipients} recipients.");
             if (draft.Body.Length > MaxBodyLength) throw new MailException("That message is too long.");
+            var uploads = draft.Attachments ?? [];
+            if (uploads.Count > MailLimits.MaxAttachments) throw new MailException($"At most {MailLimits.MaxAttachments} attachments.");
+            if (uploads.Sum(file => (long)file.Content.Length) > MailLimits.MaxAttachmentBytes)
+                throw new MailException($"Attachments can add up to {MailLimits.MaxAttachmentBytes / (1024 * 1024)} MB.");
             message.Subject = draft.Subject.Trim();
-            var body = new TextPart("plain") { Text = draft.Body };
+            MimeEntity body = new MultipartAlternative
+            {
+                new TextPart("plain") { Text = draft.Body },
+                new TextPart("html") { Text = MailFormatting.ToHtml(draft.Body) }
+            };
+            var attachments = uploads.Select(Attachment).ToList();
 
             string? threadId = null;
             if (!string.IsNullOrEmpty(draft.ReplyToMessageId))
@@ -157,17 +166,23 @@ public sealed class MailService(
                     foreach (var reference in original.Message.References) message.References.Add(reference);
                     message.References.Add(replyingTo);
                 }
-                if (draft.Forward && MailMessageRenderer.Attachments(original.Message) is { Count: > 0 } attachments)
-                {
-                    var mixed = new Multipart("mixed") { body };
-                    foreach (var attachment in attachments) mixed.Add(attachment);
-                    message.Body = mixed;
-                }
+                if (draft.Forward) attachments.InsertRange(0, MailMessageRenderer.Attachments(original.Message));
             }
-            message.Body ??= body;
+            if (attachments.Count > 0)
+            {
+                var mixed = new Multipart("mixed") { body };
+                foreach (var attachment in attachments) mixed.Add(attachment);
+                body = mixed;
+            }
+            message.Body = body;
             await backend.SendAsync(account, message, draft.Forward ? null : threadId, cancellationToken);
             return true;
         }, cancellationToken);
+
+    public async Task<int?> GetUnreadCountAsync(string username, CancellationToken cancellationToken = default) =>
+        await db.MailAccounts.AsNoTracking().AnyAsync(account => account.Username == username, cancellationToken)
+            ? await RunAsync(username, (backend, account) => backend.UnreadCountAsync(account, cancellationToken), cancellationToken)
+            : null;
 
     public Task SetReadAsync(string username, string messageId, bool read, CancellationToken cancellationToken = default) =>
         RunAsync(username, (backend, account) => backend.SetReadAsync(account, messageId, read, cancellationToken), cancellationToken);
@@ -233,6 +248,21 @@ public sealed class MailService(
                 throw new MailException($"'{entry}' isn't an email address.");
             list.Add(address);
         }
+    }
+
+    private static MimePart Attachment(MailAttachmentUpload file)
+    {
+        var name = Path.GetFileName(file.FileName ?? string.Empty);
+        if (string.IsNullOrWhiteSpace(name)) name = "attachment";
+        if (!ContentType.TryParse(string.IsNullOrWhiteSpace(file.ContentType) ? "application/octet-stream" : file.ContentType, out var type))
+            type = new ContentType("application", "octet-stream");
+        return new MimePart(type)
+        {
+            Content = new MimeContent(new MemoryStream(file.Content)),
+            ContentDisposition = new ContentDisposition(ContentDisposition.Attachment),
+            ContentTransferEncoding = ContentEncoding.Base64,
+            FileName = name
+        };
     }
 
     private static string Host(string? value, string what)

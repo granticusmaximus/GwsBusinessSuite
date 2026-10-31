@@ -8,6 +8,7 @@
 @inject AuthenticationStateProvider AuthProvider
 @inject NavigationManager Navigation
 @inject IAdminPortalSummaryService SummaryService
+@inject GwsBusinessSuite.Infrastructure.Services.MailUnreadCounter MailUnread
 @inject ISiteSettingsService SiteSettingsService
 
 <nav class="gws-nav" aria-label="Primary">
@@ -181,6 +182,7 @@
                 <NavLink class="gws-nav-link" href="admin/mail" title="Mail">
                     <i class="bi bi-envelope" aria-hidden="true"></i>
                     <span class="gws-nav-link-copy"><span>Mail</span><small>Your own inbox</small></span>
+                    @if (MailUnread.Peek(_username) is > 0 and var unreadMail) { <span class="gws-nav-count">@unreadMail</span> }
                 </NavLink>
                 @if (Shown("scheduling"))
                 {
@@ -346,6 +348,7 @@
         !_hiddenNavKeys.Contains(featureKey, StringComparer.OrdinalIgnoreCase);
 
     private string _role = string.Empty;
+    private string _username = string.Empty;
     private bool IsNativeApp { get; set; }
     private int _pendingCommentCount;
     private int _unreadDockerAlertCount;
@@ -358,6 +361,7 @@
     {
         var state = await AuthProvider.GetAuthenticationStateAsync();
         _role = state.User.FindFirst(ClaimTypes.Role)?.Value ?? string.Empty;
+        _username = state.User.Identity?.Name ?? string.Empty;
         IsNativeApp = state.User.HasClaim(claim => claim.Type == "amr" && claim.Value is "device-secret" or "device-key");
 
         // A page in a workspace this role can't see (reached by its address) shows Home instead.

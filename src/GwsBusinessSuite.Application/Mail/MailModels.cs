@@ -59,11 +59,22 @@ public sealed record MailMessageDetail(
 
 public sealed record MailAttachmentContent(string FileName, string ContentType, byte[] Content);
 
+// A file attached to a message being written.
+public sealed record MailAttachmentUpload(string FileName, string ContentType, byte[] Content);
+
 // A new message, or a reply/forward of ReplyToMessageId (its threading headers and, for a
-// forward, its attachments are carried over).
+// forward, its attachments are carried over). Body is Markdown: it's sent as plain text and as
+// the HTML it formats to.
 public sealed record MailDraft(
     IReadOnlyList<string> To, IReadOnlyList<string> Cc, IReadOnlyList<string> Bcc, string Subject, string Body,
-    string? ReplyToMessageId = null, bool Forward = false);
+    string? ReplyToMessageId = null, bool Forward = false, IReadOnlyList<MailAttachmentUpload>? Attachments = null);
+
+public static class MailLimits
+{
+    // Gmail's own limit for what you attach (the encoded message may be a third bigger).
+    public const long MaxAttachmentBytes = 25L * 1024 * 1024;
+    public const int MaxAttachments = 20;
+}
 
 public sealed class MailException(string message) : Exception(message);
 
@@ -84,6 +95,8 @@ public interface IMailService
     Task SetStarredAsync(string username, string messageId, bool starred, CancellationToken cancellationToken = default);
     Task ArchiveAsync(string username, string messageId, CancellationToken cancellationToken = default);
     Task TrashAsync(string username, string messageId, CancellationToken cancellationToken = default);
+    // Unread messages in the inbox; null when the person has no mailbox connected.
+    Task<int?> GetUnreadCountAsync(string username, CancellationToken cancellationToken = default);
 
     // The Automation credential name a person's Gmail tokens are kept under.
     static string GoogleCredentialName(string username) => $"Mail - {username}";

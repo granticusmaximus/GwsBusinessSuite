@@ -1,5 +1,7 @@
 @page "/admin/mail"
-@rendermode InteractiveServer
+@* Not prerendered: a prerender would read the mailbox once more for nothing. *@
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IAsyncDisposable
 @attribute [Authorize(Policy = "AdminOnly")]
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.Automation
@@ -8,6 +10,7 @@
 @inject IMailService MailService
 @inject IGoogleOAuthService GoogleOAuth
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject GwsBusinessSuite.Infrastructure.Services.MailUnreadCounter MailUnread
 
 @* Mail (31-10-26): your own mailbox - Gmail through your Google connection, or any provider over
    IMAP/SMTP - read live from it. Messages are sanitized on the server and shown in a sandboxed
@@ -220,10 +223,22 @@ else
                     <input id="mail-subject" class="form-control form-control-sm mb-2" @bind="_compose.Subject" @bind:event="oninput" />
                     <label class="visually-hidden" for="mail-body">Message</label>
                     <textarea id="mail-body" class="form-control mail-compose-body" @bind="_compose.Body" @bind:event="oninput"></textarea>
+                    <div class="form-text">Formatting: **bold**, _italic_, - lists, [links](https://…). Lines starting with &gt; show as a quote.</div>
                     @if (_compose.Kind == ComposeKind.Forward && _detail?.Attachments.Count > 0)
                     {
                         <div class="small text-secondary mt-1"><i class="bi bi-paperclip" aria-hidden="true"></i> The @_detail.Attachments.Count attachment(s) go with it.</div>
                     }
+                    <div class="mail-compose-files mt-2">
+                        <label class="btn btn-outline-secondary btn-sm mb-0" for="mail-attach"><i class="bi bi-paperclip me-1" aria-hidden="true"></i>Attach files</label>
+                        <InputFile id="mail-attach" class="visually-hidden" multiple OnChange="AttachAsync" />
+                        @foreach (var file in _compose.Files)
+                        {
+                            <span class="badge text-bg-light border mail-compose-file">
+                                @file.FileName · @Size(file.Content.Length)
+                                <button type="button" class="btn-close ms-1" aria-label="Remove @file.FileName" @onclick="() => _compose.Files.Remove(file)"></button>
+                            </span>
+                        }
+                    </div>
                     <div class="d-flex gap-2 mt-2">
                         <button type="submit" class="btn btn-primary btn-sm" disabled="@(_busy || string.IsNullOrWhiteSpace(_compose.To + _compose.Cc + _compose.Bcc))">
                             <i class="bi bi-send me-1" aria-hidden="true"></i>@(_busy ? "Sending…" : "Send")
@@ -313,6 +328,7 @@ else
         public string Body { get; set; } = string.Empty;
         public bool ShowCc { get; set; }
         public string? ReplyToMessageId { get; init; }
+        public List<MailAttachmentUpload> Files { get; } = [];
     }
 
     private sealed class SetupState
@@ -380,6 +396,65 @@ else
             if (_account.LastError is { } lastError && _error is null) _error = $"Last time: {lastError}";
             await LoadListAsync(reset: true);
         }
+        _ = KeepCheckingAsync(_closing.Token);
+    }
+
+    // New mail shows up while the page is open: the first page is checked every two minutes and
+    // anything new goes on top (what's already listed stays where it is).
+    private static readonly TimeSpan CheckEvery = TimeSpan.FromMinutes(2);
+    private readonly CancellationTokenSource _closing = new();
+
+    private async Task KeepCheckingAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(CheckEvery);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                if (_account is null || _loadingList || _busy || !string.IsNullOrWhiteSpace(_search)) continue;
+                try
+                {
+                    var page = await MailService.ListAsync(_username, _folder, null, null, cancellationToken);
+                    var fresh = page.Messages.Where(message => _messages.All(existing => existing.Id != message.Id)).ToList();
+                    if (fresh.Count == 0) continue;
+                    _messages.InsertRange(0, fresh);
+                    MailUnread.Invalidate(_username);
+                    await InvokeAsync(StateHasChanged);
+                }
+                catch (MailException)
+                {
+                    // A blip; the next check tries again, and Refresh shows any real problem.
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        _closing.Cancel();
+        _closing.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    private async Task AttachAsync(InputFileChangeEventArgs e)
+    {
+        if (_compose is null) return;
+        _error = null;
+        foreach (var file in e.GetMultipleFiles(MailLimits.MaxAttachments))
+        {
+            var total = _compose.Files.Sum(f => (long)f.Content.Length) + file.Size;
+            if (_compose.Files.Count >= MailLimits.MaxAttachments || total > MailLimits.MaxAttachmentBytes)
+            {
+                _error = $"Attachments can add up to {MailLimits.MaxAttachmentBytes / (1024 * 1024)} MB ({MailLimits.MaxAttachments} files).";
+                break;
+            }
+            using var stream = new MemoryStream();
+            await file.OpenReadStream(MailLimits.MaxAttachmentBytes).CopyToAsync(stream);
+            _compose.Files.Add(new MailAttachmentUpload(file.Name, file.ContentType, stream.ToArray()));
+        }
     }
 
     private async Task OpenFolderAsync(string folder)
@@ -425,6 +500,7 @@ else
         try
         {
             _detail = await MailService.GetAsync(_username, message.Id, showImages);
+            if (message.Unread) MailUnread.Invalidate(_username);
             Replace(message.Id, item => item with { Unread = false });
         }
         catch (MailException ex)
@@ -472,6 +548,7 @@ else
         if (_detail is null) return;
         var id = _detail.Id;
         await RunAsync(() => MailService.SetReadAsync(_username, id, false));
+        MailUnread.Invalidate(_username);
         if (_error is null)
         {
             Replace(id, item => item with { Unread = true });
@@ -519,7 +596,7 @@ else
         if (_compose is null) return;
         var compose = _compose;
         var draft = new MailDraft(Split(compose.To), Split(compose.Cc), Split(compose.Bcc), compose.Subject, compose.Body,
-            compose.ReplyToMessageId, compose.Kind == ComposeKind.Forward);
+            compose.ReplyToMessageId, compose.Kind == ComposeKind.Forward, compose.Files);
         await RunAsync(() => MailService.SendAsync(_username, draft), "Sent.");
         if (_error is null) _compose = null;
     }

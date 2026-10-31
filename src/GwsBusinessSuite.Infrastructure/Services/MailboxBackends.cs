@@ -31,6 +31,7 @@ public interface IMailboxBackend
     Task SetStarredAsync(MailAccount account, string id, bool starred, CancellationToken cancellationToken);
     Task ArchiveAsync(MailAccount account, string id, CancellationToken cancellationToken);
     Task TrashAsync(MailAccount account, string id, CancellationToken cancellationToken);
+    Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken);
 }
 
 // Gmail through Google's API with the person's own Google connection (gmail.modify). A 401
@@ -123,6 +124,9 @@ public sealed class GmailMailboxBackend(IAutomationCredentialService credentials
 
     public async Task TrashAsync(MailAccount account, string id, CancellationToken cancellationToken) =>
         await CallAsync(account, HttpMethod.Post, $"messages/{Uri.EscapeDataString(id)}/trash", new JsonObject(), cancellationToken);
+
+    public async Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken) =>
+        (await CallAsync(account, HttpMethod.Get, "labels/INBOX", null, cancellationToken))?["messagesUnread"]?.GetValue<int>() ?? 0;
 
     private async Task ModifyAsync(MailAccount account, string id, string[] add, string[] remove, CancellationToken cancellationToken) =>
         await CallAsync(account, HttpMethod.Post, $"messages/{Uri.EscapeDataString(id)}/modify", new JsonObject
@@ -344,6 +348,15 @@ public sealed class ImapMailboxBackend(ISecretProtector secretProtector) : IMail
 
     public Task TrashAsync(MailAccount account, string id, CancellationToken cancellationToken) =>
         MoveAsync(account, id, MailFolders.Trash, cancellationToken);
+
+    public async Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken)
+    {
+        using var client = await ConnectAsync(account, cancellationToken);
+        await client.Inbox.StatusAsync(StatusItems.Unread, cancellationToken);
+        var unread = client.Inbox.Unread;
+        await client.DisconnectAsync(true, cancellationToken);
+        return unread;
+    }
 
     private async Task FlagAsync(MailAccount account, string id, MessageFlags flag, bool on, CancellationToken cancellationToken)
     {

@@ -72,5 +72,13 @@ connect to my actual emails as well within the app." That covers the three gaps 
     - `/auth/google/connect?purpose=mail`.
   - Tests: `MailServiceTests` (6, including a Gmail HTTP stub) and `MailMessageRendererTests` (4).
 - **Phase 4 done:** `docs/MAIL_USER_GUIDE.md`, indexed and added to the Sentinel mirror list.
-- Next (not built): attachments on new messages, a rich-text compose, an unread count in the nav,
-  Mail for non-admins.
+- **Phase 5 built 31-10-26 ("Continue forward"):**
+  - Attachments on new messages, replies and forwards (`MailAttachmentUpload`, `MailLimits`: 20
+    files, 25 MB).
+  - Markdown compose sent as text plus HTML (`MailFormatting`, Markdig with DisableHtml).
+  - Unread count beside Mail: the `MailUnreadCounter` singleton never waits; it refreshes in the
+    background in its own scope, at most every 2 minutes, because the nav is static SSR.
+  - Inbox auto-check every 2 minutes; the page is no longer prerendered.
+  - Tests: 3 more in `MailServiceTests`.
+- Not built, and needs Grant's decision: Mail for non-admins. Their Gmail tokens would sit in
+  Automation credentials, which every admin can see and use.
