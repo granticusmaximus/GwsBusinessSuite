@@ -38,7 +38,8 @@ public static class SignInRateLimits
     }
 
     private static bool IsSignInStep(PathString path) =>
-        path.StartsWithSegments("/auth") || path.StartsWithSegments("/admin/api/native/lock-unlock-pin");
+        path.StartsWithSegments("/auth") || path.StartsWithSegments("/admin/api/native/lock-unlock-pin")
+        || path.StartsWithSegments("/admin/api/native/lock-unlock-authenticator");
 
     // A navigation (a form post, a link, the Mac app's web view), not fetch() or an HTTP client.
     private static bool IsPageLoad(HttpRequest request) =>

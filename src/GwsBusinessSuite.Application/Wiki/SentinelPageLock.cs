@@ -20,6 +20,9 @@ public static class SentinelPageLock
         public const string Pin = "pin";
         public const string Passkey = "passkey";
         public const string Device = "device";
+        // The sign-in authenticator code (SentinelLockRecoveryService): the way back in when the
+        // PIN is forgotten or the only Touch ID key is gone.
+        public const string Authenticator = "authenticator";
     }
 
     // 6-8 digits.
@@ -96,4 +99,15 @@ public interface ISentinelPageLockService
     // Throws unless adding another unlock method is allowed now: either none exists yet, or this
     // session is unlocked.
     Task RequireCanAddMethodAsync(string username, string? sessionId, CancellationToken cancellationToken = default);
+}
+
+// Unlocking with the code from the sign-in authenticator app (31-10-26). Grant's only unlock method
+// was a Mac key the app had lost, with no PIN: adding a PIN or a new key needs an unlock first, so
+// there was no way back. The authenticator is the account's own second factor and isn't on the
+// computer, so someone using a signed-in session left open can't produce it.
+public interface ISentinelLockRecoveryService
+{
+    // Unlocks this session (as UnlockWithPinAsync does) after checking the code. Wrong codes are
+    // limited per person; throws SentinelLockException with the reason.
+    Task<long> UnlockWithAuthenticatorAsync(string username, string? sessionId, string code, CancellationToken cancellationToken = default);
 }

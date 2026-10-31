@@ -1591,6 +1591,42 @@ app.MapPost("/admin/api/native/lock-unlock-pin", async (
     .RequireAuthorization("ContentAccess")
     .RequireRateLimiting("login-code");
 
+// The same, with the code from the sign-in authenticator app instead (31-10-26): the way back when
+// there's no PIN and this Mac's old Touch ID key is gone (ISentinelLockRecoveryService).
+app.MapPost("/admin/api/native/lock-unlock-authenticator", async (
+    NativeLockAuthenticatorRequest request,
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelLockRecoveryService recovery,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsNativeCall(httpContext)) return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    try
+    {
+        var expires = await recovery.UnlockWithAuthenticatorAsync(httpContext.User.Identity!.Name!, NativeLockSession(httpContext),
+            request.Code ?? string.Empty, cancellationToken);
+        return Results.Json(new { expiresAtUnix = expires });
+    }
+    catch (GwsBusinessSuite.Application.Wiki.SentinelLockException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+})
+    .RequireAuthorization("ContentAccess")
+    .RequireRateLimiting("login-code");
+
+// Which ways to unlock this person has, so the app asks for the right one (a PIN, or the
+// authenticator code when there's no PIN).
+app.MapGet("/admin/api/native/lock-methods", async (
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Wiki.ISentinelPageLockService pageLocks,
+    CancellationToken cancellationToken) =>
+{
+    if (!IsNativeCall(httpContext)) return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
+    var methods = await pageLocks.GetMethodsAsync(httpContext.User.Identity!.Name!, cancellationToken);
+    return Results.Json(new { hasPin = methods.HasPin, passkeys = methods.Passkeys, deviceKeys = methods.DeviceKeys });
+})
+    .RequireAuthorization("ContentAccess");
+
 // What the app's web-view session is (the Mac app checks it after a Touch ID sign-in: Content
 // Studio and other Mac-only tools need amr device-key or device-secret).
 app.MapGet("/admin/api/native/session-info", (HttpContext httpContext) =>
@@ -5425,6 +5461,7 @@ record PasskeyLoginRequest(string? CeremonyId, string? Assertion, string? Return
 record MacApprovalStartRequest(string? Username);
 record NativeSignInApproval(Guid KeyId, string? Signature, int Number);
 record NativeLockPinRequest(string? Pin);
+record NativeLockAuthenticatorRequest(string? Code);
 record NativeLockDeviceRequest(string? Name, string? PublicKey, string? Storage);
 record NativeLockChallengeRequest(Guid KeyId);
 record NativeLockUnlockRequest(Guid KeyId, string? Signature);

@@ -188,7 +188,7 @@ public sealed class SentinelPageLockService(
     public async Task RequireCanAddMethodAsync(string username, string? sessionId, CancellationToken cancellationToken = default)
     {
         if ((await GetMethodsAsync(username, cancellationToken)).Any && await ActiveGrantExpiryAsync(username, sessionId, cancellationToken) is null)
-            throw new SentinelLockException("Unlock first (PIN or Touch ID) - then you can add another way to unlock.");
+            throw new SentinelLockException("Unlock first (PIN, Touch ID or your authenticator code) - then you can add another way to unlock.");
     }
 
     public async Task LockSessionNowAsync(string username, string? sessionId, CancellationToken cancellationToken = default)

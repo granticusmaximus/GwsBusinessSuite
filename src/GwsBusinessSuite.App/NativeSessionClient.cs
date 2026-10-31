@@ -305,6 +305,21 @@ public sealed class NativeSessionClient(HttpClient httpClient)
         return error;
     }
 
+    // The code from the sign-in authenticator app: the way back when there's no PIN and this Mac's
+    // old Touch ID key is gone.
+    public async Task<string?> UnlockWithAuthenticatorAsync(string code, CancellationToken cancellationToken = default)
+    {
+        var (_, error) = await PostAsync("/admin/api/native/lock-unlock-authenticator", new { code }, cancellationToken);
+        return error;
+    }
+
+    // Whether this person has a page-lock PIN (null with the reason when the server can't say).
+    public async Task<(bool? HasPin, string? Error)> GetHasLockPinAsync(CancellationToken cancellationToken = default)
+    {
+        var (json, error) = await GetJsonAsync("/admin/api/native/lock-methods", cancellationToken);
+        return json is { } body ? (body.GetProperty("hasPin").GetBoolean(), null) : (null, error);
+    }
+
     // The app was hidden: this session's locked pages lock again.
     public async Task LockSessionAsync(CancellationToken cancellationToken = default) =>
         await PostAsync("/admin/api/native/lock-session", new { }, cancellationToken);

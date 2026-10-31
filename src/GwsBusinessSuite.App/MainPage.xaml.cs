@@ -314,17 +314,9 @@ public partial class MainPage : ContentPage
             var (ok, message) = await _touchIdLock.EnrollAsync();
             DebugLog($"Touch ID set-up: ok={ok} message={message}");
             if (ok || !message.StartsWith("Unlock first", StringComparison.Ordinal)) return (ok, message);
-            var pin = await DisplayPromptAsync("Set Up Touch ID",
-                "You already have a page-lock PIN. Enter it to confirm it's you.", accept: "Continue", cancel: "Cancel",
-                maxLength: 8, keyboard: Keyboard.Numeric);
-            if (string.IsNullOrWhiteSpace(pin)) return (false, "Set-up cancelled. Touch ID on this Mac is as it was.");
-            if (await _session.UnlockWithPinAsync(pin.Trim()) is { } pinError)
-            {
-                DebugLog($"Touch ID set-up: PIN refused: {pinError}");
-                return (false, pinError);
-            }
+            if (await ConfirmItsYouAsync() is { } confirmError) return (false, confirmError);
             (ok, message) = await _touchIdLock.EnrollAsync();
-            DebugLog($"Touch ID set-up after PIN: ok={ok} message={message}");
+            DebugLog($"Touch ID set-up after confirming: ok={ok} message={message}");
             return (ok, message);
         }
         finally
@@ -333,8 +325,36 @@ public partial class MainPage : ContentPage
         }
     }
 
+    // Unlocks this session before another way to unlock is added: the page-lock PIN, or the code
+    // from the sign-in authenticator app. Without a PIN it's the code straight away (31-10-26: the
+    // prompt asked for a PIN Grant had never set, while the only key was the one this Mac lost).
+    // Null once unlocked, otherwise why not.
+    private async Task<string?> ConfirmItsYouAsync()
+    {
+        const string Cancelled = "Set-up cancelled. Touch ID on this Mac is as it was.";
+        const string PinChoice = "Page-lock PIN";
+        const string CodeChoice = "Authenticator app code";
+        var (hasPin, methodsError) = await _session.GetHasLockPinAsync();
+        if (hasPin is null) return methodsError;
+        var choice = hasPin.Value
+            ? await DisplayActionSheetAsync("Confirm it's you to set up Touch ID", "Cancel", null, PinChoice, CodeChoice)
+            : CodeChoice;
+        if (choice is null || choice == "Cancel") return Cancelled;
+
+        var usePin = choice == PinChoice;
+        var entered = await DisplayPromptAsync("Set Up Touch ID",
+            usePin ? "Enter your page-lock PIN." : "Enter the 6-digit code from the authenticator app you sign in with.",
+            accept: "Continue", cancel: "Cancel", maxLength: usePin ? 8 : 20, keyboard: Keyboard.Numeric);
+        if (string.IsNullOrWhiteSpace(entered)) return Cancelled;
+        var error = usePin
+            ? await _session.UnlockWithPinAsync(entered.Trim())
+            : await _session.UnlockWithAuthenticatorAsync(entered.Trim());
+        if (error is not null) DebugLog($"Touch ID set-up: {(usePin ? "PIN" : "authenticator code")} refused: {error}");
+        return error;
+    }
+
     // Set Up Touch ID: creates this Mac's key (Touch ID asked), registers it with Sentinel - after
-    // the page-lock PIN when one exists - and then offers to sign in with it straight away, which
+    // the PIN or authenticator code when it asks - and then offers to sign in with it straight away, which
     // gives the session the Mac-app sign-in that Content Studio needs.
     private async Task SetUpTouchIdAsync()
     {
