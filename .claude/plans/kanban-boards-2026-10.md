@@ -416,3 +416,19 @@ Built in this order, each one verified unit (verify-release + a live browser che
 - **K9g Share a board with the team.** Per-board View/Edit grants (Sentinel per-item access, as
   Automation sharing) for Authors/Contributors; they see only shared boards and never CRM links,
   timers or billing on cards.
+  **Done 31-10-26.**
+  - Guards: `KanbanBoardService.Access.cs`. RequireEditAsync is on 28 changes, RequireAdminAsync on
+    create, delete/restore, email, publish and links. Admins and app actors (automation-engine and
+    others, not people) pass.
+  - Reads: `GetAccessAsync` and `ListBoardsForAsync`.
+  - Pages:
+    - Board and Boards pages use ContentAccess. A board not shared with you shows "isn't shared
+      with you".
+    - View-only gets a badge, no add/rename/columns, and no drag JS. The card opens read-only with
+      Open in Sentinel, since Sentinel's drawer saves straight to the database.
+    - Admin-only: Share, Ask, Automate, Roadmap, Email, rules, and the card's links and time
+      (`KanbanCardFields.ShowBusiness`).
+    - `KanbanSharePanel` (admins) sets View/Edit grants.
+    - Non-admins get Boards in Home.
+  - Notifications go to admins plus people the board is shared with.
+  - Tests: `KanbanBoardSharingTests` (4), plus the BoardNotification test extended.

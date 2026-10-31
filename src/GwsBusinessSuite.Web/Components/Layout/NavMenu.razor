@@ -49,6 +49,14 @@
                 <span class="gws-nav-link-copy"><span>Mail</span><small>Your own inbox</small></span>
                 @if (MailUnread.Peek(_username) is > 0 and var unreadMail) { <span class="gws-nav-count">@unreadMail</span> }
             </NavLink>
+            @if (!IsAdmin)
+            {
+                @* Boards shared with them (K9g); admins have Boards under Knowledge. *@
+                <NavLink class="gws-nav-link" href="admin/boards" title="Boards">
+                    <i class="bi bi-kanban" aria-hidden="true"></i>
+                    <span class="gws-nav-link-copy"><span>Boards</span><small>Shared with you</small></span>
+                </NavLink>
+            }
             <a class="@AppLinkClass(AdminApps.Community)" href="@AdminApps.Community.Href" aria-current="@AppCurrent(AdminApps.Community)" title="Community">
                 <i class="bi @AdminApps.Community.Icon" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>Community</span><small>@AdminApps.Community.Description</small></span>

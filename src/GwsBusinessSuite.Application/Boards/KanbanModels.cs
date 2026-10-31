@@ -327,8 +327,16 @@ public static class KanbanTemplates
     public static KanbanTemplate? Find(string? key) => All.FirstOrDefault(template => template.Key == key);
 }
 
+// K9g: what one person may do with one board. Admins (and the app's own actors) can do everything.
+public sealed record KanbanBoardAccess(bool CanView, bool CanEdit, bool IsAdmin);
+
 public interface IKanbanBoardService
 {
+    // K9g (31-10-26): a board is shared with a Sentinel View or Edit grant on its database.
+    Task<KanbanBoardAccess> GetAccessAsync(Guid databaseId, string username, CancellationToken cancellationToken = default);
+    // The boards this person can see: all of them for an admin, the shared ones otherwise.
+    Task<IReadOnlyList<KanbanBoardSummary>> ListBoardsForAsync(string username, CancellationToken cancellationToken = default);
+
     // Sentinel databases that work as boards: those with a Status property, or a Select property
     // that a Board view groups by.
     Task<IReadOnlyList<KanbanBoardSummary>> ListBoardsAsync(CancellationToken cancellationToken = default);

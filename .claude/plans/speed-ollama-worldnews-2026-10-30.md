@@ -54,4 +54,4 @@ hand every time he opened the app.
   - Cesium is prefetched while the portal is idle
   - It stays a full page load: Cesium needs 'unsafe-eval', which only /admin/osint's own CSP allows.
 - [ ] After deploy: re-check the droplet (docker stats during a read) to confirm the app keeps a core.
-- [ ] Boards K9g (sharing) is paused, nothing written.
+- [x] Boards K9g (sharing): built 31-10-26 (see kanban-boards-2026-10.md).

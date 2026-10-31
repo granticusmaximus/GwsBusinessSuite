@@ -63,6 +63,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<Guid> CreateBoardAsync(string title, string templateKey, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireAdminAsync(performedBy, cancellationToken);
         var template = KanbanTemplates.Find(templateKey) ?? throw new ArgumentException($"There's no board template called '{templateKey}'.", nameof(templateKey));
         var name = string.IsNullOrWhiteSpace(title) ? template.Name : title.Trim();
         var database = await databases.CreateDatabaseAsync(name, null, performedBy, cancellationToken);
@@ -106,14 +107,21 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         return database.Id;
     }
 
-    public Task DeleteBoardAsync(Guid databaseId, string performedBy, CancellationToken cancellationToken = default) =>
-        databases.TrashDatabaseAsync(databaseId, performedBy, cancellationToken);
+    public async Task DeleteBoardAsync(Guid databaseId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        await RequireAdminAsync(performedBy, cancellationToken);
+        await databases.TrashDatabaseAsync(databaseId, performedBy, cancellationToken);
+    }
 
-    public Task RestoreBoardAsync(Guid databaseId, string performedBy, CancellationToken cancellationToken = default) =>
-        databases.RestoreDatabaseAsync(databaseId, performedBy, cancellationToken);
+    public async Task RestoreBoardAsync(Guid databaseId, string performedBy, CancellationToken cancellationToken = default)
+    {
+        await RequireAdminAsync(performedBy, cancellationToken);
+        await databases.RestoreDatabaseAsync(databaseId, performedBy, cancellationToken);
+    }
 
     public async Task RenameBoardAsync(Guid databaseId, string title, string? icon, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var name = title.Trim();
         if (name.Length == 0) throw new ArgumentException("Give the board a name.", nameof(title));
         if (name.Length > 120) throw new ArgumentException("Keep the name under 120 characters.", nameof(title));
@@ -124,6 +132,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<string> AddColumnAsync(Guid databaseId, string label, string? group, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var (status, options) = await ColumnOptionsAsync(databaseId, cancellationToken);
         var name = ColumnLabel(label, options, exceptId: null);
         var color = KanbanColumnEdits.Colors.FirstOrDefault(c => options.All(o => !string.Equals(o.Color, c, StringComparison.OrdinalIgnoreCase)))
@@ -136,6 +145,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
     public async Task UpdateColumnAsync(Guid databaseId, string optionId, string label, string color, string? group, string performedBy,
         CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var (status, options) = await ColumnOptionsAsync(databaseId, cancellationToken);
         var current = options.FirstOrDefault(o => o.Id == optionId) ?? throw new KeyNotFoundException("That column isn't on the board any more.");
         if (!SafeColorPattern().IsMatch(color ?? string.Empty)) throw new ArgumentException("Pick a colour for the column.", nameof(color));
@@ -153,6 +163,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task MoveColumnAsync(Guid databaseId, string optionId, int offset, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var (status, options) = await ColumnOptionsAsync(databaseId, cancellationToken);
         var current = options.FirstOrDefault(o => o.Id == optionId) ?? throw new KeyNotFoundException("That column isn't on the board any more.");
         // Neighbours as the board shows them: a Status board orders by group first, so a column
@@ -170,6 +181,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
     public async Task DeleteColumnAsync(Guid databaseId, string optionId, string? moveCardsTo, string performedBy,
         CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var database = await databases.GetDatabaseAsync(databaseId, cancellationToken) ?? throw new KeyNotFoundException("That board isn't there any more.");
         var status = StatusProperty(database) ?? throw new KeyNotFoundException("That board has no columns to edit.");
         var options = WikiDatabasePropertyConfig.GetOptions(status).ToList();
@@ -212,6 +224,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<string?> SetEmailTokenAsync(Guid databaseId, bool on, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireAdminAsync(performedBy, cancellationToken);
         var settings = await GetSettingsAsync(databaseId, cancellationToken);
         // Ten lower-case letters and digits: unguessable enough for an address that only accepts
         // mail from known, verified senders who can edit the board anyway.
@@ -239,6 +252,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<string> CreateEpicAsync(Guid databaseId, string name, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var database = await databases.GetDatabaseAsync(databaseId, cancellationToken) ?? throw new KeyNotFoundException("That board isn't there any more.");
         var properties = database.Properties.ToList();
         var epicProperty = Find(properties, WikiDatabasePropertyTypes.Select, EpicNames);
@@ -259,6 +273,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task UpdateEpicAsync(Guid databaseId, string optionId, string name, string color, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var (epicProperty, options) = await EpicOptionsAsync(databaseId, cancellationToken);
         var current = options.FirstOrDefault(o => o.Id == optionId) ?? throw new KeyNotFoundException("That epic isn't on the board any more.");
         if (!SafeColorPattern().IsMatch(color ?? string.Empty)) throw new ArgumentException("Pick a colour for the epic.", nameof(color));
@@ -268,6 +283,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task DeleteEpicAsync(Guid databaseId, string optionId, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var database = await databases.GetDatabaseAsync(databaseId, cancellationToken) ?? throw new KeyNotFoundException("That board isn't there any more.");
         var epicProperty = Find(database.Properties.ToList(), WikiDatabasePropertyTypes.Select, EpicNames)
             ?? throw new KeyNotFoundException("That board has no epics.");
@@ -451,6 +467,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<int> ArchiveCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         if (rowIds.Count == 0) return 0;
         var property = await EnsureArchivedPropertyAsync(databaseId, performedBy, cancellationToken);
         var now = JsonValue.Create(DateTimeOffset.UtcNow);
@@ -460,6 +477,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task UnarchiveCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         if (rowIds.Count == 0) return;
         var property = await EnsureArchivedPropertyAsync(databaseId, performedBy, cancellationToken);
         await SetCardsValueAsync(databaseId, rowIds, property, _ => null, performedBy, cancellationToken);
@@ -500,6 +518,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task MoveCardAsync(Guid databaseId, Guid rowId, string? optionId, Guid? beforeRowId, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var status = await StatusPropertyAsync(databaseId, cancellationToken);
         // MoveRowAsync's index counts every other row in the target column (sub-items and trashed
         // rows included), ordered by SortOrder; this finds the anchor card's place in that list.
@@ -521,6 +540,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<Guid> AddCardAsync(Guid databaseId, string? optionId, string title, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         if (string.IsNullOrWhiteSpace(title)) throw new ArgumentException("A card needs a title.", nameof(title));
         var status = await StatusPropertyAsync(databaseId, cancellationToken);
         var titleProperty = await TitlePropertyAsync(databaseId, cancellationToken);
@@ -539,6 +559,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
     public async Task<IReadOnlyDictionary<Guid, JsonNode?>> SetCardsValueAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, Guid propertyId,
         Func<JsonNode?, JsonNode?> change, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var key = propertyId.ToString();
         var before = new Dictionary<Guid, JsonNode?>();
         foreach (var rowId in rowIds.Distinct())
@@ -559,6 +580,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task RestoreCardValuesAsync(Guid databaseId, Guid propertyId, IReadOnlyDictionary<Guid, JsonNode?> values, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         foreach (var (rowId, value) in values)
         {
             await SetCardsValueAsync(databaseId, [rowId], propertyId, _ => value?.DeepClone(), performedBy, cancellationToken);
@@ -586,6 +608,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<Guid> AddSubItemAsync(Guid databaseId, Guid parentRowId, string title, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         if (string.IsNullOrWhiteSpace(title)) throw new ArgumentException("A sub-item needs a title.", nameof(title));
         var status = await StatusPropertyAsync(databaseId, cancellationToken);
         var titleProperty = await TitlePropertyAsync(databaseId, cancellationToken);
@@ -602,6 +625,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task SetSubItemDoneAsync(Guid databaseId, Guid rowId, bool done, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var status = await StatusPropertyAsync(databaseId, cancellationToken);
         var options = ColumnOrder(status);
         var target = done
@@ -630,6 +654,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task SaveSettingsAsync(Guid databaseId, KanbanSettings settings, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         if (settings.SwimlaneBy is { } lane && !KanbanSwimlanes.All.Contains(lane))
             throw new ArgumentException($"'{lane}' isn't a swimlane choice.", nameof(settings));
         if (settings.WipLimits.Values.Any(limit => limit < 1 || limit > 999))
@@ -664,6 +689,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task SetBlockedAsync(Guid databaseId, Guid rowId, bool blocked, string? reason, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var properties = await db.WikiDatabaseProperties.AsNoTracking().Where(property => property.WikiDatabaseId == databaseId).ToListAsync(cancellationToken);
         async Task<Guid> EnsureAsync(string name, string type) =>
             Find(properties, type, [name])?.Id
@@ -677,6 +703,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task SetWaitingOnAsync(Guid databaseId, Guid rowId, IReadOnlyCollection<Guid> dependencyRowIds, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var dependencies = dependencyRowIds.Distinct().ToList();
         if (dependencies.Contains(rowId)) throw new ArgumentException("A card can't wait on itself.", nameof(dependencyRowIds));
         var valid = await db.WikiDatabaseRows.AsNoTracking()
@@ -920,6 +947,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<string> CreateSprintAsync(Guid databaseId, string name, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var properties = await db.WikiDatabaseProperties.AsNoTracking().Where(property => property.WikiDatabaseId == databaseId).ToListAsync(cancellationToken);
         var sprintProperty = Find(properties, WikiDatabasePropertyTypes.Select, SprintNames);
         var existing = sprintProperty is null ? [] : WikiDatabasePropertyConfig.GetOptions(sprintProperty);
@@ -941,14 +969,16 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         return option.Id;
     }
 
-    public Task UpdateSprintAsync(Guid databaseId, string optionId, string goal, decimal? capacity, string performedBy, CancellationToken cancellationToken = default)
+    public async Task UpdateSprintAsync(Guid databaseId, string optionId, string goal, decimal? capacity, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         if (capacity is < 0) throw new ArgumentException("Capacity can't be negative.", nameof(capacity));
-        return UpdateSprintEntryAsync(databaseId, optionId, sprint => sprint with { Goal = goal.Trim(), Capacity = capacity }, performedBy, cancellationToken);
+        await UpdateSprintEntryAsync(databaseId, optionId, sprint => sprint with { Goal = goal.Trim(), Capacity = capacity }, performedBy, cancellationToken);
     }
 
     public async Task StartSprintAsync(Guid databaseId, string optionId, DateOnly start, DateOnly end, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         if (end < start) throw new ArgumentException("A sprint ends after it starts.", nameof(end));
         var settings = await GetSettingsAsync(databaseId, cancellationToken);
         if (settings.Sprints.Any(sprint => sprint.State == KanbanSprintStates.Active && sprint.OptionId != optionId))
@@ -960,6 +990,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<KanbanSprintSummary> CompleteSprintAsync(Guid databaseId, string optionId, string? moveTo, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var sprints = await ListSprintsAsync(databaseId, cancellationToken);
         var sprint = sprints.FirstOrDefault(item => item.OptionId == optionId) ?? throw new InvalidOperationException("That sprint no longer exists.");
         if (sprint.State == KanbanSprintStates.Done) throw new InvalidOperationException("That sprint is already complete.");
@@ -1009,6 +1040,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<int> CompleteSubItemsAsync(Guid databaseId, Guid parentRowId, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var open = (await ListSubItemsAsync(databaseId, parentRowId, cancellationToken)).Where(item => !item.Done).ToList();
         foreach (var item in open) await SetSubItemDoneAsync(databaseId, item.RowId, true, performedBy, cancellationToken);
         return open.Count;
@@ -1016,6 +1048,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<Guid> AddQuickCardAsync(Guid databaseId, string? optionId, KanbanQuickCard card, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         if (string.IsNullOrWhiteSpace(card.Title)) throw new ArgumentException("A card needs a title.", nameof(card));
         var board = await GetBoardAsync(databaseId, cancellationToken) ?? throw new InvalidOperationException("That board no longer exists.");
         var titleProperty = await TitlePropertyAsync(databaseId, cancellationToken);
@@ -1112,6 +1145,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
     public async Task<KanbanRoadmapView> PublishRoadmapAsync(Guid databaseId, IReadOnlyList<string> columns, bool votes, bool descriptions, string performedBy,
         CancellationToken cancellationToken = default)
     {
+        await RequireAdminAsync(performedBy, cancellationToken);
         if (access is null || secrets is null) throw new InvalidOperationException("Publishing isn't available here.");
         var board = await GetBoardAsync(databaseId, cancellationToken) ?? throw new InvalidOperationException("That board no longer exists.");
         var chosen = board.Columns.Where(column => column.OptionId is not null && columns.Contains(column.OptionId)).Select(column => column.OptionId!).ToList();
@@ -1132,6 +1166,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task UnpublishRoadmapAsync(Guid databaseId, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireAdminAsync(performedBy, cancellationToken);
         var settings = await GetSettingsAsync(databaseId, cancellationToken);
         if (settings.Roadmap is not { } roadmap) return;
         if (access is not null) await access.RevokePublicShareAsync(roadmap.ShareId, performedBy, cancellationToken);
@@ -1261,6 +1296,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task LinkAsync(Guid databaseId, Guid rowId, string kind, Guid targetId, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireAdminAsync(performedBy, cancellationToken);
         if (!KanbanLinkKinds.All.Contains(kind)) throw new ArgumentException($"A card can't be linked to a {kind}.", nameof(kind));
         if (!await db.WikiDatabaseRows.AnyAsync(row => row.Id == rowId && row.WikiDatabaseId == databaseId && row.TrashedAt == null, cancellationToken))
             throw new InvalidOperationException("That card no longer exists.");
@@ -1346,6 +1382,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<Guid> AddCardFromTicketAsync(Guid databaseId, Guid ticketId, string? optionId, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireAdminAsync(performedBy, cancellationToken);
         var subject = await db.SupportTickets.AsNoTracking().Where(ticket => ticket.Id == ticketId).Select(ticket => ticket.Subject).FirstOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException("That ticket no longer exists.");
         var status = await StatusPropertyAsync(databaseId, cancellationToken);
@@ -1395,6 +1432,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task<Guid> AddCardFromTemplateAsync(Guid databaseId, Guid templateId, string? optionId, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         var name = await db.WikiDatabaseRowTemplates.AsNoTracking()
             .Where(template => template.Id == templateId && template.WikiDatabaseId == databaseId)
             .Select(template => template.Name)
@@ -1415,11 +1453,13 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
 
     public async Task TrashCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         foreach (var rowId in rowIds.Distinct()) await databases.TrashRowAsync(databaseId, rowId, performedBy, cancellationToken);
     }
 
     public async Task RestoreCardsAsync(Guid databaseId, IReadOnlyCollection<Guid> rowIds, string performedBy, CancellationToken cancellationToken = default)
     {
+        await RequireEditAsync(databaseId, performedBy, cancellationToken);
         foreach (var rowId in rowIds.Distinct()) await databases.RestoreRowAsync(databaseId, rowId, performedBy, cancellationToken);
     }
 

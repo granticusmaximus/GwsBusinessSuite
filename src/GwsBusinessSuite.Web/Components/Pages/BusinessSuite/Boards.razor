@@ -1,7 +1,10 @@
 @page "/admin/boards"
 @rendermode InteractiveServer
-@attribute [Authorize(Policy = "AdminOnly")]
+@* K9g (31-10-26): authors and contributors see the boards shared with them. *@
+@attribute [Authorize(Policy = "ContentAccess")]
 @using GwsBusinessSuite.Application.Boards
+@using Microsoft.AspNetCore.Components.Authorization
+@using GwsBusinessSuite.Domain.Entities
 @inject IKanbanBoardService BoardService
 @inject ICurrentUserAccessor CurrentUserAccessor
 @inject NavigationManager Navigation
@@ -12,14 +15,17 @@
 
 <PageHeader Title="Boards" Icon="bi-kanban-fill" Description="Kanban and sprint boards for your work. Every board is a Sentinel database and every card a Sentinel page, so nothing lives in two places.">
     <Actions>
-        <a class="btn btn-outline-secondary" href="admin/my-day"><i class="bi bi-sun me-1" aria-hidden="true"></i>My day</a>
-        <button type="button" class="btn btn-primary" @onclick="() => _creating = !_creating" aria-expanded="@(_creating ? "true" : "false")">
-            <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New board
-        </button>
+        @if (_isAdmin)
+        {
+            <a class="btn btn-outline-secondary" href="admin/my-day"><i class="bi bi-sun me-1" aria-hidden="true"></i>My day</a>
+            <button type="button" class="btn btn-primary" @onclick="() => _creating = !_creating" aria-expanded="@(_creating ? "true" : "false")">
+                <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>New board
+            </button>
+        }
     </Actions>
 </PageHeader>
 
-@if (_creating)
+@if (_creating && _isAdmin)
 {
     <section class="boards-new card border-0 shadow-sm mb-4" aria-labelledby="boards-new-title">
         <div class="card-body">
@@ -60,6 +66,10 @@
 {
     <ListSkeleton Message="Loading boards…" Grid="true" Rows="6" CssClass="px-0" />
 }
+else if (_boards.Count == 0 && !_isAdmin)
+{
+    <EmptyState Icon="bi-kanban" Title="No boards shared with you yet" Message="When an admin shares a board with you, it shows up here." />
+}
 else if (_boards.Count == 0)
 {
     <EmptyState Icon="bi-kanban" Title="No boards yet" Message="Make one from a template: Personal Kanban, a sprint board, bug triage or a content pipeline.">
@@ -87,12 +97,15 @@ else
             else
             {
             <div class="boards-tile-wrap">
-            <div class="boards-tile-actions">
-                <button type="button" class="boards-tile-action" title="Rename board" aria-label="@($"Rename {board.Title}")"
-                        @onclick="() => StartRename(board.DatabaseId)"><i class="bi bi-pencil" aria-hidden="true"></i></button>
-                <button type="button" class="boards-tile-action is-danger" title="Delete board" aria-label="@($"Delete {board.Title}")"
-                        @onclick="() => _pendingDelete = board"><i class="bi bi-trash3" aria-hidden="true"></i></button>
-            </div>
+            @if (_isAdmin)
+            {
+                <div class="boards-tile-actions">
+                    <button type="button" class="boards-tile-action" title="Rename board" aria-label="@($"Rename {board.Title}")"
+                            @onclick="() => StartRename(board.DatabaseId)"><i class="bi bi-pencil" aria-hidden="true"></i></button>
+                    <button type="button" class="boards-tile-action is-danger" title="Delete board" aria-label="@($"Delete {board.Title}")"
+                            @onclick="() => _pendingDelete = board"><i class="bi bi-trash3" aria-hidden="true"></i></button>
+                </div>
+            }
             <a class="boards-tile" href="admin/boards/@board.DatabaseId">
                 <span class="boards-tile-icon" aria-hidden="true">@(string.IsNullOrWhiteSpace(board.Icon) ? "🗂️" : board.Icon)</span>
                 <span class="boards-tile-title">@board.Title</span>
@@ -129,12 +142,19 @@ else
     // ⌘K's "New board" arrives as ?new=1.
     [SupplyParameterFromQuery(Name = "new")] public string? NewQuery { get; set; }
 
+    // K9g: an admin sees and manages every board; anyone else, the boards shared with them.
+    private string _username = string.Empty;
+    private bool _isAdmin;
+    [CascadingParameter] private Task<AuthenticationState> AuthenticationState { get; set; } = null!;
+
     protected override async Task OnInitializedAsync()
     {
-        _creating = NewQuery == "1";
+        _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        _isAdmin = (await AuthenticationState).User.IsInRole(AppRoles.Admin);
+        _creating = NewQuery == "1" && _isAdmin;
         try
         {
-            _boards = await BoardService.ListBoardsAsync();
+            _boards = await BoardService.ListBoardsForAsync(_username);
         }
         catch (Exception ex)
         {
@@ -156,11 +176,11 @@ else
         {
             var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
             await BoardService.DeleteBoardAsync(board.DatabaseId, performedBy);
-            _boards = await BoardService.ListBoardsAsync();
+            _boards = await BoardService.ListBoardsForAsync(_username);
             Toasts.Show($"{board.Title} moved to the trash.", async () =>
             {
                 await BoardService.RestoreBoardAsync(board.DatabaseId, performedBy);
-                _boards = await BoardService.ListBoardsAsync();
+                _boards = await BoardService.ListBoardsForAsync(_username);
                 await InvokeAsync(StateHasChanged);
             }, StatusTone.Success);
         }
@@ -186,7 +206,7 @@ else
         try
         {
             await BoardService.RenameBoardAsync(databaseId, rename.Title, rename.Icon, await CurrentUserAccessor.GetCurrentUsernameAsync());
-            _boards = await BoardService.ListBoardsAsync();
+            _boards = await BoardService.ListBoardsForAsync(_username);
             _renamingId = null;
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException)

@@ -1,0 +1,111 @@
+@using GwsBusinessSuite.Application.Boards
+@using GwsBusinessSuite.Application.Users
+@using GwsBusinessSuite.Application.Wiki
+@using GwsBusinessSuite.Domain.Entities
+@inject ISentinelAccessService Access
+@inject IUserManagementService Users
+@inject ICurrentUserAccessor CurrentUserAccessor
+@inject GwsBusinessSuite.Web.Services.ToastState Toasts
+
+@* Share this board (Boards K9g, 31-10-26): View or Edit for the people who aren't admins - a
+   Sentinel grant on the board's database, so the same grant opens its cards in Sentinel too.
+   Admins see every board already. *@
+<div class="kb-modal-backdrop" @onclick="Close"></div>
+<section class="kb-modal kb-share" role="dialog" aria-modal="true" aria-labelledby="kb-share-title">
+    <header class="kb-modal-head">
+        <h2 id="kb-share-title"><i class="bi bi-people me-2" aria-hidden="true"></i>Share this board</h2>
+        <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Close" @onclick="Close"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+    </header>
+    <p class="kb-share-note">
+        Authors and contributors see only the boards shared with them. <strong>View</strong> lets them look;
+        <strong>Edit</strong> lets them add, move and change cards. Either way they never see the contacts, tickets,
+        invoices or timers on cards, and only admins can delete, publish or automate a board.
+    </p>
+    @if (_people is null)
+    {
+        <LoadingIndicator Message="Loading people…" />
+    }
+    else if (_people.Count == 0)
+    {
+        <p class="kb-share-note mb-0">Everyone here is an admin, and admins see every board. Add an author or contributor under Users to share with them.</p>
+    }
+    else
+    {
+        <ul class="kb-share-people list-unstyled mb-0">
+            @foreach (var person in _people)
+            {
+                <li class="kb-share-person" @key="@($"{person.Username}-{_generation}")">
+                    <span class="kb-share-name">@person.Username <small class="text-secondary">@person.Role</small></span>
+                    <label class="visually-hidden" for="@($"kb-share-{person.Username}")">Access for @person.Username</label>
+                    <select id="@($"kb-share-{person.Username}")" class="form-select form-select-sm" disabled="@_busy"
+                            value="@LevelOf(person.Username)" @onchange="e => SetAsync(person.Username, e.Value as string)">
+                        <option value="">Not shared</option>
+                        <option value="@SentinelAccessLevels.View">View</option>
+                        <option value="@SentinelAccessLevels.Edit">Edit</option>
+                    </select>
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public KanbanBoard Board { get; set; } = null!;
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private List<UserView>? _people;
+    private IReadOnlyList<SentinelPermissionView> _grants = [];
+    private bool _busy;
+    private int _generation;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _people = (await Users.ListUsersAsync()).Where(user => user.IsActive && user.Role != AppRoles.Admin).OrderBy(user => user.Username).ToList();
+        await LoadGrantsAsync();
+    }
+
+    private async Task LoadGrantsAsync() =>
+        _grants = (await Access.GetAccessAsync(Board.DatabaseId, isDatabase: true)).Permissions;
+
+    // The board's own grant; Edit-like levels above Edit read as Edit here.
+    private string LevelOf(string username) =>
+        _grants.FirstOrDefault(grant => string.Equals(grant.Username, username, StringComparison.OrdinalIgnoreCase))?.AccessLevel switch
+        {
+            null => string.Empty,
+            SentinelAccessLevels.View or SentinelAccessLevels.Comment => SentinelAccessLevels.View,
+            _ => SentinelAccessLevels.Edit
+        };
+
+    private async Task SetAsync(string username, string? level)
+    {
+        _busy = true;
+        try
+        {
+            var performedBy = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            if (string.IsNullOrEmpty(level))
+            {
+                foreach (var grant in _grants.Where(grant => string.Equals(grant.Username, username, StringComparison.OrdinalIgnoreCase)).ToList())
+                    await Access.RemovePermissionAsync(grant.Id, performedBy);
+                Toasts.Show($"{Board.Title} isn't shared with {username} any more.", tone: StatusTone.Success);
+            }
+            else
+            {
+                await Access.SetPermissionAsync(Board.DatabaseId, true, username, level, performedBy);
+                Toasts.Show($"{username} can now {(level == SentinelAccessLevels.Edit ? "edit" : "view")} {Board.Title}.", tone: StatusTone.Success);
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or KeyNotFoundException or UnauthorizedAccessException)
+        {
+            Toasts.Show($"That didn't change: {ex.Message}", tone: StatusTone.Danger);
+        }
+        finally
+        {
+            await LoadGrantsAsync();
+            // A refused change must show the old choice again (value alone won't redraw).
+            _generation++;
+            _busy = false;
+        }
+    }
+
+    private Task Close() => OnClose.InvokeAsync();
+}

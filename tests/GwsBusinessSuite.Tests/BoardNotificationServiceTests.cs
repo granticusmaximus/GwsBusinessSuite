@@ -36,7 +36,7 @@ public sealed class BoardNotificationServiceTests : IAsyncLifetime
             new AppUser { Username = "sam", Role = AppRoles.Admin, IsActive = true },
             new AppUser { Username = "ann", Role = AppRoles.Author, IsActive = true });
         await _db.SaveChangesAsync();
-        _boards = new KanbanBoardService(_db, new WikiDatabaseService(_db));
+        _boards = new KanbanBoardService(_db, new WikiDatabaseService(_db), new SentinelAccessService(_db));
         _notifier = new BoardNotificationNotifier();
         _notifier.OnNotified += _told.Add;
         _mail = new RecordingMail();
@@ -67,7 +67,7 @@ public sealed class BoardNotificationServiceTests : IAsyncLifetime
         await AssignAsync(id, board, mine, "sam", ["sam"]);
 
         (await _notifications.SweepAsync(Now)).Should().Be(1, "a card sam made for sam is no news");
-        _told.Should().Equal(["sam"], "ann is an Author, who can't open boards (yet)");
+        _told.Should().Equal(["sam"], "ann is an Author the board isn't shared with, so she can't open it");
         (await _notifications.ListAsync("ann")).Should().BeEmpty();
         var notes = await _notifications.ListAsync("sam");
         notes.Should().ContainSingle().Which.Should().Match<BoardNotificationView>(note =>
@@ -77,6 +77,11 @@ public sealed class BoardNotificationServiceTests : IAsyncLifetime
 
         await _notifications.MarkReadAsync("sam", notes[0].Id);
         (await _notifications.ListAsync("sam")).Single().IsRead.Should().BeTrue();
+
+        // K9g: once the board is shared with ann, her assignment reaches her too.
+        await new SentinelAccessService(_db).SetPermissionAsync(id, true, "ann", SentinelAccessLevels.View, "grant");
+        (await _notifications.SweepAsync(Now)).Should().Be(1);
+        (await _notifications.ListAsync("ann")).Should().ContainSingle().Which.RowId.Should().Be(card);
 
         // Unassigned, then assigned again: said again.
         await AssignAsync(id, board, card, "grant", []);

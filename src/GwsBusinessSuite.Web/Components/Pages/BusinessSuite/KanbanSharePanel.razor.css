@@ -1,0 +1,13 @@
+.kb-share { width: min(34rem, calc(100vw - 2rem)); }
+.kb-share-note { margin: 0 0 .75rem; font-size: .8125rem; color: var(--gws-text-soft); }
+.kb-share-people { display: grid; gap: .4rem; }
+
+.kb-share-person {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+}
+
+.kb-share-name { min-width: 0; overflow-wrap: anywhere; }
+.kb-share-person select { width: auto; min-width: 8rem; }

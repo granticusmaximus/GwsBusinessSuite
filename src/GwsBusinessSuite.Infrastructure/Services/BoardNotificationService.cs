@@ -36,11 +36,12 @@ public sealed class BoardNotificationService(
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         var zone = timeProvider.LocalTimeZone;
         var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(now, zone).DateTime);
-        // Only people who can open boards: Admins (K9g adds people a board is shared with), so a
-        // notification never leads to "Access Denied".
-        var users = (await db.AppUsers.AsNoTracking().Where(user => user.IsActive && user.Role == AppRoles.Admin)
-                .Select(user => user.Username).ToListAsync(cancellationToken))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Only people who can open the board, so a notification never leads to "Access Denied":
+        // admins, and (K9g, 31-10-26) the people a board is shared with.
+        var active = await db.AppUsers.AsNoTracking().Where(user => user.IsActive)
+            .Select(user => new { user.Username, user.Role }).ToListAsync(cancellationToken);
+        var admins = active.Where(user => user.Role == AppRoles.Admin).Select(user => user.Username).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var team = active.Where(user => user.Role != AppRoles.Admin).Select(user => user.Username).ToList();
         var said = await db.BoardNotifications.ToListAsync(cancellationToken);
         // Due-date notes go after 90 days (a card still overdue then says so once more);
         // "assigned" ones stay while the person is assigned, so it isn't said twice.
@@ -56,6 +57,9 @@ public sealed class BoardNotificationService(
         foreach (var summary in await boards.ListBoardsAsync(cancellationToken))
         {
             if (await boards.GetBoardAsync(summary.DatabaseId, cancellationToken) is not { } board) continue;
+            var users = new HashSet<string>(admins, StringComparer.OrdinalIgnoreCase);
+            foreach (var person in team)
+                if ((await boards.GetAccessAsync(board.DatabaseId, person, cancellationToken)).CanView) users.Add(person);
             var settings = board.Settings ?? KanbanSettings.Default;
             // The first look at a board records what's already there without telling anyone.
             var quiet = settings.NotificationsSince is null;

@@ -1,6 +1,7 @@
 @page "/admin/boards/{DatabaseId:guid}"
 @rendermode InteractiveServer
-@attribute [Authorize(Policy = "AdminOnly")]
+@* K9g (31-10-26): authors and contributors open the boards shared with them (LoadAsync checks). *@
+@attribute [Authorize(Policy = "ContentAccess")]
 @implements IAsyncDisposable
 @using GwsBusinessSuite.Application.Boards
 @using System.Text.Json.Nodes
@@ -28,6 +29,12 @@
 {
     <ListSkeleton Message="Loading the board…" Grid="true" Rows="4" CssClass="px-0" />
 }
+else if (_board is null && _notShared)
+{
+    <EmptyState Icon="bi-kanban" Title="This board isn't shared with you" Message="Ask an admin to share it with you from the board's ⋯ menu.">
+        <a class="btn btn-sm btn-primary mt-2" href="admin/boards">Boards shared with you</a>
+    </EmptyState>
+}
 else if (_board is null)
 {
     <EmptyState Icon="bi-kanban" Title="That board isn't here" Message="It may have been trashed in Sentinel, or it no longer has a Status property to make columns from.">
@@ -48,12 +55,23 @@ else
             {
                 <span class="kb-icon" aria-hidden="true">@(string.IsNullOrWhiteSpace(_board.Icon) ? "🗂️" : _board.Icon)</span>
                 <h1 class="kb-title">
-                    <button type="button" class="kb-title-button" title="Rename board" @onclick="StartRename">
-                        @_board.Title<i class="bi bi-pencil kb-title-pencil" aria-hidden="true"></i>
-                    </button>
+                    @if (_access.CanEdit)
+                    {
+                        <button type="button" class="kb-title-button" title="Rename board" @onclick="StartRename">
+                            @_board.Title<i class="bi bi-pencil kb-title-pencil" aria-hidden="true"></i>
+                        </button>
+                    }
+                    else
+                    {
+                        @_board.Title
+                    }
                 </h1>
             }
             <span class="kb-summary">@OpenCount open · @TotalCount @(TotalCount == 1 ? "card" : "cards")</span>
+            @if (!_access.CanEdit)
+            {
+                <span class="badge text-bg-secondary" title="This board is shared with you to look at; ask an admin for Edit access">View only</span>
+            }
             @* Live (K6): changes saved anywhere else show here within a moment. *@
             <span class="kb-live @(_liveNote is null ? "" : "is-fresh")" title="Live: changes made anywhere else appear here as they happen" role="status">
                 <span class="kb-live-dot" aria-hidden="true"></span>@(_liveNote ?? "Live")
@@ -76,21 +94,34 @@ else
             <div class="kb-tools">
                 <label class="visually-hidden" for="kb-filter">Filter cards</label>
                 <input id="kb-filter" type="search" class="form-control form-control-sm kb-filter" placeholder="Filter cards" @bind="_filter" @bind:event="oninput" />
-                <button type="button" class="btn btn-sm btn-primary kb-add-primary" @onclick="AddToFirstColumn">
-                    <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add card
-                </button>
+                @if (_access.CanEdit)
+                {
+                    <button type="button" class="btn btn-sm btn-primary kb-add-primary" @onclick="AddToFirstColumn">
+                        <i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add card
+                    </button>
+                }
                 <div class="kb-more">
                     <button type="button" class="btn btn-sm btn-outline-secondary" title="More board actions" aria-label="More board actions"
                             aria-expanded="@(_showMore ? "true" : "false")" @onclick="() => _showMore = !_showMore"><i class="bi bi-three-dots" aria-hidden="true"></i></button>
                     @if (_showMore)
                     {
                         <div class="kb-more-menu" role="menu">
-                            <button type="button" role="menuitem" @onclick="StartRename"><i class="bi bi-pencil" aria-hidden="true"></i><span><strong>Rename board</strong><small>Its name and icon</small></span></button>
-                            <button type="button" role="menuitem" @onclick="StartAddColumn"><i class="bi bi-layout-three-columns" aria-hidden="true"></i><span><strong>Add a column</strong><small>Rename, recolour or delete one from its ⋯</small></span></button>
-                            <button type="button" role="menuitem" @onclick="OpenAssistant"><i class="bi bi-stars" aria-hidden="true"></i><span><strong>Ask SentinelGPT</strong><small>Standup and stuck work</small></span></button>
-                            <button type="button" role="menuitem" @onclick="OpenBoardAutomations"><i class="bi bi-magic" aria-hidden="true"></i><span><strong>Automate</strong><small>Rules, templates and repeats</small></span></button>
-                            <button type="button" role="menuitem" @onclick="OpenRoadmap"><i class="bi bi-broadcast" aria-hidden="true"></i><span><strong>Public roadmap</strong><small>@(_board.Settings?.Roadmap is null ? "Share it read-only, with votes" : "Live - copy the link or change it")</small></span></button>
-                            <button type="button" role="menuitem" @onclick="OpenEmail"><i class="bi bi-envelope" aria-hidden="true"></i><span><strong>Email to this board</strong><small>@(_board.Settings?.EmailToken is null ? "Turn emails into cards" : "On - copy its address")</small></span></button>
+                            @if (_access.IsAdmin)
+                            {
+                                <button type="button" role="menuitem" @onclick="OpenSharePeople"><i class="bi bi-people" aria-hidden="true"></i><span><strong>Share with the team</strong><small>View or Edit for authors and contributors</small></span></button>
+                            }
+                            @if (_access.CanEdit)
+                            {
+                                <button type="button" role="menuitem" @onclick="StartRename"><i class="bi bi-pencil" aria-hidden="true"></i><span><strong>Rename board</strong><small>Its name and icon</small></span></button>
+                                <button type="button" role="menuitem" @onclick="StartAddColumn"><i class="bi bi-layout-three-columns" aria-hidden="true"></i><span><strong>Add a column</strong><small>Rename, recolour or delete one from its ⋯</small></span></button>
+                            }
+                            @if (_access.IsAdmin)
+                            {
+                                <button type="button" role="menuitem" @onclick="OpenAssistant"><i class="bi bi-stars" aria-hidden="true"></i><span><strong>Ask SentinelGPT</strong><small>Standup and stuck work</small></span></button>
+                                <button type="button" role="menuitem" @onclick="OpenBoardAutomations"><i class="bi bi-magic" aria-hidden="true"></i><span><strong>Automate</strong><small>Rules, templates and repeats</small></span></button>
+                                <button type="button" role="menuitem" @onclick="OpenRoadmap"><i class="bi bi-broadcast" aria-hidden="true"></i><span><strong>Public roadmap</strong><small>@(_board.Settings?.Roadmap is null ? "Share it read-only, with votes" : "Live - copy the link or change it")</small></span></button>
+                                <button type="button" role="menuitem" @onclick="OpenEmail"><i class="bi bi-envelope" aria-hidden="true"></i><span><strong>Email to this board</strong><small>@(_board.Settings?.EmailToken is null ? "Turn emails into cards" : "On - copy its address")</small></span></button>
+                            }
                             <button type="button" role="menuitem" @onclick="OpenEpics"><i class="bi bi-collection" aria-hidden="true"></i><span><strong>Epics</strong><small>@EpicsSummary</small></span></button>
                             <button type="button" role="menuitem" @onclick="OpenArchive"><i class="bi bi-archive" aria-hidden="true"></i><span><strong>Archived cards</strong><small>@ArchiveSummary</small></span></button>
                             <a role="menuitem" href="admin/sentinel?database=@_board.DatabaseId"><i class="bi bi-journal-bookmark" aria-hidden="true"></i><span><strong>Open in Sentinel</strong><small>Table, calendar and timeline</small></span></a>
@@ -403,7 +434,21 @@ else
         }
     </div>
 
-    @if (_openRow is not null && _database is not null)
+    @if (_openRow is not null && _database is not null && !_access.CanEdit)
+    {
+        @* View only (K9g): Sentinel's page drawer saves as it's typed in, so a View grant opens the
+           card in Sentinel instead, which shows it read-only. *@
+        <div class="kb-modal-backdrop" @onclick="CloseCard"></div>
+        <section class="kb-modal kb-readonly-card" role="dialog" aria-modal="true" aria-labelledby="kb-readonly-title">
+            <header class="kb-modal-head">
+                <h2 id="kb-readonly-title">@(OpenCardTitle ?? "Card")</h2>
+                <button type="button" class="btn btn-sm btn-outline-secondary" aria-label="Close" @onclick="CloseCard"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+            </header>
+            <p class="small text-secondary">This board is shared with you to look at. Open the card in Sentinel to read its page.</p>
+            <a class="btn btn-sm btn-outline-primary align-self-start" href="admin/sentinel?page=@_openRow.Id"><i class="bi bi-journal-text me-1" aria-hidden="true"></i>Open in Sentinel</a>
+        </section>
+    }
+    else if (_openRow is not null && _database is not null)
     {
         @* The card drawer (K2): Sentinel's own page panel - the card's page, history, autosave - with
            the board's fields on top. Its saves keep property values (KeepPropertyValues), so a field
@@ -411,7 +456,7 @@ else
         <SentinelDatabaseRowPage @key="_openRow.Id" Database="_database" Row="_openRow" OpenMode="@WikiDatabaseOpenPageModes.SidePeek"
                                  OnSaved="RefreshAsync" OnClose="CloseCard" OnOpenPage="OpenSentinelPage">
             <FieldsContent>
-                <KanbanCardFields Board="_board" Database="_database" Row="_openRow" OnChanged="RefreshAsync"
+                <KanbanCardFields Board="_board" Database="_database" Row="_openRow" ShowBusiness="_access.IsAdmin" OnChanged="RefreshAsync"
                                   OnStatusChanged="SetOpenCardStatusAsync" OnOpenSubItem="OpenRow" />
             </FieldsContent>
         </SentinelDatabaseRowPage>
@@ -420,6 +465,10 @@ else
     @if (_sharing)
     {
         <KanbanRoadmapPanel Board="_board" OnChanged="RefreshAsync" OnClose="() => _sharing = false" />
+    }
+    @if (_sharingPeople)
+    {
+        <KanbanSharePanel Board="_board" OnClose="() => _sharingPeople = false" />
     }
     @if (_emailOpen)
     {
@@ -458,6 +507,19 @@ else
 
     private WikiDatabase? _database;
     private WikiDatabaseRow? _openRow;
+    // K9g: what this person may do here (everything for an admin); _notShared when it's not theirs to open.
+    private KanbanBoardAccess _access = new(true, true, true);
+    private bool _notShared;
+    private bool _sharingPeople;
+
+    private string? OpenCardTitle => _openRow is null ? null
+        : _columns.SelectMany(column => column.Cards).FirstOrDefault(card => card.RowId == _openRow.Id)?.Title;
+
+    private void OpenSharePeople()
+    {
+        _showMore = false;
+        _sharingPeople = true;
+    }
     private Guid _loadedDatabase;
     private bool _focusTitle;
     private bool _showHelp;
@@ -637,10 +699,12 @@ else
     {
         try
         {
-            _board = await BoardService.GetBoardAsync(DatabaseId);
+            _access = await BoardService.GetAccessAsync(DatabaseId, await CurrentUserAccessor.GetCurrentUsernameAsync());
+            _notShared = !_access.CanView;
+            _board = _notShared ? null : await BoardService.GetBoardAsync(DatabaseId);
             _columns = _board?.Columns.Select(column => new ColumnState(column)).ToList() ?? [];
             _sprints = _board?.Fields.SprintPropertyId is not null ? await BoardService.ListSprintsAsync(DatabaseId) : [];
-            _rules = _board is not null ? await RuleService.ListAsync(DatabaseId) : [];
+            _rules = _board is not null && _access.IsAdmin ? await RuleService.ListAsync(DatabaseId) : [];
             _templates = _board is not null ? await Databases.ListRowTemplatesAsync(DatabaseId) : [];
             _selection.Retain(_columns.SelectMany(column => column.Cards).Select(card => card.RowId));
             // SentinelGPT's agent: "this board" is this one.
@@ -664,7 +728,8 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_board is not null && _handle is null)
+        // Drag, drop and the keyboard moves are for people who can edit the board (K9g).
+        if (_board is not null && _handle is null && _access.CanEdit)
         {
             _self ??= DotNetObjectReference.Create(this);
             _module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/kanban-board.js");
@@ -1113,12 +1178,12 @@ else
             {
                 <span class="kb-column-count">@count</span>
             }
-            @if (RulesFor(column) is { Count: > 0 } rules)
+            @if (_access.IsAdmin && RulesFor(column) is { Count: > 0 } rules)
             {
                 <button type="button" class="kb-column-rules" title="@(string.Join("\n", rules.Select(rule => rule.Summary)))" aria-label="@column.Label has @rules.Count @(rules.Count == 1 ? "rule" : "rules")"
                         @onclick="() => OpenAutomate(column.Key)"><i class="bi bi-lightning-charge-fill" aria-hidden="true"></i>@rules.Count</button>
             }
-            @if (column.OptionId is not null)
+            @if (column.OptionId is not null && _access.CanEdit)
             {
                 <button type="button" class="kb-column-add kb-column-menu-toggle" title="Column settings" aria-label="@column.Label settings" aria-expanded="@(_menuKey == column.Key ? "true" : "false")"
                         @onclick="() => ToggleColumnMenu(column)"><i class="bi bi-three-dots" aria-hidden="true"></i></button>
@@ -1138,9 +1203,12 @@ else
                 {
                     <button type="button" class="btn btn-sm btn-link" @onclick="() => SetWipAsync(column, null)">No limit</button>
                 }
-                <button type="button" class="kb-column-menu-item" @onclick="() => OpenAutomate(column.Key)">
-                    <i class="bi bi-lightning-charge" aria-hidden="true"></i>Add a rule for @column.Label
-                </button>
+                @if (_access.IsAdmin)
+                {
+                    <button type="button" class="kb-column-menu-item" @onclick="() => OpenAutomate(column.Key)">
+                        <i class="bi bi-lightning-charge" aria-hidden="true"></i>Add a rule for @column.Label
+                    </button>
+                }
                 @if (column.IsComplete && column.Cards.Count > 0)
                 {
                     <button type="button" class="kb-column-menu-item" @onclick="() => ArchiveColumnAsync(column)">
@@ -1188,7 +1256,7 @@ else
                 <span class="kb-quick-add-hint">Enter adds · <code>!high #label @@name fri ~3</code> · Esc closes</span>
             </form>
         }
-        else
+        else if (_access.CanEdit)
         {
             <button type="button" class="kb-add-row" @onclick="() => OpenQuickAdd(column)"><i class="bi bi-plus-lg" aria-hidden="true"></i>Add card</button>
         }
@@ -1259,7 +1327,7 @@ else
                 {
                     <span class="kb-meta kb-votes" title="@($"{card.Votes} {(card.Votes == 1 ? "vote" : "votes")} on the public roadmap")"><i class="bi bi-caret-up-fill" aria-hidden="true"></i>@card.Votes</span>
                 }
-                @if (card.LinkKinds is { Count: > 0 } links)
+                @if (_access.IsAdmin && card.LinkKinds is { Count: > 0 } links)
                 {
                     @foreach (var group in links.GroupBy(kind => kind))
                     {
