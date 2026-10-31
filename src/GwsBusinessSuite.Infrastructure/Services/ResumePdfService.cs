@@ -21,7 +21,7 @@ public sealed class ResumePdfService : IResumePdfService
 
     static ResumePdfService()
     {
-        QuestPDF.Settings.License = LicenseType.Community;
+        QuestPdfSetup.Apply();
     }
 
     public byte[] GenerateResumePdf()

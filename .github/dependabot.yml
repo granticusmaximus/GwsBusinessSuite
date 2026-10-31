@@ -10,6 +10,13 @@ updates:
       dotnet-dependencies:
         patterns:
           - "*"
+    ignore:
+      # Each Stripe.net major pins a new Stripe API version, and EventUtility.ConstructEvent
+      # rejects webhook events from any other - so the bump has to go with moving the webhook
+      # endpoint's API version in the Stripe dashboard, never on its own (31-10-26: 53.x pins
+      # 2026-10-28.endive; 52.x pins 2026-08-26.dahlia).
+      - dependency-name: "Stripe.net"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 10
 
   - package-ecosystem: "github-actions"

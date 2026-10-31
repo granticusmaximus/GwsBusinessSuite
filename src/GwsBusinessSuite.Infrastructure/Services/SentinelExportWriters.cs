@@ -32,9 +32,9 @@ public static class SentinelExportWriters
 
     static SentinelExportWriters()
     {
-        QuestPDF.Settings.License = LicenseType.Community;
+        QuestPdfSetup.Apply();
         // A glyph the fonts lack (an emoji, say) prints as a blank rather than failing the export.
-        QuestPDF.Settings.CheckIfAllTextGlyphsAreAvailable = false;
+        QuestPDF.Settings.ThrowOnMissingTextGlyphs = false;
     }
 
     // ---- PDF ----

@@ -24,9 +24,9 @@ public static partial class InvoicePdf
 
     static InvoicePdf()
     {
-        QuestPDF.Settings.License = LicenseType.Community;
+        QuestPdfSetup.Apply();
         // A glyph the font lacks (a name in another script, say) prints blank rather than failing the download.
-        QuestPDF.Settings.CheckIfAllTextGlyphsAreAvailable = false;
+        QuestPDF.Settings.ThrowOnMissingTextGlyphs = false;
     }
 
     // A short, stable reference for an invoice the app made (Stripe numbers its own once sent).

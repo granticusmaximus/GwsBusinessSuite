@@ -44,12 +44,12 @@ jobs:
       # between runs. Keys follow every project file (packages) and the Playwright package
       # version's home, so a dependency change gets a fresh cache automatically; a stale or
       # missing cache only costs time, never correctness.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', 'Directory.Build.props') }}
           restore-keys: nuget-${{ runner.os }}-
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('src/GwsBusinessSuite.Infrastructure/GwsBusinessSuite.Infrastructure.csproj', 'tests/GwsBusinessSuite.Tests/GwsBusinessSuite.Tests.csproj') }}

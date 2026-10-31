@@ -47,7 +47,7 @@ public sealed class IncidentReportService(
 
     static IncidentReportService()
     {
-        QuestPDF.Settings.License = LicenseType.Community;
+        QuestPdfSetup.Apply();
     }
 
     // A live incident (still in its source's feed), or one Overwatch's history saw earlier.
