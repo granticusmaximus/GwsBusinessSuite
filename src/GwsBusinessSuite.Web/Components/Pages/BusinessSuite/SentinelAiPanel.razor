@@ -26,7 +26,11 @@
                     <button type="button" class="@(_action == option.Action ? "active" : "")" @onclick="() => _action = option.Action">@option.Label</button>
                 }
             </div>
-            @if (ServerAi.Value.IsLight)
+            @if (ServerAi.Value.IsDisabled)
+            {
+                <small class="text-secondary d-block mb-1">Server AI is off. Use SentinelGPT in the GWS Suite Mac app so generation runs on your Mac.</small>
+            }
+            else if (ServerAi.Value.IsLight)
             {
                 <small class="text-secondary d-block mb-1">This server runs a small model, so only Summarize is available here. Use SentinelGPT chat, or the GWS Suite Mac app for the other actions.</small>
             }
@@ -101,7 +105,7 @@
 
     // Light server-AI mode keeps only what the server's small model handles well.
     private IEnumerable<(string Action, string Label)> VisibleActions =>
-        ServerAi.Value.IsLight
+        ServerAi.Value.UsesLocalCompute
             ? Actions.Where(option => SentinelGptGenerationCoordinator.IsAllowedInLightMode(option.Action))
             : Actions;
     // Owns only the polling loop's lifetime, not the generation itself - the coordinator keeps
@@ -132,7 +136,7 @@
     protected override async Task OnInitializedAsync()
     {
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
-        if (ServerAi.Value.IsLight)
+        if (ServerAi.Value.UsesLocalCompute)
         {
             _action = SentinelAiActions.Summarize;
         }

@@ -778,8 +778,8 @@ else
                 RequestedModifications = ReviseWithAiNotes,
                 PerformedBy = "article-editor-ui"
             };
-            // Light server-AI mode: the revision is written by this computer's Ollama.
-            if (ServerAi.Value.IsLight)
+            // Resource-constrained server modes: the revision is written by this computer's Ollama.
+            if (ServerAi.Value.UsesLocalCompute)
             {
                 _localModels ??= new BrowserLocalOllamaService(JS);
                 await _localModels.EnsureReachableAsync();

@@ -121,7 +121,7 @@ else
                     <div class="text-danger small mt-1">@HeroUploadError</div>
                 }
 
-                @if (!ServerAi.Value.IsLight)
+                @if (!ServerAi.Value.UsesLocalCompute)
                 {
                 <div class="mt-3">
                     <label class="form-label small text-secondary">Or generate with SentinelGPT</label>

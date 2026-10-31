@@ -277,6 +277,20 @@ public sealed class SentinelGptGenerationCoordinatorTests
             .Should().Be(SentinelGptGenerationStatuses.Completed);
     }
 
+    [Fact]
+    public async Task NoneServerAiMode_ShouldRefuseAllServerGeneration()
+    {
+        var coordinator = CreateCoordinator(new ControllableSentinelAiService(), serverAiMode: ServerAiMode.None);
+
+        var chat = () => coordinator.StartAsync(
+            Guid.NewGuid(), null, "Hello", "alex", includeInternet: false, useDeepAnalysis: false);
+        var summary = () => coordinator.StartActionAsync(
+            null, SentinelAiActions.Summarize, "Some text", "grant");
+
+        await chat.Should().ThrowAsync<ServerAiUnavailableException>();
+        await summary.Should().ThrowAsync<ServerAiUnavailableException>();
+    }
+
     private static SentinelGptGenerationCoordinator CreateCoordinator(
         ControllableSentinelAiService sentinel,
         IAutomationTriggerService? triggerService = null,

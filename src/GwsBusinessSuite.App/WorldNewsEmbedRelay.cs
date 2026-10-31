@@ -5,8 +5,8 @@ namespace GwsBusinessSuite.App;
 // World News headlines embedded on this Mac (30-10-26). Embedding about 15,000 headlines a day was
 // the droplet's steadiest Ollama load, and it slowed the whole app. While this app runs and has the
 // server's embedding model installed, it asks every few minutes for headlines waiting, embeds them
-// locally and sends the vectors back. The server leaves embedding to it while it keeps asking, and
-// takes over again ten minutes after it stops.
+// locally and sends the vectors back. Production has no server model fallback, so this worker is
+// the compute boundary while the web app continues to collect and persist headlines.
 public sealed class WorldNewsEmbedRelay(NativeSessionClient session, OllamaClient ollama)
 {
     private static readonly TimeSpan Interval = TimeSpan.FromMinutes(3);
@@ -54,7 +54,7 @@ public sealed class WorldNewsEmbedRelay(NativeSessionClient session, OllamaClien
                 }
                 if (InstalledName(installed, model) is not { } local)
                 {
-                    Status = $"The server groups World News with {model}, which isn't installed here, so it embeds the headlines itself.";
+                    Status = $"World News needs {model} on this Mac. Install that model to resume headline grouping.";
                     return embedded;
                 }
                 if (jobs.Count == 0) break;

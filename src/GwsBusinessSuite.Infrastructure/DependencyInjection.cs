@@ -78,6 +78,7 @@ public static class DependencyInjection
     public static IServiceCollection AddInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("DefaultConnection") ?? "Data Source=gws-suite.db";
+        var serverAiMode = configuration.GetValue<ServerAiMode>($"{ServerAiOptions.SectionName}:Mode");
 
         // Persist Data Protection keys to the data volume so encrypted values
         // (like the CJ developer key) survive Docker container rebuilds on deploy.
@@ -149,38 +150,35 @@ public static class DependencyInjection
         });
         services.AddSingleton<OllamaWorkloadScheduler>();
         services.AddSingleton<OllamaPerformanceTracker>();
-        services.AddHttpClient<IOllamaService, OllamaService>((serviceProvider, client) =>
+        if (serverAiMode == ServerAiMode.None)
         {
-            var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ContentStudioOptions>>().Value;
-            var baseUrl = string.IsNullOrWhiteSpace(options.BaseUrl)
-                ? ContentStudioOptions.DefaultBaseUrl
-                : options.BaseUrl;
-
-            client.BaseAddress = new Uri(baseUrl);
-            // This is a generous outer safety net only. The actual per-call timeout can be
-            // overridden per-site via Settings > AI without an app restart, so it's enforced
-            // with a linked CancellationTokenSource around each generation call instead
-            // (see ContentStudioService.GetEffectiveTimeoutAsync).
-            client.Timeout = TimeSpan.FromHours(2);
-        }).AddResilienceHandler("ollama-transient-retry", builder =>
+            services.AddSingleton<IOllamaService, DisabledOllamaService>();
+        }
+        else
         {
-            // Only retries connection-level failures (Ollama not yet up, dropped socket,
-            // DNS blip) that fail fast. A generation that's genuinely just slow runs for
-            // up to client.Timeout above and is deliberately NOT retried here, since
-            // retrying a multi-minute timeout would silently double the user's wait.
-            builder.AddRetry(new HttpRetryStrategyOptions
+            services.AddHttpClient<IOllamaService, OllamaService>((serviceProvider, client) =>
             {
-                ShouldHandle = args => ValueTask.FromResult(args.Outcome.Exception is HttpRequestException),
-                MaxRetryAttempts = 2,
-                BackoffType = DelayBackoffType.Exponential,
-                Delay = TimeSpan.FromSeconds(1)
+                var options = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<ContentStudioOptions>>().Value;
+                var baseUrl = string.IsNullOrWhiteSpace(options.BaseUrl)
+                    ? ContentStudioOptions.DefaultBaseUrl
+                    : options.BaseUrl;
+
+                client.BaseAddress = new Uri(baseUrl);
+                client.Timeout = TimeSpan.FromHours(2);
+            }).AddResilienceHandler("ollama-transient-retry", builder =>
+            {
+                builder.AddRetry(new HttpRetryStrategyOptions
+                {
+                    ShouldHandle = args => ValueTask.FromResult(args.Outcome.Exception is HttpRequestException),
+                    MaxRetryAttempts = 2,
+                    BackoffType = DelayBackoffType.Exponential,
+                    Delay = TimeSpan.FromSeconds(1)
+                });
             });
-        });
-        services.AddHostedService<OllamaModelWarmupBackgroundService>();
-        // Restarts a wedged Ollama container (see the service); its own short-timeout client, not
-        // the generation client's two-hour one.
-        services.AddHttpClient(OllamaWatchdogBackgroundService.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(10));
-        services.AddHostedService<OllamaWatchdogBackgroundService>();
+            services.AddHostedService<OllamaModelWarmupBackgroundService>();
+            services.AddHttpClient(OllamaWatchdogBackgroundService.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(10));
+            services.AddHostedService<OllamaWatchdogBackgroundService>();
+        }
         services.AddHttpClient<IOllamaWebSearchService, OllamaWebSearchService>((serviceProvider, client) =>
         {
             var options = serviceProvider.GetRequiredService<
@@ -1188,7 +1186,8 @@ public static class DependencyInjection
         services.AddScoped<GwsBusinessSuite.Application.SuiteSearch.ISuiteSearchService, SuiteSearchService>();
         services.AddScoped<GwsBusinessSuite.Application.SuiteSearch.ISuiteSearchAssistant, GwsBusinessSuite.Application.SuiteSearch.SuiteSearchAssistantService>();
         services.AddScoped<IHybridSearchService, HybridSemanticSearchService>();
-        services.AddHostedService<SemanticIndexBackgroundService>();
+        if (serverAiMode != ServerAiMode.None)
+            services.AddHostedService<SemanticIndexBackgroundService>();
         services.AddScoped<ISentinelCollaborationService, SentinelCollaborationService>();
         services.AddScoped<ISentinelAccessService, SentinelAccessService>();
         services.AddScoped<ISentinelPageVerificationService, SentinelPageVerificationService>();

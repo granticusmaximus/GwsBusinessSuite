@@ -280,12 +280,9 @@ builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationM
 builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
     BlazorCircuitAuthorizationBypassHandler>();
 
-builder.Services.AddHealthChecks()
+var healthChecks = builder.Services.AddHealthChecks()
     .AddCheck<GwsBusinessSuite.Web.HealthChecks.DatabaseHealthCheck>(
         "database",
-        tags: ["ready"])
-    .AddCheck<GwsBusinessSuite.Web.HealthChecks.OllamaHealthCheck>(
-        "ollama",
         tags: ["ready"])
     .AddCheck<GwsBusinessSuite.Web.HealthChecks.DatabaseBackupHealthCheck>(
         "backups",
@@ -296,6 +293,8 @@ builder.Services.AddHealthChecks()
     .AddCheck<GwsBusinessSuite.Web.HealthChecks.DiskSpaceHealthCheck>(
         "disk-space",
         tags: ["ready"]);
+if (builder.Configuration.GetValue<ServerAiMode>($"{ServerAiOptions.SectionName}:Mode") != ServerAiMode.None)
+    healthChecks.AddCheck<GwsBusinessSuite.Web.HealthChecks.OllamaHealthCheck>("ollama", tags: ["ready"]);
 
 // Without this, the checks above only ever run when something hits /health - which nothing
 // does proactively today, so an Unhealthy/Degraded result (disk space, Ollama down) could sit
@@ -2197,9 +2196,9 @@ app.MapGet("/auth/device-login/web", async (string? code, HttpContext httpContex
     return Results.LocalRedirect("/admin");
 }).AllowAnonymous().RequireRateLimiting("login-key");
 
-// Reliability fallback for the native macOS app's SentinelGPT page - it does its AI work against
-// Ollama models on the user's own Mac by design, reaching this server's Ollama only when the
-// local model can't handle a turn (not installed, unreachable, or timed out). Gated by the same
+// Compatibility endpoint for native clients that previously used server AI as a fallback. In
+// ServerAi=None it returns an explicit unavailable response after authenticating the device; it
+// never attempts inference. Full/light development deployments retain the old fallback. Gated by the same
 // NativeApp:DeviceSecret trust boundary as /auth/device-login above - this is not a user login,
 // just proof the caller is the user's own trusted device, so no username/password/cookie is
 // involved. Deliberately a single plain completion (no tool-calling, no wiki grounding, no
@@ -2211,6 +2210,7 @@ app.MapPost("/native/fallback-chat", async (
     HttpContext httpContext,
     IConfiguration configuration,
     IOllamaService ollamaService,
+    Microsoft.Extensions.Options.IOptions<ServerAiOptions> serverAi,
     ISecurityAuditService securityAudit) =>
 {
     var form = await httpContext.Request.ReadFormAsync();
@@ -2230,6 +2230,13 @@ app.MapPost("/native/fallback-chat", async (
     if (string.IsNullOrEmpty(prompt))
     {
         return Results.Json(new { error = "empty_prompt" }, statusCode: StatusCodes.Status400BadRequest);
+    }
+
+    if (serverAi.Value.IsDisabled)
+    {
+        return Results.Json(
+            new { error = "local_compute_required" },
+            statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 
     using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(SentinelGptDefaults.DefaultTimeoutMinutes));

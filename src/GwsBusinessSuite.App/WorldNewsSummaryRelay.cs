@@ -5,13 +5,13 @@ namespace GwsBusinessSuite.App;
 // World News summaries written on this Mac (29-10-26). The droplet's small model mixes up who did
 // what and gemma4 doesn't fit there, so while this app runs it asks the server (with the
 // Workspace tab's session) every 15 minutes for events due a summary, answers each with the
-// local model and sends the answer back. While it keeps asking, the server's own model stands
-// aside; if the app is closed for two hours, the server takes over again.
+// local model and sends the answer back. Production has no server model fallback; summaries wait
+// safely until this signed-in worker is available again.
 public sealed class WorldNewsSummaryRelay(NativeSessionClient session, OllamaClient ollama)
 {
     private static readonly TimeSpan Interval = TimeSpan.FromMinutes(15);
     // The most accurate local models first. A small model is no better than the server's, so
-    // without one of these the relay stays idle and the server keeps writing.
+    // without one of these the relay stays idle and reports the missing local capability.
     private static readonly string[] PreferredModels = ["gemma4", "gemma3:27b", "qwen3:32b", "gemma3:12b", "qwen3:14b"];
     private const int JobsPerRound = 5;
     private readonly SemaphoreSlim _running = new(1, 1);
@@ -45,7 +45,7 @@ public sealed class WorldNewsSummaryRelay(NativeSessionClient session, OllamaCli
         {
             if (await PickModelAsync(cancellationToken) is not { } model)
             {
-                Status = "No accurate local model installed (gemma4 or similar), so the server writes World News summaries.";
+                Status = "Install gemma4 or another supported local model to write World News summaries on this Mac.";
                 return 0;
             }
             var (jobs, error) = await session.GetWorldNewsSummaryJobsAsync(JobsPerRound, cancellationToken);

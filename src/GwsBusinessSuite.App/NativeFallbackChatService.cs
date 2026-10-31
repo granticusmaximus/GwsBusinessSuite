@@ -37,6 +37,7 @@ public sealed class NativeFallbackChatService(HttpClient httpClient)
             {
                 HttpStatusCode.Unauthorized => "The configured device secret was rejected by the server.",
                 HttpStatusCode.GatewayTimeout => "The server's fallback also timed out.",
+                HttpStatusCode.ServiceUnavailable => "Server AI is disabled; restore Ollama on this Mac and retry.",
                 _ => $"The server fallback failed ({(int)response.StatusCode})."
             };
             return new FallbackChatResult(false, null, message);

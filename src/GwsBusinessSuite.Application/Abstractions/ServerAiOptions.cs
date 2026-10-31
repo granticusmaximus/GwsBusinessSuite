@@ -14,7 +14,12 @@ public enum ServerAiMode
     // and server-side article generation/revision/hero images - articles are written only in
     // the Mac app (NativeContentStudioAccess), on that Mac's own Ollama via
     // BrowserLocalOllamaService.
-    Light
+    Light,
+
+    // Production mode for a droplet that hosts no model runtime. AI work is performed by the
+    // signed-in Mac app through the native relays; server callers fail clearly instead of trying
+    // localhost, consuming resources, or waiting for a dependency that is intentionally absent.
+    None
 }
 
 public sealed class ServerAiOptions
@@ -24,6 +29,12 @@ public sealed class ServerAiOptions
     public ServerAiMode Mode { get; init; } = ServerAiMode.Full;
 
     public bool IsLight => Mode == ServerAiMode.Light;
+
+    public bool IsDisabled => Mode == ServerAiMode.None;
+
+    public bool AllowsServerInference => Mode != ServerAiMode.None;
+
+    public bool UsesLocalCompute => Mode is ServerAiMode.Light or ServerAiMode.None;
 }
 
 // Derives from InvalidOperationException on purpose: every UI surface that can reach one of
@@ -36,16 +47,18 @@ public sealed class ServerAiUnavailableException(string feature, string alternat
 public static class ServerAiGuard
 {
     public const string UseLocalSentinelGpt =
-        "Use SentinelGPT in the GWS Suite Mac app, which runs on your own machine. Chat and summaries still work here.";
+        "Use SentinelGPT in the GWS Suite Mac app, which runs on your own machine.";
 
     public static bool IsLight(this IOptions<ServerAiOptions>? options) => options?.Value.IsLight == true;
+
+    public static bool IsDisabled(this IOptions<ServerAiOptions>? options) => options?.Value.IsDisabled == true;
 
     public static void EnsureHeavyAiAllowed(
         this IOptions<ServerAiOptions>? options,
         string feature,
         string alternative = UseLocalSentinelGpt)
     {
-        if (options.IsLight())
+        if (options?.Value.Mode is ServerAiMode.Light or ServerAiMode.None)
         {
             throw new ServerAiUnavailableException(feature, alternative);
         }

@@ -76,6 +76,8 @@ public sealed class SentinelGptGenerationCoordinator(
         // The side panel's description of the page the user is on (see ISentinelAiService).
         string? pageContext = null)
     {
+        if (serverAi.IsDisabled())
+            throw new ServerAiUnavailableException("SentinelGPT chat on the server", ServerAiGuard.UseLocalSentinelGpt);
         if (conversationId == Guid.Empty)
             throw new ArgumentException("A conversation is required.", nameof(conversationId));
         if (string.IsNullOrWhiteSpace(instruction))
@@ -120,7 +122,7 @@ public sealed class SentinelGptGenerationCoordinator(
             throw new ArgumentException("An instruction is required.", nameof(instruction));
         if (string.IsNullOrWhiteSpace(requestedBy))
             throw new ArgumentException("A requesting user is required.", nameof(requestedBy));
-        if (!IsAllowedInLightMode(action.Trim()))
+        if (serverAi.IsDisabled() || !IsAllowedInLightMode(action.Trim()))
             serverAi.EnsureHeavyAiAllowed($"SentinelGPT '{action.Trim()}'");
 
         var state = Enqueue(
