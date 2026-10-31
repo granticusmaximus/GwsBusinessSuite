@@ -27,7 +27,8 @@ public sealed record MailRoute(MailRouteKind Kind, string Description)
     public bool CanSend => Kind != MailRouteKind.None;
 }
 
-// The one place every email feature actually hands a message off. A feature's own (already
+// The one place every email feature actually hands a message off. The app's mail account
+// (Settings > Email, AppMailAccount) wins while it's on. Otherwise a feature's own (already
 // shared-fallback-applied) SMTP settings win; when there's no SMTP server at all, mail goes out
 // through the Google account connected under Automation > Credentials (Gmail API, gmail.send
 // scope) instead of being silently skipped.
@@ -35,13 +36,16 @@ public interface IMailTransport
 {
     MailRoute Describe(ISmtpTransportOptions options);
     Task SendAsync(MimeMessage message, ISmtpTransportOptions options, string filePrefix, CancellationToken cancellationToken = default);
+    // Refreshes what Describe reads: whether a Google account is connected, and the app's mail account.
     Task RefreshGmailStatusAsync(CancellationToken cancellationToken = default);
 }
 
 public sealed class MailTransport(
     IServiceScopeFactory scopeFactory,
     IHttpClientFactory httpClientFactory,
-    ILogger<MailTransport> logger) : IMailTransport
+    ILogger<MailTransport> logger,
+    AppMailAccount? appAccount = null,
+    GoogleMailConnection? googleMail = null) : IMailTransport
 {
     public const string GoogleCredentialName = "Google";
     private const string GmailSendEndpoint = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
@@ -55,6 +59,7 @@ public sealed class MailTransport(
 
     public MailRoute Describe(ISmtpTransportOptions options)
     {
+        if (appAccount?.Current is { } account) return DescribeAppAccount(account);
         var smtp = DescribeSmtp(options);
         if (smtp.CanSend) return smtp;
         return _gmailConnected
@@ -64,6 +69,12 @@ public sealed class MailTransport(
 
     public async Task SendAsync(MimeMessage message, ISmtpTransportOptions options, string filePrefix, CancellationToken cancellationToken = default)
     {
+        if (appAccount?.Current is { } account)
+        {
+            UseAccountFrom(message, account);
+            await SendViaSmtpAsync(message, account, filePrefix, cancellationToken);
+            return;
+        }
         if (DescribeSmtp(options).CanSend)
         {
             await SendViaSmtpAsync(message, options, filePrefix, cancellationToken);
@@ -75,14 +86,32 @@ public sealed class MailTransport(
 
     public async Task RefreshGmailStatusAsync(CancellationToken cancellationToken = default)
     {
+        if (appAccount is not null) await appAccount.ReloadAsync(cancellationToken);
         try
         {
-            _gmailConnected = await FindGoogleCredentialIdAsync(cancellationToken) is not null;
+            using var scope = scopeFactory.CreateScope();
+            var credentials = scope.ServiceProvider.GetRequiredService<IAutomationCredentialService>();
+            var credentialId = await FindGoogleCredentialIdAsync(credentials, cancellationToken);
+            _gmailConnected = credentialId is not null;
+            if (googleMail is not null) googleMail.Set(credentialId is { } id ? await ReadableMailboxAsync(credentials, id, cancellationToken) : null);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Couldn't check for a connected Google account for email delivery.");
         }
+    }
+
+    internal static MailRoute DescribeAppAccount(AppMailAccountOptions account) =>
+        new(MailRouteKind.Smtp, $"the app's mail account ({account.Username} on {account.Host.Trim()}:{account.Port})");
+
+    // The account's own address as From (servers refuse or rewrite any other); the feature's
+    // display name stays, so "GWS Bookings" still reads as GWS Bookings.
+    internal static void UseAccountFrom(MimeMessage message, AppMailAccountOptions account)
+    {
+        if (!MailboxAddress.TryParse(account.FromAddress, out var from)) return;
+        var name = message.From.Mailboxes.FirstOrDefault()?.Name;
+        message.From.Clear();
+        message.From.Add(new MailboxAddress(string.IsNullOrWhiteSpace(name) ? from.Name : name, from.Address));
     }
 
     internal static MailRoute DescribeSmtp(ISmtpTransportOptions options)
@@ -169,6 +198,16 @@ public sealed class MailTransport(
         return await httpClientFactory.CreateClient(nameof(MailTransport)).SendAsync(request, cancellationToken);
     }
 
+    // The connection's mailbox, when Google granted full Gmail access (what IMAP mail-in needs).
+    private static async Task<GoogleMailConnection.Snapshot?> ReadableMailboxAsync(IAutomationCredentialService credentials, Guid credentialId, CancellationToken cancellationToken)
+    {
+        var data = JsonNode.Parse(await credentials.GetDecryptedDataAsync(credentialId, cancellationToken) ?? "{}");
+        var address = data?["email"]?.GetValue<string>();
+        return GoogleOAuthService.CanUseImap(data?["scope"]?.GetValue<string>()) && address is not null && address.Contains('@')
+            ? new GoogleMailConnection.Snapshot(credentialId, address)
+            : null;
+    }
+
     private async Task<Guid?> FindGoogleCredentialIdAsync(CancellationToken cancellationToken)
     {
         using var scope = scopeFactory.CreateScope();
@@ -234,7 +273,8 @@ public sealed class EmailDeliveryStatusService(
     IOptions<GrowthReportEmailOptions> growth,
     IOptions<BookingEmailOptions> booking,
     IOptions<EmailCampaignEmailOptions> campaigns,
-    IOptions<ClientPortalEmailOptions> portal) : IEmailDeliveryStatusService
+    IOptions<ClientPortalEmailOptions> portal,
+    AppMailAccount? appAccount = null) : IEmailDeliveryStatusService
 {
     public async Task<IReadOnlyList<EmailDeliveryFeatureStatus>> GetStatusAsync(CancellationToken cancellationToken = default)
     {
@@ -285,6 +325,6 @@ public sealed class EmailDeliveryStatusService(
     private EmailDeliveryFeatureStatus Row(string feature, ISmtpTransportOptions options)
     {
         var route = transport.Describe(options);
-        return new(feature, route.CanSend, route.Description, options.FromAddress);
+        return new(feature, route.CanSend, route.Description, appAccount?.Current?.FromAddress ?? options.FromAddress);
     }
 }

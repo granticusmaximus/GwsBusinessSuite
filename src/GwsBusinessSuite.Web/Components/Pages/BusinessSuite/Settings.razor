@@ -170,12 +170,14 @@ else
     }
     else if (ActiveTab == "Email")
     {
+        <MailServerSettingsPanel OnSaved="LoadEmailStatusAsync" />
         <div class="card border-0 shadow-sm">
             <div class="card-body">
                 <p class="small text-secondary">
-                    Every email the app sends uses the first thing that's set up: an SMTP server from <code>.env</code>
-                    (<code>Smtp__Host</code>, or any feature's own section such as <code>GrowthReportEmail__Host</code>),
-                    otherwise the Google account connected under <strong>Automation &gt; Credentials</strong> (sent through the Gmail API).
+                    Every email the app sends uses the first thing that's set up: the app's mail account above (when it's on),
+                    an SMTP server from <code>.env</code> (<code>Smtp__Host</code>, or any feature's own section such as
+                    <code>GrowthReportEmail__Host</code>), otherwise the Google account connected under
+                    <strong>Automation &gt; Credentials</strong> (sent through the Gmail API).
                 </p>
                 @if (_emailStatus is null)
                 {

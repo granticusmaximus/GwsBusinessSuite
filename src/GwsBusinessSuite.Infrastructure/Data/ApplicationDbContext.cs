@@ -138,6 +138,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<SentinelPageSuggestion> PageSuggestions => Set<SentinelPageSuggestion>();
     public DbSet<SentinelClipToken> SentinelClipTokens => Set<SentinelClipToken>();
     public DbSet<SentinelMailboxSettings> SentinelMailboxSettings => Set<SentinelMailboxSettings>();
+    public DbSet<MailServerSettings> MailServerSettings => Set<MailServerSettings>();
+    public DbSet<MailAccount> MailAccounts => Set<MailAccount>();
     public DbSet<SentinelInboundEmail> SentinelInboundEmails => Set<SentinelInboundEmail>();
     public DbSet<SupportMailboxSettings> SupportMailboxSettings => Set<SupportMailboxSettings>();
     public DbSet<SupportInboundEmail> SupportInboundEmails => Set<SupportInboundEmail>();
@@ -511,6 +513,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelOfflinePage>().HasIndex(x => new { x.Username, x.WikiPageId }).IsUnique();
         modelBuilder.Entity<SentinelUnlockGrant>().HasIndex(x => new { x.Username, x.SessionId });
         modelBuilder.Entity<SentinelLockPin>().HasIndex(x => x.Username).IsUnique();
+        // Mail: one mailbox per person.
+        modelBuilder.Entity<MailAccount>().HasIndex(x => x.Username).IsUnique();
         modelBuilder.Entity<SentinelPasskey>().HasIndex(x => x.CredentialId).IsUnique();
         modelBuilder.Entity<SentinelPasskey>().HasIndex(x => x.Username);
         modelBuilder.Entity<SentinelDeviceKey>().HasIndex(x => x.Username);

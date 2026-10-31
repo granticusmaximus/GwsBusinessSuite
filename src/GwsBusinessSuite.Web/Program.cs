@@ -2551,21 +2551,26 @@ app.MapGet("/auth/slack/callback", async (
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");
 
+// purpose=mail (31-10-26): the same consent, saved as the person's own Mail connection and back
+// to /admin/mail instead of the app-wide Google credential.
 app.MapGet("/auth/google/connect", (
     HttpContext httpContext,
+    string? purpose,
     IGoogleOAuthService googleOAuth,
     IDataProtectionProvider dataProtectionProvider) =>
 {
+    var forMail = string.Equals(purpose, "mail", StringComparison.Ordinal);
     if (!googleOAuth.IsConfigured)
     {
-        return Results.LocalRedirect("/admin/automation/credentials?googleOAuth=not-configured");
+        return Results.LocalRedirect(forMail ? "/admin/mail?google=not-configured" : "/admin/automation/credentials?googleOAuth=not-configured");
     }
 
     var username = httpContext.User.Identity?.Name ?? string.Empty;
     var statePayload = System.Text.Json.JsonSerializer.Serialize(new
     {
         username,
-        issuedAtUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
+        issuedAtUnixSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+        purpose = forMail ? "mail" : "automation"
     });
     var state = dataProtectionProvider
         .CreateProtector("GwsBusinessSuite.GoogleOAuth.State.v1")
@@ -2582,6 +2587,7 @@ app.MapGet("/auth/google/callback", async (
     string? error,
     IGoogleOAuthService googleOAuth,
     IDataProtectionProvider dataProtectionProvider,
+    GwsBusinessSuite.Application.Mail.IMailService mail,
     CancellationToken cancellationToken) =>
 {
     if (string.IsNullOrWhiteSpace(state))
@@ -2589,6 +2595,7 @@ app.MapGet("/auth/google/callback", async (
         return Results.LocalRedirect("/admin/automation/credentials?googleOAuth=invalid-state");
     }
 
+    var forMail = false;
     try
     {
         var stateJson = dataProtectionProvider
@@ -2602,6 +2609,7 @@ app.MapGet("/auth/google/callback", async (
                 ? DateTimeOffset.FromUnixTimeSeconds(issuedAtUnixSeconds)
                 : DateTimeOffset.MinValue;
         var currentUsername = httpContext.User.Identity?.Name;
+        forMail = root.TryGetProperty("purpose", out var purposeElement) && purposeElement.GetString() == "mail";
         if (!string.Equals(stateUsername, currentUsername, StringComparison.Ordinal)
             || issuedAt < DateTimeOffset.UtcNow.AddMinutes(-10)
             || issuedAt > DateTimeOffset.UtcNow.AddMinutes(1))
@@ -2618,7 +2626,18 @@ app.MapGet("/auth/google/callback", async (
 
     if (!string.IsNullOrWhiteSpace(error))
     {
-        return Results.LocalRedirect("/admin/automation/credentials?googleOAuth=denied");
+        return Results.LocalRedirect(forMail ? "/admin/mail?google=denied" : "/admin/automation/credentials?googleOAuth=denied");
+    }
+
+    if (forMail)
+    {
+        var username = httpContext.User.Identity!.Name!;
+        var connection = await googleOAuth.CompleteMailAuthorizationAsync(code ?? string.Empty,
+            GwsBusinessSuite.Application.Mail.IMailService.GoogleCredentialName(username), cancellationToken);
+        if (connection is not { IsSuccess: true, CredentialId: { } credentialId, Address: { } address })
+            return Results.LocalRedirect("/admin/mail?google=failed");
+        await mail.SaveGoogleAccountAsync(username, credentialId, address, cancellationToken);
+        return Results.LocalRedirect("/admin/mail?google=connected");
     }
 
     var result = await googleOAuth.CompleteAuthorizationAsync(code ?? string.Empty, cancellationToken);
@@ -2627,6 +2646,31 @@ app.MapGet("/auth/google/callback", async (
 })
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("admin-mutation");
+
+// Mail: an attachment of one of the signed-in person's own messages, as a download.
+app.MapGet("/admin/api/mail/messages/{id}/attachments/{index:int}", async (
+    string id,
+    int index,
+    HttpContext httpContext,
+    GwsBusinessSuite.Application.Mail.IMailService mail,
+    CancellationToken cancellationToken) =>
+{
+    try
+    {
+        var attachment = await mail.GetAttachmentAsync(httpContext.User.Identity!.Name!, id, index, cancellationToken);
+        // Anyone can email anything: an HTML or SVG attachment served as itself from this origin
+        // could run script with the session, so only plainly inert types keep their type.
+        string[] inert = ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain", "text/csv"];
+        var contentType = inert.Contains(attachment.ContentType.ToLowerInvariant()) ? attachment.ContentType : "application/octet-stream";
+        httpContext.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return Results.File(attachment.Content, contentType, attachment.FileName);
+    }
+    catch (GwsBusinessSuite.Application.Mail.MailException ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status404NotFound);
+    }
+})
+    .RequireAuthorization("AdminOnly");
 
 // Serve hero images stored as base64 data URIs as real image responses
 // so og:image tags have a cacheable URL that social crawlers can fetch.
@@ -5032,6 +5076,7 @@ static async Task EnsureUserGuidesInSentinelAsync(IServiceProvider services, IHo
         ("SITE_BUILDING_USER_GUIDE.md", "Site Building", "🏗️"),
         ("CRM_USER_GUIDE.md", "CRM & Relationships", "🤝"),
         ("SUPPORT_USER_GUIDE.md", "Support", "🛟"),
+        ("MAIL_USER_GUIDE.md", "Mail", "✉️"),
         ("COMMUNITY_USER_GUIDE.md", "Community", "🧑‍🤝‍🧑"),
         ("SENTINEL_USER_GUIDE.md", "Sentinel & SentinelGPT", "📚"),
         ("INTELLIGENCE_USER_GUIDE.md", "Intelligence & BI", "🛰️"),

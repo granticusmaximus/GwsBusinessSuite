@@ -53,7 +53,7 @@ public sealed class ResponsiveAuditTests(PlaywrightBrowserFixture fixture)
         "/admin/live-show-recordings", "/admin/localization", "/admin/media", "/admin/mind-maps",
         "/admin/mission-control", "/admin/news-intelligence", "/admin/osint", "/admin/pages", "/admin/pages/all",
         "/admin/podcasts", "/admin/privacy-operations", "/admin/scheduling", "/admin/security-audit",
-        "/admin/sentinel", "/admin/seo-audit", "/admin/settings", "/admin/support", "/admin/threat-intel",
+        "/admin/sentinel", "/admin/seo-audit", "/admin/settings", "/admin/support", "/admin/mail", "/admin/threat-intel",
         "/admin/users", "/admin/world-news"
     ];
 

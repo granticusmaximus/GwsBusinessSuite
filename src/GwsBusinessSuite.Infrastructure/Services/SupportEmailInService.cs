@@ -39,7 +39,7 @@ public sealed class SupportEmailInService(
     // the server's own mail account on its plus-address (see ServerMailAccount), which is on until
     // it's turned off here. OnlyAddressed: read only mail sent to that address.
     private sealed record Mailbox(string Host, int Port, string Username, string Password, string Folder, string AuthServId,
-        string Address, bool OnlyAddressed, bool Enabled);
+        string Address, bool OnlyAddressed, bool Enabled, Guid? OAuthCredentialId = null);
 
     private Mailbox? Effective(SupportMailboxSettings? settings)
     {
@@ -48,7 +48,7 @@ public sealed class SupportEmailInService(
                 settings.Folder, settings.AuthServId, settings.Username, false, settings.Enabled);
         if (serverAccount?.For(ServerAccountTag) is not { } server) return null;
         return new Mailbox(server.Host, server.Port, server.Username, server.Password, "INBOX", server.AuthServId, server.Address, true,
-            settings?.Enabled ?? true);
+            settings?.Enabled ?? true, server.OAuthCredentialId);
     }
 
     public async Task<SupportMailboxView> GetSettingsAsync(CancellationToken cancellationToken = default) =>
@@ -323,8 +323,11 @@ public sealed class SupportEmailInService(
         return (saved, skipped);
     }
 
-    private static Task<MailKit.Net.Imap.ImapClient> ConnectAsync(Mailbox mailbox, CancellationToken cancellationToken) =>
-        ImapMailboxConnector.ConnectAsync(mailbox.Host, mailbox.Port, mailbox.Username, mailbox.Password, cancellationToken);
+    // The server's account may sign in with the Google connection rather than a password.
+    private Task<MailKit.Net.Imap.ImapClient> ConnectAsync(Mailbox mailbox, CancellationToken cancellationToken) =>
+        mailbox.OAuthCredentialId is not null && serverAccount is not null
+            ? serverAccount.ConnectAsync(new ServerMailbox(mailbox.Host, mailbox.Port, mailbox.Username, mailbox.Password, mailbox.Address, mailbox.AuthServId, mailbox.OAuthCredentialId), cancellationToken)
+            : ImapMailboxConnector.ConnectAsync(mailbox.Host, mailbox.Port, mailbox.Username, mailbox.Password, cancellationToken);
 
     private async Task RequireAdminAsync(string username, CancellationToken cancellationToken)
     {

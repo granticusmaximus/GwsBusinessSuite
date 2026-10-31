@@ -998,6 +998,41 @@ public sealed class SupportMailboxSettings : AuditableEntity
     public string? LastError { get; set; }
 }
 
+// The app's own mail account (31-10-26), set in Settings > Email instead of .env. While enabled,
+// every email the app sends goes out through it. The password (an app password) is stored
+// protected with ISecretProtector, never in plain text.
+public sealed class MailServerSettings : AuditableEntity
+{
+    public bool Enabled { get; set; }
+    public string Host { get; set; } = string.Empty;
+    public int Port { get; set; } = 587;
+    public string Security { get; set; } = "StartTls";
+    public string Username { get; set; } = string.Empty;
+    public string PasswordProtected { get; set; } = string.Empty;
+    public string FromAddress { get; set; } = string.Empty;
+}
+
+// Mail (/admin/mail, 31-10-26): one person's own mailbox, read live from it. Provider "google"
+// keeps its tokens in an Automation credential (CredentialId, refreshed like the others);
+// "imap" signs in to ImapHost/SmtpHost with an app password stored protected (ISecretProtector).
+public sealed class MailAccount : AuditableEntity
+{
+    public required string Username { get; set; }
+    public string Provider { get; set; } = "imap";
+    public string Address { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public Guid? CredentialId { get; set; }
+    public string ImapHost { get; set; } = string.Empty;
+    public int ImapPort { get; set; } = 993;
+    public string SmtpHost { get; set; } = string.Empty;
+    public int SmtpPort { get; set; } = 587;
+    public string SmtpSecurity { get; set; } = "StartTls";
+    public string LoginUsername { get; set; } = string.Empty;
+    public string PasswordProtected { get; set; } = string.Empty;
+    public DateTimeOffset? LastUsedAt { get; set; }
+    public string? LastError { get; set; }
+}
+
 // One row per message the support poller handled (created a ticket, added a reply, or skipped
 // it with a reason); also what stops a message being processed twice.
 public sealed class SupportInboundEmail : AuditableEntity

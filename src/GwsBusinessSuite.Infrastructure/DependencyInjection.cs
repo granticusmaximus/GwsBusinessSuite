@@ -256,6 +256,14 @@ public static class DependencyInjection
         // Every email feature hands its message to this one transport: SMTP/pickup from its
         // (shared-fallback) settings, else the Google account connected under Automation.
         services.AddHttpClient(nameof(MailTransport), client => client.Timeout = TimeSpan.FromSeconds(30));
+        services.AddSingleton<AppMailAccount>();
+        services.AddSingleton<GoogleMailConnection>();
+        // Mail (/admin/mail): each person's own mailbox.
+        services.AddHttpClient(GmailMailboxBackend.HttpClientName, client => client.Timeout = TimeSpan.FromSeconds(30));
+        services.AddScoped<IMailboxBackend, GmailMailboxBackend>();
+        services.AddScoped<IMailboxBackend, ImapMailboxBackend>();
+        services.AddScoped<GwsBusinessSuite.Application.Mail.IMailService, MailService>();
+        services.AddScoped<GwsBusinessSuite.Application.Operations.IMailServerSettingsService, MailServerSettingsService>();
         services.AddSingleton<IMailTransport, MailTransport>();
         services.AddSingleton<GwsBusinessSuite.Application.Operations.IEmailDeliveryStatusService, EmailDeliveryStatusService>();
         services.AddHostedService<MailTransportStatusService>();

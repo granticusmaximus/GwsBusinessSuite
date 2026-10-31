@@ -1,0 +1,180 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.Operations
+@inject IMailServerSettingsService MailServer
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@* The app's mail account (31-10-26): what used to be only Smtp__* in .env, set here instead. *@
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            <h2 class="h6 mb-0"><i class="bi bi-envelope-at me-1" aria-hidden="true"></i>The app's mail account</h2>
+            @if (_view is { Enabled: true })
+            {
+                <span class="badge text-bg-success">On - all the app's email goes through it</span>
+            }
+            else if (_view is not null)
+            {
+                <span class="badge text-bg-secondary">Off - using .env or the Google account</span>
+            }
+        </div>
+        <p class="small text-secondary">
+            Sign in to the mail account the app should send from. While it's on, it's used for everything the app sends,
+            ahead of <code>.env</code> and the connected Google account. Use an app password, not your normal one.
+        </p>
+        @if (_view is null)
+        {
+            <LoadingIndicator Message="Loading the mail account…" />
+        }
+        else
+        {
+            <div class="d-flex flex-wrap gap-1 mb-2" role="group" aria-label="Mail provider presets">
+                @foreach (var preset in Presets)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => Apply(preset)">@preset.Name</button>
+                }
+            </div>
+            <div class="row g-2">
+                <div class="col-12 col-md-6">
+                    <label class="form-label small mb-1" for="mail-server-host">SMTP server</label>
+                    <input id="mail-server-host" class="form-control form-control-sm" placeholder="smtp.gmail.com" autocomplete="off"
+                           @bind="_host" @bind:event="oninput" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1" for="mail-server-port">Port</label>
+                    <input id="mail-server-port" type="number" min="1" max="65535" class="form-control form-control-sm"
+                           @bind="_port" @bind:event="oninput" />
+                </div>
+                <div class="col-6 col-md-4">
+                    <label class="form-label small mb-1" for="mail-server-security">Security</label>
+                    <select id="mail-server-security" class="form-select form-select-sm" @bind="_security">
+                        <option value="@MailServerSecurity.StartTls">STARTTLS (587)</option>
+                        <option value="@MailServerSecurity.SslOnConnect">SSL/TLS (465)</option>
+                        <option value="@MailServerSecurity.Auto">Automatic</option>
+                        <option value="@MailServerSecurity.None">None (not recommended)</option>
+                    </select>
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label small mb-1" for="mail-server-username">Sign-in (usually your email address)</label>
+                    <input id="mail-server-username" class="form-control form-control-sm" autocomplete="off" placeholder="you@example.com"
+                           @bind="_username" @bind:event="oninput" />
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label small mb-1" for="mail-server-password">App password</label>
+                    <input id="mail-server-password" type="password" class="form-control form-control-sm" autocomplete="new-password"
+                           placeholder="@(_view.HasPassword ? "Saved - leave empty to keep it" : "The account's app password")"
+                           @bind="_password" @bind:event="oninput" />
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label small mb-1" for="mail-server-from">From address (optional)</label>
+                    <input id="mail-server-from" type="email" class="form-control form-control-sm" placeholder="Same as the sign-in"
+                           @bind="_fromAddress" @bind:event="oninput" />
+                </div>
+                <div class="col-12 col-md-6 d-flex align-items-end">
+                    <div class="form-check form-switch mb-1">
+                        <input id="mail-server-enabled" class="form-check-input" type="checkbox" role="switch" @bind="_enabled" />
+                        <label class="form-check-label small" for="mail-server-enabled">Send the app's email through this account</label>
+                    </div>
+                </div>
+            </div>
+            <div class="form-text mb-2">@PresetHint</div>
+            <div class="d-flex flex-wrap gap-2">
+                <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="SaveAsync">@(_busy ? "Working…" : "Save")</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_busy || string.IsNullOrWhiteSpace(_host))" @onclick="CheckAsync">
+                    <i class="bi bi-plug me-1" aria-hidden="true"></i>Check sign-in
+                </button>
+            </div>
+            @if (_view.UpdatedAt is { } updated)
+            {
+                <div class="form-text">Last changed @updated.ToLocalTime().ToGwsDateTime() by @_view.UpdatedBy.</div>
+            }
+            @if (_message is not null)
+            {
+                <div class="alert @(_isError ? "alert-danger" : "alert-success") small py-2 mt-2 mb-0" role="status">@_message</div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    private sealed record Preset(string Name, string Host, int Port, string Security, string Hint);
+
+    private static readonly Preset[] Presets =
+    [
+        new("Google", "smtp.gmail.com", 587, MailServerSecurity.StartTls,
+            "Google (Gmail or Workspace): turn on 2-Step Verification, then make an app password under Google Account > Security > App passwords."),
+        new("Microsoft 365", "smtp.office365.com", 587, MailServerSecurity.StartTls,
+            "Microsoft 365 / Outlook.com: SMTP sign-in (SMTP AUTH) must be allowed for the mailbox; many organisations turn it off."),
+        new("iCloud", "smtp.mail.me.com", 587, MailServerSecurity.StartTls,
+            "iCloud Mail: make an app-specific password at account.apple.com > Sign-In and Security."),
+        new("Fastmail", "smtp.fastmail.com", 465, MailServerSecurity.SslOnConnect,
+            "Fastmail: make an app password under Settings > Privacy & Security > Integrations."),
+        new("Yahoo", "smtp.mail.yahoo.com", 465, MailServerSecurity.SslOnConnect,
+            "Yahoo Mail: make an app password under Account Security > Generate app password.")
+    ];
+
+    private MailServerSettingsView? _view;
+    private bool _enabled;
+    private string _host = string.Empty;
+    private int _port = 587;
+    private string _security = MailServerSecurity.StartTls;
+    private string _username = string.Empty;
+    private string _password = string.Empty;
+    private string _fromAddress = string.Empty;
+    private string? _message;
+    private bool _isError;
+    private bool _busy;
+
+    private string PresetHint =>
+        Presets.FirstOrDefault(p => string.Equals(p.Host, _host.Trim(), StringComparison.OrdinalIgnoreCase))?.Hint
+        ?? "Pick your provider above to fill in the server, or enter your provider's SMTP details.";
+
+    protected override async Task OnInitializedAsync() => Show(await MailServer.GetAsync());
+
+    private void Show(MailServerSettingsView view)
+    {
+        _view = view;
+        (_enabled, _host, _port, _security, _username, _fromAddress) = (view.Enabled, view.Host, view.Port, view.Security, view.Username, view.FromAddress);
+        _password = string.Empty;
+    }
+
+    private void Apply(Preset preset) => (_host, _port, _security) = (preset.Host, preset.Port, preset.Security);
+
+    private MailServerSettingsUpdate Update() => new(_enabled, _host, _port, _security, _username, _password, _fromAddress);
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _message = null;
+        try
+        {
+            Show(await MailServer.SaveAsync(Update(), await CurrentUserAccessor.GetCurrentUsernameAsync()));
+            (_message, _isError) = (_enabled ? "Saved. The app's email now goes through this account." : "Saved. This account is off.", false);
+            await OnSaved.InvokeAsync();
+        }
+        catch (MailServerSettingsException ex)
+        {
+            (_message, _isError) = (ex.Message, true);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task CheckAsync()
+    {
+        _busy = true;
+        _message = null;
+        try
+        {
+            var result = await MailServer.CheckAsync(Update());
+            (_message, _isError) = (result.Message, !result.Succeeded);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

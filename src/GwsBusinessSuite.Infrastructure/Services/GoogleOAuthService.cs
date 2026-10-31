@@ -25,9 +25,22 @@ public sealed class GoogleOAuthService(
     IAutomationCredentialService credentialService,
     ILogger<GoogleOAuthService> logger) : IGoogleOAuthService
 {
-    // Requested together so one "Connect Google" click yields a single credential usable by
-    // both gmail.sendEmail and calendar.createEvent nodes.
-    private const string Scopes = "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/calendar.events";
+    public const string GmailModifyScope = "https://www.googleapis.com/auth/gmail.modify";
+    // Full Gmail access: the only scope Gmail's IMAP accepts (XOAUTH2), so mail-in can read the
+    // plus-addresses through this connection instead of an app password.
+    public const string FullMailScope = "https://mail.google.com/";
+
+    // Requested together so one "Connect Google" click yields a single credential usable by the
+    // gmail.sendEmail and calendar.createEvent nodes, and (31-10-26) by Mail and mail-in, which
+    // read, mark read, archive and trash. gmail.send stays so a send-only consent still sends.
+    private const string Scopes = "https://www.googleapis.com/auth/gmail.send " + FullMailScope + " https://www.googleapis.com/auth/calendar.events";
+
+    public static bool CanReadMail(string? grantedScopes) =>
+        (grantedScopes ?? string.Empty).Split(' ') is var granted && (granted.Contains(FullMailScope) || granted.Contains(GmailModifyScope));
+
+    public static bool CanUseImap(string? grantedScopes) => (grantedScopes ?? string.Empty).Split(' ').Contains(FullMailScope);
+    private const string TokenEndpoint = "https://oauth2.googleapis.com/token";
+    private const string ProfileEndpoint = "https://gmail.googleapis.com/gmail/v1/users/me/profile";
     private readonly GoogleOAuthOptions _options = configuredOptions.Value;
 
     public bool IsConfigured => _options.IsConfigured;
@@ -53,14 +66,36 @@ public sealed class GoogleOAuthService(
 
     public async Task<AutomationOAuthConnectionResult> CompleteAuthorizationAsync(string code, CancellationToken cancellationToken = default)
     {
-        if (!IsConfigured)
-        {
-            return new AutomationOAuthConnectionResult(false, "Google OAuth is not configured.");
-        }
-        if (string.IsNullOrWhiteSpace(code))
-        {
-            return new AutomationOAuthConnectionResult(false, "Google did not return an authorization code.");
-        }
+        var (tokens, error) = await ExchangeAsync(code, cancellationToken);
+        if (tokens is null) return new AutomationOAuthConnectionResult(false, error!);
+
+        var canRead = tokens.CanReadMail;
+        var what = canRead ? "Gmail read + send, Calendar events" : "Gmail send + Calendar events";
+        await SaveAsync("Google", tokens, $"Connected via Google OAuth{(tokens.Address is null ? "" : $" as {tokens.Address}")} ({what}).", cancellationToken);
+        return new AutomationOAuthConnectionResult(true, $"Connected to Google ({what}).");
+    }
+
+    public async Task<GoogleMailConnectionResult> CompleteMailAuthorizationAsync(string code, string credentialName, CancellationToken cancellationToken = default)
+    {
+        var (tokens, error) = await ExchangeAsync(code, cancellationToken);
+        if (tokens is null) return new GoogleMailConnectionResult(false, error!);
+        if (!tokens.CanReadMail)
+            return new GoogleMailConnectionResult(false, "Google didn't allow reading mail - connect again and tick the Gmail box on Google's screen.");
+        if (tokens.Address is null)
+            return new GoogleMailConnectionResult(false, "Google didn't say which mailbox this is - try connecting again.");
+        var id = await SaveAsync(credentialName, tokens, $"Mail for {tokens.Address} (Gmail read + send).", cancellationToken);
+        return new GoogleMailConnectionResult(true, $"Connected {tokens.Address}.", id, tokens.Address);
+    }
+
+    private sealed record Tokens(string AccessToken, string? RefreshToken, DateTimeOffset? ExpiresAt, string Scope, string? Address)
+    {
+        public bool CanReadMail => GoogleOAuthService.CanReadMail(Scope);
+    }
+
+    private async Task<(Tokens? Tokens, string? Error)> ExchangeAsync(string code, CancellationToken cancellationToken)
+    {
+        if (!IsConfigured) return (null, "Google OAuth is not configured.");
+        if (string.IsNullOrWhiteSpace(code)) return (null, "Google did not return an authorization code.");
 
         var form = new FormUrlEncodedContent(new Dictionary<string, string>
         {
@@ -71,21 +106,18 @@ public sealed class GoogleOAuthService(
             ["grant_type"] = "authorization_code"
         });
 
-        using var response = await httpClient.PostAsync("https://oauth2.googleapis.com/token", form, cancellationToken);
+        using var response = await httpClient.PostAsync(TokenEndpoint, form, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
             logger.LogWarning("Google OAuth token exchange failed with status {StatusCode}: {Body}", (int)response.StatusCode, body);
-            return new AutomationOAuthConnectionResult(false, "Google authorization failed.");
+            return (null, "Google authorization failed.");
         }
 
         using var document = JsonDocument.Parse(body);
         var root = document.RootElement;
         var accessToken = root.TryGetProperty("access_token", out var tokenElement) ? tokenElement.GetString() : null;
-        if (string.IsNullOrWhiteSpace(accessToken))
-        {
-            return new AutomationOAuthConnectionResult(false, "Google did not return an access token.");
-        }
+        if (string.IsNullOrWhiteSpace(accessToken)) return (null, "Google did not return an access token.");
         var refreshToken = root.TryGetProperty("refresh_token", out var refreshElement) ? refreshElement.GetString() : null;
         if (string.IsNullOrWhiteSpace(refreshToken))
         {
@@ -94,20 +126,49 @@ public sealed class GoogleOAuthService(
         DateTimeOffset? expiresAt = root.TryGetProperty("expires_in", out var expiresElement) && expiresElement.TryGetInt32(out var seconds)
             ? DateTimeOffset.UtcNow.AddSeconds(seconds)
             : null;
+        // Google lets the person untick scopes on its screen, so what was granted is checked.
+        var scope = root.TryGetProperty("scope", out var scopeElement) ? scopeElement.GetString() ?? string.Empty : string.Empty;
+        var tokens = new Tokens(accessToken, refreshToken, expiresAt, scope, null);
+        return (tokens.CanReadMail ? tokens with { Address = await GetAddressAsync(accessToken, cancellationToken) } : tokens, null);
+    }
 
+    // Which mailbox this is (needs a Gmail read scope).
+    private async Task<string?> GetAddressAsync(string accessToken, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, ProfileEndpoint);
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode) return null;
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            return document.RootElement.TryGetProperty("emailAddress", out var address) ? address.GetString() : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
+        {
+            logger.LogWarning(ex, "Couldn't read the connected Google account's address.");
+            return null;
+        }
+    }
+
+    // Reconnecting updates the credential with this name rather than adding a second one (the
+    // first "Google" found is the one mail goes out through).
+    private async Task<Guid> SaveAsync(string name, Tokens tokens, string description, CancellationToken cancellationToken)
+    {
         var credentialJson = JsonSerializer.Serialize(new
         {
-            accessToken,
-            refreshToken,
-            tokenEndpoint = "https://oauth2.googleapis.com/token",
+            accessToken = tokens.AccessToken,
+            refreshToken = tokens.RefreshToken,
+            tokenEndpoint = TokenEndpoint,
             clientId = _options.ClientId,
             clientSecret = _options.ClientSecret,
-            expiresAt = expiresAt?.ToString("O")
+            expiresAt = tokens.ExpiresAt?.ToString("O"),
+            scope = tokens.Scope,
+            email = tokens.Address
         });
-        await credentialService.SaveAsync(
-            null, "Google", AutomationCredentialService.OAuth2TypeKey, credentialJson,
-            "Connected via Google OAuth (Gmail send + Calendar events).", cancellationToken);
-
-        return new AutomationOAuthConnectionResult(true, "Connected to Google (Gmail send + Calendar events).");
+        var existing = (await credentialService.ListAsync(cancellationToken)).FirstOrDefault(c =>
+            string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(c.TypeKey, AutomationCredentialService.OAuth2TypeKey, StringComparison.OrdinalIgnoreCase));
+        return await credentialService.SaveAsync(existing?.Id, name, AutomationCredentialService.OAuth2TypeKey, credentialJson, description, cancellationToken);
     }
 }
