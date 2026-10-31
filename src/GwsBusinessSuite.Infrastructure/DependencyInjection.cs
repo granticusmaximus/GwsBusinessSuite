@@ -964,7 +964,7 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
         });
         // City traffic (key-less): FHWA HPMS road volumes for every state (geo.dot.gov) and live
-        // speeds where a city publishes them (NYC DOT so far - add an ILiveRoadSpeedProvider per city).
+        // speeds where a city or country publishes them (NYC DOT, Finland's Digitraffic - one ILiveRoadSpeedProvider each).
         services.AddHttpClient<GwsBusinessSuite.Application.RoadTraffic.HpmsRoadTrafficService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(30);
@@ -977,6 +977,15 @@ public static class DependencyInjection
         });
         services.AddTransient<GwsBusinessSuite.Application.RoadTraffic.ILiveRoadSpeedProvider>(provider =>
             provider.GetRequiredService<GwsBusinessSuite.Application.RoadTraffic.NycDotSpeedProvider>());
+        // Finland's traffic stations (Digitraffic, key-less; it asks for a Digitraffic-User name).
+        services.AddHttpClient<GwsBusinessSuite.Application.RoadTraffic.DigitrafficTmsSpeedProvider>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+            client.DefaultRequestHeaders.Add(GwsBusinessSuite.Application.RoadTraffic.DigitrafficTmsSpeedProvider.UserHeader, "GwsBusinessSuite/Overwatch");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
+        services.AddTransient<GwsBusinessSuite.Application.RoadTraffic.ILiveRoadSpeedProvider>(provider =>
+            provider.GetRequiredService<GwsBusinessSuite.Application.RoadTraffic.DigitrafficTmsSpeedProvider>());
         services.AddTransient<GwsBusinessSuite.Application.RoadTraffic.LiveRoadSpeedService>();
         // Live flow (TomTom, worldwide): the key is passed in the query string, so this client
         // logs nothing at all - no request URL (with the key) can reach a log.

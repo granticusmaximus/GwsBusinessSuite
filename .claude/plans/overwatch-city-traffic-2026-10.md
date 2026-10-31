@@ -17,7 +17,7 @@ sums up the traffic picture for the view.
 |---|---|
 | FHWA HPMS via geo.dot.gov (`Hosted/HPMS_FULL_{ST}_{YEAR}` FeatureServer) | Key-less, every state + DC + PR, 2025 release for all 52. Per road section: AADT, single-unit + combination truck AADT, K and D factors, future AADT, through lanes, speed limit, signals, stop signs, toll, functional class, route signing/number. Downtown Atlanta 3 km box: 564 sections, 160 KB, ~5 s; GA 2025 count query 0.6 s. maxRecordCount 2000, pagination supported. Older years' schemas differ (2023 has `datayear`, 2025 doesn't), so fields are read from each layer first. |
 | NYC DOT Traffic Speeds NBE (Socrata `i4gi-tjb9`) | Key-less. ~125 links reporting today, newest ~2 h old: per link speed (mph), travel time (s), polyline, name, borough. |
-| Finland Digitraffic TMS | Key-less with gzip + Digitraffic-User header; not built yet (needs station metadata join). |
+| Finland Digitraffic TMS | Key-less with gzip + Digitraffic-User header. **Built 31-10-26** (`DigitrafficTmsSpeedProvider`). |
 | Chicago congestion segments (`n4j6-wkkf`) | Stale: last update 2026-04-30. Skipped. |
 | NHTSA FARS CrashAPI | 403 (Akamai) from here. Skipped; bulk CSVs are a later option. |
 | Overpass (OSM signals, stop signs, crossings, parking) | 38 s for a 3 km box, mirror timed out, 502s. Too slow for an interactive layer; skipped. |
@@ -78,3 +78,12 @@ sums up the traffic picture for the view.
   duplicates of state feeds), more live-speed cities (Finland Digitraffic TMS works key-less; Maryland
   CHART and Houston TranStar to check), FARS crash history via bulk CSVs, camera-based anonymous
   vehicle counts with the local vision model, and TomTom flow if Grant adds a key.
+
+- **Finland added 31-10-26** (`DigitrafficTmsSpeedProvider`, an ILiveRoadSpeedProvider):
+  - Data: stations (cached 1 day) are joined to readings (cached 3 min). Each station shows its
+    slower direction (rolling 5-min km/h -> mph) with VehiclesPerHour and PercentOfFreeFlow
+    (Digitraffic's VVAPAAS traffic-state value), and is drawn ±350 m along its bearing.
+  - Globe: Finnish links are coloured by % of free flow (`linkColour`), and the pop-up adds km/h,
+    VS FREE FLOW and VEHICLES.
+  - Checked on the live feed: 491 of 506 stations reporting.
+  - Tests: `DigitrafficTmsSpeedTests` (10).

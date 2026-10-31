@@ -35,7 +35,7 @@ Grep for each item first. Two hints already turned up:
   Emails name the zone.
 - Tests: `BookingTimeZoneTests`, covering DST gap, rules, refusing times not on offer, and the
   attendee's zone. The existing `BookingServiceTests` clock is pinned to UTC.
-- Still open: calendar sync (Google/iCloud busy times), noted in the CRM guide's limitations.
+- Calendar sync (busy times from iCal addresses) was built later; see the CRM guide's Booking Types section.
 
 ## Phase 2 notes (done)
 

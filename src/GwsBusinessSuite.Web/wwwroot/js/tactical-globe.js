@@ -1247,6 +1247,14 @@ window.tacticalGlobe = (function () {
         return mph < 15 ? '#ff3b3b' : mph < 30 ? '#ff8c2a' : mph < 45 ? '#ffd23f' : '#3ddc84';
     }
 
+    // A link that says how fast it usually flows (Finland's stations) is coloured by that share:
+    // 60 mph is a jam on a 75 mph motorway and fine on a city road.
+    function linkColour(link) {
+        const percent = Number(link.percent);
+        if (link.percent == null || !(percent > 0)) return speedColour(Number(link.mph));
+        return percent < 25 ? '#ff3b3b' : percent < 50 ? '#ff8c2a' : percent < 75 ? '#ffd23f' : '#3ddc84';
+    }
+
     function clearRoadTraffic(entry) {
         (entry.roadTrafficPrimitives || []).forEach(function (primitive) { entry.viewer.scene.primitives.remove(primitive); });
         entry.roadTrafficPrimitives = [];
@@ -1302,7 +1310,7 @@ window.tacticalGlobe = (function () {
         const speedLines = data.speeds
             .filter(function (link) { return link && link.path && link.path.length >= 2; })
             .map(function (link) {
-                return { positions: toPositions(link.path), width: 7, colour: Cesium.Color.fromCssColorString(speedColour(Number(link.mph))), id: { _tacticalGlobeSpeed: link } };
+                return { positions: toPositions(link.path), width: 7, colour: Cesium.Color.fromCssColorString(linkColour(link)), id: { _tacticalGlobeSpeed: link } };
             });
         addLinePrimitive(entry, roadLines);
         addLinePrimitive(entry, speedLines);
@@ -1397,8 +1405,12 @@ window.tacticalGlobe = (function () {
 
     function openSpeedPanel(link) {
         const travel = Number(link.travel);
+        const perHour = Number(link.perHour);
+        const percent = Number(link.percent);
         trafficFactsPanel(link.name || 'Live speed', [
-            ['SPEED', Math.round(Number(link.mph)) + ' mph'],
+            ['SPEED', Math.round(Number(link.mph)) + ' mph · ' + Math.round(Number(link.mph) / 0.621371) + ' km/h'],
+            ['VS FREE FLOW', link.percent != null && percent > 0 ? percent + '%' : null],
+            ['VEHICLES', link.perHour != null && perHour >= 0 ? perHour.toLocaleString('en-US') + ' an hour' : null],
             ['TRAVEL TIME', travel > 0 ? Math.floor(travel / 60) + ' min ' + (travel % 60) + ' s' : null],
             ['AREA', link.area],
             ['AS OF', link.asOf]

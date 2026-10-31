@@ -3574,6 +3574,7 @@
     private static object SpeedPayload(GwsBusinessSuite.Application.RoadTraffic.LiveRoadSpeed link) => new
     {
         id = link.Id, name = link.Name, area = link.Area, mph = link.SpeedMph, travel = link.TravelTimeSeconds,
+        perHour = link.VehiclesPerHour, percent = link.PercentOfFreeFlow,
         asOf = $"{link.AsOf.ToLocalGwsDate()} {link.AsOf.ToLocalGwsTime()}", source = link.Source, sourceUrl = link.SourceUrl,
         path = link.Path.Select(p => new[] { Math.Round(p.Longitude, 5), Math.Round(p.Latitude, 5) })
     };
