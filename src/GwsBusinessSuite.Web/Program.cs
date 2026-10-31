@@ -325,6 +325,33 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit           = 0,
             }));
 
+    // The other sign-in steps have budgets of their own (31-10-26): sharing "login" meant one
+    // password + MFA sign-in and a PIN prompt used four of its five, and the next sign-in was
+    // refused. "login-code" is for codes a person types after the password (MFA, the page-lock
+    // PIN, which also locks itself after repeated misses); "login-key" is for steps a key or a
+    // one-time code proves (Touch ID, passkeys, the Mac app's hand-off, Mac approvals), which
+    // can't be guessed, so it only dampens floods.
+    options.AddPolicy("login-code", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                Window               = TimeSpan.FromMinutes(15),
+                PermitLimit          = 5,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit           = 0,
+            }));
+    options.AddPolicy("login-key", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                Window               = TimeSpan.FromMinutes(15),
+                PermitLimit          = 20,
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit           = 0,
+            }));
+
     // Unauthenticated GET endpoints that hit the DB (and, for /og-image and /media,
     // decode base64 blobs up to several MB) on every request. Generous since real
     // visitors and crawlers hit these often, but bounded so a single IP can't hammer them.
@@ -451,21 +478,11 @@ builder.Services.AddRateLimiter(options =>
             });
     });
 
-    // Only the login page wants a redirect on rejection; API-shaped endpoints should get
-    // a plain 429 instead of being bounced to an HTML page.
-    options.OnRejected = (context, _) =>
-    {
-        if (context.HttpContext.Request.Path.StartsWithSegments("/admin/login"))
-        {
-            context.HttpContext.Response.Redirect("/admin/login?error=ratelimit");
-        }
-        else
-        {
-            context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-        }
-
-        return ValueTask.CompletedTask;
-    };
+    // A sign-in step loaded as a page goes back to the sign-in page saying how long to wait;
+    // scripts and the Mac app get a 429 with a JSON error (SignInRateLimits).
+    options.OnRejected = (context, cancellationToken) =>
+        SignInRateLimits.RejectAsync(context.HttpContext,
+            context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter) ? retryAfter : null, cancellationToken);
 });
 var app = builder.Build();
 
@@ -1572,7 +1589,7 @@ app.MapPost("/admin/api/native/lock-unlock-pin", async (
     }
 })
     .RequireAuthorization("ContentAccess")
-    .RequireRateLimiting("login");
+    .RequireRateLimiting("login-code");
 
 // What the app's web-view session is (the Mac app checks it after a Touch ID sign-in: Content
 // Studio and other Mac-only tools need amr device-key or device-secret).
@@ -1919,7 +1936,7 @@ app.MapPost("/auth/touchid/login", async (TouchIdLoginRequest request, HttpConte
     // device-key: a Mac app session, like device-secret (Content Studio etc.).
     return await CompleteTouchIdSignInAsync(httpContext, username, "device", "device-key", users, audit, pageLocks, new { ok = true });
 })
-    .AllowAnonymous().RequireRateLimiting("login");
+    .AllowAnonymous().RequireRateLimiting("login-key");
 
 // The Mac app's web view signs itself in with Touch ID: the app gets a challenge (above), signs it
 // after Touch ID, and opens this address in the web view, so the session cookie is set right in
@@ -1936,7 +1953,7 @@ app.MapGet("/auth/touchid/web-login", async (Guid keyId, string? signature, Http
         ? Results.LocalRedirect("/admin/login?error=touchid")
         : Results.LocalRedirect("/admin");
 })
-    .AllowAnonymous().RequireRateLimiting("login");
+    .AllowAnonymous().RequireRateLimiting("login-key");
 
 // "Approve with your Mac" (31-10-26): a browser signs in with the fingerprint on the person's Mac
 // (MacSignInApprovals). The browser starts it and shows a number; the Mac app, signed in as that
@@ -1952,7 +1969,7 @@ app.MapPost("/auth/mac-approval/start", (MacApprovalStartRequest request, HttpCo
         httpContext.Connection.RemoteIpAddress?.ToString());
     return Results.Json(new { id = started.Id, secret = started.Secret, number = started.Number, expiresInSeconds = (int)GwsBusinessSuite.Application.NativeApp.MacSignInApprovals.Lifetime.TotalSeconds });
 })
-    .AllowAnonymous().RequireRateLimiting("login");
+    .AllowAnonymous().RequireRateLimiting("login-key");
 
 app.MapGet("/auth/mac-approval/{id:guid}", (Guid id, string? secret, GwsBusinessSuite.Application.NativeApp.MacSignInApprovals approvals) =>
     Results.Json(new { state = approvals.State(id, secret ?? string.Empty).ToString().ToLowerInvariant() }))
@@ -2049,7 +2066,7 @@ app.MapPost("/auth/passkey/login", async (PasskeyLoginRequest request, HttpConte
         && !candidate.StartsWith("/\\", StringComparison.Ordinal) ? candidate : "/admin";
     return await CompleteTouchIdSignInAsync(httpContext, username, "passkey", "passkey", users, audit, pageLocks, new { redirect = returnUrl });
 })
-    .AllowAnonymous().RequireRateLimiting("login");
+    .AllowAnonymous().RequireRateLimiting("login-key");
 
 app.MapPost("/auth/device-login", async (
     HttpContext httpContext,
@@ -2142,7 +2159,7 @@ app.MapGet("/auth/device-login/web", async (string? code, HttpContext httpContex
         new Dictionary<string, string?> { ["step"] = "handoff-redeemed" },
         httpContext.Connection.RemoteIpAddress?.ToString(), user.Username));
     return Results.LocalRedirect("/admin");
-}).AllowAnonymous().RequireRateLimiting("login");
+}).AllowAnonymous().RequireRateLimiting("login-key");
 
 // Reliability fallback for the native macOS app's SentinelGPT page - it does its AI work against
 // Ollama models on the user's own Mac by design, reaching this server's Ollama only when the
@@ -2234,7 +2251,7 @@ app.MapPost("/auth/mfa/verify", async (
         Details: new Dictionary<string, string?> { ["factor"] = result.UsedRecoveryCode ? "RecoveryCode" : "Totp" },
         NetworkAddress: httpContext.Connection.RemoteIpAddress?.ToString(), ActorUsername: result.User.Username));
     return Results.LocalRedirect(GetPendingReturnUrl(pending));
-}).RequireAuthorization("MfaPending").RequireRateLimiting("login");
+}).RequireAuthorization("MfaPending").RequireRateLimiting("login-code");
 
 app.MapGet("/admin/login/mfa", (HttpContext httpContext, IAntiforgery antiforgery) =>
 {
@@ -2332,7 +2349,7 @@ app.MapPost("/auth/mfa/enroll", async (
         <title>Save GWS recovery codes</title><style>body{font:16px system-ui;background:#111;color:#eee;margin:0;padding:2rem}.card{max-width:42rem;margin:auto;background:#1c1a18;border:1px solid #4b4338;border-radius:14px;padding:2rem}code{font-size:1.05rem}a{display:inline-block;margin-top:1rem;padding:.7rem 1rem;border-radius:8px;background:#f5a000;color:#111;text-decoration:none;font-weight:700}</style></head>
         <body><main class="card"><h1>MFA is enabled</h1><p>Save these one-time recovery codes in a secure password manager. They will not be shown again.</p><ol>{{encodedCodes}}</ol><a href="{{encodedReturn}}">Continue to GWS</a></main></body></html>
         """, "text/html; charset=utf-8");
-}).RequireAuthorization("MfaPending").RequireRateLimiting("login");
+}).RequireAuthorization("MfaPending").RequireRateLimiting("login-code");
 
 app.MapGet("/auth/logout", async (HttpContext httpContext, ISecurityAuditService securityAudit) =>
 {

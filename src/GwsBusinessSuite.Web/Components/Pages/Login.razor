@@ -138,7 +138,8 @@
         }
         else if (string.Equals(Error, "ratelimit", StringComparison.OrdinalIgnoreCase))
         {
-            ErrorMessage = "Too many login attempts. Please try again in 15 minutes.";
+            var minutesText = LockoutMinutes is > 0 ? $"{LockoutMinutes} minute(s)" : "a few minutes";
+            ErrorMessage = $"Too many sign-in attempts from this network. Try again in {minutesText}.";
         }
         else if (string.Equals(Error, "locked", StringComparison.OrdinalIgnoreCase))
         {

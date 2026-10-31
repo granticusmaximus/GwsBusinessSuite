@@ -37,9 +37,12 @@ public sealed class NativeAppAuthService(HttpClient httpClient)
 
         if (!response.IsSuccessStatusCode)
         {
-            var message = response.StatusCode == HttpStatusCode.Locked
-                ? "This account is temporarily locked out after too many failed attempts."
-                : "Invalid device secret, username, or password.";
+            var message = response.StatusCode switch
+            {
+                HttpStatusCode.Locked => "This account is temporarily locked out after too many failed attempts.",
+                HttpStatusCode.TooManyRequests => "Too many sign-in attempts from this network - wait a few minutes, then try again.",
+                _ => "Invalid device secret, username, or password."
+            };
             return new DeviceLoginResult(false, message, null);
         }
 

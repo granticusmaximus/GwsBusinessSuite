@@ -286,6 +286,7 @@ public partial class MainPage : ContentPage
             "enroll" => await EnrollTouchIdAsync(),
             _ => (false, "Unknown request.")
         };
+        DebugLog($"Native {action}: ok={ok} message={message}");
         var detail = System.Text.Json.JsonSerializer.Serialize(new { action, ok, message });
         try
         {
@@ -311,13 +312,20 @@ public partial class MainPage : ContentPage
         try
         {
             var (ok, message) = await _touchIdLock.EnrollAsync();
+            DebugLog($"Touch ID set-up: ok={ok} message={message}");
             if (ok || !message.StartsWith("Unlock first", StringComparison.Ordinal)) return (ok, message);
             var pin = await DisplayPromptAsync("Set Up Touch ID",
                 "You already have a page-lock PIN. Enter it to confirm it's you.", accept: "Continue", cancel: "Cancel",
                 maxLength: 8, keyboard: Keyboard.Numeric);
             if (string.IsNullOrWhiteSpace(pin)) return (false, "Set-up cancelled. Touch ID on this Mac is as it was.");
-            if (await _session.UnlockWithPinAsync(pin.Trim()) is { } pinError) return (false, pinError);
-            return await _touchIdLock.EnrollAsync();
+            if (await _session.UnlockWithPinAsync(pin.Trim()) is { } pinError)
+            {
+                DebugLog($"Touch ID set-up: PIN refused: {pinError}");
+                return (false, pinError);
+            }
+            (ok, message) = await _touchIdLock.EnrollAsync();
+            DebugLog($"Touch ID set-up after PIN: ok={ok} message={message}");
+            return (ok, message);
         }
         finally
         {

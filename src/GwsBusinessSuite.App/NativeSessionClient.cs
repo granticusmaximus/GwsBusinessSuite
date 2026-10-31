@@ -348,7 +348,10 @@ public sealed class NativeSessionClient(HttpClient httpClient)
                 return (null, SessionExpired);
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
             using var document = JsonDocument.Parse(body);
-            return response.IsSuccessStatusCode ? (document.RootElement.Clone(), null) : (null, $"The server said no (HTTP {(int)response.StatusCode}).");
+            if (response.IsSuccessStatusCode) return (document.RootElement.Clone(), null);
+            return (null, document.RootElement.ValueKind == JsonValueKind.Object && document.RootElement.TryGetProperty("error", out var error)
+                ? error.GetString()
+                : $"The server said no (HTTP {(int)response.StatusCode}).");
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
         {
