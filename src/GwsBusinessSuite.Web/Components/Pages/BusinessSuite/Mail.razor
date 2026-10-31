@@ -2,7 +2,8 @@
 @* Not prerendered: a prerender would read the mailbox once more for nothing. *@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @implements IAsyncDisposable
-@attribute [Authorize(Policy = "AdminOnly")]
+@* Everyone signed in to the admin has their own Mail (only ever their own mailbox). *@
+@attribute [Authorize(Policy = "ContentAccess")]
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.Automation
 @using GwsBusinessSuite.Application.Mail
@@ -60,8 +61,8 @@ else if (_account is null || _changingAccount)
                 else
                 {
                     <div class="alert alert-warning small mb-0">
-                        Google sign-in isn't set up on this server yet: add <code>GoogleOAuth__ClientId</code>, <code>GoogleOAuth__ClientSecret</code> and
-                        <code>GoogleOAuth__RedirectUri</code> to <code>.env</code>. Until then, use an app password below (Gmail works over IMAP too).
+                        Google sign-in isn't set up on this server yet (an admin adds <code>GoogleOAuth__ClientId</code>, <code>GoogleOAuth__ClientSecret</code>
+                        and <code>GoogleOAuth__RedirectUri</code> to <code>.env</code>). Until then, use an app password below - Gmail works over IMAP too.
                     </div>
                 }
             </div>

@@ -191,6 +191,12 @@ public sealed class SentinelPageLockService(
             throw new SentinelLockException("Unlock first (PIN, Touch ID or your authenticator code) - then you can add another way to unlock.");
     }
 
+    public async Task RequireCanRemoveMethodAsync(string username, string? sessionId, CancellationToken cancellationToken = default)
+    {
+        if (await ActiveGrantExpiryAsync(username, sessionId, cancellationToken) is null)
+            throw new SentinelLockException("Unlock first (PIN, Touch ID or your authenticator code) - then you can remove a way to unlock.");
+    }
+
     public async Task LockSessionNowAsync(string username, string? sessionId, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrEmpty(sessionId)) return;

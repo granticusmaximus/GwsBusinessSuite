@@ -105,10 +105,11 @@ public sealed class AutomationConnectorOAuthServiceTests
         (await fixture.Db.AutomationCredentials.CountAsync()).Should().Be(0);
     }
 
-    // Mail (31-10-26): the consent must include reading Gmail, the address comes from Gmail's
-    // profile, and connecting again updates the same credential instead of adding another.
+    // Mail (31-10-26): the consent must include reading Gmail, and the address comes from Gmail's
+    // profile. The sign-in goes back to Mail for the person's own account - never an Automation
+    // credential, which every admin can use.
     [Fact]
-    public async Task GoogleOAuthService_ForMail_ShouldNeedGmailAccess_AndUpdateTheSameCredential()
+    public async Task GoogleOAuthService_ForMail_ShouldNeedGmailAccess_AndKeepItOutOfTheCredentials()
     {
         var scope = "https://www.googleapis.com/auth/gmail.send";
         var token = 0;
@@ -124,18 +125,38 @@ public sealed class AutomationConnectorOAuthServiceTests
             fixture.CredentialService,
             NullLogger<GoogleOAuthService>.Instance);
 
-        (await service.CompleteMailAuthorizationAsync("code", "Mail - grant")).Should().BeEquivalentTo(new { IsSuccess = false, CredentialId = (Guid?)null },
+        (await service.CompleteMailAuthorizationAsync("code")).Should().BeEquivalentTo(new { IsSuccess = false, TokenJson = (string?)null },
             "a send-only consent can't read the mailbox");
+
+        scope = "https://www.googleapis.com/auth/gmail.send " + GoogleOAuthService.FullMailScope;
+        var connected = await service.CompleteMailAuthorizationAsync("code");
+
+        connected.Should().BeEquivalentTo(new { IsSuccess = true, Address = "grant@gwsapp.net" });
+        connected.TokenJson.Should().Contain("ya29.mail-2").And.Contain("1//r").And.NotContain("secret", "the client secret stays in configuration");
         (await fixture.Db.AutomationCredentials.CountAsync()).Should().Be(0);
+    }
 
-        scope = "https://www.googleapis.com/auth/gmail.send " + GoogleOAuthService.GmailModifyScope;
-        var first = await service.CompleteMailAuthorizationAsync("code", "Mail - grant");
-        var second = await service.CompleteMailAuthorizationAsync("code", "Mail - grant");
+    [Fact]
+    public async Task GoogleOAuthService_ReconnectingTheAppWideConnection_ShouldUpdateIt_NotAddAnother()
+    {
+        var token = 0;
+        await using var fixture = await Fixture.CreateAsync(request => request.RequestUri!.AbsoluteUri switch
+        {
+            "https://oauth2.googleapis.com/token" => JsonResponse($$"""{"access_token":"ya29.app-{{++token}}","refresh_token":"1//r","expires_in":3600,"scope":"{{GoogleOAuthService.FullMailScope}}"}"""),
+            _ => JsonResponse("""{"emailAddress":"grant@gwsapp.net"}""")
+        });
+        var service = new GoogleOAuthService(
+            fixture.HttpClient,
+            Options.Create(new GoogleOAuthOptions { ClientId = "id", ClientSecret = "secret", RedirectUri = "https://example.test/auth/google/callback" }),
+            fixture.CredentialService,
+            NullLogger<GoogleOAuthService>.Instance);
 
-        first.Should().BeEquivalentTo(new { IsSuccess = true, Address = "grant@gwsapp.net" });
-        second.CredentialId.Should().Be(first.CredentialId!.Value);
+        await service.CompleteAuthorizationAsync("code");
+        await service.CompleteAuthorizationAsync("code");
+
         var credential = await fixture.Db.AutomationCredentials.SingleAsync();
-        (await fixture.CredentialService.GetDecryptedDataAsync(credential.Id)).Should().Contain("ya29.mail-3").And.Contain("grant@gwsapp.net");
+        credential.Description.Should().Contain("grant@gwsapp.net").And.Contain("read + send");
+        (await fixture.CredentialService.GetDecryptedDataAsync(credential.Id)).Should().Contain("ya29.app-2");
     }
 
     private static HttpResponseMessage JsonResponse(string json, HttpStatusCode status = HttpStatusCode.OK) =>

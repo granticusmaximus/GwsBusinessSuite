@@ -2560,6 +2560,8 @@ app.MapGet("/auth/google/connect", (
     IDataProtectionProvider dataProtectionProvider) =>
 {
     var forMail = string.Equals(purpose, "mail", StringComparison.Ordinal);
+    // Anyone with Mail connects their own Gmail; the app-wide connection is an admin's to make.
+    if (!forMail && !httpContext.User.IsInRole(AppRoles.Admin)) return Results.Forbid();
     if (!googleOAuth.IsConfigured)
     {
         return Results.LocalRedirect(forMail ? "/admin/mail?google=not-configured" : "/admin/automation/credentials?googleOAuth=not-configured");
@@ -2577,7 +2579,7 @@ app.MapGet("/auth/google/connect", (
         .Protect(statePayload);
     return Results.Redirect(googleOAuth.CreateAuthorizationUrl(state));
 })
-    .RequireAuthorization("AdminOnly")
+    .RequireAuthorization("ContentAccess")
     .RequireRateLimiting("admin-mutation");
 
 app.MapGet("/auth/google/callback", async (
@@ -2610,6 +2612,7 @@ app.MapGet("/auth/google/callback", async (
                 : DateTimeOffset.MinValue;
         var currentUsername = httpContext.User.Identity?.Name;
         forMail = root.TryGetProperty("purpose", out var purposeElement) && purposeElement.GetString() == "mail";
+        if (!forMail && !httpContext.User.IsInRole(AppRoles.Admin)) return Results.Forbid();
         if (!string.Equals(stateUsername, currentUsername, StringComparison.Ordinal)
             || issuedAt < DateTimeOffset.UtcNow.AddMinutes(-10)
             || issuedAt > DateTimeOffset.UtcNow.AddMinutes(1))
@@ -2631,12 +2634,10 @@ app.MapGet("/auth/google/callback", async (
 
     if (forMail)
     {
-        var username = httpContext.User.Identity!.Name!;
-        var connection = await googleOAuth.CompleteMailAuthorizationAsync(code ?? string.Empty,
-            GwsBusinessSuite.Application.Mail.IMailService.GoogleCredentialName(username), cancellationToken);
-        if (connection is not { IsSuccess: true, CredentialId: { } credentialId, Address: { } address })
+        var connection = await googleOAuth.CompleteMailAuthorizationAsync(code ?? string.Empty, cancellationToken);
+        if (connection is not { IsSuccess: true, TokenJson: { } tokenJson, Address: { } address })
             return Results.LocalRedirect("/admin/mail?google=failed");
-        await mail.SaveGoogleAccountAsync(username, credentialId, address, cancellationToken);
+        await mail.SaveGoogleAccountAsync(httpContext.User.Identity!.Name!, tokenJson, address, cancellationToken);
         return Results.LocalRedirect("/admin/mail?google=connected");
     }
 
@@ -2644,7 +2645,7 @@ app.MapGet("/auth/google/callback", async (
     return Results.LocalRedirect(
         result.IsSuccess ? "/admin/automation/credentials?googleOAuth=connected" : "/admin/automation/credentials?googleOAuth=failed");
 })
-    .RequireAuthorization("AdminOnly")
+    .RequireAuthorization("ContentAccess")
     .RequireRateLimiting("admin-mutation");
 
 // Mail: an attachment of one of the signed-in person's own messages, as a download.
@@ -2670,7 +2671,7 @@ app.MapGet("/admin/api/mail/messages/{id}/attachments/{index:int}", async (
         return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status404NotFound);
     }
 })
-    .RequireAuthorization("AdminOnly");
+    .RequireAuthorization("ContentAccess");
 
 // Serve hero images stored as base64 data URIs as real image responses
 // so og:image tags have a cacheable URL that social crawlers can fetch.

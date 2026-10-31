@@ -5,7 +5,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using GwsBusinessSuite.Application.Abstractions;
-using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Mail;
 using GwsBusinessSuite.Domain.Entities;
 using MailKit;
@@ -34,12 +33,17 @@ public interface IMailboxBackend
     Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken);
 }
 
-// Gmail through Google's API with the person's own Google connection (gmail.modify). A 401
-// refreshes the token once (the Automation credential's own refresh) and tries again.
-public sealed class GmailMailboxBackend(IAutomationCredentialService credentials, IHttpClientFactory httpClientFactory) : IMailboxBackend
+// Gmail through Google's API with the person's own Google sign-in (MailAccount.TokenProtected).
+// An expired token, or a 401, is renewed with the refresh token and the app's Google client
+// (GoogleOAuth settings), saved back on the account, and the call tried once more.
+public sealed class GmailMailboxBackend(
+    ISecretProtector secretProtector,
+    IHttpClientFactory httpClientFactory,
+    Microsoft.Extensions.Options.IOptions<GoogleOAuthOptions> googleOptions) : IMailboxBackend
 {
     public const string HttpClientName = "Mail";
     private const string Api = "https://gmail.googleapis.com/gmail/v1/users/me/";
+    private const string TokenEndpoint = "https://oauth2.googleapis.com/token";
     private const int PageSize = 25;
 
     public string Provider => MailProviders.Google;
@@ -161,12 +165,15 @@ public sealed class GmailMailboxBackend(IAutomationCredentialService credentials
 
     private async Task<JsonNode?> CallAsync(MailAccount account, HttpMethod method, string path, JsonNode? body, CancellationToken cancellationToken)
     {
-        if (account.CredentialId is not { } credentialId) throw new MailException("Connect Google again on the Mail page.");
-        var response = await SendOnceAsync(credentialId, method, path, body, cancellationToken);
-        if (response.StatusCode == HttpStatusCode.Unauthorized && await credentials.RefreshOAuthCredentialAsync(credentialId, cancellationToken))
+        var tokens = Tokens(account);
+        if (DateTimeOffset.TryParse(tokens["expiresAt"]?.GetValue<string>(), out var expiresAt) && expiresAt < DateTimeOffset.UtcNow.AddMinutes(1))
+            tokens = await RefreshAsync(account, tokens, cancellationToken);
+        var response = await SendOnceAsync(tokens, method, path, body, cancellationToken);
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
             response.Dispose();
-            response = await SendOnceAsync(credentialId, method, path, body, cancellationToken);
+            tokens = await RefreshAsync(account, tokens, cancellationToken);
+            response = await SendOnceAsync(tokens, method, path, body, cancellationToken);
         }
         using (response)
         {
@@ -183,10 +190,40 @@ public sealed class GmailMailboxBackend(IAutomationCredentialService credentials
         }
     }
 
-    private async Task<HttpResponseMessage> SendOnceAsync(Guid credentialId, HttpMethod method, string path, JsonNode? body, CancellationToken cancellationToken)
+    private JsonObject Tokens(MailAccount account) =>
+        account.TokenProtected.Length > 0 && JsonNode.Parse(secretProtector.Unprotect(account.TokenProtected)) is JsonObject tokens
+            ? tokens
+            : throw new MailException("Connect Google again on the Mail page.");
+
+    // A new access token from the refresh token, kept on the account (MailService saves it).
+    private async Task<JsonObject> RefreshAsync(MailAccount account, JsonObject tokens, CancellationToken cancellationToken)
     {
-        var json = await credentials.GetDecryptedDataAsync(credentialId, cancellationToken);
-        var token = json is null ? null : JsonNode.Parse(json)?["accessToken"]?.GetValue<string>();
+        var refreshToken = tokens["refreshToken"]?.GetValue<string>();
+        var options = googleOptions.Value;
+        if (string.IsNullOrWhiteSpace(refreshToken) || !options.IsConfigured)
+            throw new MailException("Google signed this mailbox out - connect Google again on the Mail page.");
+        using var response = await httpClientFactory.CreateClient(HttpClientName).PostAsync(TokenEndpoint, new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["client_id"] = options.ClientId,
+            ["client_secret"] = options.ClientSecret,
+            ["refresh_token"] = refreshToken,
+            ["grant_type"] = "refresh_token"
+        }), cancellationToken);
+        var answer = JsonNode.Parse(await response.Content.ReadAsStringAsync(cancellationToken)) as JsonObject;
+        var accessToken = answer?["access_token"]?.GetValue<string>();
+        if (!response.IsSuccessStatusCode || string.IsNullOrWhiteSpace(accessToken))
+            throw new MailException("Google signed this mailbox out - connect Google again on the Mail page.");
+        tokens["accessToken"] = accessToken;
+        if (answer!["refresh_token"]?.GetValue<string>() is { Length: > 0 } newRefresh) tokens["refreshToken"] = newRefresh;
+        if (answer["expires_in"] is JsonValue seconds && seconds.TryGetValue<int>(out var lifetime))
+            tokens["expiresAt"] = DateTimeOffset.UtcNow.AddSeconds(lifetime).ToString("O");
+        account.TokenProtected = secretProtector.Protect(tokens.ToJsonString());
+        return tokens;
+    }
+
+    private async Task<HttpResponseMessage> SendOnceAsync(JsonObject tokens, HttpMethod method, string path, JsonNode? body, CancellationToken cancellationToken)
+    {
+        var token = tokens["accessToken"]?.GetValue<string>();
         if (string.IsNullOrWhiteSpace(token)) throw new MailException("Connect Google again on the Mail page.");
         using var request = new HttpRequestMessage(method, Api + path);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);

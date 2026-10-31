@@ -92,6 +92,13 @@ public sealed class SentinelPasskeyBrowserTests(PlaywrightBrowserFixture fixture
         // A second passkey needs an unlock first (a stolen session can't add one).
         await locks.SetPinAsync("sam", Session, null, "112233");
         await passkeys.Invoking(p => p.BeginRegistrationAsync("grant", "other-session", Origin)).Should().ThrowAsync<SentinelLockException>().WithMessage("Unlock first*");
+        // Removing one needs an unlock as well (31-10-26), or a stolen session could clear the way
+        // for its own.
+        var passkey = (await passkeys.ListAsync("grant")).Single();
+        await passkeys.Invoking(p => p.RemoveAsync(passkey.Id, "grant", "other-session")).Should().ThrowAsync<SentinelLockException>().WithMessage("Unlock first*");
+        await locks.GrantAsync("grant", "other-session", SentinelPageLock.Methods.Passkey);
+        await passkeys.RemoveAsync(passkey.Id, "grant", "other-session");
+        (await passkeys.ListAsync("grant")).Should().BeEmpty();
     }
 
     private async Task<IPage> OpenAsync()

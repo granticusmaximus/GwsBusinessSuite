@@ -1013,8 +1013,10 @@ public sealed class MailServerSettings : AuditableEntity
 }
 
 // Mail (/admin/mail, 31-10-26): one person's own mailbox, read live from it. Provider "google"
-// keeps its tokens in an Automation credential (CredentialId, refreshed like the others);
-// "imap" signs in to ImapHost/SmtpHost with an app password stored protected (ISecretProtector).
+// keeps its Google sign-in (TokenProtected: the token JSON, protected with ISecretProtector) on
+// this row, where only its owner's Mail reads it - not among the Automation credentials every
+// admin can use. CredentialId is the first version's credential, moved here on first use.
+// "imap" signs in to ImapHost/SmtpHost with an app password stored protected.
 public sealed class MailAccount : AuditableEntity
 {
     public required string Username { get; set; }
@@ -1022,6 +1024,7 @@ public sealed class MailAccount : AuditableEntity
     public string Address { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public Guid? CredentialId { get; set; }
+    public string TokenProtected { get; set; } = string.Empty;
     public string ImapHost { get; set; } = string.Empty;
     public int ImapPort { get; set; } = 993;
     public string SmtpHost { get; set; } = string.Empty;

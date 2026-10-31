@@ -23,5 +23,6 @@ public interface ISentinelPasskeyService
     // typed. Returns the passkey owner's username once the assertion is verified.
     Task<(string CeremonyId, string OptionsJson)> BeginSignInAsync(string origin, CancellationToken cancellationToken = default);
     Task<string> CompleteSignInAsync(string ceremonyId, string origin, string assertionJson, CancellationToken cancellationToken = default);
-    Task RemoveAsync(Guid passkeyId, string username, CancellationToken cancellationToken = default);
+    // Needs this session unlocked (RequireCanRemoveMethodAsync).
+    Task RemoveAsync(Guid passkeyId, string username, string? sessionId, CancellationToken cancellationToken = default);
 }

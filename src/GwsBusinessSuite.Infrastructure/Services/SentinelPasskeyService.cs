@@ -196,10 +196,11 @@ public sealed class SentinelPasskeyService(
         (await db.SentinelPasskeys.AsNoTracking().Where(key => key.Username == username).ToListAsync(cancellationToken))
             .OrderBy(key => key.CreatedAtUnix).Select(ToView).ToList();
 
-    public async Task RemoveAsync(Guid passkeyId, string username, CancellationToken cancellationToken = default)
+    public async Task RemoveAsync(Guid passkeyId, string username, string? sessionId, CancellationToken cancellationToken = default)
     {
         var passkey = await db.SentinelPasskeys.FirstOrDefaultAsync(key => key.Id == passkeyId && key.Username == username, cancellationToken);
         if (passkey is null) return;
+        await pageLocks.RequireCanRemoveMethodAsync(username, sessionId, cancellationToken);
         db.SentinelPasskeys.Remove(passkey);
         await db.SaveChangesAsync(cancellationToken);
     }

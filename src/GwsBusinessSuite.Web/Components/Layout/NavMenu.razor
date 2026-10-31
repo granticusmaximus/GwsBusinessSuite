@@ -43,6 +43,12 @@
                 <i class="bi bi-grid-1x2-fill" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>Home</span><small>Your work at a glance</small></span>
             </NavLink>
+            @* Mail (31-10-26): each person's own inbox, so it's in Home for every role. *@
+            <NavLink class="gws-nav-link" href="admin/mail" title="Mail">
+                <i class="bi bi-envelope" aria-hidden="true"></i>
+                <span class="gws-nav-link-copy"><span>Mail</span><small>Your own inbox</small></span>
+                @if (MailUnread.Peek(_username) is > 0 and var unreadMail) { <span class="gws-nav-count">@unreadMail</span> }
+            </NavLink>
             <a class="@AppLinkClass(AdminApps.Community)" href="@AdminApps.Community.Href" aria-current="@AppCurrent(AdminApps.Community)" title="Community">
                 <i class="bi @AdminApps.Community.Icon" aria-hidden="true"></i>
                 <span class="gws-nav-link-copy"><span>Community</span><small>@AdminApps.Community.Description</small></span>
@@ -179,11 +185,6 @@
                         <span class="gws-nav-link-copy"><span>Support</span><small>Client portal tickets</small></span>
                     </NavLink>
                 }
-                <NavLink class="gws-nav-link" href="admin/mail" title="Mail">
-                    <i class="bi bi-envelope" aria-hidden="true"></i>
-                    <span class="gws-nav-link-copy"><span>Mail</span><small>Your own inbox</small></span>
-                    @if (MailUnread.Peek(_username) is > 0 and var unreadMail) { <span class="gws-nav-count">@unreadMail</span> }
-                </NavLink>
                 @if (Shown("scheduling"))
                 {
                     <NavLink class="gws-nav-link" href="admin/scheduling" title="Scheduling">

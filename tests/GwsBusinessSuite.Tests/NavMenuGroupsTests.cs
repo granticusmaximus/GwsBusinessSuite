@@ -51,6 +51,7 @@ public class NavMenuGroupsTests
         // Home: the dashboard, Community, and routes no workspace claims (Settings has its own rail button).
         ["admin", "home"],
         ["admin/community", "home"],
+        ["admin/mail", "home"],
         ["admin/community/activity", "home"],
         ["admin/community/messages", "home"],
         ["admin/community/departments", "home"],

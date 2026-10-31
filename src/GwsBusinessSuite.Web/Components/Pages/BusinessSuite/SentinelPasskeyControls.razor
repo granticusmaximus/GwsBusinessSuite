@@ -193,7 +193,7 @@ else
     {
         await RunAsync(async username =>
         {
-            await DeviceKeys.RevokeAsync(id, username);
+            await DeviceKeys.RevokeAsync(id, username, SessionId);
             _deviceKeys = await DeviceKeys.ListAsync(username);
             await OnChanged.InvokeAsync();
             return "That Mac can't unlock with Touch ID any more.";
@@ -204,7 +204,7 @@ else
     {
         await RunAsync(async username =>
         {
-            await Passkeys.RemoveAsync(id, username);
+            await Passkeys.RemoveAsync(id, username, SessionId);
             _keys = await Passkeys.ListAsync(username);
             await OnChanged.InvokeAsync();
             return "Passkey removed.";

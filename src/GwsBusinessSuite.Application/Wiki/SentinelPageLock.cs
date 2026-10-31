@@ -99,6 +99,9 @@ public interface ISentinelPageLockService
     // Throws unless adding another unlock method is allowed now: either none exists yet, or this
     // session is unlocked.
     Task RequireCanAddMethodAsync(string username, string? sessionId, CancellationToken cancellationToken = default);
+    // Throws unless this session is unlocked: removing a way to unlock needs one (31-10-26), or a
+    // stolen session could remove the owner's methods and then add its own as the first.
+    Task RequireCanRemoveMethodAsync(string username, string? sessionId, CancellationToken cancellationToken = default);
 }
 
 // Unlocking with the code from the sign-in authenticator app (31-10-26). Grant's only unlock method

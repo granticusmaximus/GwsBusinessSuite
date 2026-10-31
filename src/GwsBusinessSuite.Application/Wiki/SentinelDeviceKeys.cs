@@ -30,5 +30,6 @@ public interface ISentinelDeviceKeyService
     // a challenge, so the endpoint doesn't reveal which keys exist.
     Task<string> CreateSignInChallengeAsync(Guid keyId, CancellationToken cancellationToken = default);
     Task<string?> CompleteSignInAsync(Guid keyId, string signatureBase64, CancellationToken cancellationToken = default);
-    Task RevokeAsync(Guid keyId, string username, CancellationToken cancellationToken = default);
+    // Needs this session unlocked (RequireCanRemoveMethodAsync).
+    Task RevokeAsync(Guid keyId, string username, string? sessionId, CancellationToken cancellationToken = default);
 }

@@ -83,7 +83,8 @@ public interface IMailService
     Task<MailAccountView?> GetAccountAsync(string username, CancellationToken cancellationToken = default);
     // Signs in to both servers before saving; throws MailException with what went wrong.
     Task<MailAccountView> SaveImapAccountAsync(string username, MailImapAccountInput input, CancellationToken cancellationToken = default);
-    Task<MailAccountView> SaveGoogleAccountAsync(string username, Guid credentialId, string address, CancellationToken cancellationToken = default);
+    // tokenJson: the Google sign-in (GoogleOAuthService.CompleteMailAuthorizationAsync), kept protected on the account.
+    Task<MailAccountView> SaveGoogleAccountAsync(string username, string tokenJson, string address, CancellationToken cancellationToken = default);
     Task RemoveAccountAsync(string username, CancellationToken cancellationToken = default);
 
     Task<MailPage> ListAsync(string username, string folder, string? search, string? pageToken, CancellationToken cancellationToken = default);
@@ -98,6 +99,4 @@ public interface IMailService
     // Unread messages in the inbox; null when the person has no mailbox connected.
     Task<int?> GetUnreadCountAsync(string username, CancellationToken cancellationToken = default);
 
-    // The Automation credential name a person's Gmail tokens are kept under.
-    static string GoogleCredentialName(string username) => $"Mail - {username}";
 }

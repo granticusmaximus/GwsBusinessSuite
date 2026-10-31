@@ -2,7 +2,6 @@ using System.Net;
 using System.Text;
 using System.Text.Json.Nodes;
 using FluentAssertions;
-using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Mail;
 using GwsBusinessSuite.Application.Operations;
 using GwsBusinessSuite.Domain.Entities;
@@ -11,6 +10,7 @@ using GwsBusinessSuite.Infrastructure.Services;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using MimeKit;
 
 namespace GwsBusinessSuite.Tests;
@@ -98,29 +98,40 @@ public sealed class MailServiceTests
     }
 
     [Fact]
-    public async Task DisconnectingGmail_ShouldDeleteItsTokens()
+    public async Task AGmailSignIn_ShouldLiveOnTheAccount_NotInTheCredentials_AndGoOnDisconnect()
     {
         var f = await CreateAsync();
-        var credential = new AutomationCredential { Name = "Mail - grant", TypeKey = "oauth2", ProtectedData = "x" };
+        // The first version kept it as an Automation credential, which every admin could use.
+        var credential = new AutomationCredential { Name = "Mail - grant", TypeKey = "oauth2", ProtectedData = f.Protector.Protect("""{"accessToken":"ya29.first"}""") };
         f.Db.AutomationCredentials.Add(credential);
+        f.Db.MailAccounts.Add(new MailAccount { Username = "grant", Provider = MailProviders.Google, Address = "grant@gwsapp.net", CredentialId = credential.Id });
         await f.Db.SaveChangesAsync();
-        await f.Service.SaveGoogleAccountAsync("grant", credential.Id, "grant@gwsapp.net");
 
-        await f.Service.RemoveAccountAsync("grant");
+        // Any use moves it (no Gmail backend in this fixture, so the listing itself fails).
+        await f.Service.Invoking(s => s.ListAsync("grant", MailFolders.Inbox, null, null)).Should().ThrowAsync<MailException>();
 
-        (await f.Db.MailAccounts.CountAsync()).Should().Be(0);
+        var account = await f.Db.MailAccounts.SingleAsync();
+        account.CredentialId.Should().BeNull();
+        f.Protector.Unprotect(account.TokenProtected).Should().Contain("ya29.first");
         (await f.Db.AutomationCredentials.CountAsync()).Should().Be(0);
+
+        await f.Service.SaveGoogleAccountAsync("grant", """{"accessToken":"ya29.second"}""", "grant@gwsapp.net");
+        f.Protector.Unprotect((await f.Db.MailAccounts.SingleAsync()).TokenProtected).Should().Contain("ya29.second");
+        await f.Service.RemoveAccountAsync("grant");
+        (await f.Db.MailAccounts.CountAsync()).Should().Be(0);
     }
 
     [Fact]
     public async Task Gmail_ShouldListWithLabels_RefreshAnExpiredToken_AndSendRawInTheThread()
     {
-        var credentials = new FakeCredentials();
+        var protector = new DataProtectionSecretProtector(new EphemeralDataProtectionProvider());
         var requests = new List<(string Method, string Url, string Body)>();
         var handler = new StubHandler(async request =>
         {
             var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync();
             requests.Add((request.Method.Method, request.RequestUri!.PathAndQuery, body));
+            if (request.RequestUri!.Host == "oauth2.googleapis.com")
+                return Json(HttpStatusCode.OK, """{"access_token":"fresh","expires_in":3600}""");
             var token = request.Headers.Authorization?.Parameter;
             if (token == "old") return Json(HttpStatusCode.Unauthorized, """{"error":{"message":"expired"}}""");
             var path = request.RequestUri.AbsolutePath;
@@ -134,12 +145,19 @@ public sealed class MailServiceTests
                     """);
             return Json(HttpStatusCode.OK, """{"id":"sent1"}""");
         });
-        var gmail = new GmailMailboxBackend(credentials, new Factory(handler));
-        var account = new MailAccount { Username = "grant", Provider = MailProviders.Google, CredentialId = credentials.Id, Address = "grant@gwsapp.net" };
+        var gmail = new GmailMailboxBackend(protector, new Factory(handler),
+            Options.Create(new GoogleOAuthOptions { ClientId = "app-id", ClientSecret = "app-secret", RedirectUri = "https://example.test/auth/google/callback" }));
+        var account = new MailAccount
+        {
+            Username = "grant", Provider = MailProviders.Google, Address = "grant@gwsapp.net",
+            TokenProtected = protector.Protect("""{"accessToken":"old","refreshToken":"1//r"}""")
+        };
 
         var page = await gmail.ListAsync(account, MailFolders.Inbox, "from:sam", null, CancellationToken.None);
 
-        credentials.Refreshed.Should().BeTrue("the first call got a 401");
+        requests.Should().Contain(r => r.Url == "/token" && r.Body.Contains("client_id=app-id") && r.Body.Contains("refresh_token=1%2F%2Fr"),
+            "the first call got a 401, so the sign-in was renewed with the app's Google client");
+        protector.Unprotect(account.TokenProtected).Should().Contain("\"fresh\"").And.Contain("expiresAt");
         requests.First(r => r.Url.StartsWith("/gmail/v1/users/me/messages?") && r.Url.Contains("labelIds=INBOX")).Url.Should().Contain("q=from%3Asam");
         page.NextPageToken.Should().Be("p2");
         page.Messages.Single().Should().BeEquivalentTo(new
@@ -239,7 +257,7 @@ public sealed class MailServiceTests
     private static HttpResponseMessage Json(HttpStatusCode status, string body) =>
         new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
-    private sealed record Fixture(ApplicationDbContext Db, MailService Service, FakeImap Imap)
+    private sealed record Fixture(ApplicationDbContext Db, MailService Service, FakeImap Imap, DataProtectionSecretProtector Protector)
     {
         public Task UseImapAsync() => Service.SaveImapAccountAsync("grant", new MailImapAccountInput(
             "grant@icloud.com", "Grant Watson", "imap.mail.me.com", 993, "smtp.mail.me.com", 587, MailServerSecurity.StartTls, "", "pw"));
@@ -252,8 +270,8 @@ public sealed class MailServiceTests
         var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options);
         await db.Database.EnsureCreatedAsync();
         var imap = new FakeImap();
-        var service = new MailService(db, new DataProtectionSecretProtector(new EphemeralDataProtectionProvider()), [imap], TimeProvider.System);
-        return new Fixture(db, service, imap);
+        var protector = new DataProtectionSecretProtector(new EphemeralDataProtectionProvider());
+        return new Fixture(db, new MailService(db, protector, [imap], TimeProvider.System), imap, protector);
     }
 
     private sealed class FakeImap : IMailboxBackend
@@ -293,27 +311,6 @@ public sealed class MailServiceTests
         public Task ArchiveAsync(MailAccount account, string id, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task TrashAsync(MailAccount account, string id, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken) => Task.FromResult(7);
-    }
-
-    private sealed class FakeCredentials : IAutomationCredentialService
-    {
-        public Guid Id { get; } = Guid.NewGuid();
-        public bool Refreshed { get; private set; }
-        private string _token = "old";
-
-        public Task<string?> GetDecryptedDataAsync(Guid credentialId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<string?>(credentialId == Id ? $$"""{"accessToken":"{{_token}}"}""" : null);
-
-        public Task<bool> RefreshOAuthCredentialAsync(Guid credentialId, CancellationToken cancellationToken = default)
-        {
-            _token = "fresh";
-            Refreshed = true;
-            return Task.FromResult(true);
-        }
-
-        public Task<IReadOnlyList<AutomationCredentialSummary>> ListAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<Guid> SaveAsync(Guid? id, string name, string typeKey, string credentialJson, string description = "", CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task<int> RefreshExpiringOAuthCredentialsAsync(TimeSpan within, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class StubHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> responder) : HttpMessageHandler

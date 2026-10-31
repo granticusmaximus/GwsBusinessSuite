@@ -15,9 +15,9 @@ public interface ISlackOAuthService
     Task<AutomationOAuthConnectionResult> CompleteAuthorizationAsync(string code, CancellationToken cancellationToken = default);
 }
 
-// A person's own Gmail connected for Mail (31-10-26): the credential holding its tokens and the
-// address Google signed in as.
-public sealed record GoogleMailConnectionResult(bool IsSuccess, string Message, Guid? CredentialId = null, string? Address = null);
+// A person's own Gmail connected for Mail (31-10-26): the address Google signed in as and the
+// sign-in itself (token JSON) for Mail to keep on that person's account.
+public sealed record GoogleMailConnectionResult(bool IsSuccess, string Message, string? Address = null, string? TokenJson = null);
 
 // One Google connection is authorized for Gmail (read + send, since 31-10-26) and Calendar event
 // scopes at once, so a single "Connect Google" click produces one credential usable by every node
@@ -27,6 +27,7 @@ public interface IGoogleOAuthService
     bool IsConfigured { get; }
     string CreateAuthorizationUrl(string state);
     Task<AutomationOAuthConnectionResult> CompleteAuthorizationAsync(string code, CancellationToken cancellationToken = default);
-    // Mail (/admin/mail): the same consent, saved as that person's own credential (credentialName).
-    Task<GoogleMailConnectionResult> CompleteMailAuthorizationAsync(string code, string credentialName, CancellationToken cancellationToken = default);
+    // Mail (/admin/mail): the same consent, handed back for that person's own mail account rather
+    // than saved as an Automation credential (which every admin can use).
+    Task<GoogleMailConnectionResult> CompleteMailAuthorizationAsync(string code, CancellationToken cancellationToken = default);
 }

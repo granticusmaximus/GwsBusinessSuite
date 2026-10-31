@@ -73,10 +73,11 @@ public sealed class SentinelDeviceKeyService(
         (await db.SentinelDeviceKeys.AsNoTracking().Where(key => key.Username == username && key.RevokedAtUnix == null).ToListAsync(cancellationToken))
             .OrderBy(key => key.CreatedAtUnix).Select(ToView).ToList();
 
-    public async Task RevokeAsync(Guid keyId, string username, CancellationToken cancellationToken = default)
+    public async Task RevokeAsync(Guid keyId, string username, string? sessionId, CancellationToken cancellationToken = default)
     {
         var key = await db.SentinelDeviceKeys.FirstOrDefaultAsync(item => item.Id == keyId && item.Username == username, cancellationToken);
         if (key is null) return;
+        await pageLocks.RequireCanRemoveMethodAsync(username, sessionId, cancellationToken);
         key.RevokedAtUnix ??= timeProvider.GetUtcNow().ToUnixTimeSeconds();
         await db.SaveChangesAsync(cancellationToken);
     }

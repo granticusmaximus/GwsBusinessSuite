@@ -64,6 +64,7 @@ public sealed class MailService(
         account.Address = candidate.Address;
         account.DisplayName = candidate.DisplayName;
         account.CredentialId = null;
+        account.TokenProtected = string.Empty;
         account.ImapHost = imapHost;
         account.ImapPort = input.ImapPort;
         account.SmtpHost = smtpHost;
@@ -78,7 +79,7 @@ public sealed class MailService(
         return ToView(account);
     }
 
-    public async Task<MailAccountView> SaveGoogleAccountAsync(string username, Guid credentialId, string address, CancellationToken cancellationToken = default)
+    public async Task<MailAccountView> SaveGoogleAccountAsync(string username, string tokenJson, string address, CancellationToken cancellationToken = default)
     {
         var account = await db.MailAccounts.FirstOrDefaultAsync(item => item.Username == username, cancellationToken);
         if (account is null)
@@ -86,9 +87,11 @@ public sealed class MailService(
             account = new MailAccount { Username = username, CreatedBy = username };
             db.MailAccounts.Add(account);
         }
+        await RemoveCredentialAsync(account.CredentialId, cancellationToken);
         account.Provider = MailProviders.Google;
         account.Address = address.Trim();
-        account.CredentialId = credentialId;
+        account.CredentialId = null;
+        account.TokenProtected = secretProtector.Protect(tokenJson);
         account.ImapHost = account.SmtpHost = account.LoginUsername = account.PasswordProtected = string.Empty;
         account.LastError = null;
         account.UpdatedAt = timeProvider.GetUtcNow();
@@ -208,6 +211,8 @@ public sealed class MailService(
     {
         var account = await db.MailAccounts.FirstOrDefaultAsync(item => item.Username == username, cancellationToken)
             ?? throw new MailException("Connect a mailbox first.");
+        await MoveFirstVersionSignInAsync(account, cancellationToken);
+        var signInBefore = account.TokenProtected;
         string? failure = null;
         try
         {
@@ -228,12 +233,14 @@ public sealed class MailService(
         }
         finally
         {
+            var changed = account.TokenProtected != signInBefore; // a renewed Google sign-in
             if (account.LastError != failure && failure is not "That message is gone.")
             {
                 account.LastError = failure;
                 if (failure is null) account.LastUsedAt = timeProvider.GetUtcNow();
-                await db.SaveChangesAsync(CancellationToken.None);
+                changed = true;
             }
+            if (changed) await db.SaveChangesAsync(CancellationToken.None);
         }
     }
 
@@ -270,6 +277,20 @@ public sealed class MailService(
         var host = (value ?? string.Empty).Trim();
         if (host.Length is 0 or > 200 || host.Contains(' ') || host.Contains('/')) throw new MailException($"Enter the {what}.");
         return host;
+    }
+
+    // The first version (31-10-26) kept a Gmail sign-in as the Automation credential "Mail -
+    // <username>", where every admin could use it. It moves onto the account, and the credential goes.
+    private async Task MoveFirstVersionSignInAsync(MailAccount account, CancellationToken cancellationToken)
+    {
+        if (account is not { Provider: MailProviders.Google, TokenProtected.Length: 0, CredentialId: { } credentialId }) return;
+        if (await db.AutomationCredentials.FirstOrDefaultAsync(item => item.Id == credentialId, cancellationToken) is { } credential)
+        {
+            account.TokenProtected = secretProtector.Protect(secretProtector.Unprotect(credential.ProtectedData));
+            db.AutomationCredentials.Remove(credential);
+        }
+        account.CredentialId = null;
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private async Task RemoveCredentialAsync(Guid? credentialId, CancellationToken cancellationToken)

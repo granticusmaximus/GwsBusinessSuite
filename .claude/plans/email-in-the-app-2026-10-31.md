@@ -80,5 +80,16 @@ connect to my actual emails as well within the app." That covers the three gaps 
     background in its own scope, at most every 2 minutes, because the nav is static SSR.
   - Inbox auto-check every 2 minutes; the page is no longer prerendered.
   - Tests: 3 more in `MailServiceTests`.
-- Not built, and needs Grant's decision: Mail for non-admins. Their Gmail tokens would sit in
-  Automation credentials, which every admin can see and use.
+- **Phase 6 built 31-10-26 ("finish out the remaining work"): Mail for every role.**
+  - Gmail sign-ins are stored on `MailAccount.TokenProtected` (migration `AddMailAccountTokens`).
+    `GmailMailboxBackend` renews them with the GoogleOAuth client from configuration, so the
+    secret isn't copied.
+  - `MoveFirstVersionSignInAsync` moves an earlier "Mail - <user>" credential onto the account and
+    deletes it.
+  - Access:
+    - Mail page and attachment download: ContentAccess.
+    - `/auth/google/connect` and the callback: ContentAccess, but the app-wide (non-mail) purpose
+      checks the Admin role inside.
+  - Mail is in the Home workspace.
+- **Also 31-10-26:** removing a Touch ID key or passkey needs an unlocked session
+  (`RequireCanRemoveMethodAsync`).

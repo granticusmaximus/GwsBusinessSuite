@@ -41,9 +41,13 @@ public sealed class SentinelDeviceKeyTests
         await f.Keys.Invoking(k => k.UnlockAsync("grant", Session, key.Id, Sign(stranger, fresh))).Should().ThrowAsync<SentinelLockException>();
         // Someone else can't use Grant's key, and a removed key stops working.
         await f.Keys.Invoking(k => k.CreateChallengeAsync("sam", Session, key.Id)).Should().ThrowAsync<SentinelLockException>();
-        await f.Keys.RevokeAsync(key.Id, "grant");
-        await f.Keys.Invoking(k => k.CreateChallengeAsync("grant", Session, key.Id)).Should().ThrowAsync<SentinelLockException>();
         (await f.Locks.IsUnlockedAsync("grant", Session)).Should().BeFalse();
+        // Removing it needs an unlock too (31-10-26), or a stolen session could remove Grant's key
+        // and then add its own as the first way to unlock.
+        await f.Keys.Invoking(k => k.RevokeAsync(key.Id, "grant", Session)).Should().ThrowAsync<SentinelLockException>().WithMessage("Unlock first*");
+        await f.Keys.UnlockAsync("grant", Session, key.Id, Sign(mac, await f.Keys.CreateChallengeAsync("grant", Session, key.Id)));
+        await f.Keys.RevokeAsync(key.Id, "grant", Session);
+        await f.Keys.Invoking(k => k.CreateChallengeAsync("grant", Session, key.Id)).Should().ThrowAsync<SentinelLockException>();
     }
 
     [Fact]
@@ -83,7 +87,8 @@ public sealed class SentinelDeviceKeyTests
         unknownChallenge.Should().NotBeNullOrEmpty();
         (await f.Keys.CompleteSignInAsync(unknown, Sign(mac, unknownChallenge))).Should().BeNull();
 
-        await f.Keys.RevokeAsync(key.Id, "grant");
+        await f.Locks.GrantAsync("grant", Session, SentinelPageLock.Methods.Device);
+        await f.Keys.RevokeAsync(key.Id, "grant", Session);
         var afterRevoke = await f.Keys.CreateSignInChallengeAsync(key.Id);
         (await f.Keys.CompleteSignInAsync(key.Id, Sign(mac, afterRevoke))).Should().BeNull();
     }

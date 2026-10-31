@@ -75,7 +75,7 @@ public sealed class GoogleOAuthService(
         return new AutomationOAuthConnectionResult(true, $"Connected to Google ({what}).");
     }
 
-    public async Task<GoogleMailConnectionResult> CompleteMailAuthorizationAsync(string code, string credentialName, CancellationToken cancellationToken = default)
+    public async Task<GoogleMailConnectionResult> CompleteMailAuthorizationAsync(string code, CancellationToken cancellationToken = default)
     {
         var (tokens, error) = await ExchangeAsync(code, cancellationToken);
         if (tokens is null) return new GoogleMailConnectionResult(false, error!);
@@ -83,8 +83,16 @@ public sealed class GoogleOAuthService(
             return new GoogleMailConnectionResult(false, "Google didn't allow reading mail - connect again and tick the Gmail box on Google's screen.");
         if (tokens.Address is null)
             return new GoogleMailConnectionResult(false, "Google didn't say which mailbox this is - try connecting again.");
-        var id = await SaveAsync(credentialName, tokens, $"Mail for {tokens.Address} (Gmail read + send).", cancellationToken);
-        return new GoogleMailConnectionResult(true, $"Connected {tokens.Address}.", id, tokens.Address);
+        // The client id and secret stay in configuration; refreshing reads them from there.
+        var tokenJson = JsonSerializer.Serialize(new
+        {
+            accessToken = tokens.AccessToken,
+            refreshToken = tokens.RefreshToken,
+            expiresAt = tokens.ExpiresAt?.ToString("O"),
+            scope = tokens.Scope,
+            email = tokens.Address
+        });
+        return new GoogleMailConnectionResult(true, $"Connected {tokens.Address}.", tokens.Address, tokenJson);
     }
 
     private sealed record Tokens(string AccessToken, string? RefreshToken, DateTimeOffset? ExpiresAt, string Scope, string? Address)
