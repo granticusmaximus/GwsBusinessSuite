@@ -15,6 +15,10 @@ public static class MailFormatting
         .DisableHtml()
         .Build();
 
+    // The message as it'll look, for compose's Preview: the same frame as a received message.
+    public static string PreviewDocument(string markdown) =>
+        MailMessageRenderer.Document($"<!DOCTYPE html><html><head></head><body>{ToHtml(markdown)}</body></html>");
+
     public static string ToHtml(string markdown)
     {
         var html = Markdown.ToHtml(markdown ?? string.Empty, Pipeline)

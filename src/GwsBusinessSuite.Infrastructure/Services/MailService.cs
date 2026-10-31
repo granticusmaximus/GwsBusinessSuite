@@ -9,9 +9,10 @@ using MimeKit;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
-// IMailService: each person's own mailbox (see MailModels). The account row says which provider
-// and how to sign in; IMailboxBackend does the talking. Provider and network failures come back as
-// MailException with the server's reason, and the last one is kept on the account for the page.
+// IMailService: each person's own mailboxes (see MailModels). An account row says which provider
+// and how to sign in; IMailboxBackend does the talking. Every call names the account, and only the
+// person's own accounts are found. Provider and network failures come back as MailException with
+// the server's reason, and the last one is kept on the account for the page.
 public sealed class MailService(
     IAppDbContext db,
     ISecretProtector secretProtector,
@@ -22,12 +23,11 @@ public sealed class MailService(
     private const int MaxBodyLength = 1_000_000;
     private const int MaxRecipients = 100;
 
-    public async Task<MailAccountView?> GetAccountAsync(string username, CancellationToken cancellationToken = default) =>
-        await db.MailAccounts.AsNoTracking().FirstOrDefaultAsync(account => account.Username == username, cancellationToken) is { } account
-            ? ToView(account)
-            : null;
+    public async Task<IReadOnlyList<MailAccountView>> ListAccountsAsync(string username, CancellationToken cancellationToken = default) =>
+        (await db.MailAccounts.AsNoTracking().Where(account => account.Username == username).ToListAsync(cancellationToken))
+            .OrderBy(account => account.CreatedAt).Select(ToView).ToList();
 
-    public async Task<MailAccountView> SaveImapAccountAsync(string username, MailImapAccountInput input, CancellationToken cancellationToken = default)
+    public async Task<MailAccountView> SaveImapAccountAsync(string username, Guid? accountId, MailImapAccountInput input, CancellationToken cancellationToken = default)
     {
         var address = (input.Address ?? string.Empty).Trim();
         if (!MailboxAddress.TryParse(address, out var parsed) || !parsed.Address.Contains('@'))
@@ -38,7 +38,8 @@ public sealed class MailService(
         if (!MailServerSecurity.All.Contains(input.SmtpSecurity)) throw new MailException("Choose how to secure the SMTP connection.");
         var login = string.IsNullOrWhiteSpace(input.LoginUsername) ? parsed.Address : input.LoginUsername.Trim();
 
-        var account = await db.MailAccounts.FirstOrDefaultAsync(item => item.Username == username, cancellationToken);
+        var account = accountId is { } id ? await FindAsync(username, id, cancellationToken) : null;
+        if (account is null) await RequireRoomAsync(username, cancellationToken);
         var password = !string.IsNullOrEmpty(input.Password) ? input.Password.Replace(" ", string.Empty)
             : account is { Provider: MailProviders.Imap, PasswordProtected.Length: > 0 } ? secretProtector.Unprotect(account.PasswordProtected)
             : throw new MailException("Enter the mailbox's app password.");
@@ -81,15 +82,18 @@ public sealed class MailService(
 
     public async Task<MailAccountView> SaveGoogleAccountAsync(string username, string tokenJson, string address, CancellationToken cancellationToken = default)
     {
-        var account = await db.MailAccounts.FirstOrDefaultAsync(item => item.Username == username, cancellationToken);
+        var trimmed = address.Trim();
+        var account = (await db.MailAccounts.Where(item => item.Username == username).ToListAsync(cancellationToken))
+            .FirstOrDefault(item => item.Provider == MailProviders.Google && string.Equals(item.Address, trimmed, StringComparison.OrdinalIgnoreCase));
         if (account is null)
         {
+            await RequireRoomAsync(username, cancellationToken);
             account = new MailAccount { Username = username, CreatedBy = username };
             db.MailAccounts.Add(account);
         }
         await RemoveCredentialAsync(account.CredentialId, cancellationToken);
         account.Provider = MailProviders.Google;
-        account.Address = address.Trim();
+        account.Address = trimmed;
         account.CredentialId = null;
         account.TokenProtected = secretProtector.Protect(tokenJson);
         account.ImapHost = account.SmtpHost = account.LoginUsername = account.PasswordProtected = string.Empty;
@@ -100,31 +104,34 @@ public sealed class MailService(
         return ToView(account);
     }
 
-    public async Task RemoveAccountAsync(string username, CancellationToken cancellationToken = default)
+    public async Task RemoveAccountAsync(string username, Guid accountId, CancellationToken cancellationToken = default)
     {
-        if (await db.MailAccounts.FirstOrDefaultAsync(item => item.Username == username, cancellationToken) is not { } account) return;
+        if (await FindAsync(username, accountId, cancellationToken) is not { } account) return;
         await RemoveCredentialAsync(account.CredentialId, cancellationToken);
         db.MailAccounts.Remove(account);
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    public Task<MailPage> ListAsync(string username, string folder, string? search, string? pageToken, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(string username, Guid accountId, CancellationToken cancellationToken = default) =>
+        RunAsync(username, accountId, (backend, account) => backend.ListFoldersAsync(account, cancellationToken), cancellationToken);
+
+    public Task<MailPage> ListAsync(string username, Guid accountId, string folder, string? search, string? pageToken, CancellationToken cancellationToken = default)
     {
         if (!MailFolders.IsKnown(folder)) throw new MailException("Unknown folder.");
         var query = search?.Trim();
         if (query is { Length: > MaxSearchLength }) query = query[..MaxSearchLength];
-        return RunAsync(username, (backend, account) => backend.ListAsync(account, folder, query, pageToken, cancellationToken), cancellationToken);
+        return RunAsync(username, accountId, (backend, account) => backend.ListAsync(account, folder, query, pageToken, cancellationToken), cancellationToken);
     }
 
-    public Task<MailMessageDetail> GetAsync(string username, string messageId, bool showRemoteImages, CancellationToken cancellationToken = default) =>
-        RunAsync(username, async (backend, account) =>
+    public Task<MailMessageDetail> GetAsync(string username, Guid accountId, string messageId, bool showRemoteImages, CancellationToken cancellationToken = default) =>
+        RunAsync(username, accountId, async (backend, account) =>
         {
             var fetched = await backend.GetAsync(account, messageId, markRead: true, cancellationToken);
             return MailMessageRenderer.Render(messageId, fetched.ThreadId, fetched.Message, fetched.Unread, fetched.Starred, showRemoteImages);
         }, cancellationToken);
 
-    public Task<MailAttachmentContent> GetAttachmentAsync(string username, string messageId, int index, CancellationToken cancellationToken = default) =>
-        RunAsync(username, async (backend, account) =>
+    public Task<MailAttachmentContent> GetAttachmentAsync(string username, Guid accountId, string messageId, int index, CancellationToken cancellationToken = default) =>
+        RunAsync(username, accountId, async (backend, account) =>
         {
             var message = (await backend.GetAsync(account, messageId, markRead: false, cancellationToken)).Message;
             var attachments = MailMessageRenderer.Attachments(message);
@@ -135,82 +142,131 @@ public sealed class MailService(
             return new MailAttachmentContent(MailMessageRenderer.FileName(part, index), part.ContentType.MimeType, stream.ToArray());
         }, cancellationToken);
 
-    public Task SendAsync(string username, MailDraft draft, CancellationToken cancellationToken = default) =>
-        RunAsync(username, async (backend, account) =>
+    public Task SendAsync(string username, Guid accountId, MailDraft draft, CancellationToken cancellationToken = default) =>
+        RunAsync(username, accountId, async (backend, account) =>
         {
-            var message = new MimeMessage();
-            message.From.Add(new MailboxAddress(account.DisplayName, account.Address));
-            AddRecipients(message.To, draft.To);
-            AddRecipients(message.Cc, draft.Cc);
-            AddRecipients(message.Bcc, draft.Bcc);
-            if (message.To.Count + message.Cc.Count + message.Bcc.Count == 0) throw new MailException("Add who it's to.");
-            if (message.To.Count + message.Cc.Count + message.Bcc.Count > MaxRecipients) throw new MailException($"At most {MaxRecipients} recipients.");
-            if (draft.Body.Length > MaxBodyLength) throw new MailException("That message is too long.");
-            var uploads = draft.Attachments ?? [];
-            if (uploads.Count > MailLimits.MaxAttachments) throw new MailException($"At most {MailLimits.MaxAttachments} attachments.");
-            if (uploads.Sum(file => (long)file.Content.Length) > MailLimits.MaxAttachmentBytes)
-                throw new MailException($"Attachments can add up to {MailLimits.MaxAttachmentBytes / (1024 * 1024)} MB.");
-            message.Subject = draft.Subject.Trim();
-            MimeEntity body = new MultipartAlternative
-            {
-                new TextPart("plain") { Text = draft.Body },
-                new TextPart("html") { Text = MailFormatting.ToHtml(draft.Body) }
-            };
-            var attachments = uploads.Select(Attachment).ToList();
-
-            string? threadId = null;
-            if (!string.IsNullOrEmpty(draft.ReplyToMessageId))
-            {
-                var original = await backend.GetAsync(account, draft.ReplyToMessageId, markRead: false, cancellationToken);
-                threadId = original.ThreadId;
-                if (!draft.Forward && original.Message.MessageId is { } replyingTo)
-                {
-                    message.InReplyTo = replyingTo;
-                    foreach (var reference in original.Message.References) message.References.Add(reference);
-                    message.References.Add(replyingTo);
-                }
-                if (draft.Forward) attachments.InsertRange(0, MailMessageRenderer.Attachments(original.Message));
-            }
-            if (attachments.Count > 0)
-            {
-                var mixed = new Multipart("mixed") { body };
-                foreach (var attachment in attachments) mixed.Add(attachment);
-                body = mixed;
-            }
-            message.Body = body;
+            var (message, threadId) = await BuildAsync(backend, account, draft, sending: true, cancellationToken);
             await backend.SendAsync(account, message, draft.Forward ? null : threadId, cancellationToken);
+            if (draft.DraftId is { } draftId)
+            {
+                try
+                {
+                    await backend.DeleteDraftAsync(account, draftId, cancellationToken);
+                }
+                catch (MailException)
+                {
+                    throw new MailException("Sent - but its draft is still in Drafts; delete it there.");
+                }
+            }
             return true;
         }, cancellationToken);
 
-    public async Task<int?> GetUnreadCountAsync(string username, CancellationToken cancellationToken = default) =>
-        await db.MailAccounts.AsNoTracking().AnyAsync(account => account.Username == username, cancellationToken)
-            ? await RunAsync(username, (backend, account) => backend.UnreadCountAsync(account, cancellationToken), cancellationToken)
-            : null;
+    public Task<string> SaveDraftAsync(string username, Guid accountId, MailDraft draft, CancellationToken cancellationToken = default) =>
+        RunAsync(username, accountId, async (backend, account) =>
+        {
+            var (message, threadId) = await BuildAsync(backend, account, draft, sending: false, cancellationToken);
+            return await backend.SaveDraftAsync(account, message, draft.DraftId, draft.Forward ? null : threadId, cancellationToken);
+        }, cancellationToken);
 
-    public Task SetReadAsync(string username, string messageId, bool read, CancellationToken cancellationToken = default) =>
-        RunAsync(username, (backend, account) => backend.SetReadAsync(account, messageId, read, cancellationToken), cancellationToken);
+    public Task SetReadAsync(string username, Guid accountId, string messageId, bool read, CancellationToken cancellationToken = default) =>
+        RunAsync(username, accountId, (backend, account) => backend.SetReadAsync(account, messageId, read, cancellationToken), cancellationToken);
 
-    public Task SetStarredAsync(string username, string messageId, bool starred, CancellationToken cancellationToken = default) =>
-        RunAsync(username, (backend, account) => backend.SetStarredAsync(account, messageId, starred, cancellationToken), cancellationToken);
+    public Task SetStarredAsync(string username, Guid accountId, string messageId, bool starred, CancellationToken cancellationToken = default) =>
+        RunAsync(username, accountId, (backend, account) => backend.SetStarredAsync(account, messageId, starred, cancellationToken), cancellationToken);
 
-    public Task ArchiveAsync(string username, string messageId, CancellationToken cancellationToken = default) =>
-        RunAsync(username, (backend, account) => backend.ArchiveAsync(account, messageId, cancellationToken), cancellationToken);
+    public Task ArchiveAsync(string username, Guid accountId, string messageId, CancellationToken cancellationToken = default) =>
+        RunAsync(username, accountId, (backend, account) => backend.ArchiveAsync(account, messageId, cancellationToken), cancellationToken);
 
-    public Task TrashAsync(string username, string messageId, CancellationToken cancellationToken = default) =>
-        RunAsync(username, (backend, account) => backend.TrashAsync(account, messageId, cancellationToken), cancellationToken);
+    public Task TrashAsync(string username, Guid accountId, string messageId, CancellationToken cancellationToken = default) =>
+        RunAsync(username, accountId, (backend, account) => backend.TrashAsync(account, messageId, cancellationToken), cancellationToken);
 
-    private Task RunAsync(string username, Func<IMailboxBackend, MailAccount, Task> work, CancellationToken cancellationToken) =>
-        RunAsync(username, async (backend, account) =>
+    // Each inbox counted on its own; one that can't be reached is left out rather than failing the rest.
+    public async Task<int?> GetUnreadCountAsync(string username, CancellationToken cancellationToken = default)
+    {
+        var ids = await db.MailAccounts.AsNoTracking().Where(account => account.Username == username).Select(account => account.Id).ToListAsync(cancellationToken);
+        if (ids.Count == 0) return null;
+        var total = 0;
+        foreach (var id in ids)
+        {
+            try
+            {
+                total += await RunAsync(username, id, (backend, account) => backend.UnreadCountAsync(account, cancellationToken), cancellationToken);
+            }
+            catch (MailException)
+            {
+                // That mailbox's own page says what's wrong.
+            }
+        }
+        return total;
+    }
+
+    // The message to send or keep as a draft. A reply threads on the original; editing a draft keeps
+    // the threading the draft already had; a forward carries the original's attachments.
+    private async Task<(MimeMessage Message, string? ThreadId)> BuildAsync(IMailboxBackend backend, MailAccount account, MailDraft draft, bool sending, CancellationToken cancellationToken)
+    {
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress(account.DisplayName, account.Address));
+        AddRecipients(message.To, draft.To);
+        AddRecipients(message.Cc, draft.Cc);
+        AddRecipients(message.Bcc, draft.Bcc);
+        var recipients = message.To.Count + message.Cc.Count + message.Bcc.Count;
+        if (sending && recipients == 0) throw new MailException("Add who it's to.");
+        if (recipients > MaxRecipients) throw new MailException($"At most {MaxRecipients} recipients.");
+        if (draft.Body.Length > MaxBodyLength) throw new MailException("That message is too long.");
+        var uploads = draft.Attachments ?? [];
+        if (uploads.Count > MailLimits.MaxAttachments) throw new MailException($"At most {MailLimits.MaxAttachments} attachments.");
+        if (uploads.Sum(file => (long)file.Content.Length) > MailLimits.MaxAttachmentBytes)
+            throw new MailException($"Attachments can add up to {MailLimits.MaxAttachmentBytes / (1024 * 1024)} MB.");
+        message.Subject = draft.Subject.Trim();
+        MimeEntity body = new MultipartAlternative
+        {
+            new TextPart("plain") { Text = draft.Body },
+            new TextPart("html") { Text = MailFormatting.ToHtml(draft.Body) }
+        };
+        var attachments = uploads.Select(Attachment).ToList();
+
+        string? threadId = null;
+        var threadFrom = draft.ReplyToMessageId ?? draft.DraftId;
+        if (!string.IsNullOrEmpty(threadFrom))
+        {
+            var original = await backend.GetAsync(account, threadFrom, markRead: false, cancellationToken);
+            threadId = original.ThreadId;
+            if (draft.ReplyToMessageId is null)
+            {
+                // Editing a draft: the same threading headers, and the files it already had.
+                message.InReplyTo = original.Message.InReplyTo;
+                foreach (var reference in original.Message.References) message.References.Add(reference);
+                attachments.InsertRange(0, MailMessageRenderer.Attachments(original.Message));
+            }
+            else if (!draft.Forward && original.Message.MessageId is { } replyingTo)
+            {
+                message.InReplyTo = replyingTo;
+                foreach (var reference in original.Message.References) message.References.Add(reference);
+                message.References.Add(replyingTo);
+            }
+            if (draft.Forward && draft.ReplyToMessageId is not null) attachments.InsertRange(0, MailMessageRenderer.Attachments(original.Message));
+        }
+        if (attachments.Count > 0)
+        {
+            var mixed = new Multipart("mixed") { body };
+            foreach (var attachment in attachments) mixed.Add(attachment);
+            body = mixed;
+        }
+        message.Body = body;
+        return (message, threadId);
+    }
+
+    private Task RunAsync(string username, Guid accountId, Func<IMailboxBackend, MailAccount, Task> work, CancellationToken cancellationToken) =>
+        RunAsync(username, accountId, async (backend, account) =>
         {
             await work(backend, account);
             return true;
         }, cancellationToken);
 
     // Runs one mailbox operation; the account's LastError follows the outcome (written only when it changes).
-    private async Task<T> RunAsync<T>(string username, Func<IMailboxBackend, MailAccount, Task<T>> work, CancellationToken cancellationToken)
+    private async Task<T> RunAsync<T>(string username, Guid accountId, Func<IMailboxBackend, MailAccount, Task<T>> work, CancellationToken cancellationToken)
     {
-        var account = await db.MailAccounts.FirstOrDefaultAsync(item => item.Username == username, cancellationToken)
-            ?? throw new MailException("Connect a mailbox first.");
+        var account = await FindAsync(username, accountId, cancellationToken) ?? throw new MailException("Connect a mailbox first.");
         await MoveFirstVersionSignInAsync(account, cancellationToken);
         var signInBefore = account.TokenProtected;
         string? failure = null;
@@ -242,6 +298,16 @@ public sealed class MailService(
             }
             if (changed) await db.SaveChangesAsync(CancellationToken.None);
         }
+    }
+
+    // Only the person's own: someone else's account id finds nothing.
+    private Task<MailAccount?> FindAsync(string username, Guid accountId, CancellationToken cancellationToken) =>
+        db.MailAccounts.FirstOrDefaultAsync(item => item.Id == accountId && item.Username == username, cancellationToken);
+
+    private async Task RequireRoomAsync(string username, CancellationToken cancellationToken)
+    {
+        if (await db.MailAccounts.CountAsync(account => account.Username == username, cancellationToken) >= MailLimits.MaxAccounts)
+            throw new MailException($"You can connect up to {MailLimits.MaxAccounts} mailboxes - remove one first.");
     }
 
     private IMailboxBackend Backend(string provider) =>

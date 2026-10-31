@@ -119,9 +119,13 @@ public static class PublicSiteHtmlRenderer
 
     // CJ's site-wide deep-link automation. This publisher-specific URL is intentionally
     // limited to the public renderer so affiliate link rewriting never runs in the admin,
-    // Sentinel, or authenticated Canvas editing surfaces.
-    private const string CjDeepLinkScript =
-        """<script src="https://www.anrdoezrs.net/am/101461368/include/allCj/impressions/page/am.js"></script>""";
+    // Sentinel, or authenticated Canvas editing surfaces. Since 31-10-26 it's not a script tag:
+    // js/consent.js loads it once the visitor's privacy choice allows affiliate partners.
+    public const string CjDeepLinkScriptUrl = "https://www.anrdoezrs.net/am/101461368/include/allCj/impressions/page/am.js";
+
+    // Under every page, whichever footer is in use: reopens the privacy choices (js/consent.js).
+    private const string PrivacyChoicesLink =
+        """<p class="gws-privacy-choices"><a href="#privacy-choices" data-gws-consent-open>Privacy choices</a></p>""";
 
     // ── Page shell ───────────────────────────────────────────────────────────
 
@@ -186,15 +190,16 @@ public static class PublicSiteHtmlRenderer
               <style>{CmsThemeCss.Build(tokens)}</style>
               {ReducedMotionRevealScript}
             </head>
-            <body>
+            <body data-gws-affiliate-script="{CjDeepLinkScriptUrl}">
               {SiteHeader(headerHtml, navItems, siteName, logoUrl)}
               {bodyHtml}
               {languages?.Switcher()}
               {SiteFooter(footerHtml, footerNavItems)}
+              {PrivacyChoicesLink}
               <script src="/public-site.js" defer></script>
               <script src="/js/responsive-tables.js" defer></script>
+              <script src="/js/consent.js" defer></script>
               <script src="/public-analytics.js" defer></script>
-              {CjDeepLinkScript}
             </body>
             </html>
             """;

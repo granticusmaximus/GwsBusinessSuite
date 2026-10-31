@@ -27,7 +27,7 @@ public static partial class MailMessageRenderer
             : Document(Sanitize(html, InlineImages(message), showRemoteImages, out blocked));
 
         return new MailMessageDetail(
-            id, threadId, Address(message.From.Mailboxes.FirstOrDefault()), Addresses(message.To), Addresses(message.Cc), Addresses(message.ReplyTo),
+            id, threadId, Address(message.From.Mailboxes.FirstOrDefault()), Addresses(message.To), Addresses(message.Cc), Addresses(message.Bcc), Addresses(message.ReplyTo),
             message.Subject ?? string.Empty, message.Date, document, text.Trim(), blocked,
             Attachments(message).Select((part, index) => new MailAttachmentInfo(index, FileName(part, index), part.ContentType.MimeType, EstimatedSize(part))).ToList(),
             message.MessageId, message.References.ToList(), unread, starred);

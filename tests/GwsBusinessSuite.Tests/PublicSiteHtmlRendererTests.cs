@@ -79,17 +79,22 @@ public sealed class PublicSiteHtmlRendererTests
         Assert.Contains(">Contact<", html);
     }
 
+    // Privacy choices (31-10-26): CJ's deep-link script is no longer a tag on the page - js/consent.js
+    // loads it from the body's data attribute once the visitor allows affiliate partners - and the
+    // consent script runs before the analytics that waits on it. "Privacy choices" is under every footer.
     [Fact]
-    public void Layout_ShouldIncludeCjDeepLinkAutomationOnce()
+    public void Layout_ShouldLeaveCjAndAnalyticsToThePrivacyChoices()
     {
         var html = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>");
-        const string script =
-            """<script src="https://www.anrdoezrs.net/am/101461368/include/allCj/impressions/page/am.js"></script>""";
 
-        Assert.Equal(1, html.Split(script, StringSplitOptions.None).Length - 1);
-        Assert.True(
-            html.IndexOf(script, StringComparison.Ordinal)
-            < html.IndexOf("</body>", StringComparison.Ordinal));
+        Assert.DoesNotContain("<script src=\"https://www.anrdoezrs.net", html);
+        Assert.Contains($"<body data-gws-affiliate-script=\"{PublicSiteHtmlRenderer.CjDeepLinkScriptUrl}\">", html);
+        Assert.Equal("https://www.anrdoezrs.net/am/101461368/include/allCj/impressions/page/am.js", PublicSiteHtmlRenderer.CjDeepLinkScriptUrl);
+        Assert.True(html.IndexOf("/js/consent.js", StringComparison.Ordinal) < html.IndexOf("/public-analytics.js", StringComparison.Ordinal));
+        Assert.Contains("data-gws-consent-open", html);
+
+        var custom = PublicSiteHtmlRenderer.Layout("Title", "Description", null, "<p>body</p>", footerHtml: "<p>My own footer</p>");
+        Assert.Contains("data-gws-consent-open", custom);
     }
 
     [Fact]

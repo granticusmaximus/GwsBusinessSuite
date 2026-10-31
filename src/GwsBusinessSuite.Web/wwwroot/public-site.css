@@ -1857,3 +1857,61 @@ span.footer-group-heading { font-size: 0.8rem; }
 .gws-lang-switcher a { color: var(--text-2); text-decoration: none; }
 .gws-lang-switcher a:hover, .gws-lang-switcher a:focus-visible { color: var(--text-1); text-decoration: underline; }
 .gws-lang-switcher a[aria-current="true"] { color: var(--text-1); font-weight: 600; }
+
+/* Privacy choices (js/consent.js, 31-10-26): a bar along the bottom until the visitor chooses,
+   and a quiet link under every footer to choose again. */
+.gws-consent {
+  position: fixed;
+  left: 1rem;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 1000;
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--border);
+  border-radius: .75rem;
+  background: var(--bg-surface);
+  color: var(--text-1);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
+  font: 400 .9rem/1.5 var(--font-sans);
+}
+
+.gws-consent-text { margin: 0 0 .75rem; color: var(--text-2); }
+.gws-consent-text strong { color: var(--text-1); }
+
+.gws-consent-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.25rem;
+  margin-bottom: .75rem;
+}
+
+.gws-consent-options label { display: inline-flex; align-items: center; gap: .4rem; cursor: pointer; }
+
+.gws-consent-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+
+.gws-consent-actions button {
+  min-height: 2.5rem;
+  padding: .45rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: .5rem;
+  background: var(--bg-surface-2);
+  color: var(--text-1);
+  font: inherit;
+  cursor: pointer;
+}
+
+.gws-consent-actions button[data-action="all"] { background: var(--accent); border-color: var(--accent); color: #141210; font-weight: 600; }
+.gws-consent-actions button:hover { border-color: var(--accent); }
+.gws-consent-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.gws-privacy-choices {
+  margin: 0;
+  padding: 0 1rem 1.25rem;
+  text-align: center;
+  font-size: .8rem;
+}
+
+.gws-privacy-choices a { color: var(--text-3); }
+.gws-privacy-choices a:hover { color: var(--accent); }

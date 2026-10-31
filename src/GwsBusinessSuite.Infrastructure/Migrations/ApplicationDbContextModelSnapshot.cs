@@ -4653,8 +4653,7 @@ namespace GwsBusinessSuite.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Username")
-                        .IsUnique();
+                    b.HasIndex("Username");
 
                     b.ToTable("MailAccounts");
                 });

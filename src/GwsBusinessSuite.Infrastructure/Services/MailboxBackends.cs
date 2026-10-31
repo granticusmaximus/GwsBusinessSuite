@@ -31,6 +31,11 @@ public interface IMailboxBackend
     Task ArchiveAsync(MailAccount account, string id, CancellationToken cancellationToken);
     Task TrashAsync(MailAccount account, string id, CancellationToken cancellationToken);
     Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken);
+    // The provider's own folders and labels (MailFolders.LabelPrefix / FolderPrefix keys).
+    Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(MailAccount account, CancellationToken cancellationToken);
+    // Puts the message in Drafts, replacing the draft replacesDraftId; returns the new draft's id.
+    Task<string> SaveDraftAsync(MailAccount account, MimeMessage message, string? replacesDraftId, string? threadId, CancellationToken cancellationToken);
+    Task DeleteDraftAsync(MailAccount account, string draftId, CancellationToken cancellationToken);
 }
 
 // Gmail through Google's API with the person's own Google sign-in (MailAccount.TokenProtected).
@@ -52,7 +57,7 @@ public sealed class GmailMailboxBackend(
 
     public async Task<MailPage> ListAsync(MailAccount account, string folder, string? search, string? pageToken, CancellationToken cancellationToken)
     {
-        var labels = folder switch
+        var labels = folder.StartsWith(MailFolders.LabelPrefix, StringComparison.Ordinal) ? folder[MailFolders.LabelPrefix.Length..] : folder switch
         {
             MailFolders.Inbox => "INBOX",
             MailFolders.Starred => "STARRED",
@@ -131,6 +136,51 @@ public sealed class GmailMailboxBackend(
 
     public async Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken) =>
         (await CallAsync(account, HttpMethod.Get, "labels/INBOX", null, cancellationToken))?["messagesUnread"]?.GetValue<int>() ?? 0;
+
+    // The labels the person made (Gmail's own - Inbox, Sent, CATEGORY_* - are the standard folders).
+    public async Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(MailAccount account, CancellationToken cancellationToken)
+    {
+        var labels = await CallAsync(account, HttpMethod.Get, "labels", null, cancellationToken);
+        return labels?["labels"]?.AsArray()
+            .Where(label => label?["type"]?.GetValue<string>() == "user")
+            .Select(label => new MailFolderView(MailFolders.LabelPrefix + label!["id"]!.GetValue<string>(), label["name"]?.GetValue<string>() ?? "Label"))
+            .OrderBy(label => label.Label, StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? [];
+    }
+
+    // Gmail drafts have their own ids; the list maps each to the message id Mail knows it by.
+    public async Task<string> SaveDraftAsync(MailAccount account, MimeMessage message, string? replacesDraftId, string? threadId, CancellationToken cancellationToken)
+    {
+        using var stream = new MemoryStream();
+        await message.WriteToAsync(stream, cancellationToken);
+        var inner = new JsonObject { ["raw"] = ToBase64Url(stream.ToArray()) };
+        if (!string.IsNullOrEmpty(threadId)) inner["threadId"] = threadId;
+        var existing = replacesDraftId is null ? null : await DraftIdForAsync(account, replacesDraftId, cancellationToken);
+        var saved = existing is null
+            ? await CallAsync(account, HttpMethod.Post, "drafts", new JsonObject { ["message"] = inner }, cancellationToken)
+            : await CallAsync(account, HttpMethod.Put, $"drafts/{Uri.EscapeDataString(existing)}", new JsonObject { ["id"] = existing, ["message"] = inner }, cancellationToken);
+        return saved?["message"]?["id"]?.GetValue<string>() ?? throw new MailException("Gmail didn't say where it saved the draft.");
+    }
+
+    public async Task DeleteDraftAsync(MailAccount account, string draftId, CancellationToken cancellationToken)
+    {
+        if (await DraftIdForAsync(account, draftId, cancellationToken) is { } id)
+            await CallAsync(account, HttpMethod.Delete, $"drafts/{Uri.EscapeDataString(id)}", null, cancellationToken);
+    }
+
+    private async Task<string?> DraftIdForAsync(MailAccount account, string messageId, CancellationToken cancellationToken)
+    {
+        string? pageToken = null;
+        do
+        {
+            var page = await CallAsync(account, HttpMethod.Get, "drafts?maxResults=500" + (pageToken is null ? "" : "&pageToken=" + Uri.EscapeDataString(pageToken)), null, cancellationToken);
+            var match = page?["drafts"]?.AsArray().FirstOrDefault(draft => draft?["message"]?["id"]?.GetValue<string>() == messageId);
+            if (match is not null) return match["id"]?.GetValue<string>();
+            pageToken = page?["nextPageToken"]?.GetValue<string>();
+        }
+        while (pageToken is not null);
+        return null;
+    }
 
     private async Task ModifyAsync(MailAccount account, string id, string[] add, string[] remove, CancellationToken cancellationToken) =>
         await CallAsync(account, HttpMethod.Post, $"messages/{Uri.EscapeDataString(id)}/modify", new JsonObject
@@ -395,6 +445,49 @@ public sealed class ImapMailboxBackend(ISecretProtector secretProtector) : IMail
         return unread;
     }
 
+    // Every folder that isn't the inbox or one of the standard ones, by its full path.
+    public async Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(MailAccount account, CancellationToken cancellationToken)
+    {
+        using var client = await ConnectAsync(account, cancellationToken);
+        var standard = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { client.Inbox.FullName };
+        foreach (var key in Specials.Keys)
+            if (await FolderAsync(client, key, cancellationToken) is { } folder) standard.Add(folder.FullName);
+        if ((client.Capabilities & (ImapCapabilities.SpecialUse | ImapCapabilities.XList)) != 0)
+            foreach (var extra in new[] { SpecialFolder.All, SpecialFolder.Flagged, SpecialFolder.Important })
+                if (client.GetFolder(extra) is { } folder) standard.Add(folder.FullName);
+        var folders = client.PersonalNamespaces.Count == 0 ? [] : await client.GetFoldersAsync(client.PersonalNamespaces[0], false, cancellationToken);
+        var custom = folders
+            .Where(folder => !standard.Contains(folder.FullName) && !folder.Attributes.HasFlag(FolderAttributes.NoSelect) && !folder.Attributes.HasFlag(FolderAttributes.NonExistent))
+            .Select(folder => new MailFolderView(MailFolders.FolderPrefix + folder.FullName, folder.FullName.Replace(folder.DirectorySeparator.ToString(), " / ")))
+            .OrderBy(folder => folder.Label, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        await client.DisconnectAsync(true, cancellationToken);
+        return custom;
+    }
+
+    public async Task<string> SaveDraftAsync(MailAccount account, MimeMessage message, string? replacesDraftId, string? threadId, CancellationToken cancellationToken)
+    {
+        using var client = await ConnectAsync(account, cancellationToken);
+        var drafts = await FolderAsync(client, MailFolders.Drafts, cancellationToken) ?? throw new MailException("This mailbox has no Drafts folder.");
+        await drafts.OpenAsync(FolderAccess.ReadWrite, cancellationToken);
+        var uid = await drafts.AppendAsync(new AppendRequest(message, MessageFlags.Draft | MessageFlags.Seen), cancellationToken);
+        var id = uid is { } saved ? ImapMessageId.Encode(drafts.FullName, drafts.UidValidity, saved.Id)
+            : throw new MailException("The server saved the draft but didn't say where - look in Drafts.");
+        await client.DisconnectAsync(true, cancellationToken);
+        if (replacesDraftId is not null) await DeleteDraftAsync(account, replacesDraftId, cancellationToken);
+        return id;
+    }
+
+    public async Task DeleteDraftAsync(MailAccount account, string draftId, CancellationToken cancellationToken)
+    {
+        using var client = await ConnectAsync(account, cancellationToken);
+        var (folder, uid) = await OpenAsync(client, draftId, FolderAccess.ReadWrite, cancellationToken);
+        await folder.AddFlagsAsync(uid, MessageFlags.Deleted, true, cancellationToken);
+        if (client.Capabilities.HasFlag(ImapCapabilities.UidPlus)) await folder.ExpungeAsync([uid], cancellationToken);
+        else await folder.ExpungeAsync(cancellationToken);
+        await client.DisconnectAsync(true, cancellationToken);
+    }
+
     private async Task FlagAsync(MailAccount account, string id, MessageFlags flag, bool on, CancellationToken cancellationToken)
     {
         using var client = await ConnectAsync(account, cancellationToken);
@@ -439,6 +532,8 @@ public sealed class ImapMailboxBackend(ISecretProtector secretProtector) : IMail
     private static async Task<IMailFolder?> FolderAsync(ImapClient client, string key, CancellationToken cancellationToken)
     {
         if (key is MailFolders.Inbox or MailFolders.Starred) return client.Inbox;
+        if (key.StartsWith(MailFolders.FolderPrefix, StringComparison.Ordinal))
+            return await client.GetFolderAsync(key[MailFolders.FolderPrefix.Length..], cancellationToken);
         if (!Specials.TryGetValue(key, out var special)) return null;
         if ((client.Capabilities & (ImapCapabilities.SpecialUse | ImapCapabilities.XList)) != 0)
         {

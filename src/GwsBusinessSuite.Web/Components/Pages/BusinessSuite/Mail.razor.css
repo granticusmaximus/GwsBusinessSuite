@@ -48,6 +48,15 @@
     font-weight: 600;
 }
 
+.mail-folders-heading {
+    margin: .6rem .6rem .15rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    font-size: .7rem;
+}
+
+.mail-folder span { min-width: 0; }
+
 .mail-account {
     margin-top: auto;
     padding: .5rem .25rem 0;
@@ -223,6 +232,15 @@
     white-space: normal;
     overflow-wrap: anywhere;
 }
+
+.mail-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .25rem;
+    margin-bottom: .35rem;
+}
+
+.mail-compose-preview { min-height: 15rem; }
 
 .mail-compose-body {
     flex: 1;

@@ -53,5 +53,5 @@ hand every time he opened the app.
   - notes load alongside globe init
   - Cesium is prefetched while the portal is idle
   - It stays a full page load: Cesium needs 'unsafe-eval', which only /admin/osint's own CSP allows.
-- [ ] After deploy: re-check the droplet (docker stats during a read) to confirm the app keeps a core.
+- [x] After deploy: re-check the droplet (docker stats during a read) to confirm the app keeps a core. Checked 31-10-26: with Ollama reading, it ran at ~305% (NanoCpus 3e9 = 3 of 4 cores, CpuShares 256) and the app (no cap, default shares) stayed responsive, so it keeps at least one core.
 - [x] Boards K9g (sharing): built 31-10-26 (see kanban-boards-2026-10.md).

@@ -2637,8 +2637,8 @@ app.MapGet("/auth/google/callback", async (
         var connection = await googleOAuth.CompleteMailAuthorizationAsync(code ?? string.Empty, cancellationToken);
         if (connection is not { IsSuccess: true, TokenJson: { } tokenJson, Address: { } address })
             return Results.LocalRedirect("/admin/mail?google=failed");
-        await mail.SaveGoogleAccountAsync(httpContext.User.Identity!.Name!, tokenJson, address, cancellationToken);
-        return Results.LocalRedirect("/admin/mail?google=connected");
+        var connected = await mail.SaveGoogleAccountAsync(httpContext.User.Identity!.Name!, tokenJson, address, cancellationToken);
+        return Results.LocalRedirect($"/admin/mail?google=connected&account={connected.Id}");
     }
 
     var result = await googleOAuth.CompleteAuthorizationAsync(code ?? string.Empty, cancellationToken);
@@ -2649,7 +2649,8 @@ app.MapGet("/auth/google/callback", async (
     .RequireRateLimiting("admin-mutation");
 
 // Mail: an attachment of one of the signed-in person's own messages, as a download.
-app.MapGet("/admin/api/mail/messages/{id}/attachments/{index:int}", async (
+app.MapGet("/admin/api/mail/{accountId:guid}/messages/{id}/attachments/{index:int}", async (
+    Guid accountId,
     string id,
     int index,
     HttpContext httpContext,
@@ -2658,7 +2659,7 @@ app.MapGet("/admin/api/mail/messages/{id}/attachments/{index:int}", async (
 {
     try
     {
-        var attachment = await mail.GetAttachmentAsync(httpContext.User.Identity!.Name!, id, index, cancellationToken);
+        var attachment = await mail.GetAttachmentAsync(httpContext.User.Identity!.Name!, accountId, id, index, cancellationToken);
         // Anyone can email anything: an HTML or SVG attachment served as itself from this origin
         // could run script with the session, so only plainly inert types keep their type.
         string[] inert = ["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain", "text/csv"];
@@ -3276,6 +3277,17 @@ app.MapPost("/blog/{slug}/comments", async (
 
 // First-party, cookieless public-site analytics. The collector deliberately receives no
 // authentication cookie and the service persists neither IP addresses nor raw user agents.
+// Whether this visitor's region needs an opt-in before the public site stores a visitor id or
+// loads the affiliate script (js/consent.js). Unknown location asks.
+app.MapGet("/api/consent/region", (HttpContext context, IAnalyticsGeoLocationResolver geo) =>
+{
+    var country = geo.Resolve(context.Connection.RemoteIpAddress)?.CountryCode;
+    context.Response.Headers.CacheControl = "private, max-age=3600";
+    return Results.Json(new { required = GwsBusinessSuite.Application.Growth.ConsentRegions.RequiresOptIn(country) });
+})
+    .AllowAnonymous()
+    .RequireRateLimiting("public-read");
+
 app.MapPost("/api/analytics/events", async (
     HttpContext context,
     IGrowthAnalyticsService analyticsService) =>

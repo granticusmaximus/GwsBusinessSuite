@@ -11,6 +11,7 @@
 @inject IMailService MailService
 @inject IGoogleOAuthService GoogleOAuth
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
 @inject GwsBusinessSuite.Infrastructure.Services.MailUnreadCounter MailUnread
 
 @* Mail (31-10-26): your own mailbox - Gmail through your Google connection, or any provider over
@@ -119,7 +120,7 @@ else if (_account is null || _changingAccount)
                     <button type="button" class="btn btn-primary btn-sm" disabled="@(_busy || string.IsNullOrWhiteSpace(_setup.Address))" @onclick="SaveImapAsync">
                         @(_busy ? "Signing in…" : "Connect")
                     </button>
-                    @if (_changingAccount)
+                    @if (_changingAccount && _accounts.Count > 0)
                     {
                         <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => _changingAccount = false">Cancel</button>
                     }
@@ -139,10 +140,38 @@ else
                     <i class="bi @icon" aria-hidden="true"></i><span>@label</span>
                 </button>
             }
+            @if (_customFolders.Count > 0)
+            {
+                <div class="mail-folders-heading small text-secondary">@(_account.Provider == MailProviders.Google ? "Labels" : "Folders")</div>
+                @foreach (var folder in _customFolders)
+                {
+                    <button type="button" class="mail-folder @(folder.Key == _folder ? "active" : string.Empty)" aria-current="@(folder.Key == _folder ? "page" : null)"
+                            title="@folder.Label" @onclick="() => OpenFolderAsync(folder.Key)">
+                        <i class="bi @(_account.Provider == MailProviders.Google ? "bi-tag" : "bi-folder") " aria-hidden="true"></i><span class="text-truncate">@folder.Label</span>
+                    </button>
+                }
+            }
             <div class="mail-account small text-secondary">
-                <div class="text-truncate" title="@_account.Address"><i class="bi @(_account.Provider == MailProviders.Google ? "bi-google" : "bi-envelope-at") me-1" aria-hidden="true"></i>@_account.Address</div>
-                <button type="button" class="btn btn-link btn-sm p-0" @onclick="StartChangeAccount">Change mailbox</button>
-                <button type="button" class="btn btn-link btn-sm p-0 text-danger" @onclick="DisconnectAsync">Disconnect</button>
+                @if (_accounts.Count > 1)
+                {
+                    <label class="visually-hidden" for="mail-account-switch">Mailbox</label>
+                    <select id="mail-account-switch" class="form-select form-select-sm" value="@_account.Id" @onchange="SwitchAccountAsync">
+                        @foreach (var account in _accounts)
+                        {
+                            <option value="@account.Id">@account.Address</option>
+                        }
+                    </select>
+                }
+                else
+                {
+                    <div class="text-truncate" title="@_account.Address"><i class="bi @(_account.Provider == MailProviders.Google ? "bi-google" : "bi-envelope-at") me-1" aria-hidden="true"></i>@_account.Address</div>
+                }
+                <button type="button" class="btn btn-link btn-sm p-0" @onclick="StartAddAccount"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add a mailbox</button>
+                @if (_account.Provider == MailProviders.Imap)
+                {
+                    <button type="button" class="btn btn-link btn-sm p-0" @onclick="StartEditAccount">Edit this mailbox</button>
+                }
+                <button type="button" class="btn btn-link btn-sm p-0 text-danger" @onclick="DisconnectAsync">Remove this mailbox</button>
             </div>
         </nav>
 
@@ -222,9 +251,23 @@ else
                     }
                     <label class="form-label small mb-1" for="mail-subject">Subject</label>
                     <input id="mail-subject" class="form-control form-control-sm mb-2" @bind="_compose.Subject" @bind:event="oninput" />
+                    <div class="mail-toolbar" role="toolbar" aria-label="Formatting">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" title="Bold (⌘B)" aria-label="Bold" disabled="@_compose.Preview" @onclick="@(() => FormatAsync("bold"))"><i class="bi bi-type-bold" aria-hidden="true"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" title="Italic (⌘I)" aria-label="Italic" disabled="@_compose.Preview" @onclick="@(() => FormatAsync("italic"))"><i class="bi bi-type-italic" aria-hidden="true"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" title="Bulleted list" aria-label="Bulleted list" disabled="@_compose.Preview" @onclick="@(() => FormatAsync("bullets"))"><i class="bi bi-list-ul" aria-hidden="true"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" title="Numbered list" aria-label="Numbered list" disabled="@_compose.Preview" @onclick="@(() => FormatAsync("numbers"))"><i class="bi bi-list-ol" aria-hidden="true"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" title="Link (⌘K)" aria-label="Link" disabled="@_compose.Preview" @onclick="@(() => FormatAsync("link"))"><i class="bi bi-link-45deg" aria-hidden="true"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" title="Quote" aria-label="Quote" disabled="@_compose.Preview" @onclick="@(() => FormatAsync("quote"))"><i class="bi bi-quote" aria-hidden="true"></i></button>
+                        <button type="button" class="btn btn-sm @(_compose.Preview ? "btn-secondary" : "btn-outline-secondary") ms-auto" aria-pressed="@_compose.Preview"
+                                @onclick="() => _compose.Preview = !_compose.Preview"><i class="bi bi-eye me-1" aria-hidden="true"></i>Preview</button>
+                    </div>
                     <label class="visually-hidden" for="mail-body">Message</label>
-                    <textarea id="mail-body" class="form-control mail-compose-body" @bind="_compose.Body" @bind:event="oninput"></textarea>
-                    <div class="form-text">Formatting: **bold**, _italic_, - lists, [links](https://…). Lines starting with &gt; show as a quote.</div>
+                    <textarea id="mail-body" class="form-control mail-compose-body" hidden="@_compose.Preview" @ref="_bodyRef" @bind="_compose.Body" @bind:event="oninput"></textarea>
+                    @if (_compose.Preview)
+                    {
+                        <iframe class="mail-body mail-compose-preview" title="Preview" sandbox="" referrerpolicy="no-referrer"
+                                srcdoc="@GwsBusinessSuite.Infrastructure.Services.MailFormatting.PreviewDocument(_compose.Body)"></iframe>
+                    }
                     @if (_compose.Kind == ComposeKind.Forward && _detail?.Attachments.Count > 0)
                     {
                         <div class="small text-secondary mt-1"><i class="bi bi-paperclip" aria-hidden="true"></i> The @_detail.Attachments.Count attachment(s) go with it.</div>
@@ -244,7 +287,8 @@ else
                         <button type="submit" class="btn btn-primary btn-sm" disabled="@(_busy || string.IsNullOrWhiteSpace(_compose.To + _compose.Cc + _compose.Bcc))">
                             <i class="bi bi-send me-1" aria-hidden="true"></i>@(_busy ? "Sending…" : "Send")
                         </button>
-                        <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_busy" @onclick="() => _compose = null">Discard</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_busy" @onclick="SaveDraftAsync"><i class="bi bi-file-earmark me-1" aria-hidden="true"></i>Save draft</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_busy" @onclick="() => _compose = null">@(_compose.DraftId is null ? "Discard" : "Close")</button>
                     </div>
                 </form>
             }
@@ -256,11 +300,18 @@ else
             {
                 <div class="mail-reader-bar">
                     <button type="button" class="btn btn-sm btn-link mail-back" @onclick="CloseReader"><i class="bi bi-arrow-left" aria-hidden="true"></i> Back</button>
-                    <div class="btn-group btn-group-sm me-auto" role="group" aria-label="Answer">
-                        <button type="button" class="btn btn-outline-secondary" @onclick="() => StartCompose(ComposeKind.Reply)"><i class="bi bi-reply" aria-hidden="true"></i> Reply</button>
-                        <button type="button" class="btn btn-outline-secondary" @onclick="() => StartCompose(ComposeKind.ReplyAll)"><i class="bi bi-reply-all" aria-hidden="true"></i> Reply all</button>
-                        <button type="button" class="btn btn-outline-secondary" @onclick="() => StartCompose(ComposeKind.Forward)"><i class="bi bi-forward" aria-hidden="true"></i> Forward</button>
-                    </div>
+                    @if (_folder == MailFolders.Drafts)
+                    {
+                        <button type="button" class="btn btn-sm btn-primary me-auto" @onclick="() => StartCompose(ComposeKind.EditDraft)"><i class="bi bi-pencil me-1" aria-hidden="true"></i>Edit draft</button>
+                    }
+                    else
+                    {
+                        <div class="btn-group btn-group-sm me-auto" role="group" aria-label="Answer">
+                            <button type="button" class="btn btn-outline-secondary" @onclick="() => StartCompose(ComposeKind.Reply)"><i class="bi bi-reply" aria-hidden="true"></i> Reply</button>
+                            <button type="button" class="btn btn-outline-secondary" @onclick="() => StartCompose(ComposeKind.ReplyAll)"><i class="bi bi-reply-all" aria-hidden="true"></i> Reply all</button>
+                            <button type="button" class="btn btn-outline-secondary" @onclick="() => StartCompose(ComposeKind.Forward)"><i class="bi bi-forward" aria-hidden="true"></i> Forward</button>
+                        </div>
+                    }
                     <div class="btn-group btn-group-sm" role="group" aria-label="Organise">
                         <button type="button" class="btn btn-outline-secondary" title="Archive" aria-label="Archive" disabled="@_busy" @onclick="ArchiveAsync"><i class="bi bi-archive" aria-hidden="true"></i></button>
                         <button type="button" class="btn btn-outline-secondary" title="Delete" aria-label="Delete" disabled="@_busy" @onclick="TrashAsync"><i class="bi bi-trash" aria-hidden="true"></i></button>
@@ -293,7 +344,7 @@ else
                         @foreach (var attachment in _detail.Attachments)
                         {
                             <li>
-                                <a href="@($"/admin/api/mail/messages/{Uri.EscapeDataString(_detail.Id)}/attachments/{attachment.Index}")" download="@attachment.FileName" data-enhance-nav="false">
+                                <a href="@($"/admin/api/mail/{AccountId}/messages/{Uri.EscapeDataString(_detail.Id)}/attachments/{attachment.Index}")" download="@attachment.FileName" data-enhance-nav="false">
                                     <i class="bi bi-paperclip" aria-hidden="true"></i> @attachment.FileName
                                 </a>
                                 <span class="text-secondary">· @Size(attachment.Size)</span>
@@ -315,8 +366,9 @@ else
 
 @code {
     [SupplyParameterFromQuery(Name = "google")] public string? GoogleResult { get; set; }
+    [SupplyParameterFromQuery(Name = "account")] public Guid? AccountQuery { get; set; }
 
-    private enum ComposeKind { New, Reply, ReplyAll, Forward }
+    private enum ComposeKind { New, Reply, ReplyAll, Forward, EditDraft }
 
     private sealed class ComposeState
     {
@@ -329,6 +381,10 @@ else
         public string Body { get; set; } = string.Empty;
         public bool ShowCc { get; set; }
         public string? ReplyToMessageId { get; init; }
+        // The saved draft this is (opened from Drafts, or saved once already): saving replaces it.
+        public string? DraftId { get; set; }
+        public bool Preview { get; set; }
+        public bool Listening { get; set; }
         public List<MailAttachmentUpload> Files { get; } = [];
     }
 
@@ -364,7 +420,15 @@ else
     private string _username = string.Empty;
     private bool _loaded;
     private MailAccountView? _account;
+    private List<MailAccountView> _accounts = [];
+    private IReadOnlyList<MailFolderView> _customFolders = [];
+    // The setup form: adding another mailbox, or (_editingAccount) changing this IMAP one.
     private bool _changingAccount;
+    private bool _editingAccount;
+    private ElementReference _bodyRef;
+    private IJSObjectReference? _composeModule;
+
+    private Guid AccountId => _account?.Id ?? Guid.Empty;
     private SetupState _setup = new();
     private string _folder = MailFolders.Inbox;
     private string _search = string.Empty;
@@ -390,13 +454,9 @@ else
             "not-configured" => (null, "Google sign-in isn't set up on this server yet."),
             _ => (null, null)
         };
-        _account = await MailService.GetAccountAsync(_username);
+        _accounts = (await MailService.ListAccountsAsync(_username)).ToList();
         _loaded = true;
-        if (_account is not null)
-        {
-            if (_account.LastError is { } lastError && _error is null) _error = $"Last time: {lastError}";
-            await LoadListAsync(reset: true);
-        }
+        await SelectAccountAsync(_accounts.FirstOrDefault(account => account.Id == AccountQuery) ?? _accounts.FirstOrDefault());
         _ = KeepCheckingAsync(_closing.Token);
     }
 
@@ -415,7 +475,7 @@ else
                 if (_account is null || _loadingList || _busy || !string.IsNullOrWhiteSpace(_search)) continue;
                 try
                 {
-                    var page = await MailService.ListAsync(_username, _folder, null, null, cancellationToken);
+                    var page = await MailService.ListAsync(_username, AccountId, _folder, null, null, cancellationToken);
                     var fresh = page.Messages.Where(message => _messages.All(existing => existing.Id != message.Id)).ToList();
                     if (fresh.Count == 0) continue;
                     _messages.InsertRange(0, fresh);
@@ -433,11 +493,18 @@ else
         }
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
         _closing.Cancel();
         _closing.Dispose();
-        return ValueTask.CompletedTask;
+        try
+        {
+            if (_composeModule is not null) await _composeModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit is gone with the page.
+        }
     }
 
     private async Task AttachAsync(InputFileChangeEventArgs e)
@@ -478,7 +545,7 @@ else
         }
         try
         {
-            var page = await MailService.ListAsync(_username, _folder, _search, reset ? null : _nextPage);
+            var page = await MailService.ListAsync(_username, AccountId, _folder, _search, reset ? null : _nextPage);
             _messages.AddRange(page.Messages.Where(message => _messages.All(existing => existing.Id != message.Id)));
             _nextPage = page.NextPageToken;
         }
@@ -500,7 +567,7 @@ else
         _detail = null;
         try
         {
-            _detail = await MailService.GetAsync(_username, message.Id, showImages);
+            _detail = await MailService.GetAsync(_username, AccountId, message.Id, showImages);
             if (message.Unread) MailUnread.Invalidate(_username);
             Replace(message.Id, item => item with { Unread = false });
         }
@@ -524,7 +591,7 @@ else
 
     private async Task ToggleStarAsync(MailMessageSummary message)
     {
-        await RunAsync(() => MailService.SetStarredAsync(_username, message.Id, !message.Starred));
+        await RunAsync(() => MailService.SetStarredAsync(_username, AccountId, message.Id, !message.Starred));
         if (_error is null) Replace(message.Id, item => item with { Starred = !message.Starred });
     }
 
@@ -532,7 +599,7 @@ else
     {
         if (_detail is null) return;
         var id = _detail.Id;
-        await RunAsync(() => MailService.ArchiveAsync(_username, id), "Archived.");
+        await RunAsync(() => MailService.ArchiveAsync(_username, AccountId, id), "Archived.");
         if (_error is null) RemoveFromList(id);
     }
 
@@ -540,7 +607,7 @@ else
     {
         if (_detail is null) return;
         var id = _detail.Id;
-        await RunAsync(() => MailService.TrashAsync(_username, id), _folder == MailFolders.Trash ? "Deleted for good." : "Moved to Trash.");
+        await RunAsync(() => MailService.TrashAsync(_username, AccountId, id), _folder == MailFolders.Trash ? "Deleted for good." : "Moved to Trash.");
         if (_error is null) RemoveFromList(id);
     }
 
@@ -548,7 +615,7 @@ else
     {
         if (_detail is null) return;
         var id = _detail.Id;
-        await RunAsync(() => MailService.SetReadAsync(_username, id, false));
+        await RunAsync(() => MailService.SetReadAsync(_username, AccountId, id, false));
         MailUnread.Invalidate(_username);
         if (_error is null)
         {
@@ -565,6 +632,16 @@ else
             return;
         }
         var detail = _detail;
+        if (kind == ComposeKind.EditDraft)
+        {
+            _compose = new ComposeState
+            {
+                Kind = kind, Title = "Draft", DraftId = detail.Id, Subject = detail.Subject, Body = detail.TextBody,
+                To = string.Join(", ", detail.To.Select(a => a.Address)), Cc = string.Join(", ", detail.Cc.Select(a => a.Address)),
+                Bcc = string.Join(", ", detail.Bcc.Select(a => a.Address)), ShowCc = detail.Cc.Count + detail.Bcc.Count > 0
+            };
+            return;
+        }
         var me = _account?.Address ?? string.Empty;
         bool NotMe(MailAddress a) => !string.Equals(a.Address, me, StringComparison.OrdinalIgnoreCase);
         var replyTo = detail.ReplyTo.Count > 0 ? detail.ReplyTo : [detail.From];
@@ -596,10 +673,46 @@ else
     {
         if (_compose is null) return;
         var compose = _compose;
-        var draft = new MailDraft(Split(compose.To), Split(compose.Cc), Split(compose.Bcc), compose.Subject, compose.Body,
-            compose.ReplyToMessageId, compose.Kind == ComposeKind.Forward, compose.Files);
-        await RunAsync(() => MailService.SendAsync(_username, draft), "Sent.");
-        if (_error is null) _compose = null;
+        var sentFromDraft = compose.DraftId is not null;
+        await RunAsync(() => MailService.SendAsync(_username, AccountId, DraftOf(compose)), "Sent.");
+        if (_error is not null) return;
+        _compose = null;
+        if (sentFromDraft && _folder == MailFolders.Drafts) await LoadListAsync(reset: true);
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        if (_compose is null) return;
+        var compose = _compose;
+        string? savedId = null;
+        await RunAsync(async () => savedId = await MailService.SaveDraftAsync(_username, AccountId, DraftOf(compose)), "Saved to Drafts.");
+        if (savedId is null) return;
+        // Saved again later, it replaces this one; the files are in the draft now.
+        compose.DraftId = savedId;
+        compose.Files.Clear();
+        if (_folder == MailFolders.Drafts) await LoadListAsync(reset: true);
+    }
+
+    private static MailDraft DraftOf(ComposeState compose) =>
+        new(Split(compose.To), Split(compose.Cc), Split(compose.Bcc), compose.Subject, compose.Body,
+            compose.ReplyToMessageId, compose.Kind == ComposeKind.Forward, compose.Files, compose.DraftId);
+
+    private async Task FormatAsync(string action)
+    {
+        if (_compose is null) return;
+        _composeModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/mail-compose.js");
+        await _composeModule.InvokeVoidAsync("apply", _bodyRef, action);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // The message box's ⌘B/⌘I/⌘K, once per compose.
+        if (_compose is { Listening: false } compose)
+        {
+            compose.Listening = true;
+            _composeModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/mail-compose.js");
+            await _composeModule.InvokeVoidAsync("listen", _bodyRef);
+        }
     }
 
     private async Task SaveImapAsync()
@@ -608,14 +721,14 @@ else
         _error = null;
         try
         {
-            _account = await MailService.SaveImapAccountAsync(_username, new MailImapAccountInput(
+            var saved = await MailService.SaveImapAccountAsync(_username, _editingAccount ? _account?.Id : null, new MailImapAccountInput(
                 _setup.Address, _setup.DisplayName, _setup.ImapHost, _setup.ImapPort, _setup.SmtpHost, _setup.SmtpPort, _setup.SmtpSecurity,
                 _setup.Login, _setup.Password));
-            _changingAccount = false;
+            _changingAccount = _editingAccount = false;
             _setup = new SetupState();
-            _status = $"Connected {_account.Address}.";
-            _folder = MailFolders.Inbox;
-            await LoadListAsync(reset: true);
+            _status = $"Connected {saved.Address}.";
+            _accounts = (await MailService.ListAccountsAsync(_username)).ToList();
+            await SelectAccountAsync(_accounts.FirstOrDefault(account => account.Id == saved.Id));
         }
         catch (MailException ex)
         {
@@ -627,19 +740,56 @@ else
         }
     }
 
-    private void StartChangeAccount()
+    private void StartAddAccount()
+    {
+        _setup = new SetupState();
+        (_changingAccount, _editingAccount) = (true, false);
+    }
+
+    // Change this IMAP mailbox's settings; the password stays unless retyped.
+    private void StartEditAccount()
     {
         _setup = new SetupState { Address = _account?.Address ?? string.Empty, DisplayName = _account?.DisplayName ?? string.Empty };
-        _changingAccount = true;
+        (_changingAccount, _editingAccount) = (true, true);
     }
 
     private async Task DisconnectAsync()
     {
-        await MailService.RemoveAccountAsync(_username);
-        _account = null;
+        if (_account is null) return;
+        var removed = _account;
+        await MailService.RemoveAccountAsync(_username, removed.Id);
+        _accounts.RemoveAll(account => account.Id == removed.Id);
+        _status = $"{removed.Address} removed. Nothing from it is kept in the app.";
+        await SelectAccountAsync(_accounts.FirstOrDefault());
+    }
+
+    private async Task SwitchAccountAsync(ChangeEventArgs e)
+    {
+        if (Guid.TryParse(e.Value as string, out var id) && _accounts.FirstOrDefault(account => account.Id == id) is { } account)
+            await SelectAccountAsync(account);
+    }
+
+    // Opens a mailbox: its inbox, and its own folders and labels.
+    private async Task SelectAccountAsync(MailAccountView? account)
+    {
+        _account = account;
+        _folder = MailFolders.Inbox;
+        _search = string.Empty;
+        _customFolders = [];
         _messages.Clear();
+        _nextPage = null;
         CloseReader();
-        _status = "Mailbox disconnected. Nothing from it is kept in the app.";
+        if (account is null) return;
+        if (account.LastError is { } lastError && _error is null) _error = $"Last time: {lastError}";
+        await LoadListAsync(reset: true);
+        try
+        {
+            _customFolders = await MailService.ListFoldersAsync(_username, account.Id);
+        }
+        catch (MailException)
+        {
+            // The standard folders still work; the list itself says what's wrong.
+        }
     }
 
     private void ApplyPreset(Preset preset)

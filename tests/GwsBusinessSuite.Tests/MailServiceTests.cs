@@ -24,7 +24,7 @@ public sealed class MailServiceTests
     {
         var f = await CreateAsync();
 
-        var view = await f.Service.SaveImapAccountAsync("grant", new MailImapAccountInput(
+        var view = await f.Service.SaveImapAccountAsync("grant", null, new MailImapAccountInput(
             "grant@icloud.com", "Grant Watson", "imap.mail.me.com", 993, "smtp.mail.me.com", 587, MailServerSecurity.StartTls, "", "abcd-efgh"));
 
         view.Should().BeEquivalentTo(new { Provider = MailProviders.Imap, Address = "grant@icloud.com", DisplayName = "Grant Watson" });
@@ -34,7 +34,7 @@ public sealed class MailServiceTests
         row.LoginUsername.Should().Be("grant@icloud.com", "the address is the sign-in unless another is given");
 
         f.Imap.FailVerify = "Authentication failed.";
-        await f.Service.Invoking(s => s.SaveImapAccountAsync("sam", new MailImapAccountInput(
+        await f.Service.Invoking(s => s.SaveImapAccountAsync("sam", null, new MailImapAccountInput(
             "sam@icloud.com", "", "imap.mail.me.com", 993, "smtp.mail.me.com", 587, MailServerSecurity.StartTls, "", "wrong")))
             .Should().ThrowAsync<MailException>().WithMessage("Authentication failed.");
         (await f.Db.MailAccounts.CountAsync()).Should().Be(1, "a mailbox that can't sign in isn't saved");
@@ -44,7 +44,7 @@ public sealed class MailServiceTests
     public async Task AReply_ShouldThreadOnTheOriginal_AndAForward_ShouldCarryItsAttachments()
     {
         var f = await CreateAsync();
-        await f.UseImapAsync();
+        var box = (await f.UseImapAsync()).Id;
         var original = new MimeMessage { MessageId = "orig@example.com", Subject = "Plans" };
         original.References.Add("first@example.com");
         original.From.Add(MailboxAddress.Parse("sam@example.com"));
@@ -53,22 +53,22 @@ public sealed class MailServiceTests
         original.Body = builder.ToMessageBody();
         f.Imap.Messages["m1"] = original;
 
-        await f.Service.SendAsync("grant", new MailDraft(["sam@example.com"], [], [], "Re: Plans", "Sounds good", "m1"));
+        await f.Service.SendAsync("grant", box, new MailDraft(["sam@example.com"], [], [], "Re: Plans", "Sounds good", "m1"));
         var reply = f.Imap.Sent.Single();
         reply.From.Mailboxes.Single().Should().BeEquivalentTo(new { Name = "Grant Watson", Address = "grant@icloud.com" });
         reply.InReplyTo.Should().Be("orig@example.com");
         reply.References.Should().Equal("first@example.com", "orig@example.com");
         reply.Attachments.Should().BeEmpty();
 
-        await f.Service.SendAsync("grant", new MailDraft(["kim@example.com; lee@example.com"], [], [], "Fwd: Plans", "FYI", "m1", Forward: true));
+        await f.Service.SendAsync("grant", box, new MailDraft(["kim@example.com; lee@example.com"], [], [], "Fwd: Plans", "FYI", "m1", Forward: true));
         var forward = f.Imap.Sent.Last();
         forward.To.Mailboxes.Select(m => m.Address).Should().Equal("kim@example.com", "lee@example.com");
         forward.InReplyTo.Should().BeNull();
         forward.Attachments.OfType<MimePart>().Single().FileName.Should().Be("plan.pdf");
 
-        await f.Service.Invoking(s => s.SendAsync("grant", new MailDraft(["not an address"], [], [], "x", "y")))
+        await f.Service.Invoking(s => s.SendAsync("grant", box, new MailDraft(["not an address"], [], [], "x", "y")))
             .Should().ThrowAsync<MailException>().WithMessage("*isn't an email address*");
-        await f.Service.Invoking(s => s.SendAsync("grant", new MailDraft([], [], [], "x", "y")))
+        await f.Service.Invoking(s => s.SendAsync("grant", box, new MailDraft([], [], [], "x", "y")))
             .Should().ThrowAsync<MailException>().WithMessage("Add who it's to.");
     }
 
@@ -76,25 +76,25 @@ public sealed class MailServiceTests
     public async Task OpeningAMessage_ShouldMarkItRead_AndAProblem_ShouldBeKeptUntilTheNextSuccess()
     {
         var f = await CreateAsync();
-        await f.UseImapAsync();
+        var box = (await f.UseImapAsync()).Id;
         var message = new MimeMessage { Subject = "Hi" };
         message.From.Add(MailboxAddress.Parse("sam@example.com"));
         message.Body = new TextPart("plain") { Text = "Hello" };
         f.Imap.Messages["m1"] = message;
 
-        (await f.Service.GetAsync("grant", "m1", showRemoteImages: false)).Subject.Should().Be("Hi");
+        (await f.Service.GetAsync("grant", box, "m1", showRemoteImages: false)).Subject.Should().Be("Hi");
         f.Imap.MarkedRead.Should().Equal("m1");
 
         f.Imap.FailList = "The server is busy.";
-        await f.Service.Invoking(s => s.ListAsync("grant", MailFolders.Inbox, null, null)).Should().ThrowAsync<MailException>();
-        (await f.Service.GetAccountAsync("grant"))!.LastError.Should().Be("The server is busy.");
+        await f.Service.Invoking(s => s.ListAsync("grant", box, MailFolders.Inbox, null, null)).Should().ThrowAsync<MailException>();
+        (await f.Service.ListAccountsAsync("grant")).Single().LastError.Should().Be("The server is busy.");
 
         f.Imap.FailList = null;
-        await f.Service.ListAsync("grant", MailFolders.Inbox, null, null);
-        (await f.Service.GetAccountAsync("grant"))!.LastError.Should().BeNull();
+        await f.Service.ListAsync("grant", box, MailFolders.Inbox, null, null);
+        (await f.Service.ListAccountsAsync("grant")).Single().LastError.Should().BeNull();
 
-        await f.Service.Invoking(s => s.ListAsync("grant", "secret-folder", null, null)).Should().ThrowAsync<MailException>();
-        await f.Service.Invoking(s => s.ListAsync("sam", MailFolders.Inbox, null, null)).Should().ThrowAsync<MailException>().WithMessage("Connect a mailbox first.");
+        await f.Service.Invoking(s => s.ListAsync("grant", box, "secret-folder", null, null)).Should().ThrowAsync<MailException>();
+        await f.Service.Invoking(s => s.ListAsync("sam", box, MailFolders.Inbox, null, null)).Should().ThrowAsync<MailException>().WithMessage("Connect a mailbox first.");
     }
 
     [Fact]
@@ -108,7 +108,8 @@ public sealed class MailServiceTests
         await f.Db.SaveChangesAsync();
 
         // Any use moves it (no Gmail backend in this fixture, so the listing itself fails).
-        await f.Service.Invoking(s => s.ListAsync("grant", MailFolders.Inbox, null, null)).Should().ThrowAsync<MailException>();
+        var box = (await f.Db.MailAccounts.SingleAsync()).Id;
+        await f.Service.Invoking(s => s.ListAsync("grant", box, MailFolders.Inbox, null, null)).Should().ThrowAsync<MailException>();
 
         var account = await f.Db.MailAccounts.SingleAsync();
         account.CredentialId.Should().BeNull();
@@ -117,7 +118,7 @@ public sealed class MailServiceTests
 
         await f.Service.SaveGoogleAccountAsync("grant", """{"accessToken":"ya29.second"}""", "grant@gwsapp.net");
         f.Protector.Unprotect((await f.Db.MailAccounts.SingleAsync()).TokenProtected).Should().Contain("ya29.second");
-        await f.Service.RemoveAccountAsync("grant");
+        await f.Service.RemoveAccountAsync("grant", box);
         (await f.Db.MailAccounts.CountAsync()).Should().Be(0);
     }
 
@@ -182,10 +183,10 @@ public sealed class MailServiceTests
     public async Task WhatsSent_ShouldBeTextAndFormattedHtml_WithTheFilesAttached()
     {
         var f = await CreateAsync();
-        await f.UseImapAsync();
+        var box = (await f.UseImapAsync()).Id;
         var files = new[] { new MailAttachmentUpload("../../quote.pdf", "application/pdf", new byte[] { 1, 2, 3 }) };
 
-        await f.Service.SendAsync("grant", new MailDraft(["sam@example.com"], [], [], "Quote", "Here's **the quote**.\n\n> your question", Attachments: files));
+        await f.Service.SendAsync("grant", box, new MailDraft(["sam@example.com"], [], [], "Quote", "Here's **the quote**.\n\n> your question", Attachments: files));
 
         var sent = f.Imap.Sent.Single();
         sent.TextBody.Should().Be("Here's **the quote**.\n\n> your question");
@@ -195,7 +196,7 @@ public sealed class MailServiceTests
         (await f.Service.GetUnreadCountAsync("sam")).Should().BeNull("no mailbox");
 
         var tooBig = new MailAttachmentUpload("big.bin", "application/octet-stream", new byte[MailLimits.MaxAttachmentBytes + 1]);
-        await f.Service.Invoking(s => s.SendAsync("grant", new MailDraft(["sam@example.com"], [], [], "x", "y", Attachments: [tooBig])))
+        await f.Service.Invoking(s => s.SendAsync("grant", box, new MailDraft(["sam@example.com"], [], [], "x", "y", Attachments: [tooBig])))
             .Should().ThrowAsync<MailException>().WithMessage("*25 MB*");
     }
 
@@ -247,6 +248,96 @@ public sealed class MailServiceTests
     }
 
     [Fact]
+    public async Task SeveralMailboxes_ShouldEachBeTheirOwnersOnly_UpToTen()
+    {
+        var f = await CreateAsync();
+        var work = (await f.UseImapAsync()).Id;
+        var home = (await f.Service.SaveImapAccountAsync("grant", null, new MailImapAccountInput(
+            "grant@fastmail.test", "Grant", "imap.fastmail.com", 993, "smtp.fastmail.com", 465, MailServerSecurity.SslOnConnect, "", "pw"))).Id;
+
+        (await f.Service.ListAccountsAsync("grant")).Select(a => a.Address).Should().Equal("grant@icloud.com", "grant@fastmail.test");
+        (await f.Service.GetUnreadCountAsync("grant")).Should().Be(14, "both inboxes");
+        (await f.Service.ListFoldersAsync("grant", home)).Should().ContainSingle().Which.Key.Should().Be("folder:Clients");
+        await f.Service.Invoking(s => s.ListAsync("sam", work, MailFolders.Inbox, null, null)).Should().ThrowAsync<MailException>()
+            .WithMessage("Connect a mailbox first.", "someone else's account id finds nothing");
+
+        // Editing one keeps the other; its password stays unless retyped.
+        await f.Service.SaveImapAccountAsync("grant", home, new MailImapAccountInput(
+            "grant@fastmail.test", "Grant W", "imap.fastmail.com", 993, "smtp.fastmail.com", 465, MailServerSecurity.SslOnConnect, "", null));
+        (await f.Service.ListAccountsAsync("grant")).Should().HaveCount(2).And.Contain(a => a.DisplayName == "Grant W");
+
+        for (var i = 2; i < MailLimits.MaxAccounts; i++)
+            await f.Service.SaveImapAccountAsync("grant", null, new MailImapAccountInput(
+                $"grant{i}@example.com", "", "imap.example.com", 993, "smtp.example.com", 587, MailServerSecurity.StartTls, "", "pw"));
+        await f.Service.Invoking(s => s.SaveImapAccountAsync("grant", null, new MailImapAccountInput(
+                "one-too-many@example.com", "", "imap.example.com", 993, "smtp.example.com", 587, MailServerSecurity.StartTls, "", "pw")))
+            .Should().ThrowAsync<MailException>().WithMessage("*up to 10*");
+    }
+
+    [Fact]
+    public async Task ADraft_ShouldSaveWithoutRecipients_ReplaceItself_AndGoWhenSent_KeepingItsThread()
+    {
+        var f = await CreateAsync();
+        var box = (await f.UseImapAsync()).Id;
+        var original = new MimeMessage { MessageId = "orig@example.com", Subject = "Plans" };
+        original.From.Add(MailboxAddress.Parse("sam@example.com"));
+        original.Body = new TextPart("plain") { Text = "Here" };
+        f.Imap.Messages["m1"] = original;
+
+        var first = await f.Service.SaveDraftAsync("grant", box, new MailDraft([], [], [], "Re: Plans", "Half a thought", "m1"));
+        f.Imap.Drafts[first].InReplyTo.Should().Be("orig@example.com");
+
+        var second = await f.Service.SaveDraftAsync("grant", box, new MailDraft(["sam@example.com"], [], ["boss@example.com"], "Re: Plans", "The whole thought", DraftId: first));
+        f.Imap.Drafts.Keys.Should().Equal(second);
+        f.Imap.Drafts[second].InReplyTo.Should().Be("orig@example.com", "editing a draft keeps its thread");
+        f.Imap.Drafts[second].Bcc.Mailboxes.Single().Address.Should().Be("boss@example.com");
+
+        await f.Service.SendAsync("grant", box, new MailDraft(["sam@example.com"], [], [], "Re: Plans", "The whole thought", DraftId: second));
+        f.Imap.Sent.Single().References.Should().Contain("orig@example.com");
+        f.Imap.DeletedDrafts.Should().Equal(second);
+        f.Imap.Drafts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Gmail_ShouldListOnlyThePersonsLabels_AndReplaceADraftInPlace()
+    {
+        var protector = new DataProtectionSecretProtector(new EphemeralDataProtectionProvider());
+        var calls = new List<string>();
+        var handler = new StubHandler(request =>
+        {
+            calls.Add($"{request.Method} {request.RequestUri!.PathAndQuery}");
+            var path = request.RequestUri.AbsolutePath;
+            return Task.FromResult(path.EndsWith("/labels")
+                ? Json(HttpStatusCode.OK, """{"labels":[{"id":"INBOX","name":"INBOX","type":"system"},{"id":"Label_9","name":"Receipts","type":"user"},{"id":"Label_2","name":"Clients","type":"user"}]}""")
+                : path.EndsWith("/drafts") && request.Method == HttpMethod.Get
+                    ? Json(HttpStatusCode.OK, """{"drafts":[{"id":"r-77","message":{"id":"m-old"}}]}""")
+                    : Json(HttpStatusCode.OK, """{"id":"r-77","message":{"id":"m-new"}}"""));
+        });
+        var gmail = new GmailMailboxBackend(protector, new Factory(handler),
+            Options.Create(new GoogleOAuthOptions { ClientId = "id", ClientSecret = "secret", RedirectUri = "https://example.test/cb" }));
+        var account = new MailAccount { Username = "grant", Provider = MailProviders.Google, TokenProtected = protector.Protect("""{"accessToken":"t"}""") };
+
+        (await gmail.ListFoldersAsync(account, CancellationToken.None)).Should().Equal(
+            new MailFolderView("label:Label_2", "Clients"), new MailFolderView("label:Label_9", "Receipts"));
+
+        var message = new MimeMessage { Subject = "Draft" };
+        message.Body = new TextPart("plain") { Text = "x" };
+        (await gmail.SaveDraftAsync(account, message, "m-old", null, CancellationToken.None)).Should().Be("m-new");
+        calls.Should().Contain("PUT /gmail/v1/users/me/drafts/r-77", "the draft holding m-old is updated, not duplicated");
+        await gmail.DeleteDraftAsync(account, "m-old", CancellationToken.None);
+        calls.Should().Contain("DELETE /gmail/v1/users/me/drafts/r-77");
+    }
+
+    [Theory]
+    [InlineData("inbox", true)]
+    [InlineData("label:Label_12", true)]
+    [InlineData("folder:Clients/2026", true)]
+    [InlineData("label:", false)]
+    [InlineData("secret-folder", false)]
+    public void Folders_ShouldBeTheStandardOnes_OrTheProvidersOwn(string folder, bool known) =>
+        MailFolders.IsKnown(folder).Should().Be(known);
+
+    [Fact]
     public void ImapIds_ShouldRoundTrip_AndRejectGarbage()
     {
         var id = ImapMessageId.Encode("INBOX/Clients: 2026", 77, 4012);
@@ -259,7 +350,7 @@ public sealed class MailServiceTests
 
     private sealed record Fixture(ApplicationDbContext Db, MailService Service, FakeImap Imap, DataProtectionSecretProtector Protector)
     {
-        public Task UseImapAsync() => Service.SaveImapAccountAsync("grant", new MailImapAccountInput(
+        public Task<MailAccountView> UseImapAsync() => Service.SaveImapAccountAsync("grant", null, new MailImapAccountInput(
             "grant@icloud.com", "Grant Watson", "imap.mail.me.com", 993, "smtp.mail.me.com", 587, MailServerSecurity.StartTls, "", "pw"));
     }
 
@@ -311,6 +402,26 @@ public sealed class MailServiceTests
         public Task ArchiveAsync(MailAccount account, string id, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task TrashAsync(MailAccount account, string id, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken) => Task.FromResult(7);
+        public Dictionary<string, MimeMessage> Drafts { get; } = [];
+        public List<string> DeletedDrafts { get; } = [];
+
+        public Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(MailAccount account, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<MailFolderView>>([new(MailFolders.FolderPrefix + "Clients", "Clients")]);
+
+        public Task<string> SaveDraftAsync(MailAccount account, MimeMessage message, string? replacesDraftId, string? threadId, CancellationToken cancellationToken)
+        {
+            if (replacesDraftId is not null) { Drafts.Remove(replacesDraftId); Messages.Remove(replacesDraftId); }
+            var id = $"draft-{Drafts.Count + DeletedDrafts.Count + 1}";
+            Drafts[id] = Messages[id] = message;
+            return Task.FromResult(id);
+        }
+
+        public Task DeleteDraftAsync(MailAccount account, string draftId, CancellationToken cancellationToken)
+        {
+            DeletedDrafts.Add(draftId);
+            Drafts.Remove(draftId);
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class StubHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> responder) : HttpMessageHandler

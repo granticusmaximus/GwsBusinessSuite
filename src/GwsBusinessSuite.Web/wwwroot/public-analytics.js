@@ -7,6 +7,19 @@
         return;
     }
 
+    // Privacy choices (js/consent.js, 31-10-26): nothing is stored or sent until the visitor's
+    // choice allows visit statistics (or the visitor's region doesn't ask for an opt-in).
+    const consent = window.gwsConsent;
+    if (consent && consent.decided) {
+        if (consent.analytics) begin();
+        return;
+    }
+    window.addEventListener("gws-consent", event => {
+        if (event.detail && event.detail.analytics) begin();
+    }, { once: true });
+
+    function begin() {
+
     const sessionKey = name => {
         try {
             const existing = sessionStorage.getItem(name);
@@ -94,4 +107,5 @@
             if (typeof name === "string" && name.length <= 64) send(name);
         }
     };
+    }
 })();

@@ -513,8 +513,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<SentinelOfflinePage>().HasIndex(x => new { x.Username, x.WikiPageId }).IsUnique();
         modelBuilder.Entity<SentinelUnlockGrant>().HasIndex(x => new { x.Username, x.SessionId });
         modelBuilder.Entity<SentinelLockPin>().HasIndex(x => x.Username).IsUnique();
-        // Mail: one mailbox per person.
-        modelBuilder.Entity<MailAccount>().HasIndex(x => x.Username).IsUnique();
+        // Mail: a person's mailboxes (up to MailLimits.MaxAccounts each, since 31-10-26).
+        modelBuilder.Entity<MailAccount>().HasIndex(x => x.Username);
         modelBuilder.Entity<SentinelPasskey>().HasIndex(x => x.CredentialId).IsUnique();
         modelBuilder.Entity<SentinelPasskey>().HasIndex(x => x.Username);
         modelBuilder.Entity<SentinelDeviceKey>().HasIndex(x => x.Username);

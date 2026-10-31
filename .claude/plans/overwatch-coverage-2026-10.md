@@ -31,6 +31,8 @@ per provider type.
 
 Never researched yet: AK, NM, SD, WV cameras; MA re-check; Taiwan, Norway, Denmark, Estonia,
 Switzerland; Canada NS/NB/MB/SK/YT/NL/PE; Australia WA/SA/TAS/NT.
+(31-10-26: Norway and Estonia were built 08-10-26. Taiwan, Denmark, Switzerland and Australia
+WA/SA/TAS/NT have no usable key-less feed; see known-gaps-2026-10-31.md.)
 - Resolved: the 688s suite run on 2026-10-04 was machine load; it ran in 124s on 2026-10-05 with no code change.
 
 ## Camera research 2026-10-08 (cameras batch above: Iceland, Hong Kong, Singapore BUILT; TN/CO/MN/NE plow excluded)

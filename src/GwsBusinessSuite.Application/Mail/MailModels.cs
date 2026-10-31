@@ -25,8 +25,18 @@ public static class MailFolders
         (Archive, "Archive", "bi-archive"), (Spam, "Spam", "bi-exclamation-octagon"), (Trash, "Trash", "bi-trash")
     ];
 
-    public static bool IsKnown(string? folder) => All.Any(f => f.Key == folder);
+    // The provider's own folders and labels (31-10-26): "label:<Gmail label id>" or
+    // "folder:<IMAP folder path>", from IMailService.ListFoldersAsync.
+    public const string LabelPrefix = "label:";
+    public const string FolderPrefix = "folder:";
+
+    public static bool IsKnown(string? folder) =>
+        All.Any(f => f.Key == folder)
+        || folder is { Length: > 6 } && (folder.StartsWith(LabelPrefix, StringComparison.Ordinal) || folder.StartsWith(FolderPrefix, StringComparison.Ordinal));
 }
+
+// One of the provider's own folders or labels.
+public sealed record MailFolderView(string Key, string Label);
 
 public sealed record MailAccountView(Guid Id, string Provider, string Address, string DisplayName, string? LastError, DateTimeOffset? LastUsedAt);
 
@@ -52,7 +62,7 @@ public sealed record MailAttachmentInfo(int Index, string FileName, string Conte
 // HtmlDocument: the message as a sanitized HTML document for a sandboxed frame (no scripts;
 // remote images left out unless asked for). BlockedRemoteImages: how many were left out.
 public sealed record MailMessageDetail(
-    string Id, string? ThreadId, MailAddress From, IReadOnlyList<MailAddress> To, IReadOnlyList<MailAddress> Cc,
+    string Id, string? ThreadId, MailAddress From, IReadOnlyList<MailAddress> To, IReadOnlyList<MailAddress> Cc, IReadOnlyList<MailAddress> Bcc,
     IReadOnlyList<MailAddress> ReplyTo, string Subject, DateTimeOffset Date, string HtmlDocument, string TextBody,
     int BlockedRemoteImages, IReadOnlyList<MailAttachmentInfo> Attachments, string? MessageIdHeader, IReadOnlyList<string> References,
     bool Unread, bool Starred);
@@ -64,39 +74,47 @@ public sealed record MailAttachmentUpload(string FileName, string ContentType, b
 
 // A new message, or a reply/forward of ReplyToMessageId (its threading headers and, for a
 // forward, its attachments are carried over). Body is Markdown: it's sent as plain text and as
-// the HTML it formats to.
+// the HTML it formats to. DraftId: the saved draft this was opened from - saving replaces it,
+// sending removes it.
 public sealed record MailDraft(
     IReadOnlyList<string> To, IReadOnlyList<string> Cc, IReadOnlyList<string> Bcc, string Subject, string Body,
-    string? ReplyToMessageId = null, bool Forward = false, IReadOnlyList<MailAttachmentUpload>? Attachments = null);
+    string? ReplyToMessageId = null, bool Forward = false, IReadOnlyList<MailAttachmentUpload>? Attachments = null,
+    string? DraftId = null);
 
 public static class MailLimits
 {
     // Gmail's own limit for what you attach (the encoded message may be a third bigger).
     public const long MaxAttachmentBytes = 25L * 1024 * 1024;
     public const int MaxAttachments = 20;
+    public const int MaxAccounts = 10;
 }
 
 public sealed class MailException(string message) : Exception(message);
 
+// A person's mailboxes, each named by its account id (31-10-26: several per person).
 public interface IMailService
 {
-    Task<MailAccountView?> GetAccountAsync(string username, CancellationToken cancellationToken = default);
-    // Signs in to both servers before saving; throws MailException with what went wrong.
-    Task<MailAccountView> SaveImapAccountAsync(string username, MailImapAccountInput input, CancellationToken cancellationToken = default);
-    // tokenJson: the Google sign-in (GoogleOAuthService.CompleteMailAuthorizationAsync), kept protected on the account.
+    Task<IReadOnlyList<MailAccountView>> ListAccountsAsync(string username, CancellationToken cancellationToken = default);
+    // Signs in to both servers before saving; accountId null adds a mailbox. Throws MailException.
+    Task<MailAccountView> SaveImapAccountAsync(string username, Guid? accountId, MailImapAccountInput input, CancellationToken cancellationToken = default);
+    // tokenJson: the Google sign-in (GoogleOAuthService.CompleteMailAuthorizationAsync), kept protected on
+    // the account. Connecting the same Gmail address again updates that mailbox.
     Task<MailAccountView> SaveGoogleAccountAsync(string username, string tokenJson, string address, CancellationToken cancellationToken = default);
-    Task RemoveAccountAsync(string username, CancellationToken cancellationToken = default);
+    Task RemoveAccountAsync(string username, Guid accountId, CancellationToken cancellationToken = default);
 
-    Task<MailPage> ListAsync(string username, string folder, string? search, string? pageToken, CancellationToken cancellationToken = default);
+    // The provider's folders and labels beyond the standard ones.
+    Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(string username, Guid accountId, CancellationToken cancellationToken = default);
+    Task<MailPage> ListAsync(string username, Guid accountId, string folder, string? search, string? pageToken, CancellationToken cancellationToken = default);
     // Opening a message marks it read, as mail apps do.
-    Task<MailMessageDetail> GetAsync(string username, string messageId, bool showRemoteImages, CancellationToken cancellationToken = default);
-    Task<MailAttachmentContent> GetAttachmentAsync(string username, string messageId, int index, CancellationToken cancellationToken = default);
-    Task SendAsync(string username, MailDraft draft, CancellationToken cancellationToken = default);
-    Task SetReadAsync(string username, string messageId, bool read, CancellationToken cancellationToken = default);
-    Task SetStarredAsync(string username, string messageId, bool starred, CancellationToken cancellationToken = default);
-    Task ArchiveAsync(string username, string messageId, CancellationToken cancellationToken = default);
-    Task TrashAsync(string username, string messageId, CancellationToken cancellationToken = default);
-    // Unread messages in the inbox; null when the person has no mailbox connected.
+    Task<MailMessageDetail> GetAsync(string username, Guid accountId, string messageId, bool showRemoteImages, CancellationToken cancellationToken = default);
+    Task<MailAttachmentContent> GetAttachmentAsync(string username, Guid accountId, string messageId, int index, CancellationToken cancellationToken = default);
+    Task SendAsync(string username, Guid accountId, MailDraft draft, CancellationToken cancellationToken = default);
+    // Saves (or replaces draft.DraftId) in Drafts; returns the saved draft's message id.
+    Task<string> SaveDraftAsync(string username, Guid accountId, MailDraft draft, CancellationToken cancellationToken = default);
+    Task SetReadAsync(string username, Guid accountId, string messageId, bool read, CancellationToken cancellationToken = default);
+    Task SetStarredAsync(string username, Guid accountId, string messageId, bool starred, CancellationToken cancellationToken = default);
+    Task ArchiveAsync(string username, Guid accountId, string messageId, CancellationToken cancellationToken = default);
+    Task TrashAsync(string username, Guid accountId, string messageId, CancellationToken cancellationToken = default);
+    // Unread messages across all the person's inboxes; null when no mailbox is connected.
     Task<int?> GetUnreadCountAsync(string username, CancellationToken cancellationToken = default);
-
 }
