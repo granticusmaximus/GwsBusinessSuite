@@ -11,7 +11,7 @@ public sealed record NavWorkspace(string Key, string Label, string ShortLabel, s
 // Settings, Touch ID) show Home.
 public static class NavMenuGroups
 {
-    public static readonly IReadOnlyList<string> HomePrefixes = ["admin/community", "admin/mail"];
+    public static readonly IReadOnlyList<string> HomePrefixes = ["admin/community", "admin/mail", "admin/shared-boards"];
 
     public static readonly IReadOnlyList<string> ContentPublishingPrefixes =
         ["admin/article", "admin/form-submissions", "admin/content-studio", "admin/content-calendar", "admin/seo-audit", "admin/localization", "admin/comments", "admin/app-generation", "admin/media", "admin/pages", "admin/cms-knowledge", "admin/appearance", "admin/podcasts", "admin/live-show"];

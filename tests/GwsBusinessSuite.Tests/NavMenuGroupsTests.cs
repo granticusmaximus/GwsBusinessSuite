@@ -52,6 +52,7 @@ public class NavMenuGroupsTests
         ["admin", "home"],
         ["admin/community", "home"],
         ["admin/mail", "home"],
+        ["admin/shared-boards", "home"],
         ["admin/community/activity", "home"],
         ["admin/community/messages", "home"],
         ["admin/community/departments", "home"],

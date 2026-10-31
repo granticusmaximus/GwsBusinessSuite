@@ -1,4 +1,6 @@
 @page "/admin/boards"
+@* The same list under Home for authors and contributors (K9g): their boards are the shared ones. *@
+@page "/admin/shared-boards"
 @rendermode InteractiveServer
 @* K9g (31-10-26): authors and contributors see the boards shared with them. *@
 @attribute [Authorize(Policy = "ContentAccess")]
