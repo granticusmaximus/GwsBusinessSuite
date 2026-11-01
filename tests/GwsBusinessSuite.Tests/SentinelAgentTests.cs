@@ -82,9 +82,9 @@ public sealed class SentinelAgentTests
         var authorTools = asAuthor.Tools[0].Select(tool => tool.Name).ToList();
         authorTools.Should().Contain(["create_todo_list", "find_sentinel_pages", SentinelAgentRunner.UndoToolName])
             .And.NotContain(["add_card", "list_boards", "create_site_page_draft", "search_app", "find_contacts", "list_automations"],
-                "boards, the CRM, automations and app-wide search are Admin pages; site pages are Admin/Contributor");
+                "board tools are offered only when the turn points at boards; CRM, automations and app-wide search remain Admin areas");
         var authorMore = asAuthor.Tools[0].Single(tool => tool.Name == SentinelAgentRunner.UseToolsName).Description;
-        authorMore.Should().Contain("blog (").And.NotContain("crm (").And.NotContain("boards (").And.NotContain("site (");
+        authorMore.Should().Contain("blog (").And.Contain("boards (").And.NotContain("crm (").And.NotContain("site (");
 
         var adminTools = asAdmin.Tools[0].Select(tool => tool.Name).ToList();
         adminTools.Should().Contain(["create_todo_list", "search_app", SentinelAgentRunner.UseToolsName])
@@ -184,6 +184,47 @@ public sealed class SentinelAgentTests
         (await harness.ColumnOfAsync(boardId, "Write the post")).Should().Be("Done");
         await harness.Runner.UndoAsync(turn.Actions[1].Id, Admin, default);
         (await harness.ColumnOfAsync(boardId, "Write the post")).Should().Be("To do");
+    }
+
+    [Fact]
+    public async Task Boards_ShouldFindReadAndUpdateExistingCards_WithUndo()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var chat = Guid.NewGuid();
+        var created = await harness.TurnAsync(chat, Admin, "Make a launch board",
+            Call("create_board", new { title = "Launch" }), Say("Done."));
+        var boardId = created.Actions[0].Link!.Split('/').Last();
+        var added = await harness.TurnAsync(chat, Admin, "Add the existing card",
+            Call("add_card", new { boardId, title = "Write the launch post", column = "To do" }), Say("Added."));
+        added.Actions.Should().ContainSingle();
+        var cardId = (await harness.CardByTitleAsync(boardId, "Write the launch post")).RowId.ToString();
+
+        var found = new ScriptedModel(
+            _ => Call("find_cards", new { boardId, query = "launch post" }),
+            messages =>
+            {
+                LastResult(messages)["matches"]!.AsArray().Should().ContainSingle();
+                return Call("read_card", new { boardId, cardId });
+            },
+            messages =>
+            {
+                LastResult(messages)["title"]!.GetValue<string>().Should().Be("Write the launch post");
+                return Say("Found it.");
+            });
+        await harness.Runner.RunAsync(new SentinelAgentRequest(chat, Admin, "Find and read the launch post card", null, found, "test"), _ => Task.CompletedTask, default);
+
+        var priority = await harness.TurnAsync(chat, Admin, "Make it high priority",
+            Call("update_card", new { boardId, cardId, field = "priority", value = "High" }), Say("Updated."));
+        (await harness.CardAsync(boardId, cardId)).Priority!.Label.Should().Be("High");
+
+        await harness.Runner.UndoAsync(priority.Actions[0].Id, Admin, default);
+        (await harness.CardAsync(boardId, cardId)).Priority.Should().BeNull();
+
+        var description = await harness.TurnAsync(chat, Admin, "Add the brief",
+            Call("update_card", new { boardId, cardId, field = "description", value = "Draft, review, and publish the launch article." }), Say("Updated."));
+        (await harness.CardDescriptionAsync(boardId, cardId)).Should().Contain("Draft, review, and publish");
+        await harness.Runner.UndoAsync(description.Actions[0].Id, Admin, default);
+        (await harness.CardDescriptionAsync(boardId, cardId)).Should().NotContain("Draft, review, and publish");
     }
 
     [Fact]
@@ -892,6 +933,28 @@ public sealed class SentinelAgentTests
             await using var scope = _services.CreateAsyncScope();
             var board = (await scope.ServiceProvider.GetRequiredService<IKanbanBoardService>().GetBoardAsync(Guid.Parse(boardId)))!;
             return board.Columns.FirstOrDefault(column => column.Cards.Any(card => card.Title == cardTitle))?.Label;
+        }
+
+        public async Task<KanbanCard> CardAsync(string boardId, string cardId)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var board = (await scope.ServiceProvider.GetRequiredService<IKanbanBoardService>().GetBoardAsync(Guid.Parse(boardId)))!;
+            return board.Columns.SelectMany(column => column.Cards).Single(card => card.RowId == Guid.Parse(cardId));
+        }
+
+        public async Task<KanbanCard> CardByTitleAsync(string boardId, string title)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var board = (await scope.ServiceProvider.GetRequiredService<IKanbanBoardService>().GetBoardAsync(Guid.Parse(boardId)))!;
+            return board.Columns.SelectMany(column => column.Cards).Single(card => card.Title == title);
+        }
+
+        public async Task<string> CardDescriptionAsync(string boardId, string cardId)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var database = (await scope.ServiceProvider.GetRequiredService<IWikiDatabaseService>().GetDatabaseAsync(Guid.Parse(boardId)))!;
+            var row = database.Rows.Single(row => row.Id == Guid.Parse(cardId));
+            return SentinelNoteCleanup.ToMarkdown(WikiBlockJson.ParseBlocks(row.BlocksJson));
         }
 
         public async Task<Guid> TicketAsync(string subject)

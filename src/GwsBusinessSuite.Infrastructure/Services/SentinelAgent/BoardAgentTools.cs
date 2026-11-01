@@ -1,10 +1,12 @@
 using System.Text.Json.Nodes;
+using System.Text.Json;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Boards;
 using GwsBusinessSuite.Application.SentinelAgent;
 using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using System.Globalization;
 
 namespace GwsBusinessSuite.Infrastructure.Services.SentinelAgent;
 
@@ -12,7 +14,8 @@ namespace GwsBusinessSuite.Infrastructure.Services.SentinelAgent;
 // Admin page (Board.razor's AdminOnly), so these are Admin only too.
 public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseService databases, IAppDbContext db) : ISentinelAgentToolset
 {
-    private static readonly string[] Roles = [AppRoles.Admin];
+    private static readonly string[] AdminRoles = [AppRoles.Admin];
+    private static readonly string[] BoardRoles = AppRoles.All;
     private const int CardsPerColumn = 20;
 
     public SentinelAgentArea Area { get; } = new("boards", "Kanban boards and cards", ["board", "card", "kanban", "column", "backlog", "sprint"]);
@@ -23,14 +26,14 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
             "list_boards",
             "List the Kanban boards with their ids and how many cards are open.",
             SentinelAgentJson.Schema(),
-            SentinelAgentRisk.Read, Roles,
+            SentinelAgentRisk.Read, BoardRoles,
             _ => "Looking at the boards",
             ListAsync),
         new SentinelAgentTool(
             "read_board",
             "Read one board: its columns (with ids) and the cards in each (with ids).",
             SentinelAgentJson.Schema(("boardId", "string", "The board id", true)),
-            SentinelAgentRisk.Read, Roles,
+            SentinelAgentRisk.Read, BoardRoles,
             _ => "Reading a board",
             ReadAsync),
         new SentinelAgentTool(
@@ -39,7 +42,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
             SentinelAgentJson.Schema(
                 ("title", "string", "The board's name", true),
                 ("template", "string", "personal, sprint, bugs or content", false)),
-            SentinelAgentRisk.Change, Roles,
+            SentinelAgentRisk.Change, AdminRoles,
             args => $"Creating board '{args.OptionalText("title")}'",
             CreateBoardAsync,
             UndoCreateBoardAsync),
@@ -50,7 +53,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
                 ("boardId", "string", "The board id", true),
                 ("title", "string", "The card's title", true),
                 ("column", "string", "The column's name, e.g. To do", false)),
-            SentinelAgentRisk.Change, Roles,
+            SentinelAgentRisk.Change, BoardRoles,
             args => $"Adding card '{args.OptionalText("title")}'",
             AddCardAsync,
             UndoAddCardAsync),
@@ -61,7 +64,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
                 ("boardId", "string", "The board id", true),
                 ("ticketId", "string", "The support ticket's id", true),
                 ("column", "string", "The column's name (the first column when left out)", false)),
-            SentinelAgentRisk.Change, Roles,
+            SentinelAgentRisk.Change, BoardRoles,
             _ => "Adding the ticket to a board",
             AddTicketCardAsync,
             UndoAddCardAsync),
@@ -72,7 +75,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
                 ("boardId", "string", "The board id", true),
                 ("cardId", "string", "The card id", true),
                 ("column", "string", "The column's name to move it to", true)),
-            SentinelAgentRisk.Change, Roles,
+            SentinelAgentRisk.Change, BoardRoles,
             args => $"Moving a card to '{args.OptionalText("column")}'",
             MoveCardAsync,
             UndoMoveCardAsync),
@@ -83,7 +86,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
                 ("boardId", "string", "The board id", true),
                 ("cardId", "string", "The card id", true),
                 ("title", "string", "The new title", true)),
-            SentinelAgentRisk.Change, Roles,
+            SentinelAgentRisk.Change, BoardRoles,
             args => $"Renaming a card to '{args.OptionalText("title")}'",
             RenameCardAsync,
             UndoRenameCardAsync),
@@ -93,22 +96,82 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
             SentinelAgentJson.Schema(
                 ("boardId", "string", "The board id", true),
                 ("cardId", "string", "The card id", true)),
-            SentinelAgentRisk.Confirm, Roles,
+            SentinelAgentRisk.Confirm, BoardRoles,
             _ => "Proposing to delete a card",
             DeleteCardAsync,
             UndoDeleteCardAsync,
-            async (args, _, ct) =>
+            async (args, context, ct) =>
             {
+                await RequireEditAsync(args.Id("boardId"), context.User, ct);
                 var (board, card, _) = await CardAsync(args.Id("boardId"), args.Id("cardId"), ct);
                 return $"Delete the card '{card.Title}' from the board '{board.Title}'";
-            })
+            }),
+        new SentinelAgentTool(
+            "find_cards",
+            "Find cards anywhere on one board by title or card key. Returns every match, including cards past the board preview limit.",
+            SentinelAgentJson.Schema(
+                ("boardId", "string", "The board id", true),
+                ("query", "string", "Part of the card title or its key", true)),
+            SentinelAgentRisk.Read, BoardRoles,
+            args => $"Finding cards matching '{args.OptionalText("query")}'",
+            FindCardsAsync),
+        new SentinelAgentTool(
+            "read_card",
+            "Read one existing card completely: column, standard fields, custom properties, description, sub-items and allowed field options.",
+            SentinelAgentJson.Schema(
+                ("boardId", "string", "The board id", true),
+                ("cardId", "string", "The card id", true)),
+            SentinelAgentRisk.Read, BoardRoles,
+            _ => "Reading a card",
+            ReadCardAsync),
+        new SentinelAgentTool(
+            "update_card",
+            "Update one field on an existing card. Field may be title, description, column/status, priority, labels, due, assignee, estimate, sprint, epic, blocked, blocked reason, waiting on, or any editable custom property returned by read_card. Use an empty value to clear it. For multi-value fields use comma-separated option labels, usernames or card ids.",
+            SentinelAgentJson.Schema(
+                ("boardId", "string", "The board id", true),
+                ("cardId", "string", "The card id", true),
+                ("field", "string", "The field name", true),
+                ("value", "string", "The new value; empty clears it", true)),
+            SentinelAgentRisk.Change, BoardRoles,
+            args => $"Updating {args.OptionalText("field")} on a card",
+            UpdateCardAsync,
+            UndoUpdateCardAsync),
+        new SentinelAgentTool(
+            "add_card_subitem",
+            "Add a sub-item to an existing card.",
+            SentinelAgentJson.Schema(
+                ("boardId", "string", "The board id", true),
+                ("cardId", "string", "The parent card id", true),
+                ("title", "string", "The sub-item title", true)),
+            SentinelAgentRisk.Change, BoardRoles,
+            args => $"Adding sub-item '{args.OptionalText("title")}'",
+            AddSubItemAsync,
+            UndoAddCardAsync),
+        new SentinelAgentTool(
+            "set_card_subitem_done",
+            "Mark a card sub-item done or not done.",
+            SentinelAgentJson.Schema(
+                ("boardId", "string", "The board id", true),
+                ("subitemId", "string", "The sub-item row id", true),
+                ("done", "boolean", "True to complete it; false to reopen it", true)),
+            SentinelAgentRisk.Change, BoardRoles,
+            args => args.Flag("done", false) ? "Completing a sub-item" : "Reopening a sub-item",
+            SetSubItemDoneAsync),
+        new SentinelAgentTool(
+            "archive_card",
+            "Archive an existing card so it leaves the active board. The change can be undone.",
+            SentinelAgentJson.Schema(("boardId", "string", "The board id", true), ("cardId", "string", "The card id", true)),
+            SentinelAgentRisk.Change, BoardRoles,
+            _ => "Archiving a card",
+            ArchiveCardAsync,
+            UndoArchiveCardAsync)
     ];
 
     public static string LinkTo(Guid boardId) => $"/admin/boards/{boardId}";
 
     private async Task<SentinelAgentToolResult> ListAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
-        var list = await boards.ListBoardsAsync(ct);
+        var list = await boards.ListBoardsForAsync(context.User.Username, ct);
         return SentinelAgentToolResult.Of(new
         {
             boards = list.Select(board => new { id = board.DatabaseId, title = board.Title, openCards = board.OpenCount, cards = board.CardCount })
@@ -117,6 +180,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
 
     private async Task<SentinelAgentToolResult> ReadAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
+        await RequireViewAsync(args.Id("boardId"), context.User, ct);
         var board = await BoardAsync(args.Id("boardId"), ct);
         return SentinelAgentToolResult.Of(new
         {
@@ -172,10 +236,11 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
                 SentinelAgentJson.Serialize(new CardUndo(board.DatabaseId, rowId, null))));
     }
 
-    private Task UndoAddCardAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
+    private async Task UndoAddCardAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
     {
         var undo = SentinelAgentJson.Deserialize<CardUndo>(undoJson);
-        return databases.TrashRowAsync(undo.BoardId, undo.CardId, context.User.Username, ct);
+        await RequireEditAsync(undo.BoardId, context.User, ct);
+        await databases.TrashRowAsync(undo.BoardId, undo.CardId, context.User.Username, ct);
     }
 
     private async Task<SentinelAgentToolResult> MoveCardAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
@@ -219,6 +284,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
 
     private async Task<SentinelAgentToolResult> DeleteCardAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
+        await RequireEditAsync(args.Id("boardId"), context.User, ct);
         var (board, card, _) = await CardAsync(args.Id("boardId"), args.Id("cardId"), ct);
         await databases.TrashRowAsync(board.DatabaseId, card.RowId, context.User.Username, ct);
         return SentinelAgentToolResult.Of(new { deleted = card.Title },
@@ -226,11 +292,297 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
                 SentinelAgentJson.Serialize(new CardUndo(board.DatabaseId, card.RowId, null))));
     }
 
-    private Task UndoDeleteCardAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
+    private async Task UndoDeleteCardAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
     {
         var undo = SentinelAgentJson.Deserialize<CardUndo>(undoJson);
-        return databases.RestoreRowAsync(undo.BoardId, undo.CardId, context.User.Username, ct);
+        await RequireEditAsync(undo.BoardId, context.User, ct);
+        await databases.RestoreRowAsync(undo.BoardId, undo.CardId, context.User.Username, ct);
     }
+
+    private async Task<SentinelAgentToolResult> FindCardsAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var boardId = args.Id("boardId");
+        await RequireViewAsync(boardId, context.User, ct);
+        var board = await BoardAsync(boardId, ct);
+        var query = args.Text("query");
+        var matches = board.Columns.SelectMany(column => column.Cards.Select(card => new { card, column }))
+            .Where(item => item.card.Title.Contains(query, StringComparison.OrdinalIgnoreCase)
+                || (item.card.Key?.Contains(query, StringComparison.OrdinalIgnoreCase) ?? false))
+            .Take(50)
+            .Select(item => new { id = item.card.RowId, key = item.card.Key, title = item.card.Title, column = item.column.Label })
+            .ToList();
+        return SentinelAgentToolResult.Of(new { boardId, board = board.Title, matches });
+    }
+
+    private async Task<SentinelAgentToolResult> ReadCardAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var boardId = args.Id("boardId");
+        var cardId = args.Id("cardId");
+        await RequireViewAsync(boardId, context.User, ct);
+        var (board, card, column) = await CardAsync(boardId, cardId, ct);
+        var database = await DatabaseAsync(boardId, ct);
+        var row = database.Rows.First(item => item.Id == cardId);
+        var values = WikiPropertyValues.ParseObject(row.PropertyValuesJson);
+        var properties = database.Properties.OrderBy(property => property.SortOrder).Select(property => new
+        {
+            name = property.Name,
+            type = property.Type,
+            value = WikiPropertyValues.GetDisplayText(property, values, row.CreatedAt, row.UpdatedAt, row.CreatedBy, row.UpdatedBy),
+            options = property.Type is WikiDatabasePropertyTypes.Select or WikiDatabasePropertyTypes.MultiSelect or WikiDatabasePropertyTypes.Status
+                ? WikiDatabasePropertyConfig.GetOptions(property).Select(option => new { id = option.Id, label = option.Label }).ToList()
+                : null
+        });
+        var description = SentinelNoteCleanup.ToMarkdown(WikiBlockJson.ParseBlocks(row.BlocksJson));
+        var subItems = await boards.ListSubItemsAsync(boardId, cardId, ct);
+        return SentinelAgentToolResult.Of(new
+        {
+            boardId,
+            cardId,
+            key = card.Key,
+            title = card.Title,
+            column = column.Label,
+            description,
+            blocked = card.Blocked,
+            blockedReason = card.BlockedReason,
+            waitingOn = card.WaitingOn,
+            properties,
+            subItems
+        });
+    }
+
+    private async Task<SentinelAgentToolResult> UpdateCardAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var boardId = args.Id("boardId");
+        var cardId = args.Id("cardId");
+        await RequireEditAsync(boardId, context.User, ct);
+        var (board, card, column) = await CardAsync(boardId, cardId, ct);
+        var field = args.Text("field");
+        var value = args["value"] is null ? string.Empty : args["value"]!.GetValue<string>().Trim();
+
+        if (Matches(field, "column", "status"))
+        {
+            var target = Column(board, value);
+            await boards.MoveCardAsync(boardId, cardId, target.OptionId, null, context.User.Username, ct);
+            return Changed(card, board, field, value, new CardUpdateUndo(boardId, cardId, "column", null, column.OptionId, null, 0));
+        }
+
+        if (Matches(field, "blocked"))
+        {
+            if (!bool.TryParse(value, out var blocked)) throw new SentinelAgentToolException("Blocked must be true or false.");
+            await boards.SetBlockedAsync(boardId, cardId, blocked, card.BlockedReason, context.User.Username, ct);
+            return Changed(card, board, field, value, new CardUpdateUndo(boardId, cardId, "blocked", null,
+                JsonSerializer.Serialize(new { card.Blocked, card.BlockedReason }), null, 0));
+        }
+
+        if (Matches(field, "blocked reason", "blockedreason"))
+        {
+            await boards.SetBlockedAsync(boardId, cardId, true, EmptyToNull(value), context.User.Username, ct);
+            return Changed(card, board, field, value, new CardUpdateUndo(boardId, cardId, "blocked", null,
+                JsonSerializer.Serialize(new { card.Blocked, card.BlockedReason }), null, 0));
+        }
+
+        if (Matches(field, "waiting on", "waitingon", "dependencies"))
+        {
+            var ids = Split(value).Select(text => Guid.TryParse(text, out var id) ? id : throw new SentinelAgentToolException($"'{text}' isn't a card id. Find the dependency first.")).ToList();
+            var dependencyBefore = card.WaitingOn?.ToList() ?? [];
+            await boards.SetWaitingOnAsync(boardId, cardId, ids, context.User.Username, ct);
+            return Changed(card, board, field, value, new CardUpdateUndo(boardId, cardId, "waiting", null, JsonSerializer.Serialize(dependencyBefore), null, 0));
+        }
+
+        var database = await DatabaseAsync(boardId, ct);
+        var row = database.Rows.First(item => item.Id == cardId);
+        if (Matches(field, "description", "body", "notes"))
+        {
+            var updated = await databases.SaveRowAsync(boardId, new WikiDatabaseRowEditor
+            {
+                Id = cardId,
+                ParentRowId = row.ParentRowId,
+                BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(value)),
+                KeepPropertyValues = true,
+                ExpectedVersion = row.ConcurrencyVersion
+            }, context.User.Username, ct);
+            return Changed(card, board, field, value, new CardUpdateUndo(boardId, cardId, "description", null, row.BlocksJson, null, updated.ConcurrencyVersion));
+        }
+
+        var property = ResolveProperty(database, field);
+        var beforeValues = await boards.SetCardsValueAsync(boardId, [cardId], property.Id,
+            _ => PropertyValue(property, value), context.User.Username, ct);
+        var before = beforeValues.GetValueOrDefault(cardId)?.ToJsonString() ?? "null";
+        return Changed(card, board, property.Name, value, new CardUpdateUndo(boardId, cardId, "property", property.Id, before, null, 0));
+    }
+
+    private async Task UndoUpdateCardAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var undo = SentinelAgentJson.Deserialize<CardUpdateUndo>(undoJson);
+        await RequireEditAsync(undo.BoardId, context.User, ct);
+        switch (undo.Kind)
+        {
+            case "column":
+                await boards.MoveCardAsync(undo.BoardId, undo.CardId, undo.Secondary, null, context.User.Username, ct);
+                break;
+            case "blocked":
+                var blocked = JsonSerializer.Deserialize<BlockedUndo>(undo.Before!)!;
+                await boards.SetBlockedAsync(undo.BoardId, undo.CardId, blocked.Blocked, blocked.BlockedReason, context.User.Username, ct);
+                break;
+            case "waiting":
+                await boards.SetWaitingOnAsync(undo.BoardId, undo.CardId, JsonSerializer.Deserialize<List<Guid>>(undo.Before!) ?? [], context.User.Username, ct);
+                break;
+            case "description":
+                var database = await DatabaseAsync(undo.BoardId, ct);
+                var row = database.Rows.First(item => item.Id == undo.CardId);
+                await databases.SaveRowAsync(undo.BoardId, new WikiDatabaseRowEditor
+                {
+                    Id = undo.CardId,
+                    ParentRowId = row.ParentRowId,
+                    BlocksJson = undo.Before,
+                    KeepPropertyValues = true,
+                    ExpectedVersion = undo.ExpectedVersion
+                }, context.User.Username, ct);
+                break;
+            default:
+                var node = undo.Before == "null" ? null : JsonNode.Parse(undo.Before!);
+                await boards.RestoreCardValuesAsync(undo.BoardId, undo.PropertyId!.Value,
+                    new Dictionary<Guid, JsonNode?> { [undo.CardId] = node }, context.User.Username, ct);
+                break;
+        }
+    }
+
+    private async Task<SentinelAgentToolResult> AddSubItemAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var boardId = args.Id("boardId");
+        var cardId = args.Id("cardId");
+        await RequireEditAsync(boardId, context.User, ct);
+        var (board, card, _) = await CardAsync(boardId, cardId, ct);
+        var title = args.Text("title");
+        var id = await boards.AddSubItemAsync(boardId, cardId, title, context.User.Username, ct);
+        return SentinelAgentToolResult.Of(new { added = true, subitemId = id, title, parentCard = card.Title },
+            new SentinelAgentChange($"Added sub-item '{title}' to '{card.Title}'", "board-card", id.ToString(), title, LinkTo(boardId),
+                SentinelAgentJson.Serialize(new CardUndo(boardId, id, null))));
+    }
+
+    private async Task<SentinelAgentToolResult> SetSubItemDoneAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var boardId = args.Id("boardId");
+        await RequireEditAsync(boardId, context.User, ct);
+        var id = args.Id("subitemId");
+        var done = args.Flag("done", false);
+        await boards.SetSubItemDoneAsync(boardId, id, done, context.User.Username, ct);
+        return SentinelAgentToolResult.Of(new { subitemId = id, done },
+            new SentinelAgentChange($"Marked sub-item {(done ? "done" : "not done")}", "board-card", id.ToString(), "Sub-item", LinkTo(boardId), null));
+    }
+
+    private async Task<SentinelAgentToolResult> ArchiveCardAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var boardId = args.Id("boardId");
+        var cardId = args.Id("cardId");
+        await RequireEditAsync(boardId, context.User, ct);
+        var (board, card, _) = await CardAsync(boardId, cardId, ct);
+        await boards.ArchiveCardsAsync(boardId, [cardId], context.User.Username, ct);
+        return SentinelAgentToolResult.Of(new { archived = card.Title },
+            new SentinelAgentChange($"Archived '{card.Title}'", "board-card", cardId.ToString(), card.Title, LinkTo(boardId),
+                SentinelAgentJson.Serialize(new CardUndo(boardId, cardId, null))));
+    }
+
+    private Task UndoArchiveCardAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var undo = SentinelAgentJson.Deserialize<CardUndo>(undoJson);
+        return boards.UnarchiveCardsAsync(undo.BoardId, [undo.CardId], context.User.Username, ct);
+    }
+
+    private async Task RequireViewAsync(Guid boardId, SentinelAgentUser user, CancellationToken ct)
+    {
+        var allowed = await boards.GetAccessAsync(boardId, user.Username, ct);
+        if (!allowed.CanView) throw new SentinelAgentToolException("You don't have access to that board.");
+    }
+
+    private async Task RequireEditAsync(Guid boardId, SentinelAgentUser user, CancellationToken ct)
+    {
+        var allowed = await boards.GetAccessAsync(boardId, user.Username, ct);
+        if (!allowed.CanEdit) throw new SentinelAgentToolException("That board is view-only for you; ask an admin for Edit access.");
+    }
+
+    private async Task<WikiDatabase> DatabaseAsync(Guid boardId, CancellationToken ct) =>
+        await databases.GetDatabaseAsync(boardId, ct) ?? throw new SentinelAgentToolException("That board no longer exists.");
+
+    private static WikiDatabaseProperty ResolveProperty(WikiDatabase database, string field)
+    {
+        var normalized = Normalize(field);
+        var aliases = normalized switch
+        {
+            "assignee" or "assignees" or "owner" => new[] { "assignee", "assignees", "owner" },
+            "due" or "duedate" or "deadline" => new[] { "due", "duedate", "deadline" },
+            "label" or "labels" or "tag" or "tags" => new[] { "label", "labels", "tag", "tags" },
+            "estimate" or "points" or "storypoints" => new[] { "estimate", "points", "storypoints" },
+            _ => [normalized]
+        };
+        var matches = database.Properties.Where(property => aliases.Contains(Normalize(property.Name), StringComparer.OrdinalIgnoreCase)).ToList();
+        if (matches.Count == 0) throw new SentinelAgentToolException($"'{field}' isn't an editable field on this board. Read the card for its field names.");
+        if (matches.Count > 1) throw new SentinelAgentToolException($"'{field}' matches more than one field. Use the exact field name from read_card.");
+        var property = matches[0];
+        if (property.Type is WikiDatabasePropertyTypes.Formula or WikiDatabasePropertyTypes.Rollup or WikiDatabasePropertyTypes.CreatedTime
+            or WikiDatabasePropertyTypes.LastEditedTime or WikiDatabasePropertyTypes.LastEditedBy or WikiDatabasePropertyTypes.CreatedBy
+            or WikiDatabasePropertyTypes.UniqueId or WikiDatabasePropertyTypes.Button or WikiDatabasePropertyTypes.AiField
+            or WikiDatabasePropertyTypes.Files or WikiDatabasePropertyTypes.Place or WikiDatabasePropertyTypes.Relation
+            or WikiDatabasePropertyTypes.Verification)
+            throw new SentinelAgentToolException($"'{property.Name}' is read-only or needs its dedicated application workflow.");
+        return property;
+    }
+
+    private static JsonNode? PropertyValue(WikiDatabaseProperty property, string value)
+    {
+        if (value.Length == 0) return null;
+        switch (property.Type)
+        {
+            case WikiDatabasePropertyTypes.Title:
+            case WikiDatabasePropertyTypes.Text:
+            case WikiDatabasePropertyTypes.Url:
+            case WikiDatabasePropertyTypes.Email:
+            case WikiDatabasePropertyTypes.Phone:
+                return JsonValue.Create(value);
+            case WikiDatabasePropertyTypes.Number:
+                return decimal.TryParse(value.Replace(",", string.Empty), NumberStyles.Number, CultureInfo.InvariantCulture, out var number)
+                    ? JsonValue.Create(number)
+                    : throw new SentinelAgentToolException($"'{property.Name}' needs a number.");
+            case WikiDatabasePropertyTypes.Checkbox:
+                return bool.TryParse(value, out var flag) ? JsonValue.Create(flag)
+                    : throw new SentinelAgentToolException($"'{property.Name}' needs true or false.");
+            case WikiDatabasePropertyTypes.Date:
+                var parsed = ParseDate(value, property.Name);
+                return JsonValue.Create(parsed.ToString("O"));
+            case WikiDatabasePropertyTypes.Person:
+                return new JsonArray(Split(value).Select(item => (JsonNode?)JsonValue.Create(item)).ToArray());
+            case WikiDatabasePropertyTypes.Select:
+            case WikiDatabasePropertyTypes.Status:
+                return JsonValue.Create(ResolveOption(property, value));
+            case WikiDatabasePropertyTypes.MultiSelect:
+                return new JsonArray(Split(value).Select(item => (JsonNode?)JsonValue.Create(ResolveOption(property, item))).ToArray());
+            default:
+                throw new SentinelAgentToolException($"'{property.Name}' cannot be changed through update_card.");
+        }
+    }
+
+    private static string ResolveOption(WikiDatabaseProperty property, string value)
+    {
+        var options = WikiDatabasePropertyConfig.GetOptions(property);
+        return options.FirstOrDefault(option => string.Equals(option.Id, value, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(option.Label, value, StringComparison.OrdinalIgnoreCase))?.Id
+            ?? throw new SentinelAgentToolException($"'{value}' isn't an option for {property.Name}. Choose: {string.Join(", ", options.Select(option => option.Label))}.");
+    }
+
+    private static DateTimeOffset ParseDate(string value, string field) =>
+        DateTime.TryParseExact(value, ["yyyy-MM-dd", "dd-MM-yy", "dd-MM-yyyy"], CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+            ? new DateTimeOffset(date.Date, TimeSpan.Zero)
+            : throw new SentinelAgentToolException($"'{field}' needs a date like 2026-11-04.");
+
+    private static IReadOnlyList<string> Split(string value) => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    private static bool Matches(string value, params string[] choices) => choices.Any(choice => Normalize(value) == Normalize(choice));
+    private static string Normalize(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+    private static string? EmptyToNull(string value) => value.Length == 0 ? null : value;
+
+    private static SentinelAgentToolResult Changed(KanbanCard card, KanbanBoard board, string field, string value, CardUpdateUndo undo) =>
+        SentinelAgentToolResult.Of(new { updated = true, cardId = card.RowId, field, value },
+            new SentinelAgentChange($"Updated {field} on '{card.Title}'", "board-card", card.RowId.ToString(), card.Title, LinkTo(board.DatabaseId),
+                SentinelAgentJson.Serialize(undo)));
 
     private async Task<KanbanBoard> BoardAsync(Guid boardId, CancellationToken ct) =>
         await boards.GetBoardAsync(boardId, ct)
@@ -264,4 +616,6 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
     private sealed record CardUndo(Guid BoardId, Guid CardId, string? OptionId);
 
     private sealed record CardRenameUndo(Guid BoardId, Guid PropertyId, string ValuesJson);
+    private sealed record CardUpdateUndo(Guid BoardId, Guid CardId, string Kind, Guid? PropertyId, string? Before, string? Secondary, long ExpectedVersion);
+    private sealed record BlockedUndo(bool Blocked, string? BlockedReason);
 }

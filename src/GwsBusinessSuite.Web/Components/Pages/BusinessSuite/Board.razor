@@ -595,11 +595,13 @@ else
         if (CardQuery is not { } id || _board is null)
         {
             _openRow = null;
+            SetAssistantContext();
             return;
         }
         if (_openRow?.Id == id) return;
         _database = await Databases.GetDatabaseAsync(DatabaseId);
         _openRow = _database?.Rows.FirstOrDefault(row => row.Id == id);
+        SetAssistantContext();
     }
 
     // After a change anywhere: the board, and the open card's fresh row.
@@ -707,13 +709,7 @@ else
             _rules = _board is not null && _access.IsAdmin ? await RuleService.ListAsync(DatabaseId) : [];
             _templates = _board is not null ? await Databases.ListRowTemplatesAsync(DatabaseId) : [];
             _selection.Retain(_columns.SelectMany(column => column.Cards).Select(card => card.RowId));
-            // SentinelGPT's agent: "this board" is this one.
-            if (_board is not null)
-            {
-                Assistant.Set(new GwsBusinessSuite.Application.Assistant.AssistantPageContext("Boards", "Board", _board.Title,
-                    "Columns: " + string.Join(", ", _board.Columns.Select(column => $"{column.Label} ({column.Cards.Count})")),
-                    RecordId: _board.DatabaseId.ToString()));
-            }
+            SetAssistantContext();
         }
         catch (Exception ex)
         {
@@ -724,6 +720,20 @@ else
         {
             _loading = false;
         }
+    }
+
+    private void SetAssistantContext()
+    {
+        if (_board is null) return;
+        var card = _openRow is null ? null : _board.Columns.SelectMany(column => column.Cards).FirstOrDefault(item => item.RowId == _openRow.Id);
+        var columns = "Columns: " + string.Join(", ", _board.Columns.Select(column => $"{column.Label} ({column.Cards.Count})"));
+        Assistant.Set(card is null
+            ? new GwsBusinessSuite.Application.Assistant.AssistantPageContext("Boards", "Board", _board.Title,
+                columns, RecordId: _board.DatabaseId.ToString())
+            : new GwsBusinessSuite.Application.Assistant.AssistantPageContext("Boards", "Card", card.Title,
+                $"Board: {_board.Title} (id {_board.DatabaseId}). Column: {_board.Columns.First(column => column.Cards.Any(item => item.RowId == card.RowId)).Label}. " +
+                $"Priority: {card.Priority?.Label ?? "none"}. Due: {card.Due?.ToString("dd-MM-yy") ?? "none"}. Assignees: {(card.Assignees.Count == 0 ? "none" : string.Join(", ", card.Assignees))}. {columns}",
+                RecordId: card.RowId.ToString()));
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
