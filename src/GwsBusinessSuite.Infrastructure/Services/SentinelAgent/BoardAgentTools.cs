@@ -363,7 +363,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
         {
             var target = Column(board, value);
             await boards.MoveCardAsync(boardId, cardId, target.OptionId, null, context.User.Username, ct);
-            return Changed(card, board, field, value, new CardUpdateUndo(boardId, cardId, "column", null, column.OptionId, null, 0));
+            return Changed(card, board, field, value, new CardUpdateUndo(boardId, cardId, "column", null, column.OptionId, target.OptionId, 0));
         }
 
         if (Matches(field, "blocked"))
@@ -371,14 +371,16 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
             if (!bool.TryParse(value, out var blocked)) throw new SentinelAgentToolException("Blocked must be true or false.");
             await boards.SetBlockedAsync(boardId, cardId, blocked, card.BlockedReason, context.User.Username, ct);
             return Changed(card, board, field, value, new CardUpdateUndo(boardId, cardId, "blocked", null,
-                JsonSerializer.Serialize(new { card.Blocked, card.BlockedReason }), null, 0));
+                JsonSerializer.Serialize(new { card.Blocked, card.BlockedReason }),
+                JsonSerializer.Serialize(new { Blocked = blocked, card.BlockedReason }), 0));
         }
 
         if (Matches(field, "blocked reason", "blockedreason"))
         {
             await boards.SetBlockedAsync(boardId, cardId, true, EmptyToNull(value), context.User.Username, ct);
             return Changed(card, board, field, value, new CardUpdateUndo(boardId, cardId, "blocked", null,
-                JsonSerializer.Serialize(new { card.Blocked, card.BlockedReason }), null, 0));
+                JsonSerializer.Serialize(new { card.Blocked, card.BlockedReason }),
+                JsonSerializer.Serialize(new { Blocked = true, BlockedReason = EmptyToNull(value) }), 0));
         }
 
         if (Matches(field, "waiting on", "waitingon", "dependencies"))
@@ -386,7 +388,8 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
             var ids = Split(value).Select(text => Guid.TryParse(text, out var id) ? id : throw new SentinelAgentToolException($"'{text}' isn't a card id. Find the dependency first.")).ToList();
             var dependencyBefore = card.WaitingOn?.ToList() ?? [];
             await boards.SetWaitingOnAsync(boardId, cardId, ids, context.User.Username, ct);
-            return Changed(card, board, field, value, new CardUpdateUndo(boardId, cardId, "waiting", null, JsonSerializer.Serialize(dependencyBefore), null, 0));
+            return Changed(card, board, field, value, new CardUpdateUndo(boardId, cardId, "waiting", null,
+                JsonSerializer.Serialize(dependencyBefore), JsonSerializer.Serialize(ids), 0));
         }
 
         var database = await DatabaseAsync(boardId, ct);
@@ -405,10 +408,12 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
         }
 
         var property = ResolveProperty(database, field);
+        var newValue = PropertyValue(property, value);
         var beforeValues = await boards.SetCardsValueAsync(boardId, [cardId], property.Id,
-            _ => PropertyValue(property, value), context.User.Username, ct);
+            _ => newValue?.DeepClone(), context.User.Username, ct);
         var before = beforeValues.GetValueOrDefault(cardId)?.ToJsonString() ?? "null";
-        return Changed(card, board, property.Name, value, new CardUpdateUndo(boardId, cardId, "property", property.Id, before, null, 0));
+        return Changed(card, board, property.Name, value, new CardUpdateUndo(boardId, cardId, "property", property.Id, before,
+            newValue?.ToJsonString() ?? "null", 0));
     }
 
     private async Task UndoUpdateCardAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
@@ -418,13 +423,21 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
         switch (undo.Kind)
         {
             case "column":
-                await boards.MoveCardAsync(undo.BoardId, undo.CardId, undo.Secondary, null, context.User.Username, ct);
+                var (_, _, currentColumn) = await CardAsync(undo.BoardId, undo.CardId, ct);
+                if (currentColumn.OptionId != undo.Secondary) throw ChangedSince();
+                await boards.MoveCardAsync(undo.BoardId, undo.CardId, undo.Before, null, context.User.Username, ct);
                 break;
             case "blocked":
+                var (_, currentBlockedCard, _) = await CardAsync(undo.BoardId, undo.CardId, ct);
+                var expectedBlocked = JsonSerializer.Deserialize<BlockedUndo>(undo.Secondary!)!;
+                if (currentBlockedCard.Blocked != expectedBlocked.Blocked || currentBlockedCard.BlockedReason != expectedBlocked.BlockedReason) throw ChangedSince();
                 var blocked = JsonSerializer.Deserialize<BlockedUndo>(undo.Before!)!;
                 await boards.SetBlockedAsync(undo.BoardId, undo.CardId, blocked.Blocked, blocked.BlockedReason, context.User.Username, ct);
                 break;
             case "waiting":
+                var (_, currentWaitingCard, _) = await CardAsync(undo.BoardId, undo.CardId, ct);
+                var expectedWaiting = JsonSerializer.Deserialize<List<Guid>>(undo.Secondary!) ?? [];
+                if (!(currentWaitingCard.WaitingOn ?? []).Order().SequenceEqual(expectedWaiting.Order())) throw ChangedSince();
                 await boards.SetWaitingOnAsync(undo.BoardId, undo.CardId, JsonSerializer.Deserialize<List<Guid>>(undo.Before!) ?? [], context.User.Username, ct);
                 break;
             case "description":
@@ -440,11 +453,18 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
                 }, context.User.Username, ct);
                 break;
             default:
+                var currentDatabase = await DatabaseAsync(undo.BoardId, ct);
+                var currentRow = currentDatabase.Rows.First(item => item.Id == undo.CardId);
+                var currentValue = WikiPropertyValues.ParseObject(currentRow.PropertyValuesJson)[undo.PropertyId!.Value.ToString()];
+                var expectedValue = undo.Secondary == "null" ? null : JsonNode.Parse(undo.Secondary!);
+                if (!JsonNode.DeepEquals(currentValue, expectedValue)) throw ChangedSince();
                 var node = undo.Before == "null" ? null : JsonNode.Parse(undo.Before!);
-                await boards.RestoreCardValuesAsync(undo.BoardId, undo.PropertyId!.Value,
+                await boards.RestoreCardValuesAsync(undo.BoardId, undo.PropertyId.Value,
                     new Dictionary<Guid, JsonNode?> { [undo.CardId] = node }, context.User.Username, ct);
                 break;
         }
+
+        static InvalidOperationException ChangedSince() => new("That card changed after SentinelGPT edited it, so Undo did not overwrite the newer change.");
     }
 
     private async Task<SentinelAgentToolResult> AddSubItemAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)

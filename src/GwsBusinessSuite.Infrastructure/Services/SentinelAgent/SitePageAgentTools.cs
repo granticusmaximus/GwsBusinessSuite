@@ -44,6 +44,26 @@ public sealed class SitePageAgentTools(ICmsBuilderService cms) : ISentinelAgentT
             AppendAsync,
             UndoAppendAsync),
         new SentinelAgentTool(
+            "replace_site_page_draft",
+            "Replace all sections of an existing Draft website page, optionally changing its title or address. Use when asked to rewrite or fully edit a draft rather than append to it.",
+            Schema(
+                ("pageId", "string", "The draft page's id", true),
+                ("title", "string", "Optional replacement title", false),
+                ("slug", "string", "Optional replacement address", false)),
+            SentinelAgentRisk.Change, Roles,
+            _ => "Replacing a draft page",
+            ReplaceAsync,
+            UndoReplaceAsync),
+        new SentinelAgentTool(
+            "trash_site_page",
+            "Move a website page to Trash so it leaves the site and page list. Only proposes: the person confirms first.",
+            SentinelAgentJson.Schema(("pageId", "string", "The page id", true)),
+            SentinelAgentRisk.Confirm, Roles,
+            _ => "Proposing to trash a site page",
+            TrashAsync,
+            UndoTrashAsync,
+            async (args, _, ct) => $"Move the site page '{(await PageAsync(args.Id("pageId"), ct)).Title}' to Trash"),
+        new SentinelAgentTool(
             "publish_site_page",
             "Publish a Draft website page so the public can see it. Only proposes: the person confirms first.",
             SentinelAgentJson.Schema(("pageId", "string", "The draft page's id", true)),
@@ -136,6 +156,39 @@ public sealed class SitePageAgentTools(ICmsBuilderService cms) : ISentinelAgentT
         await SaveAsync(page, undo.BlocksJson, CmsPageStatuses.Draft, null, context, ct);
     }
 
+    private async Task<SentinelAgentToolResult> ReplaceAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var page = await DraftAsync(args.Id("pageId"), ct);
+        var before = Snapshot(page);
+        var layout = new PageLayout { Sections = Sections(args) };
+        var saved = await SaveAsync(page, CmsBuilderJson.Serialize(layout), CmsPageStatuses.Draft, null, context, ct,
+            args.OptionalText("title"), args.OptionalText("slug")?.Trim('/'));
+        return SentinelAgentToolResult.Of(new { replaced = true, pageId = saved.Id, title = saved.Title, address = "/" + saved.Slug, sections = layout.Sections.Count },
+            new SentinelAgentChange($"Replaced the draft site page '{saved.Title}' ({Count(layout.Sections.Count)})", "site-page", saved.Id.ToString(), saved.Title,
+                LinkTo(saved.Id), SentinelAgentJson.Serialize(new PageReplaceUndo(before, saved.ConcurrencyVersion))));
+    }
+
+    private async Task UndoReplaceAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var undo = SentinelAgentJson.Deserialize<PageReplaceUndo>(undoJson);
+        var page = await DraftAsync(undo.Before.PageId, ct);
+        if (page.ConcurrencyVersion != undo.VersionAfter)
+            throw new SentinelAgentToolException($"'{page.Title}' has changed since, so undoing would lose that newer edit.");
+        await SaveAsync(page, undo.Before.BlocksJson, CmsPageStatuses.Draft, null, context, ct, undo.Before.Title, undo.Before.Slug);
+    }
+
+    private async Task<SentinelAgentToolResult> TrashAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var page = await PageAsync(args.Id("pageId"), ct);
+        await cms.TrashPageAsync(page.Id, ct);
+        return SentinelAgentToolResult.Of(new { trashed = page.Title },
+            new SentinelAgentChange($"Moved the site page '{page.Title}' to Trash", "site-page", page.Id.ToString(), page.Title, LinkTo(page.Id),
+                SentinelAgentJson.Serialize(new PageUndo(page.Id))));
+    }
+
+    private Task UndoTrashAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct) =>
+        cms.RestorePageAsync(SentinelAgentJson.Deserialize<PageUndo>(undoJson).PageId, ct);
+
     private async Task<SentinelAgentToolResult> PublishAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
         var page = await DraftAsync(args.Id("pageId"), ct);
@@ -155,7 +208,8 @@ public sealed class SitePageAgentTools(ICmsBuilderService cms) : ISentinelAgentT
 
     // CmsPageEditorModel replaces every field on save, so each one the page has is carried over
     // (the 21-08-26 autosave bug wiped category, tags, canonical URL and properties this way).
-    private async Task<CmsPage> SaveAsync(CmsPage page, string blocksJson, string status, DateTimeOffset? publishedAt, SentinelAgentToolContext context, CancellationToken ct)
+    private async Task<CmsPage> SaveAsync(CmsPage page, string blocksJson, string status, DateTimeOffset? publishedAt, SentinelAgentToolContext context, CancellationToken ct,
+        string? title = null, string? slug = null)
     {
         var categoryName = string.Empty;
         if (page.CategoryId is { } categoryId)
@@ -172,8 +226,8 @@ public sealed class SitePageAgentTools(ICmsBuilderService cms) : ISentinelAgentT
             PageId = page.Id,
             SiteId = page.SiteId,
             ParentPageId = page.ParentPageId,
-            Title = page.Title,
-            Slug = page.Slug,
+            Title = title ?? page.Title,
+            Slug = slug ?? page.Slug,
             BlocksJson = blocksJson,
             MetaTitle = page.MetaTitle,
             MetaDescription = page.MetaDescription,
@@ -198,6 +252,14 @@ public sealed class SitePageAgentTools(ICmsBuilderService cms) : ISentinelAgentT
         if (page.Status != CmsPageStatuses.Draft)
             throw new SentinelAgentToolException($"'{page.Title}' is already live. Changes to a live page are made in the page editor, which shows them before 'Publish changes'.");
         return page;
+    }
+
+    private async Task<CmsPage> PageAsync(Guid pageId, CancellationToken ct)
+    {
+        var page = await cms.GetPageAsync(pageId, ct);
+        return page is null || page.TrashedAt is not null
+            ? throw new SentinelAgentToolException($"There's no site page with id {pageId}. Search for it first.")
+            : page;
     }
 
     private static List<LayoutSection> Sections(JsonObject args)
@@ -246,4 +308,8 @@ public sealed class SitePageAgentTools(ICmsBuilderService cms) : ISentinelAgentT
     private sealed record PageUndo(Guid PageId);
 
     private sealed record PageEditUndo(Guid PageId, string BlocksJson, long VersionAfter);
+    private sealed record PageSnapshot(Guid PageId, string Title, string Slug, string BlocksJson);
+    private sealed record PageReplaceUndo(PageSnapshot Before, long VersionAfter);
+
+    private static PageSnapshot Snapshot(CmsPage page) => new(page.Id, page.Title, page.Slug, page.BlocksJson);
 }

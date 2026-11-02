@@ -217,6 +217,13 @@ public sealed class SentinelAgentTests
             Call("update_card", new { boardId, cardId, field = "priority", value = "High" }), Say("Updated."));
         (await harness.CardAsync(boardId, cardId)).Priority!.Label.Should().Be("High");
 
+        var urgent = await harness.TurnAsync(chat, Admin, "Actually make it urgent",
+            Call("update_card", new { boardId, cardId, field = "priority", value = "Urgent" }), Say("Updated."));
+        var staleUndo = () => harness.Runner.UndoAsync(priority.Actions[0].Id, Admin, default);
+        (await staleUndo.Should().ThrowAsync<InvalidOperationException>()).Which.Message.Should().Contain("changed after");
+
+        await harness.Runner.UndoAsync(urgent.Actions[0].Id, Admin, default);
+        (await harness.CardAsync(boardId, cardId)).Priority!.Label.Should().Be("High");
         await harness.Runner.UndoAsync(priority.Actions[0].Id, Admin, default);
         (await harness.CardAsync(boardId, cardId)).Priority.Should().BeNull();
 
@@ -255,6 +262,44 @@ public sealed class SentinelAgentTests
 
         await harness.Runner.UndoAsync(published.Id, Admin, default);
         (await harness.SitePageAsync(pageId)).Status.Should().Be(CmsPageStatuses.Draft, "undoing a publish takes it back off the site");
+    }
+
+    [Fact]
+    public async Task SitePageDrafts_ShouldSupportReplaceTrashAndRestore()
+    {
+        await using var harness = await Harness.CreateAsync();
+        await harness.SiteAsync();
+        var chat = Guid.NewGuid();
+        var created = await harness.TurnAsync(chat, Admin, "Draft an about page",
+            Call("create_site_page_draft", new
+            {
+                title = "About",
+                sections = new object[] { new { heading = "Old heading", text = "Old copy" } }
+            }), Say("Drafted."));
+        var pageId = Guid.Parse(created.Actions[0].Link!.Split('/')[3]);
+
+        var replaced = await harness.TurnAsync(chat, Admin, "Rewrite the draft",
+            Call("replace_site_page_draft", new
+            {
+                pageId,
+                title = "About us",
+                slug = "about-us",
+                sections = new object[] { new { heading = "Our story", text = "New copy" } }
+            }), Say("Rewritten."));
+        var page = await harness.SitePageAsync(pageId);
+        page.Title.Should().Be("About us");
+        page.Slug.Should().Be("about-us");
+        CmsBuilderJson.ParseLayoutOrEmpty(page.BlocksJson).Sections[0].Label.Should().Be("Our story");
+
+        await harness.Runner.UndoAsync(replaced.Actions[0].Id, Admin, default);
+        (await harness.SitePageAsync(pageId)).Title.Should().Be("About");
+
+        var proposed = await harness.TurnAsync(chat, Admin, "Trash the draft",
+            Call("trash_site_page", new { pageId }), Say("Waiting for confirmation."));
+        var trashed = await harness.Runner.ConfirmAsync(proposed.Actions[0].Id, Admin, approve: true, default);
+        (await harness.SitePageAsync(pageId)).TrashedAt.Should().NotBeNull();
+        await harness.Runner.UndoAsync(trashed.Id, Admin, default);
+        (await harness.SitePageAsync(pageId)).TrashedAt.Should().BeNull();
     }
 
     [Fact]
