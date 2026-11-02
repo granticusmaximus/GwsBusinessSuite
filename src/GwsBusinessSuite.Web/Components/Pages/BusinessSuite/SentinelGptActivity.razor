@@ -24,6 +24,34 @@
                     aria-pressed="@(_tab == ActivityTab.Memories ? "true" : "false")" @onclick="() => _tab = ActivityTab.Memories">Memories (@_memories.Count)</button>
         </div>
     </Actions>
+    <Filters>
+        @if (_tab == ActivityTab.Changes)
+        {
+            <div class="sga-filters" role="search" aria-label="Filter SentinelGPT activity">
+                <label class="visually-hidden" for="sga-search">Search activity</label>
+                <div class="input-group sga-search">
+                    <span class="input-group-text" aria-hidden="true"><i class="bi bi-search"></i></span>
+                    <input id="sga-search" class="form-control" placeholder="Search changes…" @bind="_search" @bind:event="oninput" />
+                </div>
+                <label class="visually-hidden" for="sga-status">Filter by status</label>
+                <select id="sga-status" class="form-select" @bind="_status">
+                    <option value="">All statuses</option>
+                    <option value="@SentinelAgentActionStatuses.Done">Done</option>
+                    <option value="@SentinelAgentActionStatuses.AwaitingConfirm">Waiting for you</option>
+                    <option value="@SentinelAgentActionStatuses.Undone">Undone</option>
+                    <option value="@SentinelAgentActionStatuses.Declined">Declined</option>
+                    <option value="@SentinelAgentActionStatuses.Failed">Failed</option>
+                </select>
+                @if (_isAdmin)
+                {
+                    <div class="form-check form-switch sga-everyone">
+                        <input id="sga-everyone" class="form-check-input" type="checkbox" checked="@_everyone" @onchange="ToggleEveryoneAsync" />
+                        <label class="form-check-label" for="sga-everyone">Everyone's activity</label>
+                    </div>
+                }
+            </div>
+        }
+    </Filters>
 </PageHeader>
 
 @if (_error is not null)
@@ -33,38 +61,20 @@
 
 @if (_tab == ActivityTab.Changes)
 {
-    <div class="sga-filters">
-        <label class="visually-hidden" for="sga-search">Search</label>
-        <input id="sga-search" class="form-control" placeholder="Search what it did…" @bind="_search" @bind:event="oninput" />
-        <label class="visually-hidden" for="sga-status">Status</label>
-        <select id="sga-status" class="form-select" @bind="_status">
-            <option value="">Everything</option>
-            <option value="@SentinelAgentActionStatuses.Done">Done</option>
-            <option value="@SentinelAgentActionStatuses.AwaitingConfirm">Waiting for you</option>
-            <option value="@SentinelAgentActionStatuses.Undone">Undone</option>
-            <option value="@SentinelAgentActionStatuses.Declined">Declined</option>
-        </select>
-        @if (_isAdmin)
-        {
-            <div class="form-check form-switch">
-                <input id="sga-everyone" class="form-check-input" type="checkbox" checked="@_everyone" @onchange="ToggleEveryoneAsync" />
-                <label class="form-check-label" for="sga-everyone">Everyone's</label>
-            </div>
-        }
-    </div>
-
     @if (_rows is null)
     {
         <LoadingIndicator Message="Loading SentinelGPT's activity…" />
     }
     else if (!Filtered.Any())
     {
-        <p class="text-body-secondary">Nothing here yet. Ask SentinelGPT (the ✦ button) to do something, and it shows up here.</p>
+        <EmptyState Icon="bi-stars" Title="No matching activity"
+                    Message="Ask SentinelGPT to make a change, or clear the filters to see earlier work." />
     }
     else
     {
-        <div class="table-responsive">
-            <table class="table align-middle sga-table">
+        <section class="card border-0 shadow-sm sga-ledger" aria-label="SentinelGPT change ledger" aria-busy="@_acting">
+        <div class="table-responsive gws-list-table-wrap">
+            <table class="table table-hover align-middle mb-0 gws-list-table sga-table">
                 <thead>
                     <tr>
                         <th scope="col">When</th>
@@ -86,28 +96,34 @@
                             {
                                 <td>@row.Who</td>
                             }
-                            <td class="sga-what">@What(row.Action)</td>
-                            <td><span class="badge @StatusClass(row.Action.Status)">@StatusLabel(row.Action)</span></td>
+                            <td class="sga-what">
+                                <strong>@What(row.Action)</strong>
+                                <small><i class="bi bi-terminal" aria-hidden="true"></i>@ToolLabel(row.Action.Tool)</small>
+                            </td>
+                            <td><StatusPill Tone="@StatusToneFor(row.Action.Status)">@StatusLabel(row.Action)</StatusPill></td>
                             <td class="text-end text-nowrap">
-                                @if (row.Action.Link is not null && row.Action.Status != SentinelAgentActionStatuses.Undone)
-                                {
-                                    <a class="btn btn-sm btn-link" href="@row.Action.Link">Open</a>
-                                }
-                                @if (row.Mine && row.Action.AwaitingConfirm && row.Action.Tool != SentinelAgentRunner.PlanToolName)
-                                {
-                                    <button type="button" class="btn btn-sm btn-primary" disabled="@_acting" @onclick="() => ConfirmAsync(row, true)">Confirm</button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary ms-1" disabled="@_acting" @onclick="() => ConfirmAsync(row, false)">Decline</button>
-                                }
-                                @if (row.Mine && row.Action.CanUndo)
-                                {
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_acting" @onclick="() => UndoAsync(row)">Undo</button>
-                                }
+                                <div class="sga-row-actions">
+                                    @if (row.Action.Link is not null && row.Action.Status != SentinelAgentActionStatuses.Undone)
+                                    {
+                                        <a class="btn btn-sm btn-outline-secondary" href="@row.Action.Link"><i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>Open</a>
+                                    }
+                                    @if (row.Mine && row.Action.AwaitingConfirm && row.Action.Tool != SentinelAgentRunner.PlanToolName)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-primary" disabled="@_acting" @onclick="() => ConfirmAsync(row, true)">Confirm</button>
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_acting" @onclick="() => ConfirmAsync(row, false)">Decline</button>
+                                    }
+                                    @if (row.Mine && row.Action.CanUndo)
+                                    {
+                                        <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_acting" @onclick="() => UndoAsync(row)"><i class="bi bi-arrow-counterclockwise" aria-hidden="true"></i>Undo</button>
+                                    }
+                                </div>
                             </td>
                         </tr>
                     }
                 </tbody>
             </table>
         </div>
+        </section>
     }
 }
 else
@@ -230,11 +246,15 @@ else
         _ => action.Tool == SentinelAgentRunner.PlanToolName ? "Started" : "Done"
     };
 
-    private static string StatusClass(string status) => status switch
+    private static StatusTone StatusToneFor(string status) => status switch
     {
-        SentinelAgentActionStatuses.AwaitingConfirm => "text-bg-warning",
-        SentinelAgentActionStatuses.Undone or SentinelAgentActionStatuses.Declined => "text-bg-secondary",
-        SentinelAgentActionStatuses.Failed => "text-bg-danger",
-        _ => "text-bg-success"
+        SentinelAgentActionStatuses.AwaitingConfirm => StatusTone.Warning,
+        SentinelAgentActionStatuses.Undone or SentinelAgentActionStatuses.Declined => StatusTone.Neutral,
+        SentinelAgentActionStatuses.Failed => StatusTone.Danger,
+        _ => StatusTone.Success
     };
+
+    private static string ToolLabel(string tool) => tool == SentinelAgentRunner.PlanToolName
+        ? "Approved plan"
+        : tool.Replace('_', ' ');
 }

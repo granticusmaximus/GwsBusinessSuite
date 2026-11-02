@@ -87,8 +87,8 @@
         }
         else
         {
-            <div class="table-responsive">
-                <table class="table align-middle mb-0">
+            <div class="table-responsive gws-list-table-wrap">
+                <table class="table table-hover align-middle mb-0 gws-list-table">
                     <thead>
                         <tr>
                             <th>Username</th>
@@ -123,14 +123,10 @@
                                     }
                                 </td>
                                 <td>
-                                    <span class="badge @(user.IsActive ? "text-bg-success" : "text-bg-secondary")">
-                                        @(user.IsActive ? "Active" : "Inactive")
-                                    </span>
+                                    <StatusPill Tone="@(user.IsActive ? StatusTone.Success : StatusTone.Neutral)">@(user.IsActive ? "Active" : "Inactive")</StatusPill>
                                     @if (IsLockedOut(user))
                                     {
-                                        <span class="badge text-bg-warning ms-1" title="Too many failed login attempts">
-                                            Locked until @user.LockoutEndAt!.Value.ToLocalTime().ToString("HH:mm")
-                                        </span>
+                                        <StatusPill Tone="StatusTone.Warning" CssClass="ms-1" Title="Too many failed login attempts">Locked until @user.LockoutEndAt!.Value.ToLocalTime().ToString("HH:mm")</StatusPill>
                                     }
                                 </td>
                                 <td class="small text-secondary">@user.CreatedAt.ToLocalTime().ToString("dd-MM-yy")</td>

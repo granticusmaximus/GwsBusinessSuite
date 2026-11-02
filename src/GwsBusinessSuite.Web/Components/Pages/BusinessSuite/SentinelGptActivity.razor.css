@@ -1,4 +1,3 @@
-.sga-filters,
 .sga-remember {
     display: flex;
     flex-wrap: wrap;
@@ -7,18 +6,77 @@
     margin-bottom: 1rem;
 }
 
-.sga-filters .form-control,
 .sga-remember .form-control {
     flex: 1 1 16rem;
     min-width: 0;
 }
 
+.sga-filters {
+    display: flex;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+}
+
+.sga-search {
+    flex: 1 1 18rem;
+    max-width: 32rem;
+}
+
+.sga-search .input-group-text {
+    color: var(--gws-text-soft);
+    background: var(--gws-panel-bg-2);
+}
+
 .sga-filters .form-select {
-    flex: 0 1 12rem;
+    flex: 0 1 13rem;
+}
+
+.sga-everyone {
+    margin-inline-start: auto;
+    white-space: nowrap;
+}
+
+.sga-ledger {
+    overflow: hidden;
 }
 
 .sga-what {
     overflow-wrap: anywhere;
+}
+
+.sga-what strong,
+.sga-what small {
+    display: block;
+}
+
+.sga-what strong {
+    color: var(--gws-text-strong);
+    font-weight: 600;
+}
+
+.sga-what small {
+    margin-top: .2rem;
+    color: var(--gws-text-soft);
+    font-size: .75rem;
+    text-transform: capitalize;
+}
+
+.sga-what small i {
+    margin-inline-end: .35rem;
+}
+
+.sga-row-actions {
+    display: inline-flex;
+    justify-content: flex-end;
+    gap: .35rem;
+}
+
+.sga-row-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
 }
 
 .sga-memories .list-group-item {
@@ -32,4 +90,22 @@
     flex: 1 1 14rem;
     min-width: 0;
     overflow-wrap: anywhere;
+}
+
+@container gws-main (max-width: 687.98px) {
+    .sga-search,
+    .sga-filters .form-select {
+        flex-basis: 100%;
+        max-width: none;
+    }
+
+    .sga-everyone {
+        margin-inline-start: 0;
+    }
+}
+
+@media (pointer: coarse) {
+    .sga-row-actions .btn {
+        min-height: 44px;
+    }
 }

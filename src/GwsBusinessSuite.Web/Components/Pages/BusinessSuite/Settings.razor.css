@@ -41,6 +41,25 @@
 .gws-settings-nav-item small { margin-top: .1rem; color: var(--gws-text-soft); font-size: .75rem; }
 
 .gws-settings-content .card-body { padding: 1.4rem; }
+.gws-settings-section-head {
+    display: flex;
+    align-items: center;
+    gap: .8rem;
+    margin-bottom: 1rem;
+}
+.gws-settings-section-head h2 { margin: 0; font-size: 1.05rem; font-weight: 700; }
+.gws-settings-section-head p { margin: .15rem 0 0; color: var(--gws-text-soft); font-size: .85rem; }
+.gws-settings-section-icon {
+    display: grid;
+    flex: 0 0 2.25rem;
+    width: 2.25rem;
+    height: 2.25rem;
+    place-items: center;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-sm);
+    background: var(--gws-panel-bg-2);
+    color: var(--gws-text-soft);
+}
 .gws-settings-actions {
     position: sticky;
     bottom: 0;
@@ -52,7 +71,7 @@
     padding: .85rem 1.4rem;
     border-top: 1px solid var(--gws-panel-border);
     border-radius: 0 0 var(--gws-radius-md) var(--gws-radius-md);
-    background: rgba(28, 25, 23, .94);
+    background: color-mix(in srgb, var(--gws-panel-bg) 94%, transparent);
     backdrop-filter: blur(12px);
 }
 .gws-settings-actions span { color: var(--gws-text-soft); font-size: .75rem; }

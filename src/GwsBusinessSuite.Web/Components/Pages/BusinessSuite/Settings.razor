@@ -49,10 +49,7 @@
 
 @if (!_loaded)
 {
-    <div class="d-flex align-items-center gap-2 text-secondary">
-        <span class="spinner-border spinner-border-sm"></span>
-        <span>Loading settings…</span>
-    </div>
+    <LoadingIndicator Message="Loading settings…" />
 }
 else
 {
@@ -70,6 +67,13 @@ else
         </nav>
 
         <section class="gws-settings-content" aria-label="@ActiveTab settings">
+            <header class="gws-settings-section-head">
+                <span class="gws-settings-section-icon" aria-hidden="true"><i class="bi @CurrentTab.Icon"></i></span>
+                <div>
+                    <h2>@CurrentTab.Key</h2>
+                    <p>@CurrentTab.Description</p>
+                </div>
+            </header>
 
     @if (ActiveTab == "General")
     {
@@ -185,8 +189,8 @@ else
                 }
                 else
                 {
-                    <div class="table-responsive">
-                        <table class="table table-sm align-middle mb-3">
+                    <div class="table-responsive gws-list-table-wrap">
+                        <table class="table table-sm align-middle mb-3 gws-list-table">
                             <thead><tr><th>Feature</th><th>Sends via</th><th>From</th></tr></thead>
                             <tbody>
                                 @foreach (var row in _emailStatus)
@@ -196,11 +200,11 @@ else
                                         <td>
                                             @if (row.CanSend)
                                             {
-                                                <span class="badge text-bg-success me-1">Ready</span>
+                                                <StatusPill Tone="StatusTone.Success" CssClass="me-1">Ready</StatusPill>
                                             }
                                             else
                                             {
-                                                <span class="badge text-bg-danger me-1">Not set up</span>
+                                                <StatusPill Tone="StatusTone.Danger" CssClass="me-1">Not set up</StatusPill>
                                             }
                                             <span class="small">@row.Route</span>
                                         </td>
@@ -366,8 +370,8 @@ else
 
         <div class="card border-0 shadow-sm mb-4">
             <div class="card-header bg-white border-bottom"><h2 class="h5 mb-0">Issued keys</h2></div>
-            <div class="table-responsive">
-                <table class="table table-hover align-middle mb-0">
+            <div class="table-responsive gws-list-table-wrap">
+                <table class="table table-hover align-middle mb-0 gws-list-table">
                     <thead><tr><th>Name</th><th>Prefix</th><th>Scopes</th><th>Usage</th><th>Status</th><th></th></tr></thead>
                     <tbody>
                         @if (ApiKeys.Count == 0)
@@ -382,9 +386,9 @@ else
                                 <td><div class="d-flex flex-wrap gap-1">@foreach (var scope in key.Scopes) { <span class="badge text-bg-light border">@scope</span> }</div></td>
                                 <td><span>@key.RequestCount.ToString("N0") requests</span><div class="small text-secondary">@(key.LastUsedAt?.ToLocalTime().ToString("dd-MM-yy HH:mm") ?? "Never used") · @key.RateLimitPerMinute/min</div></td>
                                 <td>
-                                    @if (key.RevokedAt is not null) { <span class="badge text-bg-secondary">Revoked</span> }
-                                    else if (key.ExpiresAt <= DateTimeOffset.UtcNow) { <span class="badge text-bg-warning">Expired</span> }
-                                    else { <span class="badge text-bg-success">Active</span> }
+                                    @if (key.RevokedAt is not null) { <StatusPill Tone="StatusTone.Neutral">Revoked</StatusPill> }
+                                    else if (key.ExpiresAt <= DateTimeOffset.UtcNow) { <StatusPill Tone="StatusTone.Warning">Expired</StatusPill> }
+                                    else { <StatusPill Tone="StatusTone.Success">Active</StatusPill> }
                                 </td>
                                 <td class="text-end">
                                     @if (key.RevokedAt is null)
@@ -437,6 +441,7 @@ else
         new("Developer API", "bi-braces-asterisk", "Keys, scopes, and docs")
     ];
     private string ActiveTab { get; set; } = "General";
+    private SettingsTab CurrentTab => Tabs.First(tab => tab.Key == ActiveTab);
 
     private bool _loaded;
     private bool IsBusy { get; set; }
