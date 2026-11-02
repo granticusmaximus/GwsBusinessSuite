@@ -68,6 +68,10 @@ public sealed record KanbanBoard(Guid DatabaseId, string Title, string? Icon, Ka
     KanbanSettings? Settings = null, IReadOnlyList<KanbanOption>? SprintOptions = null, int ArchivedCount = 0,
     IReadOnlyList<KanbanFaceField>? FaceFields = null, IReadOnlyList<KanbanOption>? EpicOptions = null);
 
+// K9g: what a signed-in user may do on a board. Edit access is required for rename, column and card changes,
+// while View lets someone inspect a board they were shared with.
+public sealed record KanbanBoardAccess(bool CanView, bool CanEdit, bool IsAdmin);
+
 // K9e: an epic and how it's going. Cards counts its archived ones too; Forecast is for the open ones.
 public sealed record KanbanEpicView(string OptionId, string Name, string Color, int Cards, int Done, KanbanForecast? Forecast)
 {
@@ -332,6 +336,11 @@ public interface IKanbanBoardService
     // Sentinel databases that work as boards: those with a Status property, or a Select property
     // that a Board view groups by.
     Task<IReadOnlyList<KanbanBoardSummary>> ListBoardsAsync(CancellationToken cancellationToken = default);
+    // Board list filtered to what this signed-in person can actually see.
+    Task<IReadOnlyList<KanbanBoardSummary>> ListBoardsForAsync(string username, CancellationToken cancellationToken = default);
+
+    // What this signed-in person can do on a board.
+    Task<KanbanBoardAccess> GetAccessAsync(Guid databaseId, string username, CancellationToken cancellationToken = default);
 
     // A new Sentinel database laid out for the template; returns its id.
     Task<Guid> CreateBoardAsync(string title, string templateKey, string performedBy, CancellationToken cancellationToken = default);
