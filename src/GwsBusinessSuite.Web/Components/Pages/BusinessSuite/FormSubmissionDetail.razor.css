@@ -1,0 +1,9 @@
+.gws-inline-form {
+    padding: var(--gws-step-4);
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-md);
+    background: var(--gws-panel-bg-2);
+}
+
+.gws-inline-form h3 { margin: 0; font-size: .95rem; font-weight: 700; }
+.gws-inline-form > p { margin: .2rem 0 var(--gws-step-3); color: var(--gws-text-soft); font-size: .8rem; }

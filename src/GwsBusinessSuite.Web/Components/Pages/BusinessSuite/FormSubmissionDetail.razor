@@ -44,8 +44,16 @@ else if (Submission is null)
 }
 else
 {
-    <div class="card border-0 shadow-sm">
-        <div class="card-body">
+    <RecordSection Title="Submission fields" Description="The values received from the published website form." Icon="bi-ui-checks">
+        <Actions>
+            @if (SourcePage is not null)
+            {
+                <a class="btn btn-sm btn-outline-secondary" href="/admin/pages/edit/@SourcePage.Id">
+                    <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>Open source page
+                </a>
+            }
+        </Actions>
+        <ChildContent>
             <dl class="row mb-0">
                 @foreach (var field in Fields)
                 {
@@ -68,17 +76,21 @@ else
                 }
                 else
                 {
-                    <div class="card border-0 bg-light mt-3">
-                        <div class="card-body">
+                    <div class="gws-inline-form mt-3" aria-label="Create CRM contact">
+                        <h3>Create CRM contact</h3>
+                        <p>Review the submitted identity information before creating and linking the contact.</p>
                             <div class="row g-2">
                                 <div class="col-md-4">
-                                    <input class="form-control form-control-sm" placeholder="Full name" @bind="_newContactName" />
+                                    <label class="form-label small" for="submission-contact-name">Full name</label>
+                                    <input id="submission-contact-name" class="form-control form-control-sm" @bind="_newContactName" />
                                 </div>
                                 <div class="col-md-4">
-                                    <input class="form-control form-control-sm" placeholder="Email" @bind="_newContactEmail" @bind:event="oninput" />
+                                    <label class="form-label small" for="submission-contact-email">Email</label>
+                                    <input id="submission-contact-email" class="form-control form-control-sm" type="email" @bind="_newContactEmail" @bind:event="oninput" />
                                 </div>
                                 <div class="col-md-4">
-                                    <input class="form-control form-control-sm" placeholder="Company (optional)" @bind="_newContactCompany" />
+                                    <label class="form-label small" for="submission-contact-company">Company <span class="text-secondary">(optional)</span></label>
+                                    <input id="submission-contact-company" class="form-control form-control-sm" @bind="_newContactCompany" />
                                 </div>
                             </div>
                             @if (!string.IsNullOrWhiteSpace(_createContactError))
@@ -91,24 +103,22 @@ else
                                 </button>
                                 <button class="btn btn-sm btn-outline-secondary" @onclick="() => _showCreateContact = false" disabled="@_busy">Cancel</button>
                             </div>
-                        </div>
                     </div>
                 }
             }
-        </div>
-        <div class="card-footer bg-white border-top d-flex gap-2">
-            <button class="btn btn-sm btn-outline-danger" @onclick="DeleteAsync">
-                <i class="bi bi-trash me-1"></i>Delete
-            </button>
-            @if (SourcePage is not null)
-            {
-                <a class="btn btn-sm btn-outline-secondary" href="/admin/pages/edit/@SourcePage.Id">
-                    <i class="bi bi-arrow-left me-1"></i>Back to page
-                </a>
-            }
-        </div>
-    </div>
+
+            <FormActionBar Hint="Deleting a submission permanently removes this captured form data.">
+                <button class="btn btn-outline-danger" @onclick="() => _confirmDelete = true">
+                    <i class="bi bi-trash3 me-1" aria-hidden="true"></i>Delete submission
+                </button>
+            </FormActionBar>
+        </ChildContent>
+    </RecordSection>
 }
+
+<ConfirmModal Show="_confirmDelete" Title="Delete form submission"
+              Message="Delete this submission permanently? This cannot be undone. Any linked CRM contact remains unchanged."
+              ConfirmText="Delete" Busy="_busy" OnConfirm="DeleteAsync" OnCancel="() => _confirmDelete = false" />
 
 @code {
     [Parameter] public Guid SubmissionId { get; set; }
@@ -125,6 +135,7 @@ else
     // Admin check rather than a page-wide policy change.
     private bool _isAdmin;
     private bool _showCreateContact;
+    private bool _confirmDelete;
     private bool _busy;
     private string _newContactName = string.Empty;
     private string _newContactEmail = string.Empty;
@@ -173,6 +184,8 @@ else
 
     private async Task DeleteAsync()
     {
+        _confirmDelete = false;
+        _busy = true;
         ErrorMessage = string.Empty;
         try
         {
@@ -182,6 +195,7 @@ else
         {
             Logger.LogError(ex, "Deleting form submission {SubmissionId} failed.", SubmissionId);
             ErrorMessage = $"Unable to delete this submission. {ex.Message}";
+            _busy = false;
             return;
         }
 

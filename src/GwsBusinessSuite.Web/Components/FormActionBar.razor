@@ -1,0 +1,14 @@
+@* Persistent end-of-form actions. The neutral explanation stays left; buttons stay grouped right. *@
+<div class="gws-form-actions @CssClass">
+    @if (!string.IsNullOrWhiteSpace(Hint))
+    {
+        <span class="gws-form-actions-hint">@Hint</span>
+    }
+    <div class="gws-form-actions-buttons">@ChildContent</div>
+</div>
+
+@code {
+    [Parameter] public string? Hint { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+}

@@ -1,0 +1,36 @@
+@* Shared record-page section anatomy: one title/description/action header and one content surface.
+   Keep workflow-specific markup in the caller; this component only standardizes the chrome. *@
+<section class="card border-0 shadow-sm gws-record-section @CssClass" aria-labelledby="@_titleId">
+    <header class="gws-record-section-head">
+        <div class="gws-record-section-heading">
+            @if (!string.IsNullOrWhiteSpace(Icon))
+            {
+                <i class="bi @Icon" aria-hidden="true"></i>
+            }
+            <div>
+                <h2 id="@_titleId">@Title</h2>
+                @if (!string.IsNullOrWhiteSpace(Description))
+                {
+                    <p>@Description</p>
+                }
+            </div>
+        </div>
+        @if (Actions is not null)
+        {
+            <div class="gws-record-section-actions">@Actions</div>
+        }
+    </header>
+    <div class="gws-record-section-body @(Flush ? "is-flush" : string.Empty)">@ChildContent</div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string? Description { get; set; }
+    [Parameter] public string? Icon { get; set; }
+    [Parameter] public RenderFragment? Actions { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public bool Flush { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+
+    private readonly string _titleId = $"record-section-{Guid.NewGuid():N}";
+}

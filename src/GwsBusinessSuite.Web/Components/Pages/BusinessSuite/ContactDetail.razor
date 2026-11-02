@@ -24,7 +24,24 @@
 
 <PageTitle>@(Contact?.FullName ?? "Contact") · CRM</PageTitle>
 
-<PageHeader Record="true" Title="@(Contact?.FullName ?? "Contact")" Icon="bi-person-vcard" ParentLabel="CRM" ParentHref="/admin/crm" />
+<PageHeader Record="true" Title="@(Contact?.FullName ?? "Contact")" Icon="bi-person-vcard" ParentLabel="CRM" ParentHref="/admin/crm">
+    <Meta>
+        @if (Contact is not null)
+        {
+            <div class="d-flex align-items-center gap-2 mt-1 flex-wrap">
+                <StatusPill Tone="StatusTones.ForContact(Contact.Status)">@Contact.Status</StatusPill>
+                @if (!string.IsNullOrWhiteSpace(Contact.Company))
+                {
+                    <span class="small text-secondary"><i class="bi bi-building me-1" aria-hidden="true"></i>@Contact.Company</span>
+                }
+                @if (!string.IsNullOrWhiteSpace(Contact.Email))
+                {
+                    <a class="small" href="mailto:@Contact.Email"><i class="bi bi-envelope me-1" aria-hidden="true"></i>@Contact.Email</a>
+                }
+            </div>
+        }
+    </Meta>
+</PageHeader>
 
 @if (!string.IsNullOrWhiteSpace(ErrorMessage))
 {
@@ -53,15 +70,13 @@ else
 {
     <div class="row g-4">
         <div class="col-lg-6">
-            <div class="card border-0 shadow-sm mb-4">
-                <div class="card-header bg-white border-bottom py-3"><span class="fw-semibold">Details</span></div>
-                <div class="card-body">
+            <RecordSection Title="Contact details" Description="Identity, ownership, and follow-up information." Icon="bi-person-lines-fill">
                     <EditForm Model="Editor" OnValidSubmit="SaveAsync">
                         <DataAnnotationsValidator />
                         <ValidationSummary />
                         <div class="row g-3">
                             <div class="col-md-6">
-                                <label class="form-label fw-semibold small">Full Name</label>
+                                <label class="form-label fw-semibold small">Full name</label>
                                 <InputText class="form-control" @bind-Value="Editor.FullName" />
                             </div>
                             <div class="col-md-6">
@@ -82,25 +97,22 @@ else
                                 <InputText class="form-control" @bind-Value="Editor.Company" />
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label fw-semibold small">Follow-up Date <span class="text-muted">(optional)</span></label>
+                                <label class="form-label fw-semibold small">Follow-up date <span class="text-muted">(optional)</span></label>
                                 <InputDate class="form-control" @bind-Value="Editor.FollowUpDate" />
                             </div>
                         </div>
-                        <div class="mt-3 d-flex flex-wrap gap-2">
+                        <FormActionBar Hint="Save contact changes before leaving this record.">
+                            <button type="button" class="btn btn-outline-danger" @onclick="TrashAsync" disabled="@IsBusy">
+                                <i class="bi bi-trash3 me-1" aria-hidden="true"></i>Move to Trash
+                            </button>
                             <button type="submit" class="btn btn-primary" disabled="@IsBusy">
                                 <i class="bi bi-floppy-fill me-1"></i>Save
                             </button>
-                            <button type="button" class="btn btn-outline-danger" @onclick="TrashAsync" disabled="@IsBusy">
-                                Move to Trash
-                            </button>
-                        </div>
+                        </FormActionBar>
                     </EditForm>
-                </div>
-            </div>
+            </RecordSection>
 
-            <div class="card border-0 shadow-sm">
-                <div class="card-header bg-white border-bottom py-3"><span class="fw-semibold">Notes &amp; Activity</span></div>
-                <div class="card-body">
+            <RecordSection Title="Notes &amp; activity" Description="A lightweight internal log for this relationship." Icon="bi-journal-text">
                     <div class="d-flex gap-2 mb-3">
                         <input class="form-control" placeholder="Log a call, email, or note..."
                                value="@NewActivityNote" @oninput="e => NewActivityNote = e.Value?.ToString() ?? string.Empty"
@@ -111,7 +123,7 @@ else
                     </div>
                     @if (Activities.Count == 0)
                     {
-                        <p class="text-secondary mb-0">No activity logged yet.</p>
+                        <EmptyState Icon="bi-journal-plus" Title="No activity yet" Message="Log a call, email, or note to start the record history." CssClass="py-3" />
                     }
                     else
                     {
@@ -125,16 +137,13 @@ else
                             }
                         </ul>
                     }
-                </div>
-            </div>
+            </RecordSection>
         </div>
 
         <div class="col-lg-6">
-            <div class="card border-0 shadow-sm mb-4">
-                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
-                    <span class="fw-semibold">Deals</span>
-                    <a class="small" href="/admin/crm">Manage in Pipeline</a>
-                </div>
+            <RecordSection Title="Deals" Description="Pipeline opportunities linked to this contact." Icon="bi-kanban" Flush="true">
+                <Actions><a class="btn btn-sm btn-outline-secondary" href="/admin/crm">Open pipeline</a></Actions>
+                <ChildContent>
                 <div class="list-group list-group-flush">
                     @if (Deals.Count == 0)
                     {
@@ -154,13 +163,12 @@ else
                         }
                     }
                 </div>
-            </div>
+                </ChildContent>
+            </RecordSection>
 
-            <div class="card border-0 shadow-sm mb-4">
-                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
-                    <span class="fw-semibold">Support Tickets</span>
-                    <a class="small" href="/admin/support">Open Support</a>
-                </div>
+            <RecordSection Title="Support tickets" Description="Requests and issues raised by this contact." Icon="bi-life-preserver" Flush="true">
+                <Actions><a class="btn btn-sm btn-outline-secondary" href="/admin/support">Open support</a></Actions>
+                <ChildContent>
                 <div class="list-group list-group-flush">
                     @if (Tickets.Count == 0)
                     {
@@ -172,18 +180,17 @@ else
                         {
                             <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
                                 <div class="fw-semibold small">@ticket.Subject</div>
-                                <span class="badge text-bg-secondary">@ticket.Status</span>
+                                <StatusPill Tone="StatusTones.ForTicket(ticket.Status)">@ticket.Status</StatusPill>
                             </div>
                         }
                     }
                 </div>
-            </div>
+                </ChildContent>
+            </RecordSection>
 
-            <div class="card border-0 shadow-sm mb-4">
-                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
-                    <span class="fw-semibold">Invoices</span>
-                    <a class="small" href="/admin/billing">Open Billing</a>
-                </div>
+            <RecordSection Title="Invoices" Description="Billing documents associated with this account." Icon="bi-receipt" Flush="true">
+                <Actions><a class="btn btn-sm btn-outline-secondary" href="/admin/billing">Open billing</a></Actions>
+                <ChildContent>
                 <div class="list-group list-group-flush">
                     @if (Invoices.Count == 0)
                     {
@@ -195,18 +202,17 @@ else
                         {
                             <div class="list-group-item d-flex justify-content-between align-items-center gap-2">
                                 <div class="fw-semibold small">@invoice.Title</div>
-                                <span class="small">@invoice.TotalUsd.ToString("C0") &middot; @invoice.Status</span>
+                                <div class="d-flex align-items-center gap-2"><span class="small gws-num">@invoice.TotalUsd.ToString("C0")</span><StatusPill Tone="StatusTones.ForInvoice(invoice.Status)">@invoice.Status</StatusPill></div>
                             </div>
                         }
                     }
                 </div>
-            </div>
+                </ChildContent>
+            </RecordSection>
 
-            <div class="card border-0 shadow-sm mb-4">
-                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
-                    <span class="fw-semibold">Bookings</span>
-                    <a class="small" href="/admin/scheduling">Open Scheduling</a>
-                </div>
+            <RecordSection Title="Bookings" Description="Scheduled appointments and their current state." Icon="bi-calendar2-check" Flush="true">
+                <Actions><a class="btn btn-sm btn-outline-secondary" href="/admin/scheduling">Open scheduling</a></Actions>
+                <ChildContent>
                 <div class="list-group list-group-flush">
                     @if (Bookings.Count == 0)
                     {
@@ -223,13 +229,12 @@ else
                         }
                     }
                 </div>
-            </div>
+                </ChildContent>
+            </RecordSection>
 
-            <div class="card border-0 shadow-sm mb-4">
-                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
-                    <span class="fw-semibold">Email Campaigns</span>
-                    <a class="small" href="/admin/email-campaigns">Open Email Campaigns</a>
-                </div>
+            <RecordSection Title="Email campaigns" Description="Automated journeys and campaign enrollment progress." Icon="bi-envelope-paper" Flush="true">
+                <Actions><a class="btn btn-sm btn-outline-secondary" href="/admin/email-campaigns">Open campaigns</a></Actions>
+                <ChildContent>
                 <div class="list-group list-group-flush">
                     @if (Enrollments.Count == 0)
                     {
@@ -257,19 +262,17 @@ else
                                         }
                                     </div>
                                 </div>
-                                <span class="badge text-bg-secondary">@enrollment.Status</span>
+                                <StatusPill Tone="StatusTones.ForEnrollment(enrollment.Status)">@enrollment.Status</StatusPill>
                             </div>
                         }
                     }
                 </div>
-            </div>
+                </ChildContent>
+            </RecordSection>
 
-            <div class="card border-0 shadow-sm mb-4">
-                <div class="card-header bg-white border-bottom py-3 d-flex justify-content-between align-items-center">
-                    <span class="fw-semibold">Time</span>
-                    <a class="small" href="/admin/time?contact=@ContactId">Track time</a>
-                </div>
-                <div class="card-body">
+            <RecordSection Title="Time" Description="Tracked effort and billable value for this contact." Icon="bi-stopwatch">
+                <Actions><a class="btn btn-sm btn-outline-secondary" href="/admin/time?contact=@ContactId">Track time</a></Actions>
+                <ChildContent>
                     @{ var unbilled = TimeEntries.Where(t => t.Billable && t.InvoiceId is null && !t.IsRunning).ToList(); }
                     <div class="small mb-2">
                         @TimeEntries.Sum(t => t.Minutes / 60m).ToString("0.##") h tracked in total ·
@@ -278,11 +281,10 @@ else
                     <button type="button" class="btn btn-sm btn-outline-primary" @onclick="BillTimeAsync" disabled="@(IsBusy || unbilled.Count == 0)">
                         <i class="bi bi-receipt me-1"></i>Create draft invoice from unbilled time
                     </button>
-                </div>
-            </div>
+                </ChildContent>
+            </RecordSection>
 
-            <div class="card border-0 shadow-sm">
-                <div class="card-header bg-white border-bottom py-3"><span class="fw-semibold">Form Submissions</span></div>
+            <RecordSection Title="Form submissions" Description="Website forms connected to this contact." Icon="bi-clipboard-data" Flush="true">
                 <div class="list-group list-group-flush">
                     @if (FormSubmissions.Count == 0)
                     {
@@ -298,13 +300,12 @@ else
                         }
                     }
                 </div>
-            </div>
+            </RecordSection>
         </div>
     </div>
 
-    <div class="card border-0 shadow-sm mt-4">
-        <div class="card-header bg-white border-bottom py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <span class="fw-semibold">History <span class="text-secondary small fw-normal">everything with this contact, newest first</span></span>
+    <RecordSection Title="History" Description="Everything associated with this contact, newest first." Icon="bi-clock-history" Flush="true" CssClass="mt-4">
+        <Actions>
             <div class="d-flex flex-wrap gap-1" role="group" aria-label="Filter history">
                 <button type="button" class="btn btn-sm @(HistoryFilter is null ? "btn-primary" : "btn-outline-secondary")" @onclick="() => SetHistoryFilter(null)">All @History.Count</button>
                 @foreach (var kind in ContactTimelineKinds.All.Where(k => History.Any(e => e.Kind == k)))
@@ -313,7 +314,8 @@ else
                             @onclick="() => SetHistoryFilter(kind)">@ContactTimelineKinds.Label(kind) @History.Count(e => e.Kind == kind)</button>
                 }
             </div>
-        </div>
+        </Actions>
+        <ChildContent>
         <ul class="list-group list-group-flush">
             @if (FilteredHistory.Count == 0)
             {
@@ -340,7 +342,8 @@ else
                 </li>
             }
         </ul>
-    </div>
+        </ChildContent>
+    </RecordSection>
 }
 
 

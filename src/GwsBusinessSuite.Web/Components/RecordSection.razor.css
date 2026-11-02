@@ -1,0 +1,23 @@
+.gws-record-section { margin-bottom: var(--gws-step-6); overflow: hidden; }
+.gws-record-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--gws-step-4);
+    min-height: 3.25rem;
+    padding: var(--gws-step-3) var(--gws-card-pad);
+    border-bottom: 1px solid var(--gws-panel-border);
+    background: var(--gws-panel-bg);
+}
+.gws-record-section-heading { display: flex; align-items: flex-start; gap: .65rem; min-width: 0; }
+.gws-record-section-heading > i { margin-top: .1rem; color: var(--gws-text-soft); font-size: 1rem; }
+.gws-record-section-heading h2 { margin: 0; color: var(--gws-text-strong); font-size: .95rem; font-weight: 700; }
+.gws-record-section-heading p { margin: .15rem 0 0; color: var(--gws-text-soft); font-size: .78rem; }
+.gws-record-section-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.gws-record-section-body { padding: var(--gws-card-pad); }
+.gws-record-section-body.is-flush { padding: 0; }
+
+@container gws-main (max-width: 575.98px) {
+    .gws-record-section-head { align-items: flex-start; flex-direction: column; }
+    .gws-record-section-actions { width: 100%; }
+}

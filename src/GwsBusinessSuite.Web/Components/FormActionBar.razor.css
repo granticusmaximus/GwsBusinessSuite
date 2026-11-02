@@ -1,0 +1,22 @@
+.gws-form-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--gws-step-4);
+    margin: var(--gws-step-5) calc(-1 * var(--gws-card-pad)) calc(-1 * var(--gws-card-pad));
+    padding: var(--gws-step-3) var(--gws-card-pad);
+    border-top: 1px solid var(--gws-panel-border);
+    background: color-mix(in srgb, var(--gws-panel-bg) 94%, transparent);
+    backdrop-filter: blur(12px);
+}
+.gws-form-actions-hint { color: var(--gws-text-soft); font-size: .78rem; }
+.gws-form-actions-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; }
+
+@container gws-main (max-width: 575.98px) {
+    .gws-form-actions { align-items: stretch; flex-direction: column; }
+    .gws-form-actions-buttons { display: grid; grid-template-columns: 1fr; }
+    .gws-form-actions-buttons ::deep .btn { width: 100%; min-height: 44px; }
+}
