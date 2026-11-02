@@ -272,6 +272,23 @@
 /* T4b: a notifier updated this visible record. The tint fades without moving the row, and the
    same rule works after responsive tables turn rows into cards. */
 .gws-live-updated > * { animation: gws-live-row 1.5s ease-out; }
+.gws-record-presence { display: inline-flex; align-items: center; padding-inline-start: .25rem; }
+.gws-record-presence-avatar,
+.gws-record-presence-more {
+    display: inline-grid;
+    place-items: center;
+    width: 1.75rem;
+    height: 1.75rem;
+    margin-inline-start: -.25rem;
+    border: 2px solid var(--gws-panel-bg);
+    border-radius: 50%;
+    background: var(--gws-status-info-fill);
+    color: var(--gws-status-info-on);
+    font-size: .625rem;
+    font-weight: 700;
+    letter-spacing: .02em;
+}
+.gws-record-presence-more { background: var(--gws-status-neutral-fill); color: var(--gws-status-neutral-on); }
 @keyframes gws-live-row {
     0%, 22% { background-color: color-mix(in srgb, var(--gws-status-info-fill) 24%, var(--gws-panel-bg)); }
     100% { background-color: transparent; }

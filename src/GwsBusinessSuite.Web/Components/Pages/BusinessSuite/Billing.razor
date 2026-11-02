@@ -27,7 +27,7 @@
 </PageHeader>
 
 <RecordInspector Open="InspectedInvoice is not null" Title="@(InspectedInvoice?.Title ?? "Invoice")" Subtitle="@InspectedInvoice?.ContactName"
-                 Icon="bi-receipt" OnClose="() => _inspectedInvoiceId = null">
+                 Icon="bi-receipt" PresenceKind="invoice" PresenceId="_inspectedInvoiceId" OnClose="() => _inspectedInvoiceId = null">
     <Actions>
         @if (InspectedInvoice is { } actionInvoice)
         {

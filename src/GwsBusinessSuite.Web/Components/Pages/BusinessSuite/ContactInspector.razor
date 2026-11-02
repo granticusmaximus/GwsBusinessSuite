@@ -12,7 +12,8 @@
 @* A contact opened from the CRM list (shell redesign R3): the essentials, what's open with them
    (deals, tickets, unpaid invoices) and their latest activity; the full page is a click away. *@
 <RecordInspector Open="ContactId is not null" Title="@(_contact?.FullName ?? "Contact")" Subtitle="@_contact?.Company" Icon="bi-person-vcard"
-                 FullPageHref="@(ContactId is { } id ? $"/admin/crm/contacts/{id}" : null)" AssistantPage="_assistantPage" OnClose="OnClose">
+                 FullPageHref="@(ContactId is { } id ? $"/admin/crm/contacts/{id}" : null)" PresenceKind="contact" PresenceId="ContactId"
+                 AssistantPage="_assistantPage" OnClose="OnClose">
     @if (_loading)
     {
         <LoadingIndicator Message="Loading contact…" />

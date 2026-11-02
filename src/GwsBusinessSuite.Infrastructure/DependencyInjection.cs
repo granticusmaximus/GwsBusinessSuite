@@ -124,6 +124,7 @@ public static class DependencyInjection
         services.AddSingleton<WikiDatabaseChangeNotifier>();
         services.AddSingleton<SupportTicketNotifier>();
         services.AddSingleton<BillingNotifier>();
+        services.AddSingleton<RecordPresenceTracker>();
         services.AddSingleton<GwsBusinessSuite.Application.Boards.KanbanPresence>();
         services.AddSingleton<WikiDatabaseChangeInterceptor>();
         services.AddDbContextFactory<ApplicationDbContext>((serviceProvider, options) => options

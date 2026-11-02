@@ -28,6 +28,10 @@
                 </div>
             </div>
             <div class="gws-record-inspector-tools">
+                @if (PresenceId is { } presenceId && !string.IsNullOrWhiteSpace(PresenceKind))
+                {
+                    <RecordPresenceAvatars Kind="@PresenceKind" RecordId="presenceId" />
+                }
                 @if (!string.IsNullOrEmpty(FullPageHref))
                 {
                     <a class="btn btn-sm btn-outline-secondary" href="@FullPageHref" title="Open full page" aria-label="@($"Open {Title} as a full page")">
@@ -54,6 +58,8 @@
     // A Bootstrap Icons class, e.g. "bi-receipt".
     [Parameter] public string? Icon { get; set; }
     [Parameter] public string? FullPageHref { get; set; }
+    [Parameter] public string? PresenceKind { get; set; }
+    [Parameter] public Guid? PresenceId { get; set; }
     // What SentinelGPT is told while the inspector is open (cleared when it closes).
     [Parameter] public AssistantPageContext? AssistantPage { get; set; }
     // Buttons for the record, under its title.

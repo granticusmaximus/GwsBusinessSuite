@@ -1,0 +1,95 @@
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Application.AdminPortal
+@implements IDisposable
+@inject RecordPresenceTracker Presence
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@if (Viewers.Count > 0)
+{
+    <span class="gws-record-presence" role="group" aria-label="@PresenceLabel">
+        @foreach (var viewer in Viewers.Take(4))
+        {
+            <span class="gws-record-presence-avatar" title="@ViewerTitle(viewer.Username)">@Initials(viewer.Username)</span>
+        }
+        @if (Viewers.Count > 4)
+        {
+            <span class="gws-record-presence-more">+@(Viewers.Count - 4)</span>
+        }
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Kind { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public Guid RecordId { get; set; }
+
+    private readonly Guid _sessionId = Guid.NewGuid();
+    private readonly CancellationTokenSource _lifetime = new();
+    private RecordPresenceKey _record;
+    private string _username = "unknown";
+    private Task? _heartbeat;
+
+    private IReadOnlyList<RecordViewer> Viewers => _record.Id == Guid.Empty
+        ? []
+        : Presence.Others(_record, _sessionId)
+            .GroupBy(viewer => viewer.Username, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    private string PresenceLabel => $"Also viewing this record: {string.Join(", ", Viewers.Select(viewer => viewer.Username))}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+        Presence.Changed += OnPresenceChanged;
+        _heartbeat = RunHeartbeatAsync(_lifetime.Token);
+    }
+
+    protected override void OnParametersSet()
+    {
+        var next = RecordPresenceKey.Create(Kind, RecordId);
+        if (next == _record) return;
+        _record = next;
+        Presence.Enter(_sessionId, _record, _username);
+    }
+
+    private async Task RunHeartbeatAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                Presence.Touch(_sessionId);
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+    }
+
+    private void OnPresenceChanged(RecordPresenceKey record)
+    {
+        if (record == _record) _ = InvokeAsync(StateHasChanged);
+    }
+
+    private string ViewerTitle(string username) => string.Equals(username, _username, StringComparison.OrdinalIgnoreCase)
+        ? "You, in another window"
+        : $"{username} is viewing this record";
+
+    private static string Initials(string username)
+    {
+        var parts = username.Split([' ', '.', '_', '-'], StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length switch
+        {
+            0 => "?",
+            1 => parts[0][..Math.Min(2, parts[0].Length)].ToUpperInvariant(),
+            _ => string.Concat(parts.Take(2).Select(part => char.ToUpperInvariant(part[0])))
+        };
+    }
+
+    public void Dispose()
+    {
+        Presence.Changed -= OnPresenceChanged;
+        Presence.Leave(_sessionId);
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}
