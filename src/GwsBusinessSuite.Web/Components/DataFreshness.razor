@@ -1,0 +1,10 @@
+<span class="gws-data-freshness" title="@At.ToLocalTime().ToString("F")">
+    <i class="bi bi-clock-history" aria-hidden="true"></i>
+    @Label @At.ToLocalTime().ToString(Format)
+</span>
+
+@code {
+    [Parameter, EditorRequired] public DateTimeOffset At { get; set; }
+    [Parameter] public string Label { get; set; } = "Updated";
+    [Parameter] public string Format { get; set; } = "HH:mm";
+}

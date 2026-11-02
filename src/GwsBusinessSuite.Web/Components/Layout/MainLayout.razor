@@ -13,6 +13,7 @@
 }
 <AuthorizeView>
     <Authorized Context="authState">
+        <a class="gws-skip-link" href="#gws-main-content">Skip to main content</a>
         <div class="gws-layout @(IsChromelessRoute ? "gws-builder-mode" : "") @(_compact ? "gws-density-compact" : "")">
             @if (!IsChromelessRoute)
             {
@@ -77,7 +78,7 @@
                 }
 
                 <div class="gws-body">
-                    <main class="gws-content @(IsChromelessRoute ? "gws-content-builder" : "")">
+                    <main id="gws-main-content" tabindex="-1" class="gws-content @(IsChromelessRoute ? "gws-content-builder" : "")">
                         @Body
                     </main>
                     @if (!IsChromelessRoute)

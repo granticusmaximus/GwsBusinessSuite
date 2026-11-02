@@ -384,9 +384,42 @@ body {
 
 h1:focus { outline: none; }
 
+.gws-skip-link {
+    position: fixed;
+    top: .5rem;
+    left: .5rem;
+    z-index: 1200;
+    padding: .65rem .9rem;
+    border: 2px solid var(--gws-sidebar-accent);
+    border-radius: var(--gws-radius-sm);
+    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+    box-shadow: var(--gws-shadow-md);
+    font-weight: 700;
+    text-decoration: none;
+    transform: translateY(calc(-100% - 1rem));
+}
+.gws-skip-link:focus { color: var(--gws-text-strong); transform: translateY(0); }
+
 :where(a, button, input, select, textarea, summary):focus-visible {
     outline: 3px solid rgba(var(--bs-primary-rgb), 0.55);
     outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    html:focus-within { scroll-behavior: auto; }
+    .gws-layout *, .gws-layout *::before, .gws-layout *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+    }
+}
+
+@media (forced-colors: active) {
+    :where(a, button, input, select, textarea, summary):focus-visible { outline-color: Highlight; }
+    .gws-pill, .gws-kpi-tile, .card { border: 1px solid CanvasText; }
+    .gws-pill::before { forced-color-adjust: none; }
 }
 
 .gws-no-scroll { overflow: hidden; }

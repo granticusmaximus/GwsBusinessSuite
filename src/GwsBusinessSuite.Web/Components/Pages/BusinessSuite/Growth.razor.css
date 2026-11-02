@@ -102,6 +102,10 @@
 .annotation-marker { position: absolute; z-index: 2; left: 50%; bottom: .25rem; display: grid; place-items: center; width: .9rem; height: .9rem; transform: translateX(-50%); border-radius: 50%; background: #f7f3ed; color: #8b5a08; box-shadow: 0 0 0 2px rgba(16,15,13,.85); font-size: .75rem; }
 .annotation-marker b { position: absolute; top: -.45rem; right: -.45rem; display: grid; place-items: center; min-width: .7rem; height: .7rem; border-radius: 999px; background: var(--growth-accent); color: #17130c; font-size: .75rem; }
 .trend-day small { color: var(--growth-muted); font-size: .75rem; margin-top: .4rem; white-space: nowrap; overflow: hidden; }
+.growth-chart-data { margin-top: .75rem; border-top: 1px solid var(--growth-line); padding-top: .7rem; }
+.growth-chart-data summary { width: fit-content; color: var(--growth-muted); font-size: .78rem; cursor: pointer; }
+.growth-chart-data[open] summary { margin-bottom: .65rem; color: var(--growth-ink); }
+.growth-chart-data .table { --bs-table-bg: transparent; --bs-table-color: var(--growth-ink); --bs-table-border-color: var(--growth-line); }
 .insight-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .9rem; margin-bottom: .9rem; }
 ::deep .breakdown-panel .panel-heading { padding: .9rem 1rem; border-bottom: 1px solid var(--growth-line); display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
 .breakdown-export, ::deep .breakdown-export { display: inline-flex; align-items: center; justify-content: center; width: 1.9rem; height: 1.9rem; padding: 0; flex: none; border-radius: .55rem; border: 1px solid var(--growth-line); background: var(--growth-panel); color: var(--growth-muted); text-decoration: none; }

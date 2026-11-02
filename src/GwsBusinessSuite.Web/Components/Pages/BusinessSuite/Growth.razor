@@ -56,6 +56,10 @@
                     <p>Cookieless, first-party measurement. No raw IPs or full user agents retained.</p>
                 </div>
                 <div class="analytics-actions">
+                    @if (_analyticsLoadedAt is { } loadedAt)
+                    {
+                        <DataFreshness At="loadedAt" />
+                    }
                     <GrowthReportScheduleManager />
                     <button type="button" class="btn btn-outline-secondary" @onclick="ToggleGoalSetup">
                         <i class="bi bi-bullseye"></i> Manage goals
@@ -164,7 +168,7 @@
                             </a>
                         </div>
                     </div>
-                    <div class="trend-chart" role="img" aria-label="Daily visitors and page views">
+                    <div class="trend-chart" role="img" aria-label="Daily visitors and page views" aria-describedby="growth-trend-data">
                         @foreach (var point in Dashboard.Trend)
                         {
                             <div class="trend-day" title="@($"{point.Date:dd-MM-yy}: {point.Visitors} visitors, {point.PageViews} views")">
@@ -189,6 +193,21 @@
                             </div>
                         }
                     </div>
+                    <details id="growth-trend-data" class="growth-chart-data">
+                        <summary>View exact chart values</summary>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <caption class="visually-hidden">Daily visitors and page views for the selected period</caption>
+                                <thead><tr><th scope="col">Date</th><th scope="col" class="text-end">Visitors</th><th scope="col" class="text-end">Page views</th></tr></thead>
+                                <tbody>
+                                    @foreach (var point in Dashboard.Trend)
+                                    {
+                                        <tr><td>@point.Date.ToString("dd-MM-yy")</td><td class="text-end gws-num">@point.Visitors.ToString("N0")</td><td class="text-end gws-num">@point.PageViews.ToString("N0")</td></tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
                 </div>
 
                 <div class="insight-grid">
@@ -412,6 +431,7 @@
     private IReadOnlyList<AnalyticsSegmentView> Segments = [];
     private Guid? SelectedSegmentId;
     private bool _analyticsLoaded;
+    private DateTimeOffset? _analyticsLoadedAt;
     private bool _showGoalSetup;
     private bool IsBusy;
     private string ErrorMessage = string.Empty;
@@ -454,6 +474,7 @@
             DateTimeOffset.UtcNow.AddDays(-RangeDays),
             DateTimeOffset.UtcNow.AddMinutes(1),
             SelectedSegmentId);
+        _analyticsLoadedAt = DateTimeOffset.Now;
         _analyticsLoaded = true;
     }
 

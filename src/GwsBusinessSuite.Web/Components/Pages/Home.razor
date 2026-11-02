@@ -77,42 +77,28 @@
     <section aria-labelledby="kpi-heading" class="mb-5">
         <div class="gws-section-heading">
             <div><span class="gws-eyebrow">Business</span><h2 id="kpi-heading">At a glance</h2></div>
-            <span class="text-secondary small">Generated @mc.GeneratedAt.ToLocalTime().ToString("HH:mm")</span>
+            <DataFreshness At="mc.GeneratedAt" Label="Generated" />
         </div>
         <div class="row g-3">
             <div class="col-md-3 col-6">
-                <a class="card gws-kpi-card h-100 text-decoration-none @(mc.AutomationRecentFailureCount > 0 ? "gws-kpi-card-danger" : "")" href="/admin/automation">
-                    <div class="card-body">
-                        <div class="small text-secondary">Automation failures</div>
-                        <div class="gws-kpi-value">@mc.AutomationRecentFailureCount</div>
-                    </div>
-                </a>
+                <KpiCard Label="Automation failures" Value="@mc.AutomationRecentFailureCount.ToString("N0")"
+                         Detail="Recent workflow runs" Icon="bi-exclamation-triangle"
+                         Tone="@(mc.AutomationRecentFailureCount > 0 ? "danger" : "neutral")" Href="/admin/automation" />
             </div>
             <div class="col-md-3 col-6">
-                <a class="card gws-kpi-card h-100 text-decoration-none" href="/admin/crm">
-                    <div class="card-body">
-                        <div class="small text-secondary">Open CRM deals</div>
-                        <div class="gws-kpi-value">@mc.CrmOpenDealCount</div>
-                        <div class="small text-secondary">@mc.CrmOpenDealValueUsd.ToString("C0") pipeline &middot; @mc.CrmDueFollowUpCount due</div>
-                    </div>
-                </a>
+                <KpiCard Label="Open CRM deals" Value="@mc.CrmOpenDealCount.ToString("N0")"
+                         Detail="@($"{mc.CrmOpenDealValueUsd:C0} pipeline · {mc.CrmDueFollowUpCount} due")"
+                         Icon="bi-people" Href="/admin/crm" />
             </div>
             <div class="col-md-3 col-6">
-                <a class="card gws-kpi-card h-100 text-decoration-none" href="/admin/affiliate-analytics">
-                    <div class="card-body">
-                        <div class="small text-secondary">Affiliate clicks</div>
-                        <div class="gws-kpi-value">@mc.AffiliateTotalClicks</div>
-                        <div class="small text-secondary">@mc.AffiliateTotalCommissionAmount.ToString("C2") commission</div>
-                    </div>
-                </a>
+                <KpiCard Label="Affiliate clicks" Value="@mc.AffiliateTotalClicks.ToString("N0")"
+                         Detail="@($"{mc.AffiliateTotalCommissionAmount:C2} commission")"
+                         Icon="bi-graph-up-arrow" Href="/admin/affiliate-analytics" />
             </div>
             <div class="col-md-3 col-6">
-                <a class="card gws-kpi-card h-100 text-decoration-none @(mc.DockerUnreadAlertCount > 0 ? "gws-kpi-card-warning" : "")" href="/admin/docker-health">
-                    <div class="card-body">
-                        <div class="small text-secondary">Container alerts</div>
-                        <div class="gws-kpi-value">@mc.DockerUnreadAlertCount</div>
-                    </div>
-                </a>
+                <KpiCard Label="Container alerts" Value="@mc.DockerUnreadAlertCount.ToString("N0")"
+                         Detail="Unread operational alerts" Icon="bi-heart-pulse"
+                         Tone="@(mc.DockerUnreadAlertCount > 0 ? "warning" : "neutral")" Href="/admin/docker-health" />
             </div>
         </div>
 

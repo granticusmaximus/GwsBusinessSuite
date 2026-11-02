@@ -1,0 +1,46 @@
+@* Shared dashboard metric: consistent hierarchy, semantic tone, optional destination and detail. *@
+@if (!string.IsNullOrWhiteSpace(Href))
+{
+    <a class="gws-kpi-tile gws-kpi-tile-@Tone @CssClass" href="@Href" aria-label="@AccessibleLabel">
+        @Body
+    </a>
+}
+else
+{
+    <article class="gws-kpi-tile gws-kpi-tile-@Tone @CssClass" aria-label="@AccessibleLabel">
+        @Body
+    </article>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string Value { get; set; } = string.Empty;
+    [Parameter] public string? Detail { get; set; }
+    [Parameter] public string? Icon { get; set; }
+    [Parameter] public string? Href { get; set; }
+    [Parameter] public string Tone { get; set; } = "neutral";
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public RenderFragment? Footer { get; set; }
+
+    private string AccessibleLabel => string.Join(", ", new[] { Label, Value, Detail }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+    private RenderFragment Body => @<>
+        <div class="gws-kpi-tile-head">
+            <span class="gws-kpi-tile-label">@Label</span>
+            @if (!string.IsNullOrWhiteSpace(Icon))
+            {
+                <i class="bi @Icon" aria-hidden="true"></i>
+            }
+        </div>
+        <strong class="gws-kpi-tile-value">@Value</strong>
+        @if (!string.IsNullOrWhiteSpace(Detail))
+        {
+            <span class="gws-kpi-tile-detail">@Detail</span>
+        }
+        @Footer
+        @if (!string.IsNullOrWhiteSpace(Href))
+        {
+            <i class="bi bi-arrow-up-right gws-kpi-tile-arrow" aria-hidden="true"></i>
+        }
+    </>;
+}
