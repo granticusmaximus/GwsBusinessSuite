@@ -134,15 +134,19 @@ public sealed class BillingServiceTests
         var sent = await fixture.Service.SendInvoiceAsync(draft.Id);
         var stripeInvoiceId = fixture.Stripe.LastCreatedStripeInvoiceId!;
 
+        var updates = new List<InvoiceView>();
+        fixture.Notifier.Changed += updates.Add;
         await fixture.Service.MarkInvoicePaidByStripeIdAsync(stripeInvoiceId);
         var paidOnce = await fixture.Service.GetInvoiceAsync(sent.Id);
         paidOnce!.Status.Should().Be(InvoiceStatuses.Paid);
+        updates.Should().ContainSingle().Which.Status.Should().Be(InvoiceStatuses.Paid);
         var firstPaidAt = paidOnce.PaidAt;
 
         // A second webhook delivery for the same event must not throw or move PaidAt.
         await fixture.Service.MarkInvoicePaidByStripeIdAsync(stripeInvoiceId);
         var paidTwice = await fixture.Service.GetInvoiceAsync(sent.Id);
         paidTwice!.PaidAt.Should().Be(firstPaidAt);
+        updates.Should().ContainSingle("an idempotent webhook redelivery must not flash the row again");
     }
 
     [Fact]
@@ -277,11 +281,13 @@ public sealed class BillingServiceTests
             _connection = connection;
             Db = db;
             Stripe = stripe;
-            Service = new BillingService(db, stripe, new FixedTimeProvider(DateTimeOffset.UtcNow));
+            Notifier = new BillingNotifier();
+            Service = new BillingService(db, stripe, new FixedTimeProvider(DateTimeOffset.UtcNow), notifier: Notifier);
         }
 
         public ApplicationDbContext Db { get; }
         public FakeStripeInvoicingClient Stripe { get; }
+        public BillingNotifier Notifier { get; }
         public BillingService Service { get; }
 
         public static async Task<Fixture> CreateAsync()

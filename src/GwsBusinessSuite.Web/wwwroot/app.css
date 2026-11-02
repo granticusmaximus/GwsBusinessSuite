@@ -268,6 +268,17 @@
 .gws-stripe-info { --gws-stripe: var(--gws-status-info-fill); }
 .gws-stripe-neutral { --gws-stripe: var(--gws-status-neutral-fill); }
 .gws-stripe:not(tr) { box-shadow: inset 3px 0 0 var(--gws-stripe); }
+
+/* T4b: a notifier updated this visible record. The tint fades without moving the row, and the
+   same rule works after responsive tables turn rows into cards. */
+.gws-live-updated > * { animation: gws-live-row 1.5s ease-out; }
+@keyframes gws-live-row {
+    0%, 22% { background-color: color-mix(in srgb, var(--gws-status-info-fill) 24%, var(--gws-panel-bg)); }
+    100% { background-color: transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .gws-live-updated > * { animation: none; background-color: color-mix(in srgb, var(--gws-status-info-fill) 12%, var(--gws-panel-bg)); }
+}
 /* Cards are flat (box-shadow: none !important above), so a striped card needs the same weight. */
 .card.gws-stripe { box-shadow: inset 3px 0 0 var(--gws-stripe) !important; }
 /* Table cells paint over their row, so a row's stripe goes on its first cell, kept alongside

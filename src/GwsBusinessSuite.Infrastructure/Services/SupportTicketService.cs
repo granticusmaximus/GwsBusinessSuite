@@ -21,7 +21,8 @@ public sealed class SupportTicketService(
     // Optional, resolved by DI in production - see AutomationWorkflowService's own comment on
     // this same pattern for why it's nullable (existing tests new this class up directly).
     ISecurityAuditService? securityAudit = null,
-    IAutomationTriggerService? automationTriggerService = null) : ISupportTicketService
+    IAutomationTriggerService? automationTriggerService = null,
+    SupportTicketNotifier? notifier = null) : ISupportTicketService
 {
     // Same order of magnitude as MediaLibraryService's default image cap - a ticket attachment
     // is hand-uploaded (screenshot, log file, small document), not a bulk transfer, and this
@@ -178,7 +179,9 @@ public sealed class SupportTicketService(
             }
         }
 
-        return ToView(ticket, contactName);
+        var view = ToView(ticket, contactName);
+        notifier?.Publish(view);
+        return view;
     }
 
     public async Task<SupportTicketView> AddReplyAsync(
@@ -261,8 +264,10 @@ public sealed class SupportTicketService(
             }
         }
 
-        return await GetTicketAsync(ticketId, cancellationToken)
+        var view = await GetTicketAsync(ticketId, cancellationToken)
             ?? throw new InvalidOperationException($"Ticket {ticketId} was not found after saving.");
+        notifier?.Publish(view);
+        return view;
     }
 
     private async Task NotifyAdminOfNewTicketAsync(

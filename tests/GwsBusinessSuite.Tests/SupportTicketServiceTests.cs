@@ -21,6 +21,8 @@ public sealed class SupportTicketServiceTests
         await using var fixture = await Fixture.CreateAsync();
         var contact = await fixture.AddContactAsync("Jamie Rivera");
 
+        var updates = new List<SupportTicketView>();
+        fixture.Notifier.Changed += updates.Add;
         var ticket = await fixture.Service.CreateTicketAsync(
             contact.Id, "Can't log in", "I keep getting an error", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
 
@@ -28,6 +30,7 @@ public sealed class SupportTicketServiceTests
         ticket.Messages.Should().ContainSingle();
         ticket.Messages[0].Body.Should().Be("I keep getting an error");
         ticket.ContactName.Should().Be("Jamie Rivera");
+        updates.Should().ContainSingle().Which.Id.Should().Be(ticket.Id);
     }
 
     [Fact]
@@ -50,6 +53,8 @@ public sealed class SupportTicketServiceTests
             contact.Id, "Question", "Body", SupportTicketAuthorTypes.Contact, "Jamie Rivera");
         await fixture.Service.SetStatusAsync(ticket.Id, SupportTicketStatuses.Resolved, "staff");
 
+        var updates = new List<SupportTicketView>();
+        fixture.Notifier.Changed += updates.Add;
         var afterStaffReply = await fixture.Service.AddReplyAsync(
             ticket.Id, SupportTicketAuthorTypes.Staff, "staff", "Following up");
         afterStaffReply.Status.Should().Be(SupportTicketStatuses.Resolved, "a staff reply alone shouldn't reopen a resolved ticket");
@@ -59,6 +64,8 @@ public sealed class SupportTicketServiceTests
         afterContactReply.Status.Should().Be(SupportTicketStatuses.Open);
         afterContactReply.ResolvedAt.Should().BeNull();
         afterContactReply.Messages.Should().HaveCount(3);
+        updates.Should().HaveCount(2).And.OnlyContain(update => update.Id == ticket.Id);
+        updates[^1].Status.Should().Be(SupportTicketStatuses.Open);
     }
 
     [Fact]
@@ -505,6 +512,7 @@ public sealed class SupportTicketServiceTests
             AdminSender = new CapturingAdminSender();
             ContactSender = new CapturingContactSender();
             AutomationTriggers = new RecordingAutomationTriggerService();
+            Notifier = new SupportTicketNotifier();
             Clock = new FixedTimeProvider(now);
             Service = new SupportTicketService(
                 db,
@@ -513,7 +521,8 @@ public sealed class SupportTicketServiceTests
                 ContactSender,
                 Options.Create(new SupportNotificationOptions { NotifyEmail = "grant@gwsapp.net", AdminBaseUrl = "https://admin.example.test" }),
                 NullLogger<SupportTicketService>.Instance,
-                automationTriggerService: AutomationTriggers);
+                automationTriggerService: AutomationTriggers,
+                notifier: Notifier);
         }
 
         public ApplicationDbContext Db { get; }
@@ -521,6 +530,7 @@ public sealed class SupportTicketServiceTests
         public CapturingAdminSender AdminSender { get; }
         public CapturingContactSender ContactSender { get; }
         public RecordingAutomationTriggerService AutomationTriggers { get; }
+        public SupportTicketNotifier Notifier { get; }
         public FixedTimeProvider Clock { get; }
 
         public static async Task<Fixture> CreateAsync(DateTimeOffset? now = null)

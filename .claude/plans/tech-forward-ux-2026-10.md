@@ -268,6 +268,25 @@ Built in three units: T4a status strip, T4b live list rows, T4c presence.
   the palette's scroll lock. Checked live before and after each; `EnhancedNavigationGuardTests`
   fails a permanent element carrying `hidden` or the dead event name.
 
+**T4b done 02-11-26 (live list rows).**
+- `SupportTicketNotifier` and `BillingNotifier` are singleton in-memory publishers carrying the
+  complete updated row. Open Blazor circuits therefore update without polling and without making
+  a second read through their scoped DbContext. Support publishes newly created tickets and every
+  reply (including a contact reply reopening a terminal ticket); Billing publishes the Paid row
+  after a non-idempotent Stripe webhook transition. Webhook redelivery stays silent.
+- Support inserts or replaces the row in last-reply order, respects the active status filter, and
+  updates or closes the selected thread when the changed row enters or leaves that view. Billing
+  replaces the invoice in place, so its row and inspector see Paid together. Both retain valid
+  bulk selections and unsubscribe when their circuit component is disposed.
+- `.gws-live-updated` gives changed cells a 1.5 s info tint without moving the row; responsive
+  card rows use the same rule. Reduced-motion users get a steady, short-lived tint instead.
+- Tests: the existing Billing and Support service suites now assert create/reply publication,
+  the reopened-ticket model, a single Paid publication, and no second publication on webhook
+  redelivery (41 focused tests pass).
+- Checked on a disposable instance: opening a ticket added the row with `gws-live-updated`, the
+  class cleared after 1.5 s, and the browser logged no errors or warnings. The Paid publisher is
+  covered at the service boundary; no live Stripe webhook was sent from the disposable instance.
+
 ## T5. Density and charts (areas 2, 15)
 
 - One chart theme (Chart.js is already vendored) from the status and text tokens, light and dark,

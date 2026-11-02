@@ -1,6 +1,7 @@
 @page "/admin/billing"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
+@implements IDisposable
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.Billing
 @using GwsBusinessSuite.Application.Crm
@@ -13,6 +14,7 @@
 @inject IJSRuntime JS
 @inject ILogger<Billing> Logger
 @inject GwsBusinessSuite.Web.Services.ToastState Toasts
+@inject BillingNotifier BillingUpdates
 
 <PageTitle>Billing</PageTitle>
 
@@ -379,7 +381,7 @@ else
                         </tr></thead><tbody>
                         @foreach (var invoice in VisibleInvoices)
                         {
-                            <tr class="@(invoice.Id == _inspectedInvoiceId ? "gws-row-selected" : string.Empty) @(_selection.IsSelected(invoice.Id) ? "gws-row-checked" : string.Empty) @StatusTones.Stripe(invoice.IsOverdue(DateTimeOffset.UtcNow) ? StatusTone.Warning : null)" id="invoice-@invoice.Id">
+                            <tr class="@(invoice.Id == _inspectedInvoiceId ? "gws-row-selected" : string.Empty) @(_selection.IsSelected(invoice.Id) ? "gws-row-checked" : string.Empty) @StatusTones.Stripe(invoice.IsOverdue(DateTimeOffset.UtcNow) ? StatusTone.Warning : null) @LiveClass(invoice.Id)" id="invoice-@invoice.Id">
                                 <td class="gws-select-cell"><input type="checkbox" class="form-check-input" data-row-select aria-label="Select @invoice.Title"
                                     checked="@_selection.IsSelected(invoice.Id)" @onclick="e => _selection.Toggle(invoice.Id, e.ShiftKey, ShownInvoiceIds)" /></td>
                                 <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" title="Open this invoice beside the list" data-preview="invoice:@invoice.Id" aria-pressed="@(invoice.Id == _inspectedInvoiceId ? "true" : "false")" @onclick="() => _inspectedInvoiceId = invoice.Id">@invoice.Title</button>@if (invoice.AutoRemind && invoice.Status is InvoiceStatuses.Draft or InvoiceStatuses.Sent) { <i class="bi bi-bell ms-2 text-secondary" title="Reminds the client automatically when overdue" aria-hidden="true"></i><span class="visually-hidden">(auto-remind on)</span> }@if (invoice.IsOverdue(DateTimeOffset.UtcNow)) { <StatusPill Tone="StatusTone.Warning" CssClass="ms-2">Overdue</StatusPill> }</td>
@@ -471,6 +473,8 @@ else
     private readonly ListSelection<Guid> _selection = new();
     private int _inlineRevision;
     private List<InvoiceView> _pendingBulkDelete = [];
+    private readonly HashSet<Guid> _liveUpdatedIds = [];
+    private readonly Dictionary<Guid, CancellationTokenSource> _liveHighlightTimers = [];
     private IReadOnlyList<Guid> ShownInvoiceIds => VisibleInvoices.Select(invoice => invoice.Id).ToList();
     // Bulk actions reach only checked rows that are on show, so a search hiding one can't touch it.
     private List<InvoiceView> SelectedShown => VisibleInvoices.Where(invoice => _selection.IsSelected(invoice.Id)).ToList();
@@ -537,6 +541,7 @@ else
             _issuer = await BillingService.GetIssuerAsync();
             FillIssuerForm();
             await RefreshInvoicesAsync();
+            BillingUpdates.Changed += HandleInvoiceChanged;
         }
         finally
         {
@@ -592,6 +597,49 @@ else
     {
         Invoices = await BillingService.ListInvoicesAsync();
         _selection.Retain(Invoices.Select(invoice => invoice.Id));
+    }
+
+    private string LiveClass(Guid id) => _liveUpdatedIds.Contains(id) ? "gws-live-updated" : string.Empty;
+
+    private void HandleInvoiceChanged(InvoiceView invoice) => _ = InvokeAsync(async () =>
+    {
+        var rows = Invoices.ToList();
+        var index = rows.FindIndex(row => row.Id == invoice.Id);
+        if (index >= 0) rows[index] = invoice;
+        else rows.Insert(0, invoice);
+        Invoices = rows;
+        _selection.Retain(rows.Select(row => row.Id));
+        await HighlightLiveRowAsync(invoice.Id);
+    });
+
+    private async Task HighlightLiveRowAsync(Guid id)
+    {
+        if (_liveHighlightTimers.Remove(id, out var previous))
+        {
+            previous.Cancel();
+            previous.Dispose();
+        }
+        var timer = new CancellationTokenSource();
+        _liveHighlightTimers[id] = timer;
+        _liveUpdatedIds.Add(id);
+        StateHasChanged();
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1.5), timer.Token);
+            _liveUpdatedIds.Remove(id);
+            _liveHighlightTimers.Remove(id);
+            StateHasChanged();
+        }
+        catch (OperationCanceledException) { }
+        finally { timer.Dispose(); }
+    }
+
+    public void Dispose()
+    {
+        BillingUpdates.Changed -= HandleInvoiceChanged;
+        foreach (var timer in _liveHighlightTimers.Values) timer.Cancel();
+        foreach (var timer in _liveHighlightTimers.Values) timer.Dispose();
+        _liveHighlightTimers.Clear();
     }
 
     // Inline due date (tech-forward T3): saves at once, Undo puts the old date back, and a refusal

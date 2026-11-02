@@ -12,7 +12,8 @@ public sealed class BillingService(
     TimeProvider timeProvider,
     // Optional, resolved by DI in production - see AutomationWorkflowService's own comment on
     // this same pattern for why it's nullable (existing tests new this class up directly).
-    ISecurityAuditService? securityAudit = null) : IBillingService
+    ISecurityAuditService? securityAudit = null,
+    BillingNotifier? notifier = null) : IBillingService
 {
     // An invoice is a first-class money-movement record, so DueDate is always given to Stripe
     // as "N days from send", not a stored absolute date recomputed at send time - this keeps
@@ -480,6 +481,9 @@ public sealed class BillingService(
                 SecurityAuditCategories.DataLifecycle, "InvoicePaid", SecurityAuditOutcomes.Succeeded,
                 TargetType: "Invoice", TargetId: invoice.Id.ToString()), cancellationToken);
         }
+
+        var view = await GetInvoiceAsync(invoice.Id, cancellationToken);
+        if (view is not null) notifier?.Publish(view);
     }
 
     // Lines in the order they were entered (Id breaks ties for lines saved before Position existed).

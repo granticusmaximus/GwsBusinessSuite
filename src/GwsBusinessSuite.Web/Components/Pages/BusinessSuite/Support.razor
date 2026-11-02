@@ -1,6 +1,7 @@
 @page "/admin/support"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
+@implements IDisposable
 @using Microsoft.AspNetCore.Authorization
 @using GwsBusinessSuite.Application.Crm
 @using GwsBusinessSuite.Application.Support
@@ -19,6 +20,7 @@
 @inject GwsBusinessSuite.Web.Services.ToastState Toasts
 @inject GwsBusinessSuite.Application.Boards.IKanbanBoardService Boards
 @inject NavigationManager Navigation
+@inject SupportTicketNotifier TicketUpdates
 @using GwsBusinessSuite.Application.Abstractions
 
 <PageTitle>Support</PageTitle>
@@ -169,7 +171,7 @@ else
                             <tbody>
                             @foreach (var ticket in Tickets)
                             {
-                                <tr class="@(SelectedTicketId == ticket.Id ? "gws-row-selected" : "") @(_selection.IsSelected(ticket.Id) ? "gws-row-checked" : "") @StatusTones.Stripe(IsSlaBreached(ticket) ? StatusTone.Danger : null)">
+                                <tr class="@(SelectedTicketId == ticket.Id ? "gws-row-selected" : "") @(_selection.IsSelected(ticket.Id) ? "gws-row-checked" : "") @StatusTones.Stripe(IsSlaBreached(ticket) ? StatusTone.Danger : null) @LiveClass(ticket.Id)">
                                     <td class="gws-select-cell"><input type="checkbox" class="form-check-input" data-row-select aria-label="Select @ticket.Subject"
                                         checked="@_selection.IsSelected(ticket.Id)" @onclick="e => _selection.Toggle(ticket.Id, e.ShiftKey, ShownTicketIds)" /></td>
                                     <td><button type="button" class="btn btn-link p-0 fw-semibold text-start" @onclick="() => SelectTicketAsync(ticket.Id)" data-preview="ticket:@ticket.Id">@ticket.Subject</button>@if (IsSlaBreached(ticket)) { <StatusPill Tone="StatusTone.Danger" CssClass="ms-2">SLA overdue</StatusPill> }</td>
@@ -452,6 +454,8 @@ else
     private bool IsLoading { get; set; } = true;
     private bool _isBusy;
     private Guid? PendingDeleteCannedResponseId { get; set; }
+    private readonly HashSet<Guid> _liveUpdatedIds = [];
+    private readonly Dictionary<Guid, CancellationTokenSource> _liveHighlightTimers = [];
 
     // Reflects whatever the current status filter shows, same "stats for what you're looking
     // at" scope as the ticket list itself - not a separate all-time query.
@@ -513,6 +517,7 @@ else
             _me = await CurrentUserAccessor.GetCurrentUsernameAsync();
             await RefreshTicketsAsync();
             await RefreshCannedResponsesAsync();
+            TicketUpdates.Changed += HandleTicketChanged;
         }
         finally
         {
@@ -658,6 +663,66 @@ else
         {
             SelectedTicket = Tickets.FirstOrDefault(ticket => ticket.Id == id);
         }
+    }
+
+    private string LiveClass(Guid id) => _liveUpdatedIds.Contains(id) ? "gws-live-updated" : string.Empty;
+
+    private void HandleTicketChanged(SupportTicketView ticket) => _ = InvokeAsync(async () =>
+    {
+        var rows = Tickets.ToList();
+        var index = rows.FindIndex(row => row.Id == ticket.Id);
+        var belongsInView = string.IsNullOrWhiteSpace(StatusFilter) || ticket.Status == StatusFilter;
+        if (!belongsInView)
+        {
+            if (index >= 0) rows.RemoveAt(index);
+            if (SelectedTicketId == ticket.Id)
+            {
+                SelectedTicketId = null;
+                SelectedTicket = null;
+                Assistant.Clear();
+            }
+        }
+        else
+        {
+            if (index >= 0) rows[index] = ticket;
+            else rows.Add(ticket);
+            rows = rows.OrderByDescending(row => row.LastRepliedAt ?? row.CreatedAt).ToList();
+            if (SelectedTicketId == ticket.Id) SelectedTicket = ticket;
+        }
+        Tickets = rows;
+        _selection.Retain(rows.Select(row => row.Id));
+        if (belongsInView) await HighlightLiveRowAsync(ticket.Id);
+        else StateHasChanged();
+    });
+
+    private async Task HighlightLiveRowAsync(Guid id)
+    {
+        if (_liveHighlightTimers.Remove(id, out var previous))
+        {
+            previous.Cancel();
+            previous.Dispose();
+        }
+        var timer = new CancellationTokenSource();
+        _liveHighlightTimers[id] = timer;
+        _liveUpdatedIds.Add(id);
+        StateHasChanged();
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(1.5), timer.Token);
+            _liveUpdatedIds.Remove(id);
+            _liveHighlightTimers.Remove(id);
+            StateHasChanged();
+        }
+        catch (OperationCanceledException) { }
+        finally { timer.Dispose(); }
+    }
+
+    public void Dispose()
+    {
+        TicketUpdates.Changed -= HandleTicketChanged;
+        foreach (var timer in _liveHighlightTimers.Values) timer.Cancel();
+        foreach (var timer in _liveHighlightTimers.Values) timer.Dispose();
+        _liveHighlightTimers.Clear();
     }
 
     private bool TicketColumnVisible(string key) => _visibleTicketColumns.Contains(key);

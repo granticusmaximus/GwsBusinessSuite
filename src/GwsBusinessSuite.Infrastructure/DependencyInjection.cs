@@ -8,6 +8,7 @@ using GwsBusinessSuite.Application.AffiliateRotations;
 using GwsBusinessSuite.Application.AppGeneration;
 using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.Billing;
+using GwsBusinessSuite.Application.Support;
 using GwsBusinessSuite.Application.CameraIntel;
 using GwsBusinessSuite.Application.ThreatIntel;
 using GwsBusinessSuite.Application.CmsBuilder;
@@ -121,6 +122,8 @@ public static class DependencyInjection
         services.AddSingleton<SemanticIndexSaveChangesInterceptor>();
         services.AddSingleton<ActivityFeedSaveChangesInterceptor>();
         services.AddSingleton<WikiDatabaseChangeNotifier>();
+        services.AddSingleton<SupportTicketNotifier>();
+        services.AddSingleton<BillingNotifier>();
         services.AddSingleton<GwsBusinessSuite.Application.Boards.KanbanPresence>();
         services.AddSingleton<WikiDatabaseChangeInterceptor>();
         services.AddDbContextFactory<ApplicationDbContext>((serviceProvider, options) => options
