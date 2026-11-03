@@ -82,15 +82,50 @@ public sealed class SentinelAgentTests
         var authorTools = asAuthor.Tools[0].Select(tool => tool.Name).ToList();
         authorTools.Should().Contain(["create_todo_list", "find_sentinel_pages", SentinelAgentRunner.UndoToolName])
             .And.NotContain(["add_card", "list_boards", "create_site_page_draft", "search_app", "find_contacts", "list_automations"],
-                "board tools are offered only when the turn points at boards; CRM, automations and app-wide search remain Admin areas");
+                "area tools are offered only when the turn points at them; CRM and app-wide search remain Admin areas");
         var authorMore = asAuthor.Tools[0].Single(tool => tool.Name == SentinelAgentRunner.UseToolsName).Description;
-        authorMore.Should().Contain("blog (").And.Contain("boards (").And.NotContain("crm (").And.NotContain("site (");
+        authorMore.Should().Contain("blog (").And.Contain("boards (").And.Contain("automations (").And.NotContain("crm (").And.NotContain("site (");
 
         var adminTools = asAdmin.Tools[0].Select(tool => tool.Name).ToList();
         adminTools.Should().Contain(["create_todo_list", "search_app", SentinelAgentRunner.UseToolsName])
             .And.NotContain(["add_card", "create_deal"], "an area's tools are offered when the turn points at it");
         asAdmin.Tools[0].Single(tool => tool.Name == SentinelAgentRunner.UseToolsName).Description.Should()
             .Contain("boards (").And.Contain("crm (").And.Contain("automations (").And.Contain("site (");
+    }
+
+    [Fact]
+    public async Task SentinelPageTools_ShouldMatchTheUsersResourceAccess_ForSearchReadAndEdit()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var viewOnly = await harness.PageWithAccessAsync("Shared roadmap", Author.Username, SentinelAccessLevels.View);
+        var privatePage = await harness.PageWithAccessAsync("Private roadmap", null, null);
+
+        var model = new ScriptedModel(
+            _ => Call("find_sentinel_pages", new { query = "roadmap" }),
+            messages =>
+            {
+                var pages = LastResult(messages)["pages"]!.AsArray();
+                pages.Select(node => node!["id"]!.GetValue<string>()).Should().Equal(viewOnly.ToString());
+                return Call("read_sentinel_page", new { pageId = viewOnly });
+            },
+            messages =>
+            {
+                LastResult(messages)["title"]!.GetValue<string>().Should().Be("Shared roadmap");
+                return Call("add_to_sentinel_page", new { pageId = viewOnly, content = "Should be denied" });
+            },
+            messages =>
+            {
+                LastResult(messages)["error"]!.GetValue<string>().Should().Contain("doesn't have edit access");
+                return Call("read_sentinel_page", new { pageId = privatePage });
+            },
+            messages =>
+            {
+                LastResult(messages)["error"]!.GetValue<string>().Should().Contain("doesn't have view access");
+                return Say("Access stayed scoped to the signed-in user.");
+            });
+
+        var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Author, "Review the roadmaps", null, model, "test"), _ => Task.CompletedTask, default);
+        turn.Actions.Should().BeEmpty("denied mutations must not create action-log entries");
     }
 
     [Fact]
@@ -639,6 +674,36 @@ public sealed class SentinelAgentTests
     }
 
     [Fact]
+    public async Task AutomationTools_ShouldMirrorTheEditorsPerWorkflowGrant_ForNonAdmins()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var shared = await harness.CreateWorkflowAsync("Shared workflow", Author.Username);
+        var privateWorkflow = await harness.CreateWorkflowAsync("Private workflow");
+        var model = new ScriptedModel(
+            _ => Call("list_automations", new { }),
+            messages =>
+            {
+                var rows = LastResult(messages)["automations"]!.AsArray();
+                rows.Select(node => node!["id"]!.GetValue<string>()).Should().Equal(shared.ToString());
+                return Call("read_automation", new { workflowId = shared });
+            },
+            messages =>
+            {
+                LastResult(messages)["name"]!.GetValue<string>().Should().Be("Shared workflow");
+                return Call("read_automation", new { workflowId = privateWorkflow });
+            },
+            messages =>
+            {
+                LastResult(messages)["error"]!.GetValue<string>().Should().Contain("doesn't have access");
+                return Say("Only the shared workflow was accessible.");
+            });
+
+        await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Author, "Review my automations", null, model, "test"), _ => Task.CompletedTask, default);
+        model.Tools[0].Select(tool => tool.Name).Should().Contain(["list_automations", "read_automation", "run_automation"])
+            .And.NotContain("create_automation", "only Admin may create a suite automation");
+    }
+
+    [Fact]
     public async Task Areas_ShouldBeOfferedWhenTheTurnPointsAtThem_AndUseToolsAddsOneMidTurn()
     {
         await using var harness = await Harness.CreateAsync();
@@ -850,7 +915,12 @@ public sealed class SentinelAgentTests
             var connection = new SqliteConnection("Data Source=:memory:");
             await connection.OpenAsync();
             var options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(connection).Options;
-            await using (var db = new ApplicationDbContext(options)) await db.Database.EnsureCreatedAsync();
+            await using (var db = new ApplicationDbContext(options))
+            {
+                await db.Database.EnsureCreatedAsync();
+                db.AppUsers.Add(new AppUser { Username = Admin.Username, Role = AppRoles.Admin, IsActive = true });
+                await db.SaveChangesAsync();
+            }
 
             var portalMail = new RecordingPortalMail();
             var mail = new RecordingMail();
@@ -858,6 +928,7 @@ public sealed class SentinelAgentTests
                 .AddScoped(_ => new ApplicationDbContext(options))
                 .AddScoped<IAppDbContext>(provider => provider.GetRequiredService<ApplicationDbContext>())
                 .AddScoped<IWikiService>(provider => new WikiService(provider.GetRequiredService<IAppDbContext>()))
+                .AddScoped<ISentinelAccessService, SentinelAccessService>()
                 .AddScoped<IWikiDatabaseService>(provider => new WikiDatabaseService(provider.GetRequiredService<IAppDbContext>()))
                 .AddScoped<IKanbanBoardService>(provider => new KanbanBoardService(provider.GetRequiredService<IAppDbContext>(), provider.GetRequiredService<IWikiDatabaseService>()))
                 .AddScoped<ICmsBuilderService>(provider => new CmsBuilderService(provider.GetRequiredService<IAppDbContext>()))
@@ -925,6 +996,16 @@ public sealed class SentinelAgentTests
             await using var scope = _services.CreateAsyncScope();
             await scope.ServiceProvider.GetRequiredService<IWikiService>().SavePageAsync(
                 new WikiPageEditorModel { Title = title, BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(text)) }, "grant");
+        }
+
+        public async Task<Guid> PageWithAccessAsync(string title, string? username, string? accessLevel)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var page = await scope.ServiceProvider.GetRequiredService<IWikiService>().SavePageAsync(
+                new WikiPageEditorModel { Title = title, BlocksJson = WikiBlockJson.Serialize(WikiBlockJson.FromMarkdown(title)) }, Admin.Username);
+            if (username is not null && accessLevel is not null)
+                await scope.ServiceProvider.GetRequiredService<ISentinelAccessService>().SetPermissionAsync(page.Id, false, username, accessLevel, Admin.Username);
+            return page.Id;
         }
 
         public async Task<bool> TrashedAsync(string title)
@@ -1105,6 +1186,18 @@ public sealed class SentinelAgentTests
         {
             await using var scope = _services.CreateAsyncScope();
             return (await scope.ServiceProvider.GetRequiredService<IAutomationWorkflowService>().GetAsync(id))!;
+        }
+
+        public async Task<Guid> CreateWorkflowAsync(string name, string? sharedWith = null)
+        {
+            await using var scope = _services.CreateAsyncScope();
+            var node = new AutomationNodeView(Guid.NewGuid(), "Start", "core.manualTrigger", 1, 100, 100, "{}", null, false, false, false, 1, 0, 0, string.Empty);
+            var workflow = await scope.ServiceProvider.GetRequiredService<IAutomationWorkflowService>()
+                .CreateFromGraphAsync(name, string.Empty, [node], [], Admin.Username);
+            if (sharedWith is not null)
+                await scope.ServiceProvider.GetRequiredService<ISentinelAccessService>()
+                    .SetPermissionAsync(workflow.Id, isDatabase: false, sharedWith, SentinelAccessLevels.View, Admin.Username);
+            return workflow.Id;
         }
 
         public async ValueTask DisposeAsync()

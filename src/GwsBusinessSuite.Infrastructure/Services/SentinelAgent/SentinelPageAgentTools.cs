@@ -8,7 +8,7 @@ namespace GwsBusinessSuite.Infrastructure.Services.SentinelAgent;
 // Sentinel pages and to-do lists for the agent. A to-do list is a Sentinel page of to-do blocks,
 // the same as one made by hand. Everything goes through IWikiService, so permissions, revisions
 // and the concurrency check still apply. Same roles as the Sentinel page (ContentAccess).
-public sealed class SentinelPageAgentTools(IWikiService wiki) : ISentinelAgentToolset
+public sealed class SentinelPageAgentTools(IWikiService wiki, ISentinelAccessService access) : ISentinelAgentToolset
 {
     private static readonly string[] Roles = [AppRoles.Admin, AppRoles.Author, AppRoles.Contributor];
     private const int MaxMarkdown = 6_000;
@@ -104,7 +104,7 @@ public sealed class SentinelPageAgentTools(IWikiService wiki) : ISentinelAgentTo
             _ => "Proposing to trash a page",
             TrashAsync,
             UndoTrashAsync,
-            async (args, _, ct) => $"Move the Sentinel page '{(await PageAsync(args.Id("pageId"), ct)).Title}' to the trash")
+            async (args, context, ct) => $"Move the Sentinel page '{(await PageAsync(args.Id("pageId"), context, SentinelAccessLevels.Edit, ct)).Title}' to the trash")
     ];
 
     public static string LinkTo(Guid pageId) => $"/admin/sentinel?page={pageId}";
@@ -113,7 +113,11 @@ public sealed class SentinelPageAgentTools(IWikiService wiki) : ISentinelAgentTo
     {
         var words = args.Text("query").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         var pages = await wiki.ListPagesAsync(cancellationToken: ct);
+        var visible = await access.GetAccessibleTargetsAsync(
+            pages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false)).ToList(),
+            context.User.Username, SentinelAccessLevels.View, ct);
         var matches = pages
+            .Where(page => visible.Contains(new SentinelAccessTarget(page.Id, IsDatabase: false)))
             .Select(page => (Page: page, Score: Score(page, words)))
             .Where(match => match.Score > 0)
             .OrderByDescending(match => match.Score)
@@ -137,7 +141,7 @@ public sealed class SentinelPageAgentTools(IWikiService wiki) : ISentinelAgentTo
 
     private async Task<SentinelAgentToolResult> ReadAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
-        var page = await PageAsync(args.Id("pageId"), ct);
+        var page = await PageAsync(args.Id("pageId"), context, SentinelAccessLevels.View, ct);
         var blocks = WikiBlockJson.ParseBlocks(page.BlocksJson);
         var markdown = WikiMarkdownExporter.ExportPage(page.Title, blocks).Trim();
         return SentinelAgentToolResult.Of(new
@@ -153,7 +157,7 @@ public sealed class SentinelPageAgentTools(IWikiService wiki) : ISentinelAgentTo
         string title, IReadOnlyList<WikiBlock> blocks, Guid? parentPageId, string? icon, SentinelAgentToolContext context, CancellationToken ct,
         Func<WikiPage, int, string> summary)
     {
-        if (parentPageId is { } parent) await PageAsync(parent, ct);
+        if (parentPageId is { } parent) await PageAsync(parent, context, SentinelAccessLevels.Edit, ct);
         var page = await wiki.SavePageAsync(new WikiPageEditorModel
         {
             Title = title,
@@ -168,8 +172,12 @@ public sealed class SentinelPageAgentTools(IWikiService wiki) : ISentinelAgentTo
                 SentinelAgentJson.Serialize(new PageUndo(page.Id))));
     }
 
-    private Task UndoCreateAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct) =>
-        wiki.TrashPageAsync(SentinelAgentJson.Deserialize<PageUndo>(undoJson).PageId, context.User.Username, ct);
+    private async Task UndoCreateAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var pageId = SentinelAgentJson.Deserialize<PageUndo>(undoJson).PageId;
+        await PageAsync(pageId, context, SentinelAccessLevels.Edit, ct);
+        await wiki.TrashPageAsync(pageId, context.User.Username, ct);
+    }
 
     private async Task<SentinelAgentToolResult> AddToDosAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
@@ -220,7 +228,7 @@ public sealed class SentinelPageAgentTools(IWikiService wiki) : ISentinelAgentTo
         Guid pageId, Func<IReadOnlyList<WikiBlock>, IReadOnlyList<WikiBlock>> change, SentinelAgentToolContext context, CancellationToken ct,
         Func<WikiPage, string> summary, Func<WikiPage, object> forModel)
     {
-        var page = await PageAsync(pageId, ct);
+        var page = await PageAsync(pageId, context, SentinelAccessLevels.Edit, ct);
         var before = page.BlocksJson;
         var blocks = change(WikiBlockJson.ParseBlocks(before));
         var saved = await SaveAsync(page, page.Title, WikiBlockJson.Serialize(blocks), context, ct);
@@ -232,7 +240,7 @@ public sealed class SentinelPageAgentTools(IWikiService wiki) : ISentinelAgentTo
     private async Task UndoEditAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
     {
         var undo = SentinelAgentJson.Deserialize<PageEditUndo>(undoJson);
-        var page = await PageAsync(undo.PageId, ct);
+        var page = await PageAsync(undo.PageId, context, SentinelAccessLevels.Edit, ct);
         if (page.ContentVersion != undo.VersionAfter)
             throw new SentinelAgentToolException($"'{page.Title}' has changed since, so undoing would lose that. Use the page's history to go back.");
         await SaveAsync(page, undo.Title, undo.BlocksJson, context, ct);
@@ -240,7 +248,7 @@ public sealed class SentinelPageAgentTools(IWikiService wiki) : ISentinelAgentTo
 
     private async Task<SentinelAgentToolResult> RenameAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
-        var page = await PageAsync(args.Id("pageId"), ct);
+        var page = await PageAsync(args.Id("pageId"), context, SentinelAccessLevels.Edit, ct);
         var before = page.Title;
         var saved = await SaveAsync(page, args.Text("title"), page.BlocksJson, context, ct);
         return SentinelAgentToolResult.Of(new { renamed = true, from = before, to = saved.Title },
@@ -251,21 +259,26 @@ public sealed class SentinelPageAgentTools(IWikiService wiki) : ISentinelAgentTo
     private async Task UndoRenameAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
     {
         var undo = SentinelAgentJson.Deserialize<PageEditUndo>(undoJson);
-        var page = await PageAsync(undo.PageId, ct);
+        var page = await PageAsync(undo.PageId, context, SentinelAccessLevels.Edit, ct);
         await SaveAsync(page, undo.Title, page.BlocksJson, context, ct);
     }
 
     private async Task<SentinelAgentToolResult> TrashAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
-        var page = await PageAsync(args.Id("pageId"), ct);
+        var page = await PageAsync(args.Id("pageId"), context, SentinelAccessLevels.Edit, ct);
         await wiki.TrashPageAsync(page.Id, context.User.Username, ct);
         return SentinelAgentToolResult.Of(new { trashed = page.Title },
             new SentinelAgentChange($"Moved '{page.Title}' to the trash", "sentinel-page", page.Id.ToString(), page.Title, null,
                 SentinelAgentJson.Serialize(new PageUndo(page.Id))));
     }
 
-    private Task UndoTrashAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct) =>
-        wiki.RestorePageAsync(SentinelAgentJson.Deserialize<PageUndo>(undoJson).PageId, context.User.Username, ct);
+    private async Task UndoTrashAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var pageId = SentinelAgentJson.Deserialize<PageUndo>(undoJson).PageId;
+        if (!await access.CanAccessAsync(pageId, isDatabase: false, context.User.Username, SentinelAccessLevels.Edit, ct))
+            throw new SentinelAgentToolException($"{context.User.Username} doesn't have edit access to that Sentinel page.");
+        await wiki.RestorePageAsync(pageId, context.User.Username, ct);
+    }
 
     private Task<WikiPage> SaveAsync(WikiPage page, string title, string blocksJson, SentinelAgentToolContext context, CancellationToken ct) =>
         wiki.SavePageAsync(new WikiPageEditorModel
@@ -283,10 +296,14 @@ public sealed class SentinelPageAgentTools(IWikiService wiki) : ISentinelAgentTo
             BlocksJson = blocksJson
         }, context.User.Username, cancellationToken: ct);
 
-    private async Task<WikiPage> PageAsync(Guid pageId, CancellationToken ct) =>
-        await wiki.GetPageAsync(pageId, ct) is { } page && page.TrashedAt is null
+    private async Task<WikiPage> PageAsync(Guid pageId, SentinelAgentToolContext context, string level, CancellationToken ct)
+    {
+        if (!await access.CanAccessAsync(pageId, isDatabase: false, context.User.Username, level, ct))
+            throw new SentinelAgentToolException($"{context.User.Username} doesn't have {level.ToLowerInvariant()} access to that Sentinel page.");
+        return await wiki.GetPageAsync(pageId, ct) is { } page && page.TrashedAt is null
             ? page
             : throw new SentinelAgentToolException($"There's no Sentinel page with id {pageId}. Search for it first.");
+    }
 
     private static IReadOnlyList<WikiBlock> ToDoBlocks(IEnumerable<string> items) =>
         items.Select(item => new WikiBlock(Guid.NewGuid(), WikiBlockTypes.ToDo, 0, [new WikiRichTextSpan(item)],

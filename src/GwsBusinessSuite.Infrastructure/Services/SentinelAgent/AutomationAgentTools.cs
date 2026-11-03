@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Automation;
 using GwsBusinessSuite.Application.SentinelAgent;
+using GwsBusinessSuite.Application.Wiki;
 using GwsBusinessSuite.Domain.Entities;
 
 namespace GwsBusinessSuite.Infrastructure.Services.SentinelAgent;
@@ -15,9 +16,11 @@ namespace GwsBusinessSuite.Infrastructure.Services.SentinelAgent;
 public sealed class AutomationAgentTools(
     IAutomationWorkflowService workflows,
     IAutomationExecutionService executions,
-    IAutomationNodeRegistry registry) : ISentinelAgentToolset
+    IAutomationNodeRegistry registry,
+    ISentinelAccessService access) : ISentinelAgentToolset
 {
-    private static readonly string[] Roles = [AppRoles.Admin];
+    private static readonly string[] AdminRoles = [AppRoles.Admin];
+    private static readonly string[] SharedRoles = AppRoles.All;
     private const int MaxNodes = 15;
     private const int NodeTypesShown = 25;
     private const int RunsShown = 5;
@@ -30,28 +33,28 @@ public sealed class AutomationAgentTools(
             "list_automations",
             "List the automation workflows with their ids, whether each is on, and when each last ran.",
             SentinelAgentJson.Schema(),
-            SentinelAgentRisk.Read, Roles,
+            SentinelAgentRisk.Read, SharedRoles,
             _ => "Looking at the automations",
             ListAsync),
         new SentinelAgentTool(
             "read_automation",
             "Read one automation workflow: its steps (nodes) in order, how they connect, and its latest runs.",
             SentinelAgentJson.Schema(("workflowId", "string", "The workflow id", true)),
-            SentinelAgentRisk.Read, Roles,
+            SentinelAgentRisk.Read, SharedRoles,
             _ => "Reading an automation",
             ReadAsync),
         new SentinelAgentTool(
             "automation_node_types",
             "The steps an automation can use (typeKey, what it does, its default settings). Search for what you need, e.g. 'email', 'crm' or 'schedule'. Call this before create_automation.",
             SentinelAgentJson.Schema(("search", "string", "Words to look for; leave out for every typeKey by category", false)),
-            SentinelAgentRisk.Read, Roles,
+            SentinelAgentRisk.Read, SharedRoles,
             args => args.OptionalText("search") is { } search ? $"Looking up automation steps for '{search}'" : "Looking up automation steps",
             NodeTypesAsync),
         new SentinelAgentTool(
             "create_automation",
             "Propose a new automation workflow from steps you choose with automation_node_types: one trigger first, then the rest. Connections can be left out to run the steps in the order given. Only proposes; once confirmed it's made switched off, as a draft to check in the editor.",
             CreateSchema,
-            SentinelAgentRisk.Confirm, Roles,
+            SentinelAgentRisk.Confirm, AdminRoles,
             args => $"Proposing the automation '{args.OptionalText("name")}'",
             CreateAsync,
             UndoCreateAsync,
@@ -62,12 +65,12 @@ public sealed class AutomationAgentTools(
             SentinelAgentJson.Schema(
                 ("workflowId", "string", "The workflow id", true),
                 ("input", "string", "Optional: a JSON object the trigger passes to the first step", false)),
-            SentinelAgentRisk.Confirm, Roles,
+            SentinelAgentRisk.Confirm, SharedRoles,
             _ => "Proposing to run an automation",
             RunAsync,
-            preview: async (args, _, ct) =>
+            preview: async (args, context, ct) =>
             {
-                var workflow = await WorkflowAsync(args.Id("workflowId"), ct);
+                var workflow = await WorkflowAsync(args.Id("workflowId"), context, ct);
                 if (workflow.CurrentVersion == 0)
                     throw new SentinelAgentToolException($"'{workflow.Name}' has never been published, so it can't run yet. Switching it on publishes it.");
                 Input(args);
@@ -77,20 +80,20 @@ public sealed class AutomationAgentTools(
             "turn_on_automation",
             "Switch an automation workflow on, so its trigger (a schedule, a webhook, a CRM change) runs it. Its latest draft is checked and published first. Only proposes: the person confirms first.",
             SentinelAgentJson.Schema(("workflowId", "string", "The workflow id", true)),
-            SentinelAgentRisk.Confirm, Roles,
+            SentinelAgentRisk.Confirm, SharedRoles,
             _ => "Proposing to switch an automation on",
             TurnOnAsync,
             UndoTurnOnAsync,
-            async (args, _, ct) =>
+            async (args, context, ct) =>
             {
-                var workflow = await ReadyToTurnOnAsync(args.Id("workflowId"), ct);
+                var workflow = await ReadyToTurnOnAsync(args.Id("workflowId"), context, ct);
                 return $"Publish and switch on the automation '{workflow.Name}'";
             }),
         new SentinelAgentTool(
             "turn_off_automation",
             "Switch an automation workflow off, so nothing runs it until it's switched on again.",
             SentinelAgentJson.Schema(("workflowId", "string", "The workflow id", true)),
-            SentinelAgentRisk.Change, Roles,
+            SentinelAgentRisk.Change, SharedRoles,
             _ => "Switching an automation off",
             TurnOffAsync,
             UndoTurnOffAsync)
@@ -118,6 +121,14 @@ public sealed class AutomationAgentTools(
     private async Task<SentinelAgentToolResult> ListAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
         var list = await workflows.ListAsync(ct);
+        if (!context.User.IsAdmin)
+        {
+            var allowed = new List<AutomationWorkflowSummary>();
+            foreach (var workflow in list)
+                if (await access.HasDirectPermissionAsync(workflow.Id, isDatabase: false, context.User.Username, SentinelAccessLevels.View, ct))
+                    allowed.Add(workflow);
+            list = allowed;
+        }
         return SentinelAgentToolResult.Of(new
         {
             automations = list.Select(workflow => new
@@ -135,7 +146,7 @@ public sealed class AutomationAgentTools(
 
     private async Task<SentinelAgentToolResult> ReadAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
-        var workflow = await WorkflowAsync(args.Id("workflowId"), ct);
+        var workflow = await WorkflowAsync(args.Id("workflowId"), context, ct);
         var names = workflow.Nodes.ToDictionary(node => node.Id, node => node.Name);
         return SentinelAgentToolResult.Of(new
         {
@@ -205,7 +216,7 @@ public sealed class AutomationAgentTools(
 
     private async Task UndoCreateAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
     {
-        var workflow = await WorkflowAsync(SentinelAgentJson.Deserialize<WorkflowUndo>(undoJson).WorkflowId, ct);
+        var workflow = await WorkflowAsync(SentinelAgentJson.Deserialize<WorkflowUndo>(undoJson).WorkflowId, context, ct);
         if (workflow.Status == AutomationWorkflowStatuses.Active)
             throw new SentinelAgentToolException($"'{workflow.Name}' has been switched on since. Switch it off first, then delete it in the editor.");
         await workflows.DeleteWorkflowAsync(workflow.Id, ct);
@@ -213,7 +224,7 @@ public sealed class AutomationAgentTools(
 
     private async Task<SentinelAgentToolResult> RunAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
-        var workflow = await WorkflowAsync(args.Id("workflowId"), ct);
+        var workflow = await WorkflowAsync(args.Id("workflowId"), context, ct);
         var run = await executions.ExecuteAsync(workflow.Id, Input(args), cancellationToken: ct);
         var outcome = run.Status == AutomationExecutionStatuses.Succeeded
             ? "it finished"
@@ -225,7 +236,7 @@ public sealed class AutomationAgentTools(
 
     private async Task<SentinelAgentToolResult> TurnOnAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
-        var workflow = await ReadyToTurnOnAsync(args.Id("workflowId"), ct);
+        var workflow = await ReadyToTurnOnAsync(args.Id("workflowId"), context, ct);
         var version = await workflows.PublishAsync(workflow.Id, "Published by SentinelGPT", ct);
         await workflows.SetActiveAsync(workflow.Id, true, ct);
         return SentinelAgentToolResult.Of(new { on = true, name = workflow.Name, version },
@@ -234,12 +245,16 @@ public sealed class AutomationAgentTools(
     }
 
     // Undo leaves the new published version in the history; it only stops the workflow running.
-    private Task UndoTurnOnAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct) =>
-        workflows.SetActiveAsync(SentinelAgentJson.Deserialize<WorkflowUndo>(undoJson).WorkflowId, false, ct);
+    private async Task UndoTurnOnAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var workflowId = SentinelAgentJson.Deserialize<WorkflowUndo>(undoJson).WorkflowId;
+        await WorkflowAsync(workflowId, context, ct);
+        await workflows.SetActiveAsync(workflowId, false, ct);
+    }
 
     private async Task<SentinelAgentToolResult> TurnOffAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
-        var workflow = await WorkflowAsync(args.Id("workflowId"), ct);
+        var workflow = await WorkflowAsync(args.Id("workflowId"), context, ct);
         if (workflow.Status != AutomationWorkflowStatuses.Active) throw new SentinelAgentToolException($"'{workflow.Name}' is already off.");
         await workflows.SetActiveAsync(workflow.Id, false, ct);
         return SentinelAgentToolResult.Of(new { on = false, name = workflow.Name },
@@ -249,19 +264,23 @@ public sealed class AutomationAgentTools(
 
     private async Task UndoTurnOffAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
     {
-        var workflow = await WorkflowAsync(SentinelAgentJson.Deserialize<WorkflowUndo>(undoJson).WorkflowId, ct);
+        var workflow = await WorkflowAsync(SentinelAgentJson.Deserialize<WorkflowUndo>(undoJson).WorkflowId, context, ct);
         if (workflow.Status == AutomationWorkflowStatuses.Active) throw new SentinelAgentToolException($"'{workflow.Name}' is already on again.");
         await workflows.SetActiveAsync(workflow.Id, true, ct);
     }
 
-    private async Task<AutomationWorkflowView> WorkflowAsync(Guid workflowId, CancellationToken ct) =>
-        await workflows.GetAsync(workflowId, ct)
+    private async Task<AutomationWorkflowView> WorkflowAsync(Guid workflowId, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        if (!context.User.IsAdmin && !await access.HasDirectPermissionAsync(workflowId, isDatabase: false, context.User.Username, SentinelAccessLevels.View, ct))
+            throw new SentinelAgentToolException($"{context.User.Username} doesn't have access to that automation.");
+        return await workflows.GetAsync(workflowId, ct)
             ?? throw new SentinelAgentToolException($"There's no automation with id {workflowId}. List the automations first.");
+    }
 
     // Checked when proposing and again on Confirm: the editor's Activate button does the same.
-    private async Task<AutomationWorkflowView> ReadyToTurnOnAsync(Guid workflowId, CancellationToken ct)
+    private async Task<AutomationWorkflowView> ReadyToTurnOnAsync(Guid workflowId, SentinelAgentToolContext context, CancellationToken ct)
     {
-        var workflow = await WorkflowAsync(workflowId, ct);
+        var workflow = await WorkflowAsync(workflowId, context, ct);
         if (workflow.Status == AutomationWorkflowStatuses.Active) throw new SentinelAgentToolException($"'{workflow.Name}' is already on.");
         var validation = await workflows.ValidateAsync(workflow.Id, ct);
         if (!validation.IsValid)
