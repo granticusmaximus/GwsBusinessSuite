@@ -67,6 +67,11 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         var template = KanbanTemplates.Find(templateKey) ?? throw new ArgumentException($"There's no board template called '{templateKey}'.", nameof(templateKey));
         var name = string.IsNullOrWhiteSpace(title) ? template.Name : title.Trim();
         var database = await databases.CreateDatabaseAsync(name, null, performedBy, cancellationToken);
+        // A board created by SentinelGPT must open with the same editable ownership as one made
+        // from the UI. Persist the creator grant as well as relying on the Admin bypass, so the
+        // board remains editable if their role/session representation changes later.
+        if (access is not null)
+            await access.SetPermissionAsync(database.Id, isDatabase: true, performedBy, SentinelAccessLevels.FullAccess, performedBy, cancellationToken);
         await databases.RenameDatabaseAsync(database.Id, name, template.Icon, performedBy, cancellationToken);
 
         static WikiDatabasePropertyOption Option(string label, string color, string? group = null) => new(Guid.NewGuid().ToString(), label, color, group);

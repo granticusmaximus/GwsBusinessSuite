@@ -16,6 +16,12 @@ public sealed partial class KanbanBoardService
     public async Task<KanbanBoardAccess> GetAccessAsync(Guid databaseId, string username, CancellationToken cancellationToken = default)
     {
         if (access is null || !await IsTeamMemberAsync(username, cancellationToken)) return new KanbanBoardAccess(true, true, true);
+        // Boards created before creator grants were persisted still belong to their creator.
+        // This also repairs SentinelGPT-created boards already in production without a data migration.
+        var normalized = username.ToLower();
+        if (await db.WikiDatabases.AsNoTracking().AnyAsync(database => database.Id == databaseId
+                && database.CreatedBy.ToLower() == normalized, cancellationToken))
+            return new KanbanBoardAccess(true, true, false);
         var canEdit = await access.CanAccessAsync(databaseId, true, username, SentinelAccessLevels.Edit, cancellationToken);
         var canView = canEdit || await access.CanAccessAsync(databaseId, true, username, SentinelAccessLevels.View, cancellationToken);
         return new KanbanBoardAccess(canView, canEdit, false);
