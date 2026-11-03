@@ -52,6 +52,21 @@ public sealed class KanbanBoardSharingTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task CreatedBoards_ShouldPersistCreatorAccess_AndLegacyCreatorBoardsShouldRemainEditable()
+    {
+        var grant = await _db.SentinelResourcePermissions.SingleAsync(permission => permission.TargetId == _id && permission.IsDatabase && permission.Username == "grant");
+        grant.AccessLevel.Should().Be(SentinelAccessLevels.FullAccess);
+
+        // Simulate a pre-fix SentinelGPT board whose creator grant was never written.
+        var board = await _db.WikiDatabases.SingleAsync(database => database.Id == _id);
+        board.CreatedBy = "ann";
+        _db.SentinelResourcePermissions.Remove(grant);
+        await _db.SaveChangesAsync();
+
+        (await _boards.GetAccessAsync(_id, "ann")).Should().Be(new KanbanBoardAccess(true, true, false));
+    }
+
+    [Fact]
     public async Task AViewGrant_ShouldShowOnlyThatBoard_ButChangeNothing()
     {
         var board = (await _boards.GetBoardAsync(_id))!;

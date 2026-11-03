@@ -216,6 +216,8 @@ public sealed class SentinelAgentTests
         var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(chat, Admin, "Add a card and mark it done", null, model, "test"), _ => Task.CompletedTask, default);
 
         turn.Actions.Select(action => action.Summary).Should().Equal("Added 'Write the post' to To do on 'Launch'", "Moved 'Write the post' from To do to Done");
+        var cardId = (await harness.CardByTitleAsync(boardId, "Write the post")).RowId;
+        turn.Actions.Should().OnlyContain(action => action.Link == $"/admin/boards/{boardId}?card={cardId}");
         (await harness.ColumnOfAsync(boardId, "Write the post")).Should().Be("Done");
         await harness.Runner.UndoAsync(turn.Actions[1].Id, Admin, default);
         (await harness.ColumnOfAsync(boardId, "Write the post")).Should().Be("To do");

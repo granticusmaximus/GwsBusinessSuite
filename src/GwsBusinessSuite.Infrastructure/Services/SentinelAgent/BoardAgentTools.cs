@@ -168,6 +168,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
     ];
 
     public static string LinkTo(Guid boardId) => $"/admin/boards/{boardId}";
+    public static string LinkToCard(Guid boardId, Guid cardId) => $"{LinkTo(boardId)}?card={cardId}";
 
     private async Task<SentinelAgentToolResult> ListAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
     {
@@ -218,7 +219,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
         var rowId = await boards.AddCardAsync(board.DatabaseId, column.OptionId, title, context.User.Username, ct);
         return SentinelAgentToolResult.Of(
             new { added = true, cardId = rowId, title, column = column.Label, board = board.Title },
-            new SentinelAgentChange($"Added '{title}' to {column.Label} on '{board.Title}'", "board-card", rowId.ToString(), title, LinkTo(board.DatabaseId),
+            new SentinelAgentChange($"Added '{title}' to {column.Label} on '{board.Title}'", "board-card", rowId.ToString(), title, LinkToCard(board.DatabaseId, rowId),
                 SentinelAgentJson.Serialize(new CardUndo(board.DatabaseId, rowId, null))));
     }
 
@@ -232,7 +233,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
         var rowId = await boards.AddCardFromTicketAsync(board.DatabaseId, ticketId, column.OptionId, context.User.Username, ct);
         return SentinelAgentToolResult.Of(
             new { added = true, cardId = rowId, ticket = subject, column = column.Label, board = board.Title },
-            new SentinelAgentChange($"Added the ticket '{subject}' to {column.Label} on '{board.Title}'", "board-card", rowId.ToString(), subject, LinkTo(board.DatabaseId),
+            new SentinelAgentChange($"Added the ticket '{subject}' to {column.Label} on '{board.Title}'", "board-card", rowId.ToString(), subject, LinkToCard(board.DatabaseId, rowId),
                 SentinelAgentJson.Serialize(new CardUndo(board.DatabaseId, rowId, null))));
     }
 
@@ -250,7 +251,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
         await boards.MoveCardAsync(board.DatabaseId, card.RowId, to.OptionId, null, context.User.Username, ct);
         return SentinelAgentToolResult.Of(
             new { moved = card.Title, from = from.Label, to = to.Label },
-            new SentinelAgentChange($"Moved '{card.Title}' from {from.Label} to {to.Label}", "board-card", card.RowId.ToString(), card.Title, LinkTo(board.DatabaseId),
+            new SentinelAgentChange($"Moved '{card.Title}' from {from.Label} to {to.Label}", "board-card", card.RowId.ToString(), card.Title, LinkToCard(board.DatabaseId, card.RowId),
                 SentinelAgentJson.Serialize(new CardUndo(board.DatabaseId, card.RowId, from.OptionId))));
     }
 
@@ -270,7 +271,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
         foreach (var (rowId, value) in before) saved[rowId.ToString()] = value?.DeepClone();
         return SentinelAgentToolResult.Of(
             new { renamed = true, from = card.Title, to = title },
-            new SentinelAgentChange($"Renamed the card '{card.Title}' to '{title}'", "board-card", card.RowId.ToString(), title, LinkTo(board.DatabaseId),
+            new SentinelAgentChange($"Renamed the card '{card.Title}' to '{title}'", "board-card", card.RowId.ToString(), title, LinkToCard(board.DatabaseId, card.RowId),
                 SentinelAgentJson.Serialize(new CardRenameUndo(board.DatabaseId, titleProperty, saved.ToJsonString()))));
     }
 
@@ -476,7 +477,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
         var title = args.Text("title");
         var id = await boards.AddSubItemAsync(boardId, cardId, title, context.User.Username, ct);
         return SentinelAgentToolResult.Of(new { added = true, subitemId = id, title, parentCard = card.Title },
-            new SentinelAgentChange($"Added sub-item '{title}' to '{card.Title}'", "board-card", id.ToString(), title, LinkTo(boardId),
+            new SentinelAgentChange($"Added sub-item '{title}' to '{card.Title}'", "board-card", id.ToString(), title, LinkToCard(boardId, cardId),
                 SentinelAgentJson.Serialize(new CardUndo(boardId, id, null))));
     }
 
@@ -601,7 +602,7 @@ public sealed class BoardAgentTools(IKanbanBoardService boards, IWikiDatabaseSer
 
     private static SentinelAgentToolResult Changed(KanbanCard card, KanbanBoard board, string field, string value, CardUpdateUndo undo) =>
         SentinelAgentToolResult.Of(new { updated = true, cardId = card.RowId, field, value },
-            new SentinelAgentChange($"Updated {field} on '{card.Title}'", "board-card", card.RowId.ToString(), card.Title, LinkTo(board.DatabaseId),
+            new SentinelAgentChange($"Updated {field} on '{card.Title}'", "board-card", card.RowId.ToString(), card.Title, LinkToCard(board.DatabaseId, card.RowId),
                 SentinelAgentJson.Serialize(undo)));
 
     private async Task<KanbanBoard> BoardAsync(Guid boardId, CancellationToken ct) =>
