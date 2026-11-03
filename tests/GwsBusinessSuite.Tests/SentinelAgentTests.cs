@@ -346,10 +346,9 @@ public sealed class SentinelAgentTests
     }
 
     [Fact]
-    public async Task BigJobs_ThatStartWithoutAPlan_ShouldBeRolledBack_AndPlannedWhole()
+    public async Task RoutineReversibleCrud_ShouldNotBeRolledBack_AfterThreeChanges()
     {
         await using var harness = await Harness.CreateAsync();
-        var events = new List<SentinelAgentEvent>();
         var model = new ScriptedModel(
             _ => Call("create_todo_list", new { title = "A" }),
             _ => Call("create_todo_list", new { title = "B" }),
@@ -357,21 +356,11 @@ public sealed class SentinelAgentTests
             _ => new OllamaChatResponse(string.Empty, [
                 new OllamaToolCall("create_todo_list", JsonSerializer.Serialize(new { title = "D" })),
                 new OllamaToolCall("create_todo_list", JsonSerializer.Serialize(new { title = "E" }))]),
-            messages =>
-            {
-                var results = messages.Where(message => message.Role == "tool").TakeLast(2).Select(message => message.Content).ToList();
-                results[0].Should().Contain("needs a plan first").And.Contain("have been undone");
-                results[1].Should().Contain("call show_plan", "nothing more changes in the turn until the plan is shown");
-                return Call(SentinelAgentRunner.PlanToolName, new { steps = new[] { "A", "B", "C", "D", "E" } });
-            });
-        var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin, "Make five lists", null, model, "test"),
-            agentEvent => { events.Add(agentEvent); return Task.CompletedTask; }, default);
+            _ => Say("Created all five lists."));
+        var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin, "Make five lists", null, model, "test"), _ => Task.CompletedTask, default);
 
-        turn.Actions.Should().ContainSingle().Which.Tool.Should().Be(SentinelAgentRunner.PlanToolName);
-        events.OfType<SentinelAgentWithdrawn>().Should().HaveCount(3);
-        foreach (var title in new[] { "A", "B", "C" }) (await harness.TrashedAsync(title)).Should().BeTrue($"'{title}' was rolled back");
-        (await harness.PagesTitledAsync("D")).Should().Be(0);
-        (await harness.PagesTitledAsync("E")).Should().Be(0);
+        turn.Actions.Should().HaveCount(5).And.OnlyContain(action => action.Status == SentinelAgentActionStatuses.Done);
+        foreach (var title in new[] { "A", "B", "C", "D", "E" }) (await harness.PagesTitledAsync(title)).Should().Be(1);
     }
 
     [Fact]

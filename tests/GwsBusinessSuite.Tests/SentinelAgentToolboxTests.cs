@@ -39,7 +39,10 @@ public sealed class SentinelAgentToolboxTests(ITestOutputHelper output)
 
         tools.Select(tool => tool.Name).Should().OnlyHaveUniqueItems()
             .And.Contain(["create_todo_list", "add_card", "create_site_page_draft", "find_contacts", "create_automation",
-                "update_ticket", "log_time", "create_blog_post_draft", "find_media", "send_email", "change_setting", "overwatch_briefing"]);
+                "update_ticket", "log_time", "create_blog_post_draft", "find_media", "send_email", "change_setting", "overwatch_briefing",
+                "create_sentinel_database", "create_sentinel_database_row", "create_invoice_draft", "list_form_submissions", "create_booking_type"]);
+        tools.Where(tool => tool.Risk == SentinelAgentRisk.Change).Should().OnlyContain(tool => tool.Capability.Operation != SentinelAgentOperation.Read);
+        tools.Single(tool => tool.Name == "send_invoice").Capability.Operation.Should().Be(SentinelAgentOperation.Communicate);
         var definitionCharacters = tools.Sum(tool => tool.Name.Length + tool.Description.Length + tool.ParametersJson.Length);
         output.WriteLine($"{tools.Count} tools, {definitionCharacters} characters of definitions.");
         scope.Dispose();

@@ -58,7 +58,10 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
     public const string GoMessage = "Go ahead with the plan.";
     // Offers another area's tools for the rest of the turn (see SentinelAgentArea).
     public const string UseToolsName = "use_tools";
-    private const int PlanThreshold = 3;
+    public const string DiscoverCapabilitiesToolName = "discover_capabilities";
+    // Routine, reversible CRUD should feel like the signed-in person using the app. Planning is
+    // retained only as a runaway-batch guard; consequential tools already pause for Confirm.
+    private const int RoutineChangePlanThreshold = 25;
     private const int MemoriesInPrompt = 40;
     private const int ActivityRows = 200;
     private const int HistoryTurns = 6;
@@ -84,7 +87,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
 
         var actions = new List<SentinelAgentActionView>();
         var done = new HashSet<string>(StringComparer.Ordinal);
-        // Without a Go, a turn that reaches more than PlanThreshold changes is rolled back and the
+        // Without a Go, a runaway turn is rolled back and the
         // model plans the whole job: in the 30-10-26 live check it went straight into a 5-change
         // job, and planning only "the rest" made it redo the first three after Go.
         var planApproved = request.Message.Trim() == GoMessage;
@@ -102,15 +105,16 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             messages.Add(new OllamaChatMessage("assistant", response.Content, ToolCalls: response.ToolCalls));
             foreach (var call in response.ToolCalls)
             {
-                var changes = actions.Count(action => action.Tool != PlanToolName && action.Status == SentinelAgentActionStatuses.Done);
-                var isChange = tools.GetValueOrDefault(call.Name) is { Risk: not SentinelAgentRisk.Read } && call.Name != PlanToolName && call.Name != UndoToolName;
+                var changes = actions.Count(action => action.Tool != PlanToolName && action.Status == SentinelAgentActionStatuses.Done
+                    && tools.GetValueOrDefault(action.Tool)?.Risk == SentinelAgentRisk.Change);
+                var isChange = tools.GetValueOrDefault(call.Name) is { Risk: SentinelAgentRisk.Change } && call.Name != UndoToolName;
                 string result;
                 if (isChange && planRequired)
                 {
                     // Rolled back already: nothing more changes until the plan is shown.
                     result = Problem("Not yet: call show_plan with every step of the whole job first, then stop.");
                 }
-                else if (isChange && !planApproved && changes >= PlanThreshold)
+                else if (isChange && !planApproved && changes >= RoutineChangePlanThreshold)
                 {
                     planRequired = true;
                     result = await RollBackForPlanAsync(db, tools, context, actions, onEvent, cancellationToken);
@@ -119,6 +123,10 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
                 {
                     result = UseTools(call, areas, offered);
                     definitions = Definitions(tools, areas, offered);
+                }
+                else if (call.Name == DiscoverCapabilitiesToolName)
+                {
+                    result = DiscoverCapabilities(areas);
                 }
                 else
                 {
@@ -352,7 +360,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
         IAppDbContext db, IReadOnlyDictionary<string, ISentinelAgentTool> tools, SentinelAgentToolContext context,
         List<SentinelAgentActionView> actions, Func<SentinelAgentEvent, Task> onEvent, CancellationToken cancellationToken)
     {
-        await onEvent(new SentinelAgentStep($"That's more than {PlanThreshold} changes, so making a plan first"));
+        await onEvent(new SentinelAgentStep($"That's more than {RoutineChangePlanThreshold} routine changes, so making a plan first"));
         var kept = new List<string>();
         foreach (var view in actions.Where(action => action.Status == SentinelAgentActionStatuses.Done && action.Tool != PlanToolName).Reverse().ToList())
         {
@@ -371,7 +379,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             }
         }
 
-        return Problem($"Stop: this job needs more than {PlanThreshold} changes, so it needs a plan first. "
+        return Problem($"Stop: this job needs more than {RoutineChangePlanThreshold} routine changes, so it needs a plan first. "
             + (kept.Count == 0
                 ? "The changes you made this turn have been undone. Call show_plan now with every step of the whole job, then stop."
                 : $"Your changes this turn were undone except: {string.Join("; ", kept)}. Call show_plan now with every other step still needed, then stop."));
@@ -501,6 +509,10 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             .Select(tool => new OllamaToolDefinition(tool.Name, tool.Description, tool.ParametersJson))
             .ToList();
         var others = areas.Where(area => !offered.Contains(area.Area.Name)).ToList();
+        definitions.Add(new OllamaToolDefinition(
+            DiscoverCapabilitiesToolName,
+            "List every app area and CRUD capability available to the signed-in user. Use this when the request spans the suite or you are unsure which area owns a record.",
+            SentinelAgentJson.Schema()));
         if (others.Count > 0)
         {
             definitions.Add(new OllamaToolDefinition(
@@ -543,6 +555,23 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
         });
     }
 
+    private static string DiscoverCapabilities(IReadOnlyList<AgentArea> areas) => SentinelAgentJson.Serialize(new
+    {
+        areas = areas.Select(area => new
+        {
+            area = area.Area.Name,
+            about = area.Area.About,
+            capabilities = area.Tools.Select(tool => new
+            {
+                tool = tool.Name,
+                operation = tool.Capability.Operation.ToString().ToLowerInvariant(),
+                risk = tool.Risk.ToString().ToLowerInvariant(),
+                reversible = tool.CanUndo
+            })
+        }),
+        note = "These are the signed-in user's capabilities. Call use_tools for the area you need."
+    });
+
     // A scope for work done as this person, so services that record who did it see them.
     private AsyncServiceScope ScopeFor(SentinelAgentUser user)
     {
@@ -565,7 +594,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             (_, _, _) => throw new SentinelAgentToolException("Undo runs through the runner."));
         tools[PlanToolName] = new SentinelAgentTool(
             PlanToolName,
-            $"Show the person your plan before a job that needs more than {PlanThreshold} changes. List the steps as short sentences. The turn then waits for them to press Go.",
+            $"Show the person your plan before a job that needs more than {RoutineChangePlanThreshold} routine changes. List the steps as short sentences. The turn then waits for them to press Go.",
             SentinelAgentJson.Schema(("steps", "string[]", "The steps, in order", true)),
             SentinelAgentRisk.Confirm, [], _ => "Making a plan",
             (_, _, _) => throw new SentinelAgentToolException("Plans run through the runner."));
@@ -579,7 +608,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             You are SentinelGPT, the assistant inside GWS Business Suite. You can look things up and make changes in the app with your tools, acting as {request.User.Username} ({request.User.RoleLabel}). Today is {now.ToString("dddd dd-MM-yy", CultureInfo.InvariantCulture)}, {now:HH:mm}.
 
             How to work:
-            - Before your first change, count the changes the whole job needs (each new board, card, list, page, contact, note, deal or edit is one). More than {PlanThreshold}: call show_plan with every step and stop, so the person can check it and press Go. When they say "{GoMessage}", carry the plan out without showing it again.
+            - Routine reversible CRUD runs immediately with Undo. Publishing, sending, permanent deletion, financial side effects, access changes and automation execution wait for Confirm. Only jobs above {RoutineChangePlanThreshold} routine changes need show_plan first. When they say "{GoMessage}", carry the plan out without showing it again.
             - When asked to do something, research first, then do it. Look up what you need (Sentinel, the app, World News, the web) so what you write is right, then make the change with the tools. Don't tell the person how to do it themselves.
             - Write from what you found, not from memory, and say where facts came from when it matters.
             - Find things before changing them, unless "What this chat has changed" below already gives the id.
@@ -588,7 +617,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             - Use ids exactly as the tools return them. Never make up an id.
             - Deleting, publishing, and running or switching on an automation only propose: say it's waiting for their Confirm.
             - When asked to remember something for later, call remember. Use what's under "What you've been asked to remember"; if the tools show otherwise, trust the tools and say so.
-            - Your tools cover what this request seems to need. If the job needs another part of the app, call use_tools for it first.
+            - Your authority is exactly the signed-in person's authority. Your tools cover what this request seems to need. If the job needs another part of the app, call use_tools for it first; call discover_capabilities when you are unsure what the person can do.
             - If a tool returns an error, fix the call and try again, or say plainly what's stopping you.
             - For facts, use only what the tools and the page give you. If you don't know, say so.
             - When you've finished, answer in one to three short sentences saying what you did. The app shows links and Undo buttons, so don't paste ids or links.

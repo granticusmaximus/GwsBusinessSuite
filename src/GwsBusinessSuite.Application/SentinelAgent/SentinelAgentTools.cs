@@ -12,10 +12,44 @@ namespace GwsBusinessSuite.Application.SentinelAgent;
 // Confirm.
 public enum SentinelAgentRisk { Read, Change, Confirm }
 
+public enum SentinelAgentOperation { Read, Create, Update, Delete, Execute, Communicate, Configure }
+
+public sealed record SentinelAgentCapability(
+    string Area,
+    string Resource,
+    SentinelAgentOperation Operation,
+    SentinelAgentRisk Risk,
+    bool Reversible)
+{
+    public static SentinelAgentCapability Infer(string name, SentinelAgentRisk risk, bool reversible)
+    {
+        var operation = name.StartsWith("create_", StringComparison.Ordinal) || name.StartsWith("add_", StringComparison.Ordinal)
+            ? SentinelAgentOperation.Create
+            : name.StartsWith("delete_", StringComparison.Ordinal) || name.StartsWith("trash_", StringComparison.Ordinal)
+                || name.StartsWith("forget", StringComparison.Ordinal) || name.StartsWith("remove_", StringComparison.Ordinal)
+                ? SentinelAgentOperation.Delete
+            : name.StartsWith("send_", StringComparison.Ordinal) || name.StartsWith("reply_", StringComparison.Ordinal)
+                ? SentinelAgentOperation.Communicate
+            : name.StartsWith("run_", StringComparison.Ordinal) || name.StartsWith("start_", StringComparison.Ordinal)
+                || name.StartsWith("stop_", StringComparison.Ordinal) || name.StartsWith("publish_", StringComparison.Ordinal)
+                ? SentinelAgentOperation.Execute
+            : risk == SentinelAgentRisk.Read || name.StartsWith("find_", StringComparison.Ordinal)
+                || name.StartsWith("list_", StringComparison.Ordinal) || name.StartsWith("read_", StringComparison.Ordinal)
+                || name.StartsWith("search_", StringComparison.Ordinal) || name.StartsWith("my_", StringComparison.Ordinal)
+                ? SentinelAgentOperation.Read
+            : name.Contains("setting", StringComparison.Ordinal) ? SentinelAgentOperation.Configure
+            : SentinelAgentOperation.Update;
+        var separator = name.IndexOf('_');
+        return new SentinelAgentCapability(string.Empty, separator < 0 ? name : name[(separator + 1)..], operation, risk, reversible);
+    }
+}
+
 public sealed record SentinelAgentUser(string Username, IReadOnlyCollection<string> Roles)
 {
     public bool MayUse(ISentinelAgentTool tool) =>
-        tool.Roles.Count == 0 || tool.Roles.Any(role => Roles.Contains(role, StringComparer.OrdinalIgnoreCase));
+        IsAdmin || tool.Roles.Count == 0 || tool.Roles.Any(role => Roles.Contains(role, StringComparer.OrdinalIgnoreCase));
+
+    public bool IsAdmin => Roles.Contains(GwsBusinessSuite.Domain.Entities.AppRoles.Admin, StringComparer.OrdinalIgnoreCase);
 
     public string RoleLabel => Roles.Count == 0 ? "no role" : string.Join(", ", Roles);
 }
@@ -46,6 +80,7 @@ public interface ISentinelAgentTool
     // Empty means anyone signed in; otherwise the AppRoles that may use it (the same as the page's).
     IReadOnlyCollection<string> Roles { get; }
     bool CanUndo { get; }
+    SentinelAgentCapability Capability => SentinelAgentCapability.Infer(Name, Risk, CanUndo);
 
     // A few words for the person while it runs ("Creating to-do list 'Groceries'").
     string Describe(JsonObject arguments);
