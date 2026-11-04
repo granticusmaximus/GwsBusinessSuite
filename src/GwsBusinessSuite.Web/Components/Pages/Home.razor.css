@@ -1,0 +1,181 @@
+.gws-neu-dashboard {
+    --neu-surface: #191715;
+    --neu-surface-raised: #1d1a18;
+    --neu-highlight: rgba(255, 255, 255, .055);
+    --neu-shadow: rgba(0, 0, 0, .58);
+    --neu-inset: rgba(0, 0, 0, .42);
+    position: relative;
+    isolation: isolate;
+}
+
+.gws-neu-dashboard::before {
+    position: absolute;
+    z-index: -1;
+    inset: -1.5rem -1.75rem auto;
+    height: 18rem;
+    border-radius: 0 0 2.5rem 2.5rem;
+    background:
+        radial-gradient(circle at 16% 8%, rgba(245, 158, 11, .11), transparent 34%),
+        radial-gradient(circle at 86% 0%, rgba(251, 191, 36, .05), transparent 28%);
+    content: "";
+    pointer-events: none;
+}
+
+:root[data-theme="light"] .gws-neu-dashboard {
+    --neu-surface: #eeece8;
+    --neu-surface-raised: #f1efeb;
+    --neu-highlight: rgba(255, 255, 255, .95);
+    --neu-shadow: rgba(108, 98, 88, .22);
+    --neu-inset: rgba(108, 98, 88, .18);
+}
+
+:root[data-theme="light"] .gws-neu-dashboard::before {
+    background:
+        radial-gradient(circle at 16% 8%, rgba(245, 158, 11, .16), transparent 34%),
+        radial-gradient(circle at 86% 0%, rgba(251, 191, 36, .09), transparent 28%);
+}
+
+/* One tactile action dock keeps the header controls related without competing with the cards. */
+.gws-neu-dashboard ::deep .gws-page-header-actions {
+    gap: .35rem;
+    padding: .35rem;
+    border: 1px solid color-mix(in srgb, var(--gws-panel-border) 55%, transparent);
+    border-radius: 1.05rem;
+    background: var(--neu-surface);
+    box-shadow: 7px 7px 17px var(--neu-shadow), -5px -5px 13px var(--neu-highlight);
+}
+
+.gws-neu-dashboard ::deep .gws-page-header-actions .btn {
+    border-color: transparent;
+    border-radius: .8rem;
+    background: transparent;
+    box-shadow: none;
+    color: var(--gws-text-soft);
+}
+
+.gws-neu-dashboard ::deep .gws-page-header-actions .btn-primary {
+    border-color: color-mix(in srgb, var(--gws-sidebar-accent) 20%, transparent);
+    background: color-mix(in srgb, var(--gws-sidebar-accent) 15%, var(--neu-surface-raised));
+    box-shadow: 3px 3px 7px color-mix(in srgb, var(--neu-shadow) 65%, transparent),
+        -2px -2px 5px color-mix(in srgb, var(--neu-highlight) 70%, transparent);
+    color: var(--gws-sidebar-accent);
+}
+
+.gws-neu-dashboard ::deep .gws-page-header-actions .btn-outline-secondary {
+    box-shadow: inset 2px 2px 5px color-mix(in srgb, var(--neu-inset) 80%, transparent),
+        inset -2px -2px 5px color-mix(in srgb, var(--neu-highlight) 70%, transparent);
+}
+
+.gws-neu-dashboard ::deep .gws-page-header-actions .btn:hover {
+    color: var(--gws-text-strong);
+}
+
+.gws-neu-dashboard ::deep .gws-page-header-actions .btn-primary:hover {
+    background: color-mix(in srgb, var(--gws-sidebar-accent) 20%, var(--neu-surface-raised));
+    color: var(--gws-sidebar-accent);
+}
+
+.gws-neu-dashboard ::deep .gws-page-header-actions .btn:active {
+    box-shadow: inset 3px 3px 7px var(--neu-inset), inset -2px -2px 5px var(--neu-highlight);
+    transform: translateY(1px);
+}
+
+.gws-neu-dashboard .gws-hint-banner {
+    border-color: transparent;
+    background: var(--neu-surface);
+    box-shadow: inset 3px 3px 8px var(--neu-inset), inset -3px -3px 7px var(--neu-highlight);
+}
+
+.gws-neu-dashboard .gws-section-heading {
+    padding-inline: .2rem;
+}
+
+.gws-neu-dashboard .gws-attention-card,
+.gws-neu-dashboard .gws-module-card,
+.gws-neu-dashboard ::deep .gws-kpi-tile {
+    border-color: transparent;
+    border-radius: 1rem;
+    background: linear-gradient(145deg, color-mix(in srgb, var(--neu-surface-raised) 96%, white), var(--neu-surface-raised));
+    box-shadow: 8px 8px 18px var(--neu-shadow), -6px -6px 14px var(--neu-highlight);
+}
+
+.gws-neu-dashboard .gws-attention-card,
+.gws-neu-dashboard .gws-module-card {
+    transition: box-shadow .18s ease, transform .18s ease;
+}
+
+.gws-neu-dashboard ::deep a.gws-kpi-tile {
+    transition: box-shadow .18s ease, transform .18s ease;
+}
+
+.gws-neu-dashboard .gws-attention-card:hover,
+.gws-neu-dashboard .gws-module-card:hover,
+.gws-neu-dashboard ::deep a.gws-kpi-tile:hover {
+    border-color: transparent !important;
+    box-shadow: 11px 11px 22px var(--neu-shadow), -7px -7px 17px var(--neu-highlight);
+    transform: translateY(-3px);
+}
+
+.gws-neu-dashboard .gws-stat-icon,
+.gws-neu-dashboard .gws-module-icon {
+    border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+    border-radius: .85rem;
+    box-shadow: inset 2px 2px 5px rgba(0, 0, 0, .16), inset -2px -2px 4px rgba(255, 255, 255, .06);
+}
+
+.gws-neu-dashboard ::deep .gws-kpi-tile-head > i {
+    display: grid;
+    width: 2.35rem;
+    height: 2.35rem;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--neu-surface);
+    box-shadow: inset 2px 2px 5px var(--neu-inset), inset -2px -2px 5px var(--neu-highlight);
+}
+
+.gws-neu-dashboard ::deep .gws-kpi-tile-value,
+.gws-neu-dashboard .gws-attention-count {
+    text-shadow: 0 1px 0 var(--neu-highlight);
+}
+
+.gws-neu-dashboard ::deep a:focus-visible,
+.gws-neu-dashboard ::deep button:focus-visible {
+    outline: 3px solid var(--gws-sidebar-accent);
+    outline-offset: 4px;
+}
+
+@media (max-width: 767.98px) {
+    .gws-neu-dashboard::before {
+        inset-inline: -.75rem;
+    }
+
+    .gws-neu-dashboard .gws-attention-card,
+    .gws-neu-dashboard .gws-module-card,
+    .gws-neu-dashboard ::deep .gws-kpi-tile {
+        box-shadow: 5px 5px 12px var(--neu-shadow), -4px -4px 10px var(--neu-highlight);
+    }
+
+    .gws-neu-dashboard ::deep .gws-page-header-actions {
+        width: 100%;
+        box-shadow: 5px 5px 12px var(--neu-shadow), -4px -4px 10px var(--neu-highlight);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .gws-neu-dashboard .gws-attention-card,
+    .gws-neu-dashboard .gws-module-card,
+    .gws-neu-dashboard ::deep a.gws-kpi-tile {
+        transition: none;
+    }
+}
+
+@media (forced-colors: active) {
+    .gws-neu-dashboard .gws-attention-card,
+    .gws-neu-dashboard .gws-module-card,
+    .gws-neu-dashboard ::deep .gws-kpi-tile,
+    .gws-neu-dashboard ::deep .gws-page-header-actions,
+    .gws-neu-dashboard ::deep .gws-page-header-actions .btn {
+        border: 1px solid CanvasText;
+        box-shadow: none;
+    }
+}

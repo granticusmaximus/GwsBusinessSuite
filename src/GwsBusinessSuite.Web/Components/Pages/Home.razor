@@ -15,6 +15,7 @@
 
 <PageTitle>Dashboard · GWS Business Suite</PageTitle>
 
+<div class="gws-neu-dashboard">
 <PageHeader Title="@($"Good {GreetingPeriod()}")" Description="@DashboardDescription">
     <Meta>
         <p class="small text-secondary mb-0">@DateTimeOffset.Now.ToString("dd-MM-yy")</p>
@@ -145,6 +146,7 @@
         }
     </div>
 </section>
+</div>
 
 @code {
     private const string CommandPaletteHintKey = "gws-dashboard-command-hint-dismissed";
