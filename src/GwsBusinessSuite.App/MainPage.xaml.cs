@@ -598,6 +598,17 @@ public partial class MainPage : ContentPage
         StopNavigationTimeout();
         StatusOverlay.IsVisible = false;
         BeginBlockingNavigation();
+#if MACCATALYST
+        // WKWebView.Reload() is allowed to reuse its persistent cache. That can keep an old
+        // blazor.web.js alive after a web deployment and leave static HTML visible while every
+        // Interactive Server control is inert. The toolbar's explicit Reload action means
+        // "get the current application", so bypass the cache without touching login cookies.
+        if (WorkspaceView.Handler?.PlatformView is WKWebView webView)
+        {
+            webView.ReloadFromOrigin();
+            return;
+        }
+#endif
         WorkspaceView.Reload();
     }
 

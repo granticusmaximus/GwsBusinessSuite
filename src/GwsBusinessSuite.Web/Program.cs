@@ -659,6 +659,12 @@ app.Use(async (context, next) =>
         // route rather than loosened app-wide - every other page keeps the stricter policy.
         var isOverwatchGrid = string.Equals(context.Request.Path.Value, "/admin/osint", StringComparison.OrdinalIgnoreCase);
         var isOverwatchGridScript = string.Equals(context.Request.Path.Value, "/js/tactical-globe.js", StringComparison.OrdinalIgnoreCase);
+        var isAdminDocument = context.Request.Method == HttpMethods.Get
+            && context.Request.Path.StartsWithSegments("/admin")
+            && context.Request.GetTypedHeaders().Accept?.Any(value =>
+                value.MediaType.HasValue
+                && string.Equals(value.MediaType.Value, "text/html", StringComparison.OrdinalIgnoreCase)) == true;
+        var isBlazorBootstrap = string.Equals(context.Request.Path.Value, "/_framework/blazor.web.js", StringComparison.OrdinalIgnoreCase);
         var scriptSrc = isOverwatchGrid
             ? "script-src 'self' https://cdn.jsdelivr.net 'unsafe-eval' 'wasm-unsafe-eval';"
             : "script-src 'self' https://cdn.jsdelivr.net;";
@@ -674,9 +680,12 @@ app.Use(async (context, next) =>
         // browser without that cache picked up the very same server-side fix immediately.
         // Neither this page nor its script carries any per-viewer state worth caching, so
         // never let any client cache either response, closing off this whole class of bug.
-        if (isOverwatchGrid || isOverwatchGridScript)
+        if (isOverwatchGrid || isOverwatchGridScript || isAdminDocument || isBlazorBootstrap)
         {
-            headers["Cache-Control"] = "no-store, no-cache";
+            // Admin HTML contains viewer-specific data and must never be reused. The Blazor
+            // bootstrap has a stable URL across deployments, so force clients (especially the
+            // Mac app's persistent WKWebView cache) to revalidate it before starting a circuit.
+            headers["Cache-Control"] = isBlazorBootstrap ? "no-cache" : "no-store, no-cache";
             headers["Pragma"] = "no-cache";
         }
         headers["Content-Security-Policy"] = string.Join(' ', [
