@@ -34,6 +34,14 @@
     --gws-panel-border: #292524;
     --gws-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
     --gws-shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+    --gws-neu-surface: #191715;
+    --gws-neu-raised: #211e1b;
+    --gws-neu-highlight: rgba(255, 255, 255, .055);
+    --gws-neu-shadow: rgba(0, 0, 0, .52);
+    --gws-neu-inset: rgba(0, 0, 0, .38);
+    --gws-neu-raised-shadow: 7px 7px 16px var(--gws-neu-shadow), -5px -5px 12px var(--gws-neu-highlight);
+    --gws-neu-raised-shadow-sm: 4px 4px 10px var(--gws-neu-shadow), -3px -3px 8px var(--gws-neu-highlight);
+    --gws-neu-inset-shadow: inset 3px 3px 7px var(--gws-neu-inset), inset -2px -2px 5px var(--gws-neu-highlight);
     --gws-text-strong: #fafaf9;
     --gws-text-soft: #a8a29e;
     --gws-font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
@@ -157,6 +165,11 @@
     --gws-panel-border: #e7e4e1;
     --gws-shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.08);
     --gws-shadow-md: 0 4px 16px rgba(28, 25, 23, 0.12);
+    --gws-neu-surface: #eeece8;
+    --gws-neu-raised: #f5f3ef;
+    --gws-neu-highlight: rgba(255, 255, 255, .96);
+    --gws-neu-shadow: rgba(108, 98, 88, .2);
+    --gws-neu-inset: rgba(108, 98, 88, .17);
     --gws-text-strong: #1c1917;
     --gws-text-soft: #6b6560;
     --gws-status-success-text: #166534;
@@ -1401,9 +1414,12 @@ h1:focus { outline: none; }
 }
 
 .card {
-    border-radius: var(--gws-radius-md) !important;
-    background: var(--gws-panel-bg);
-    border-color: var(--gws-panel-border);
+    border: 1px solid color-mix(in srgb, var(--gws-panel-border) 56%, transparent);
+    border-radius: calc(var(--gws-radius-md) + 3px) !important;
+    background: linear-gradient(145deg,
+        color-mix(in srgb, var(--gws-neu-raised) 96%, white),
+        var(--gws-neu-raised));
+    box-shadow: var(--gws-neu-raised-shadow);
     color: var(--gws-text-strong);
 }
 
@@ -1413,20 +1429,23 @@ h1:focus { outline: none; }
     border-color: var(--gws-panel-border);
 }
 
-/* Surfaces on the page are flat: a 1px border, no shadow. Shadows belong to layers that float
-   over the page (menus, popovers, dialogs, the inspector and assistant panels). */
+/* Shared panels participate in the same raised surface system as cards. */
 .card.border-0.shadow-sm,
 .surface-panel {
-    background: var(--gws-panel-bg);
-    border: 1px solid var(--gws-panel-border) !important;
-    box-shadow: none !important;
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
+    border: 1px solid color-mix(in srgb, var(--gws-panel-border) 56%, transparent) !important;
+    box-shadow: var(--gws-neu-raised-shadow) !important;
 }
 
 .btn {
     min-height: var(--gws-control-height);
-    border-radius: var(--gws-radius-sm);
+    border-radius: calc(var(--gws-radius-sm) + 3px);
     font-weight: 600;
+    transition: background .15s ease, border-color .15s ease, box-shadow .15s ease, color .15s ease, transform .15s ease;
 }
+
+.btn:not(.btn-link):not(.btn-close) { box-shadow: var(--gws-neu-raised-shadow-sm); }
+.btn:not(.btn-link):not(.btn-close):active { box-shadow: var(--gws-neu-inset-shadow); transform: translateY(1px); }
 
 .btn-sm { min-height: var(--gws-control-height-sm); }
 
@@ -1434,20 +1453,25 @@ h1:focus { outline: none; }
    disabled states read those variables, and their defaults are its hardcoded blue (#0d6efd),
    which a disabled Remind or a pressed outline button used to show. */
 .btn-primary {
-    --bs-btn-color: var(--gws-accent-contrast);
-    --bs-btn-bg: var(--gws-sidebar-accent);
-    --bs-btn-border-color: var(--gws-sidebar-accent);
-    --bs-btn-hover-color: var(--gws-accent-contrast);
-    --bs-btn-hover-bg: var(--gws-sidebar-accent-hover);
-    --bs-btn-hover-border-color: var(--gws-sidebar-accent-hover);
-    --bs-btn-active-color: var(--gws-accent-contrast);
-    --bs-btn-active-bg: var(--gws-sidebar-accent-hover);
-    --bs-btn-active-border-color: var(--gws-sidebar-accent-hover);
-    --bs-btn-disabled-color: var(--gws-accent-contrast);
-    --bs-btn-disabled-bg: var(--gws-sidebar-accent);
-    --bs-btn-disabled-border-color: var(--gws-sidebar-accent);
-    border: none;
-    box-shadow: none;
+    --bs-btn-color: var(--gws-sidebar-accent);
+    --bs-btn-bg: color-mix(in srgb, var(--gws-sidebar-accent) 15%, var(--gws-neu-raised));
+    --bs-btn-border-color: color-mix(in srgb, var(--gws-sidebar-accent) 24%, transparent);
+    --bs-btn-hover-color: var(--gws-sidebar-accent);
+    --bs-btn-hover-bg: color-mix(in srgb, var(--gws-sidebar-accent) 22%, var(--gws-neu-raised));
+    --bs-btn-hover-border-color: color-mix(in srgb, var(--gws-sidebar-accent) 38%, transparent);
+    --bs-btn-active-color: var(--gws-sidebar-accent);
+    --bs-btn-active-bg: color-mix(in srgb, var(--gws-sidebar-accent) 18%, var(--gws-neu-surface));
+    --bs-btn-active-border-color: color-mix(in srgb, var(--gws-sidebar-accent) 42%, transparent);
+    --bs-btn-disabled-color: var(--gws-text-soft);
+    --bs-btn-disabled-bg: var(--gws-neu-surface);
+    --bs-btn-disabled-border-color: var(--gws-panel-border);
+}
+
+/* Amber text needs its darker companion on a light raised surface. */
+:root[data-theme="light"] .btn-primary {
+    --bs-btn-color: var(--gws-sidebar-accent-hover);
+    --bs-btn-hover-color: var(--gws-sidebar-accent-hover);
+    --bs-btn-active-color: var(--gws-sidebar-accent-hover);
 }
 
 .btn-outline-secondary,
@@ -1455,7 +1479,7 @@ h1:focus { outline: none; }
 .btn-outline-primary,
 .btn-outline-danger {
     --bs-btn-color: var(--gws-text-strong);
-    --bs-btn-bg: transparent;
+    --bs-btn-bg: var(--gws-neu-raised);
     --bs-btn-border-color: var(--gws-panel-border);
     --bs-btn-hover-color: var(--gws-text-strong);
     --bs-btn-hover-bg: var(--gws-panel-bg-2);
@@ -1567,17 +1591,18 @@ h1:focus { outline: none; }
 .form-control:focus,
 .form-select:focus {
     min-height: var(--gws-control-height);
-    border-radius: var(--gws-radius-sm);
-    background-color: var(--gws-panel-bg-2);
-    border-color: var(--gws-panel-border);
+    border-radius: calc(var(--gws-radius-sm) + 2px);
+    background-color: var(--gws-neu-surface);
+    border-color: color-mix(in srgb, var(--gws-panel-border) 64%, transparent);
     color: var(--gws-text-strong);
+    box-shadow: var(--gws-neu-inset-shadow);
 }
 
 /* Checkboxes, radios and switches take the theme colours but keep Bootstrap's own size and
    shape - they used to share the 40px text-field min-height above, which stretched every
    checkbox into a 13x40px pill. */
 .form-check-input {
-    background-color: var(--gws-panel-bg-2);
+    background-color: var(--gws-neu-surface);
     border-color: var(--gws-panel-border);
 }
 
@@ -1585,10 +1610,10 @@ h1:focus { outline: none; }
 
 .form-control:focus,
 .form-select:focus {
-    background-color: var(--gws-panel-bg-2);
+    background-color: var(--gws-neu-surface);
     color: var(--gws-text-strong);
     border-color: var(--gws-sidebar-accent);
-    box-shadow: 0 0 0 0.2rem rgba(var(--bs-primary-rgb), 0.18);
+    box-shadow: var(--gws-neu-inset-shadow), 0 0 0 0.2rem rgba(var(--bs-primary-rgb), 0.18);
 }
 
 .form-label { color: var(--gws-text-soft); }
@@ -1929,6 +1954,65 @@ body.gws-modal-dragging-active { -webkit-user-select: none; user-select: none; }
     background: var(--gws-sidebar-accent);
     border-color: var(--gws-sidebar-accent);
     color: var(--gws-accent-contrast);
+}
+
+/* Dense data stays flat for scanability; its containing surface carries the depth. */
+.gws-content .table-responsive,
+.gws-list-table-wrap {
+    border: 1px solid color-mix(in srgb, var(--gws-panel-border) 56%, transparent);
+    border-radius: calc(var(--gws-radius-md) + 3px);
+    background: var(--gws-neu-surface);
+    box-shadow: var(--gws-neu-raised-shadow);
+}
+
+.gws-content .table-responsive > .table,
+.gws-list-table-wrap > .table { margin-bottom: 0; }
+
+.modal-content,
+.gws-command-dialog,
+.gws-shortcuts-dialog,
+.gws-rail-flyout,
+.dropdown-menu {
+    border-color: color-mix(in srgb, var(--gws-panel-border) 58%, transparent);
+    border-radius: calc(var(--gws-radius-md) + 3px);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
+    box-shadow: 12px 12px 28px var(--gws-neu-shadow), -7px -7px 18px var(--gws-neu-highlight);
+}
+
+.alert {
+    border-radius: calc(var(--gws-radius-md) + 1px);
+    box-shadow: var(--gws-neu-inset-shadow);
+}
+
+.nav-tabs .nav-link.active,
+.nav-pills .nav-link.active,
+.page-item.active .page-link {
+    box-shadow: var(--gws-neu-inset-shadow);
+}
+
+@media (max-width: 767.98px) {
+    .card,
+    .surface-panel,
+    .gws-content .table-responsive,
+    .gws-list-table-wrap { box-shadow: var(--gws-neu-raised-shadow-sm) !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .btn { transition: none; }
+}
+
+@media (forced-colors: active) {
+    .card,
+    .surface-panel,
+    .gws-content .table-responsive,
+    .gws-list-table-wrap,
+    .modal-content,
+    .gws-command-dialog,
+    .gws-shortcuts-dialog,
+    .dropdown-menu,
+    .btn,
+    .form-control,
+    .form-select { border: 1px solid CanvasText; box-shadow: none !important; }
 }
 
 .nav-tabs { border-color: var(--gws-panel-border); }

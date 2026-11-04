@@ -35,6 +35,10 @@
         radial-gradient(circle at 86% 0%, rgba(251, 191, 36, .09), transparent 28%);
 }
 
+:root[data-theme="light"] .gws-neu-dashboard ::deep .gws-page-header-actions .btn-primary {
+    color: var(--gws-sidebar-accent-hover);
+}
+
 /* One tactile action dock keeps the header controls related without competing with the cards. */
 .gws-neu-dashboard ::deep .gws-page-header-actions {
     gap: .35rem;

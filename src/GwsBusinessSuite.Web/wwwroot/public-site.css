@@ -15,6 +15,14 @@
   --text-1:       #fafaf9;
   --text-2:       #a8a29e;
   --text-3:       #78716c;
+  --neu-surface:  #191715;
+  --neu-raised:   #211e1b;
+  --neu-highlight: rgba(255, 255, 255, .055);
+  --neu-shadow: rgba(0, 0, 0, .52);
+  --neu-inset: rgba(0, 0, 0, .38);
+  --neu-raised-shadow: 8px 8px 18px var(--neu-shadow), -6px -6px 14px var(--neu-highlight);
+  --neu-raised-shadow-sm: 4px 4px 10px var(--neu-shadow), -3px -3px 8px var(--neu-highlight);
+  --neu-inset-shadow: inset 3px 3px 7px var(--neu-inset), inset -2px -2px 5px var(--neu-highlight);
 
   --font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --font-sans:  'Inter', system-ui, -apple-system, sans-serif;
@@ -1915,3 +1923,131 @@ span.footer-group-heading { font-size: 0.8rem; }
 
 .gws-privacy-choices a { color: var(--text-3); }
 .gws-privacy-choices a:hover { color: var(--accent); }
+
+/* ─── Site-wide tactile surface system ──────────────────────
+   The public renderer and admin now share the same depth language. Content remains readable
+   and mostly flat; cards, controls and interactive layers communicate hierarchy through a
+   restrained raised/inset treatment. */
+.site-nav,
+.gws-site-header {
+  background: color-mix(in srgb, var(--neu-surface) 90%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--border) 65%, transparent);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .22);
+}
+
+.site-logo img,
+.gws-site-logo img {
+  border-radius: 11px;
+  box-shadow: var(--neu-raised-shadow-sm);
+}
+
+.nav-admin,
+.site-nav-toggle,
+.gws-nav-menu-toggle {
+  background: var(--neu-raised) !important;
+  border-color: color-mix(in srgb, var(--border) 60%, transparent) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--neu-raised-shadow-sm);
+}
+
+.btn,
+.comment-form-submit,
+.gws-form-submit,
+.pagesize-btn,
+.pagination-btn,
+.gws-tabs-tab,
+.gws-pricing-toggle-btn,
+.gws-portfolio-filter,
+.gws-carousel-arrow,
+.gws-consent-actions button {
+  border-color: color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: calc(var(--radius-sm) + 4px);
+  background: var(--neu-raised);
+  box-shadow: var(--neu-raised-shadow-sm);
+  transition: background .15s ease, border-color .15s ease, box-shadow .15s ease, color .15s ease, transform .15s ease;
+}
+
+.btn-primary,
+.comment-form-submit,
+.gws-form-submit,
+.gws-consent-actions button[data-action="all"] {
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, var(--neu-raised));
+  color: var(--accent);
+}
+
+:is(.btn, .comment-form-submit, .gws-form-submit, .pagesize-btn, .pagination-btn,
+    .gws-tabs-tab, .gws-pricing-toggle-btn, .gws-portfolio-filter, .gws-carousel-arrow,
+    .gws-consent-actions button):active {
+  box-shadow: var(--neu-inset-shadow);
+  transform: translateY(1px);
+}
+
+:is(.article-card, .gws-card, .gws-pricing-card, .gws-testimonial, .gws-accordion-item,
+    .gws-callout, .gws-posts-grid-item, .gws-posts-grid-list-item, .gws-related-posts-item,
+    .gws-toc, .contact-thank-you-card, .gws-consent, .nav-dropdown-menu,
+    .gws-portfolio-lightbox-panel) {
+  border-color: color-mix(in srgb, var(--border) 58%, transparent);
+  border-radius: calc(var(--radius) + 5px);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--neu-raised) 96%, white), var(--neu-raised));
+  box-shadow: var(--neu-raised-shadow);
+}
+
+:is(.article-card, .gws-card, .gws-posts-grid-item, .gws-posts-grid-list-item,
+    .gws-related-posts-item):hover {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  box-shadow: 11px 11px 22px var(--neu-shadow), -7px -7px 17px var(--neu-highlight);
+  transform: translateY(-3px);
+}
+
+.comment-form input,
+.comment-form textarea,
+.gws-form-field input,
+.gws-form-field textarea,
+.gws-form-field select,
+.keyword-cloud,
+.blog-controls {
+  border-color: color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: calc(var(--radius-sm) + 3px);
+  background: var(--neu-surface);
+  box-shadow: var(--neu-inset-shadow);
+}
+
+.site-footer,
+.gws-site-footer {
+  border-top-color: color-mix(in srgb, var(--border) 65%, transparent);
+  background: linear-gradient(180deg, var(--bg), var(--neu-surface));
+  box-shadow: inset 0 8px 20px rgba(0, 0, 0, .18);
+}
+
+:is(a, button, input, textarea, select, summary):focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 4px;
+}
+
+@media (max-width: 767.98px) {
+  :is(.article-card, .gws-card, .gws-pricing-card, .gws-testimonial, .gws-accordion-item,
+      .gws-callout, .gws-posts-grid-item, .gws-posts-grid-list-item, .gws-related-posts-item,
+      .gws-toc, .contact-thank-you-card) {
+    box-shadow: 5px 5px 12px var(--neu-shadow), -4px -4px 10px var(--neu-highlight);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .article-card,
+  .gws-card,
+  .gws-posts-grid-item,
+  .gws-posts-grid-list-item,
+  .gws-related-posts-item { transition: none; }
+}
+
+@media (forced-colors: active) {
+  :is(.article-card, .gws-card, .gws-pricing-card, .gws-testimonial, .gws-accordion-item,
+      .gws-callout, .gws-posts-grid-item, .gws-posts-grid-list-item, .gws-related-posts-item,
+      .gws-toc, .contact-thank-you-card, .gws-consent, .nav-dropdown-menu,
+      .btn, .comment-form-submit, .gws-form-submit) {
+    border: 1px solid CanvasText;
+    box-shadow: none;
+  }
+}
