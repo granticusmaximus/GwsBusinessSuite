@@ -96,8 +96,68 @@ public sealed class AutomationAgentTools(
             SentinelAgentRisk.Change, SharedRoles,
             _ => "Switching an automation off",
             TurnOffAsync,
-            UndoTurnOffAsync)
+            UndoTurnOffAsync),
+        new SentinelAgentTool(
+            "update_automation",
+            "Rename an automation, or change its description or tags (comma-separated). Give only what changes.",
+            SentinelAgentJson.Schema(
+                ("workflowId", "string", "The automation id", true),
+                ("name", "string", "The new name", false),
+                ("description", "string", "The new description", false),
+                ("tags", "string", "The new tags, comma-separated", false)),
+            SentinelAgentRisk.Change, SharedRoles,
+            _ => "Updating an automation",
+            UpdateWorkflowAsync,
+            UndoUpdateWorkflowAsync),
+        new SentinelAgentTool(
+            "delete_automation",
+            "Delete an automation for good, with its run history. Only proposes: the person confirms first.",
+            SentinelAgentJson.Schema(("workflowId", "string", "The automation id", true)),
+            SentinelAgentRisk.Confirm, SharedRoles,
+            _ => "Proposing to delete an automation",
+            DeleteWorkflowAsync,
+            preview: async (args, context, ct) => $"Delete the automation '{(await EditableAsync(args.Id("workflowId"), context, ct)).Name}' and its run history for good")
     ];
+
+    // 05-11-26 (role coverage pass): editing and deleting need Edit on the automation (Admins always).
+    private sealed record MetadataUndo(Guid WorkflowId, string Name, string Description, string TagsCsv);
+
+    private async Task<AutomationWorkflowView> EditableAsync(Guid workflowId, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var workflow = await WorkflowAsync(workflowId, context, ct);
+        if (!context.User.IsAdmin && !await access.HasDirectPermissionAsync(workflowId, isDatabase: false, context.User.Username, SentinelAccessLevels.Edit, ct))
+            throw new SentinelAgentToolException($"{context.User.Username} can see that automation but not change it.");
+        return workflow;
+    }
+
+    private async Task<SentinelAgentToolResult> UpdateWorkflowAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var workflow = await EditableAsync(args.Id("workflowId"), context, ct);
+        var name = args.OptionalText("name")?.Trim() is { Length: > 0 } newName ? newName : workflow.Name;
+        var description = args.OptionalText("description") ?? workflow.Description;
+        var tags = args.OptionalText("tags") ?? workflow.TagsCsv;
+        if (name == workflow.Name && description == workflow.Description && tags == workflow.TagsCsv)
+            return SentinelAgentToolResult.Of(new { unchanged = "Nothing to change: give a new name, description or tags." });
+        await workflows.UpdateMetadataAsync(workflow.Id, name, description, tags, ct);
+        return SentinelAgentToolResult.Of(new { updated = name },
+            new SentinelAgentChange($"Updated the automation '{name}'", "automation", workflow.Id.ToString(), name, $"/admin/automation/{workflow.Id}",
+                SentinelAgentJson.Serialize(new MetadataUndo(workflow.Id, workflow.Name, workflow.Description, workflow.TagsCsv))));
+    }
+
+    private async Task UndoUpdateWorkflowAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var undo = SentinelAgentJson.Deserialize<MetadataUndo>(undoJson);
+        await EditableAsync(undo.WorkflowId, context, ct);
+        await workflows.UpdateMetadataAsync(undo.WorkflowId, undo.Name, undo.Description, undo.TagsCsv, ct);
+    }
+
+    private async Task<SentinelAgentToolResult> DeleteWorkflowAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var workflow = await EditableAsync(args.Id("workflowId"), context, ct);
+        await workflows.DeleteWorkflowAsync(workflow.Id, ct);
+        return SentinelAgentToolResult.Of(new { deleted = workflow.Name },
+            new SentinelAgentChange($"Deleted the automation '{workflow.Name}'", "automation", workflow.Id.ToString(), workflow.Name, "/admin/automation", null));
+    }
 
     public static string LinkTo(Guid workflowId) => $"/admin/automation/{workflowId}";
 

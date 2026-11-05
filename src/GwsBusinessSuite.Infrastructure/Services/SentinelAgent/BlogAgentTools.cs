@@ -113,8 +113,47 @@ public sealed class BlogAgentTools(
             SentinelAgentRisk.Change, CalendarRoles,
             args => $"Moving a {args.OptionalText("kind")} to {args.OptionalText("at")}",
             RescheduleAsync,
-            UndoRescheduleAsync)
+            UndoRescheduleAsync),
+        new SentinelAgentTool(
+            "trash_blog_post",
+            "Move a blog post to the trash; a published post comes off the blog. Only proposes: the person confirms first.",
+            SentinelAgentJson.Schema(("postId", "string", "The post id", true)),
+            SentinelAgentRisk.Confirm, PostRoles,
+            _ => "Proposing to trash a post",
+            TrashPostAsync,
+            UndoTrashPostAsync,
+            async (args, _, ct) =>
+            {
+                var post = await PostAsync(args.Id("postId"), ct);
+                return $"Move the blog post '{post.Title}' to the trash" + (post.Status == ArticleStatuses.Draft ? string.Empty : " (it comes off the blog)");
+            })
     ];
+
+    // 05-11-26 (role coverage pass): trashing a post, and Undo bringing it back.
+    private sealed record TrashPostUndo(Guid PostId);
+
+    private async Task<SentinelAgentToolResult> TrashPostAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var post = await TrackedAsync(args.Id("postId"), ct);
+        post.TrashedAt = clock.GetUtcNow();
+        post.UpdatedAt = clock.GetUtcNow();
+        post.UpdatedBy = context.User.Username;
+        await db.SaveChangesAsync(ct);
+        return SentinelAgentToolResult.Of(new { trashed = post.Title },
+            new SentinelAgentChange($"Moved the blog post '{post.Title}' to the trash", "article", post.Id.ToString(), post.Title, "/admin/posts",
+                SentinelAgentJson.Serialize(new TrashPostUndo(post.Id))));
+    }
+
+    private async Task UndoTrashPostAsync(string undoJson, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var postId = SentinelAgentJson.Deserialize<TrashPostUndo>(undoJson).PostId;
+        var post = await db.Articles.FirstOrDefaultAsync(article => article.Id == postId && article.TrashedAt != null, ct)
+            ?? throw new SentinelAgentToolException("That post isn't in the trash any more.");
+        post.TrashedAt = null;
+        post.UpdatedAt = clock.GetUtcNow();
+        post.UpdatedBy = context.User.Username;
+        await db.SaveChangesAsync(ct);
+    }
 
     public static string LinkTo(Guid postId) => $"/admin/article-editor/{postId}";
 

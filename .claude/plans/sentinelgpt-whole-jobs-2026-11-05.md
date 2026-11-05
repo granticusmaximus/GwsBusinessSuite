@@ -119,8 +119,28 @@ without the app, based on the user's role, and get the entirety of the task comp
          chat's done actions, with arguments in canonical order.
       3. The planner put doubts under "cannot". The field is now `not_possible`, with a narrow
          wording.
-- [ ] 3 Background turns (side-panel turns still live in the circuit; navigation doesn't cancel them)
-- [ ] 4 Coverage matrix and gaps
+- [ ] 3 Background turns. Side-panel turns still live in the circuit. Navigating doesn't cancel them, and if the tab closes, the saved ledger means "carry on" picks the job up.
+- [x] **4 Coverage matrix and gaps, 05-11-26.** Mapped from the registry: 98 tools in 17 areas.
+  Gaps filled, each to its page's roles:
+  - **Comments**, new toolset (ContentAccess): list, set_comment_status with Undo, delete_comment
+    (Confirm).
+  - **Mail**, new toolset (every role, the person's own mailboxes only): list_mail, read_mail,
+    draft_mail (Undo trashes the draft), send_mail (Confirm).
+  - **Insights**, new toolset (Admin, read-only): growth_summary, system_health.
+  - **Support:** create_ticket (Confirm, since the contact may be emailed).
+  - **CRM:** read_deal, and delete_deal (Confirm).
+  - **Blog:** trash_blog_post (Confirm, with Undo).
+  - **Automations:** update_automation (Undo) and delete_automation (Confirm). Both need Edit on
+    the workflow unless you're an Admin.
+  - **Tests:** SentinelAgentCoverageTests (comment moderation + Undo, own-mailbox only + Confirm
+    send, roles per area).
+  - **Still not covered**, each its own product or too risky for an agent:
+    - campaigns and article alerts
+    - social publishing
+    - Content Studio generation (Mac-only)
+    - users and roles
+    - privacy erasure
+    - container restarts
 
 Paused for this: tech-forward-ux T5 (charts/sparklines). `DayRange` plus the three daily-count service
 methods are in place (they build, nothing calls them yet). Next: MissionControl series, Sparkline,

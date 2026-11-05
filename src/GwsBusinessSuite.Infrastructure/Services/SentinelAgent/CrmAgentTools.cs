@@ -126,8 +126,50 @@ public sealed class CrmAgentTools(ICrmService crm, IAppDbContext db) : ISentinel
             SentinelAgentRisk.Change, Roles,
             args => $"Moving a deal to {args.OptionalText("stage")}",
             SetStageAsync,
-            UndoSetStageAsync)
+            UndoSetStageAsync),
+        new SentinelAgentTool(
+            "read_deal",
+            "Read one CRM deal: its contact, stage, value, expected close date and notes.",
+            SentinelAgentJson.Schema(("dealId", "string", "The deal id", true)),
+            SentinelAgentRisk.Read, Roles,
+            _ => "Reading a deal",
+            ReadDealAsync),
+        new SentinelAgentTool(
+            "delete_deal",
+            "Delete a CRM deal for good. Only proposes: the person confirms first.",
+            SentinelAgentJson.Schema(("dealId", "string", "The deal id", true)),
+            SentinelAgentRisk.Confirm, Roles,
+            _ => "Proposing to delete a deal",
+            DeleteDealAsync,
+            preview: async (args, _, ct) =>
+            {
+                var deal = await DealViewAsync(args.Id("dealId"), ct);
+                return $"Delete the deal '{deal.Title}' ({deal.ContactName}, {deal.ValueUsd:C0}) for good";
+            })
     ];
+
+    // 05-11-26 (role coverage pass): one deal, and deleting one.
+    private async Task<SentinelAgentToolResult> ReadDealAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var deal = await DealViewAsync(args.Id("dealId"), ct);
+        return SentinelAgentToolResult.Of(new
+        {
+            id = deal.Id, deal.Title, contact = deal.ContactName, contactId = deal.ContactId, deal.Stage, valueUsd = deal.ValueUsd,
+            expectedClose = deal.ExpectedCloseDate?.ToLocalTime().ToString("dd-MM-yy"), deal.Notes
+        });
+    }
+
+    private async Task<SentinelAgentToolResult> DeleteDealAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var deal = await DealViewAsync(args.Id("dealId"), ct);
+        await crm.DeleteDealAsync(deal.Id, ct);
+        return SentinelAgentToolResult.Of(new { deleted = deal.Title },
+            new SentinelAgentChange($"Deleted the deal '{deal.Title}'", "deal", deal.Id.ToString(), deal.Title, "/admin/crm", null));
+    }
+
+    private async Task<DealView> DealViewAsync(Guid dealId, CancellationToken ct) =>
+        (await crm.ListDealsAsync(ct)).FirstOrDefault(deal => deal.Id == dealId)
+            ?? throw new SentinelAgentToolException($"There's no deal with id {dealId}. Find the deals first.");
 
     public static string LinkTo(Guid contactId) => $"/admin/crm/contacts/{contactId}";
 

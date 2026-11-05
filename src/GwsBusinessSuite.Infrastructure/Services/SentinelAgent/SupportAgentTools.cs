@@ -10,7 +10,7 @@ namespace GwsBusinessSuite.Infrastructure.Services.SentinelAgent;
 // Support page (AdminOnly). Status, priority and assignee go through the list-edit triage, whose
 // snapshot puts a ticket back exactly on Undo, SLA clock included. A reply emails the contact,
 // so it waits for a Confirm.
-public sealed class SupportAgentTools(ISupportTicketService tickets) : ISentinelAgentToolset
+public sealed class SupportAgentTools(ISupportTicketService tickets, GwsBusinessSuite.Application.Crm.ICrmService? crm = null) : ISentinelAgentToolset
 {
     private static readonly string[] Roles = [AppRoles.Admin];
     private const int TicketsShown = 25;
@@ -72,8 +72,32 @@ public sealed class SupportAgentTools(ISupportTicketService tickets) : ISentinel
             {
                 var ticket = await TicketAsync(args.Id("ticketId"), ct);
                 return $"Reply to '{ticket.Subject}' (emails {ticket.ContactName}): {Shorten(args.Text("message"), 300)}";
+            }),
+        new SentinelAgentTool(
+            "create_ticket",
+            "Open a support ticket on a CRM contact's behalf, with its first message. The contact may be emailed about it, so this only proposes: the person confirms first.",
+            SentinelAgentJson.Schema(
+                ("contactId", "string", "The CRM contact's id", true),
+                ("subject", "string", "The ticket's subject", true),
+                ("message", "string", "The ticket's first message", true)),
+            SentinelAgentRisk.Confirm, Roles,
+            _ => "Proposing a new ticket",
+            CreateAsync,
+            preview: async (args, _, ct) =>
+            {
+                var contact = crm is null ? null : await crm.GetContactAsync(args.Id("contactId"), ct);
+                return $"Open the ticket '{args.Text("subject")}' for {contact?.FullName ?? "that contact"}: {Shorten(args.Text("message"), 200)}";
             })
     ];
+
+    // 05-11-26 (role coverage pass): staff open a ticket for a contact, as on the Support page.
+    private async Task<SentinelAgentToolResult> CreateAsync(JsonObject args, SentinelAgentToolContext context, CancellationToken ct)
+    {
+        var ticket = await tickets.CreateTicketAsync(args.Id("contactId"), args.Text("subject"), args.Text("message"),
+            SupportTicketAuthorTypes.Staff, context.User.Username, null, ct);
+        return SentinelAgentToolResult.Of(new { ticket = ticket.Id, subject = ticket.Subject },
+            new SentinelAgentChange($"Opened the ticket '{ticket.Subject}' for {ticket.ContactName}", "ticket", ticket.Id.ToString(), ticket.Subject, LinkTo(ticket.Id), null));
+    }
 
     public static string LinkTo(Guid ticketId) => $"/admin/support?ticket={ticketId}";
 

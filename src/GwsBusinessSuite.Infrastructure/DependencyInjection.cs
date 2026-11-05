@@ -1185,6 +1185,10 @@ public static class DependencyInjection
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.BillingAgentTools>();
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.FormSubmissionAgentTools>();
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.SchedulingAgentTools>();
+        // Role coverage pass (05-11-26): comment moderation, the person's own mailbox, Growth and server health.
+        services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.CommentAgentTools>();
+        services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.MailAgentTools>();
+        services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.InsightsAgentTools>();
         services.AddScoped<IQuickNoteService, QuickNoteService>();
         services.AddScoped<IDailyNoteService, DailyNoteService>();
         services.AddScoped<ISentinelWebClipService, SentinelWebClipService>();
