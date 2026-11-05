@@ -24,7 +24,10 @@ else
 
     private string AccessibleLabel => string.Join(", ", new[] { Label, Value, Detail }.Where(value => !string.IsNullOrWhiteSpace(value)));
 
-    private RenderFragment Body => @<>
+    // A template with no wrapper element is @<text>...</text>. Razor has no <>...</> fragment: it
+    // compiles <> to an element with an empty name, which the browser refuses (createElement("")),
+    // so every page with a tile crashed its circuit - the Mac app's "Reload" on login (01-11..05-11-26).
+    private RenderFragment Body => @<text>
         <div class="gws-kpi-tile-head">
             <span class="gws-kpi-tile-label">@Label</span>
             @if (!string.IsNullOrWhiteSpace(Icon))
@@ -42,5 +45,5 @@ else
         {
             <i class="bi bi-arrow-up-right gws-kpi-tile-arrow" aria-hidden="true"></i>
         }
-    </>;
+    </text>;
 }

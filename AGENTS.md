@@ -85,6 +85,11 @@ Blazor:
   the literal text.
 - `@(expr).Method()` renders `.Method()` as text, because the expression ends at its `)`. Razor
   also reserves `<text>`, so write SVG labels as an encoded `MarkupString`.
+- **No `@<>...</>` fragments.** Razor has none: `<>` compiles to an element with an empty name,
+  and the browser's `createElement("")` kills the circuit ("An unhandled error has occurred.
+  Reload"). That was the Home dashboard straight after login, 01-11 to 05-11-26
+  (`KpiCard`). A template with no wrapper element is `@<text>...</text>`.
+  `RazorTemplateGuardTests` guards it.
 - Scoped CSS: use `::deep` for markup a child component renders. Never use `:global()`.
 - Interactive components can't call `SignInAsync`. Sign-in flows use a static page plus a
   minimal-API endpoint (`Login.razor`, `/auth/login`).

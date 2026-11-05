@@ -101,7 +101,11 @@ public sealed class TouchIdKeyStore(string folder)
         {
             // The key's access control asks for Touch ID on use; the context carries the prompt text
             // (the replacement for the obsolete UseOperationPrompt) and must outlive the signing.
-            using var promptContext = new LAContext { LocalizedReason = reason };
+            using var promptContext = new LAContext
+            {
+                LocalizedReason = reason,
+                TouchIdAuthenticationAllowableReuseDuration = LAContext.TouchIdAuthenticationMaximumAllowableReuseDuration
+            };
             var key = SecKeyChain.QueryAsConcreteType(new SecRecord(SecKind.Key)
             {
                 ApplicationTag = NSData.FromString(KeyTag(info)),
@@ -112,7 +116,13 @@ public sealed class TouchIdKeyStore(string folder)
             var signature = key.CreateSignature(SecKeyAlgorithm.EcdsaSignatureMessageX962Sha256, NSData.FromArray(challenge), out var error);
             return signature is null ? (null, error?.LocalizedDescription ?? "Touch ID was cancelled.") : (signature.ToArray(), null);
         }
-        using var context = new LAContext();
+        // No prompt at all when this Mac was unlocked with Touch ID in the last 5 minutes (Apple's
+        // maximum): opening the app right after unlocking signs straight in (05-11-26). Otherwise
+        // macOS shows its own Touch ID sheet - an app can't verify a fingerprint without it.
+        using var context = new LAContext
+        {
+            TouchIdAuthenticationAllowableReuseDuration = LAContext.TouchIdAuthenticationMaximumAllowableReuseDuration
+        };
         var (ok, laError) = await context.EvaluatePolicyAsync(LAPolicy.DeviceOwnerAuthenticationWithBiometrics, reason);
         if (!ok) return (null, laError?.LocalizedDescription ?? "Touch ID was cancelled.");
 #else
