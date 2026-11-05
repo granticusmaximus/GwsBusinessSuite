@@ -862,6 +862,51 @@ public sealed class SentinelAgentTests
 
     private static string TextReply(string text) => JsonSerializer.Serialize(new { message = new { role = "assistant", content = text } });
 
+    // 05-11-26, background jobs: a turn on the person's Mac carries on with nobody following it, and
+    // one that finishes that way is kept for the bell. One being followed isn't.
+    [Fact]
+    public async Task AMacTurnThatFinishesWithNobodyFollowing_ShouldBeKeptForTheBell_AndAFollowedOneShouldNot()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var clock = new ManualClock();
+        var relay = new SentinelAgentRelay(clock);
+        var turns = new SentinelAgentTurns(harness.Runner, relay, clock, NullLogger<SentinelAgentTurns>.Instance);
+        var told = new List<string>();
+        turns.JobFinishedUnwatched += told.Add;
+        var answerNow = new SemaphoreSlim(0);
+        using var closeApp = new CancellationTokenSource();
+        var mac = Task.Run(async () =>
+        {
+            while (true)
+            {
+                if (await relay.TakeAsync("grant", ["sentinelgpt:latest"], closeApp.Token) is not { } call) continue;
+                await answerNow.WaitAsync(closeApp.Token);
+                relay.Complete("grant", call.Id, TextReply("All done."), null);
+            }
+        });
+        for (var i = 0; i < 200 && relay.ModelsFor("grant").Count == 0; i++) await Task.Delay(10);
+
+        // Started, then the tab closes: nothing polls it while the Mac thinks.
+        var (unwatched, _) = turns.Start(Admin, Guid.NewGuid(), "A long job", null, "On the Home page");
+        clock.Advance(TimeSpan.FromSeconds(30));
+        answerNow.Release();
+        for (var i = 0; i < 300 && told.Count == 0; i++) await Task.Delay(10);
+        told.Should().Equal(["grant"]);
+        turns.FinishedUnwatched("grant").Should().ContainSingle().Which.Should().BeEquivalentTo(new { TurnId = unwatched!.Value, Request = "A long job", Outcome = "All done." });
+        turns.FinishedUnwatched("writer").Should().BeEmpty("a finished job is only its starter's");
+
+        // Followed to the end: no bell.
+        var (followed, _) = turns.Start(Admin, Guid.NewGuid(), "A watched job", null);
+        clock.Advance(TimeSpan.FromSeconds(30));
+        turns.Get(followed!.Value, "grant").Should().NotBeNull();
+        answerNow.Release();
+        for (var i = 0; i < 300 && turns.Get(followed.Value, "grant")?.Status == SentinelAgentTurns.Statuses.Running; i++) await Task.Delay(10);
+        await Task.Delay(50);
+        turns.FinishedUnwatched("grant").Should().ContainSingle("only the unwatched one");
+        closeApp.Cancel();
+        await mac.Invoking(task => task).Should().ThrowAsync<OperationCanceledException>();
+    }
+
     private sealed class ManualClock : TimeProvider
     {
         private DateTimeOffset _now = new(2026, 10, 30, 12, 0, 0, TimeSpan.Zero);

@@ -119,7 +119,17 @@ without the app, based on the user's role, and get the entirety of the task comp
          chat's done actions, with arguments in canonical order.
       3. The planner put doubts under "cannot". The field is now `not_possible`, with a narrow
          wording.
-- [ ] 3 Background turns. Side-panel turns still live in the circuit. Navigating doesn't cancel them, and if the tab closes, the saved ledger means "carry on" picks the job up.
+- [x] **3 Background turns, 05-11-26.** When the panel thinks on the person's Mac through the relay,
+  the turn now runs in `SentinelAgentTurns` on the server (page context passed through), and the
+  panel follows its snapshot every 0.5 s.
+  - Closing the tab cancels only the following. The Stop button stops the job.
+  - Get() marks the turn watched. A turn that finishes 20 s or more after anyone last polled it
+    is kept as a `FinishedJob` (30 min) and raises `JobFinishedUnwatched`. The bell shows it as
+    "SentinelGPT finished", linking to /admin/sentinelgpt/activity.
+  - With a local model (the Mac app's bridge, or a browser Ollama allows), the turn stays in the
+    circuit, because the model is reached through that page's JS. The ledger + "carry on" cover
+    a closed tab there.
+  - Test: SentinelAgentTests (unwatched vs followed).
 - [x] **4 Coverage matrix and gaps, 05-11-26.** Mapped from the registry: 98 tools in 17 areas.
   Gaps filled, each to its page's roles:
   - **Comments**, new toolset (ContentAccess): list, set_comment_status with Undo, delete_comment

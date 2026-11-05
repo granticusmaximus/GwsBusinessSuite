@@ -12,6 +12,7 @@
 @inject GwsBusinessSuite.Infrastructure.Services.OverwatchAreaNotifier OverwatchAreaNotifier
 @inject GwsBusinessSuite.Infrastructure.Services.WorldNewsService WorldNews
 @inject GwsBusinessSuite.Application.Boards.IBoardNotificationService BoardNotifications
+@inject GwsBusinessSuite.Application.SentinelAgent.SentinelAgentTurns AgentTurns
 @inject GwsBusinessSuite.Application.Boards.BoardNotificationNotifier BoardNotifier
 @inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUserAccessor
 @inject INotificationInboxStateService InboxStates
@@ -188,6 +189,7 @@
         "overwatch" => "Overwatch",
         "board" => "Boards",
         "world-news" => "World News",
+        "sentinelgpt" => "SentinelGPT",
         _ => kind
     };
 
@@ -202,7 +204,8 @@
         var overwatchAlerts = await LoadOverwatchAlertsAsync();
         var worldNewsAlerts = WorldNews.Store.Alerts(_currentUsername).Select(ToInboxItem);
         var boardAlerts = await LoadBoardAlertsAsync();
-        _items = dockerAlerts.Concat(socialAlerts).Concat(chatAlerts).Concat(overwatchAlerts).Concat(worldNewsAlerts).Concat(boardAlerts).ToList();
+        var jobAlerts = AgentTurns.FinishedUnwatched(_currentUsername).Select(JobItem);
+        _items = dockerAlerts.Concat(socialAlerts).Concat(chatAlerts).Concat(overwatchAlerts).Concat(worldNewsAlerts).Concat(boardAlerts).Concat(jobAlerts).ToList();
         await LoadStatesAsync();
         Recompute();
 
@@ -215,6 +218,21 @@
         OverwatchAreaNotifier.OnAlert += HandleOverwatchAlert;
         WorldNews.AlertCreated += HandleWorldNewsAlert;
         BoardNotifier.OnNotified += HandleBoardNotified;
+        AgentTurns.JobFinishedUnwatched += HandleJobFinished;
+    }
+
+    // A SentinelGPT job that finished after its tab closed (05-11-26, background jobs).
+    private static InboxItem JobItem(GwsBusinessSuite.Application.SentinelAgent.SentinelAgentTurns.FinishedJob job) =>
+        new("sentinelgpt", job.TurnId, "SentinelGPT finished: " + (job.Request.Length <= 60 ? job.Request : job.Request[..60] + "…"),
+            job.Outcome, false, job.FinishedAt, "/admin/sentinelgpt/activity");
+
+    private void HandleJobFinished(string username)
+    {
+        if (!string.Equals(username, _currentUsername, StringComparison.OrdinalIgnoreCase)) return;
+        _ = InvokeAsync(() =>
+        {
+            foreach (var job in AgentTurns.FinishedUnwatched(username)) AddItem(JobItem(job));
+        });
     }
 
     // Boards K9b: cards assigned to you, due tomorrow or overdue.
@@ -521,6 +539,7 @@
         ChatNotifier.OnMessage -= HandleChatMessage;
         OverwatchAreaNotifier.OnAlert -= HandleOverwatchAlert;
         BoardNotifier.OnNotified -= HandleBoardNotified;
+        AgentTurns.JobFinishedUnwatched -= HandleJobFinished;
         WorldNews.AlertCreated -= HandleWorldNewsAlert;
     }
 }

@@ -9,6 +9,7 @@
 @inject RightPanelState RightPanels
 @inject SentinelAgentRunner AgentRunner
 @inject SentinelAgentRelay AgentRelay
+@inject SentinelAgentTurns AgentTurns
 @inject SentinelGptGenerationCoordinator Coordinator
 @inject AuthenticationStateProvider AuthState
 @inject ICurrentUserAccessor CurrentUserAccessor
@@ -334,23 +335,9 @@
             }
         }
 
-        foreach (var model in AgentRelay.ModelsFor(user.Username))
-        {
-            turn.Activity = $"Thinking on your Mac's {model}…";
-            StateHasChanged();
-            try
-            {
-                await RunTurnAsync(turn, user, context, new RelayedOllamaService(AgentRelay, user.Username), model,
-                    SentinelAgentRunner.LocalRounds, $"Your Mac · {model}", stop);
-                return;
-            }
-            catch (InvalidOperationException ex) when (!stop.IsCancellationRequested && turn.Actions.Count == 0)
-            {
-                if (SentinelAgentModels.IsNoToolsError(ex)) continue;
-                turn.Steps.Clear();
-                break;
-            }
-        }
+        // Through this person's Mac (05-11-26): the job runs on the server (SentinelAgentTurns) and the
+        // panel follows it, so it carries on if this tab closes, and the bell says when it's done.
+        if (AgentRelay.ModelsFor(user.Username).Count > 0 && await FollowMacTurnAsync(turn, user, context, stop)) return;
 
         await AskServerAsync(turn, context, stop);
         turn.AnswersOnlyNote = !_answersOnlyNoted;
@@ -419,6 +406,62 @@
         turn.Answer = result.Answer;
         turn.Source = source;
         RefreshIfShowing(result.Actions);
+    }
+
+    private static readonly TimeSpan FollowEvery = TimeSpan.FromMilliseconds(500);
+    private Guid? _macTurnId;
+
+    // Starts the turn on the server and follows its snapshot. False when the Mac can't take it (no
+    // model there uses tools), so the server's SentinelGPT answers instead.
+    private async Task<bool> FollowMacTurnAsync(Turn turn, SentinelAgentUser user, string context, CancellationToken stop)
+    {
+        var (id, _) = AgentTurns.Start(user, _conversationId, turn.Question, null, context);
+        if (id is not { } turnId) return false;
+        _macTurnId = turnId;
+        _username ??= user.Username;
+        turn.Activity = "Thinking on your Mac…";
+        StateHasChanged();
+        try
+        {
+            while (true)
+            {
+                if (AgentTurns.Get(turnId, user.Username) is not { } snapshot) return false;
+                Follow(turn, snapshot);
+                if (snapshot.Status == SentinelAgentTurns.Statuses.Done)
+                {
+                    turn.Answer = snapshot.Answer ?? string.Empty;
+                    turn.Source = $"Your Mac · {snapshot.Model}";
+                    RefreshIfShowing(snapshot.Actions);
+                    return true;
+                }
+                if (snapshot.Status == SentinelAgentTurns.Statuses.Failed)
+                {
+                    if (turn.Actions.Count == 0 && snapshot.Error is { } error && error.Contains("can use tools", StringComparison.Ordinal))
+                    {
+                        turn.Steps.Clear();
+                        return false;
+                    }
+                    throw new InvalidOperationException(snapshot.Error ?? "SentinelGPT stopped.");
+                }
+                _scrollToEnd = true;
+                StateHasChanged();
+                // Closing the tab cancels this wait, not the job: only Stop stops it (Stop()).
+                await Task.Delay(FollowEvery, stop);
+            }
+        }
+        finally
+        {
+            _macTurnId = null;
+        }
+    }
+
+    private static void Follow(Turn turn, SentinelAgentTurns.Snapshot snapshot)
+    {
+        turn.Steps.Clear();
+        turn.Steps.AddRange(snapshot.Steps);
+        turn.Actions.RemoveAll(action => snapshot.Actions.All(current => current.Id != action.Id));
+        foreach (var action in snapshot.Actions) turn.Upsert(action);
+        if (snapshot.Steps.Count > 0) turn.Activity = snapshot.Steps[^1] + "…";
     }
 
     private async Task<IReadOnlyList<string>> LocalCandidatesAsync(CancellationToken stop)
@@ -538,6 +581,8 @@
 
     private void Stop()
     {
+        // The Stop button stops a job on the Mac too; closing the tab (DisposeAsync) leaves it running.
+        if (_macTurnId is { } macTurn && _username is not null) AgentTurns.Stop(macTurn, _username);
         _stop?.Cancel();
         if (_generationId is { } id && _username is not null) Coordinator.Cancel(id, _username);
     }
