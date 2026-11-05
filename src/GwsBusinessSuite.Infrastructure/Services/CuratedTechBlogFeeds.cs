@@ -11,7 +11,7 @@ public static class CuratedTechBlogFeeds
         ("GitHub Engineering", "http://githubengineering.com/atom.xml"),
         ("Stripe Blog", "https://stripe.com/blog/feed.rss"),
         ("The Cloudflare Blog", "https://blog.cloudflare.com/rss/"),
-        ("Uber Engineering Blog", "https://eng.uber.com/feed/"),
+        // Uber Engineering Blog taken out 05-11-26: eng.uber.com/feed is gone (404) and its new blog answers 406.
         ("Dropbox Tech", "https://dropbox.tech/feed"),
         ("Shopify Engineering", "https://shopifyengineering.myshopify.com/blogs/engineering.atom"),
         ("Slack Engineering", "https://slack.engineering/feed"),

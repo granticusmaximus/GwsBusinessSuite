@@ -59,7 +59,7 @@ public sealed partial class NewsWatchService(
     public async Task<IReadOnlyDictionary<Guid, int>> GetUnreadCountsAsync(string username, CancellationToken ct = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var retention = await db.NewsWatchSettings.AsNoTracking().Select(x => (int?)x.RetentionHours).FirstOrDefaultAsync(ct) ?? NewsRetention.DefaultHours;
+        var retention = await db.NewsWatchSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).Select(x => (int?)x.RetentionHours).FirstOrDefaultAsync(ct) ?? NewsRetention.DefaultHours;
         var cutoff = timeProvider.GetUtcNow().AddHours(-retention).ToUnixTimeSeconds();
         var items = await db.NewsItems.AsNoTracking().Where(n => n.FetchedAtUnixSeconds >= cutoff)
             .Select(n => new { n.TopicId, n.Url }).ToListAsync(ct);

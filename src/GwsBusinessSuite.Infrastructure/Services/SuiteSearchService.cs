@@ -83,7 +83,7 @@ public sealed class SuiteSearchService(
         if (parsed.Wants(SuiteSearchCategories.CrmContact))
         {
             var contacts = await db.Contacts.AsNoTracking().Where(item => item.TrashedAt == null)
-                .Take(ModuleScanLimit).Select(item => new { item.Id, item.FullName, item.Company, item.CreatedAt }).ToListAsync(cancellationToken);
+                .OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit).Select(item => new { item.Id, item.FullName, item.Company, item.CreatedAt }).ToListAsync(cancellationToken);
             results.AddRange(Newest(contacts.Where(item => Matches(text, item.FullName, item.Company)), item => item.CreatedAt, text).Take(perCategory)
                 .Select(item => new SuiteSearchResult(item.FullName, item.Company ?? "CRM contact", SuiteSearchCategories.CrmContact, $"/admin/crm/contacts/{item.Id}", "bi bi-person-lines-fill")));
         }
@@ -91,7 +91,7 @@ public sealed class SuiteSearchService(
         if (parsed.Wants(SuiteSearchCategories.CrmDeal))
         {
             var deals = await db.Deals.AsNoTracking()
-                .Take(ModuleScanLimit).Select(item => new { item.Title, item.Stage, item.CreatedAt }).ToListAsync(cancellationToken);
+                .OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit).Select(item => new { item.Title, item.Stage, item.CreatedAt }).ToListAsync(cancellationToken);
             results.AddRange(Newest(deals.Where(item => Matches(text, item.Title, item.Stage)), item => item.CreatedAt, text).Take(perCategory)
                 .Select(item => new SuiteSearchResult(item.Title, $"Stage: {item.Stage}", SuiteSearchCategories.CrmDeal, "/admin/crm", "bi bi-graph-up-arrow")));
         }
@@ -99,7 +99,7 @@ public sealed class SuiteSearchService(
         if (parsed.Wants(SuiteSearchCategories.Automation))
         {
             var workflows = await db.AutomationWorkflows.AsNoTracking()
-                .Take(ModuleScanLimit).Select(item => new { item.Id, item.Name, item.Description, item.Status, item.CreatedAt }).ToListAsync(cancellationToken);
+                .OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit).Select(item => new { item.Id, item.Name, item.Description, item.Status, item.CreatedAt }).ToListAsync(cancellationToken);
             results.AddRange(Newest(workflows.Where(item => Matches(text, item.Name, item.Description)), item => item.CreatedAt, text).Take(perCategory)
                 .Select(item => new SuiteSearchResult(item.Name, $"{item.Status} workflow", SuiteSearchCategories.Automation, $"/admin/automation/{item.Id}", "bi bi-diagram-3-fill")));
         }
@@ -107,7 +107,7 @@ public sealed class SuiteSearchService(
         if (parsed.Wants(SuiteSearchCategories.CmsPage))
         {
             var pages = await db.CmsPages.AsNoTracking().Where(item => item.TrashedAt == null)
-                .Take(ModuleScanLimit).Select(item => new { item.Id, item.Title, item.Slug, item.CreatedAt }).ToListAsync(cancellationToken);
+                .OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit).Select(item => new { item.Id, item.Title, item.Slug, item.CreatedAt }).ToListAsync(cancellationToken);
             results.AddRange(Newest(pages.Where(item => Matches(text, item.Title, item.Slug)), item => item.CreatedAt, text).Take(perCategory)
                 .Select(item => new SuiteSearchResult(item.Title, $"/{item.Slug}", SuiteSearchCategories.CmsPage, $"/admin/pages/edit/{item.Id}", "bi bi-file-earmark-richtext")));
         }
@@ -115,7 +115,7 @@ public sealed class SuiteSearchService(
         if (parsed.Wants(SuiteSearchCategories.Article))
         {
             var articles = await db.Articles.AsNoTracking().Where(item => item.TrashedAt == null)
-                .Take(ModuleScanLimit).Select(item => new { item.Id, item.Title, item.Topic, item.CreatedAt }).ToListAsync(cancellationToken);
+                .OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit).Select(item => new { item.Id, item.Title, item.Topic, item.CreatedAt }).ToListAsync(cancellationToken);
             results.AddRange(Newest(articles.Where(item => Matches(text, item.Title, item.Topic)), item => item.CreatedAt, text).Take(perCategory)
                 .Select(item => new SuiteSearchResult(item.Title, item.Topic ?? "Article", SuiteSearchCategories.Article, $"/admin/article-editor/{item.Id}", "bi bi-newspaper")));
         }
@@ -123,7 +123,7 @@ public sealed class SuiteSearchService(
         if (parsed.Wants(SuiteSearchCategories.AffiliateOffer))
         {
             var offers = await db.AffiliateOffers.AsNoTracking()
-                .Take(ModuleScanLimit).Select(item => new { item.LinkName, item.AdvertiserName }).ToListAsync(cancellationToken);
+                .OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit).Select(item => new { item.LinkName, item.AdvertiserName }).ToListAsync(cancellationToken);
             results.AddRange(offers.Where(item => Matches(text, item.LinkName, item.AdvertiserName)).Take(perCategory)
                 .Select(item => new SuiteSearchResult(item.LinkName, item.AdvertiserName, SuiteSearchCategories.AffiliateOffer, "/admin/cj-ads", "bi bi-link-45deg")));
         }
@@ -134,7 +134,7 @@ public sealed class SuiteSearchService(
         if (parsed.Wants(SuiteSearchCategories.SupportTicket))
         {
             var tickets = await db.SupportTickets.AsNoTracking()
-                .Take(ModuleScanLimit).Select(item => new { item.Id, item.Subject, item.Status, item.CreatedAt }).ToListAsync(cancellationToken);
+                .OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit).Select(item => new { item.Id, item.Subject, item.Status, item.CreatedAt }).ToListAsync(cancellationToken);
             results.AddRange(Newest(tickets.Where(item => Matches(text, item.Subject)), item => item.CreatedAt, text).Take(perCategory)
                 .Select(item => new SuiteSearchResult(item.Subject, $"{item.Status} ticket", SuiteSearchCategories.SupportTicket, $"/admin/support?ticket={item.Id}", "bi bi-life-preserver")));
         }
@@ -142,7 +142,7 @@ public sealed class SuiteSearchService(
         if (parsed.Wants(SuiteSearchCategories.BillingInvoice))
         {
             var invoices = await db.Invoices.AsNoTracking()
-                .Take(ModuleScanLimit).Select(item => new { item.Id, item.Title, item.Status, item.CreatedAt }).ToListAsync(cancellationToken);
+                .OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit).Select(item => new { item.Id, item.Title, item.Status, item.CreatedAt }).ToListAsync(cancellationToken);
             results.AddRange(Newest(invoices.Where(item => Matches(text, item.Title)), item => item.CreatedAt, text).Take(perCategory)
                 .Select(item => new SuiteSearchResult(item.Title, $"{item.Status} invoice", SuiteSearchCategories.BillingInvoice, $"/admin/billing?invoice={item.Id}", "bi bi-receipt")));
         }
@@ -168,7 +168,7 @@ public sealed class SuiteSearchService(
         HashSet<Guid>? contactIds = null;
         if (request.Kind is "tickets" or "invoices" or "deals")
         {
-            names = (await db.Contacts.AsNoTracking().Take(ModuleScanLimit).Select(item => new { item.Id, item.FullName }).ToListAsync(cancellationToken))
+            names = (await db.Contacts.AsNoTracking().OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit).Select(item => new { item.Id, item.FullName }).ToListAsync(cancellationToken))
                 .ToDictionary(item => item.Id, item => item.FullName);
             if (request.Contact is { Length: > 0 } contactName)
             {
@@ -181,42 +181,42 @@ public sealed class SuiteSearchService(
 
         IEnumerable<SuiteSearchResult> results = request.Kind switch
         {
-            "contacts" => (await db.Contacts.AsNoTracking().Where(item => item.TrashedAt == null).Take(ModuleScanLimit)
+            "contacts" => (await db.Contacts.AsNoTracking().Where(item => item.TrashedAt == null).OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit)
                     .Select(item => new { item.Id, item.FullName, item.Company, item.Email, item.Status, item.FollowUpDate, item.CreatedAt }).ToListAsync(cancellationToken))
                 .Where(item => Matches(request.Text, item.FullName, item.Company, item.Email) && StatusIs(item.Status) && Recent(item.CreatedAt)
                     && (!request.OverdueOnly || item.FollowUpDate is { } due && due <= now))
                 .OrderByDescending(item => item.CreatedAt)
                 .Select(item => new SuiteSearchResult(item.FullName, $"{item.Status}{(item.Company is { Length: > 0 } company ? $" · {company}" : string.Empty)}",
                     SuiteSearchCategories.CrmContact, $"/admin/crm/contacts/{item.Id}", "bi bi-person-lines-fill")),
-            "deals" => (await db.Deals.AsNoTracking().Take(ModuleScanLimit)
+            "deals" => (await db.Deals.AsNoTracking().OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit)
                     .Select(item => new { item.Title, item.Stage, item.ContactId, item.CreatedAt }).ToListAsync(cancellationToken))
                 .Where(item => Matches(request.Text, item.Title, NameOf(item.ContactId)) && StatusIs(item.Stage) && Recent(item.CreatedAt) && Belongs(item.ContactId))
                 .OrderByDescending(item => item.CreatedAt)
                 .Select(item => new SuiteSearchResult(item.Title, $"Stage: {item.Stage}", SuiteSearchCategories.CrmDeal, "/admin/crm", "bi bi-graph-up-arrow")),
-            "tickets" => (await db.SupportTickets.AsNoTracking().Take(ModuleScanLimit)
+            "tickets" => (await db.SupportTickets.AsNoTracking().OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit)
                     .Select(item => new { item.Id, item.Subject, item.Status, item.Priority, item.ContactId, item.ResolutionDueAt, item.CreatedAt }).ToListAsync(cancellationToken))
                 .Where(item => Matches(request.Text, item.Subject, NameOf(item.ContactId)) && StatusIs(item.Status) && Recent(item.CreatedAt) && Belongs(item.ContactId)
                     && (request.Priority is null || string.Equals(item.Priority, request.Priority, StringComparison.OrdinalIgnoreCase))
                     && (!request.OverdueOnly || item.Status is "Open" or "Pending" && item.ResolutionDueAt is { } due && due < now))
                 .OrderByDescending(item => item.CreatedAt)
                 .Select(item => new SuiteSearchResult(item.Subject, $"{item.Status} · {item.Priority}", SuiteSearchCategories.SupportTicket, $"/admin/support?ticket={item.Id}", "bi bi-life-preserver")),
-            "invoices" => (await db.Invoices.AsNoTracking().Take(ModuleScanLimit)
+            "invoices" => (await db.Invoices.AsNoTracking().OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit)
                     .Select(item => new { item.Id, item.Title, item.Status, item.ContactId, item.DueDate, item.CreatedAt }).ToListAsync(cancellationToken))
                 .Where(item => Matches(request.Text, item.Title, NameOf(item.ContactId)) && StatusIs(item.Status) && Recent(item.CreatedAt) && Belongs(item.ContactId)
                     && (!request.OverdueOnly || item.Status == "Sent" && item.DueDate is { } due && due < now))
                 .OrderByDescending(item => item.CreatedAt)
                 .Select(item => new SuiteSearchResult(item.Title, $"{item.Status} invoice", SuiteSearchCategories.BillingInvoice, $"/admin/billing?invoice={item.Id}", "bi bi-receipt")),
-            "posts" => (await db.Articles.AsNoTracking().Where(item => item.TrashedAt == null).Take(ModuleScanLimit)
+            "posts" => (await db.Articles.AsNoTracking().Where(item => item.TrashedAt == null).OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit)
                     .Select(item => new { item.Id, item.Title, item.Topic, item.Status, item.CreatedAt }).ToListAsync(cancellationToken))
                 .Where(item => Matches(request.Text, item.Title, item.Topic) && StatusIs(item.Status) && Recent(item.CreatedAt))
                 .OrderByDescending(item => item.CreatedAt)
                 .Select(item => new SuiteSearchResult(item.Title, $"{item.Status} post", SuiteSearchCategories.Article, $"/admin/article-editor/{item.Id}", "bi bi-newspaper")),
-            "pages" => (await db.CmsPages.AsNoTracking().Where(item => item.TrashedAt == null).Take(ModuleScanLimit)
+            "pages" => (await db.CmsPages.AsNoTracking().Where(item => item.TrashedAt == null).OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit)
                     .Select(item => new { item.Id, item.Title, item.Slug, item.Status, item.CreatedAt }).ToListAsync(cancellationToken))
                 .Where(item => Matches(request.Text, item.Title, item.Slug) && StatusIs(item.Status) && Recent(item.CreatedAt))
                 .OrderByDescending(item => item.CreatedAt)
                 .Select(item => new SuiteSearchResult(item.Title, $"{item.Status} · /{item.Slug}", SuiteSearchCategories.CmsPage, $"/admin/pages/edit/{item.Id}", "bi bi-file-earmark-richtext")),
-            "workflows" => (await db.AutomationWorkflows.AsNoTracking().Take(ModuleScanLimit)
+            "workflows" => (await db.AutomationWorkflows.AsNoTracking().OrderBy(scanRow => scanRow.Id).Take(ModuleScanLimit)
                     .Select(item => new { item.Id, item.Name, item.Description, item.Status, item.CreatedAt }).ToListAsync(cancellationToken))
                 .Where(item => Matches(request.Text, item.Name, item.Description) && StatusIs(item.Status) && Recent(item.CreatedAt))
                 .OrderByDescending(item => item.CreatedAt)

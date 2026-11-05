@@ -481,7 +481,7 @@ public sealed class ArticleAlertService(
 
         var pending = await db.ArticleAnnouncementDeliveries
             .Where(d => d.AnnouncementId == announcement.Id && !d.Succeeded && d.Attempts < MaxAttempts)
-            .Take(budget)
+            .OrderBy(scanRow => scanRow.Id).Take(budget)
             .ToListAsync(cancellationToken);
         if (pending.Count == 0)
         {
@@ -562,7 +562,7 @@ public sealed class ArticleAlertService(
 
         var pending = await db.ArticleAnnouncementDeliveries
             .Where(d => d.AnnouncementId == lead.Id && !d.Succeeded && d.Attempts < MaxAttempts)
-            .Take(budget)
+            .OrderBy(scanRow => scanRow.Id).Take(budget)
             .ToListAsync(cancellationToken);
         var articles = members
             .Select(m => liveArticles.FirstOrDefault(l => l.Id == m.ArticleId))

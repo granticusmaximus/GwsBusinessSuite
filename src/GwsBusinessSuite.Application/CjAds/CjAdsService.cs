@@ -886,7 +886,7 @@ public sealed class CjAdsService(
     {
         var row = await db.CjConnectorSettings
             .AsNoTracking()
-            .FirstOrDefaultAsync(cancellationToken);
+            .OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
 
         if (row is null)
         {
@@ -910,7 +910,7 @@ public sealed class CjAdsService(
     public async Task SaveConnectorSettingsAsync(CjConnectorSettingsView settings, CancellationToken cancellationToken = default)
     {
         var row = await db.CjConnectorSettings
-            .FirstOrDefaultAsync(cancellationToken);
+            .OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
 
         if (row is null)
         {

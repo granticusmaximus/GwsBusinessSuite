@@ -49,13 +49,13 @@ public sealed class DeveloperApiSentinelReadService(
                 && (EF.Functions.Like(contact.FullName, $"%{term}%")
                     || EF.Functions.Like(contact.Email ?? string.Empty, $"%{term}%")
                     || EF.Functions.Like(contact.Company ?? string.Empty, $"%{term}%")))
-            .Take(MaxCrmResults)
+            .OrderBy(scanRow => scanRow.Id).Take(MaxCrmResults)
             .ToListAsync(cancellationToken);
 
         var deals = await db.Deals.AsNoTracking()
             .Where(deal => EF.Functions.Like(deal.Title, $"%{term}%")
                 || EF.Functions.Like(deal.Notes, $"%{term}%"))
-            .Take(MaxCrmResults)
+            .OrderBy(scanRow => scanRow.Id).Take(MaxCrmResults)
             .ToListAsync(cancellationToken);
 
         // A second round trip rather than a join, purely for simplicity over this capped result
@@ -117,7 +117,7 @@ public sealed class DeveloperApiSentinelReadService(
                 && (EF.Functions.Like(page.Title, $"%{term}%")
                     || EF.Functions.Like(page.Slug, $"%{term}%")
                     || EF.Functions.Like(page.MetaDescription, $"%{term}%")))
-            .Take(MaxCrmResults)
+            .OrderBy(scanRow => scanRow.Id).Take(MaxCrmResults)
             .ToListAsync(cancellationToken);
 
         // PublishedAt is a DateTimeOffset - ordered here, after materializing, for the same
@@ -139,7 +139,7 @@ public sealed class DeveloperApiSentinelReadService(
 
         var alerts = await db.DockerHealthAlerts.AsNoTracking()
             .Where(alert => !alert.IsRead)
-            .Take(MaxAlertScan)
+            .OrderBy(scanRow => scanRow.Id).Take(MaxAlertScan)
             .ToListAsync(cancellationToken);
 
         return new(

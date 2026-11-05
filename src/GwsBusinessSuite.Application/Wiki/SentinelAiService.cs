@@ -1896,7 +1896,7 @@ public sealed class SentinelAiService(
             .Where(run => run.Status == SentinelAiRunStatuses.Approved
                 && run.Action != SentinelAiActions.ModelManagement
                 && (run.ReviewedBy == performedBy || run.CreatedBy == "sentinel-learning-workflow"))
-            .Take(500)
+            .OrderBy(scanRow => scanRow.Id).Take(500)
             .Select(run => new { run.Instruction, run.Output, run.ReviewedAt, run.CreatedAt })
             .ToListAsync(cancellationToken);
         // Score > 0 is required unconditionally now (the Teacher Panel workflow can auto-fire

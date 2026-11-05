@@ -19,6 +19,8 @@ public static partial class OutletFeeds
 {
     // Every feed answered with stories on 21-10-26. Left out after that check: Euronews French
     // and German (HTTP 406), CBC (no answer), El Mundo (timed out), Folha (no items).
+    // Taken out 05-11-26: France 24 (all four languages) and The Times of Israel answer the
+    // server 403 Access Denied, so their refusal page was being parsed as RSS on every read.
     public static readonly IReadOnlyList<NewsOutlet> Outlets =
     [
         new("Al Jazeera", "English", "Qatar", "https://www.aljazeera.com/xml/rss/all.xml"),
@@ -26,7 +28,6 @@ public static partial class OutletFeeds
         new("The Guardian", "English", "United Kingdom", "https://www.theguardian.com/world/rss"),
         new("NPR", "English", "United States", "https://feeds.npr.org/1004/rss.xml"),
         new("DW", "English", "Germany", "https://rss.dw.com/rdf/rss-en-all"),
-        new("France 24", "English", "France", "https://www.france24.com/en/rss"),
         new("RFI", "English", "France", "https://www.rfi.fr/en/rss"),
         new("Euronews", "English", "France", "https://www.euronews.com/rss"),
         new("Yonhap", "English", "South Korea", "https://en.yna.co.kr/RSS/news.xml"),
@@ -42,18 +43,14 @@ public static partial class OutletFeeds
         new("Daily Maverick", "English", "South Africa", "https://www.dailymaverick.co.za/dmrss/"),
         new("Premium Times", "English", "Nigeria", "https://www.premiumtimesng.com/feed"),
         new("The Kyiv Independent", "English", "Ukraine", "https://kyivindependent.com/news-archive/rss/"),
-        new("The Times of Israel", "English", "Israel", "https://www.timesofisrael.com/feed/"),
         new("Anadolu Agency", "English", "Turkey", "https://www.aa.com.tr/en/rss/default?cat=guncel"),
         new("Hürriyet Daily News", "English", "Turkey", "https://www.hurriyetdailynews.com/rss/world"),
         new("TASS", "English", "Russia", "https://tass.com/rss/v2.xml"),
         new("Al Jazeera Arabic", "Arabic", "Qatar", "https://www.aljazeera.net/aljazeerarss/a7c186be-1baa-4bd4-9d80-a84db769f779/73d0e1b4-532f-45ef-b135-bfdff8b8cab9"),
-        new("France 24", "Arabic", "France", "https://www.france24.com/ar/rss"),
         new("BBC Arabic", "Arabic", "United Kingdom", "https://feeds.bbci.co.uk/arabic/rss.xml"),
-        new("France 24", "French", "France", "https://www.france24.com/fr/rss"),
         new("RFI", "French", "France", "https://www.rfi.fr/fr/rss"),
         new("Le Monde", "French", "France", "https://www.lemonde.fr/international/rss_full.xml"),
         new("Le Figaro", "French", "France", "https://www.lefigaro.fr/rss/figaro_international.xml"),
-        new("France 24", "Spanish", "France", "https://www.france24.com/es/rss"),
         new("DW", "Spanish", "Germany", "https://rss.dw.com/rdf/rss-sp-all"),
         new("BBC Mundo", "Spanish", "United Kingdom", "https://feeds.bbci.co.uk/mundo/rss.xml"),
         new("El País", "Spanish", "Spain", "https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/section/internacional/portada"),

@@ -83,11 +83,11 @@ public sealed class SentinelWorkspaceService(
                     || row.BlocksJson.ToLower().Contains(loweredTerm)));
         }
 
-        var pages = await pageQuery.Take(MaxSearchCandidatesPerType).ToListAsync(cancellationToken);
+        var pages = await pageQuery.OrderBy(scanRow => scanRow.Id).Take(MaxSearchCandidatesPerType).ToListAsync(cancellationToken);
         var databases = await databaseQuery
             .Include(database => database.Properties)
             .Include(database => database.Rows)
-            .Take(MaxSearchCandidatesPerType)
+            .OrderBy(scanRow => scanRow.Id).Take(MaxSearchCandidatesPerType)
             .ToListAsync(cancellationToken);
         var accessibleTargets = await GetAccessibleTargetsAsync(
             pages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false))
@@ -168,7 +168,7 @@ public sealed class SentinelWorkspaceService(
             var loweredTerm = term.ToLower();
             commentQuery = commentQuery.Where(comment => comment.Body.ToLower().Contains(loweredTerm));
         }
-        var comments = await commentQuery.Take(MaxSearchCandidatesPerType).ToListAsync(cancellationToken);
+        var comments = await commentQuery.OrderBy(scanRow => scanRow.Id).Take(MaxSearchCandidatesPerType).ToListAsync(cancellationToken);
         if (comments.Count > 0)
         {
             var discussionIds = comments.Select(comment => comment.SentinelDiscussionId).Distinct().ToList();
@@ -216,7 +216,7 @@ public sealed class SentinelWorkspaceService(
             aiRunQuery = aiRunQuery.Where(run =>
                 run.Instruction.ToLower().Contains(loweredTerm) || run.Output.ToLower().Contains(loweredTerm));
         }
-        var aiRuns = await aiRunQuery.Take(MaxSearchCandidatesPerType).ToListAsync(cancellationToken);
+        var aiRuns = await aiRunQuery.OrderBy(scanRow => scanRow.Id).Take(MaxSearchCandidatesPerType).ToListAsync(cancellationToken);
         if (aiRuns.Count > 0)
         {
             var aiRunPageIds = aiRuns.Select(run => run.WikiPageId!.Value).Distinct().ToList();
@@ -376,7 +376,7 @@ public sealed class SentinelWorkspaceService(
         // Legacy Markdown blocks link by name: the title or any of the page's aliases.
         var legacyLinks = WikiPageAliases.Parse(target.Aliases).Prepend(target.Title).Select(name => $"[[{name}]]").ToList();
         var backlinks = new List<SentinelBacklink>();
-        var pages = await dbContext.WikiPages.AsNoTracking().Take(MaxScanPages).ToListAsync(cancellationToken);
+        var pages = await dbContext.WikiPages.AsNoTracking().OrderBy(scanRow => scanRow.Id).Take(MaxScanPages).ToListAsync(cancellationToken);
         var accessibleTargets = await GetAccessibleTargetsAsync(
             pages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false)),
             username,
@@ -499,7 +499,7 @@ public sealed class SentinelWorkspaceService(
         // written inside another row's page body is not, matching that existing limitation
         // rather than quietly having two different backlink scan depths in the same app.
         var expectedLink = $"rowmention:{wikiDatabaseId}:{rowId}";
-        var pages = await dbContext.WikiPages.AsNoTracking().Take(MaxScanPages).ToListAsync(cancellationToken);
+        var pages = await dbContext.WikiPages.AsNoTracking().OrderBy(scanRow => scanRow.Id).Take(MaxScanPages).ToListAsync(cancellationToken);
         var accessibleTargets = await GetAccessibleTargetsAsync(
             pages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false)),
             username,
@@ -798,7 +798,7 @@ public sealed class SentinelWorkspaceService(
     {
         var expectedLink = $"usermention:{NormalizeUsername(username)}";
         var pages = await dbContext.WikiPages.AsNoTracking()
-            .Take(MaxScanPages)
+            .OrderBy(scanRow => scanRow.Id).Take(MaxScanPages)
             .ToListAsync(cancellationToken);
         var accessibleTargets = await GetAccessibleTargetsAsync(
             pages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false)),
@@ -831,7 +831,7 @@ public sealed class SentinelWorkspaceService(
         // Open to-dos that mention this user - same bounded, access-filtered page scan as GetMentionsAsync.
         var pages = await dbContext.WikiPages.AsNoTracking()
             .Where(page => page.TrashedAt == null)
-            .Take(MaxScanPages)
+            .OrderBy(scanRow => scanRow.Id).Take(MaxScanPages)
             .ToListAsync(cancellationToken);
         var accessiblePages = await GetAccessibleTargetsAsync(
             pages.Select(page => new SentinelAccessTarget(page.Id, IsDatabase: false)),
@@ -857,7 +857,7 @@ public sealed class SentinelWorkspaceService(
             .Where(database => database.TrashedAt == null)
             .Include(database => database.Properties)
             .Include(database => database.Rows)
-            .Take(MaxScanPages)
+            .OrderBy(scanRow => scanRow.Id).Take(MaxScanPages)
             .ToListAsync(cancellationToken);
         var accessibleDatabases = await GetAccessibleTargetsAsync(
             databases.Select(database => new SentinelAccessTarget(database.Id, IsDatabase: true)),

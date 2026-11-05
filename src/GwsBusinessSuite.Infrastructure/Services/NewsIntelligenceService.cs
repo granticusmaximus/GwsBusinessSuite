@@ -83,7 +83,7 @@ public sealed class NewsIntelligenceService(
 
     // How long fetched articles stay (Media Watch settings; 24 hours until changed).
     private static async Task<int> RetentionHoursAsync(IAppDbContext db, CancellationToken ct) =>
-        await db.NewsWatchSettings.AsNoTracking().Select(x => (int?)x.RetentionHours).FirstOrDefaultAsync(ct) ?? NewsRetention.DefaultHours;
+        await db.NewsWatchSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).Select(x => (int?)x.RetentionHours).FirstOrDefaultAsync(ct) ?? NewsRetention.DefaultHours;
 
     public async Task<IReadOnlyList<WatchedTopicSummary>> ListTopicsAsync(CancellationToken ct = default)
     {

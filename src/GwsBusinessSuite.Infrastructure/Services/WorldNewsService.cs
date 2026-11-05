@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 namespace GwsBusinessSuite.Infrastructure.Services;
 
 // World News (Intelligence workspace, .claude/plans/world-news-situations-macos-2026-10.md):
-// WorldNewsKit's pipeline on the server. 41 Google News country editions and 64 outlets' own
+// WorldNewsKit's pipeline on the server. 41 Google News country editions and 59 outlets' own
 // feeds are read every 15 minutes and grouped into events across languages with embeddinggemma
 // on the server's Ollama. embeddinggemma is in ollama/server-models.txt, and Light mode allows
 // it, since it's embeddings, not generation. After each read the busiest events get an English
@@ -38,6 +38,8 @@ public sealed class WorldNewsService : IDisposable
     private readonly ILogger<WorldNewsService> _logger;
     private readonly WorldNewsOptions _options;
     private readonly WorldNewsMapCache? _mapCache;
+    // ServerAi None: no Ollama on this server, so anything to embed waits for the Mac's relay.
+    private readonly bool _serverHasNoModel;
 
     public WorldNewsService(IConfiguration configuration, IOptions<ContentStudioOptions> ollamaOptions,
         IHttpClientFactory httpClientFactory, IServiceScopeFactory scopes, ILogger<WorldNewsService> logger,
@@ -45,6 +47,7 @@ public sealed class WorldNewsService : IDisposable
     {
         _mapCache = mapCache;
         _logger = logger;
+        _serverHasNoModel = configuration.GetValue<ServerAiMode>($"{ServerAiOptions.SectionName}:Mode") == ServerAiMode.None;
         var path = Path.GetFullPath(configuration["WorldNews:DatabasePath"] ?? "/app/data/worldnews.db");
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         Store = new WorldNewsStore(path);
@@ -343,17 +346,14 @@ public sealed class WorldNewsService : IDisposable
     private async Task<IReadOnlyDictionary<string, IReadOnlyList<float[]>>?> KindExamplesAsync(CancellationToken ct)
     {
         if (_kindExamples is not null) return _kindExamples;
+        // The Mac embeds them alongside headlines (KindExampleJobsForRelay); asking a server with no
+        // model only fails, which logged a warning every read (~97 a day after 31-10-26).
+        if (_serverHasNoModel || EmbedRelayActive(DateTimeOffset.UtcNow)) return null;
         try
         {
             var examples = KindExampleTexts();
             var vectors = await _ollama.EmbedAsync(_options.EmbeddingModel, examples.Select(e => e.Text).ToList(), ct);
             return _kindExamples = BuildKindExamples(examples, vectors);
-        }
-        catch (ServerAiUnavailableException)
-        {
-            // No model on this server: the Mac app embeds the examples (KindExampleJobsForRelay).
-            // Keywords until then - expected, so not a warning (~97 a day after 31-10-26).
-            return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

@@ -48,7 +48,7 @@ public sealed class SentinelConnectionsService(
             var lowered = name.ToLower();
             candidateIds.UnionWith(await dbContext.WikiPages.AsNoTracking()
                 .Where(p => p.Id != pageId && p.TrashedAt == null && p.BlocksJson.ToLower().Contains(lowered))
-                .Select(p => p.Id).Take(MaxScannedPages).ToListAsync(cancellationToken));
+                .Select(p => p.Id).OrderBy(scanRow => scanRow).Take(MaxScannedPages).ToListAsync(cancellationToken));
         }
         var visible = await VisibleAsync(candidateIds, username, cancellationToken);
         var ids = candidateIds.Where(visible.Contains).Take(MaxScannedPages).ToList();

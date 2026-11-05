@@ -308,7 +308,7 @@ public sealed class BusinessIntelligenceService(IAppDbContext db, TimeProvider t
 
     private async Task<List<TicketProjection>> LoadTicketsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken) =>
         (await db.SupportTickets.AsNoTracking()
-            .Take(MaxSourceRows)
+            .OrderBy(scanRow => scanRow.Id).Take(MaxSourceRows)
             .Select(item => new TicketProjection(item.Subject, item.Status, item.Priority, item.CreatedAt, item.SatisfactionRating,
                 item.FirstResponseBreachNotifiedAt != null || item.ResolutionBreachNotifiedAt != null))
             .ToListAsync(cancellationToken))
@@ -346,7 +346,7 @@ public sealed class BusinessIntelligenceService(IAppDbContext db, TimeProvider t
     private async Task<List<(Guid PageId, string? Name, string? Email, DateTimeOffset CreatedAt)>> LoadFormSubmissionsAsync(
         DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken) =>
         (await db.FormSubmissions.AsNoTracking()
-            .Take(MaxSourceRows)
+            .OrderBy(scanRow => scanRow.Id).Take(MaxSourceRows)
             .Select(item => new { item.PageId, item.FullName, item.Email, item.CreatedAt })
             .ToListAsync(cancellationToken))
         .Where(item => item.CreatedAt >= from && item.CreatedAt < to)

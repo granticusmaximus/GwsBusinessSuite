@@ -46,7 +46,7 @@ public sealed class HybridSemanticSearchService(
         {
             keywordQuery = keywordQuery.Where(item => allowedTypes.Contains(item.SourceType));
         }
-        var keywordDocuments = await keywordQuery.Take(MaximumKeywordCandidates).ToListAsync(cancellationToken);
+        var keywordDocuments = await keywordQuery.OrderBy(scanRow => scanRow.Id).Take(MaximumKeywordCandidates).ToListAsync(cancellationToken);
         var terms = TokenPattern.Matches(normalizedQuery.ToLowerInvariant())
             .Select(match => match.Value)
             .Distinct(StringComparer.Ordinal)

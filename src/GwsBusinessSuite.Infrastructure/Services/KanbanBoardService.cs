@@ -1357,14 +1357,14 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
             KanbanLinkKinds.Ticket => await NamedAsync((await db.SupportTickets.AsNoTracking()
                     .Where(ticket => EF.Functions.Like(ticket.Subject, pattern))
                     .Select(ticket => new { ticket.Id, ticket.Subject, ticket.Status, ticket.ContactId, ticket.CreatedAt })
-                    .Take(50).ToListAsync(cancellationToken))
+                    .OrderBy(scanRow => scanRow.Id).Take(50).ToListAsync(cancellationToken))
                 // Newest first, sorted here: SQLite can't order by a DateTimeOffset.
                 .OrderByDescending(ticket => ticket.CreatedAt).Take(8)
                 .Select(ticket => (ticket.Id, ticket.Subject, ticket.Status, ticket.ContactId)).ToList()),
             KanbanLinkKinds.Invoice => await NamedAsync((await db.Invoices.AsNoTracking()
                     .Where(invoice => EF.Functions.Like(invoice.Title, pattern))
                     .Select(invoice => new { invoice.Id, invoice.Title, invoice.Status, invoice.ContactId, invoice.CreatedAt })
-                    .Take(50).ToListAsync(cancellationToken))
+                    .OrderBy(scanRow => scanRow.Id).Take(50).ToListAsync(cancellationToken))
                 .OrderByDescending(invoice => invoice.CreatedAt).Take(8)
                 .Select(invoice => (invoice.Id, invoice.Title, invoice.Status, invoice.ContactId)).ToList()),
             _ => []
