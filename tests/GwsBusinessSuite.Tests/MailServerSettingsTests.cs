@@ -126,6 +126,19 @@ public sealed class MailServerSettingsTests
         mailIn.For("sentinel")!.OAuthCredentialId.Should().BeNull("an app-password login still comes first");
     }
 
+    // 05-11-26: on the droplet every SMTP port is blocked; the check used to answer "smtp.gmail.com said: The operation has timed out".
+    [Fact]
+    public async Task Checking_WhenNothingAnswersThePort_ShouldSayItsBlocked_AndThatThePasswordWasNeverTried()
+    {
+        var f = await CreateAsync();
+        var port = SmtpReachabilityTests.ClosedPort();
+
+        var result = await f.Service.CheckAsync(new MailServerSettingsUpdate(true, "127.0.0.1", port, MailServerSecurity.StartTls, "grant@gwsapp.net", "abcd efgh ijkl mnop", ""));
+
+        result.Succeeded.Should().BeFalse();
+        result.Message.Should().Contain($"can't reach 127.0.0.1:{port}").And.Contain(SmtpReachability.PasswordNeverTried);
+    }
+
     [Theory]
     [InlineData("https://www.googleapis.com/auth/gmail.send", false, false)]
     [InlineData("https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.modify", true, false)]

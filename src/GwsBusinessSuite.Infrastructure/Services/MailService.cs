@@ -50,7 +50,7 @@ public sealed class MailService(
             ImapHost = imapHost, ImapPort = input.ImapPort, SmtpHost = smtpHost, SmtpPort = input.SmtpPort, SmtpSecurity = input.SmtpSecurity,
             LoginUsername = login
         };
-        await Backend(MailProviders.Imap).VerifyAsync(candidate, password, cancellationToken);
+        var warning = await Backend(MailProviders.Imap).VerifyAsync(candidate, password, cancellationToken);
 
         if (account is null)
         {
@@ -77,7 +77,7 @@ public sealed class MailService(
         account.UpdatedAt = timeProvider.GetUtcNow();
         account.UpdatedBy = username;
         await db.SaveChangesAsync(cancellationToken);
-        return ToView(account);
+        return ToView(account) with { Warning = warning };
     }
 
     public async Task<MailAccountView> SaveGoogleAccountAsync(string username, string tokenJson, string address, CancellationToken cancellationToken = default)

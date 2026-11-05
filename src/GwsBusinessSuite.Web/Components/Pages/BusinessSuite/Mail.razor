@@ -36,6 +36,13 @@
         <button type="button" class="btn-close" aria-label="Dismiss" @onclick="() => _error = null"></button>
     </div>
 }
+@if (_warning is not null)
+{
+    <div class="alert alert-warning d-flex align-items-start gap-2" role="status">
+        <i class="bi bi-exclamation-circle-fill" aria-hidden="true"></i><div class="flex-grow-1">@_warning</div>
+        <button type="button" class="btn-close" aria-label="Dismiss" @onclick="() => _warning = null"></button>
+    </div>
+}
 @if (_status is not null)
 {
     <div class="alert alert-success d-flex align-items-start gap-2" role="status">
@@ -442,6 +449,8 @@ else
     private bool _busy;
     private string? _error;
     private string? _status;
+    // Survives the mailbox loading (RunAsync clears _error): connected, but sending is blocked.
+    private string? _warning;
 
     protected override async Task OnInitializedAsync()
     {
@@ -719,11 +728,20 @@ else
     {
         _busy = true;
         _error = null;
+        _warning = null;
         try
         {
             var saved = await MailService.SaveImapAccountAsync(_username, _editingAccount ? _account?.Id : null, new MailImapAccountInput(
                 _setup.Address, _setup.DisplayName, _setup.ImapHost, _setup.ImapPort, _setup.SmtpHost, _setup.SmtpPort, _setup.SmtpSecurity,
                 _setup.Login, _setup.Password));
+            if (saved.Warning is { } warning)
+            {
+                // Google's API sends over HTTPS, which hosts don't block the way they block SMTP.
+                var gmail = _setup.SmtpHost.Trim().EndsWith("gmail.com", StringComparison.OrdinalIgnoreCase);
+                _warning = !gmail ? warning
+                    : GoogleOAuth.IsConfigured ? $"{warning} For Gmail, use Connect Gmail instead: it sends through Google over HTTPS, which isn't blocked."
+                    : $"{warning} For Gmail, Google sign-in would send over HTTPS, which isn't blocked, once an admin adds GoogleOAuth__ClientId, GoogleOAuth__ClientSecret and GoogleOAuth__RedirectUri to .env.";
+            }
             _changingAccount = _editingAccount = false;
             _setup = new SetupState();
             _status = $"Connected {saved.Address}.";

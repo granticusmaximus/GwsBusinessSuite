@@ -21,8 +21,11 @@ public sealed record MailFetched(MimeMessage Message, string? ThreadId, bool Unr
 public interface IMailboxBackend
 {
     string Provider { get; }
-    // Signs in before an account is saved (IMAP and SMTP); throws MailException.
-    Task VerifyAsync(MailAccount account, string password, CancellationToken cancellationToken);
+    // Signs in before an account is saved (IMAP and SMTP); throws MailException. Returns a warning,
+    // not an error, when reading works but this server can't reach the SMTP port at all (a host
+    // blocking outgoing mail ports): the mailbox is still worth having, and sending starts working
+    // with no reconnect once the port opens.
+    Task<string?> VerifyAsync(MailAccount account, string password, CancellationToken cancellationToken);
     Task<MailPage> ListAsync(MailAccount account, string folder, string? search, string? pageToken, CancellationToken cancellationToken);
     Task<MailFetched> GetAsync(MailAccount account, string id, bool markRead, CancellationToken cancellationToken);
     Task SendAsync(MailAccount account, MimeMessage message, string? threadId, CancellationToken cancellationToken);
@@ -53,7 +56,7 @@ public sealed class GmailMailboxBackend(
 
     public string Provider => MailProviders.Google;
 
-    public Task VerifyAsync(MailAccount account, string password, CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task<string?> VerifyAsync(MailAccount account, string password, CancellationToken cancellationToken) => Task.FromResult<string?>(null);
 
     public async Task<MailPage> ListAsync(MailAccount account, string folder, string? search, string? pageToken, CancellationToken cancellationToken)
     {
@@ -329,7 +332,7 @@ public sealed class ImapMailboxBackend(ISecretProtector secretProtector) : IMail
 
     public string Provider => MailProviders.Imap;
 
-    public async Task VerifyAsync(MailAccount account, string password, CancellationToken cancellationToken)
+    public async Task<string?> VerifyAsync(MailAccount account, string password, CancellationToken cancellationToken)
     {
         try
         {
@@ -341,10 +344,19 @@ public sealed class ImapMailboxBackend(ISecretProtector secretProtector) : IMail
         {
             throw new MailException($"Couldn't sign in to {account.ImapHost} (IMAP): {ex.Message}");
         }
+        using var smtp = new MailKit.Net.Smtp.SmtpClient { Timeout = 15_000 };
         try
         {
-            using var smtp = new MailKit.Net.Smtp.SmtpClient { Timeout = 15_000 };
             await smtp.ConnectAsync(account.SmtpHost, account.SmtpPort, MailTransport.ParseSecurity(account.SmtpSecurity), cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var failure = await SmtpReachability.DescribeConnectFailureAsync(account.SmtpHost, account.SmtpPort, ex, cancellationToken);
+            if (failure.PortBlocked) return $"Reading works, so the app password is right, but mail can't be sent from here yet. {failure.Message}";
+            throw new MailException($"Signed in to read mail, but couldn't connect to {account.SmtpHost} to send (SMTP): {failure.Message}");
+        }
+        try
+        {
             await smtp.AuthenticateAsync(account.LoginUsername, password, cancellationToken);
             await smtp.DisconnectAsync(true, cancellationToken);
         }
@@ -352,6 +364,7 @@ public sealed class ImapMailboxBackend(ISecretProtector secretProtector) : IMail
         {
             throw new MailException($"Signed in to read mail, but couldn't sign in to {account.SmtpHost} to send (SMTP): {ex.Message}");
         }
+        return null;
     }
 
     public async Task<MailPage> ListAsync(MailAccount account, string folder, string? search, string? pageToken, CancellationToken cancellationToken)
@@ -401,7 +414,17 @@ public sealed class ImapMailboxBackend(ISecretProtector secretProtector) : IMail
         var password = Password(account);
         using (var smtp = new MailKit.Net.Smtp.SmtpClient { Timeout = 30_000 })
         {
-            await smtp.ConnectAsync(account.SmtpHost, account.SmtpPort, MailTransport.ParseSecurity(account.SmtpSecurity), cancellationToken);
+            try
+            {
+                await smtp.ConnectAsync(account.SmtpHost, account.SmtpPort, MailTransport.ParseSecurity(account.SmtpSecurity), cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                var failure = await SmtpReachability.DescribeConnectFailureAsync(account.SmtpHost, account.SmtpPort, ex, cancellationToken);
+                throw new MailException(failure.PortBlocked
+                    ? $"Couldn't send. {failure.Message} {SmtpReachability.PasswordNeverTried}"
+                    : $"Couldn't connect to {account.SmtpHost} to send: {failure.Message}");
+            }
             await smtp.AuthenticateAsync(account.LoginUsername, password, cancellationToken);
             await smtp.SendAsync(message, cancellationToken);
             await smtp.DisconnectAsync(true, cancellationToken);

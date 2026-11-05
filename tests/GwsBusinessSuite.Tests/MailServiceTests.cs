@@ -40,6 +40,22 @@ public sealed class MailServiceTests
         (await f.Db.MailAccounts.CountAsync()).Should().Be(1, "a mailbox that can't sign in isn't saved");
     }
 
+    // 05-11-26: the production droplet can't reach any SMTP port (DigitalOcean blocks 25/465/587),
+    // so Gmail and iCloud were refused outright with "couldn't sign in ... The operation has timed out".
+    [Fact]
+    public async Task ConnectingAnImapMailbox_WhenThisServerCantReachItsSmtpPort_ShouldStillSaveIt_AndSayWhySendingWont()
+    {
+        var f = await CreateAsync();
+        f.Imap.VerifyWarning = "Reading works, so the app password is right, but mail can't be sent from here yet.";
+
+        var view = await f.Service.SaveImapAccountAsync("grant", null, new MailImapAccountInput(
+            "grant@icloud.com", "", "imap.mail.me.com", 993, "smtp.mail.me.com", 587, MailServerSecurity.StartTls, "", "abcd-efgh"));
+
+        view.Warning.Should().Be(f.Imap.VerifyWarning);
+        (await f.Db.MailAccounts.SingleAsync()).LastError.Should().BeNull("the warning is about this server's network, not a failure of the mailbox");
+        (await f.Service.ListAccountsAsync("grant")).Single().Warning.Should().BeNull("only the connect result carries it");
+    }
+
     [Fact]
     public async Task AReply_ShouldThreadOnTheOriginal_AndAForward_ShouldCarryItsAttachments()
     {
@@ -373,13 +389,14 @@ public sealed class MailServiceTests
         public List<MimeMessage> Sent { get; } = [];
         public List<string> MarkedRead { get; } = [];
         public string? FailVerify { get; set; }
+        public string? VerifyWarning { get; set; }
         public string? FailList { get; set; }
 
-        public Task VerifyAsync(MailAccount account, string password, CancellationToken cancellationToken)
+        public Task<string?> VerifyAsync(MailAccount account, string password, CancellationToken cancellationToken)
         {
             if (FailVerify is { } failure) throw new MailException(failure);
             Verified.Add((account.LoginUsername, password));
-            return Task.CompletedTask;
+            return Task.FromResult(VerifyWarning);
         }
 
         public Task<MailPage> ListAsync(MailAccount account, string folder, string? search, string? pageToken, CancellationToken cancellationToken) =>

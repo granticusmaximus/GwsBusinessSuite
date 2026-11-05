@@ -38,7 +38,9 @@ public static class MailFolders
 // One of the provider's own folders or labels.
 public sealed record MailFolderView(string Key, string Label);
 
-public sealed record MailAccountView(Guid Id, string Provider, string Address, string DisplayName, string? LastError, DateTimeOffset? LastUsedAt);
+// Warning: only on the view SaveImapAccountAsync returns - the mailbox connected for reading,
+// but this server can't reach its SMTP port, so sending won't work until the port opens.
+public sealed record MailAccountView(Guid Id, string Provider, string Address, string DisplayName, string? LastError, DateTimeOffset? LastUsedAt, string? Warning = null);
 
 // Other providers: the IMAP server mail is read from and the SMTP server it's sent through.
 public sealed record MailImapAccountInput(

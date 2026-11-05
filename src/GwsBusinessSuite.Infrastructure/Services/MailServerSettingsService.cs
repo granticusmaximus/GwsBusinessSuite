@@ -128,7 +128,15 @@ public sealed class MailServerSettingsService(
         try
         {
             using var client = new SmtpClient { Timeout = 15_000 };
-            await client.ConnectAsync(host, update.Port, MailTransport.ParseSecurity(update.Security), cancellationToken);
+            try
+            {
+                await client.ConnectAsync(host, update.Port, MailTransport.ParseSecurity(update.Security), cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                var failure = await SmtpReachability.DescribeConnectFailureAsync(host, update.Port, ex, cancellationToken);
+                return new(false, failure.PortBlocked ? $"{failure.Message} {SmtpReachability.PasswordNeverTried}" : $"Couldn't connect to {host}: {failure.Message}");
+            }
             if (username.Length > 0) await client.AuthenticateAsync(username, password, cancellationToken);
             await client.DisconnectAsync(true, cancellationToken);
             return new(true, username.Length > 0 ? $"Signed in to {host} as {username}." : $"Connected to {host}.");
