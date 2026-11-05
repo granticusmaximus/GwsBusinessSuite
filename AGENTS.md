@@ -100,6 +100,11 @@ Data and build:
   lowercased.
 - **EF:** every entity change needs a migration. On a long-lived context, don't add to a
   collection loaded with `Include()`. Add through the child `DbSet` instead.
+- **Order before you limit.** A database `Take`/`Skip`/`First` needs an `OrderBy`, or EF warns
+  and the rows you get are arbitrary. Use `OrderBy(x => x.Id)` for capped scans and single-row
+  settings tables, placed before any `Select`. Load several large collections with
+  `AsSplitQuery()`. All of these were fixed on 05-11-26 (about 60 queries). Production logs these
+  warnings, so check there after a change.
 - **Docker:** a new project referenced by the web app needs its own `COPY` line in the
   `Dockerfile`. `DockerfileProjectsTests` guards this, but `verify-release.sh` doesn't build the
   image.

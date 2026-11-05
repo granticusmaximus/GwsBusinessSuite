@@ -1638,7 +1638,7 @@ public sealed class SentinelAiService(
         // regression, which is worse than that.
         var articles = await db.Articles.AsNoTracking()
             .Where(item => item.TrashedAt == null)
-            .Select(item => new { item.Id, item.Title, item.Topic, item.Tags, item.MetaDescription, item.Status })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.Id, item.Title, item.Topic, item.Tags, item.MetaDescription, item.Status })
             .Take(80)
             .ToListAsync(cancellationToken);
         foreach (var item in articles.Where(item => MatchesAny(terms, item.Title, item.Topic, item.Tags, item.MetaDescription)).Take(4))
@@ -1647,7 +1647,7 @@ public sealed class SentinelAiService(
         }
 
         var drafts = await db.SeoArticleDrafts.AsNoTracking()
-            .Select(item => new { item.Id, item.Title, item.Topic, item.PrimaryKeyword, item.Tags, item.Status })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.Id, item.Title, item.Topic, item.PrimaryKeyword, item.Tags, item.Status })
             .Take(80)
             .ToListAsync(cancellationToken);
         foreach (var item in drafts.Where(item => MatchesAny(terms, item.Title, item.Topic, item.PrimaryKeyword, item.Tags)).Take(4))
@@ -1657,7 +1657,7 @@ public sealed class SentinelAiService(
 
         var pages = await db.CmsPages.AsNoTracking()
             .Where(item => item.TrashedAt == null)
-            .Select(item => new { item.Id, item.Title, item.Slug, item.MetaDescription, item.Tags, item.Status })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.Id, item.Title, item.Slug, item.MetaDescription, item.Tags, item.Status })
             .Take(80)
             .ToListAsync(cancellationToken);
         foreach (var item in pages.Where(item => MatchesAny(terms, item.Title, item.Slug, item.MetaDescription, item.Tags)).Take(4))
@@ -1667,7 +1667,7 @@ public sealed class SentinelAiService(
 
         var contacts = await db.Contacts.AsNoTracking()
             .Where(item => item.TrashedAt == null)
-            .Select(item => new { item.Id, item.FullName, item.Company, item.Status, item.FollowUpDate })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.Id, item.FullName, item.Company, item.Status, item.FollowUpDate })
             .Take(80)
             .ToListAsync(cancellationToken);
         foreach (var item in contacts.Where(item => MatchesAny(terms, item.FullName, item.Company, item.Status)).Take(4))
@@ -1678,7 +1678,7 @@ public sealed class SentinelAiService(
         // Deals are grounded separately from Contacts above - a question like "why did deal X
         // stall" needs the deal's own stage/value/notes/close date, not just its contact's info.
         var deals = await db.Deals.AsNoTracking()
-            .Select(item => new { item.Id, item.Title, item.Stage, item.ValueUsd, item.Notes, item.ExpectedCloseDate, item.UpdatedAt })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.Id, item.Title, item.Stage, item.ValueUsd, item.Notes, item.ExpectedCloseDate, item.UpdatedAt })
             .Take(80)
             .ToListAsync(cancellationToken);
         foreach (var item in deals.Where(item => MatchesAny(terms, item.Title, item.Stage, item.Notes)).Take(4))
@@ -1692,7 +1692,7 @@ public sealed class SentinelAiService(
         }
 
         var workflows = await db.AutomationWorkflows.AsNoTracking()
-            .Select(item => new { item.Id, item.Name, item.Description, item.Status, item.TagsCsv, item.CurrentVersion, item.LastExecutedAt })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.Id, item.Name, item.Description, item.Status, item.TagsCsv, item.CurrentVersion, item.LastExecutedAt })
             .Take(80)
             .ToListAsync(cancellationToken);
         foreach (var item in workflows.Where(item => MatchesAny(terms, item.Name, item.Description, item.Status, item.TagsCsv)).Take(4))
@@ -1701,7 +1701,7 @@ public sealed class SentinelAiService(
         }
 
         var executions = await db.AutomationExecutions.AsNoTracking()
-            .Select(item => new { item.Id, item.Status, item.Mode, item.ErrorMessage })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.Id, item.Status, item.Mode, item.ErrorMessage })
             .Take(80)
             .ToListAsync(cancellationToken);
         foreach (var item in executions.Where(item => MatchesAny(terms, item.Status, item.Mode, item.ErrorMessage)).Take(4))
@@ -1710,7 +1710,7 @@ public sealed class SentinelAiService(
         }
 
         var alerts = await db.DockerHealthAlerts.AsNoTracking()
-            .Select(item => new { item.ContainerName, item.Severity, item.Message, item.IsRead })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.ContainerName, item.Severity, item.Message, item.IsRead })
             .Take(80)
             .ToListAsync(cancellationToken);
         foreach (var item in alerts.Where(item => MatchesAny(terms, item.ContainerName, item.Severity, item.Message)).Take(4))
@@ -1719,7 +1719,7 @@ public sealed class SentinelAiService(
         }
 
         var news = await db.NewsItems.AsNoTracking()
-            .Select(item => new { item.Title, item.Source, item.Description, item.OllamaSummary, item.PublishedAt })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.Title, item.Source, item.Description, item.OllamaSummary, item.PublishedAt })
             .Take(100)
             .ToListAsync(cancellationToken);
         foreach (var item in news.Where(item => MatchesAny(terms, item.Title, item.Source, item.Description, item.OllamaSummary)).Take(4))
@@ -1728,7 +1728,7 @@ public sealed class SentinelAiService(
         }
 
         var podcasts = await db.PodcastShows.AsNoTracking()
-            .Select(item => new { item.Title, item.Author, item.Category, item.Description })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.Title, item.Author, item.Category, item.Description })
             .Take(80)
             .ToListAsync(cancellationToken);
         foreach (var item in podcasts.Where(item => MatchesAny(terms, item.Title, item.Author, item.Category, item.Description)).Take(4))
@@ -1737,7 +1737,7 @@ public sealed class SentinelAiService(
         }
 
         var requests = await db.AppGenerationRequests.AsNoTracking()
-            .Select(item => new { item.Title, item.Status, item.RejectionReason, item.ApprovedBy })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.Title, item.Status, item.RejectionReason, item.ApprovedBy })
             .Take(80)
             .ToListAsync(cancellationToken);
         foreach (var item in requests.Where(item => MatchesAny(terms, item.Title, item.Status, item.RejectionReason)).Take(4))
@@ -1746,7 +1746,7 @@ public sealed class SentinelAiService(
         }
 
         var offers = await db.AffiliateOffers.AsNoTracking()
-            .Select(item => new { item.LinkName, item.AdvertiserName, item.Network, item.Category, item.RelationshipStatus })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.LinkName, item.AdvertiserName, item.Network, item.Category, item.RelationshipStatus })
             .Take(100)
             .ToListAsync(cancellationToken);
         foreach (var item in offers.Where(item => MatchesAny(terms, item.AdvertiserName, item.LinkName, item.Category, item.RelationshipStatus)).Take(4))
@@ -1755,7 +1755,7 @@ public sealed class SentinelAiService(
         }
 
         var shows = await db.LiveShowSessions.AsNoTracking()
-            .Select(item => new { item.Title, item.Status, item.StartedAt, item.EndedAt })
+            .OrderBy(scanRow => scanRow.Id).Select(item => new { item.Title, item.Status, item.StartedAt, item.EndedAt })
             .Take(50)
             .ToListAsync(cancellationToken);
         foreach (var item in shows.Where(item => MatchesAny(terms, item.Title, item.Status)).Take(4))

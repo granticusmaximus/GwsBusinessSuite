@@ -67,6 +67,25 @@ Production logs showed what moving AI to the Mac (31-10-26) left behind, plus fa
   constructor, unaffected by the options change), Ical.Net 5.2.4, Stripe.net 52.4.2 (same major).
 - [x] Guides: Platform Operations and Intelligence. AGENTS.md: environment notes.
 
+## Unit 3 - after checking production (05-11-26)
+
+Two minutes after the 9663719 deploy:
+- The overview and hot-take warnings were gone.
+- Each refusing site was logged once and paused.
+- Three things were left, all now fixed.
+
+- [x] **World News kinds** still logged a warning. World News uses its own `OllamaClient`, so it now
+  skips the server while `ServerAi` is None or the Mac's embed relay is active.
+- [x] **About 60 EF ordering fixes.** EF warnings name no query, so I made EF throw on
+  `FirstWithoutOrderByAndFilter` and `RowLimitingOperationWithoutOrderBy` in a scratch worktree and
+  ran the suite until it passed (3,608 tests): `OrderBy(Id)` before every capped `Take` and
+  `First`. AGENTS.md: "Order before you limit". 7d3f132 (Grant) plus the SentinelGPT
+  suite-context follow-up.
+- [x] **Feeds taken out:**
+  - France 24 (four languages) and The Times of Israel answer 403.
+  - Uber Engineering: the feed is gone (404, and the new blog answers 406).
+  - Left in: the Perry, GA calendar, which times out from the droplet (Grant's local area).
+
 Needs Grant (not code):
 - a free congress.gov key (`CongressApi__ApiKey`)
 - connecting a Google account under Automation > Credentials, so the app's email works
