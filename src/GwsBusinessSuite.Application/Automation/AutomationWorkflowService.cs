@@ -543,6 +543,17 @@ public sealed class AutomationWorkflowService(
         return execution is null ? null : ToExecutionView(execution);
     }
 
+    public async Task<IReadOnlyList<int>> CountFailuresByDayAsync(DayRange range, CancellationToken cancellationToken = default)
+    {
+        var start = range.StartUnixSeconds;
+        var started = await db.AutomationExecutions.AsNoTracking()
+            .Where(execution => execution.Status == AutomationExecutionStatuses.Failed
+                && execution.StartedAtUnixSeconds != null && execution.StartedAtUnixSeconds >= start)
+            .Select(execution => execution.StartedAtUnixSeconds!.Value)
+            .ToListAsync(cancellationToken);
+        return range.CountUnixSeconds(started);
+    }
+
     public async Task<IReadOnlyList<AutomationRecentFailureView>> ListRecentFailuresAsync(
         int take = 20, CancellationToken cancellationToken = default)
     {

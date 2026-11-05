@@ -107,6 +107,17 @@ public sealed class AffiliateAnalyticsService(IAppDbContext db, IMemoryCache cac
     private static readonly TimeSpan DashboardWindow = TimeSpan.FromDays(90);
     private const int MaxDashboardRows = 5_000;
 
+    public async Task<IReadOnlyList<int>> CountClicksByDayAsync(DayRange range, CancellationToken cancellationToken = default)
+    {
+        var start = range.StartUnixSeconds;
+        // The same rule as the dashboard's total: a click classified as a bot doesn't count.
+        var clicked = await db.ArticleAffiliateClicks.AsNoTracking()
+            .Where(click => click.CreatedAtUnixSeconds >= start && click.PassedBotFilter != false)
+            .Select(click => click.CreatedAtUnixSeconds)
+            .ToListAsync(cancellationToken);
+        return range.CountUnixSeconds(clicked);
+    }
+
     public async Task<AffiliateAnalyticsDashboard> GetDashboardAsync(CancellationToken cancellationToken = default)
     {
         var cutoffUnixSeconds = DateTimeOffset.UtcNow.Subtract(DashboardWindow).ToUnixTimeSeconds();

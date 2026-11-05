@@ -1,3 +1,4 @@
+using GwsBusinessSuite.Application.Abstractions;
 namespace GwsBusinessSuite.Application.AffiliateAnalytics;
 
 public interface IAffiliateAnalyticsService
@@ -13,4 +14,6 @@ public interface IAffiliateAnalyticsService
         CancellationToken cancellationToken = default);
 
     Task<AffiliateAnalyticsDashboard> GetDashboardAsync(CancellationToken cancellationToken = default);
+    // Real (non-bot) clicks per day over range, oldest first - the Home tile's sparkline (T5, 05-11-26).
+    Task<IReadOnlyList<int>> CountClicksByDayAsync(DayRange range, CancellationToken cancellationToken = default);
 }

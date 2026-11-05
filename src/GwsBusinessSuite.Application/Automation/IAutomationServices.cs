@@ -1,3 +1,4 @@
+using GwsBusinessSuite.Application.Abstractions;
 using System.Text.Json;
 
 namespace GwsBusinessSuite.Application.Automation;
@@ -42,6 +43,8 @@ public interface IAutomationWorkflowService
     // acknowledged via AcknowledgeFailureAsync/AcknowledgeAllFailuresAsync - an admin currently
     // has no way to see this without opening each workflow's own Executions tab individually,
     // nor any way to clear a failure off this list once they've dealt with it.
+    // Failed runs per day over range, oldest first - the Home tile's sparkline (T5, 05-11-26).
+    Task<IReadOnlyList<int>> CountFailuresByDayAsync(DayRange range, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<AutomationRecentFailureView>> ListRecentFailuresAsync(int take = 20, CancellationToken cancellationToken = default);
 
     // Marks one failed execution as handled, removing it from ListRecentFailuresAsync (and

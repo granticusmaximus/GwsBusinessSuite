@@ -1,3 +1,4 @@
+using GwsBusinessSuite.Application.Abstractions;
 using System.Net;
 using FluentAssertions;
 using GwsBusinessSuite.Application.ContentStudio;
@@ -120,6 +121,7 @@ public sealed class OllamaWatchdogTests
         public Task MarkAlertReadAsync(Guid alertId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task MarkAllAlertsReadAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<int> CountUnreadAlertsAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<int>> CountAlertsByDayAsync(DayRange range, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<DockerActionResult> StartContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<DockerActionResult> StopContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<DockerActionResult> RemoveContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default) => throw new NotSupportedException();

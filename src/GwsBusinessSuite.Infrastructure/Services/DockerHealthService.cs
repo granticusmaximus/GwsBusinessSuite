@@ -139,6 +139,14 @@ public sealed class DockerHealthService(IAppDbContext dbContext) : IDockerHealth
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<int>> CountAlertsByDayAsync(DayRange range, CancellationToken cancellationToken = default)
+    {
+        // CreatedAt is a DateTimeOffset, which SQLite can't compare, so only that column is read and
+        // the range applied in memory.
+        var raised = await dbContext.DockerHealthAlerts.AsNoTracking().Select(alert => alert.CreatedAt).ToListAsync(cancellationToken);
+        return range.Count(raised);
+    }
+
     public async Task<int> CountUnreadAlertsAsync(CancellationToken cancellationToken = default)
     {
         return await dbContext.DockerHealthAlerts.CountAsync(a => !a.IsRead, cancellationToken);

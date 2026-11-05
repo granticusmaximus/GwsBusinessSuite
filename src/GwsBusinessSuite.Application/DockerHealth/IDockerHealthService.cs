@@ -1,3 +1,4 @@
+using GwsBusinessSuite.Application.Abstractions;
 namespace GwsBusinessSuite.Application.DockerHealth;
 
 public interface IDockerHealthService
@@ -12,6 +13,8 @@ public interface IDockerHealthService
 
     Task MarkAllAlertsReadAsync(CancellationToken cancellationToken = default);
 
+    // Alerts raised per day over range, oldest first - the Home tile's sparkline (T5, 05-11-26).
+    Task<IReadOnlyList<int>> CountAlertsByDayAsync(DayRange range, CancellationToken cancellationToken = default);
     Task<int> CountUnreadAlertsAsync(CancellationToken cancellationToken = default);
 
     Task<DockerActionResult> StartContainerAsync(string containerName, string performedBy, CancellationToken cancellationToken = default);
