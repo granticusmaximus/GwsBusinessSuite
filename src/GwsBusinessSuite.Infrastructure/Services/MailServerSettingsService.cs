@@ -29,7 +29,7 @@ public sealed class AppMailAccount(IServiceScopeFactory? scopeFactory = null, IL
         {
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
-            var row = await db.MailServerSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+            var row = await db.MailServerSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
             Set(From(row, scope.ServiceProvider.GetRequiredService<ISecretProtector>()));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -71,11 +71,11 @@ public sealed class MailServerSettingsService(
     ISecurityAuditService? securityAudit = null) : IMailServerSettingsService
 {
     public async Task<MailServerSettingsView> GetAsync(CancellationToken cancellationToken = default) =>
-        ToView(await db.MailServerSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken));
+        ToView(await db.MailServerSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken));
 
     public async Task<MailServerSettingsView> SaveAsync(MailServerSettingsUpdate update, string performedBy, CancellationToken cancellationToken = default)
     {
-        var settings = await db.MailServerSettings.FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.MailServerSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         var (host, username, fromAddress) = Validate(update, hasSavedPassword: settings is { PasswordProtected.Length: > 0 });
         if (settings is null)
         {
@@ -113,7 +113,7 @@ public sealed class MailServerSettingsService(
 
     public async Task<MailServerCheckResult> CheckAsync(MailServerSettingsUpdate update, CancellationToken cancellationToken = default)
     {
-        var settings = await db.MailServerSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.MailServerSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         string host, username;
         try
         {

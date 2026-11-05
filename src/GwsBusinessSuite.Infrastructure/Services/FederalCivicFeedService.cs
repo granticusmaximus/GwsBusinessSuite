@@ -18,7 +18,12 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // federal StatusNote) accepts the public "DEMO_KEY" without signup, rate-limited but
 // sufficient for one fetch per hour; set CongressApi:ApiKey in configuration to use a real
 // key instead.
-public sealed record CongressApiSettings(string ApiKey);
+public sealed record CongressApiSettings(string ApiKey)
+{
+    // The shared key allows about 50 requests a day per server. At the hourly pace (about 20 calls
+    // a refresh) nearly every call failed with 429 (05-11-26), so the feed slows down on it.
+    public bool UsesDemoKey => string.Equals(ApiKey, "DEMO_KEY", StringComparison.Ordinal);
+}
 
 public sealed class FederalCivicFeedService(
     HttpClient http,
@@ -44,6 +49,9 @@ public sealed class FederalCivicFeedService(
     // gracefully per-item, but leaves most hearings missing) - 8 keeps this sustainable on
     // DEMO_KEY while still surfacing the most recently updated meetings per chamber.
     private const int HearingsListPageSize = 8;
+    // On DEMO_KEY: 2 x (1 + 3) hearing calls + 2 = 10 a refresh, four refreshes a day.
+    private const int DemoKeyHearingsListPageSize = 3;
+    private int HearingsPageSize => settings.UsesDemoKey ? DemoKeyHearingsListPageSize : HearingsListPageSize;
 
     // The committee-meeting endpoint requires a specific congress number in its path (unlike
     // the bill/congressional-record endpoints above, which query across all congresses by
@@ -299,7 +307,7 @@ public sealed class FederalCivicFeedService(
     private async Task<List<CivicHearing>> FetchChamberHearingsAsync(string chamber, CancellationToken ct)
     {
         var listUrl = $"https://api.congress.gov/v3/committee-meeting/{CurrentCongressNumber}/{chamber}" +
-            $"?api_key={Uri.EscapeDataString(settings.ApiKey)}&limit={HearingsListPageSize}&format=json";
+            $"?api_key={Uri.EscapeDataString(settings.ApiKey)}&limit={HearingsPageSize}&format=json";
         var listResponse = await http.GetFromJsonAsync<CommitteeMeetingListResponse>(listUrl, JsonOptions, ct);
         var items = listResponse?.CommitteeMeetings ?? [];
 

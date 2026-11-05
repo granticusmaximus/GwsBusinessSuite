@@ -15,9 +15,12 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 public sealed class FederalCivicRefreshBackgroundService(
     IServiceScopeFactory scopeFactory,
     IOperationalAlertService alerts,
-    ILogger<FederalCivicRefreshBackgroundService> logger) : BackgroundService
+    ILogger<FederalCivicRefreshBackgroundService> logger,
+    CongressApiSettings? congressApi = null) : BackgroundService
 {
-    private static readonly TimeSpan Interval = TimeSpan.FromHours(1);
+    // Hourly with a key of its own; every 6 hours on the shared DEMO_KEY, which allows about 50
+    // requests a day (05-11-26: hourly on DEMO_KEY, nearly every call came back 429).
+    private TimeSpan Interval => congressApi?.UsesDemoKey == true ? TimeSpan.FromHours(6) : TimeSpan.FromHours(1);
 
     public static readonly SemaphoreSlim RefreshLock = new(1, 1);
 

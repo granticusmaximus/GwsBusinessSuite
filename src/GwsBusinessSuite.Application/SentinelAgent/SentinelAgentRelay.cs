@@ -10,6 +10,9 @@ namespace GwsBusinessSuite.Application.SentinelAgent;
 // posts the reply back. The agent loop and its tools stay on the server; the Mac only thinks.
 // A person's calls only ever go to a Mac signed in as them. In memory: one server, and a call
 // waiting on a Mac is only as old as the turn asking.
+// Since 05-11-26 it also carries shared work (MacRelayScope): server background jobs on public data,
+// such as bill overviews and news hot takes, run on the Admin Mac that asked most recently. They
+// wait in a second lane, so the person's own SentinelGPT steps always go first.
 public sealed class SentinelAgentRelay(TimeProvider time, TimeSpan? callTimeout = null)
 {
     public static readonly TimeSpan PollWait = TimeSpan.FromSeconds(25);
@@ -25,7 +28,10 @@ public sealed class SentinelAgentRelay(TimeProvider time, TimeSpan? callTimeout 
     {
         public DateTimeOffset LastSeen;
         public IReadOnlyList<string> Models = [];
+        // Signed in as an Admin, so it may take shared work.
+        public bool TakesSharedWork;
         public readonly Channel<Call> Calls = Channel.CreateUnbounded<Call>();
+        public readonly Channel<Call> Shared = Channel.CreateUnbounded<Call>();
         public readonly ConcurrentDictionary<Guid, Call> Waiting = new();
     }
 
@@ -33,18 +39,34 @@ public sealed class SentinelAgentRelay(TimeProvider time, TimeSpan? callTimeout 
 
     // The Mac's models that can run the agent, best first, while it's online; otherwise none.
     public IReadOnlyList<string> ModelsFor(string username) =>
-        _macs.TryGetValue(username, out var mac) && time.GetUtcNow() - mac.LastSeen <= OnlineFor
+        _macs.TryGetValue(username, out var mac) && IsOnline(mac)
             ? SentinelAgentModels.LocalCandidates(mac.Models)
             : [];
 
-    public async Task<string> ChatAsync(string username, string payloadJson, CancellationToken cancellationToken)
+    // The online Admin Mac that asked most recently, with everything it has installed, for shared
+    // work. Null when there's none.
+    public (string Username, IReadOnlyList<string> Models)? SharedWorkMac() =>
+        _macs.Where(pair => pair.Value.TakesSharedWork && IsOnline(pair.Value))
+            .OrderByDescending(pair => pair.Value.LastSeen)
+            .Select(pair => ((string Username, IReadOnlyList<string> Models)?)(pair.Key, pair.Value.Models))
+            .FirstOrDefault();
+
+    public Task<string> ChatAsync(string username, string payloadJson, CancellationToken cancellationToken) =>
+        SendAsync(_macs.GetOrAdd(username, _ => new Mac()), shared: false, payloadJson, cancellationToken);
+
+    // Shared work on that Admin's Mac (SharedWorkMac), behind any step of the person's own.
+    public Task<string> ChatSharedAsync(string username, string payloadJson, CancellationToken cancellationToken) =>
+        _macs.TryGetValue(username, out var mac) && mac.TakesSharedWork
+            ? SendAsync(mac, shared: true, payloadJson, cancellationToken)
+            : throw new InvalidOperationException("That Mac doesn't take shared work.");
+
+    private async Task<string> SendAsync(Mac mac, bool shared, string payloadJson, CancellationToken cancellationToken)
     {
-        var mac = _macs.GetOrAdd(username, _ => new Mac());
         var call = new Call(Guid.NewGuid(), payloadJson, new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously));
         mac.Waiting[call.Id] = call;
         try
         {
-            await mac.Calls.Writer.WriteAsync(call, cancellationToken);
+            await (shared ? mac.Shared : mac.Calls).Writer.WriteAsync(call, cancellationToken);
             return await call.Reply.Task.WaitAsync(_callTimeout, time, cancellationToken);
         }
         catch (TimeoutException)
@@ -57,11 +79,16 @@ public sealed class SentinelAgentRelay(TimeProvider time, TimeSpan? callTimeout 
         }
     }
 
-    // The Mac's long poll: the next call for this person, or null after PollWait.
-    public async Task<(Guid Id, string PayloadJson)?> TakeAsync(string username, IEnumerable<string> models, CancellationToken cancellationToken)
+    private bool IsOnline(Mac mac) => time.GetUtcNow() - mac.LastSeen <= OnlineFor;
+
+    // The Mac's long poll: the next call for this person - their own steps first, then shared work
+    // when they're an Admin (takesSharedWork) - or null after PollWait.
+    public async Task<(Guid Id, string PayloadJson)?> TakeAsync(string username, IEnumerable<string> models, CancellationToken cancellationToken,
+        bool takesSharedWork = false)
     {
         var mac = _macs.GetOrAdd(username, _ => new Mac());
         mac.Models = models.Take(MaxModels).ToList();
+        mac.TakesSharedWork = takesSharedWork;
         mac.LastSeen = time.GetUtcNow();
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         wait.CancelAfter(PollWait);
@@ -69,9 +96,15 @@ public sealed class SentinelAgentRelay(TimeProvider time, TimeSpan? callTimeout 
         {
             while (true)
             {
-                var call = await mac.Calls.Reader.ReadAsync(wait.Token);
-                // A turn that gave up (stopped, timed out) no longer wants its call.
-                if (mac.Waiting.ContainsKey(call.Id)) return (call.Id, call.PayloadJson);
+                if (mac.Calls.Reader.TryRead(out var call) || (takesSharedWork && mac.Shared.Reader.TryRead(out call)))
+                {
+                    // A turn or job that gave up (stopped, timed out) no longer wants its call.
+                    if (mac.Waiting.ContainsKey(call.Id)) return (call.Id, call.PayloadJson);
+                    continue;
+                }
+                var own = mac.Calls.Reader.WaitToReadAsync(wait.Token).AsTask();
+                await (takesSharedWork ? (Task)Task.WhenAny(own, mac.Shared.Reader.WaitToReadAsync(wait.Token).AsTask()) : own);
+                wait.Token.ThrowIfCancellationRequested();
             }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)

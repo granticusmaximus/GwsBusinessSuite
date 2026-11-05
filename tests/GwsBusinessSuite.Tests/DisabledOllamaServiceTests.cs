@@ -40,7 +40,7 @@ public sealed class DisabledOllamaServiceTests
 
         services.Should().ContainSingle(descriptor =>
             descriptor.ServiceType == typeof(IOllamaService)
-            && descriptor.ImplementationType == typeof(DisabledOllamaService));
+            && descriptor.ImplementationType == typeof(MacRelayOllamaService));
         services.Where(descriptor => descriptor.ServiceType == typeof(IHostedService))
             .Select(descriptor => descriptor.ImplementationType)
             .Should().NotContain([

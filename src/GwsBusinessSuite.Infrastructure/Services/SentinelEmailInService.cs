@@ -48,12 +48,12 @@ public sealed class SentinelEmailInService(
     }
 
     public async Task<SentinelMailboxView> GetSettingsAsync(CancellationToken cancellationToken = default) =>
-        ToView(await db.SentinelMailboxSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken));
+        ToView(await db.SentinelMailboxSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken));
 
     public async Task<SentinelMailboxView> SetServerAccountEnabledAsync(bool enabled, string performedBy, CancellationToken cancellationToken = default)
     {
         await RequireAdminAsync(performedBy, cancellationToken);
-        var settings = await db.SentinelMailboxSettings.FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.SentinelMailboxSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (settings is { PasswordProtected.Length: > 0 }) throw new SentinelEmailInException("A mailbox is saved here, so email-in uses that one.");
         if (serverAccount?.For(ServerAccountTag) is null) throw new SentinelEmailInException("The server's mail account isn't a Google account this can read.");
         if (settings is null)
@@ -79,7 +79,7 @@ public sealed class SentinelEmailInService(
         if (username.Length is 0 or > 320) throw new SentinelEmailInException("Enter the mailbox's sign-in address.");
         if (string.IsNullOrWhiteSpace(update.AuthServId)) throw new SentinelEmailInException("Enter the receiving server's name (mx.google.com for Google Workspace).");
 
-        var settings = await db.SentinelMailboxSettings.FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.SentinelMailboxSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (settings is null)
         {
             settings = new SentinelMailboxSettings { CreatedBy = performedBy };
@@ -102,7 +102,7 @@ public sealed class SentinelEmailInService(
     public async Task<string> TestConnectionAsync(string performedBy, CancellationToken cancellationToken = default)
     {
         await RequireAdminAsync(performedBy, cancellationToken);
-        var mailbox = Effective(await db.SentinelMailboxSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken))
+        var mailbox = Effective(await db.SentinelMailboxSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken))
             ?? throw new SentinelEmailInException("Save the mailbox settings first.");
         try
         {
@@ -133,7 +133,7 @@ public sealed class SentinelEmailInService(
 
     private async Task<int> PollInboxAsync(CancellationToken cancellationToken)
     {
-        var settings = await db.SentinelMailboxSettings.FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.SentinelMailboxSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (Effective(settings) is not { Enabled: true } mailbox) return 0;
         if (settings is null)
         {

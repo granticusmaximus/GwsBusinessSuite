@@ -25,7 +25,7 @@ public sealed class DigitalOceanService(
 
     public async Task<DigitalOceanSettingsView?> GetSettingsAsync(CancellationToken cancellationToken = default)
     {
-        var row = await dbContext.DigitalOceanSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var row = await dbContext.DigitalOceanSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null)
         {
             return null;
@@ -64,7 +64,7 @@ public sealed class DigitalOceanService(
 
     public async Task SaveSettingsAsync(DigitalOceanApiSettingsInput settings, CancellationToken cancellationToken = default)
     {
-        var row = await dbContext.DigitalOceanSettings.FirstOrDefaultAsync(cancellationToken);
+        var row = await dbContext.DigitalOceanSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null)
         {
             row = new DigitalOceanSettings();
@@ -92,7 +92,7 @@ public sealed class DigitalOceanService(
 
     public async Task SaveSshSettingsAsync(SshSettingsInput settings, CancellationToken cancellationToken = default)
     {
-        var row = await dbContext.DigitalOceanSettings.FirstOrDefaultAsync(cancellationToken);
+        var row = await dbContext.DigitalOceanSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null)
         {
             row = new DigitalOceanSettings();
@@ -293,7 +293,7 @@ public sealed class DigitalOceanService(
 
     private async Task<RequestContext?> BuildRequestContextAsync(CancellationToken cancellationToken)
     {
-        var row = await dbContext.DigitalOceanSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var row = await dbContext.DigitalOceanSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null || string.IsNullOrWhiteSpace(row.ApiToken))
         {
             return null;

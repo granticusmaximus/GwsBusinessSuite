@@ -72,7 +72,7 @@ public sealed partial class CivicWatchService(
     public async Task<CivicWatchSettingsView> GetSettingsAsync(CancellationToken ct = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var row = await db.CivicWatchSettings.AsNoTracking().FirstOrDefaultAsync(ct) ?? new CivicWatchSettings();
+        var row = await db.CivicWatchSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(ct) ?? new CivicWatchSettings();
         return ToView(row);
     }
 
@@ -86,7 +86,7 @@ public sealed partial class CivicWatchService(
             throw new ArgumentException("Enter a valid email address for bill alerts.");
 
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var row = await db.CivicWatchSettings.FirstOrDefaultAsync(ct);
+        var row = await db.CivicWatchSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(ct);
         var isNew = row is null;
         row ??= new CivicWatchSettings { CreatedBy = username };
 
@@ -843,6 +843,8 @@ public sealed partial class CivicWatchService(
         if (pending.Count == 0) return;
 
         using var priority = ollamaWorkloads.UseBackgroundPriority();
+        // County minutes and agendas are public: with server AI off they may be summarized on an Admin's Mac.
+        using var sharedWork = MacRelayScope.ForSharedWork();
         foreach (var document in pending)
         {
             ct.ThrowIfCancellationRequested();
@@ -865,6 +867,14 @@ public sealed partial class CivicWatchService(
                 document.AiSummary = string.IsNullOrWhiteSpace(summary) ? null : summary;
                 document.SummarizedAt = document.AiSummary is null ? null : timeProvider.GetUtcNow();
                 document.LastError = document.AiSummary is null ? "SentinelGPT returned an empty summary." : null;
+            }
+            catch (ServerAiUnavailableException)
+            {
+                // Nowhere to run it right now: not a failed attempt, and the rest wait too.
+                document.SummaryAttempts--;
+                document.LastError = "Waiting for an Admin's Mac app to write the summary.";
+                await db.SaveChangesAsync(ct);
+                return;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {

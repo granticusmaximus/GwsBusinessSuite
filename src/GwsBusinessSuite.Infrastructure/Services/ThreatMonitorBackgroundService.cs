@@ -48,7 +48,7 @@ public sealed class ThreatMonitorBackgroundService(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
-        var settings = await db.ThreatMonitorSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        var settings = await db.ThreatMonitorSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(ct);
         if (settings is null) return;
 
         var now = timeProvider.GetUtcNow();

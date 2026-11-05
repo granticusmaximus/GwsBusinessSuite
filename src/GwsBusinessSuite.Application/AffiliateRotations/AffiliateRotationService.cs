@@ -206,7 +206,7 @@ public sealed class AffiliateRotationService(
 
     private async Task<bool> IsEnabledAsync(CancellationToken cancellationToken)
     {
-        var settings = await db.CjConnectorSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.CjConnectorSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         return settings?.AutomaticArticleRotationEnabled ?? true;
     }
 

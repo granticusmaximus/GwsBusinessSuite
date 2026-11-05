@@ -19,7 +19,7 @@ public sealed class SshTerminalService(
     public async Task<SshTerminalOpenResult> OpenAsync(
         string performedBy, int initialColumns, int initialRows, CancellationToken cancellationToken = default)
     {
-        var row = await dbContext.DigitalOceanSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var row = await dbContext.DigitalOceanSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null || string.IsNullOrWhiteSpace(row.SshPrivateKey))
         {
             return new SshTerminalOpenResult(false, null, "No SSH private key saved yet. Add one below.");
@@ -139,7 +139,7 @@ public sealed class SshTerminalService(
 
     private async Task PinHostKeyAsync(string fingerprint, CancellationToken cancellationToken, string updatedBy = "system")
     {
-        var row = await dbContext.DigitalOceanSettings.FirstOrDefaultAsync(cancellationToken);
+        var row = await dbContext.DigitalOceanSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null)
         {
             return;

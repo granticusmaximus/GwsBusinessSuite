@@ -329,12 +329,23 @@ public sealed class GovernmentIntelligenceService(
         }
 
         // Background priority so this never jumps ahead of an actual interactive AI request
-        // (chat, Content Studio) queued on the same shared scheduler.
+        // (chat, Content Studio) queued on the same shared scheduler. Bill text is public, so with
+        // server AI off it may run on an Admin's Mac (MacRelayScope).
         using var priorityScope = ollamaWorkloads.UseBackgroundPriority();
-        foreach (var brief in briefs)
+        using var sharedWork = MacRelayScope.ForSharedWork();
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            await GenerateAndCacheOverviewAsync(brief, ct);
+            foreach (var brief in briefs)
+            {
+                ct.ThrowIfCancellationRequested();
+                await GenerateAndCacheOverviewAsync(brief, ct);
+            }
+        }
+        catch (ServerAiUnavailableException)
+        {
+            // No model here and no Admin Mac online: the rest wait for the next sweep, unlogged
+            // (this was ~1,165 warnings a day after 31-10-26).
+            logger.LogDebug("SentinelGPT overviews wait for an Admin's Mac app ({Count} without one)", briefs.Count);
         }
     }
 
@@ -363,7 +374,16 @@ public sealed class GovernmentIntelligenceService(
 
         var snapshot = await GetSnapshotAsync(forceRefresh: false, ct);
         var brief = AllLegislationBriefs(snapshot).FirstOrDefault(b => string.Equals(b.OfficialUrl, officialUrl, StringComparison.OrdinalIgnoreCase));
-        return brief is null ? null : await GenerateAndCacheOverviewAsync(brief, ct);
+        if (brief is null) return null;
+        using var sharedWork = MacRelayScope.ForSharedWork();
+        try
+        {
+            return await GenerateAndCacheOverviewAsync(brief, ct);
+        }
+        catch (ServerAiUnavailableException)
+        {
+            return null;
+        }
     }
 
     // Bill/vote text doesn't change once signed or voted, so overviews are cached for a week
@@ -391,6 +411,11 @@ public sealed class GovernmentIntelligenceService(
 
             cache.Set(AiOverviewCacheKey(brief.OfficialUrl), overview, AiOverviewCacheDuration);
             return overview;
+        }
+        catch (ServerAiUnavailableException)
+        {
+            // Nowhere to run it right now - the caller stops asking rather than logging each one.
+            throw;
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -814,6 +839,12 @@ public sealed class GovernmentIntelligenceService(
         try
         {
             return await http.GetStringAsync(url, ct);
+        }
+        catch (HostPausedException ex)
+        {
+            // That site refused this server and is paused for a day (logged once, when it refused).
+            logger.LogDebug("Government Intelligence skipped {Url}: {Reason}", url, ex.Message);
+            return null;
         }
         catch (Exception ex)
         {

@@ -43,6 +43,39 @@ Grant: "Make this correct and unified", after an audit of gaps left by Claude, C
   app" section, SMTP block), Support, CRM.
 - [ ] GitHub: delete Copilot's `agents/vscode-resume-prompt-guide` branch, which closes PR #51.
 
+## Unit 2 - leftover work (05-11-26, Grant: "have no more left over work")
+
+Production logs showed what moving AI to the Mac (31-10-26) left behind, plus failing sources.
+- [x] **Shared work runs on an Admin's Mac.** `MacRelayOllamaService` replaces
+  `DisabledOllamaService` in None mode. Inside `MacRelayScope.ForSharedWork()` it relays to the
+  Admin Mac that asked most recently, through `SentinelAgentRelay`'s new low-priority lane, so
+  the person's own steps go first. Everything else fails closed as before. This covers Government
+  Intelligence overviews (~1,165 skips a day), Media Watch hot takes (~200) and Civic Watch
+  summaries. It's quiet while no Mac is online, and the installed Mac app answers with no update.
+- [x] **World News kinds:** the 45 example phrases ride the Mac's embed relay (`kind:<n>` jobs).
+  They had been falling back to keywords, ~97 times a day.
+- [x] **Refusing sites** (Eventbrite 405, gov.georgia.gov and senate.gov 403):
+  `RefusedHostPauseHandler` leaves them alone for 24 h with one log line. It doesn't work around
+  them.
+- [x] **congress.gov `DEMO_KEY`** (429s): refresh every 6 h instead of hourly, and 3 hearings per
+  chamber instead of 8.
+- [x] **EF warnings:**
+  - 39 single-row settings reads got `OrderBy(Id)`.
+  - Single queries are now set explicitly, as before.
+  - `AsSplitQuery()` on the three loads of every Sentinel database with rows.
+- [x] **Dependencies** (Dependabot #47, #50): Fido2 4.3.2, HtmlSanitizer 10.0.1120 (parameterless
+  constructor, unaffected by the options change), Ical.Net 5.2.4, Stripe.net 52.4.2 (same major).
+- [x] Guides: Platform Operations and Intelligence. AGENTS.md: environment notes.
+
+Needs Grant (not code):
+- a free congress.gov key (`CongressApi__ApiKey`)
+- connecting a Google account under Automation > Credentials, so the app's email works
+- the DigitalOcean SMTP unblock, for iCloud
+- the `@AGENTS.md` line in CLAUDE.md
+- deleting the Copilot branch (both blocked for Claude)
+- the deferred product decisions: 511 key, timeline drag-resize, World News claims, the
+  Woffice-scale modules
+
 Still unverified (needs a real device or account, so not done here):
 - the SentinelGPT agent live
 - Mail against a real mailbox

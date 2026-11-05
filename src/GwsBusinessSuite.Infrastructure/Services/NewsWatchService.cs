@@ -325,7 +325,7 @@ public sealed partial class NewsWatchService(
     public async Task<NewsWatchSettingsView> GetSettingsAsync(CancellationToken ct = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var s = await db.NewsWatchSettings.AsNoTracking().FirstOrDefaultAsync(ct) ?? new NewsWatchSettings();
+        var s = await db.NewsWatchSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(ct) ?? new NewsWatchSettings();
         return new NewsWatchSettingsView(s.RetentionHours, s.DigestEnabled, s.DigestRecipient, s.DigestFrequency,
             s.DigestHourLocal, s.DigestDayOfWeek, s.LastDigestSentAt, mailTransport.Describe(smtpOptions.Value).CanSend);
     }
@@ -339,7 +339,7 @@ public sealed partial class NewsWatchService(
             throw new ArgumentException("Enter a valid email address for the digest.");
 
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var row = await db.NewsWatchSettings.FirstOrDefaultAsync(ct);
+        var row = await db.NewsWatchSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(ct);
         if (row is null)
         {
             row = new NewsWatchSettings { CreatedAt = timeProvider.GetUtcNow() };
@@ -371,7 +371,7 @@ public sealed partial class NewsWatchService(
     public async Task<NewsDigestResult> SendDigestAsync(bool force, CancellationToken ct = default)
     {
         await using var db = await dbContextFactory.CreateDbContextAsync(ct);
-        var settings = await db.NewsWatchSettings.FirstOrDefaultAsync(ct);
+        var settings = await db.NewsWatchSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(ct);
         if (settings is null || string.IsNullOrWhiteSpace(settings.DigestRecipient) || !MailboxAddress.TryParse(settings.DigestRecipient, out var to))
             return new(false, "Set a digest email address first.");
         var now = timeProvider.GetUtcNow();

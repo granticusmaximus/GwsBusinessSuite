@@ -761,6 +761,7 @@ public sealed class SentinelWorkspaceService(
             var databases = await dbContext.WikiDatabases.AsNoTracking()
                 .Include(database => database.Properties)
                 .Include(database => database.Rows)
+                .AsSplitQuery() // every database's properties x rows would multiply in one query
                 .ToListAsync(cancellationToken);
             var accessibleTargets = await GetAccessibleTargetsAsync(
                 databases.Select(database => new SentinelAccessTarget(database.Id, IsDatabase: true)),

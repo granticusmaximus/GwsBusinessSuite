@@ -313,7 +313,7 @@ public sealed class SupportTicketService(
 
         var portalUrl = $"{notificationOptions.Value.AdminBaseUrl.TrimEnd('/')}/client-portal/support";
         // While the support mailbox is on, the client can answer by email (SupportEmailIn).
-        var mailbox = await db.SupportMailboxSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var mailbox = await db.SupportMailboxSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         var replyTo = mailbox is { Enabled: true } && mailbox.PasswordProtected.Length > 0 && mailbox.Username.Contains('@')
             ? mailbox.Username
             : null;

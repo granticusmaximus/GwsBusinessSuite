@@ -934,7 +934,7 @@ public sealed class CjAdsService(
         bool enabled,
         CancellationToken cancellationToken = default)
     {
-        var row = await db.CjConnectorSettings.FirstOrDefaultAsync(cancellationToken);
+        var row = await db.CjConnectorSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null)
         {
             row = new CjConnectorSettings { Id = CjConnectorSettings.WellKnownId };

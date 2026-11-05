@@ -1388,8 +1388,14 @@ app.MapGet("/admin/api/native/world-news/embed-jobs", (HttpContext httpContext, 
     if (!httpContext.Request.Headers.TryGetValue("X-GWS-Native", out var marker) || marker != "1")
         return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
     var installed = (models ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-    var (model, jobs) = news.EmbedJobsForRelay(installed, limit ?? 64);
-    return Results.Json(new { model, jobs = jobs.Select(job => new { id = job.Id, title = job.Title }) });
+    // The kinds' example headlines first while they've no vectors, then headlines to fill the batch.
+    var kinds = news.KindExampleJobsForRelay(installed);
+    var (model, jobs) = news.EmbedJobsForRelay(installed, Math.Max(1, (limit ?? 64) - kinds.Count));
+    return Results.Json(new
+    {
+        model,
+        jobs = kinds.Select(kind => new { id = kind.Id, title = kind.Text }).Concat(jobs.Select(job => new { id = job.Id, title = job.Title }))
+    });
 })
     .RequireAuthorization("AdminOnly");
 
@@ -1417,7 +1423,8 @@ app.MapGet("/admin/api/native/agent/chat-jobs", async (HttpContext httpContext, 
     if (httpContext.User.Identity?.Name is not { Length: > 0 } username) return Results.Unauthorized();
     var installed = (models ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
         .Where(model => model.Length <= 80);
-    var call = await relay.TakeAsync(username, installed, cancellationToken);
+    // An Admin's Mac also takes shared work (MacRelayScope), after the person's own steps.
+    var call = await relay.TakeAsync(username, installed, cancellationToken, takesSharedWork: httpContext.User.IsInRole(AppRoles.Admin));
     return call is { } next ? Results.Json(new { id = next.Id, payload = next.PayloadJson }) : Results.NoContent();
 })
     .RequireAuthorization("ContentAccess");

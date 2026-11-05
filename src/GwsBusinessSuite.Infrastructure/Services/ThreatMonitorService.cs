@@ -640,7 +640,7 @@ public sealed class ThreatMonitorService(
 
     private async Task<ThreatMonitorSettings> EnsureSettingsAsync(CancellationToken ct)
     {
-        var settings = await dbContext.ThreatMonitorSettings.FirstOrDefaultAsync(ct);
+        var settings = await dbContext.ThreatMonitorSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(ct);
         if (settings is not null) return settings;
         settings = new ThreatMonitorSettings { CreatedAt = timeProvider.GetUtcNow() };
         dbContext.ThreatMonitorSettings.Add(settings);

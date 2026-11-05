@@ -15,7 +15,7 @@ public sealed class SiteSettingsService(
     // read-only hot path (this is queried on every /blog request, media upload, etc.).
     public async Task<SiteSettingsView> GetSettingsAsync(CancellationToken cancellationToken = default)
     {
-        var row = await db.SiteSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var row = await db.SiteSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         var defaults = new SiteSettings();
 
         return new SiteSettingsView(
@@ -32,7 +32,7 @@ public sealed class SiteSettingsService(
 
     public async Task SaveSettingsAsync(SiteSettingsView settings, CancellationToken cancellationToken = default)
     {
-        var row = await db.SiteSettings.FirstOrDefaultAsync(cancellationToken);
+        var row = await db.SiteSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null)
         {
             row = new SiteSettings();

@@ -990,9 +990,17 @@ public sealed class NewsIntelligenceService(
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(BatchSummarizeTimeout);
+            // Public headlines: with server AI off they may be written on an Admin's Mac.
+            using var sharedWork = MacRelayScope.ForSharedWork();
             var raw = await ollama.GenerateAsync(OllamaModel, system, string.Join("\n", input), timeoutCts.Token);
             var parsed = ParseNumberedList(raw, articles.Count);
             return new(parsed, parsed.All(string.IsNullOrWhiteSpace) ? $"{OllamaModel} returned no usable takes" : null);
+        }
+        catch (ServerAiUnavailableException ex)
+        {
+            // No model here and no Admin Mac online - expected, so not a warning (~200 a day after 31-10-26).
+            logger.LogDebug("Hot takes wait for an Admin's Mac app; {Count} articles saved without them", articles.Count);
+            return new(Enumerable.Repeat(string.Empty, articles.Count).ToList(), ex.Message);
         }
         catch (Exception ex)
         {

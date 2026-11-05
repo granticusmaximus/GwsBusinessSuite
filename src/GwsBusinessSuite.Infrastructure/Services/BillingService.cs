@@ -215,14 +215,14 @@ public sealed class BillingService(
 
     public async Task<BillingIssuer> GetIssuerAsync(CancellationToken cancellationToken = default)
     {
-        var row = await db.BillingSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var row = await db.BillingSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         return row is null ? BillingIssuer.Empty : new BillingIssuer(row.BusinessName, row.Email, row.Address, row.TaxId, row.PaymentNotes);
     }
 
     public async Task SaveIssuerAsync(BillingIssuer issuer, string? actor = null, CancellationToken cancellationToken = default)
     {
         var now = timeProvider.GetUtcNow();
-        var row = await db.BillingSettings.FirstOrDefaultAsync(cancellationToken);
+        var row = await db.BillingSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null)
         {
             row = new BillingSettings { CreatedAt = now, CreatedBy = actor ?? "system" };

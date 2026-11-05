@@ -50,6 +50,29 @@ public sealed class WorldNewsEmbedRelayTests : IDisposable
         news.Store.FillEmbeddings([("a1", [0f, 1f])]).Should().Be(0, "a grouped report keeps what it has");
     }
 
+    // 05-11-26: with no model on the server, kinds had fallen back to keywords since 31-10-26.
+    [Fact]
+    public void TheKindsExamples_ShouldBeEmbeddedByTheMac_AlongsideHeadlines_UntilTheyHaveVectors()
+    {
+        var news = NewService();
+        news.Store.AddArticles([Article("a1", "Flood in Izmir")]);
+        news.KindExampleJobsForRelay(["llama3.2"]).Should().BeEmpty("only the server's embedding model can make comparable vectors");
+
+        var kinds = news.KindExampleJobsForRelay(["embeddinggemma:latest"]);
+        var examples = SituationKinds.Examples.Sum(pair => pair.Value.Length);
+        kinds.Should().HaveCount(examples).And.OnlyContain(job => job.Id.StartsWith(WorldNewsService.KindJobPrefix));
+        kinds.Select(job => job.Text).Should().Contain(SituationKinds.Examples.First().Value.First());
+
+        // Half of them arrive with a headline; the headline is saved, the kinds wait for the rest.
+        var half = kinds.Take(examples / 2).Select(job => (job.Id, new[] { 1f, 0f })).ToList();
+        news.SaveRelayEmbeddings("embeddinggemma", [.. half, ("a1", [0f, 1f])]).Should().BeNull();
+        news.KindExampleJobsForRelay(["embeddinggemma:latest"]).Should().HaveCount(examples, "they're still asked for until every one has a vector");
+        news.Store.FillEmbeddings([("a1", [1f, 0f])]).Should().Be(0, "the headline's vector was saved");
+
+        news.SaveRelayEmbeddings("embeddinggemma", kinds.Skip(examples / 2).Select(job => (job.Id, new[] { 0f, 1f })).ToList()).Should().BeNull();
+        news.KindExampleJobsForRelay(["embeddinggemma:latest"]).Should().BeEmpty("kinds are classified by meaning again");
+    }
+
     private WorldNewsService NewService()
     {
         var configuration = new ConfigurationBuilder()

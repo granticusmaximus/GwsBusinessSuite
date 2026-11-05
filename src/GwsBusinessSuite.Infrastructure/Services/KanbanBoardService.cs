@@ -680,7 +680,7 @@ public sealed partial class KanbanBoardService(IAppDbContext db, IWikiDatabaseSe
         };
 
         var now = DateTimeOffset.UtcNow;
-        var row = await db.KanbanBoardSettings.FirstOrDefaultAsync(item => item.WikiDatabaseId == databaseId, cancellationToken);
+        var row = await db.KanbanBoardSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(item => item.WikiDatabaseId == databaseId, cancellationToken);
         if (row is null)
         {
             row = new KanbanBoardSettings { WikiDatabaseId = databaseId, CreatedAt = now, CreatedBy = performedBy };

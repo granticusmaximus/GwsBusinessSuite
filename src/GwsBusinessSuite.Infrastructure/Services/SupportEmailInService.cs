@@ -52,12 +52,12 @@ public sealed class SupportEmailInService(
     }
 
     public async Task<SupportMailboxView> GetSettingsAsync(CancellationToken cancellationToken = default) =>
-        ToView(await db.SupportMailboxSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken));
+        ToView(await db.SupportMailboxSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken));
 
     public async Task<SupportMailboxView> SetServerAccountEnabledAsync(bool enabled, string performedBy, CancellationToken cancellationToken = default)
     {
         await RequireAdminAsync(performedBy, cancellationToken);
-        var settings = await db.SupportMailboxSettings.FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.SupportMailboxSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (settings is { PasswordProtected.Length: > 0 }) throw new SupportEmailInException("A mailbox is saved here, so email-to-ticket uses that one.");
         if (serverAccount?.For(ServerAccountTag) is null) throw new SupportEmailInException("The server's mail account isn't a Google account this can read.");
         if (settings is null)
@@ -83,7 +83,7 @@ public sealed class SupportEmailInService(
         if (username.Length is 0 or > 320 || !username.Contains('@')) throw new SupportEmailInException("Enter the support mailbox's full address, e.g. support@gwsapp.net - clients reply to it.");
         if (string.IsNullOrWhiteSpace(update.AuthServId)) throw new SupportEmailInException("Enter the receiving server's name (mx.google.com for Google Workspace).");
 
-        var settings = await db.SupportMailboxSettings.FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.SupportMailboxSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (settings is null)
         {
             settings = new SupportMailboxSettings { CreatedBy = performedBy };
@@ -106,7 +106,7 @@ public sealed class SupportEmailInService(
     public async Task<string> TestConnectionAsync(string performedBy, CancellationToken cancellationToken = default)
     {
         await RequireAdminAsync(performedBy, cancellationToken);
-        var mailbox = Effective(await db.SupportMailboxSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken))
+        var mailbox = Effective(await db.SupportMailboxSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken))
             ?? throw new SupportEmailInException("Save the mailbox settings first.");
         try
         {
@@ -134,13 +134,13 @@ public sealed class SupportEmailInService(
 
     public async Task<string?> GetReplyToAddressAsync(CancellationToken cancellationToken = default)
     {
-        var mailbox = Effective(await db.SupportMailboxSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken));
+        var mailbox = Effective(await db.SupportMailboxSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken));
         return mailbox is { Enabled: true } ? mailbox.Address : null;
     }
 
     public async Task<int> PollAsync(CancellationToken cancellationToken = default)
     {
-        var settings = await db.SupportMailboxSettings.FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.SupportMailboxSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (Effective(settings) is not { Enabled: true } mailbox) return 0;
         if (settings is null)
         {

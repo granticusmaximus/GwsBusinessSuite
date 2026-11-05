@@ -46,6 +46,12 @@ public sealed class EventbriteEventsSource(
             {
                 all.AddRange(await FetchLocationAsync(client, slug, city, ct));
             }
+            catch (HostPausedException ex)
+            {
+                // Eventbrite refused this server and is paused for a day (logged once, when it refused).
+                logger.LogDebug("Eventbrite: {Slug} skipped: {Reason}", slug, ex.Message);
+                break;
+            }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // One town's page failing must not lose the others - each is an independent pull.

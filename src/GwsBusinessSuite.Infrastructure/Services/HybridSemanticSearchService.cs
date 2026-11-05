@@ -223,6 +223,7 @@ public sealed class HybridSemanticSearchService(
             .Where(item => item.TrashedAt == null && item.NotionArchivedAt == null)
             .Include(item => item.Properties)
             .Include(item => item.Rows.Where(row => row.TrashedAt == null && row.NotionArchivedAt == null))
+            .AsSplitQuery() // every database's properties x rows would multiply in one query
             .ToListAsync(cancellationToken);
         foreach (var database in databases)
         {

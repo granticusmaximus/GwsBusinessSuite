@@ -130,7 +130,7 @@ public sealed class BookingCalendarService(
 
     public async Task<BookingCalendarExportView> GetExportAsync(CancellationToken cancellationToken = default)
     {
-        var settings = await db.BookingCalendarSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.BookingCalendarSettings.AsNoTracking().OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (settings?.ExportTokenProtected is not { } protectedToken) return new BookingCalendarExportView(null);
         try
         {
@@ -144,7 +144,7 @@ public sealed class BookingCalendarService(
 
     public async Task<BookingCalendarExportView> CreateExportLinkAsync(string performedBy, CancellationToken cancellationToken = default)
     {
-        var settings = await db.BookingCalendarSettings.FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.BookingCalendarSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (settings is null)
         {
             settings = new BookingCalendarSettings { CreatedAt = timeProvider.GetUtcNow(), CreatedBy = performedBy };
@@ -162,7 +162,7 @@ public sealed class BookingCalendarService(
 
     public async Task DisableExportAsync(string performedBy, CancellationToken cancellationToken = default)
     {
-        var settings = await db.BookingCalendarSettings.FirstOrDefaultAsync(cancellationToken);
+        var settings = await db.BookingCalendarSettings.OrderBy(oneRow => oneRow.Id).FirstOrDefaultAsync(cancellationToken);
         if (settings is null) return;
         settings.ExportTokenHash = null;
         settings.ExportTokenProtected = null;

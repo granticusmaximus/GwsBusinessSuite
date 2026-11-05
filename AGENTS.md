@@ -119,6 +119,17 @@ Mac app (MAUI, Mac Catalyst):
     signed-in Mac app through its relays (SentinelGPT, articles, World News summaries and
     embeddings). Server-side AI calls fail with a clear message instead of reaching for an
     Ollama.
+    - Background work on **public data** can run on an Admin's signed-in Mac through SentinelGPT's
+      agent relay (`MacRelayOllamaService`), but only inside `MacRelayScope.ForSharedWork()`:
+      bill overviews, news hot takes, county meeting summaries. Never wrap a person's own content
+      in that scope, because it would run on someone else's Mac.
+    - While no Admin Mac is online, `ServerAiUnavailableException` means "wait": skip quietly,
+      without logging a warning per item.
+  - **Sites that refuse the server** (403/405 to a plain request) are left alone for a day
+    (`RefusedHostPause`). Respect a refusal. Never get around bot protection with a browser
+    user agent or similar tricks.
+  - **congress.gov** falls back to the shared `DEMO_KEY` (about 50 requests a day), and the
+    Federal Civic feed slows down to fit it. `CongressApi__ApiKey` in `.env` lifts the limit.
 - **The Mac app** shows admin pages served by the server. A network connection made from one of
   those pages, such as mail or HTTP, runs on the droplet. A test from the Mac's terminal proves
   nothing about it.

@@ -227,6 +227,37 @@ public sealed class WorldNewsService : IDisposable
         return (_options.EmbeddingModel, Store.RecentArticlesToEmbed(Math.Clamp(limit, 1, MaxEmbedJobs), now - _options.EventWindow));
     }
 
+    // The kinds' example headlines while they have no vectors (05-11-26). With no model on the
+    // server, kinds had fallen back to keywords since 31-10-26, so the Mac that embeds headlines
+    // embeds these too, ahead of them. Ids are "kind:<n>". All 45 fit in one of the Mac's batches.
+    public const string KindJobPrefix = "kind:";
+
+    public IReadOnlyList<(string Id, string Text)> KindExampleJobsForRelay(IReadOnlyCollection<string> macModels) =>
+        _kindExamples is not null || InstalledName(macModels, _options.EmbeddingModel) is null
+            ? []
+            : KindExampleTexts().Select((example, i) => ($"{KindJobPrefix}{i}", example.Text)).ToList();
+
+    private static List<(string Kind, string Text)> KindExampleTexts() =>
+        SituationKinds.Examples.SelectMany(pair => pair.Value.Select(text => (Kind: pair.Key, Text: text))).ToList();
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, float[]> _relayKindVectors = new();
+
+    // Once every example has its vector, kinds are classified by meaning again.
+    private void SaveKindExampleVectors(IEnumerable<(string Id, float[] Vector)> vectors)
+    {
+        foreach (var (id, vector) in vectors)
+            if (int.TryParse(id.AsSpan(KindJobPrefix.Length), out var index)) _relayKindVectors[index] = vector;
+        var examples = KindExampleTexts();
+        if (_kindExamples is not null || Enumerable.Range(0, examples.Count).Any(i => !_relayKindVectors.ContainsKey(i))) return;
+        _kindExamples = BuildKindExamples(examples, examples.Select((_, i) => _relayKindVectors[i]).ToList());
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<float[]>> BuildKindExamples(
+        List<(string Kind, string Text)> examples, IReadOnlyList<float[]> vectors) =>
+        examples.Zip(vectors)
+            .GroupBy(pair => pair.First.Kind)
+            .ToDictionary(group => group.Key, group => (IReadOnlyList<float[]>)group.Select(pair => EventClusterer.Normalize(pair.Second)).ToList());
+
     // The Mac's embeddings: saved for the reports still waiting, then grouped straight away unless
     // a read is running (it groups them itself). An error message, or null.
     public string? SaveRelayEmbeddings(string model, IReadOnlyList<(string Id, float[] Vector)> embeddings)
@@ -236,6 +267,13 @@ public sealed class WorldNewsService : IDisposable
         var dimensions = Store.EmbeddingDimensions() ?? embeddings.FirstOrDefault().Vector?.Length ?? 0;
         if (embeddings.Any(e => e.Vector is null || e.Vector.Length != dimensions || e.Vector.Any(v => !float.IsFinite(v))))
             return $"Each embedding needs {dimensions} numbers.";
+        var kinds = embeddings.Where(e => e.Id.StartsWith(KindJobPrefix, StringComparison.Ordinal)).ToList();
+        if (kinds.Count > 0)
+        {
+            SaveKindExampleVectors(kinds);
+            embeddings = embeddings.Where(e => !e.Id.StartsWith(KindJobPrefix, StringComparison.Ordinal)).ToList();
+            if (embeddings.Count == 0) return null;
+        }
         if (Store.FillEmbeddings(embeddings) == 0 || !_running.Wait(0)) return null;
         try
         {
@@ -307,11 +345,15 @@ public sealed class WorldNewsService : IDisposable
         if (_kindExamples is not null) return _kindExamples;
         try
         {
-            var examples = SituationKinds.Examples.SelectMany(pair => pair.Value.Select(text => (Kind: pair.Key, Text: text))).ToList();
+            var examples = KindExampleTexts();
             var vectors = await _ollama.EmbedAsync(_options.EmbeddingModel, examples.Select(e => e.Text).ToList(), ct);
-            return _kindExamples = examples.Zip(vectors)
-                .GroupBy(pair => pair.First.Kind)
-                .ToDictionary(group => group.Key, group => (IReadOnlyList<float[]>)group.Select(pair => EventClusterer.Normalize(pair.Second)).ToList());
+            return _kindExamples = BuildKindExamples(examples, vectors);
+        }
+        catch (ServerAiUnavailableException)
+        {
+            // No model on this server: the Mac app embeds the examples (KindExampleJobsForRelay).
+            // Keywords until then - expected, so not a warning (~97 a day after 31-10-26).
+            return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

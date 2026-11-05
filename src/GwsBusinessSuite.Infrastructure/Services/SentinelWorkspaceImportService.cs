@@ -270,6 +270,7 @@ public sealed class SentinelWorkspaceImportService(IAppDbContext dbContext)
                 .Include(database => database.Properties)
                 .Include(database => database.Rows)
                 .Include(database => database.Views)
+                .AsSplitQuery() // every database's properties x rows x views would multiply in one query
                 .ToListAsync(cancellationToken);
             var databasesByExportId = existingDatabases
                 .Where(database => !string.IsNullOrWhiteSpace(database.NotionExportId))

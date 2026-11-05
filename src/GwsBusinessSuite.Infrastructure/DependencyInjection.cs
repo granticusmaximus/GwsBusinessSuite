@@ -128,7 +128,11 @@ public static class DependencyInjection
         services.AddSingleton<GwsBusinessSuite.Application.Boards.KanbanPresence>();
         services.AddSingleton<WikiDatabaseChangeInterceptor>();
         services.AddDbContextFactory<ApplicationDbContext>((serviceProvider, options) => options
-            .UseSqlite(connectionString)
+            // Single queries stay the default, as they always were. Choosing explicitly stops EF's
+            // MultipleCollectionIncludeWarning on every query loading two collections (05-11-26);
+            // the queries where that multiplies rows (a Sentinel database's Properties x Rows) say
+            // AsSplitQuery() themselves.
+            .UseSqlite(connectionString, sqlite => sqlite.UseQuerySplittingBehavior(QuerySplittingBehavior.SingleQuery))
             .AddInterceptors(
                 serviceProvider.GetRequiredService<ActivityFeedSaveChangesInterceptor>(),
                 serviceProvider.GetRequiredService<PublicContentCacheInvalidationInterceptor>(),
@@ -153,10 +157,14 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
         });
         services.AddSingleton<OllamaWorkloadScheduler>();
+        // Sites that refuse this server are left alone for a day (RefusedHostPause).
+        services.AddSingleton<RefusedHostPause>();
+        services.AddTransient<RefusedHostPauseHandler>();
         services.AddSingleton<OllamaPerformanceTracker>();
         if (serverAiMode == ServerAiMode.None)
         {
-            services.AddSingleton<IOllamaService, DisabledOllamaService>();
+            // Fails closed like DisabledOllamaService, except shared work, which runs on an Admin's Mac.
+            services.AddSingleton<IOllamaService, MacRelayOllamaService>();
         }
         else
         {
@@ -1277,7 +1285,7 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd(
                 "Mozilla/5.0 (compatible; GWSuite/1.0; +https://grantwatson.dev)");
             client.Timeout = TimeSpan.FromSeconds(20);
-        });
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
         services.AddHostedService<GovernmentIntelligenceRefreshBackgroundService>();
         services.AddHttpClient(nameof(EventbriteEventsSource), client =>
         {
@@ -1287,7 +1295,7 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.UserAgent.ParseAdd(
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36");
-        });
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
         services.AddSingleton<IEventbriteEventsSource, EventbriteEventsSource>();
         services.AddSingleton<ILocalEventsScraperService, LocalEventsScraperService>();
         services.AddHostedService<LocalEventsRefreshBackgroundService>();
