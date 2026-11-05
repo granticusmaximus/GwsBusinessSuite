@@ -1383,6 +1383,53 @@ h1:focus { outline: none; }
     border-radius: 10px;
 }
 
+/* BusyOverlay: the boot screen over the whole page while a long job runs. Above Bootstrap's
+   modals, since a job can start from one. */
+.gws-busy-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1085;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(5, 8, 10, 0.55);
+    backdrop-filter: blur(2px);
+}
+
+.gws-busy-panel {
+    width: min(30rem, 100%);
+    min-height: 0;
+    padding: 1.5rem 1.25rem;
+    text-align: center;
+}
+
+.gws-busy-panel .gws-boot-bar-fill {
+    animation: gws-boot-progress 1.8s ease-in-out infinite;
+}
+
+.gws-busy-title {
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+}
+
+.gws-busy-detail {
+    font-size: 0.8rem;
+    color: rgba(125, 255, 176, 0.75);
+    text-shadow: none;
+}
+
+.gws-busy-elapsed {
+    font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .gws-busy-panel .gws-boot-bar-fill {
+        animation: none;
+        width: 100%;
+    }
+}
+
 .gws-empty-state {
     display: flex;
     flex-direction: column;

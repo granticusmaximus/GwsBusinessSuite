@@ -35,14 +35,7 @@
 
 @if (IsBusy && !_isGeneratingDraft)
 {
-    <div class="gws-busy-overlay" role="status" aria-live="polite" aria-busy="true">
-        <div class="gws-busy-panel shadow">
-            <div class="spinner-border text-secondary" aria-hidden="true"></div>
-            <div class="fw-semibold mt-3">Working on your request</div>
-            <div class="text-secondary small mt-1">@BusyMessage</div>
-            <div class="text-muted small mt-2">@BusyElapsedText</div>
-        </div>
-    </div>
+    <BusyOverlay Title="Working on your request" Message="@BusyMessage" Elapsed="@BusyElapsedText" />
 }
 
 <div class="card border-0 shadow-sm mb-4">
@@ -706,25 +699,3 @@
     }
 }
 
-<style>
-    .gws-busy-overlay {
-        position: fixed;
-        inset: 0;
-        z-index: 1085;
-        background: rgba(15, 23, 42, 0.38);
-        backdrop-filter: blur(2px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 1rem;
-    }
-
-    .gws-busy-panel {
-        width: min(28rem, 100%);
-        background: #ffffff;
-        border-radius: 14px;
-        border: 1px solid #dbe6f3;
-        padding: 1.25rem;
-        text-align: center;
-    }
-</style>

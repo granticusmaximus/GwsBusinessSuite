@@ -1,41 +1,20 @@
-# GWS Business Suite Engineering Rules
+# GWS Business Suite
 
-Apply these rules to every code change in this repository.
+**Read `AGENTS.md` at the repository root before any change.** It's the single rulebook for every
+assistant in this repo: architecture, conventions, known traps, and the environment. If anything
+here seems to disagree with it, `AGENTS.md` wins.
 
-## Architecture
+These rules are repeated here because breaking them has broken production:
 
-- Preserve Clean Architecture boundaries.
-- Domain contains entities, value objects, and business rules only.
-- Application contains use cases, orchestration, abstractions, DTOs, and validation.
-- Infrastructure contains database access, HTTP clients, external integrations, and framework-specific implementations.
-- Web contains Blazor UI composition only. Keep components thin and move business logic to Application services.
-- Dependencies must flow inward only: Web -> Application, Infrastructure -> Application and Domain, Application -> Domain, Domain -> nothing.
-
-## Clean Code
-
-- Remove dead code, scaffold leftovers, and placeholder types when they are no longer needed.
-- Prefer focused classes and methods with a single responsibility.
-- Avoid god classes, hidden side effects, and mixed concerns.
-- Use explicit, descriptive names for types, methods, and variables.
-- Favor strongly typed models over anonymous or loosely shaped data once behavior stabilizes.
-- Keep logging structured and actionable around external boundaries and failure points.
-
-## Blazor
-
-- Keep Razor components primarily responsible for state, rendering, and user interaction.
-- Move business workflows, HTTP calls, persistence rules, and transformation logic into Application or Infrastructure.
-- Surface loading, success, and failure states explicitly in the UI.
-
-## Testing
-
-- Every meaningful feature or business rule change must include or update automated tests.
-- Add tests at the narrowest layer that validates the behavior.
-- Prefer Application-layer tests for orchestration and business outcomes.
-- Do not keep empty or placeholder tests.
-
-## Change Workflow
-
-- Start with the smallest owning abstraction for the behavior being changed.
-- Fix root causes rather than layering on UI-only workarounds.
-- Avoid unrelated refactors during feature work unless they unblock the task or remove clear scaffold noise.
-- Run `dotnet build` and `dotnet test` after changes.
+1. **Every push to `main` deploys to production.** Don't push, open PRs or merge unless Grant
+   gives permission in the current session.
+2. **Start from current code.** `git fetch`, then confirm `git rev-list --count HEAD..origin/main`
+   is `0` before working. An old worktree or branch must merge `origin/main` first. A worktree
+   reused from May 2026 led to a PR that broke production on 02-11-26.
+3. **Look before you build.** Search the code for an existing implementation and extend it. Don't
+   add a parallel service.
+4. **Before you call work done, run `./scripts/verify-release.sh`** (the full CI build and tests,
+   7-8 minutes). `dotnet build` and `dotnet test` alone aren't enough. Report the result, and
+   keep zero warnings.
+5. **Update the matching `docs/*_USER_GUIDE.md`** for user-visible changes, and track multi-part
+   work in `.claude/plans/`.

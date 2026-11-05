@@ -1,0 +1,26 @@
+@* While a long job runs (Content Studio writing an article, revising a draft): the Overwatch boot
+   screen over the page, with what's happening and how long it has taken. The same screen as
+   LoadingIndicator (05-11-26: these two pages had a white Bootstrap-spinner panel of their own,
+   styled twice inline). The bar loops, since the job's length isn't known. *@
+
+<div class="gws-busy-overlay" role="status" aria-live="polite" aria-busy="true">
+    <div class="gws-boot gws-boot-panel gws-busy-panel">
+        <div class="gws-boot-line" aria-hidden="true">PROCESSING REQUEST...</div>
+        <div class="gws-boot-bar" aria-hidden="true"><div class="gws-boot-bar-fill"></div></div>
+        <div class="gws-busy-title">@Title</div>
+        @if (!string.IsNullOrWhiteSpace(Message))
+        {
+            <div class="gws-busy-detail">@Message</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(Elapsed))
+        {
+            <div class="gws-busy-detail gws-busy-elapsed">@Elapsed</div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public string? Message { get; set; }
+    [Parameter] public string? Elapsed { get; set; }
+}

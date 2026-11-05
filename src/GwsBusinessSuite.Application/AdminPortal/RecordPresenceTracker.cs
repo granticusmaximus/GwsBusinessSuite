@@ -5,25 +5,32 @@ public readonly record struct RecordPresenceKey(string Kind, Guid Id)
     public static RecordPresenceKey Create(string kind, Guid id) => new(kind.Trim().ToLowerInvariant(), id);
 }
 
-public sealed record RecordViewer(Guid SessionId, string Username);
+// FocusId: the part of the record this viewer has open, when the record has parts (a board's
+// open card); null otherwise.
+public sealed record RecordViewer(Guid SessionId, string Username, Guid? FocusId = null);
 
 /// <summary>
-/// Process-local presence for ordinary admin records. Each open record checks in every 30 seconds
-/// and disappears after 90 seconds if a circuit vanishes without disposing cleanly.
+/// The app's one process-local presence tracker: who else has a record open (contacts, invoices,
+/// support tickets, boards via <c>KanbanPresence</c>). Each open record checks in every 30 seconds
+/// and disappears after 90 seconds if a circuit vanishes without disposing cleanly. Sentinel pages
+/// use persisted leases instead (SentinelPresenceService), because they also lock edits.
 /// </summary>
 public sealed class RecordPresenceTracker(TimeProvider timeProvider)
 {
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(90);
 
-    private sealed record Session(RecordPresenceKey Record, string Username, DateTimeOffset LastSeen);
+    private sealed record Session(RecordPresenceKey Record, string Username, Guid? FocusId, DateTimeOffset LastSeen);
     private readonly object _gate = new();
     private readonly Dictionary<Guid, Session> _sessions = [];
 
     public event Action<RecordPresenceKey>? Changed;
 
-    public void Enter(Guid sessionId, RecordPresenceKey record, string username)
+    // Opening a record, or saying which part of it is open now. Tells the record only when
+    // something it shows changed.
+    public void Enter(Guid sessionId, RecordPresenceKey record, string username, Guid? focusId = null)
     {
         if (record.Id == Guid.Empty || string.IsNullOrWhiteSpace(record.Kind) || string.IsNullOrWhiteSpace(username)) return;
+        var name = username.Trim();
         RecordPresenceKey? left = null;
         var changed = true;
         lock (_gate)
@@ -31,9 +38,10 @@ public sealed class RecordPresenceTracker(TimeProvider timeProvider)
             if (_sessions.TryGetValue(sessionId, out var previous))
             {
                 if (previous.Record != record) left = previous.Record;
-                changed = previous.Record != record || !string.Equals(previous.Username, username, StringComparison.Ordinal);
+                changed = previous.Record != record || previous.FocusId != focusId
+                    || !string.Equals(previous.Username, name, StringComparison.Ordinal);
             }
-            _sessions[sessionId] = new Session(record, username.Trim(), timeProvider.GetUtcNow());
+            _sessions[sessionId] = new Session(record, name, focusId, timeProvider.GetUtcNow());
         }
         if (left is { } previousRecord) Notify(previousRecord);
         if (changed) Notify(record);
@@ -58,6 +66,7 @@ public sealed class RecordPresenceTracker(TimeProvider timeProvider)
         if (record is { } key) Notify(key);
     }
 
+    // Everyone else on the record (other people, and the same person in another window), by name.
     public IReadOnlyList<RecordViewer> Others(RecordPresenceKey record, Guid exceptSessionId)
     {
         var cutoff = timeProvider.GetUtcNow() - Timeout;
@@ -67,7 +76,7 @@ public sealed class RecordPresenceTracker(TimeProvider timeProvider)
                 _sessions.Remove(stale);
             return _sessions
                 .Where(pair => pair.Key != exceptSessionId && pair.Value.Record == record)
-                .Select(pair => new RecordViewer(pair.Key, pair.Value.Username))
+                .Select(pair => new RecordViewer(pair.Key, pair.Value.Username, pair.Value.FocusId))
                 .OrderBy(viewer => viewer.Username, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }

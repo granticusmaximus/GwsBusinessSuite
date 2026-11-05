@@ -1,4 +1,5 @@
 using FluentAssertions;
+using GwsBusinessSuite.Application.AdminPortal;
 using GwsBusinessSuite.Application.Boards;
 
 namespace GwsBusinessSuite.Tests;
@@ -16,7 +17,7 @@ public sealed class KanbanLookTests
     public void Presence_ShouldListEveryoneElseOnTheBoard_WithTheCardTheyHaveOpen()
     {
         var clock = new Clock();
-        var presence = new KanbanPresence(clock);
+        var presence = new KanbanPresence(new RecordPresenceTracker(clock));
         var board = Guid.NewGuid();
         var otherBoard = Guid.NewGuid();
         var card = Guid.NewGuid();
@@ -51,7 +52,7 @@ public sealed class KanbanLookTests
     public void Presence_ShouldForgetASessionThatStopsCheckingIn_AndOneThatLeaves()
     {
         var clock = new Clock();
-        var presence = new KanbanPresence(clock);
+        var presence = new KanbanPresence(new RecordPresenceTracker(clock));
         var board = Guid.NewGuid();
         var (me, quiet, steady) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
         presence.Enter(me, board, "grant", null);
@@ -65,6 +66,29 @@ public sealed class KanbanLookTests
 
         presence.Leave(steady);
         presence.Others(board, me).Should().BeEmpty();
+    }
+
+    // 05-11-26: boards and ordinary records (contacts, invoices, tickets) share the one tracker.
+    [Fact]
+    public void Presence_ShouldShareTheRecordTracker_WithoutMixingABoardWithAnotherRecordOfTheSameId()
+    {
+        var tracker = new RecordPresenceTracker(new Clock());
+        var presence = new KanbanPresence(tracker);
+        var id = Guid.NewGuid();
+        var (onBoard, onContact, me) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        var boardsHeard = new List<Guid>();
+        presence.Changed += boardsHeard.Add;
+        presence.Changed += _ => throw new InvalidOperationException("one board page failing to redraw");
+        var lateListener = new List<Guid>();
+        presence.Changed += lateListener.Add;
+
+        presence.Enter(onBoard, id, "sam", null);
+        tracker.Enter(onContact, RecordPresenceKey.Create("contact", id), "alex");
+
+        presence.Others(id, me).Select(viewer => viewer.Username).Should().Equal("sam");
+        tracker.Others(RecordPresenceKey.Create("contact", id), me).Select(viewer => viewer.Username).Should().Equal("alex");
+        boardsHeard.Should().Equal([id], "a contact opening isn't a board change");
+        lateListener.Should().Equal([id], "a listener that throws doesn't stop the ones after it");
     }
 
     [Theory]
