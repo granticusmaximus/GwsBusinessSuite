@@ -98,11 +98,17 @@ public partial class MainPage : ContentPage
 #if MACCATALYST
         await ClearStaleWebViewCacheAsync();
 
-        // Sign in with Touch ID when this Mac has a key. If it doesn't go through, the Touch ID
+        // With Touch ID set up, open the workspace first (05-11-26). A Touch ID sign-in now lasts its
+        // full 8 hours across quitting the app (PortalSessionCookie on the server), so a session
+        // that's still valid opens with no Touch ID at all. Only when the server sends the workspace
+        // to the sign-in page does Touch ID run (OnWorkspaceNavigated) - silently, if this Mac was
+        // unlocked with Touch ID in the last 5 minutes. If that doesn't go through, the Touch ID
         // screen stays up with Try Again and Use Password (the sign-in below).
         if (_touchIdLock.IsSetUp)
         {
-            await SignInWithTouchIdAsync(reportProblems: false);
+            _resumingSession = true;
+            BeginBlockingNavigation();
+            WorkspaceView.Source = AppEndpoints.StartUrl;
             return;
         }
 #endif
@@ -432,6 +438,8 @@ public partial class MainPage : ContentPage
     // go through it says why and offers Try Again and Use Password.
     private CancellationTokenSource? _touchIdPulse;
     private bool _touchIdSigningIn;
+    // Launching with Touch ID set up: the first load shows whether the last session is still valid.
+    private bool _resumingSession;
 
     private void ShowTouchIdScreen(string title, string message, bool scanning)
     {
@@ -509,6 +517,18 @@ public partial class MainPage : ContentPage
         NavigationProgress.IsVisible = false;
         SlowNavigationNotice.IsVisible = false;
         LoadingOverlay.IsVisible = false;
+        // The launch check above: still signed in (the workspace) - done, no Touch ID. Sent to the
+        // sign-in page - sign in with Touch ID now.
+        if (_resumingSession)
+        {
+            _resumingSession = false;
+            if (args.Result == WebNavigationResult.Success && args.Url.Contains("/login", StringComparison.OrdinalIgnoreCase))
+            {
+                StatusOverlay.IsVisible = false;
+                _ = SignInWithTouchIdAsync(reportProblems: false);
+                return;
+            }
+        }
         FinishTouchIdSignIn(args.Url, args.Result == WebNavigationResult.Success);
         if (args.Result == WebNavigationResult.Success)
         {

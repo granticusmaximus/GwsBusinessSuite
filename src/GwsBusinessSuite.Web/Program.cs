@@ -5447,7 +5447,7 @@ static async Task<string> SignInPortalAsync(HttpContext httpContext, UserView us
     await httpContext.SignInAsync(
         CookieAuthenticationDefaults.AuthenticationScheme,
         new ClaimsPrincipal(identity),
-        new AuthenticationProperties { IsPersistent = false });
+        PortalSessionCookie.PropertiesFor(amr)); // persistent only for the Mac app's Touch ID sign-in
     return sessionId;
 }
 
