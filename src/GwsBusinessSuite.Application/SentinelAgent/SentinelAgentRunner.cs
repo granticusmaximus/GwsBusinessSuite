@@ -46,7 +46,7 @@ public sealed record SentinelAgentActivity(SentinelAgentActionView Action, DateT
 
 public sealed record SentinelAgentMemoryView(Guid Id, string Fact, DateTimeOffset At);
 
-public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvider time, ILogger<SentinelAgentRunner> logger)
+public sealed partial class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvider time, ILogger<SentinelAgentRunner> logger)
 {
     // Room for a real multi-step job (find, read, then change). Only a local model runs the agent:
     // in the 30-10-26 live check the droplet's llama3.2 claimed a list it never made and wrote a
@@ -76,6 +76,8 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
         var db = scope.ServiceProvider.GetRequiredService<IAppDbContext>();
         var tools = ToolsFor(scope.ServiceProvider, request.User);
         var context = new SentinelAgentToolContext(request.User, request.ConversationId);
+        // "Go" on a job's plan, or "carry on": the saved job picks up where it stopped (Jobs.cs).
+        if (await ResumeJobAsync(scope.ServiceProvider, db, tools, context, request, onEvent, cancellationToken) is { } resumed) return resumed;
 
         var messages = new List<OllamaChatMessage> { new("system", await SystemPromptAsync(db, request, cancellationToken)) };
         var history = await HistoryAsync(db, request, cancellationToken);
@@ -92,6 +94,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
         // job, and planning only "the rest" made it redo the first three after Go.
         var planApproved = request.Message.Trim() == GoMessage;
         var planRequired = false;
+        var jobAsked = false;
         string? answer = null;
         for (var round = 0; round < Math.Max(1, request.MaxRounds) && answer is null; round++)
         {
@@ -128,12 +131,20 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
                 {
                     result = DiscoverCapabilities(areas);
                 }
+                else if (call.Name == PlanJobToolName)
+                {
+                    jobAsked = true;
+                    result = SentinelAgentJson.Serialize(new { status = "planning the job now" });
+                }
                 else
                 {
                     result = await CallAsync(db, tools, call, context, actions, done, onEvent, cancellationToken);
                 }
                 messages.Add(new OllamaChatMessage("tool", result, Name: call.Name));
             }
+
+            // A bigger job: think it through, plan it in sections and carry it out (Jobs.cs).
+            if (jobAsked) break;
 
             // A plan waits for Go: nothing more happens this turn.
             if (actions.Any(action => action.Tool == PlanToolName && action.AwaitingConfirm))
@@ -144,11 +155,19 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             }
         }
 
-        if (string.IsNullOrWhiteSpace(answer))
+        // Asked for a job, or out of rounds before finishing: plan the whole job and carry it on in
+        // sections. Before 05-11-26 this answered "Done: ..." even for half a job, or gave up with
+        // "I couldn't finish that in 8 steps".
+        if (jobAsked || answer is null)
+        {
+            return await RunJobAsync(new JobStart(scope.ServiceProvider, db, tools, context, request, actions, messages), onEvent, cancellationToken);
+        }
+        // The model finished without a word: say what it did, or ask.
+        if (answer.Length == 0)
         {
             answer = actions.Count > 0
                 ? "Done: " + string.Join("; ", actions.Select(action => action.Summary)) + "."
-                : $"I couldn't finish that in {request.MaxRounds} steps. Try asking for one thing at a time.";
+                : "I'm not sure what you'd like me to do. Could you say a bit more?";
         }
 
         db.SentinelAiRuns.Add(new SentinelAiRun
@@ -266,9 +285,9 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
 
         // Small models sometimes send the same change twice in a row; the second one would make a
         // duplicate list or card, so it's answered from the first.
-        var key = call.Name + arguments.ToJsonString();
+        var key = ChangeKey(call.Name, arguments);
         if (tool.Risk != SentinelAgentRisk.Read && !done.Add(key))
-            return Problem("That's already done in this turn. Don't repeat it; carry on or answer.");
+            return Problem("That's already done. Don't repeat it: carry on with the next step, or answer.");
 
         await onEvent(new SentinelAgentStep(tool.Describe(arguments)));
         try
@@ -508,6 +527,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
         var definitions = new List<ISentinelAgentTool> { tools[PlanToolName], tools[UndoToolName] }
             .Select(tool => new OllamaToolDefinition(tool.Name, tool.Description, tool.ParametersJson))
             .ToList();
+        definitions.Add(PlanJobDefinition);
         var others = areas.Where(area => !offered.Contains(area.Area.Name)).ToList();
         definitions.Add(new OllamaToolDefinition(
             DiscoverCapabilitiesToolName,
@@ -622,6 +642,7 @@ public sealed class SentinelAgentRunner(IServiceScopeFactory scopes, TimeProvide
             - For facts, use only what the tools and the page give you. If you don't know, say so.
             - When you've finished, answer in one to three short sentences saying what you did. The app shows links and Undo buttons, so don't paste ids or links.
             - Questions that need no change get a direct answer.
+            - For a job with more than 3 steps, more than one record or more than one part of the app, call plan_job first, before changing anything. The app then thinks it through with you, plans it in sections and carries it out step by step, however long it takes.
             """);
 
         var changes = (await db.SentinelAgentActions.AsNoTracking()

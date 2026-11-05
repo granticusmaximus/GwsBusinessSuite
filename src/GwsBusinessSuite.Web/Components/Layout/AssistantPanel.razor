@@ -85,6 +85,12 @@
                                     <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@(_acting || _busy)" @onclick="() => ResolvePlanAsync(turn, action, false)">Cancel</button>
                                 </span>
                             }
+                            else if (action.Status == SentinelAgentActionStatuses.Done && JobUnfinished(action))
+                            {
+                                <span class="gws-assistant-action-buttons">
+                                    <button type="button" class="btn btn-sm btn-primary" disabled="@(_acting || _busy)" @onclick="() => AskAsync(SentinelAgentRunner.ContinueMessage)">Carry on</button>
+                                </span>
+                            }
                         </div>
                     }
                     @foreach (var action in turn.Actions.Where(action => action.Tool != SentinelAgentRunner.PlanToolName))
@@ -466,10 +472,17 @@
 
     private static string PlanSuffix(SentinelAgentActionView plan) => plan.Status switch
     {
+        SentinelAgentActionStatuses.Done when JobFinished(plan) => " (done and checked)",
         SentinelAgentActionStatuses.Done => " (started)",
         SentinelAgentActionStatuses.Declined => " (cancelled)",
         _ => string.Empty
     };
+
+    // A planned job's card (SentinelAgentRunner jobs, 05-11-26) marks each step: ☐ to do, ☑ done,
+    // ✓ checked, ✗ didn't check out, – skipped. An older plain plan has no marks.
+    private static bool JobUnfinished(SentinelAgentActionView plan) => plan.Summary.IndexOfAny(['☐', '☑', '✗']) >= 0;
+
+    private static bool JobFinished(SentinelAgentActionView plan) => !JobUnfinished(plan) && plan.Summary.IndexOfAny(['✓', '–']) >= 0;
 
     private async Task UndoAsync(Turn turn, SentinelAgentActionView action)
     {

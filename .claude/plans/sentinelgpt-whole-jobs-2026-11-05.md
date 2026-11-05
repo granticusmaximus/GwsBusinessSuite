@@ -84,7 +84,44 @@ without the app, based on the user's role, and get the entirety of the task comp
 - Carry on automatically between legs (proposed), or ask after each one?
 
 ## Progress
-- [ ] 1 Continuation + ledger + honest ending
-- [ ] 2 Verification
-- [ ] 3 Background turns
+- [x] **1+2 built 05-11-26.** Grant asked SentinelGPT to "think about what the task is asking for,
+  deliberate, consider an appropriate plan, execute the steps ... break it into sections ... build
+  the pathway". `SentinelAgentRunner.Jobs.cs`:
+  - **Think.** A no-tools call gets the request, the screen, what's done and what the tools
+    returned, plus the role's capabilities. It replies with JSON: understanding, approach,
+    cannot, and sections of steps, each with a check. Limits: 8 sections, 10 steps a section, 40
+    in all. If it can't produce a plan, the request becomes a one-step job.
+  - **Ledger.** The plan is a show_plan action; its ArgumentsJson keeps the job, and the summary
+    is the checklist card (☐ ☑ ✓ ✗ –).
+  - **Starts** when the model calls `plan_job` (always offered, with a prompt rule for anything
+    over 3 steps), or when the fast path runs out of rounds. That replaces "couldn't finish in 8
+    steps" and the false "Done: ...".
+  - **Section legs.** Up to MaxRounds rounds each, with a fresh context (system prompt + brief +
+    ledger), 2 legs a section, 16 legs and 30 minutes a turn. `complete_step` / `skip_step`
+    move the ledger.
+  - **Check, then repair.** A check leg with only the read tools replies with JSON
+    {complete, problems}. Failures get one repair leg and one more check.
+  - **Honest outcome:** "Done and checked", "Partly done ... Still to do ... carry on", or "I
+    didn't change anything".
+  - **Resume.** "carry on", or the panel's **Carry on**, continues the saved job. Go on a plan of
+    more than 25 steps resumes the saved plan.
+  - **Tests:** SentinelAgentTests +6 (sections, out-of-rounds escalation, repair, partial + carry
+    on, Go, parser bounds); the existing 32 unchanged.
+  - **Live-checked 05-11-26 on sentinelgpt:latest (gemma4)** with the opt-in
+    `Live_*OnARealLocalModel` tests (`GWS_LIVE_OLLAMA_MODEL=sentinelgpt:latest`):
+    - A two-list job is done on the fast path, correctly not planned.
+    - The 5 lists + "review" on each job runs out of fast-path rounds after 8 changes, plans only
+      the 2 left, carries them out, reads the pages back, and answers "Done and checked".
+    - The first run exposed three things, all fixed:
+      1. Each leg's user message was the original request, so every leg redid the whole job.
+         It's now the leg's own instruction.
+      2. The repeat guard was per leg, so all 5 lists were re-created. It's now seeded from the
+         chat's done actions, with arguments in canonical order.
+      3. The planner put doubts under "cannot". The field is now `not_possible`, with a narrow
+         wording.
+- [ ] 3 Background turns (side-panel turns still live in the circuit; navigation doesn't cancel them)
 - [ ] 4 Coverage matrix and gaps
+
+Paused for this: tech-forward-ux T5 (charts/sparklines). `DayRange` plus the three daily-count service
+methods are in place (they build, nothing calls them yet). Next: MissionControl series, Sparkline,
+KpiCard/MetricCard trend, chart theme, compact offer.

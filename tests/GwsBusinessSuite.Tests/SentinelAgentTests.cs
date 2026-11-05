@@ -899,6 +899,251 @@ public sealed class SentinelAgentTests
 
     private static OllamaChatResponse Say(string text) => new(text, []);
 
+    private static OllamaChatResponse Calls(params (string Name, object Arguments)[] calls) =>
+        new(string.Empty, calls.Select(call => new OllamaToolCall(call.Name, JsonSerializer.Serialize(call.Arguments))).ToList());
+
+    private static string PlanJson(params (string Title, string[] Steps)[] sections) => JsonSerializer.Serialize(new
+    {
+        understanding = "What was asked",
+        approach = "The simplest way",
+        not_possible = Array.Empty<string>(),
+        sections = sections.Select(section => new { title = section.Title, steps = section.Steps.Select(step => new { @do = step, check = $"{step} is there" }) })
+    });
+
+    private const string AllRight = """{"complete": true, "problems": []}""";
+
+    // The id of a list this chat made, from "What this chat has changed" in the system prompt (oldest first).
+    private static string MadeListId(IReadOnlyList<OllamaChatMessage> messages, int index = 0) =>
+        Regex.Matches(messages[0].Content, @"sentinel-page id ([0-9a-f-]{36})")[index].Groups[1].Value;
+
+    // 05-11-26 (Grant: think about the task, plan it, break it into sections, carry it out, check it).
+    [Fact]
+    public async Task AJob_ShouldBeThoughtThrough_PlannedInSections_CarriedOutSectionBySection_AndChecked()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var model = new ScriptedModel(
+            _ => Call(SentinelAgentRunner.PlanJobToolName, new { request = "Two lists, then sunscreen on the first" }),
+            messages =>
+            {
+                messages[0].Content.Should().Contain("Think the job through").And.Contain("create_todo_list", "the plan is made from real capabilities");
+                return Say("Here you go:\n" + PlanJson(("Lists", ["Make the Packing list", "Make the Errands list"]), ("Items", ["Add sunscreen to Packing"])));
+            },
+            messages =>
+            {
+                messages[0].Content.Should().Contain("section 1 of 2").And.Contain("☐ 1. Make the Packing list");
+                return Calls(("create_todo_list", new { title = "Packing" }), (SentinelAgentRunner.CompleteStepToolName, new { step = 1, result = "made it" }),
+                    ("create_todo_list", new { title = "Errands" }), (SentinelAgentRunner.CompleteStepToolName, new { step = 2, result = "made it" }));
+            },
+            messages =>
+            {
+                messages[0].Content.Should().Contain("section 2 of 2").And.Contain("☑ 1. Make the Packing list", "a fresh leg carries the ledger");
+                return Calls(("add_todo_items", new { pageId = MadeListId(messages), items = new[] { "sunscreen" } }),
+                    (SentinelAgentRunner.CompleteStepToolName, new { step = 3, result = "added" }));
+            },
+            messages =>
+            {
+                messages[0].Content.Should().Contain("You're checking a finished job");
+                return Say(AllRight);
+            });
+
+        var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin, "Make me a Packing and an Errands list, and put sunscreen on Packing", null, model, "test"),
+            _ => Task.CompletedTask, default);
+
+        turn.Answer.Should().Be("Done and checked: 3 steps in 2 sections.");
+        (await harness.ToDosAsync("Packing")).Should().Equal("sunscreen");
+        (await harness.PagesTitledAsync("Errands")).Should().Be(1);
+        var plan = turn.Actions.Single(action => action.Tool == SentinelAgentRunner.PlanToolName);
+        plan.Summary.Should().Be("Section 1: Lists\n✓ 1. Make the Packing list\n✓ 2. Make the Errands list\nSection 2: Items\n✓ 3. Add sunscreen to Packing");
+        model.Tools[4].Select(tool => tool.Name).Should().NotContain("create_todo_list", "the check only looks").And.Contain("find_sentinel_pages");
+    }
+
+    [Fact]
+    public async Task RunningOutOfRounds_ShouldBecomeAPlannedJob_NotAFalseDone()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var model = new ScriptedModel(
+            _ => Call("create_todo_list", new { title = "A" }),
+            _ => Call("create_todo_list", new { title = "B" }),
+            messages =>
+            {
+                messages[1].Content.Should().Contain("Already done in this turn").And.Contain("'A'").And.Contain("'B'");
+                return Say(PlanJson(("The rest", ["Make list C"])));
+            },
+            _ => Calls(("create_todo_list", new { title = "C" }), (SentinelAgentRunner.CompleteStepToolName, new { step = 1, result = "made C" })),
+            _ => Say(AllRight));
+
+        var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin, "Make lists A, B and C", null, model, "test", MaxRounds: 2),
+            _ => Task.CompletedTask, default);
+
+        turn.Answer.Should().Be("Done and checked: 1 step in 1 section.").And.NotContain("Done: Created");
+        foreach (var title in new[] { "A", "B", "C" }) (await harness.PagesTitledAsync(title)).Should().Be(1, $"{title} was made once");
+    }
+
+    [Fact]
+    public async Task AStepThatDoesntCheckOut_ShouldBeRepaired_ThenCheckedAgain()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var model = new ScriptedModel(
+            _ => Call(SentinelAgentRunner.PlanJobToolName, new { request = "A Trip list with tickets" }),
+            _ => Say(PlanJson(("Trip", ["Make the Trip list with tickets on it"]))),
+            _ => Calls(("create_todo_list", new { title = "Trip" }), (SentinelAgentRunner.CompleteStepToolName, new { step = 1, result = "made it" })),
+            _ => Say("""{"complete": false, "problems": [{"step": 1, "why": "tickets aren't on it"}]}"""),
+            messages =>
+            {
+                messages[0].Content.Should().Contain("didn't check out").And.Contain("tickets aren't on it");
+                return Calls(("add_todo_items", new { pageId = MadeListId(messages), items = new[] { "tickets" } }),
+                    (SentinelAgentRunner.CompleteStepToolName, new { step = 1, result = "added tickets" }));
+            },
+            _ => Say(AllRight));
+
+        var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin, "Make a Trip list with tickets on it", null, model, "test"),
+            _ => Task.CompletedTask, default);
+
+        turn.Answer.Should().Be("Done and checked: 1 step in 1 section.");
+        (await harness.ToDosAsync("Trip")).Should().Equal("tickets");
+    }
+
+    [Fact]
+    public async Task AJobThatRunsOut_ShouldSayExactlyWhatsLeft_AndCarryOnShouldPickItUp()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var chat = Guid.NewGuid();
+        var first = new ScriptedModel(
+            _ => Call(SentinelAgentRunner.PlanJobToolName, new { request = "Lists X and Y" }),
+            _ => Say(PlanJson(("Lists", ["Make list X", "Make list Y"]))),
+            _ => Calls(("create_todo_list", new { title = "X" }), (SentinelAgentRunner.CompleteStepToolName, new { step = 1, result = "made X" })),
+            _ => Say("I'll stop there."),
+            _ => Say(AllRight));
+        var partly = await harness.Runner.RunAsync(new SentinelAgentRequest(chat, Admin, "Make lists X and Y", null, first, "test", MaxRounds: 1),
+            _ => Task.CompletedTask, default);
+        partly.Answer.Should().Be("Partly done: 1 of 2 steps. Still to do: 2. Make list Y. Say \"carry on\" and I'll pick up from there.");
+
+        var second = new ScriptedModel(
+            messages =>
+            {
+                messages[0].Content.Should().Contain("✓ 1. Make list X").And.Contain("☐ 2. Make list Y");
+                return Calls(("create_todo_list", new { title = "Y" }), (SentinelAgentRunner.CompleteStepToolName, new { step = 2, result = "made Y" }));
+            },
+            _ => Say(AllRight));
+        var finished = await harness.Runner.RunAsync(new SentinelAgentRequest(chat, Admin, "carry on", null, second, "test"), _ => Task.CompletedTask, default);
+
+        finished.Answer.Should().Be("Done and checked: 2 steps in 1 section.");
+        (await harness.PagesTitledAsync("X")).Should().Be(1, "carrying on doesn't redo what's done");
+        (await harness.PagesTitledAsync("Y")).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ABigJob_ShouldWaitForGo_ThenGoShouldCarryOutTheSavedPlan()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var chat = Guid.NewGuid();
+        var steps = Enumerable.Range(1, 26).Select(number => $"Step {number}").ToArray();
+        var planned = await harness.Runner.RunAsync(new SentinelAgentRequest(chat, Admin, "A very big job", null,
+            new ScriptedModel(_ => Call(SentinelAgentRunner.PlanJobToolName, new { request = "big" }), _ => Say(PlanJson(("A", steps[..10]), ("B", steps[10..20]), ("C", steps[20..])))), "test"),
+            _ => Task.CompletedTask, default);
+        var plan = planned.Actions.Single(action => action.Tool == SentinelAgentRunner.PlanToolName);
+        plan.AwaitingConfirm.Should().BeTrue("more than 25 steps wait for Go");
+        planned.Answer.Should().Contain("Press Go");
+
+        await harness.Runner.ConfirmAsync(plan.Id, Admin, approve: true, default);
+        var go = new ScriptedModel(
+            _ => Calls(steps[..10].Select((_, index) => ((string, object))(SentinelAgentRunner.SkipStepToolName, new { step = index + 1, why = "not needed" })).ToArray()),
+            _ => Calls(steps[10..20].Select((_, index) => ((string, object))(SentinelAgentRunner.SkipStepToolName, new { step = index + 11, why = "not needed" })).ToArray()),
+            _ => Calls(steps[20..].Select((_, index) => ((string, object))(SentinelAgentRunner.SkipStepToolName, new { step = index + 21, why = "not needed" })).ToArray()));
+        var done = await harness.Runner.RunAsync(new SentinelAgentRequest(chat, Admin, SentinelAgentRunner.GoMessage, null, go, "test"), _ => Task.CompletedTask, default);
+
+        done.Answer.Should().StartWith("I didn't change anything: Step 1 (not needed)");
+    }
+
+    // Opt-in live check of a whole job on a real local model (it does nothing unless
+    // GWS_LIVE_OLLAMA_MODEL names one, e.g. sentinelgpt:latest; Ollama at 127.0.0.1:11434).
+    [Fact]
+    public async Task Live_AJobOnARealLocalModel_ShouldBeCarriedOutAndChecked()
+    {
+        var modelName = Environment.GetEnvironmentVariable("GWS_LIVE_OLLAMA_MODEL");
+        if (string.IsNullOrWhiteSpace(modelName)) return;
+        await using var harness = await Harness.CreateAsync();
+        var steps = new List<string>();
+        var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin,
+                "Make a to-do list called 'Trip prep' with passport, tickets and charger on it, and a second to-do list called 'Errands' with milk and stamps.",
+                null, new LocalOllama(), modelName),
+            agentEvent =>
+            {
+                if (agentEvent is SentinelAgentStep step) steps.Add(step.Text);
+                return Task.CompletedTask;
+            }, default);
+
+        var log = string.Join("\n", steps) + "\nANSWER: " + turn.Answer + "\nPLAN: " +
+            (turn.Actions.FirstOrDefault(action => action.Tool == SentinelAgentRunner.PlanToolName)?.Summary ?? "(no plan)");
+        File.WriteAllText(Path.Combine(Path.GetTempPath(), "gws-live-job.txt"), log);
+        (await harness.ToDosAsync("Trip prep")).Should().BeEquivalentTo(["passport", "tickets", "charger"], log);
+        (await harness.ToDosAsync("Errands")).Should().BeEquivalentTo(["milk", "stamps"], log);
+        turn.Answer.Should().NotStartWith("Partly done", log);
+    }
+
+    // More than 8 rounds of work at one change a round: it has to plan, run in sections and check.
+    [Fact]
+    public async Task Live_ABigJobOnARealLocalModel_ShouldBePlannedCarriedOutInSectionsAndChecked()
+    {
+        var modelName = Environment.GetEnvironmentVariable("GWS_LIVE_OLLAMA_MODEL");
+        if (string.IsNullOrWhiteSpace(modelName)) return;
+        await using var harness = await Harness.CreateAsync();
+        var steps = new List<string>();
+        var lists = new[] { "Monday", "Tuesday", "Wednesday", "Thursday", "Friday" };
+        var turn = await harness.Runner.RunAsync(new SentinelAgentRequest(Guid.NewGuid(), Admin,
+                "Make five to-do lists, one each called Monday, Tuesday, Wednesday, Thursday and Friday, each with the item 'stand-up'. " +
+                "Then add the item 'review' to every one of those five lists.",
+                null, new LocalOllama(), modelName),
+            agentEvent =>
+            {
+                if (agentEvent is SentinelAgentStep step) steps.Add(step.Text);
+                return Task.CompletedTask;
+            }, default);
+
+        var log = string.Join("\n", steps) + "\nANSWER: " + turn.Answer + "\nPLAN:\n" +
+            (turn.Actions.LastOrDefault(action => action.Tool == SentinelAgentRunner.PlanToolName)?.Summary ?? "(no plan)");
+        File.WriteAllText(Path.Combine(Path.GetTempPath(), "gws-live-bigjob.txt"), log);
+        foreach (var list in lists)
+            (await harness.ToDosAsync(list)).Should().BeEquivalentTo(["stand-up", "review"], $"{list}\n{log}");
+        turn.Answer.Should().NotStartWith("Partly done", log);
+    }
+
+    private sealed class LocalOllama : IOllamaService
+    {
+        private static readonly HttpClient Http = new() { BaseAddress = new Uri("http://127.0.0.1:11434/"), Timeout = TimeSpan.FromMinutes(5) };
+
+        public async Task<OllamaChatResponse> ChatAsync(string model, IReadOnlyList<OllamaChatMessage> messages, IReadOnlyList<OllamaToolDefinition>? tools = null, CancellationToken ct = default)
+        {
+            var payload = OllamaChatPayload.Build(model, messages, tools, "10m").ToJsonString();
+            using var response = await Http.PostAsync("api/chat", new StringContent(payload, System.Text.Encoding.UTF8, "application/json"), ct);
+            return OllamaChatPayload.Parse(await response.Content.ReadAsStringAsync(ct));
+        }
+
+        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) => throw new NotSupportedException();
+        public async IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            await Task.CompletedTask;
+            yield break;
+        }
+        public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyCollection<string>>([]);
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) => Task.FromResult(string.Empty);
+    }
+
+    [Fact]
+    public void ThePlanParser_ShouldTakeTheModelsJson_EvenWithWordsAroundIt_AndKeepItInBounds()
+    {
+        var many = Enumerable.Range(1, 30).Select(number => $"s{number}").ToArray();
+        var job = SentinelAgentRunner.ParseJob("Sure! " + PlanJson(("One", many[..12]), ("Two", many[12..]), ("Empty", [])) + " Hope that helps.", "the request");
+        job.Should().NotBeNull();
+        job!.Sections.Select(section => section.Steps.Count).Should().Equal([10, 10], "10 steps a section; an empty section is dropped");
+        job.Steps.Select(step => step.Number).Should().Equal(Enumerable.Range(1, 20));
+        SentinelAgentRunner.ParseJob("no json here", "x").Should().BeNull();
+        SentinelAgentRunner.ParseProblems("""{"complete": false, "problems": []}""").Should().BeNull("'not complete' naming nothing can't be acted on");
+        SentinelAgentRunner.ParseProblems("""{"complete": false, "problems": [{"step": "2", "why": "missing"}]}""").Should().ContainKey(2);
+    }
+
     private sealed class Harness : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
