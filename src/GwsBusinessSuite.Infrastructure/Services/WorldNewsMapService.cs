@@ -25,7 +25,9 @@ public sealed record WorldNewsMapSignal(
     // New events in the last 48 hours (World News's "Active"); otherwise Quiet.
     bool Active = true,
     // Set when coverage is surging (SituationSurge), saying how.
-    string? Surge = null)
+    string? Surge = null,
+    // For cyber stories, how sure it is (CyberStatus), from the headlines.
+    string? Status = null)
 {
     public string Country => Location.Country;
     public double Latitude => Location.Latitude;
@@ -223,10 +225,12 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
         var summary = details.Summary;
         var sources = details.Sources;
         var (outlets, before) = growth.GetValueOrDefault(situation.Id);
+        var kind = KindOf(situation);
         return new WorldNewsMapSignal(situation.Id, situation.Title, situation.Latest, location, situation.EventCount,
-            situation.OutletCount, situation.ArticleCount, situation.LastSeen, summary, sources, KindOf(situation),
+            situation.OutletCount, situation.ArticleCount, situation.LastSeen, summary, sources, kind,
             situation.LastSeen >= DateTimeOffset.UtcNow - SituationLinker.QuietAfter,
-            SituationSurge.IsSurging(outlets, before) ? SituationSurge.Message(outlets, before) : null);
+            SituationSurge.IsSurging(outlets, before) ? SituationSurge.Message(outlets, before) : null,
+            kind == SituationKinds.Cyber ? CyberStatus.Of([situation.Title, situation.Latest, summary, .. sources.Select(source => source.Title)]) : null);
     }
 
     private Details LoadDetails(SituationOverview situation, WorldNewsLocation location)

@@ -462,6 +462,74 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         consoleErrors.Should().BeEmpty();
     }
 
+    // Unit 6 (06-11-26): a photo's own EXIF places it on the globe, read in the browser.
+    [Fact]
+    public async Task PhotoPlacement_ShouldReadWhereAndWhenAPhotoWasTaken_AndSayWhenItHasNoLocation()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        var result = await page.EvaluateAsync<System.Text.Json.JsonElement>("""
+            (photos) => {
+                const bytes = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+                const info = window.tacticalGlobe.readPhotoExif(bytes(photos.withGps));
+                const placed = window.tacticalGlobe.placePhoto('tg-viewport', info, 'IMG_0001.jpg');
+                const none = window.tacticalGlobe.placePhoto('tg-viewport', window.tacticalGlobe.readPhotoExif(bytes(photos.withoutGps)), 'IMG_0002.jpg');
+                const notAPhoto = window.tacticalGlobe.readPhotoExif(new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]));
+                return { info, placed, none, notAPhoto };
+            }
+            """, new { withGps = Convert.ToBase64String(ExifJpeg(withGps: true)), withoutGps = Convert.ToBase64String(ExifJpeg(withGps: false)) });
+
+        var info = result.GetProperty("info");
+        info.GetProperty("latitude").GetDouble().Should().BeApproximately(32.6485, 0.0001);
+        info.GetProperty("longitude").GetDouble().Should().BeApproximately(-83.6675, 0.0001, "W is negative");
+        info.GetProperty("heading").GetDouble().Should().Be(123.5);
+        info.GetProperty("takenAt").GetString().Should().Be("05-11-26 14:03", "dd-MM-yy HH:mm");
+        info.GetProperty("make").GetString().Should().Be("Apple");
+        result.GetProperty("placed").GetString().Should().Be("PHOTO PLACED · TAKEN 05-11-26 14:03 · FACING 124°");
+        result.GetProperty("none").GetString().Should().StartWith("NO LOCATION IN THIS PHOTO");
+        result.GetProperty("notAPhoto").ValueKind.Should().Be(System.Text.Json.JsonValueKind.Null);
+        consoleErrors.Should().BeEmpty();
+    }
+
+    // A JPEG holding only an EXIF block (big-endian TIFF): Make, DateTimeOriginal and, optionally,
+    // GPS 32°38'54.6"N 83°40'03"W facing 123.5°.
+    private static byte[] ExifJpeg(bool withGps)
+    {
+        var tiff = new byte[216];
+        void U16(int at, int value) => System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(tiff.AsSpan(at), (ushort)value);
+        void U32(int at, long value) => System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(tiff.AsSpan(at), (uint)value);
+        void Entry(int at, int tag, int type, int count, long value) { U16(at, tag); U16(at + 2, type); U32(at + 4, count); U32(at + 8, value); }
+        void Text(int at, string text) => System.Text.Encoding.ASCII.GetBytes(text + "\0").CopyTo(tiff, at);
+        void Rational(int at, long numerator, long denominator) { U32(at, numerator); U32(at + 4, denominator); }
+
+        tiff[0] = (byte)'M'; tiff[1] = (byte)'M'; U16(2, 42); U32(4, 8);
+        // IFD0 at 8: Make, the Exif IFD, the GPS IFD.
+        U16(8, withGps ? 3 : 2);
+        Entry(10, 0x010F, 2, 6, 50);
+        Entry(22, 0x8769, 4, 1, 56);
+        if (withGps) Entry(34, 0x8825, 4, 1, 94);
+        Text(50, "Apple");
+        // Exif IFD at 56: DateTimeOriginal.
+        U16(56, 1);
+        Entry(58, 0x9003, 2, 20, 74);
+        Text(74, "2026:11:05 14:03:22");
+        // GPS IFD at 94.
+        U16(94, 5);
+        Entry(96, 1, 2, 2, 0x4E000000);
+        Entry(108, 2, 5, 3, 160);
+        Entry(120, 3, 2, 2, 0x57000000);
+        Entry(132, 4, 5, 3, 184);
+        Entry(144, 17, 5, 1, 208);
+        Rational(160, 32, 1); Rational(168, 38, 1); Rational(176, 546, 10);
+        Rational(184, 83, 1); Rational(192, 40, 1); Rational(200, 3, 1);
+        Rational(208, 1235, 10);
+
+        var app1Length = 2 + 6 + tiff.Length;
+        return [0xFF, 0xD8, 0xFF, 0xE1, (byte)(app1Length >> 8), (byte)app1Length, (byte)'E', (byte)'x', (byte)'i', (byte)'f', 0, 0, .. tiff, 0xFF, 0xD9];
+    }
+
     [Fact]
     public async Task ClickingAnAircraft_ShouldShowItsDetails_AndDrawItsPath()
     {

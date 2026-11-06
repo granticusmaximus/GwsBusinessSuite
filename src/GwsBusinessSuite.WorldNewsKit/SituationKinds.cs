@@ -11,16 +11,20 @@ public static partial class SituationKinds
     public const string Disaster = "disaster";
     public const string Transport = "transport";
     public const string Conflict = "conflict";
+    // Hacks, ransomware and breaches (06-11-26, from the globalhackmap review): placed on the map like
+    // any operational story, with an honest status (CyberStatus).
+    public const string Cyber = "cyber";
     public const string Health = "health";
     public const string Politics = "politics";
     public const string Business = "business";
     public const string Sport = "sport";
     public const string Other = "other";
 
-    public static readonly IReadOnlyList<string> All = [Disaster, Transport, Conflict, Health, Politics, Business, Sport, Other];
+    // Cyber comes before Conflict, so "hackers attack ..." (one keyword each) counts as cyber.
+    public static readonly IReadOnlyList<string> All = [Disaster, Transport, Cyber, Conflict, Health, Politics, Business, Sport, Other];
 
     // Shown on the globe unless someone turns more on.
-    public static readonly IReadOnlyList<string> Operational = [Disaster, Transport, Conflict, Health];
+    public static readonly IReadOnlyList<string> Operational = [Disaster, Transport, Cyber, Conflict, Health];
 
     // Below this similarity to every example (embeddinggemma, cosine) a story is "other": an
     // obituary or a game listing shouldn't be forced into "health" or "sport".
@@ -41,6 +45,12 @@ public static partial class SituationKinds
             "Two trains collide, injuring passengers", "Plane crashes shortly after takeoff", "Flights cancelled as airport shuts down",
             "Ferry sinks and crew are rescued", "Rail strike halts train services across the country", "Motorway closed after major crash",
             "Ship attacked in shipping lane"
+        ],
+        [Cyber] =
+        [
+            "Ransomware attack shuts down hospital systems", "Hackers steal customer data in major breach",
+            "Cyberattack disrupts airport check-in systems", "Company confirms data breach affecting millions of users",
+            "Ransomware gang claims attack on city council", "Government websites knocked offline by cyberattack"
         ],
         [Conflict] =
         [
@@ -77,6 +87,8 @@ public static partial class SituationKinds
             "tornado", "landslide", "tsunami", "volcano", "eruption", "explosion", "blast", "drought", "heatwave"],
         [Transport] = ["train", "trains", "rail", "railway", "flight", "flights", "airport", "plane", "airline", "ferry", "ship",
             "cruise", "motorway", "highway", "metro", "subway", "derailment", "derails"],
+        [Cyber] = ["ransomware", "hack", "hacked", "hacker", "hackers", "hacking", "cyberattack", "cyberattacks", "cyber", "malware",
+            "breach", "phishing", "ddos", "spyware", "cybersecurity"],
         [Conflict] = ["war", "attack", "attacks", "missile", "missiles", "drone", "drones", "troops", "military", "fighting", "ceasefire",
             "truce", "protest", "protests", "protesters", "clashes", "riot", "bomb", "bombing", "shooting", "hostage", "hostages", "militants"],
         [Health] = ["outbreak", "virus", "ebola", "cholera", "measles", "epidemic", "pandemic", "disease", "vaccine", "hospital", "hospitals"],
@@ -93,6 +105,7 @@ public static partial class SituationKinds
         Disaster => "Disasters",
         Transport => "Transport",
         Conflict => "Conflict & unrest",
+        Cyber => "Cyber attacks & breaches",
         Health => "Health",
         Politics => "Politics",
         Business => "Business",

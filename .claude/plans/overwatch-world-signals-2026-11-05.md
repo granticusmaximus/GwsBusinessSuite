@@ -99,21 +99,25 @@ that becomes a toolset beside `search_web` and `read_web_page`:
   - Placing them would mean fetching about 2,000 files per refresh, and a guessed CAP path answered 403.
   - GDACS already covers the world's cyclones and floods.
 
-## Unit 4 - Cyber incidents on the globe (Overwatch)
+## Unit 4 - Cyber incidents on the globe (Overwatch) - DONE 06-11-26
 
-- [ ] A "cyber" World News kind, so breach, ransomware and outage headlines are placed through
-  the existing pipeline.
-- [ ] Honest status labels (globalhackmap): Confirmed / Reported / Claimed / Precautionary /
-  Disputed, from the headlines.
+- [x] A "cyber" World News kind (`SituationKinds.Cyber`), so breach and ransomware headlines are placed through the existing pipeline.
+  - It has 6 example headlines (51 in all, within the Mac's batch of 64) and keywords for when no model is reachable.
+  - It is operational: on by default on the map, and in Brief me, watched areas and convergence.
+- [x] Honest status labels (`CyberStatus`, globalhackmap's scale): Confirmed / Reported / Claimed / Precautionary / Disputed.
+  - Read from the story's headlines. A denial outweighs a confirmation, which outweighs an attacker's claim.
+  - Shown in the Overwatch news window and on the World News page.
 
 ## Unit 5 - Satellites (Overwatch)
 
 - [ ] CelesTrak stations and visible groups, refreshed every 2 h as CelesTrak asks, drawn on orbit in Cesium (SPACE).
 
-## Unit 6 - Photo placement (Overwatch)
+## Unit 6 - Photo placement (Overwatch) - DONE 06-11-26
 
-- [ ] Drop a photo on the search bar: read its EXIF GPS, time and heading in the browser and fly
-  there. Nothing is uploaded.
+- [x] Pick a photo with the camera button by the search box, or drop one on the globe.
+  - Its EXIF GPS, time and heading are read in the browser (`readPhotoExif`: JPEG, and iPhone HEIC via its Exif item). Nothing is uploaded.
+  - It flies there, with a pin and a 300 m line the way the camera faced. Clicking the pin shows the details.
+  - A photo with no location says so: apps often remove it when sharing.
 
 ## Unit 7 - Threat Intel additions
 

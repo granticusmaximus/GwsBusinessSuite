@@ -347,6 +347,8 @@ window.tacticalGlobe = (function () {
                 openHazardPanel(entity._tacticalGlobeHazard);
             } else if (entity && entity._tacticalGlobeConvergence) {
                 openConvergencePanel(entity._tacticalGlobeConvergence);
+            } else if (entity && entity._tacticalGlobePhoto) {
+                openPhotoPanel(entity._tacticalGlobePhoto);
             } else if (entity && entity._tacticalGlobeSign) {
                 openSignPanel(entity._tacticalGlobeSign);
             } else if (entity && entity._tacticalGlobeRoadWeather) {
@@ -387,6 +389,7 @@ window.tacticalGlobe = (function () {
 
         ensureKeyboardShortcutsRegistered();
         setUpLocationSearch(viewer, dotNetRef);
+        setUpPhotoPlacement(containerId);
         setUpShareLink(containerId);
         const hoverIdentify = setUpHoverIdentify(viewer, dotNetRef);
         viewers.get(containerId).hoverIdentify = hoverIdentify;
@@ -581,6 +584,190 @@ window.tacticalGlobe = (function () {
                 performSearch();
             }
         });
+    }
+
+    // Photo placement (06-11-26): a photo's own EXIF says where and when it was taken, and often
+    // which way the camera faced. It's read here in the browser and never uploaded. The camera
+    // button opens a file picker; a photo dropped on the globe works too.
+    function setUpPhotoPlacement(containerId) {
+        const button = document.getElementById('tg-photo-button');
+        const input = document.getElementById('tg-photo-input');
+        const status = document.getElementById('tg-search-status');
+        const entry = viewers.get(containerId);
+        if (!entry) return;
+        async function place(file) {
+            if (!file) return;
+            if (status) status.textContent = 'READING PHOTO...';
+            try {
+                const info = readPhotoExif(new Uint8Array(await file.arrayBuffer()));
+                const message = placePhoto(containerId, info, file.name);
+                if (status) status.textContent = message;
+            } catch (e) {
+                if (status) status.textContent = 'COULDN\'T READ THAT PHOTO';
+            }
+        }
+        if (button && input) {
+            button.addEventListener('click', function () { input.value = ''; input.click(); });
+            input.addEventListener('change', function () { place(input.files && input.files[0]); });
+        }
+        const container = entry.viewer.container;
+        container.addEventListener('dragover', function (event) {
+            if (event.dataTransfer && Array.from(event.dataTransfer.types || []).indexOf('Files') >= 0) event.preventDefault();
+        });
+        container.addEventListener('drop', function (event) {
+            const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+            if (!file) return;
+            event.preventDefault();
+            place(file);
+        });
+    }
+
+    // info: { latitude, longitude, altitude, heading, takenAt, make, model } or null. Draws a pin
+    // (and a line the way the camera faced), flies there, and returns the status line.
+    function placePhoto(containerId, info, name) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return '';
+        if (!info || typeof info.latitude !== 'number' || typeof info.longitude !== 'number') {
+            return 'NO LOCATION IN THIS PHOTO (APPS OFTEN REMOVE IT WHEN SHARING)';
+        }
+        const entities = entry.viewer.entities;
+        (entry.photoEntities || []).forEach(function (e) { entities.remove(e); });
+        entry.photoEntities = [];
+        const photo = Object.assign({ name: name || 'Photo' }, info);
+        const pin = entities.add({
+            position: Cesium.Cartesian3.fromDegrees(info.longitude, info.latitude),
+            billboard: { image: pinBillboardImage, width: 22, height: 22, color: Cesium.Color.fromCssColorString('#ff8bd1'), disableDepthTestDistance: Number.POSITIVE_INFINITY },
+            label: {
+                text: 'PHOTO', font: '600 11px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -20), disableDepthTestDistance: Number.POSITIVE_INFINITY
+            }
+        });
+        pin._tacticalGlobePhoto = photo;
+        entry.photoEntities.push(pin);
+        if (typeof info.heading === 'number') {
+            // 300 m the way the camera faced.
+            const meters = 300, earth = 6371000, bearing = Cesium.Math.toRadians(info.heading), lat = Cesium.Math.toRadians(info.latitude);
+            const toLat = info.latitude + Cesium.Math.toDegrees(meters * Math.cos(bearing) / earth);
+            const toLon = info.longitude + Cesium.Math.toDegrees(meters * Math.sin(bearing) / (earth * Math.cos(lat)));
+            entry.photoEntities.push(entities.add({
+                polyline: {
+                    positions: Cesium.Cartesian3.fromDegreesArray([info.longitude, info.latitude, toLon, toLat]),
+                    width: 3, material: Cesium.Color.fromCssColorString('#ff8bd1'), clampToGround: true
+                }
+            }));
+        }
+        flyTo(containerId, info.latitude, info.longitude, 2500);
+        entry.viewer.scene.requestRender();
+        return 'PHOTO PLACED' + (info.takenAt ? ' · TAKEN ' + info.takenAt : '') +
+            (typeof info.heading === 'number' ? ' · FACING ' + Math.round(info.heading) + '°' : '');
+    }
+
+    function openPhotoPanel(photo) {
+        closeIncidentPanel();
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel';
+        const facts = [['WHERE', photo.latitude.toFixed(5) + ', ' + photo.longitude.toFixed(5)]];
+        if (photo.takenAt) facts.push(['TAKEN', photo.takenAt + ' (the camera\'s clock)']);
+        if (typeof photo.heading === 'number') facts.push(['FACING', Math.round(photo.heading) + '°']);
+        if (typeof photo.altitude === 'number') facts.push(['ALTITUDE', Math.round(photo.altitude) + ' M']);
+        if (photo.make || photo.model) facts.push(['CAMERA', [photo.make, photo.model].filter(Boolean).join(' ')]);
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header"><span>' + escapeHtml(photo.name) + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button></div>' +
+            '<div class="tg-stream-panel-body">' +
+            '<dl class="tg-incident-facts">' + facts.map(function (f) {
+                return '<dt>' + f[0] + '</dt><dd>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
+            }).join('') + '</dl>' +
+            '<div>Read from the photo itself, here in your browser. Nothing was uploaded.</div>' +
+            '</div>';
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        if (!openAsModal(panel, closeIncidentPanel)) return;
+        incidentPanel = panel;
+    }
+
+    // The EXIF block's TIFF header: in a JPEG it follows "Exif\0\0" in the APP1 segment; in an
+    // iPhone HEIC the Exif item holds the same; a TIFF file starts with it.
+    function readPhotoExif(bytes) {
+        let start = -1;
+        for (let i = 0; i + 10 < bytes.length; i++) {
+            if (bytes[i] === 0x45 && bytes[i + 1] === 0x78 && bytes[i + 2] === 0x69 && bytes[i + 3] === 0x66 && bytes[i + 4] === 0 && bytes[i + 5] === 0
+                && ((bytes[i + 6] === 0x49 && bytes[i + 7] === 0x49) || (bytes[i + 6] === 0x4d && bytes[i + 7] === 0x4d))) {
+                start = i + 6;
+                break;
+            }
+        }
+        if (start < 0 && bytes.length > 8 && ((bytes[0] === 0x49 && bytes[1] === 0x49) || (bytes[0] === 0x4d && bytes[1] === 0x4d))) start = 0;
+        if (start < 0) return null;
+        try {
+            return readTiff(new DataView(bytes.buffer, bytes.byteOffset + start, bytes.length - start));
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function readTiff(view) {
+        const little = view.getUint16(0) === 0x4949;
+        const u16 = function (o) { return view.getUint16(o, little); };
+        const u32 = function (o) { return view.getUint32(o, little); };
+        if (u16(2) !== 42) return null;
+        const sizes = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8 };
+        function directory(offset) {
+            const tags = {};
+            const count = u16(offset);
+            for (let i = 0; i < count && i < 500; i++) {
+                const at = offset + 2 + i * 12;
+                const type = u16(at + 2), n = u32(at + 4);
+                const size = (sizes[type] || 1) * n;
+                tags[u16(at)] = { type: type, count: n, offset: size <= 4 ? at + 8 : u32(at + 8) };
+            }
+            return tags;
+        }
+        function text(tag) {
+            if (!tag || tag.type !== 2) return null;
+            let s = '';
+            for (let i = 0; i < tag.count && i < 200; i++) {
+                const c = view.getUint8(tag.offset + i);
+                if (c === 0) break;
+                s += String.fromCharCode(c);
+            }
+            return s.trim() || null;
+        }
+        function rationals(tag) {
+            if (!tag || (tag.type !== 5 && tag.type !== 10)) return null;
+            const values = [];
+            for (let i = 0; i < tag.count && i < 8; i++) {
+                const n = tag.type === 10 ? view.getInt32(tag.offset + i * 8, little) : u32(tag.offset + i * 8);
+                const d = tag.type === 10 ? view.getInt32(tag.offset + i * 8 + 4, little) : u32(tag.offset + i * 8 + 4);
+                values.push(d === 0 ? 0 : n / d);
+            }
+            return values;
+        }
+        function degrees(tag, ref) {
+            const parts = rationals(tag);
+            if (!parts || parts.length < 3) return null;
+            const value = parts[0] + parts[1] / 60 + parts[2] / 3600;
+            return ref === 'S' || ref === 'W' ? -value : value;
+        }
+        const ifd0 = directory(u32(4));
+        const exif = ifd0[0x8769] ? directory(u32(ifd0[0x8769].offset)) : {};
+        const gps = ifd0[0x8825] ? directory(u32(ifd0[0x8825].offset)) : {};
+        const latitude = degrees(gps[2], text(gps[1]));
+        const longitude = degrees(gps[4], text(gps[3]));
+        const altitude = rationals(gps[6]);
+        const heading = rationals(gps[17]);
+        const taken = text(exif[0x9003]) || text(ifd0[0x0132]);
+        const match = taken && /^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2})/.exec(taken);
+        const valid = typeof latitude === 'number' && typeof longitude === 'number' && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180
+            && !(latitude === 0 && longitude === 0);
+        return {
+            latitude: valid ? latitude : null,
+            longitude: valid ? longitude : null,
+            altitude: altitude ? (gps[5] && view.getUint8(gps[5].offset) === 1 ? -altitude[0] : altitude[0]) : null,
+            heading: heading ? heading[0] % 360 : null,
+            takenAt: match ? match[3] + '-' + match[2] + '-' + match[1].slice(2) + ' ' + match[4] + ':' + match[5] : null,
+            make: text(ifd0[0x010f]),
+            model: text(ifd0[0x0110])
+        };
     }
 
     // Shareable view links: encodes the current camera position + whatever camera(s) are open
@@ -2142,6 +2329,8 @@ window.tacticalGlobe = (function () {
             '<div class="tg-stream-panel-body">' +
             '<div class="tg-incident-type">' + escapeHtml(placementLabel(signal.precision)) + ' · NOT A CONFIRMED INCIDENT</div>' +
             (signal.surge ? '<div class="tg-world-news-surge">' + escapeHtml(signal.surge) + '</div>' : '') +
+            (signal.status ? '<div class="tg-world-news-status">STATUS: ' + escapeHtml(signal.status.toUpperCase()) +
+                (signal.statusMeaning ? ' · ' + escapeHtml(signal.statusMeaning) : '') + '</div>' : '') +
             '<h2>' + escapeHtml(signal.title) + '</h2>' +
             (signal.latest !== signal.title ? '<div><strong>LATEST:</strong> ' + escapeHtml(signal.latest) + '</div>' : '') +
             (signal.summary ? '<p>' + escapeHtml(signal.summary) + '</p>' : '') +
@@ -3759,6 +3948,8 @@ window.tacticalGlobe = (function () {
         clearAirportStatus: clearAirportStatus,
         setAurora: setAurora,
         clearAurora: clearAurora,
+        readPhotoExif: readPhotoExif,
+        placePhoto: placePhoto,
         clearCoverageMarkers: clearCoverageMarkers,
         setWeatherSnapshot: setWeatherSnapshot,
         dispose: dispose,

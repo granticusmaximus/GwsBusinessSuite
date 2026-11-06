@@ -319,6 +319,20 @@
     margin-bottom: 0.4rem;
 }
 
+/* A cyber story's status (CyberStatus): Confirmed, Reported, Claimed, Precautionary or Disputed. */
+.tg-world-news-status {
+    color: #7fe3ff;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.4rem;
+}
+
+/* The items in a convergence square's window. */
+.tg-convergence-items {
+    padding-left: 1.1rem;
+    margin: 0.5rem 0 0;
+}
+
 .tg-world-news-sources {
     list-style: none;
     padding: 0;

@@ -86,6 +86,13 @@
                 <button type="button" class="tg-icon-btn" title="Directions" aria-label="Directions" @onclick='() => SelectPanelTabAsync("directions", keepOpen: true)'>
                     <i class="bi bi-sign-turn-right" aria-hidden="true"></i>
                 </button>
+                @* Photo placement (06-11-26): read where a photo was taken from its own EXIF data, in
+                   the browser, and fly there. Nothing is uploaded. Wired up by tactical-globe.js. *@
+                <button type="button" class="tg-icon-btn" id="tg-photo-button" title="Place a photo: where it was taken, from the photo itself (nothing is uploaded). You can also drop a photo on the globe."
+                        aria-label="Place a photo">
+                    <i class="bi bi-camera" aria-hidden="true"></i>
+                </button>
+                <input type="file" id="tg-photo-input" accept="image/jpeg,image/heic,image/heif,image/tiff,.jpg,.jpeg,.heic,.heif,.tif,.tiff" hidden />
             </div>
             <span id="tg-search-status" class="tg-search-status" role="status"></span>
         </div>
@@ -2133,6 +2140,8 @@
         precision = signal.Location.Precision,
         kind = signal.Kind,
         kindLabel = GwsBusinessSuite.WorldNewsKit.SituationKinds.Label(signal.Kind),
+        status = signal.Status is { } status ? GwsBusinessSuite.WorldNewsKit.CyberStatus.Label(status) : null,
+        statusMeaning = signal.Status is { } meaning ? GwsBusinessSuite.WorldNewsKit.CyberStatus.Meaning(meaning) : null,
         active = signal.Active,
         surge = signal.Surge,
         lat = signal.Latitude,

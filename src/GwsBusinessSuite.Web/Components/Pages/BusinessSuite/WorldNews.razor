@@ -229,6 +229,12 @@ else if (_view == WorldNewsView.Situations)
                         <dd>@string.Join(", ", _situation.Countries.Order())</dd>
                         <dt>Kind</dt>
                         <dd>@SituationKinds.Label(WorldNewsMapService.KindOf(_situation))</dd>
+                        @if (WorldNewsMapService.KindOf(_situation) == SituationKinds.Cyber)
+                        {
+                            var status = CyberStatus.Of([_situation.Title, _situation.Latest, .. _situationEvents.Select(e => e.Title)]);
+                            <dt>Status</dt>
+                            <dd>@CyberStatus.Label(status) <span class="text-secondary">(@CyberStatus.Meaning(status))</span></dd>
+                        }
                     </dl>
                     <h3 class="world-news-language">How it developed <span>(@_situationEvents.Count)</span></h3>
                     <ol class="world-news-timeline">
