@@ -40,6 +40,8 @@
 @inject GwsBusinessSuite.Application.LiveLayers.ShipService ShipService
 @inject GwsBusinessSuite.Application.LiveLayers.AirQualityService AirQualityService
 @inject GwsBusinessSuite.Application.LiveLayers.PowerOutageService PowerOutageService
+@inject GwsBusinessSuite.Infrastructure.Services.InternetOutageService InternetOutageService
+@inject GwsBusinessSuite.Infrastructure.Services.SignalConvergenceService SignalConvergenceService
 @inject ICameraFavoritesService CameraFavoritesService
 @inject ICameraSnapshotAnalysisService CameraSnapshotAnalysisService
 @inject IBusinessInfoService BusinessInfoService
@@ -187,7 +189,16 @@
                         @onclick="ToggleWorldNewsAsync">
                     WORLD NEWS [@(_worldNewsOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="convergence" class="tg-toggle @(_convergenceOn ? "tg-toggle-on" : "")"
+                        title="Places where three or more independent kinds of signal meet in the last day: news placed at a city, earthquakes, fires, floods, storms, volcanoes, severe weather, power and internet outages"
+                        @onclick="ToggleConvergenceAsync">
+                    CONVERGENCE [@(_convergenceOn ? "ON" : "OFF")]
+                </button>
             </div>
+            @if (_convergenceOn && !string.IsNullOrWhiteSpace(_convergenceSummary))
+            {
+                <div class="tg-hazard-summary">@_convergenceSummary</div>
+            }
             @if (_worldNewsOn)
             {
                 <div class="tg-hazard-summary">@_worldNewsCount reported situation@(_worldNewsCount == 1 ? "" : "s") in view · placed from what the headlines name</div>
@@ -227,12 +238,16 @@
             <div class="tg-layer-group-title">HAZARDS</div>
             <div class="tg-layer-buttons">
                 <button type="button" data-tg-toggle="hazards" class="tg-toggle @(_hazardsOn ? "tg-toggle-on" : "")"
-                        title="Earthquakes (USGS), active wildfires (NIFC) and flooding river gauges (NOAA)" @onclick="ToggleHazardsAsync">
+                        title="Earthquakes (USGS), wildfires (NIFC in the US, GDACS elsewhere), flooding river gauges (NOAA), and tropical cyclones, floods, volcanoes and droughts worldwide (GDACS)" @onclick="ToggleHazardsAsync">
                     HAZARDS [@(_hazardsOn ? "ON" : "OFF")]
                 </button>
                 <button type="button" data-tg-toggle="outages" class="tg-toggle @(_outagesOn ? "tg-toggle-on" : "")"
                         title="Power outages by county from utilities that report to the U.S. DOE's ODIN (60+ utilities in 26 states)" @onclick="ToggleOutagesAsync">
                     POWER OUTAGES [@(_outagesOn ? "ON" : "OFF")]
+                </button>
+                <button type="button" data-tg-toggle="internet" class="tg-toggle @(_internetOn ? "tg-toggle-on" : "")"
+                        title="Internet outages by country in the last day, from Georgia Tech's IODA (routing, active probing and Google traffic)" @onclick="ToggleInternetAsync">
+                    INTERNET OUTAGES [@(_internetOn ? "ON" : "OFF")]
                 </button>
             </div>
             @if (_hazardsOn && !string.IsNullOrWhiteSpace(_hazardSummary))
@@ -242,6 +257,10 @@
             @if (_outagesOn && !string.IsNullOrWhiteSpace(_outageSummary))
             {
                 <div class="tg-hazard-summary">@_outageSummary</div>
+            }
+            @if (_internetOn && !string.IsNullOrWhiteSpace(_internetSummary))
+            {
+                <div class="tg-hazard-summary">@_internetSummary</div>
             }
         </div>
         <div class="tg-layer-group">
@@ -1770,6 +1789,8 @@
             _aircraftOn || _airQualityOn ? TimedAsync("air", PushAirLayersAsync) : Task.CompletedTask,
             _shipsOn ? TimedAsync("ships", PushShipsAsync) : Task.CompletedTask,
             _outagesOn ? TimedAsync("power outages", PushOutagesAsync) : Task.CompletedTask,
+            _internetOn ? TimedAsync("internet outages", PushInternetAsync) : Task.CompletedTask,
+            _convergenceOn ? TimedAsync("convergence", PushConvergenceAsync) : Task.CompletedTask,
             _cityTrafficOn ? TimedAsync("city traffic", PushCityTrafficAsync) : Task.CompletedTask);
         if (Current()) StateHasChanged();
     }
@@ -2368,7 +2389,7 @@
     private bool _helpOpen;
 
     private int ActiveLayerCount =>
-        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
+        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
 
     private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {
@@ -3771,6 +3792,100 @@
         }
     }
 
+    // ---- Internet outages by country (IODA) and convergence (05-11-26). ----
+    private bool _internetOn;
+    private string? _internetSummary;
+    private bool _convergenceOn;
+    private string? _convergenceSummary;
+
+    private async Task ToggleInternetAsync()
+    {
+        _internetOn = !_internetOn;
+        if (_internetOn)
+        {
+            await PushInternetAsync();
+        }
+        else
+        {
+            _internetSummary = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearInternetOutages");
+        }
+    }
+
+    private async Task PushInternetAsync()
+    {
+        try
+        {
+            var outages = await InternetOutageService.GetAsync();
+            var inView = outages.Where(o => _lastBbox.Contains(o.Latitude, o.Longitude)).OrderBy(o => SeverityRank(o.Severity)).ToList();
+            await JS.InvokeVoidAsync("tacticalGlobe.setInternetOutages", HazardPayload(outages));
+            _internetSummary = outages.Count == 0
+                ? "No country-wide internet outages seen by IODA in the last day."
+                : $"IODA: {outages.Count} {(outages.Count == 1 ? "COUNTRY" : "COUNTRIES")} IN THE LAST DAY" +
+                  (inView.Count == 0 ? " · none in view" : " · in view: " + string.Join(", ", inView.Take(3).Select(o => o.Title.Replace("Internet outage - ", string.Empty, StringComparison.Ordinal))));
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch internet outage layer failed");
+            _internetSummary = "Internet outage data couldn't be shown just now.";
+        }
+    }
+
+    private async Task ToggleConvergenceAsync()
+    {
+        _convergenceOn = !_convergenceOn;
+        if (_convergenceOn)
+        {
+            await PushConvergenceAsync();
+        }
+        else
+        {
+            _convergenceSummary = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearConvergence");
+        }
+    }
+
+    private async Task PushConvergenceAsync()
+    {
+        try
+        {
+            var cells = await SignalConvergenceService.GetAsync(_lastBbox);
+            await JS.InvokeVoidAsync("tacticalGlobe.setConvergence", cells.Select(cell => new
+            {
+                south = cell.South, west = cell.West, north = cell.North, east = cell.East,
+                lat = cell.CenterLatitude, lon = cell.CenterLongitude,
+                label = cell.Label, kinds = cell.Kinds, score = cell.Score, severity = cell.Severity,
+                signals = cell.Signals.Select(signal => new { kind = signal.Kind, title = signal.Title, url = signal.Url, countryWide = signal.CountryWide })
+            }));
+            _convergenceSummary = cells.Count == 0
+                ? "Nowhere in view do three or more kinds of signal meet right now."
+                : $"{cells.Count} {(cells.Count == 1 ? "PLACE" : "PLACES")} WHERE SIGNALS MEET · strongest: {cells[0].Label} ({string.Join(", ", cells[0].Kinds)})";
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch convergence layer failed");
+            _convergenceSummary = "Convergence couldn't be worked out just now.";
+        }
+    }
+
+    private static int SeverityRank(string severity) => severity switch { "major" => 0, "moderate" => 1, _ => 2 };
+
+    private static IEnumerable<object> HazardPayload(IEnumerable<GwsBusinessSuite.Application.Hazards.HazardFeature> features) =>
+        features.Select(h => new
+        {
+            id = h.Id,
+            kind = h.Kind,
+            title = h.Title,
+            detail = h.Detail,
+            severity = h.Severity,
+            url = h.Url,
+            observedAt = h.ObservedAt?.ToLocalTime().ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture),
+            lat = h.Latitude,
+            lon = h.Longitude
+        });
+
     // ---- Sea layer: AIS ships from aisstream.io (the server holds one shared stream). ----
     private bool _shipsOn;
     private string? _shipSummary;
@@ -3851,24 +3966,21 @@
         try
         {
             var result = await HazardLayerService.GetHazardsAsync(_lastBbox);
-            var payload = result.Features.Select(h => new
-            {
-                id = h.Id,
-                kind = h.Kind,
-                title = h.Title,
-                detail = h.Detail,
-                severity = h.Severity,
-                url = h.Url,
-                observedAt = h.ObservedAt?.ToLocalTime().ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture),
-                lat = h.Latitude,
-                lon = h.Longitude
-            }).ToList();
+            var payload = HazardPayload(result.Features).ToList();
             var counts = new[]
             {
                 (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Earthquake, Label: "QUAKES"),
                 (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Wildfire, Label: "FIRES"),
                 (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.River, Label: "FLOODING GAUGES")
-            }.Select(k => $"{k.Label} {result.Features.Count(f => f.Kind == k.Kind)}");
+            }.Select(k => $"{k.Label} {result.Features.Count(f => f.Kind == k.Kind)}")
+                // GDACS's world-wide kinds, named only when there are some in view.
+                .Concat(new[]
+                {
+                    (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Cyclone, Label: "CYCLONES"),
+                    (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Flood, Label: "FLOODS"),
+                    (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Volcano, Label: "VOLCANOES"),
+                    (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Drought, Label: "DROUGHTS")
+                }.Select(k => (k.Label, Count: result.Features.Count(f => f.Kind == k.Kind))).Where(k => k.Count > 0).Select(k => $"{k.Label} {k.Count}"));
             _hazardSummary = string.Join(" · ", counts) + (result.Notes.Count > 0 ? " - " + string.Join(" ", result.Notes) : string.Empty);
             await JS.InvokeVoidAsync("tacticalGlobe.setHazards", payload);
             await InvokeAsync(StateHasChanged);

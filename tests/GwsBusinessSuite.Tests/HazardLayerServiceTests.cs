@@ -66,4 +66,36 @@ public sealed class HazardLayerServiceTests
         gauges[0].Url.Should().Be("https://water.noaa.gov/gauges/FLDG1");
         gauges[1].Detail.Should().StartWith("at action stage");
     }
+
+    // Trimmed from the live GDACS SEARCH feed, 05-11-26.
+    [Fact]
+    public void ParseGdacs_ShouldKeepCurrentEvents_MapTheAlertLevel_AndLeaveUsWildfiresToNifc()
+    {
+        const string json = """
+            {"type":"FeatureCollection","features":[
+              {"geometry":{"type":"Point","coordinates":[80.2,15.8]},"properties":{"eventtype":"TC","eventid":1001346,"name":"Tropical Cyclone MURASU-26","alertlevel":"Red","iscurrent":"true","iso3":"IND","country":"India","datemodified":"2026-11-04T06:01:20","severitydata":{"severitytext":"Hurricane/Typhoon > 74 mph (maximum wind speed of 157 km/h)"},"url":{"report":"https://www.gdacs.org/report.aspx?eventid=1001346&episodeid=10&eventtype=TC"}}},
+              {"geometry":{"type":"Point","coordinates":[121.1,14.0]},"properties":{"eventtype":"VO","eventid":1000151,"name":"Eruption  Taal","alertlevel":"Orange","iscurrent":"true","iso3":"PHL","country":"Philippines","datemodified":"2026-11-05T10:29:00","severitydata":{"severitytext":""},"url":{"report":"https://www.gdacs.org/report.aspx?eventid=1000151"}}},
+              {"geometry":{"type":"Point","coordinates":[23.4,-21.2]},"properties":{"eventtype":"WF","eventid":1027700,"name":"Forest fires in Botswana","alertlevel":"Green","iscurrent":"true","iso3":"BWA","country":"Botswana","datemodified":"2026-11-05T00:00:00","severitydata":{"severitytext":"Green impact for forestfire in 105482 ha"},"url":{"report":"https://www.gdacs.org/report.aspx?eventid=1027700"}}},
+              {"geometry":{"type":"Point","coordinates":[-120.5,38.9]},"properties":{"eventtype":"WF","eventid":1027701,"name":"Forest fires in United States","alertlevel":"Green","iscurrent":"true","iso3":"USA","country":"United States"}},
+              {"geometry":{"type":"Point","coordinates":[15.0,45.0]},"properties":{"eventtype":"DR","eventid":1018332,"name":"Drought in Andorra, Albania, Austria","alertlevel":"Orange","iscurrent":"true","iso3":"AND","country":"Andorra, Albania, Austria"}},
+              {"geometry":{"type":"Point","coordinates":[100.0,30.0]},"properties":{"eventtype":"EQ","eventid":1573141,"name":"Earthquake in China","alertlevel":"Orange","iscurrent":"true"}},
+              {"geometry":{"type":"Point","coordinates":[150.0,-30.0]},"properties":{"eventtype":"FL","eventid":1103001,"name":"Flood in Australia","alertlevel":"Orange","iscurrent":"false"}},
+              {"geometry":{"type":"Point","coordinates":[25.0,42.7]},"properties":{"eventtype":"FL","eventid":1103002,"name":"Flood in Bulgaria","alertlevel":"Green","iscurrent":"true","country":"Bulgaria","severitydata":{"severitytext":"Magnitude 0 "}}}]}
+            """;
+
+        var events = HazardLayerService.ParseGdacs(json);
+
+        events.Select(e => e.Kind).Should().Equal(HazardKinds.Cyclone, HazardKinds.Volcano, HazardKinds.Wildfire, HazardKinds.Drought, HazardKinds.Flood);
+        var cyclone = events[0];
+        cyclone.Should().Match<HazardFeature>(e => e.Id == "gdacs-TC-1001346" && e.Severity == "major" && e.Latitude == 15.8 && e.Longitude == 80.2
+            && e.Url.Contains("eventid=1001346"));
+        cyclone.Detail.Should().Be("Hurricane/Typhoon > 74 mph (maximum wind speed of 157 km/h) · India · GDACS red alert");
+        events[1].Title.Should().Be("Eruption Taal", "GDACS's doubled spaces are tidied");
+        events[1].Severity.Should().Be("moderate");
+        events[2].Detail.Should().NotContain("Botswana ·", "the country is already in the name");
+        events[2].Severity.Should().Be("minor");
+        events[3].Detail.Should().EndWith("pin at the centre of the drought area");
+        events[3].Url.Should().Be("https://www.gdacs.org");
+        events[4].Detail.Should().Be("GDACS green alert", "a flood's \"Magnitude 0\" says nothing");
+    }
 }

@@ -370,6 +370,54 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         consoleErrors.Should().BeEmpty();
     }
 
+    // World signals (05-11-26): GDACS kinds and IODA outages draw as hazard pins, and a convergence
+    // square opens its own window listing what meets there.
+    [Fact]
+    public async Task WorldSignals_ShouldDrawGdacsKindsOutagesAndConvergence_AndOpenTheConvergenceWindow()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        var error = await page.EvaluateAsync<string?>("""
+            () => {
+                try {
+                    window.tacticalGlobe.setHazards([
+                        { id: 'gdacs-TC-1', kind: 'cyclone', title: 'Tropical Cyclone A', detail: '', severity: 'major', url: 'https://www.gdacs.org', lat: 15.8, lon: 80.2 },
+                        { id: 'gdacs-VO-1', kind: 'volcano', title: 'Eruption Taal', detail: '', severity: 'moderate', url: 'https://www.gdacs.org', lat: 14, lon: 121 },
+                        { id: 'gdacs-DR-1', kind: 'drought', title: 'Drought', detail: '', severity: 'minor', url: 'https://www.gdacs.org', lat: 45, lon: 15 }
+                    ]);
+                    window.tacticalGlobe.setInternetOutages([
+                        { id: 'ioda-NG', kind: 'internet', title: 'Internet outage - Nigeria', detail: 'Seen by IODA in routing (BGP)', severity: 'moderate', url: 'https://ioda.inetintel.cc.gatech.edu/country/NG', lat: 9.6, lon: 8.1 }
+                    ]);
+                    window.tacticalGlobe.clearInternetOutages();
+                    // The globe opens centred on 39.8, -98.5: this square's marker sits mid-canvas.
+                    window.tacticalGlobe.setConvergence([
+                        { south: 39.3, west: -99, north: 40.3, east: -98, lat: 39.8, lon: -98.5, label: 'Smith Center, United States', kinds: ['flooding', 'news', 'severe weather'],
+                          score: 81, severity: 'moderate', signals: [
+                            { kind: 'flooding', title: 'Solomon River', url: 'https://water.noaa.gov/gauges/X', countryWide: false },
+                            { kind: 'news', title: 'Storms hit <Kansas>', url: null, countryWide: false },
+                            { kind: 'severe weather', title: 'NWS Tornado Warning', url: null, countryWide: false } ] }
+                    ]);
+                    return null;
+                } catch (e) { return String(e && e.stack || e); }
+            }
+            """);
+        error.Should().BeNull();
+        await page.WaitForTimeoutAsync(800);
+        await page.Mouse.ClickAsync(400, 300);
+        await page.WaitForSelectorAsync(".tg-incident-panel:has-text('SIGNALS MEET')", new PageWaitForSelectorOptions { Timeout = 5000 });
+
+        var panel = await page.InnerTextAsync(".tg-incident-panel");
+        panel.Should().Contain("SIGNALS MEET - Smith Center, United States").And.Contain("FLOODING, NEWS, SEVERE WEATHER").And.Contain("81 / 100")
+            .And.Contain("Storms hit <Kansas>", "titles are escaped, not parsed as markup").And.Contain("not proof that they are linked");
+        (await page.GetAttributeAsync(".tg-convergence-items a", "href")).Should().Be("https://water.noaa.gov/gauges/X");
+
+        await page.ClickAsync(".tg-incident-panel .tg-stream-panel-close");
+        await page.EvaluateAsync("() => { window.tacticalGlobe.clearConvergence(); window.tacticalGlobe.clearHazards(); }");
+        consoleErrors.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task ClickingAnAircraft_ShouldShowItsDetails_AndDrawItsPath()
     {

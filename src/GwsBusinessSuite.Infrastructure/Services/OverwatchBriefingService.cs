@@ -42,8 +42,11 @@ public sealed class OverwatchBriefingService(
     TimeProvider timeProvider,
     ILogger<OverwatchBriefingService> logger,
     IMailTransport? mailTransport = null,
-    WorldNewsMapService? worldNewsMap = null)
+    WorldNewsMapService? worldNewsMap = null,
+    SignalConvergenceService? convergence = null)
 {
+    public const int MaxConvergences = 2;
+
     public const string AlertCreatedBy = "overwatch-briefing";
     public const int MaxMorningTrips = 5;
     private readonly IMailTransport _mail = mailTransport ?? MailTransport.SmtpOnly;
@@ -57,7 +60,22 @@ public sealed class OverwatchBriefingService(
         var alertList = await Safely(() => weatherAlerts.GetActiveAlertsAsync(bounds, ct), [], "weather alerts");
         var hazardList = await Safely(async () => (await hazards.GetHazardsAsync(bounds, ct)).Features, [], "hazards");
         var cameras = (await CameraStatesAsync(username, ct)).Where(c => bounds.Contains(c.Latitude, c.Longitude));
-        return AddWorldNews(OverwatchBriefing.ForArea(scope, now, incidentList, alertList, hazardList, cameras), bounds);
+        var facts = AddWorldNews(OverwatchBriefing.ForArea(scope, now, incidentList, alertList, hazardList, cameras), bounds);
+        return convergence is null ? facts : AddConvergence(facts, await Safely(() => convergence.GetAsync(bounds, ct), [], "convergence"));
+    }
+
+    // Where several kinds of signal meet (SignalConvergence), strongest first.
+    public static BriefingFacts AddConvergence(BriefingFacts facts, IReadOnlyList<ConvergenceCell> cells)
+    {
+        if (cells.Count == 0) return facts;
+        var combined = facts.Facts.ToList();
+        foreach (var cell in cells.Take(MaxConvergences))
+        {
+            combined.Add(new BriefingFact(combined.Count + 1, "convergence",
+                $"Several kinds of signal meet near {cell.Label}: {string.Join(", ", cell.Kinds)} ({cell.Signals.Count} items in the last day)",
+                cell.CenterLatitude, cell.CenterLongitude));
+        }
+        return facts with { Facts = combined };
     }
 
     public async Task<BriefingFacts> GetRouteFactsAsync(string username, string scope, RouteWatchResult route, CancellationToken ct = default) =>

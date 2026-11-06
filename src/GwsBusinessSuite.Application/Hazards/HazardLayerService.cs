@@ -11,6 +11,13 @@ public static class HazardKinds
     public const string Earthquake = "earthquake";
     public const string Wildfire = "wildfire";
     public const string River = "river";
+    // GDACS (05-11-26): the UN's global disaster alerts, for the world outside the US feeds.
+    public const string Cyclone = "cyclone";
+    public const string Flood = "flood";
+    public const string Volcano = "volcano";
+    public const string Drought = "drought";
+    // IODA internet outages (InternetOutageService), drawn by their own layer.
+    public const string Internet = "internet";
 }
 
 public sealed record HazardFeature(
@@ -31,9 +38,12 @@ public sealed record HazardLayerResult(IReadOnlyList<HazardFeature> Features, IR
 //   - USGS earthquakes (M2.5+, past day, worldwide GeoJSON summary feed)
 //   - NIFC WFIGS current wildfire incident locations (ArcGIS, U.S.)
 //   - NOAA National Water Prediction Service river gauges (U.S.), flooding gauges only
+//   - GDACS, the UN's Global Disaster Alert and Coordination System (05-11-26): current tropical
+//     cyclones, floods, volcanoes and droughts worldwide, and wildfires outside the US (NIFC has
+//     the US ones). Its earthquakes are left out because USGS already covers the world.
 // Fire *locations* rather than perimeter polygons: ~500 current fires' polygons would be heavy to
 // send on every pan, and the point carries the facts that matter (size, containment).
-public sealed class HazardLayerService(
+public sealed partial class HazardLayerService(
     HttpClient httpClient,
     IMemoryCache cache,
     ILogger<HazardLayerService> logger)
@@ -41,6 +51,9 @@ public sealed class HazardLayerService(
     private const string QuakeFeedUrl = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson";
     private const string FireLocationsUrl = "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Incident_Locations_Current/FeatureServer/0/query";
     private const string GaugesUrl = "https://api.water.noaa.gov/nwps/v1/gauges";
+    // GDACS's SEARCH endpoint (MAP answered 400 on 05-11-26). It returns at most 100 rows and green
+    // wildfires alone fill them, so wildfires are asked for on their own.
+    private const string GdacsUrl = "https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?alertlevel=Green;Orange;Red&eventlist=";
     // The gauge API returns every gauge in the box (~570 for Georgia alone, ~0.6 MB), so it is
     // only asked about views up to roughly a few states across.
     public const double MaxGaugeViewDegrees = 12;
@@ -59,9 +72,12 @@ public sealed class HazardLayerService(
             else
                 notes.Add("Zoom in to about state level to see flooding river gauges.");
         }
-        await Task.WhenAll(quakesTask, firesTask, gaugesTask);
+        var disastersTask = GetGdacsAsync("TC;FL;VO;DR", cancellationToken);
+        var worldFiresTask = GetGdacsAsync("WF", cancellationToken);
+        await Task.WhenAll(quakesTask, firesTask, gaugesTask, disastersTask, worldFiresTask);
 
         var features = quakesTask.Result.Concat(firesTask.Result).Concat(gaugesTask.Result)
+            .Concat(disastersTask.Result).Concat(worldFiresTask.Result)
             .Where(f => bbox.Contains(f.Latitude, f.Longitude))
             .ToList();
         return new HazardLayerResult(features, notes);
@@ -82,6 +98,10 @@ public sealed class HazardLayerService(
                       + "&returnGeometry=true&outSR=4326&f=json&resultRecordCount=2000";
             return ParseFires(await httpClient.GetStringAsync(url, ct));
         });
+
+    private Task<IReadOnlyList<HazardFeature>> GetGdacsAsync(string eventTypes, CancellationToken ct) =>
+        CachedAsync($"hazards:gdacs:{eventTypes}", TimeSpan.FromMinutes(15), async () =>
+            ParseGdacs(await httpClient.GetStringAsync(GdacsUrl + eventTypes, ct)));
 
     private Task<IReadOnlyList<HazardFeature>> GetFloodingGaugesAsync(BoundingBox bbox, CancellationToken ct)
     {
@@ -195,6 +215,64 @@ public sealed class HazardLayerService(
         }
         return list;
     }
+
+    // Current GDACS events only. Red, Orange and Green are GDACS's own impact levels, which map to
+    // major, moderate and minor. A drought covers a wide area (often several countries), so its pin
+    // is the area's centre, and the detail says so.
+    public static IReadOnlyList<HazardFeature> ParseGdacs(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var list = new List<HazardFeature>();
+        if (!doc.RootElement.TryGetProperty("features", out var features) || features.ValueKind != JsonValueKind.Array) return list;
+        foreach (var f in features.EnumerateArray())
+        {
+            if (!f.TryGetProperty("properties", out var p) || !f.TryGetProperty("geometry", out var g)
+                || !g.TryGetProperty("coordinates", out var c) || c.ValueKind != JsonValueKind.Array || c.GetArrayLength() < 2
+                || c[0].ValueKind != JsonValueKind.Number || c[1].ValueKind != JsonValueKind.Number) continue;
+            if (!string.Equals(Str(p, "iscurrent"), "true", StringComparison.OrdinalIgnoreCase)) continue;
+            var type = Str(p, "eventtype");
+            var kind = type switch
+            {
+                "TC" => HazardKinds.Cyclone,
+                "FL" => HazardKinds.Flood,
+                "VO" => HazardKinds.Volcano,
+                "DR" => HazardKinds.Drought,
+                "WF" => HazardKinds.Wildfire,
+                _ => null
+            };
+            if (kind is null) continue;
+            if (kind == HazardKinds.Wildfire && Str(p, "iso3") == "USA") continue;
+            var level = Str(p, "alertlevel") ?? "Green";
+            var name = (Str(p, "name") ?? Str(p, "eventname") ?? kind).Replace("  ", " ", StringComparison.Ordinal).Trim();
+            var countries = Str(p, "country");
+            var detail = string.Join(" · ", new[]
+            {
+                p.TryGetProperty("severitydata", out var severityData) ? SeverityText(Str(severityData, "severitytext")) : null,
+                countries is { Length: > 0 } && !name.Contains(countries, StringComparison.OrdinalIgnoreCase) ? countries : null,
+                $"GDACS {level.ToLowerInvariant()} alert",
+                kind == HazardKinds.Drought ? "pin at the centre of the drought area" : null
+            }.Where(part => !string.IsNullOrWhiteSpace(part)));
+            var eventId = p.TryGetProperty("eventid", out var id) ? id.ToString() : list.Count.ToString(CultureInfo.InvariantCulture);
+            var modified = Str(p, "datemodified") ?? Str(p, "todate");
+            var time = DateTimeOffset.TryParse(modified, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) ? at : (DateTimeOffset?)null;
+            list.Add(new($"gdacs-{type}-{eventId}", kind, name, detail,
+                c[1].GetDouble(), c[0].GetDouble(),
+                level switch { "Red" => "major", "Orange" => "moderate", _ => "minor" },
+                (p.TryGetProperty("url", out var url) ? Str(url, "report") : null) ?? "https://www.gdacs.org",
+                time));
+        }
+        return list;
+    }
+
+    // GDACS gives floods "Magnitude 0", which says nothing.
+    private static string? SeverityText(string? text)
+    {
+        var trimmed = text?.Trim();
+        return string.IsNullOrEmpty(trimmed) || MeaninglessMagnitude().IsMatch(trimmed) ? null : trimmed;
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^Magnitude 0(\.0+)?$")]
+    private static partial System.Text.RegularExpressions.Regex MeaninglessMagnitude();
 
     private static string? Str(JsonElement e, string name) =>
         e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;

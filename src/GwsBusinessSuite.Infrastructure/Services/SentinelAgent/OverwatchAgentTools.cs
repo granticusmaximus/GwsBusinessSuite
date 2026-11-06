@@ -23,7 +23,7 @@ public sealed class OverwatchAgentTools(OverwatchBriefingService briefings, IGeo
     [
         new SentinelAgentTool(
             "overwatch_briefing",
-            "What's happening now around a place (traffic incidents, weather alerts, hazards, cameras, local news), or, with no place, in your Overwatch watched areas and saved trips.",
+            "What's happening now around a place (traffic incidents, weather alerts, hazards worldwide, cameras, local news, and places where several kinds of signal meet), or, with no place, in your Overwatch watched areas and saved trips.",
             SentinelAgentJson.Schema(("place", "string", "A town, city or address; leave out for your watched areas", false)),
             SentinelAgentRisk.Read, Roles,
             args => args.OptionalText("place") is { } place ? $"Checking Overwatch around {place}" : "Checking your Overwatch areas",

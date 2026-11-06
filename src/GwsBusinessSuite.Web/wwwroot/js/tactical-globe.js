@@ -261,6 +261,11 @@ window.tacticalGlobe = (function () {
         // rarely more than a few hundred in view and each is worth seeing individually.
         const hazardDataSource = new Cesium.CustomDataSource('tg-hazards');
         await viewer.dataSources.add(hazardDataSource);
+        // Internet outages by country (IODA) and convergence squares (05-11-26), each its own layer.
+        const internetDataSource = new Cesium.CustomDataSource('tg-internet');
+        await viewer.dataSources.add(internetDataSource);
+        const convergenceDataSource = new Cesium.CustomDataSource('tg-convergence');
+        await viewer.dataSources.add(convergenceDataSource);
         const signDataSource = new Cesium.CustomDataSource('tg-signs');
         await viewer.dataSources.add(signDataSource);
         const roadWeatherDataSource = new Cesium.CustomDataSource('tg-road-weather');
@@ -338,6 +343,8 @@ window.tacticalGlobe = (function () {
                 openNewsCountryPanel(entity._tacticalGlobeNewsCountry);
             } else if (entity && entity._tacticalGlobeHazard) {
                 openHazardPanel(entity._tacticalGlobeHazard);
+            } else if (entity && entity._tacticalGlobeConvergence) {
+                openConvergencePanel(entity._tacticalGlobeConvergence);
             } else if (entity && entity._tacticalGlobeSign) {
                 openSignPanel(entity._tacticalGlobeSign);
             } else if (entity && entity._tacticalGlobeRoadWeather) {
@@ -359,7 +366,7 @@ window.tacticalGlobe = (function () {
 
         viewers.set(containerId, {
             containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities, worldNewsDataSource,
-            hazardDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
+            hazardDataSource, internetDataSource, convergenceDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
             ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null,
             renderTimer, pulseTimer: null
         });
@@ -2479,17 +2486,33 @@ window.tacticalGlobe = (function () {
         }
     }
 
-    const hazardColors = { earthquake: '#ff6bd6', wildfire: '#ff5a1f', river: '#3ba7ff' };
+    const hazardColors = {
+        earthquake: '#ff6bd6', wildfire: '#ff5a1f', river: '#3ba7ff',
+        cyclone: '#00e0c6', flood: '#2f6bff', volcano: '#ff2e4d', drought: '#d4a72c', internet: '#9dff3c'
+    };
     const hazardSizes = { major: 20, moderate: 15, minor: 11 };
 
     function setHazards(hazards, containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
-        if (!entry) return;
-        entry.hazardDataSource.entities.suspendEvents();
-        entry.hazardDataSource.entities.removeAll();
+        if (entry) drawHazardPins(entry.hazardDataSource, hazards);
+    }
+
+    function setInternetOutages(outages, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) drawHazardPins(entry.internetDataSource, outages);
+    }
+
+    function clearInternetOutages(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) entry.internetDataSource.entities.removeAll();
+    }
+
+    function drawHazardPins(dataSource, hazards) {
+        dataSource.entities.suspendEvents();
+        dataSource.entities.removeAll();
         (hazards || []).forEach(function (hazard) {
             const size = hazardSizes[hazard.severity] || 11;
-            const entity = entry.hazardDataSource.entities.add({
+            const entity = dataSource.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(hazard.lon, hazard.lat),
                 billboard: {
                     image: pinBillboardImage,
@@ -2501,7 +2524,56 @@ window.tacticalGlobe = (function () {
             });
             entity._tacticalGlobeHazard = hazard;
         });
-        entry.hazardDataSource.entities.resumeEvents();
+        dataSource.entities.resumeEvents();
+    }
+
+    // cells: [{ south, west, north, east, lat, lon, label, kinds: [..], score, severity,
+    //           signals: [{ kind, title, url, countryWide }] }]
+    const convergenceColors = { major: '#ff3b30', moderate: '#ffb020' };
+
+    function setConvergence(cells, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        const entities = entry.convergenceDataSource.entities;
+        entities.suspendEvents();
+        entities.removeAll();
+        (cells || []).forEach(function (cell) {
+            const color = Cesium.Color.fromCssColorString(convergenceColors[cell.severity] || convergenceColors.moderate);
+            const square = entities.add({
+                rectangle: {
+                    coordinates: Cesium.Rectangle.fromDegrees(cell.west, cell.south, cell.east, cell.north),
+                    material: color.withAlpha(0.22)
+                }
+            });
+            square._tacticalGlobeConvergence = cell;
+            const marker = entities.add({
+                position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat),
+                billboard: {
+                    image: pinBillboardImage,
+                    width: 18,
+                    height: 18,
+                    color: color,
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                },
+                label: {
+                    text: (cell.kinds || []).length + ' SIGNALS',
+                    font: '600 11px monospace',
+                    fillColor: Cesium.Color.WHITE,
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 3,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    pixelOffset: new Cesium.Cartesian2(0, -18),
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                }
+            });
+            marker._tacticalGlobeConvergence = cell;
+        });
+        entities.resumeEvents();
+    }
+
+    function clearConvergence(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) entry.convergenceDataSource.entities.removeAll();
     }
 
     function clearHazards(containerId) {
@@ -2623,7 +2695,10 @@ window.tacticalGlobe = (function () {
         incidentPanel = panel;
     }
 
-    const hazardKindLabels = { earthquake: 'EARTHQUAKE', wildfire: 'WILDFIRE', river: 'RIVER FLOODING' };
+    const hazardKindLabels = {
+        earthquake: 'EARTHQUAKE', wildfire: 'WILDFIRE', river: 'RIVER FLOODING',
+        cyclone: 'TROPICAL CYCLONE', flood: 'FLOOD', volcano: 'VOLCANO', drought: 'DROUGHT', internet: 'INTERNET OUTAGE'
+    };
 
     // Reuses the incident window (same chrome, same single-instance handling).
     function openHazardPanel(hazard) {
@@ -2643,6 +2718,35 @@ window.tacticalGlobe = (function () {
             }).join('') + '</dl>' +
             '<div>' + escapeHtml(hazard.detail || '') + '</div>' +
             '<div class="tg-stream-panel-meta"><a href="' + escapeHtml(hazard.url) + '" target="_blank" rel="noopener noreferrer">OFFICIAL SOURCE</a></div>' +
+            '</div>';
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        if (!openAsModal(panel, closeIncidentPanel)) return;
+        incidentPanel = panel;
+    }
+
+    function openConvergencePanel(cell) {
+        closeIncidentPanel();
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel';
+        const facts = [['KINDS', (cell.kinds || []).join(', ')], ['SCORE', cell.score + ' / 100']];
+        const items = (cell.signals || []).map(function (signal) {
+            const text = escapeHtml(String(signal.kind).toUpperCase()) + ' - ' + escapeHtml(signal.title || '') +
+                (signal.countryWide ? ' (whole country)' : '');
+            return '<li>' + (signal.url
+                ? '<a href="' + escapeHtml(signal.url) + '" target="_blank" rel="noopener noreferrer">' + text + '</a>'
+                : text) + '</li>';
+        }).join('');
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header">' +
+            '<span>SIGNALS MEET - ' + escapeHtml(cell.label || '') + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
+            '</div>' +
+            '<div class="tg-stream-panel-body">' +
+            '<dl class="tg-incident-facts">' + facts.map(function (f) {
+                return '<dt>' + f[0] + '</dt><dd>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
+            }).join('') + '</dl>' +
+            '<div>Independent kinds of signal in this 1° square in the last day. Worth a look, not proof that they are linked.</div>' +
+            '<ul class="tg-convergence-items">' + items + '</ul>' +
             '</div>';
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
         if (!openAsModal(panel, closeIncidentPanel)) return;
@@ -3575,6 +3679,10 @@ window.tacticalGlobe = (function () {
         openTimelapse: openTimelapse,
         clearRoute: clearRoute,
         clearHazards: clearHazards,
+        setInternetOutages: setInternetOutages,
+        clearInternetOutages: clearInternetOutages,
+        setConvergence: setConvergence,
+        clearConvergence: clearConvergence,
         clearCoverageMarkers: clearCoverageMarkers,
         setWeatherSnapshot: setWeatherSnapshot,
         dispose: dispose,

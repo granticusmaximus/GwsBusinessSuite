@@ -1018,6 +1018,13 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(25);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
         });
+        // Internet outages by country (IODA, key-less) and where Overwatch's signals converge (05-11-26).
+        services.AddHttpClient<InternetOutageService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(25);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
+        services.AddScoped<SignalConvergenceService>();
         services.AddScoped<TrafficIncidentDirectoryService>();
         services.AddScoped<CameraDirectoryService>();
         // Overwatch route watch: OSRM public router (key-less) + the camera/incident/alert directories.
