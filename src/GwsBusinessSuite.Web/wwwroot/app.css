@@ -7023,3 +7023,33 @@ a.wiki-live-title:hover { text-decoration: underline; }
 /* Account > Touch ID & page lock: the settings panel shown in the page instead of floating. */
 .gws-account-touchid { max-width: 44rem; padding: 1.5rem 1rem; }
 .gws-account-touchid .sentinel-ask { position: static; width: auto; max-height: none; box-shadow: none; }
+
+/* Sparklines (T5, 06-11-26): inline SVG trend lines in KPI tiles and metric cards, in the
+   status tone; a previous period is a dashed line on the same scale. */
+.gws-sparkline { display: block; width: 100%; height: 1.6rem; margin: .1rem 0 .35rem; overflow: visible; }
+.gws-sparkline polyline { fill: none; stroke-linejoin: round; stroke-linecap: round; }
+.gws-sparkline-line { stroke: currentColor; stroke-width: 1.75; }
+.gws-sparkline-previous { stroke: var(--gws-text-soft); stroke-width: 1.25; stroke-dasharray: 3 3; opacity: .75; }
+.gws-sparkline-neutral { color: var(--gws-text-soft); }
+.gws-sparkline-info { color: var(--gws-status-info-text); }
+.gws-sparkline-success { color: var(--gws-status-success-text); }
+.gws-sparkline-warning { color: var(--gws-status-warning-text); }
+.gws-sparkline-danger { color: var(--gws-status-danger-text); }
+
+/* "Updated 12s ago" on live data (UpdatedAgo; app.js keeps the words current). */
+.gws-updated-ago { color: var(--gws-text-soft); font-size: .78rem; white-space: nowrap; }
+
+/* The one-time compact-layout offer (DensityOffer, T5): only with a mouse or trackpad. */
+.gws-density-offer { display: none; }
+@media (pointer: fine) {
+    .gws-density-offer {
+        position: fixed; z-index: 1040; right: 1.25rem; bottom: calc(var(--gws-status-strip-height, 0px) + 1rem);
+        display: flex; align-items: flex-start; gap: .75rem; max-width: 26rem; padding: .9rem 1rem;
+        border: 1px solid var(--gws-panel-border); border-radius: var(--gws-radius-md);
+        background: var(--gws-panel-bg); box-shadow: 0 .75rem 2rem rgba(0, 0, 0, .18);
+    }
+}
+.gws-density-offer > i { font-size: 1.25rem; color: var(--gws-text-soft); }
+.gws-density-offer-text { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; }
+.gws-density-offer-text span { color: var(--gws-text-soft); }
+.gws-density-offer-actions { display: flex; flex-direction: column; gap: .4rem; flex-shrink: 0; }

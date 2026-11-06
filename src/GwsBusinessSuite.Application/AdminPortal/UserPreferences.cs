@@ -11,6 +11,14 @@ public interface IUserPreferenceService
 public static class UserPreferenceKeys
 {
     public const string Density = "density";
+    // Whether the person has answered the one-time compact-layout offer (T5, 06-11-26).
+    public const string DensityOffer = "density-offer";
+}
+
+public static class DensityOffers
+{
+    public const string Unanswered = "unanswered";
+    public const string Answered = "answered";
 }
 
 public static class Densities
@@ -24,7 +32,8 @@ public static class UserPreferenceRules
     // The first value of each key is its default.
     private static readonly Dictionary<string, string[]> Values = new(StringComparer.Ordinal)
     {
-        [UserPreferenceKeys.Density] = [Densities.Comfortable, Densities.Compact]
+        [UserPreferenceKeys.Density] = [Densities.Comfortable, Densities.Compact],
+        [UserPreferenceKeys.DensityOffer] = [DensityOffers.Unanswered, DensityOffers.Answered]
     };
 
     // A family of keys whose values can't be listed: each board's filters (Boards K3), a small JSON

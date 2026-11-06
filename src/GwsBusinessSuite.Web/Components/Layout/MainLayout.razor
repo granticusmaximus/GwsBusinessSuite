@@ -81,6 +81,10 @@
                     <main id="gws-main-content" tabindex="-1" class="gws-content @(IsChromelessRoute ? "gws-content-builder" : "")">
                         @Body
                     </main>
+                    @if (_offerCompact && !IsChromelessRoute)
+                    {
+                        <DensityOffer @rendermode="InteractiveServer" />
+                    }
                     @if (!IsChromelessRoute)
                     {
                         @* The status strip (tech-forward T4): the live connection, automation jobs running,
@@ -205,6 +209,7 @@
     // The person's saved layout density (shell redesign R4), read on each request so an enhanced
     // navigation keeps what the account menu's switch saved.
     private bool _compact;
+    private bool _offerCompact;
 
     protected override async Task OnInitializedAsync()
     {
@@ -212,6 +217,10 @@
         var username = await CurrentUser.GetCurrentUsernameAsync();
         _compact = await Preferences.GetAsync(username, GwsBusinessSuite.Application.AdminPortal.UserPreferenceKeys.Density)
             == GwsBusinessSuite.Application.AdminPortal.Densities.Compact;
+        // Offered once to people still on the default (T5); app.css shows it only with a mouse.
+        _offerCompact = !_compact && !string.IsNullOrEmpty(username)
+            && await Preferences.GetAsync(username, GwsBusinessSuite.Application.AdminPortal.UserPreferenceKeys.DensityOffer)
+                == GwsBusinessSuite.Application.AdminPortal.DensityOffers.Unanswered;
     }
 
     private bool IsChromelessRoute

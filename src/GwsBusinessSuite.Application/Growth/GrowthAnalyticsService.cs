@@ -184,6 +184,8 @@ public sealed class GrowthAnalyticsService(
             RetentionPeriodLabel = retention.PeriodLabel,
             RetentionCohorts = retention.Cohorts,
             Trend = BuildTrend(pageViews, from, to),
+            PreviousTrend = BuildTrend(comparisonEvents.Where(item => item.EventName == WebAnalyticsEventNames.PageView).ToList(),
+                DateTimeOffset.FromUnixTimeSeconds(comparisonFromUnix), DateTimeOffset.FromUnixTimeSeconds(fromUnix)),
             TopPages = Breakdown(pageViews, item => item.Path, breakdownLimit),
             TopSources = Breakdown(pageViews, item =>
                 !string.IsNullOrWhiteSpace(item.Source)

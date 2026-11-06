@@ -71,6 +71,17 @@ public sealed class MissionControlServiceTests
         snapshot.AffiliateTotalClicks.Should().Be(1);
         snapshot.AffiliateTotalCommissionAmount.Should().Be(12.5m);
         snapshot.DockerUnreadAlertCount.Should().Be(1, "the already-read alert must not count");
+
+        // T5: the tiles' 14-day trends, today last.
+        var trends = snapshot.Trends!;
+        trends.Days.Should().Be(MissionControlService.TrendDays);
+        new[] { trends.AutomationFailures.Count, trends.PipelineAddedUsd.Count, trends.AffiliateClicks.Count, trends.DockerAlerts.Count }
+            .Should().OnlyContain(count => count == MissionControlService.TrendDays);
+        trends.PipelineAddedUsd[^1].Should().Be(4_500m, "only the open deal, opened today");
+        trends.PipelineAddedUsd.Sum().Should().Be(4_500m);
+        trends.AffiliateClicks[^1].Should().Be(1);
+        trends.AutomationFailures.Sum().Should().Be(1);
+        trends.DockerAlerts.Sum().Should().Be(2, "the trend counts every alert raised, read or not");
     }
 
     [Fact]

@@ -1,0 +1,31 @@
+@* A small trend line for KPI tiles and metric cards (T5, 06-11-26): inline SVG, no script, in the
+   tile's status tone. A previous period, when given, is a dashed line on the same scale. *@
+@if (Values is { Count: > 1 })
+{
+    var max = SparklineGeometry.Max(Values, Previous);
+    var description = SparklineGeometry.Describe(Label, Values, Format ?? DefaultFormat, Previous);
+    <svg class="gws-sparkline gws-sparkline-@Tone @CssClass" viewBox="0 0 @Width @Height" preserveAspectRatio="none"
+         role="img" aria-label="@description" focusable="false">
+        <title>@description</title>
+        @if (Previous is { Count: > 1 })
+        {
+            <polyline class="gws-sparkline-previous" points="@SparklineGeometry.Points(Previous, max)" vector-effect="non-scaling-stroke" />
+        }
+        <polyline class="gws-sparkline-line" points="@SparklineGeometry.Points(Values, max)" vector-effect="non-scaling-stroke" />
+    </svg>
+}
+
+@code {
+    private static readonly string Width = SparklineGeometry.Width.ToString(System.Globalization.CultureInfo.InvariantCulture);
+    private static readonly string Height = SparklineGeometry.Height.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    [Parameter, EditorRequired] public IReadOnlyList<double>? Values { get; set; }
+    [Parameter] public IReadOnlyList<double>? Previous { get; set; }
+    [Parameter] public string Label { get; set; } = "Last 14 days";
+    // neutral, info, success, warning or danger: the colour follows the status tokens.
+    [Parameter] public string Tone { get; set; } = "info";
+    [Parameter] public Func<double, string>? Format { get; set; }
+    [Parameter] public string? CssClass { get; set; }
+
+    private static string DefaultFormat(double value) => value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+}

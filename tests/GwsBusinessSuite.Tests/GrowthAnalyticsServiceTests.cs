@@ -164,6 +164,11 @@ public sealed class GrowthAnalyticsServiceTests
         dashboard.PageViewsComparison.Should().Be(new AnalyticsPeriodComparison(1, 200));
         dashboard.BounceRateComparison.Should().Be(new AnalyticsPeriodComparison(100, -50));
         dashboard.AverageEngagementComparison.Should().Be(new AnalyticsPeriodComparison(30, 200));
+        // T5: the period before by day, for the comparison lines.
+        dashboard.PreviousTrend.Should().HaveCount(7);
+        dashboard.PreviousTrend[^1].Should().Be(new AnalyticsPoint(DateOnly.FromDateTime(from.AddDays(-1).UtcDateTime), 1, 1));
+        dashboard.PreviousTrend.Take(6).Should().OnlyContain(point => point.Visitors == 0 && point.PageViews == 0);
+        dashboard.Trend.Should().HaveCount(7);
     }
 
     [Fact]

@@ -1,6 +1,10 @@
-<span class="gws-data-freshness" title="@At.ToLocalTime().ToString("F")">
+@* When the data on screen was read. The time is fixed; the "· 12s ago" after it (T5, 06-11-26) is
+   kept current by app.js (window.gwsAgo) every second, in a span Blazor never writes into, so the
+   words stay right between renders without a round trip. *@
+<span class="gws-data-freshness" title="@At.ToLocalTime().ToString("dd-MM-yy HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture)">
     <i class="bi bi-clock-history" aria-hidden="true"></i>
-    @Label @At.ToLocalTime().ToString(Format)
+    @Label @At.ToLocalTime().ToString(Format, System.Globalization.CultureInfo.InvariantCulture)
+    <span class="gws-updated-ago" data-gws-ago="@At.ToUniversalTime().ToString("o", System.Globalization.CultureInfo.InvariantCulture)"></span>
 </span>
 
 @code {

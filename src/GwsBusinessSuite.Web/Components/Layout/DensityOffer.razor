@@ -1,0 +1,56 @@
+@using GwsBusinessSuite.Application.AdminPortal
+@inject IUserPreferenceService Preferences
+@inject ICurrentUserAccessor CurrentUser
+@inject IJSRuntime JS
+@inject ILogger<DensityOffer> Logger
+
+@* The one-time compact-layout offer (T5, 06-11-26): compact suits a mouse or trackpad, so it's
+   offered once to people who haven't chosen, and only shown on such a pointer (app.css). Either
+   answer is remembered; the account menu's switch stays the way to change it later. *@
+@if (!_answered)
+{
+    <aside class="gws-density-offer" aria-label="Compact layout">
+        <i class="bi bi-arrows-collapse" aria-hidden="true"></i>
+        <div class="gws-density-offer-text">
+            <strong>Try the compact layout?</strong>
+            <span>With a mouse or trackpad it fits more on each screen. You can switch back any time from your account menu.</span>
+        </div>
+        <div class="gws-density-offer-actions">
+            <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="UseCompactAsync">Use compact</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="KeepAsync">Keep as is</button>
+        </div>
+    </aside>
+}
+
+@code {
+    private bool _answered;
+    private bool _busy;
+
+    private Task UseCompactAsync() => AnswerAsync(compact: true);
+
+    private Task KeepAsync() => AnswerAsync(compact: false);
+
+    private async Task AnswerAsync(bool compact)
+    {
+        _busy = true;
+        try
+        {
+            var username = await CurrentUser.GetCurrentUsernameAsync();
+            if (compact)
+            {
+                await Preferences.SetAsync(username, UserPreferenceKeys.Density, Densities.Compact);
+                await JS.InvokeVoidAsync("gwsDensity.set", true);
+            }
+            await Preferences.SetAsync(username, UserPreferenceKeys.DensityOffer, DensityOffers.Answered);
+            _answered = true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "The compact-layout offer couldn't be saved");
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

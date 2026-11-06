@@ -84,22 +84,26 @@
             <div class="col-md-3 col-6">
                 <KpiCard Label="Automation failures" Value="@mc.AutomationRecentFailureCount.ToString("N0")"
                          Detail="Recent workflow runs" Icon="bi-exclamation-triangle"
-                         Tone="@(mc.AutomationRecentFailureCount > 0 ? "danger" : "neutral")" Href="/admin/automation" />
+                         Tone="@(mc.AutomationRecentFailureCount > 0 ? "danger" : "neutral")" Href="/admin/automation"
+                         Trend="Series(mc.Trends?.AutomationFailures)" TrendLabel="Failed runs a day, last 14 days" />
             </div>
             <div class="col-md-3 col-6">
                 <KpiCard Label="Open CRM deals" Value="@mc.CrmOpenDealCount.ToString("N0")"
                          Detail="@($"{mc.CrmOpenDealValueUsd:C0} pipeline · {mc.CrmDueFollowUpCount} due")"
-                         Icon="bi-people" Href="/admin/crm" />
+                         Icon="bi-people" Href="/admin/crm"
+                         Trend="Series(mc.Trends?.PipelineAddedUsd)" TrendLabel="Pipeline added a day, last 14 days" TrendFormat="Dollars" />
             </div>
             <div class="col-md-3 col-6">
                 <KpiCard Label="Affiliate clicks" Value="@mc.AffiliateTotalClicks.ToString("N0")"
                          Detail="@($"{mc.AffiliateTotalCommissionAmount:C2} commission")"
-                         Icon="bi-graph-up-arrow" Href="/admin/affiliate-analytics" />
+                         Icon="bi-graph-up-arrow" Href="/admin/affiliate-analytics"
+                         Trend="Series(mc.Trends?.AffiliateClicks)" TrendLabel="Clicks a day, last 14 days" />
             </div>
             <div class="col-md-3 col-6">
                 <KpiCard Label="Container alerts" Value="@mc.DockerUnreadAlertCount.ToString("N0")"
                          Detail="Unread operational alerts" Icon="bi-heart-pulse"
-                         Tone="@(mc.DockerUnreadAlertCount > 0 ? "warning" : "neutral")" Href="/admin/docker-health" />
+                         Tone="@(mc.DockerUnreadAlertCount > 0 ? "warning" : "neutral")" Href="/admin/docker-health"
+                         Trend="Series(mc.Trends?.DockerAlerts)" TrendLabel="Alerts a day, last 14 days" />
             </div>
         </div>
 
@@ -149,6 +153,11 @@
 </div>
 
 @code {
+    // The tiles' daily trends (T5) as the sparkline's numbers.
+    private static IReadOnlyList<double>? Series(IReadOnlyList<int>? values) => values?.Select(value => (double)value).ToList();
+    private static IReadOnlyList<double>? Series(IReadOnlyList<decimal>? values) => values?.Select(value => (double)value).ToList();
+    private static string Dollars(double value) => value.ToString("C0", System.Globalization.CultureInfo.GetCultureInfo("en-US"));
+
     private const string CommandPaletteHintKey = "gws-dashboard-command-hint-dismissed";
 
     private int _pendingDrafts;

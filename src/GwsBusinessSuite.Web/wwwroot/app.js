@@ -1076,6 +1076,31 @@
 		}
 	};
 
+	// "Updated 12s ago" (DataFreshness, T5 06-11-26): each [data-gws-ago] span gets how long ago its
+	// time was, refreshed every second; past a day it stays empty (the fixed time beside it says enough).
+	window.gwsAgo = {
+		words: function (seconds) {
+			if (seconds < 10) return 'just now';
+			if (seconds < 60) return seconds + 's ago';
+			if (seconds < 3600) return Math.floor(seconds / 60) + ' min ago';
+			if (seconds < 86400) return Math.floor(seconds / 3600) + ' h ago';
+			return '';
+		},
+		render: function () {
+			var now = Date.now();
+			var spans = document.querySelectorAll('[data-gws-ago]');
+			for (var i = 0; i < spans.length; i++) {
+				var at = Date.parse(spans[i].getAttribute('data-gws-ago'));
+				if (isNaN(at)) continue;
+				var words = window.gwsAgo.words(Math.max(0, Math.round((now - at) / 1000)));
+				var text = words ? '\u00b7 ' + words : '';
+				if (spans[i].textContent !== text) spans[i].textContent = text;
+			}
+		}
+	};
+	window.gwsAgo.render();
+	setInterval(window.gwsAgo.render, 1000);
+
 	var quickNoteCleanups = {};
 	window.gwsQuickNote = {
 		init: function (elementId) {

@@ -21,6 +21,10 @@ else
     [Parameter] public string Tone { get; set; } = "neutral";
     [Parameter] public string? CssClass { get; set; }
     [Parameter] public RenderFragment? Footer { get; set; }
+    // A daily trend under the value (T5), oldest first, and what it covers.
+    [Parameter] public IReadOnlyList<double>? Trend { get; set; }
+    [Parameter] public string TrendLabel { get; set; } = "Last 14 days";
+    [Parameter] public Func<double, string>? TrendFormat { get; set; }
 
     private string AccessibleLabel => string.Join(", ", new[] { Label, Value, Detail }.Where(value => !string.IsNullOrWhiteSpace(value)));
 
@@ -36,6 +40,10 @@ else
             }
         </div>
         <strong class="gws-kpi-tile-value">@Value</strong>
+        @if (Trend is { Count: > 1 })
+        {
+            <Sparkline Values="Trend" Label="@($"{Label}, {TrendLabel.ToLowerInvariant()}")" Tone="@(Tone == "neutral" ? "info" : Tone)" Format="TrendFormat" />
+        }
         @if (!string.IsNullOrWhiteSpace(Detail))
         {
             <span class="gws-kpi-tile-detail">@Detail</span>

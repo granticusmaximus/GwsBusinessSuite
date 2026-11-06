@@ -164,6 +164,8 @@ public sealed class GrowthAnalyticsDashboard
     public string RetentionPeriodLabel { get; init; } = "Day";
     public IReadOnlyList<AnalyticsRetentionCohort> RetentionCohorts { get; init; } = [];
     public IReadOnlyList<AnalyticsPoint> Trend { get; init; } = [];
+    // The same days of the period before (T5, 06-11-26), for the comparison lines.
+    public IReadOnlyList<AnalyticsPoint> PreviousTrend { get; init; } = [];
     public IReadOnlyList<AnalyticsBreakdownRow> TopPages { get; init; } = [];
     public IReadOnlyList<AnalyticsBreakdownRow> TopSources { get; init; } = [];
     public IReadOnlyList<AnalyticsBreakdownRow> Campaigns { get; init; } = [];

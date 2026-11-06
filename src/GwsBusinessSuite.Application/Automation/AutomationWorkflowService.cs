@@ -545,13 +545,15 @@ public sealed class AutomationWorkflowService(
 
     public async Task<IReadOnlyList<int>> CountFailuresByDayAsync(DayRange range, CancellationToken cancellationToken = default)
     {
+        // A failure belongs to the day it failed: when the run finished, else when it started.
         var start = range.StartUnixSeconds;
-        var started = await db.AutomationExecutions.AsNoTracking()
+        var failedAt = await db.AutomationExecutions.AsNoTracking()
             .Where(execution => execution.Status == AutomationExecutionStatuses.Failed
-                && execution.StartedAtUnixSeconds != null && execution.StartedAtUnixSeconds >= start)
-            .Select(execution => execution.StartedAtUnixSeconds!.Value)
+                && (execution.FinishedAtUnixSeconds ?? execution.StartedAtUnixSeconds) != null
+                && (execution.FinishedAtUnixSeconds ?? execution.StartedAtUnixSeconds) >= start)
+            .Select(execution => (execution.FinishedAtUnixSeconds ?? execution.StartedAtUnixSeconds)!.Value)
             .ToListAsync(cancellationToken);
-        return range.CountUnixSeconds(started);
+        return range.CountUnixSeconds(failedAt);
     }
 
     public async Task<IReadOnlyList<AutomationRecentFailureView>> ListRecentFailuresAsync(

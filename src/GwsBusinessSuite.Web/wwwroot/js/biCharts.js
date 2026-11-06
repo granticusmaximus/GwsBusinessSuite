@@ -1,8 +1,14 @@
 // Business Intelligence charts (BusinessIntelligence.razor). Chart.js is vendored under
 // /lib/chartjs (served from 'self', so it also works in the Mac app and offline) and loaded
-// once, on first use, rather than on every admin page.
+// once, on first use, rather than on every admin page. Colours, hover and the crosshair come from
+// the shared theme (gws-chart-theme.js, T5), and charts redraw themselves when the theme changes.
+import { apply, comparison, cssVar, onThemeChange } from './gws-chart-theme.js';
+
 let chartJsLoad;
 const charts = new Map();
+// What each canvas was last drawn with, so a theme change can draw it again in the new colours.
+const drawn = new Map();
+let stopWatchingTheme;
 
 function loadChartJs() {
     if (window.Chart) return Promise.resolve();
@@ -16,10 +22,6 @@ function loadChartJs() {
     return chartJsLoad;
 }
 
-function cssVar(name, fallback) {
-    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-}
-
 function formatValue(value, format) {
     if (format === 'Currency') return value.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
     if (format === 'Rating') return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -27,17 +29,21 @@ function formatValue(value, format) {
 }
 
 // type: "Bar" | "Line". Re-rendering the same canvas id replaces its previous chart.
-// dotNetRef (optional) receives OnPointClicked(canvasId, label) for drill-down.
-export async function render(canvasId, type, labels, values, valueFormat, metricLabel, dotNetRef) {
+// dotNetRef (optional) receives OnPointClicked(canvasId, label) for drill-down. previousValues
+// (optional, lines only) draws the period before as a dashed line under the current one.
+export async function render(canvasId, type, labels, values, valueFormat, metricLabel, dotNetRef, previousValues, previousLabel) {
     await loadChartJs();
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
     charts.get(canvasId)?.destroy();
     window.Chart.getChart(canvas)?.destroy(); // Blazor may hand this id a reused canvas element
+    drawn.set(canvasId, [type, labels, values, valueFormat, metricLabel, dotNetRef, previousValues, previousLabel]);
+    stopWatchingTheme ??= onThemeChange(redrawAll);
 
-    const primary = cssVar('--bs-primary', '#0d6efd');
-    const text = cssVar('--bs-secondary-color', '#6c757d');
-    const grid = cssVar('--bs-border-color', '#dee2e6');
+    const colors = apply(window.Chart);
+    const primary = colors.primary;
+    const text = colors.text;
+    const grid = colors.grid;
     const isBar = type === 'Bar';
     const valueTicks = { color: text, precision: valueFormat === 'Rating' ? 1 : 0, callback: value => formatValue(value, valueFormat) };
     // Horizontal bars grow with the number of rows so long label lists stay readable.
@@ -55,8 +61,10 @@ export async function render(canvasId, type, labels, values, valueFormat, metric
                 borderWidth: isBar ? 0 : 3,
                 borderRadius: isBar ? 4 : 0,
                 tension: 0.3,
-                pointRadius: isBar ? 0 : 3
-            }]
+                pointRadius: isBar ? 0 : 3,
+                order: 1
+            }].concat(!isBar && Array.isArray(previousValues) && previousValues.length
+                ? [comparison(previousLabel || 'Period before', previousValues)] : [])
         },
         options: {
             indexAxis: isBar ? 'y' : 'x',
@@ -69,8 +77,8 @@ export async function render(canvasId, type, labels, values, valueFormat, metric
                 if (dotNetRef) event.native.target.style.cursor = elements.length ? 'pointer' : 'default';
             },
             plugins: {
-                legend: { display: false },
-                tooltip: { callbacks: { label: ctx => `${metricLabel}: ${formatValue(ctx.parsed[isBar ? 'x' : 'y'], valueFormat)}` } }
+                legend: { display: !isBar && Array.isArray(previousValues) && previousValues.length > 0, labels: { boxHeight: 2 } },
+                tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${formatValue(ctx.parsed[isBar ? 'x' : 'y'], valueFormat)}` } }
             },
             scales: {
                 // The value axis is x for horizontal bars, y for lines; counts tick in whole numbers.
@@ -84,6 +92,22 @@ export async function render(canvasId, type, labels, values, valueFormat, metric
 export function dispose(canvasId) {
     charts.get(canvasId)?.destroy();
     charts.delete(canvasId);
+    drawn.delete(canvasId);
+    if (drawn.size === 0 && stopWatchingTheme) {
+        stopWatchingTheme();
+        stopWatchingTheme = undefined;
+    }
+}
+
+// The theme changed: draw every chart still on the page again, in the new colours.
+function redrawAll() {
+    for (const [canvasId, args] of Array.from(drawn.entries())) {
+        if (!document.getElementById(canvasId)) {
+            dispose(canvasId);
+            continue;
+        }
+        render(canvasId, ...args);
+    }
 }
 
 // Saves the chart as a PNG on a solid background (a transparent PNG is unreadable in dark viewers).

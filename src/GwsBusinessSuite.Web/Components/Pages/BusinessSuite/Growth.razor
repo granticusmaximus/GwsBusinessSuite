@@ -90,12 +90,16 @@
                                 Value="@Dashboard.Visitors.ToString("N0")"
                                 Detail="First-party, cookieless"
                                 Comparison="Dashboard.VisitorsComparison"
-                                PreviousValue="@Dashboard.VisitorsComparison.PreviousValue.ToString("N0")" />
+                                PreviousValue="@Dashboard.VisitorsComparison.PreviousValue.ToString("N0")"
+                                Trend="@Dashboard.Trend.Select(point => (double)point.Visitors).ToList()"
+                                PreviousTrend="@Dashboard.PreviousTrend.Select(point => (double)point.Visitors).ToList()" />
                     <MetricCard Label="Page views"
                                 Value="@Dashboard.PageViews.ToString("N0")"
                                 Detail="@($"{Dashboard.ViewsPerSession:N2} per session")"
                                 Comparison="Dashboard.PageViewsComparison"
-                                PreviousValue="@Dashboard.PageViewsComparison.PreviousValue.ToString("N0")" />
+                                PreviousValue="@Dashboard.PageViewsComparison.PreviousValue.ToString("N0")"
+                                Trend="@Dashboard.Trend.Select(point => (double)point.PageViews).ToList()"
+                                PreviousTrend="@Dashboard.PreviousTrend.Select(point => (double)point.PageViews).ToList()" />
                     <MetricCard Label="Bounce rate"
                                 Value="@($"{Dashboard.BounceRate:N1}%")"
                                 Detail="Single-page sessions"
@@ -158,7 +162,7 @@
                     <div class="panel-heading">
                         <div><span>Audience trend</span><small>Visitors and page views by day</small></div>
                         <div class="trend-heading-actions">
-                            <div class="legend"><i class="views"></i> Views <i class="visitors"></i> Visitors</div>
+                            <div class="legend"><i class="views"></i> Views <i class="visitors"></i> Visitors @if (Dashboard.PreviousTrend.Count > 0) {<i class="previous"></i><span>Visitors, period before</span>}</div>
                             <GrowthAnnotationManager Annotations="Dashboard.Annotations"
                                                      RangeStart="AnnotationRangeStart"
                                                      RangeEnd="AnnotationRangeEnd"
@@ -169,12 +173,19 @@
                         </div>
                     </div>
                     <div class="trend-chart" role="img" aria-label="Daily visitors and page views" aria-describedby="growth-trend-data">
-                        @foreach (var point in Dashboard.Trend)
+                        @for (var day = 0; day < Dashboard.Trend.Count; day++)
                         {
-                            <div class="trend-day" title="@($"{point.Date:dd-MM-yy}: {point.Visitors} visitors, {point.PageViews} views")">
+                            var point = Dashboard.Trend[day];
+                            var previous = day < Dashboard.PreviousTrend.Count ? Dashboard.PreviousTrend[day] : null;
+                            <div class="trend-day" title="@($"{point.Date:dd-MM-yy}: {point.Visitors} visitors, {point.PageViews} views" + (previous is null ? "" : $" (period before, {previous.Date:dd-MM-yy}: {previous.Visitors} visitors)"))">
                                 <div class="bars">
                                     <span class="bar views" style="@BarHeight(point.PageViews)"></span>
                                     <span class="bar visitors" style="@BarHeight(point.Visitors)"></span>
+                                    @if (previous is not null)
+                                    {
+                                        @* The same day of the period before (T5): a dashed mark at its visitor count. *@
+                                        <span class="previous-mark" style="@MarkBottom(previous.Visitors)"></span>
+                                    }
                                     @if (AnnotationsFor(point.Date) is { Count: > 0 } annotations)
                                     {
                                         <span class="annotation-marker"
@@ -189,7 +200,7 @@
                                         </span>
                                     }
                                 </div>
-                                <small>@point.Date.ToString(Dashboard.Trend.Count > 35 ? "MMM" : "M/d")</small>
+                                <small>@point.Date.ToString(Dashboard.Trend.Count > 35 ? "MMM" : "dd-MM", System.Globalization.CultureInfo.InvariantCulture)</small>
                             </div>
                         }
                     </div>
@@ -664,7 +675,9 @@
     private string FormatDuration(TimeSpan duration) => duration.TotalMinutes >= 1
         ? $"{(int)duration.TotalMinutes}m {duration.Seconds}s"
         : $"{duration.Seconds}s";
-    private int TrendMax => Math.Max(1, Dashboard.Trend.Select(item => Math.Max(item.PageViews, item.Visitors)).DefaultIfEmpty(1).Max());
+    private int TrendMax => Math.Max(1, Dashboard.Trend.Select(item => Math.Max(item.PageViews, item.Visitors))
+        .Concat(Dashboard.PreviousTrend.Select(item => item.Visitors)).DefaultIfEmpty(1).Max());
+    private string MarkBottom(int value) => $"bottom:{Math.Min(100, value * 100d / TrendMax):0.#}%";
     private string BarHeight(int value) => $"height:{Math.Max(2, value * 100d / TrendMax):0.#}%";
     private DateOnly AnnotationRangeStart => DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-RangeDays));
     private DateOnly AnnotationRangeEnd => DateOnly.FromDateTime(DateTime.UtcNow);

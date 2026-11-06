@@ -16,7 +16,18 @@ public sealed record MissionControlSnapshot(
     int AffiliateTotalClicks,
     decimal AffiliateTotalCommissionAmount,
     int DockerUnreadAlertCount,
-    DateTimeOffset GeneratedAt);
+    DateTimeOffset GeneratedAt,
+    MissionControlTrends? Trends = null);
+
+// The tiles' sparklines (T5, 06-11-26): one value per day for the last Days days, oldest first,
+// in the server's time zone.
+public sealed record MissionControlTrends(
+    int Days,
+    IReadOnlyList<int> AutomationFailures,
+    // The value of deals opened each day that are still open.
+    IReadOnlyList<decimal> PipelineAddedUsd,
+    IReadOnlyList<int> AffiliateClicks,
+    IReadOnlyList<int> DockerAlerts);
 
 public interface IMissionControlService
 {

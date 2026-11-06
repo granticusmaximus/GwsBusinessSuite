@@ -287,13 +287,25 @@ Built in three units: T4a status strip, T4b live list rows, T4c presence.
   class cleared after 1.5 s, and the browser logged no errors or warnings. The Paid publisher is
   covered at the service boundary; no live Stripe webhook was sent from the disposable instance.
 
-## T5. Density and charts (areas 2, 15)
+## T5. Density and charts (areas 2, 15) - DONE 06-11-26
 
-- One chart theme (Chart.js is already vendored) from the status and text tokens, light and dark,
-  with hover crosshairs and a previous-period comparison line.
-- Sparklines in KPI tiles and in list rows where a trend exists (deal value, visitors, campaign
-  sends). "Updated 12s ago" indicators on live data.
-- Compact as the default suggestion for mouse users (first visit offers it; the switch stays).
+- [x] **One chart theme** (`wwwroot/js/gws-chart-theme.js`), used by Business Intelligence (`biCharts.js`).
+  - Colours from the tokens. Charts redraw when light/dark changes.
+  - Index hover with a dashed crosshair, and a `comparison()` series for the period before (`render(..., previousValues, previousLabel)`).
+  - Checked live: dashed previous series, index mode, redrawn in the new colours, no CSP errors.
+- [x] **Sparklines** (`Sparkline.razor` + `SparklineGeometry`, inline SVG, a dashed previous period on the same scale):
+  - Home's four At a glance tiles (`MissionControlTrends`, 14 days):
+    - automation failures, by the day they failed (`CountFailuresByDayAsync` now uses the finish time)
+    - pipeline added by open deals
+    - affiliate clicks
+    - container alerts
+  - Growth's visitor and page-view cards: this period, and dashed the one before (`PreviousTrend`).
+  - Growth's audience chart marks each day's previous-period visitors, and its axis reads dd-MM (was M/d).
+  - List-row sparklines were left out: campaign sends have no per-day timestamp column, and per-row deal value has no history.
+- [x] **"Updated 12s ago":** `DataFreshness` now ends in a live "· 12s ago" (app.js `gwsAgo`, every second, in a span Blazor doesn't write to). On Home and Growth.
+- [x] **Compact offer** (`DensityOffer`, preference `density-offer`):
+  - Shown once to people still on the default, only with a mouse (`pointer: fine`).
+  - Checked live: Use compact applies it at once, and after a reload it's still compact and the offer is gone.
 
 ## T6. SentinelGPT in context (area 4)
 

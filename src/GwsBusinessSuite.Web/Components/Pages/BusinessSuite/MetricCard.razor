@@ -16,6 +16,10 @@
             }
         </small>
     }
+    @if (Trend is { Count: > 1 })
+    {
+        <Sparkline Values="Trend" Previous="PreviousTrend" Label="@($"{Label} by day, this period (dashed: the one before)")" Tone="info" />
+    }
     <small class="metric-detail">@Detail</small>
 </article>
 
@@ -26,6 +30,9 @@
     [Parameter] public AnalyticsPeriodComparison? Comparison { get; set; }
     [Parameter] public string PreviousValue { get; set; } = string.Empty;
     [Parameter] public bool LowerIsBetter { get; set; }
+    // Daily values for this period and the one before (T5).
+    [Parameter] public IReadOnlyList<double>? Trend { get; set; }
+    [Parameter] public IReadOnlyList<double>? PreviousTrend { get; set; }
 
     private string ComparisonIcon => Comparison?.ChangePercent switch
     {
