@@ -44,4 +44,21 @@ public sealed class MarkdownPdfTests
         var links = document.GetPages().SelectMany(page => page.GetHyperlinks()).Select(link => link.Uri).ToList();
         links.Should().Equal(["https://example.com/nhk"], "only web and mail links stay links");
     }
+
+    [Fact]
+    public void Render_ShouldDrawATable()
+    {
+        const string markdown = """
+            **Who reports what**:
+
+            | Outlet | 1 | 2 |
+            | --- | :-: | :-: |
+            | Reuters | ● | – |
+            | Al Jazeera | ● | ● |
+            """;
+
+        using var document = PdfDocument.Open(MarkdownPdf.Render(markdown, "test"));
+        var words = document.GetPages().SelectMany(page => page.GetWords()).Select(word => word.Text).ToList();
+        words.Should().Contain(["Outlet", "Reuters", "Al", "Jazeera"]).And.NotContain(word => word.Contains('|'), "it's a table, not the Markdown");
+    }
 }

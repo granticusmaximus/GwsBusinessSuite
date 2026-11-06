@@ -752,7 +752,8 @@ else
 
     private async Task<bool> ShowDocumentAsync(string eventId)
     {
-        var document = await Task.Run(() => News.Document(eventId));
+        var username = string.IsNullOrWhiteSpace(_username) ? null : _username;
+        var document = await Task.Run(() => News.Document(eventId, username));
         if (document is null)
         {
             _documentError = "This event isn't there any more (events are merged and pruned as coverage changes).";
@@ -760,6 +761,8 @@ else
             return false;
         }
         _document = new OpenDocument(eventId, document.Title, AssistantMarkdown.ToSafeHtml(document.Markdown, linksInNewTab: true));
+        // Seen: the next "what changed since you last read" starts from this analysis.
+        if (username is not null && document.AnalysisAt is { } analysisAt) await Task.Run(() => News.MarkStoryRead(username, eventId, analysisAt));
         return true;
     }
 

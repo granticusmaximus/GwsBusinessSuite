@@ -19,9 +19,9 @@ public static class MarkdownPdf
     public static readonly string[] Fonts =
     [
         "Liberation Sans", "Noto Sans", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans Arabic",
-        "Noto Naskh Arabic", "Noto Sans Devanagari", "Noto Sans Hebrew", "Noto Sans Thai",
+        "Noto Naskh Arabic", "Noto Sans Devanagari", "Noto Sans Hebrew", "Noto Sans Thai", "Noto Sans Symbols 2", "Noto Sans Symbols",
         // A Mac's own, for local runs.
-        "Helvetica", "Hiragino Sans", "Apple SD Gothic Neo", "PingFang SC", "Geeza Pro", "Kohinoor Devanagari"
+        "Helvetica", "Hiragino Sans", "Apple SD Gothic Neo", "PingFang SC", "Geeza Pro", "Kohinoor Devanagari", "Apple Symbols"
     ];
 
     private static readonly string[] MonoFonts = ["Liberation Mono", "Menlo", "Noto Sans Mono"];
@@ -35,6 +35,7 @@ public static class MarkdownPdf
     private const float BodySize = 10;
 
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
+        .UsePipeTables()
         .UseEmphasisExtras()
         .UseAutoLinks()
         .DisableHtml()
@@ -79,6 +80,9 @@ public static class MarkdownPdf
     {
         switch (block)
         {
+            case Markdig.Extensions.Tables.Table table:
+                RenderTable(column, table);
+                break;
             case HeadingBlock heading:
                 var size = heading.Level switch { 1 => 18f, 2 => 13.5f, 3 => 11f, _ => BodySize };
                 column.Item().PaddingTop(heading.Level switch { 1 => 0, 2 => 10, _ => 4 })
@@ -129,6 +133,39 @@ public static class MarkdownPdf
                 column.Item().Text(text => RenderInlines(text, leaf.Inline, new Style(BodySize)));
                 break;
         }
+    }
+
+    // A pipe table: the first column takes what's left, the others share a third; the header row is shaded.
+    private static void RenderTable(ColumnDescriptor column, Markdig.Extensions.Tables.Table table)
+    {
+        var rows = table.OfType<Markdig.Extensions.Tables.TableRow>().ToList();
+        var columns = rows.Count == 0 ? 0 : rows.Max(row => row.Count);
+        if (columns == 0) return;
+        column.Item().PaddingVertical(2).Table(grid =>
+        {
+            grid.ColumnsDefinition(definition =>
+            {
+                definition.RelativeColumn(Math.Max(2, columns / 2f));
+                for (var i = 1; i < columns; i++) definition.RelativeColumn(1);
+            });
+            foreach (var row in rows)
+            {
+                var cells = row.OfType<Markdig.Extensions.Tables.TableCell>().ToList();
+                for (var i = 0; i < columns; i++)
+                {
+                    var cell = grid.Cell().BorderBottom(0.5f).BorderColor(Rule).PaddingVertical(2).PaddingHorizontal(3);
+                    if (row.IsHeader) cell = cell.Background(CodeBackground);
+                    if (i > 0) cell = cell.AlignCenter();
+                    var content = i < cells.Count ? cells[i] : null;
+                    cell.Text(text =>
+                    {
+                        if (content is null) return;
+                        foreach (var leaf in content.OfType<LeafBlock>())
+                            RenderInlines(text, leaf.Inline, new Style(9, Bold: row.IsHeader));
+                    });
+                }
+            }
+        });
     }
 
     private sealed record Style(float Size, bool Bold = false, bool Italic = false, bool Mono = false, string? Url = null);

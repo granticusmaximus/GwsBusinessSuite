@@ -1,0 +1,81 @@
+# World News and Overwatch: the next round (06-11-26)
+
+Grant, on the proposal (World News features 1-6, World News UI, Overwatch features 1-4,
+Overwatch UI): "I like this entire list. Proceed with this".
+
+Each phase is built in the scratch worktree, tested, checked in a browser, then applied to main.
+Then verify-release runs and Grant gets a commit message: he commits and pushes.
+
+Found before planning (grep first):
+- Watched areas and area alerts already exist (`OverwatchWatchArea`, `OverwatchAreaService`):
+  traffic incidents, NWS weather, hazards and news. Phase 4d extends them; it isn't new.
+- Production, last 7 days: most publishers come only through Google News. Busiest by events:
+  - Yahoo, BBC Mundo, Infobae, The Guardian, Aftonbladet, ANSA, the New York Times, El País.
+  - Dagens Nyheter, WELT, YNET, Yonhap, n-tv, G1, De Telegraaf, Le Figaro, La Nación.
+  - Al Arabiya, Clarín, The Independent, Expressen, Chosun.
+
+## Phase 1 - the story document, deeper - 1a, 1d, 1e DONE (06-11-26); 1b, 1c TO DO
+
+Done:
+- `StoryDocument` (WorldNewsKit) is the one record the document is drawn from.
+  `WorldNewsService.Story(eventId, username)` builds it.
+- 1a: the grid, as a pipe table in the dialog (AssistantMarkdown renders pipe tables) and in the
+  PDF (MarkdownPdf draws tables).
+- 1d: headlines translated after each analysis (`HeadlineTranslator`, `article_translations`).
+- 1e: "what changed" (`StoryChangesFinder`, `analysis_history`, `story_reads`), marked read when
+  the dialog opens.
+- 1b and 1c need a Razor view of `StoryDocument` (the chips filter the grid and sources live),
+  shared by the dialog and a new `/admin/world-news/events/{id}` page. See
+  `GwsBusinessSuite-handoff/HANDOFF-2026-11-06.md`.
+
+- 1a **Who reports what:** a grid, rows the outlets and columns the agreed facts, a tick or a gap.
+  It goes on the page, in the dialog and in the PDF (MarkdownPdf learns pipe tables).
+- 1b **A story page**, `/admin/world-news/events/{id}`, beside the dialog. It can be linked to and
+  bookmarked, and Back works. Overwatch's READ DOCUMENT opens it, and the dialog gets "Open as page".
+- 1c **Region and language chips** on the story page, filtering the grid and the sources (for
+  example, only outlets outside Western Europe and North America).
+- 1d **English headlines:** the analysis also translates its sources' headlines (one per
+  outlet, not English, up to 80), kept per article and shown under each original.
+- 1e **What changed since you last read:** analyses are kept as versions; each reader's last-read
+  version is remembered. On the next open, the top of the document shows:
+  - outlets new since then;
+  - facts added or dropped;
+  - a claim that changed;
+  - figures that moved.
+
+## Phase 2 - World News behind the scenes
+- 2a **Analyse ahead of time:** while an Admin Mac is online, the top 20 stories of the last day
+  and the latest event of every watched situation are analysed when due, a few each round, in
+  the shared (lower-priority) lane.
+- 2b **Background translations** of those stories' headlines.
+- 2c **More outlets' own feeds:** the busiest Google-News-only publishers above, each feed fetched
+  and checked before it's added. Refusals are respected.
+- 2d **Fact-checks:**
+  - Public fact-check feeds from IFCN signatories (each checked first).
+  - Matched to a story by the words of its claim and headline.
+  - A "Fact-checks" section in the document when there's a match.
+
+## Phase 3 - the World News list
+- **Story cards:**
+  - English headline and a one-line claim.
+  - Outlet counts by language.
+  - A "figures disputed" flag.
+  - A coverage sparkline (reports per hour, the T5 Sparkline).
+- **Region and language chips** filtering the list.
+
+## Phase 4 - Overwatch features
+- 4a **What the sensors say:** for a news story, what other layers show near that place and time:
+  - quakes and GDACS hazards, internet outages, airport delays;
+  - NWS alerts, power outages, convergence;
+  - in the World News panel, next to what the outlets say.
+- 4b **Layer presets:** Weather, Conflict, Cyber, Infrastructure.
+- 4c **One time slider:** the last 24, 48 or 72 hours, for every layer whose items carry a time.
+  Layers with no history say they're live only.
+- 4d **Watched areas also alert on** internet outages, airport closures, news surges and aircraft
+  emergencies (7500/7600/7700). New alerts reach the Mac app as notifications.
+
+## Phase 5 - Overwatch UI
+- 5a **One detail panel shared by every layer,** with the same actions: Read document (news), Ask
+  SentinelGPT (with that item as context), Capture.
+- 5b **The layer panel:** search, active layers as chips at the top, a count per layer, a legend.
+- 5c **Clustering** of markers when zoomed out; panels as a bottom sheet on phones.

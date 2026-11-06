@@ -18,7 +18,8 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // headline and summary from the same model and service Media Watch summarizes with (summaries
 // are what Light mode keeps on the server). The data lives in its own SQLite file beside the
 // main database (no migrations), keeping 30 days.
-public sealed record WorldNewsDocument(string Title, string FileName, string Markdown);
+// AnalysisAt: when the analysis it shows was written (for "what changed since you last read").
+public sealed record WorldNewsDocument(string Title, string FileName, string Markdown, DateTimeOffset? AnalysisAt = null);
 
 public sealed partial class WorldNewsService : IDisposable
 {
@@ -431,15 +432,16 @@ public sealed partial class WorldNewsService : IDisposable
 
     // The event's combined document as Markdown (shown rendered on the page), or null when the
     // event is gone. FileName is the PDF's (DocumentPdf).
-    public WorldNewsDocument? Document(string eventId)
+    // With a username, the document starts with what changed since that reader last read it.
+    public WorldNewsDocument? Document(string eventId, string? username = null)
     {
-        if (Store.Event(eventId) is not { } e) return null;
-        var markdown = EventDocument.ToMarkdown(e, Store.ArticlesForEvent(eventId), Store.LatestSummary(eventId), at => at.ToLocalGwsDateTime(),
-            Store.LatestAnalysis(eventId));
+        if (Story(eventId, username) is not { } story) return null;
+        var e = story.Event;
+        var markdown = EventDocument.ToMarkdown(story, at => at.ToLocalGwsDateTime());
         var title = e.Headline ?? e.Title;
         var slug = string.Join('-', NonSlug().Split(title.ToLowerInvariant()).Where(part => part.Length > 0));
         var name = slug.Length == 0 ? eventId[..Math.Min(8, eventId.Length)] : slug[..Math.Min(slug.Length, 60)].TrimEnd('-');
-        return new WorldNewsDocument(title, $"world-news-{e.FirstSeen.ToLocalTime():yyyyMMdd}-{name}.pdf", markdown);
+        return new WorldNewsDocument(title, $"world-news-{e.FirstSeen.ToLocalTime():yyyyMMdd}-{name}.pdf", markdown, story.Analysis?.CreatedAt);
     }
 
     // The same document as a PDF, made from its Markdown (06-11-26: downloads are PDFs, not Markdown).
@@ -447,6 +449,25 @@ public sealed partial class WorldNewsService : IDisposable
         Document(eventId) is { } document
             ? (document.FileName, MarkdownPdf.Render(document.Markdown, $"World News · made {DateTimeOffset.UtcNow.ToLocalGwsDateTime()}"))
             : null;
+
+    // The story as its document shows it, or null when the event is gone. With a username, it says
+    // what changed since that reader last read it (the analysis they saw then against this one).
+    public StoryDocument? Story(string eventId, string? username)
+    {
+        if (Store.Event(eventId) is not { } e) return null;
+        var articles = Store.ArticlesForEvent(eventId);
+        var analysis = Store.LatestAnalysis(eventId);
+        StoryChanges? changes = null;
+        if (username is not null && analysis is not null && Store.StoryRead(username, eventId) is { } read
+            && read.AnalysisAt.ToUnixTimeSeconds() < analysis.CreatedAt.ToUnixTimeSeconds())
+            changes = StoryChangesFinder.Find(analysis, Store.AnalysisAt(eventId, read.AnalysisAt), read.ReadAt, articles);
+        return EventDocument.Build(e, articles, Store.LatestSummary(eventId), analysis, Store.TranslationsForEvent(eventId),
+            Store.ReadInFull(eventId), changes);
+    }
+
+    // The reader has seen this analysis: the next "what changed" starts from it.
+    public void MarkStoryRead(string username, string eventId, DateTimeOffset analysisAt) =>
+        Store.MarkStoryRead(username, eventId, analysisAt, DateTimeOffset.UtcNow);
 
     // ---- SentinelGPT's analysis of an event (06-11-26), written when its document is read.
 
@@ -496,8 +517,10 @@ public sealed partial class WorldNewsService : IDisposable
             var parsed = EventAnalyzer.Parse(raw, outlets)
                 ?? throw new InvalidOperationException("SentinelGPT's answer didn't have the analysis in it. Try again.");
             var writtenBy = _serverHasNoModel ? "SentinelGPT on the Mac" : _model;
-            return Store.SaveAnalysis(new EventAnalysis(eventId, parsed.Claim, parsed.Summary, parsed.Agreed, parsed.Differences, writtenBy,
+            var saved = Store.SaveAnalysis(new EventAnalysis(eventId, parsed.Claim, parsed.Summary, parsed.Agreed, parsed.Differences, writtenBy,
                 e.ArticleCount, excerpts.Count, DateTimeOffset.UtcNow));
+            await TranslateHeadlinesAsync(eventId, articles);
+            return saved;
         }
         catch (ServerAiUnavailableException ex)
         {
@@ -518,6 +541,36 @@ public sealed partial class WorldNewsService : IDisposable
         {
             _analysing.TryRemove(eventId, out _);
             _analysisStatus.TryRemove(eventId, out _);
+        }
+    }
+
+    // English for the story's headlines in other languages, after its analysis is saved (so the
+    // analysis shows first). A failure here only leaves headlines untranslated.
+    private async Task TranslateHeadlinesAsync(string eventId, IReadOnlyList<WorldArticle> articles)
+    {
+        var pending = HeadlineTranslator.Choose(articles, Store.TranslationsForEvent(eventId));
+        if (pending.Count == 0) return;
+        try
+        {
+            var done = 0;
+            foreach (var batch in pending.Chunk(HeadlineTranslator.MaxPerCall))
+            {
+                _analysisStatus[eventId] = $"Translating headlines into English ({done} of {pending.Count})…";
+                string raw;
+                using (MacRelayScope.ForSharedWork())
+                {
+                    await using var scope = _scopes.CreateAsyncScope();
+                    using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+                    raw = await scope.ServiceProvider.GetRequiredService<IOllamaService>()
+                        .GenerateAsync(_model, HeadlineTranslator.SystemPrompt, HeadlineTranslator.Prompt(batch), 16_384, limit.Token);
+                }
+                Store.SaveTranslations(HeadlineTranslator.Parse(raw, batch), DateTimeOffset.UtcNow);
+                done += batch.Length;
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or OperationCanceledException or HttpRequestException)
+        {
+            _logger.LogInformation(ex, "World News: headlines for {Event} weren't translated", eventId);
         }
     }
 

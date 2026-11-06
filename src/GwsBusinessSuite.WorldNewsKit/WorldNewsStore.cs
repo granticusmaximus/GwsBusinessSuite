@@ -74,6 +74,14 @@ public sealed class WorldNewsStore
                 event_id TEXT PRIMARY KEY, claim TEXT NOT NULL, summary TEXT NOT NULL, agreed TEXT NOT NULL, differences TEXT NOT NULL,
                 model TEXT NOT NULL, article_count INTEGER NOT NULL, articles_read INTEGER NOT NULL, created_at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS article_texts (article_id TEXT PRIMARY KEY, excerpt TEXT, reason TEXT, fetched_at INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS analysis_history (
+                event_id TEXT NOT NULL, claim TEXT NOT NULL, summary TEXT NOT NULL, agreed TEXT NOT NULL, differences TEXT NOT NULL,
+                model TEXT NOT NULL, article_count INTEGER NOT NULL, articles_read INTEGER NOT NULL, created_at INTEGER NOT NULL,
+                PRIMARY KEY (event_id, created_at));
+            CREATE TABLE IF NOT EXISTS story_reads (
+                username TEXT NOT NULL, event_id TEXT NOT NULL, analysis_at INTEGER NOT NULL, read_at INTEGER NOT NULL,
+                PRIMARY KEY (username, event_id));
+            CREATE TABLE IF NOT EXISTS article_translations (article_id TEXT PRIMARY KEY, english TEXT NOT NULL, created_at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS surge_alerts_sent (situation_id TEXT PRIMARY KEY, sent_at INTEGER NOT NULL);
             """);
         // Databases from before outlet feeds (21-10-26) have no snippet column.
@@ -374,6 +382,8 @@ public sealed class WorldNewsStore
                 DELETE FROM events WHERE id = $drop;
                 DELETE FROM summaries WHERE event_id = $drop;
                 DELETE FROM analyses WHERE event_id = $drop;
+                DELETE FROM analysis_history WHERE event_id = $drop;
+                DELETE FROM story_reads WHERE event_id = $drop;
                 UPDATE events SET title = $title, title_language = $language, vector_sum = $sum, article_count = $count,
                     first_seen = $first, last_seen = $last WHERE id = $keep;
                 """;
@@ -893,14 +903,28 @@ public sealed class WorldNewsStore
     }
 
     // SentinelGPT's analysis of an event (EventAnalyzer): only the latest is kept.
-    public EventAnalysis? LatestAnalysis(string eventId)
+    public EventAnalysis? LatestAnalysis(string eventId) =>
+        ReadAnalysis(eventId, "SELECT claim, summary, agreed, differences, model, article_count, articles_read, created_at FROM analyses WHERE event_id = $event");
+
+    // The analysis a reader saw at analysisAt: the latest if that's it, else the kept version.
+    public EventAnalysis? AnalysisAt(string eventId, DateTimeOffset analysisAt) =>
+        LatestAnalysis(eventId) is { } latest && latest.CreatedAt.ToUnixTimeSeconds() == analysisAt.ToUnixTimeSeconds()
+            ? latest
+            : ReadAnalysis(eventId, """
+                SELECT claim, summary, agreed, differences, model, article_count, articles_read, created_at FROM analysis_history
+                WHERE event_id = $event AND created_at <= $at ORDER BY created_at DESC LIMIT 1
+                """, ("$at", analysisAt.ToUnixTimeSeconds()));
+
+    // Versions kept for "what changed since you last read".
+    public const int KeptAnalysisVersions = 10;
+
+    private EventAnalysis? ReadAnalysis(string eventId, string sql, params (string Name, object Value)[] parameters)
     {
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT claim, summary, agreed, differences, model, article_count, articles_read, created_at FROM analyses WHERE event_id = $event
-            """;
+        command.CommandText = sql;
         command.Parameters.AddWithValue("$event", eventId);
+        foreach (var (name, value) in parameters) command.Parameters.AddWithValue(name, value);
         using var reader = command.ExecuteReader();
         if (!reader.Read()) return null;
         var differences = reader.GetString(3).Split('\n', StringSplitOptions.RemoveEmptyEntries)
@@ -920,7 +944,12 @@ public sealed class WorldNewsStore
         static string Line(string text) => text.Replace('\n', ' ').Replace('\t', ' ').Trim();
         using var connection = Open();
         using var command = connection.CreateCommand();
-        command.CommandText = """
+        // The one it replaces is kept, for "what changed since you last read".
+        command.CommandText = $"""
+            INSERT OR IGNORE INTO analysis_history SELECT event_id, claim, summary, agreed, differences, model, article_count, articles_read, created_at
+                FROM analyses WHERE event_id = $event;
+            DELETE FROM analysis_history WHERE event_id = $event AND created_at NOT IN
+                (SELECT created_at FROM analysis_history WHERE event_id = $event ORDER BY created_at DESC LIMIT {KeptAnalysisVersions});
             INSERT OR REPLACE INTO analyses (event_id, claim, summary, agreed, differences, model, article_count, articles_read, created_at)
             VALUES ($event, $claim, $summary, $agreed, $differences, $model, $count, $read, $created)
             """;
@@ -952,6 +981,91 @@ public sealed class WorldNewsStore
         while (reader.Read())
             found[reader.GetString(0)] = (reader.IsDBNull(1) ? null : reader.GetString(1), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2)));
         return found;
+    }
+
+    // When a reader last read a story, and which analysis they saw then.
+    public (DateTimeOffset AnalysisAt, DateTimeOffset ReadAt)? StoryRead(string username, string eventId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT analysis_at, read_at FROM story_reads WHERE username = $user AND event_id = $event";
+        command.Parameters.AddWithValue("$user", username);
+        command.Parameters.AddWithValue("$event", eventId);
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? (DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(0)), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(1))) : null;
+    }
+
+    public void MarkStoryRead(string username, string eventId, DateTimeOffset analysisAt, DateTimeOffset readAt)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "INSERT OR REPLACE INTO story_reads (username, event_id, analysis_at, read_at) VALUES ($user, $event, $analysis, $read)";
+        command.Parameters.AddWithValue("$user", username);
+        command.Parameters.AddWithValue("$event", eventId);
+        command.Parameters.AddWithValue("$analysis", analysisAt.ToUnixTimeSeconds());
+        command.Parameters.AddWithValue("$read", readAt.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+    }
+
+    // English headlines for reports in other languages, by article id.
+    public IReadOnlyDictionary<string, string> Translations(IEnumerable<string> articleIds)
+    {
+        var ids = articleIds.Distinct(StringComparer.Ordinal).ToList();
+        var found = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var batch in ids.Chunk(500))
+        {
+            using var connection = Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = $"SELECT article_id, english FROM article_translations WHERE article_id IN ({string.Join(',', batch.Select((_, i) => $"$id{i}"))})";
+            for (var i = 0; i < batch.Length; i++) command.Parameters.AddWithValue($"$id{i}", batch[i]);
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) found[reader.GetString(0)] = reader.GetString(1);
+        }
+        return found;
+    }
+
+    // An event's English headlines, by article id.
+    public IReadOnlyDictionary<string, string> TranslationsForEvent(string eventId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT t.article_id, t.english FROM article_translations t JOIN articles a ON a.id = t.article_id WHERE a.event_id = $event";
+        command.Parameters.AddWithValue("$event", eventId);
+        using var reader = command.ExecuteReader();
+        var found = new Dictionary<string, string>(StringComparer.Ordinal);
+        while (reader.Read()) found[reader.GetString(0)] = reader.GetString(1);
+        return found;
+    }
+
+    // An event's articles that were read in full (they have an excerpt).
+    public IReadOnlySet<string> ReadInFull(string eventId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT t.article_id FROM article_texts t JOIN articles a ON a.id = t.article_id WHERE a.event_id = $event AND t.excerpt IS NOT NULL";
+        command.Parameters.AddWithValue("$event", eventId);
+        using var reader = command.ExecuteReader();
+        var found = new HashSet<string>(StringComparer.Ordinal);
+        while (reader.Read()) found.Add(reader.GetString(0));
+        return found;
+    }
+
+    public void SaveTranslations(IReadOnlyDictionary<string, string> english, DateTimeOffset at)
+    {
+        if (english.Count == 0) return;
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        foreach (var (id, text) in english)
+        {
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "INSERT OR REPLACE INTO article_translations (article_id, english, created_at) VALUES ($id, $text, $at)";
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$text", text);
+            command.Parameters.AddWithValue("$at", at.ToUnixTimeSeconds());
+            command.ExecuteNonQuery();
+        }
+        transaction.Commit();
     }
 
     private readonly object _articleTextWrites = new();
@@ -1045,7 +1159,10 @@ public sealed class WorldNewsStore
             DELETE FROM events WHERE last_seen < $before;
             DELETE FROM summaries WHERE event_id NOT IN (SELECT id FROM events);
             DELETE FROM analyses WHERE event_id NOT IN (SELECT id FROM events);
+            DELETE FROM analysis_history WHERE event_id NOT IN (SELECT id FROM events);
+            DELETE FROM story_reads WHERE event_id NOT IN (SELECT id FROM events);
             DELETE FROM article_texts WHERE article_id NOT IN (SELECT id FROM articles);
+            DELETE FROM article_translations WHERE article_id NOT IN (SELECT id FROM articles);
             DELETE FROM situations WHERE id NOT IN (SELECT situation_id FROM events WHERE situation_id IS NOT NULL);
             DELETE FROM situation_placements WHERE situation_id NOT IN (SELECT id FROM situations);
             DELETE FROM surge_alerts_sent WHERE situation_id NOT IN (SELECT id FROM situations);

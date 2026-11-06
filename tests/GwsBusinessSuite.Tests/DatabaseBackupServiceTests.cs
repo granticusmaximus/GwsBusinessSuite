@@ -5,6 +5,7 @@ using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.Services;
 using GwsBusinessSuite.Web.Services;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -42,6 +43,10 @@ public sealed class DatabaseBackupServiceTests : IDisposable
     {
         var fixture = await CreateFixtureAsync();
         var archivePath = await fixture.Service.CreateBackupAsync();
+        // A pooled connection left open by the backup folds its write-ahead log into the file when
+        // it closes, which on a busy machine could happen between the two hashes (it failed the
+        // release check twice on 06-11-26). Closing them first measures the file as it rests.
+        SqliteConnection.ClearAllPools();
         var sourceBefore = SHA256.HashData(await File.ReadAllBytesAsync(fixture.DatabasePath));
 
         string[] migrations;
@@ -55,6 +60,7 @@ public sealed class DatabaseBackupServiceTests : IDisposable
         verification.IsValid.Should().BeTrue();
         verification.MigrationRehearsalFrom.Should().Be(migrations[^2]);
         verification.MigrationRehearsalTo.Should().Be(migrations[^1]);
+        SqliteConnection.ClearAllPools();
         SHA256.HashData(await File.ReadAllBytesAsync(fixture.DatabasePath)).Should().Equal(sourceBefore);
     }
 

@@ -802,7 +802,8 @@ public sealed class WorldNewsKitTests : IDisposable
             .And.Contain("- Japanese: 1 outlet (NHK), from Japan")
             .And.Contain("- First report: BBC, 20-10-26 11:00. Latest: NHK, 20-10-26 14:00.")
             .And.Contain("## What each outlet leaves out or adds\n\n- **NHK:** Leaves out: 64 people died. Adds: shows the flooded metro.\n- No outlet names the districts worst hit.")
-            .And.Contain("## What they agree on\n\n- Flooding hit Istanbul on Tuesday. (3 outlets: BBC, Reuters, NHK)\n- 64 people died. (2 outlets: BBC, Reuters)")
+            .And.Contain("## What they agree on\n\n1. Flooding hit Istanbul on Tuesday. (3 outlets: BBC, Reuters, NHK)\n2. 64 people died. (2 outlets: BBC, Reuters)")
+            .And.Contain("| Outlet | 1 | 2 |\n| --- | :-: | :-: |\n| BBC | ● | ● |\n| Reuters | ● | ● |\n| NHK | ● | – |")
             .And.Contain("written by SentinelGPT (SentinelGPT on the Mac), 20-10-26 15:00, from the headlines and descriptions of 3 reports and 2 articles read in full")
             .And.MatchRegex(@"\*\*Figures in the reports\*\*[^\n]*\n\n- [^\n]*64 \(BBC, Reuters\)")
             .And.Contain("[Istanbul floods: 64 dead](https://example.com/reuters)");
@@ -814,6 +815,63 @@ public sealed class WorldNewsKitTests : IDisposable
         var bare = EventDocument.ToMarkdown(e, [bbc], null, Format);
         bare.Should().Contain("## What the outlets report\n\n_No summary yet._").And.Contain("## What each outlet leaves out or adds\n\n_SentinelGPT hasn't analysed")
             .And.NotContain("written by");
+    }
+
+    [Fact]
+    public void Story_ShouldSayWhatChangedSinceTheLastRead_AndCarryEnglishHeadlines()
+    {
+        var bbc = Article("bbc", "Istanbul floods leave 64 dead", "English", Now.AddHours(-4)) with { Outlet = "BBC", Country = "United Kingdom" };
+        var nhk = Article("nhk", "イスタンブールで洪水", "Japanese", Now.AddHours(-1)) with { Outlet = "NHK", Country = "Japan" };
+        var reuters = Article("reuters", "Istanbul floods: 70 dead", "English", Now.AddMinutes(-30)) with { Outlet = "Reuters", Country = "United Kingdom" };
+        var e = new EventOverview("e1", "Istanbul floods", 3, 3, ["Japan", "United Kingdom"], ["English", "Japanese"], Now.AddHours(-4), Now, "Istanbul floods");
+        var before = new EventAnalysis("e1", "Floods killed 64 in Istanbul.", "s", [new AgreedFact("Flooding hit Istanbul on Tuesday.", ["BBC"])], [], "m", 2, 0, Now.AddHours(-2));
+        var now = before with
+        {
+            Claim = "A dam breach caused the deadly floods, officials now say.", CreatedAt = Now,
+            Agreed = [new AgreedFact("Flooding hit Istanbul on Tuesday.", ["BBC", "NHK"]), new AgreedFact("Officials blame a dam breach.", ["BBC", "Reuters"])]
+        };
+
+        var changes = StoryChangesFinder.Find(now, before, Now.AddHours(-2), [bbc, nhk, reuters]);
+
+        changes.Should().NotBeNull();
+        changes!.NewOutlets.Should().Equal("NHK", "Reuters");
+        changes.NewFacts.Should().Equal("Officials blame a dam breach.");
+        changes.DroppedFacts.Should().BeEmpty("the same fact, reworded or not, isn't new");
+        changes.PreviousClaim.Should().Be("Floods killed 64 in Istanbul.");
+        changes.FigureChanges.Should().ContainSingle().Which.Should().Be("Deaths: 70; 64 (new)", "one report wasn't enough to make it a figure before");
+        StoryChangesFinder.Find(now, now, Now, [bbc]).Should().BeNull("nothing changed since the same analysis");
+
+        var story = EventDocument.Build(e, [bbc, nhk, reuters], null, now, new Dictionary<string, string> { ["nhk"] = "Floods in Istanbul" },
+            new HashSet<string> { "bbc" }, changes);
+        story.Outlet("BBC")!.ReadInFull.Should().BeTrue();
+        story.Outlet("NHK")!.Region.Should().Be(WorldRegions.Asia);
+        story.Grid.Select(row => row.Outlet).Should().Equal("BBC", "NHK", "Reuters");
+        var md = EventDocument.ToMarkdown(story, at => at.ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture));
+        md.Should().Contain("## What changed since you last read (20-10-26 13:00)\n\n- 2 new outlets: NHK, Reuters")
+            .And.Contain("- The claim changed. It was: Floods killed 64 in Istanbul.")
+            .And.Contain("- Now agreed: Officials blame a dam breach.")
+            .And.Contain("_In English: Floods in Istanbul_");
+        md.IndexOf("## What changed", StringComparison.Ordinal).Should().BeLessThan(md.IndexOf("## The claim", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Translator_ShouldAskOncePerHeadline_AndReadNumberedAnswers()
+    {
+        var reports = new[]
+        {
+            Article("en", "English headline", "English", Now),
+            Article("ja1", "イスタンブールで洪水", "Japanese", Now.AddMinutes(-5)) with { Outlet = "NHK" },
+            Article("ja2", "洪水の続報", "Japanese", Now) with { Outlet = "NHK" },
+            Article("es", "Inundaciones en Estambul", "Spanish", Now.AddMinutes(-9)) with { Outlet = "El País" },
+            Article("de", "Flut in Istanbul", "German", Now.AddMinutes(-1)) with { Outlet = "Der Spiegel" }
+        };
+        var pending = HeadlineTranslator.Choose(reports, new Dictionary<string, string> { ["de"] = "Flood in Istanbul" });
+        pending.Select(a => a.Id).Should().Equal("ja2", "es", "ja1");
+        HeadlineTranslator.Prompt(pending).Should().Be("1. 洪水の続報\n2. Inundaciones en Estambul\n3. イスタンブールで洪水");
+
+        HeadlineTranslator.Parse("<think>hm</think>1. Flood update\n2) \"Floods in Istanbul\"\n3. イスタンブールで洪水\n9. Out of range", pending)
+            .Should().BeEquivalentTo(new Dictionary<string, string> { ["ja2"] = "Flood update", ["es"] = "Floods in Istanbul" },
+                "an untranslated line and a number out of range are left out");
     }
 
     [Fact]
