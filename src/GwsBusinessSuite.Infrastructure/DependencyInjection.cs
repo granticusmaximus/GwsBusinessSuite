@@ -959,6 +959,23 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GwsBusinessSuite-WorldNews/1.0; +https://www.gwsapp.net)");
         });
+        // The outlets' own articles, for SentinelGPT's analysis of an event: links come from feeds, so
+        // every connection (redirects included) is refused if it resolves to a private address, and a
+        // site that refuses this server is left alone for a day.
+        services.AddHttpClient(WorldNewsArticleReader.HttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.MaxResponseContentBufferSize = 3 * 1024 * 1024;
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GwsBusinessSuite-WorldNews/1.0; +https://www.gwsapp.net)");
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>().ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            ConnectCallback = AutomationDestinationValidator.ConnectAsync,
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 5,
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        });
+        services.AddSingleton<WorldNewsArticleReader>();
         services.AddSingleton<WorldNewsService>();
         services.AddSingleton<GwsBusinessSuite.Application.NewsIntelligence.IWorldNewsSearch, WorldNewsAssistantSearch>();
         services.AddHostedService<WorldNewsBackgroundService>();

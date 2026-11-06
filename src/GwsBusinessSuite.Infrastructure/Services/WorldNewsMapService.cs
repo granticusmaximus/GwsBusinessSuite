@@ -27,7 +27,9 @@ public sealed record WorldNewsMapSignal(
     // Set when coverage is surging (SituationSurge), saying how.
     string? Surge = null,
     // For cyber stories, how sure it is (CyberStatus), from the headlines.
-    string? Status = null)
+    string? Status = null,
+    // The situation's latest event, whose document READ DOCUMENT opens (06-11-26).
+    string? EventId = null)
 {
     public string Country => Location.Country;
     public double Latitude => Location.Latitude;
@@ -213,7 +215,7 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
     private WorldNewsLocation? NamedCached(SituationOverview situation) =>
         Cached($"named:{situation.Id}:{situation.Title}|{situation.Latest}", () => Named(situation));
 
-    private sealed record Details(string? Summary, IReadOnlyList<WorldNewsMapSource> Sources, WorldNewsLocation Location);
+    private sealed record Details(string? Summary, IReadOnlyList<WorldNewsMapSource> Sources, WorldNewsLocation Location, string? EventId = null);
 
     private WorldNewsMapSignal Project(SituationOverview situation, WorldNewsLocation location,
         IReadOnlyDictionary<string, (int Outlets, int OutletsBefore)> growth)
@@ -230,7 +232,8 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
             situation.OutletCount, situation.ArticleCount, situation.LastSeen, summary, sources, kind,
             situation.LastSeen >= DateTimeOffset.UtcNow - SituationLinker.QuietAfter,
             SituationSurge.IsSurging(outlets, before) ? SituationSurge.Message(outlets, before) : null,
-            kind == SituationKinds.Cyber ? CyberStatus.Of([situation.Title, situation.Latest, summary, .. sources.Select(source => source.Title)]) : null);
+            kind == SituationKinds.Cyber ? CyberStatus.Of([situation.Title, situation.Latest, summary, .. sources.Select(source => source.Title)]) : null,
+            details.EventId);
     }
 
     private Details LoadDetails(SituationOverview situation, WorldNewsLocation location)
@@ -247,7 +250,7 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
         if (location.Precision == WorldNewsPrecision.Country && summary is not null
             && Locate(situation.Title, situation.Latest, summary) is { City: not null } sharper && sharper.CountryCode == location.CountryCode)
             location = sharper;
-        return new Details(summary, sources, location);
+        return new Details(summary, sources, location, latestEvent?.Id);
     }
 
     public static WorldNewsLocation? Locate(string title, string latest, string? detail = null) =>

@@ -347,6 +347,23 @@
     color: var(--gws-text-strong, var(--bs-body-color));
 }
 
+/* SentinelGPT's analysis: working on it, couldn't, or done (with Analyse again). */
+.world-news-analysis {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+    max-width: 46rem;
+    margin: 0 auto 1rem;
+    padding: .55rem .8rem;
+    border-radius: var(--gws-radius-sm, 6px);
+    background: var(--gws-body-bg, var(--bs-tertiary-bg));
+    color: var(--gws-text-soft);
+    font-size: .875rem;
+}
+
+.world-news-analysis .btn-link { padding: 0; }
+
 .world-news-document {
     max-width: 46rem;
     margin: 0 auto;

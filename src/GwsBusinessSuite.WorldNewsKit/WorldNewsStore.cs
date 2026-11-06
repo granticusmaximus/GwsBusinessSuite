@@ -70,6 +70,10 @@ public sealed class WorldNewsStore
                 situation_id TEXT PRIMARY KEY, country_code TEXT, city TEXT, hidden INTEGER NOT NULL,
                 updated_by TEXT NOT NULL, updated_at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS surge_watchers (username TEXT PRIMARY KEY, created_at INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS analyses (
+                event_id TEXT PRIMARY KEY, claim TEXT NOT NULL, summary TEXT NOT NULL, agreed TEXT NOT NULL, differences TEXT NOT NULL,
+                model TEXT NOT NULL, article_count INTEGER NOT NULL, articles_read INTEGER NOT NULL, created_at INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS article_texts (article_id TEXT PRIMARY KEY, excerpt TEXT, reason TEXT, fetched_at INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS surge_alerts_sent (situation_id TEXT PRIMARY KEY, sent_at INTEGER NOT NULL);
             """);
         // Databases from before outlet feeds (21-10-26) have no snippet column.
@@ -369,6 +373,7 @@ public sealed class WorldNewsStore
                 UPDATE events SET situation_id = COALESCE(situation_id, (SELECT situation_id FROM events WHERE id = $drop)) WHERE id = $keep;
                 DELETE FROM events WHERE id = $drop;
                 DELETE FROM summaries WHERE event_id = $drop;
+                DELETE FROM analyses WHERE event_id = $drop;
                 UPDATE events SET title = $title, title_language = $language, vector_sum = $sum, article_count = $count,
                     first_seen = $first, last_seen = $last WHERE id = $keep;
                 """;
@@ -887,6 +892,85 @@ public sealed class WorldNewsStore
         return new EventSummary(eventId, version, headline, text, model, articleCount, DateTimeOffset.FromUnixTimeSeconds(createdAt.ToUnixTimeSeconds()), points);
     }
 
+    // SentinelGPT's analysis of an event (EventAnalyzer): only the latest is kept.
+    public EventAnalysis? LatestAnalysis(string eventId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT claim, summary, agreed, differences, model, article_count, articles_read, created_at FROM analyses WHERE event_id = $event
+            """;
+        command.Parameters.AddWithValue("$event", eventId);
+        using var reader = command.ExecuteReader();
+        if (!reader.Read()) return null;
+        var differences = reader.GetString(3).Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Split('\t', 2))
+            .Select(parts => parts.Length == 2 ? new OutletDifference(parts[0], parts[1]) : new OutletDifference(string.Empty, parts[0]))
+            .ToList();
+        var agreed = reader.GetString(2).Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.Split('\t', 2))
+            .Select(parts => new AgreedFact(parts[0], parts.Length == 2 ? parts[1].Split('|', StringSplitOptions.RemoveEmptyEntries) : []))
+            .ToList();
+        return new EventAnalysis(eventId, reader.GetString(0), reader.GetString(1), agreed,
+            differences, reader.GetString(4), reader.GetInt32(5), reader.GetInt32(6), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(7)));
+    }
+
+    public EventAnalysis SaveAnalysis(EventAnalysis analysis)
+    {
+        static string Line(string text) => text.Replace('\n', ' ').Replace('\t', ' ').Trim();
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT OR REPLACE INTO analyses (event_id, claim, summary, agreed, differences, model, article_count, articles_read, created_at)
+            VALUES ($event, $claim, $summary, $agreed, $differences, $model, $count, $read, $created)
+            """;
+        command.Parameters.AddWithValue("$event", analysis.EventId);
+        command.Parameters.AddWithValue("$claim", Line(analysis.Claim));
+        command.Parameters.AddWithValue("$summary", Line(analysis.Summary));
+        command.Parameters.AddWithValue("$agreed", string.Join('\n', analysis.Agreed.Select(fact =>
+            $"{Line(fact.Text)}\t{string.Join('|', fact.Outlets.Select(outlet => Line(outlet).Replace('|', '/')))}")));
+        command.Parameters.AddWithValue("$differences", string.Join('\n', analysis.Differences.Select(d => $"{Line(d.Outlet)}\t{Line(d.Text)}")));
+        command.Parameters.AddWithValue("$model", analysis.Model);
+        command.Parameters.AddWithValue("$count", analysis.ArticleCount);
+        command.Parameters.AddWithValue("$read", analysis.ArticlesRead);
+        command.Parameters.AddWithValue("$created", analysis.CreatedAt.ToUnixTimeSeconds());
+        command.ExecuteNonQuery();
+        return LatestAnalysis(analysis.EventId)!;
+    }
+
+    // What was read from articles' own pages: the excerpt, or null with the reason it couldn't be.
+    public IReadOnlyDictionary<string, (string? Excerpt, DateTimeOffset FetchedAt)> ArticleTexts(IEnumerable<string> articleIds)
+    {
+        var ids = articleIds.Distinct(StringComparer.Ordinal).ToList();
+        var found = new Dictionary<string, (string?, DateTimeOffset)>(StringComparer.Ordinal);
+        if (ids.Count == 0) return found;
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT article_id, excerpt, fetched_at FROM article_texts WHERE article_id IN ({string.Join(',', ids.Select((_, i) => $"$id{i}"))})";
+        for (var i = 0; i < ids.Count; i++) command.Parameters.AddWithValue($"$id{i}", ids[i]);
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            found[reader.GetString(0)] = (reader.IsDBNull(1) ? null : reader.GetString(1), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2)));
+        return found;
+    }
+
+    private readonly object _articleTextWrites = new();
+
+    public void SaveArticleText(string articleId, string? excerpt, string? reason, DateTimeOffset fetchedAt)
+    {
+        lock (_articleTextWrites)
+        {
+            using var connection = Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "INSERT OR REPLACE INTO article_texts (article_id, excerpt, reason, fetched_at) VALUES ($id, $excerpt, $reason, $at)";
+            command.Parameters.AddWithValue("$id", articleId);
+            command.Parameters.AddWithValue("$excerpt", (object?)excerpt ?? DBNull.Value);
+            command.Parameters.AddWithValue("$reason", (object?)reason ?? DBNull.Value);
+            command.Parameters.AddWithValue("$at", fetchedAt.ToUnixTimeSeconds());
+            command.ExecuteNonQuery();
+        }
+    }
+
     public IReadOnlyList<WorldArticle> ArticlesForEvent(string eventId) =>
         QueryArticles("WHERE event_id = $event ORDER BY seen_at", ("$event", eventId));
 
@@ -960,6 +1044,8 @@ public sealed class WorldNewsStore
             DELETE FROM articles WHERE seen_at < $before;
             DELETE FROM events WHERE last_seen < $before;
             DELETE FROM summaries WHERE event_id NOT IN (SELECT id FROM events);
+            DELETE FROM analyses WHERE event_id NOT IN (SELECT id FROM events);
+            DELETE FROM article_texts WHERE article_id NOT IN (SELECT id FROM articles);
             DELETE FROM situations WHERE id NOT IN (SELECT situation_id FROM events WHERE situation_id IS NOT NULL);
             DELETE FROM situation_placements WHERE situation_id NOT IN (SELECT id FROM situations);
             DELETE FROM surge_alerts_sent WHERE situation_id NOT IN (SELECT id FROM situations);

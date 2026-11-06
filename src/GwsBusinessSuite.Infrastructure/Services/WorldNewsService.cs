@@ -43,10 +43,16 @@ public sealed partial class WorldNewsService : IDisposable
     // ServerAi None: no Ollama on this server, so anything to embed waits for the Mac's relay.
     private readonly bool _serverHasNoModel;
 
+    private readonly IServiceScopeFactory _scopes;
+    private readonly string _model;
+    private readonly WorldNewsArticleReader? _articleReader;
+
     public WorldNewsService(IConfiguration configuration, IOptions<ContentStudioOptions> ollamaOptions,
         IHttpClientFactory httpClientFactory, IServiceScopeFactory scopes, ILogger<WorldNewsService> logger,
-        OllamaWorkloadScheduler? workloads = null, WorldNewsMapCache? mapCache = null)
+        OllamaWorkloadScheduler? workloads = null, WorldNewsMapCache? mapCache = null, WorldNewsArticleReader? articleReader = null)
     {
+        _scopes = scopes;
+        _articleReader = articleReader;
         _mapCache = mapCache;
         _logger = logger;
         _serverHasNoModel = configuration.GetValue<ServerAiMode>($"{ServerAiOptions.SectionName}:Mode") == ServerAiMode.None;
@@ -68,7 +74,7 @@ public sealed partial class WorldNewsService : IDisposable
         _pipeline = new WorldNewsPipeline(Store, http, new GdeltDocClient(http, TimeProvider.System), _ollama, TimeProvider.System, _options);
         // IOllamaService is a typed HttpClient, so each summary takes a fresh one rather than this
         // singleton holding one for the app's lifetime. 8k context fits SummaryOptions.MaxPromptChars.
-        var model = ollamaOptions.Value.Model;
+        var model = _model = ollamaOptions.Value.Model;
         // Server summaries are the fallback for when the Mac app isn't writing them: one a read, at
         // background priority, and one that's running stops the moment someone starts a chat (it's
         // summarized on a later read), so nobody waits behind it.
@@ -428,7 +434,8 @@ public sealed partial class WorldNewsService : IDisposable
     public WorldNewsDocument? Document(string eventId)
     {
         if (Store.Event(eventId) is not { } e) return null;
-        var markdown = EventDocument.ToMarkdown(e, Store.ArticlesForEvent(eventId), Store.LatestSummary(eventId), at => at.ToLocalGwsDateTime());
+        var markdown = EventDocument.ToMarkdown(e, Store.ArticlesForEvent(eventId), Store.LatestSummary(eventId), at => at.ToLocalGwsDateTime(),
+            Store.LatestAnalysis(eventId));
         var title = e.Headline ?? e.Title;
         var slug = string.Join('-', NonSlug().Split(title.ToLowerInvariant()).Where(part => part.Length > 0));
         var name = slug.Length == 0 ? eventId[..Math.Min(8, eventId.Length)] : slug[..Math.Min(slug.Length, 60)].TrimEnd('-');
@@ -440,6 +447,79 @@ public sealed partial class WorldNewsService : IDisposable
         Document(eventId) is { } document
             ? (document.FileName, MarkdownPdf.Render(document.Markdown, $"World News · made {DateTimeOffset.UtcNow.ToLocalGwsDateTime()}"))
             : null;
+
+    // ---- SentinelGPT's analysis of an event (06-11-26), written when its document is read.
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Lazy<Task<EventAnalysis>>> _analysing = new(StringComparer.Ordinal);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _analysisStatus = new(StringComparer.Ordinal);
+
+    // True when there's none yet, or coverage has grown by a quarter since.
+    public bool AnalysisDue(string eventId) =>
+        Store.Event(eventId) is { } e && EventAnalyzer.IsDue(Store.LatestAnalysis(eventId), e);
+
+    // What a running analysis is doing, for the page; null when none is running.
+    public string? AnalysisStatus(string eventId) =>
+        _analysing.ContainsKey(eventId) ? _analysisStatus.GetValueOrDefault(eventId) ?? "Starting…" : null;
+
+    // Reads the outlets' own articles, then asks SentinelGPT to compare the coverage, and keeps the
+    // answer. The model runs where the app's shared work on public data runs: with server AI off
+    // (production), on the Admin Mac whose app is open (MacRelayScope), else the server's own. One
+    // analysis per event at a time; anyone else asking waits for the same one. It carries on if the
+    // person who asked closes the page. Throws InvalidOperationException (ServerAiUnavailableException
+    // when no Mac is open) with a message to show.
+    public Task<EventAnalysis> AnalyzeAsync(string eventId) =>
+        _analysing.GetOrAdd(eventId, id => new Lazy<Task<EventAnalysis>>(() => RunAnalysisAsync(id))).Value;
+
+    private async Task<EventAnalysis> RunAnalysisAsync(string eventId)
+    {
+        try
+        {
+            var e = Store.Event(eventId) ?? throw new InvalidOperationException("This event isn't there any more (events are merged and pruned as coverage changes).");
+            var articles = Store.ArticlesForEvent(eventId);
+            IReadOnlyDictionary<string, string> excerpts = new Dictionary<string, string>();
+            if (_articleReader is not null)
+            {
+                _analysisStatus[eventId] = $"Reading the outlets' own articles (up to {WorldNewsArticleReader.MaxArticles})…";
+                excerpts = await Task.Run(() => _articleReader.ReadAsync(Store, articles, CancellationToken.None));
+            }
+            var prompt = EventAnalyzer.BuildPrompt(e, articles, excerpts, at => at.ToLocalGwsDateTime());
+            _analysisStatus[eventId] = $"SentinelGPT is comparing what {e.OutletCount} outlets report ({excerpts.Count} articles read in full)…";
+            string raw;
+            using (MacRelayScope.ForSharedWork())
+            {
+                await using var scope = _scopes.CreateAsyncScope();
+                using var limit = new CancellationTokenSource(TimeSpan.FromMinutes(4));
+                raw = await scope.ServiceProvider.GetRequiredService<IOllamaService>()
+                    .GenerateAsync(_model, EventAnalyzer.SystemPrompt, prompt, 16_384, limit.Token);
+            }
+            var outlets = articles.Select(a => a.Outlet).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var parsed = EventAnalyzer.Parse(raw, outlets)
+                ?? throw new InvalidOperationException("SentinelGPT's answer didn't have the analysis in it. Try again.");
+            var writtenBy = _serverHasNoModel ? "SentinelGPT on the Mac" : _model;
+            return Store.SaveAnalysis(new EventAnalysis(eventId, parsed.Claim, parsed.Summary, parsed.Agreed, parsed.Differences, writtenBy,
+                e.ArticleCount, excerpts.Count, DateTimeOffset.UtcNow));
+        }
+        catch (ServerAiUnavailableException ex)
+        {
+            // Production has no model on the server: the analysis waits for the Mac.
+            throw new InvalidOperationException("SentinelGPT writes this on your Mac, and no Mac is connected right now. Open the GWS Suite Mac app " +
+                "(signed in as an admin), then choose Try again. The outlets, the figures and the sources below don't need it.", ex);
+        }
+        catch (OperationCanceledException ex)
+        {
+            throw new InvalidOperationException("SentinelGPT took too long (over 4 minutes). Try again in a moment.", ex);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException)
+        {
+            _logger.LogWarning(ex, "World News analysis of {Event} failed", eventId);
+            throw new InvalidOperationException($"SentinelGPT couldn't be reached: {ex.Message}", ex);
+        }
+        finally
+        {
+            _analysing.TryRemove(eventId, out _);
+            _analysisStatus.TryRemove(eventId, out _);
+        }
+    }
 
     [System.Text.RegularExpressions.GeneratedRegex("[^a-z0-9]+")]
     private static partial System.Text.RegularExpressions.Regex NonSlug();

@@ -435,6 +435,26 @@ else
                     <button type="button" class="btn-close flex-shrink-0" aria-label="Close" @onclick="CloseDocument"></button>
                 </div>
                 <div class="modal-body">
+                    <div class="world-news-analysis" role="status">
+                        @if (_analysisStatus is not null)
+                        {
+                            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                            <span>@_analysisStatus The sections below fill in when it's done.</span>
+                        }
+                        else if (_analysisError is not null)
+                        {
+                            <i class="bi bi-exclamation-triangle text-warning" aria-hidden="true"></i>
+                            <span>@_analysisError</span>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AnalyseAsync(_document.EventId)">Try again</button>
+                        }
+                        else
+                        {
+                            <i class="bi bi-stars" aria-hidden="true"></i>
+                            <span>The claim, the summary, what each outlet leaves out or adds, and what they agree on are SentinelGPT's.</span>
+                            <button type="button" class="btn btn-sm btn-link" title="Read the outlets' articles and compare the coverage again"
+                                    @onclick="() => AnalyseAsync(_document.EventId)">Analyse again</button>
+                        }
+                    </div>
                     <article class="world-news-document">@((MarkupString)_document.Html)</article>
                 </div>
             </div>
@@ -472,6 +492,14 @@ else
     [SupplyParameterFromQuery(Name = "situation")]
     public string? SituationId { get; set; }
 
+    // ?event=<id>&read=1 (Overwatch's READ DOCUMENT): that event, with its document open.
+    [SupplyParameterFromQuery(Name = "event")]
+    public string? EventQuery { get; set; }
+
+    // Text, not bool: "read=1" would fail to parse as a bool and take the page down.
+    [SupplyParameterFromQuery(Name = "read")]
+    public string? ReadQuery { get; set; }
+
     private IReadOnlyList<EventOverview> VisibleEvents => string.IsNullOrWhiteSpace(_filter)
         ? _events ?? []
         : (_events ?? []).Where(e => e.Title.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
@@ -508,6 +536,13 @@ else
         _surgeAlerts = !string.IsNullOrWhiteSpace(_username) && await Task.Run(() => News.Store.IsWatchingSurges(_username));
         if (!string.IsNullOrWhiteSpace(SituationId)) _view = WorldNewsView.Situations;
         await LoadAsync();
+        if (!string.IsNullOrWhiteSpace(EventQuery)
+            && (_events?.FirstOrDefault(e => e.Id == EventQuery) ?? await Task.Run(() => News.Store.Event(EventQuery))) is { } linked)
+        {
+            await SelectAsync(linked);
+            if (ReadQuery is "1" or "true") await OpenDocumentAsync();
+            return;
+        }
         if (!string.IsNullOrWhiteSpace(SituationId)
             && (_situations?.FirstOrDefault(s => s.Id == SituationId) ?? await Task.Run(() => News.Store.Situation(SituationId))) is { } situation)
         {
@@ -687,6 +722,10 @@ else
     private OpenDocument? _document;
     private bool _documentLoading;
     private string? _documentError;
+    // SentinelGPT's analysis while it's being written, or why it couldn't be.
+    private string? _analysisStatus;
+    private string? _analysisError;
+    private bool _disposed;
     private ElementReference _documentDialog;
     private bool _focusDocument;
 
@@ -699,19 +738,55 @@ else
         _documentError = null;
         try
         {
-            var document = await Task.Run(() => News.Document(e.Id));
-            if (document is null)
-            {
-                _documentError = "This event isn't there any more (events are merged and pruned as coverage changes).";
-                return;
-            }
-            _document = new OpenDocument(e.Id, document.Title, AssistantMarkdown.ToSafeHtml(document.Markdown, linksInNewTab: true));
+            _analysisError = null;
+            if (!await ShowDocumentAsync(e.Id)) return;
             _focusDocument = true;
+            // No analysis yet, or coverage has grown since: SentinelGPT writes one now.
+            if (_analysisStatus is null && await Task.Run(() => News.AnalysisDue(e.Id))) _ = AnalyseAsync(e.Id);
         }
         finally
         {
             _documentLoading = false;
         }
+    }
+
+    private async Task<bool> ShowDocumentAsync(string eventId)
+    {
+        var document = await Task.Run(() => News.Document(eventId));
+        if (document is null)
+        {
+            _documentError = "This event isn't there any more (events are merged and pruned as coverage changes).";
+            _document = null;
+            return false;
+        }
+        _document = new OpenDocument(eventId, document.Title, AssistantMarkdown.ToSafeHtml(document.Markdown, linksInNewTab: true));
+        return true;
+    }
+
+    // Follows the analysis (it runs on the server and carries on if this page closes), then shows
+    // the document again with it.
+    private async Task AnalyseAsync(string eventId)
+    {
+        _analysisError = null;
+        var analysis = News.AnalyzeAsync(eventId);
+        while (!analysis.IsCompleted && !_disposed)
+        {
+            _analysisStatus = News.AnalysisStatus(eventId) ?? "SentinelGPT is working…";
+            await InvokeAsync(StateHasChanged);
+            await Task.WhenAny(analysis, Task.Delay(750));
+        }
+        _analysisStatus = null;
+        if (_disposed) return;
+        try
+        {
+            await analysis;
+            if (_document?.EventId == eventId) await ShowDocumentAsync(eventId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _analysisError = ex.Message;
+        }
+        await InvokeAsync(StateHasChanged);
     }
 
     private void CloseDocument() => _document = null;
@@ -736,5 +811,9 @@ else
         }
     }
 
-    public void Dispose() => News.Changed -= OnNewsChanged;
+    public void Dispose()
+    {
+        _disposed = true;
+        News.Changed -= OnNewsChanged;
+    }
 }

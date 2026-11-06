@@ -6,18 +6,23 @@ namespace GwsBusinessSuite.WorldNewsKit;
 // carried the same wire copy (the same description, or the same headline when there's none).
 public sealed record DocumentSource(WorldArticle Report, IReadOnlyList<string> AlsoCarriedBy);
 
-// The combined document for one event (the plan's "single document"). It opens with an overview
-// to read first (06-11-26, Grant: "a summary of what is being said from all sources so that I can
-// get an overview comparison"): what the sources say, how their coverage compares (the summary
-// model's points, the figures each report gives, read without AI, and who is covering it), then
-// every source in time order with its link and its outlet's description. The same sources, trimmed
-// to fit, are what the summary model reads. Times go through formatTime so the host shows them its
-// own way (dd-MM-yy HH:mm in GWS). The app shows this Markdown rendered and downloads it as a PDF.
+// The combined document for one event (the plan's "single document"), read in the app and
+// downloaded as a PDF. Since 06-11-26 it answers, in this order, what Grant asked of it: the claim
+// the coverage makes, what the outlets report, who they are, what each leaves out, what they agree
+// on, and then every source with its link. The claim, the summary, the gaps and the agreement are
+// SentinelGPT's (EventAnalysis, written when the document is read, from the outlets' own articles
+// where they could be read); who reports it, the figures and the sources are the reports themselves,
+// with no AI. Times go through formatTime so the host shows them its own way (dd-MM-yy HH:mm in GWS).
 public static class EventDocument
 {
-    public const string OverviewHeading = "What the sources say";
-    public const string ComparisonHeading = "How the coverage compares";
+    public const string ClaimHeading = "The claim";
+    public const string OverviewHeading = "What the outlets report";
+    public const string OutletsHeading = "Who is reporting it";
+    public const string GapsHeading = "What each outlet leaves out or adds";
+    public const string AgreedHeading = "What they agree on";
     public const string SourcesHeading = "Sources";
+    // Before 06-11-26 (the summary model's own comparison points).
+    public const string ComparisonHeading = "How the coverage compares";
 
     public static IReadOnlyList<DocumentSource> Sources(IEnumerable<WorldArticle> articles) =>
         articles.OrderBy(a => a.SeenAt).ThenBy(a => a.Outlet)
@@ -28,7 +33,7 @@ public static class EventDocument
             .ToList();
 
     public static string ToMarkdown(EventOverview e, IReadOnlyList<WorldArticle> articles, EventSummary? summary,
-        Func<DateTimeOffset, string> formatTime)
+        Func<DateTimeOffset, string> formatTime, EventAnalysis? analysis = null)
     {
         var md = new StringBuilder();
         md.AppendLine($"# {Inline(e.Headline ?? e.Title)}").AppendLine();
@@ -38,29 +43,65 @@ public static class EventDocument
         md.AppendLine($"- Reported from: {string.Join(", ", e.Countries.Order())}");
         md.AppendLine($"- First seen {formatTime(e.FirstSeen)}, latest {formatTime(e.LastSeen)}").AppendLine();
 
-        md.AppendLine($"## {OverviewHeading}").AppendLine();
-        md.AppendLine(summary is not null
-            ? summary.Text
-            : "_No summary yet. After each read, the busiest events covered by 3 or more outlets are summarized in English._").AppendLine();
+        const string waiting = "_SentinelGPT hasn't analysed this coverage yet. It does when the document is opened in the app while your Mac app is open._";
 
-        md.AppendLine($"## {ComparisonHeading}").AppendLine();
-        if (summary?.Comparison is { Count: > 0 } points)
+        md.AppendLine($"## {ClaimHeading}").AppendLine();
+        md.AppendLine(analysis is { Claim.Length: > 0 } ? Inline(analysis.Claim) : waiting).AppendLine();
+
+        md.AppendLine($"## {OverviewHeading}").AppendLine();
+        if (analysis is { Summary.Length: > 0 }) md.AppendLine(Inline(analysis.Summary)).AppendLine();
+        else if (summary is not null) md.AppendLine(Inline(summary.Text)).AppendLine().AppendLine("_A short summary from the headlines alone._").AppendLine();
+        else md.AppendLine("_No summary yet._").AppendLine();
+
+        md.AppendLine($"## {OutletsHeading}").AppendLine();
+        AppendCoverage(md, articles, formatTime);
+
+        md.AppendLine($"## {GapsHeading}").AppendLine();
+        if (analysis is not null)
+        {
+            var comparisons = EventAnalyzer.Compare(analysis);
+            if (comparisons.Count == 0 && analysis.Differences.Count == 0)
+                md.AppendLine("_SentinelGPT found no outlet whose coverage stands out from the rest._").AppendLine();
+            foreach (var comparison in comparisons)
+            {
+                var parts = new List<string>();
+                if (comparison.LeavesOut.Count > 0) parts.Add("Leaves out: " + string.Join(" ", comparison.LeavesOut.Select(Inline)));
+                if (comparison.Adds is { } adds) parts.Add("Adds: " + Inline(adds));
+                md.AppendLine($"- **{Inline(comparison.Outlet)}:** {string.Join(" ", parts)}");
+            }
+            foreach (var general in analysis.Differences.Where(d => d.Outlet.Length == 0)) md.AppendLine($"- {Inline(general.Text)}");
+            md.AppendLine();
+            if (comparisons.Any(c => c.LeavesOut.Count > 0))
+                md.AppendLine("_\"Leaves out\" lists the agreed facts below that an outlet's report doesn't state, going by the outlets SentinelGPT names for each fact._").AppendLine();
+        }
+        else if (summary?.Comparison is { Count: > 0 } points)
         {
             foreach (var point in points) md.AppendLine($"- {Inline(point)}");
             md.AppendLine();
         }
+        else md.AppendLine(waiting).AppendLine();
+
+        md.AppendLine($"## {AgreedHeading}").AppendLine();
+        if (analysis is { Agreed.Count: > 0 })
+        {
+            foreach (var fact in analysis.Agreed)
+                md.AppendLine(fact.Outlets.Count == 0 ? $"- {Inline(fact.Text)}"
+                    : $"- {Inline(fact.Text)} ({Count(fact.Outlets.Count, "outlet")}: {Outlets(fact.Outlets)})");
+            md.AppendLine();
+        }
+        else if (analysis is null) md.AppendLine(waiting).AppendLine();
+        AppendFigures(md, CoverageClaims.For(articles));
+
+        if (analysis is not null)
+        {
+            md.AppendLine($"_The claim, the summary, what each outlet leaves out or adds, and what they agree on were written by SentinelGPT ({Inline(analysis.Model)}), " +
+                $"{formatTime(analysis.CreatedAt)}, from the headlines and descriptions of {Count(analysis.ArticleCount, "report")}" +
+                (analysis.ArticlesRead > 0 ? $" and {Count(analysis.ArticlesRead, "article")} read in full" : string.Empty) +
+                ". Check the sources below before relying on a detail._").AppendLine();
+        }
         else if (summary is not null)
         {
-            md.AppendLine(summary.Comparison is null
-                ? "_This summary is from before comparisons were added; the next one compares the coverage too._"
-                : "_The model didn't compare the coverage this time._").AppendLine();
-        }
-        AppendFigures(md, CoverageClaims.For(articles));
-        AppendCoverage(md, articles, formatTime);
-        if (summary is not null)
-        {
-            var what = summary.Comparison is { Count: > 0 } ? "The overview and comparison were" : "The overview was";
-            md.AppendLine($"_{what} written by AI ({Inline(summary.Model)}) from the headlines and descriptions of {Count(summary.ArticleCount, "report")}, " +
+            md.AppendLine($"_The summary was written by AI ({Inline(summary.Model)}) from the headlines and descriptions of {Count(summary.ArticleCount, "report")}, " +
                 $"{formatTime(summary.CreatedAt)} (version {summary.Version}). Check the sources below before relying on a detail._").AppendLine();
         }
 
@@ -80,7 +121,7 @@ public static class EventDocument
     private static void AppendFigures(StringBuilder md, IReadOnlyList<CoverageClaim> claims)
     {
         if (claims.Count == 0) return;
-        md.AppendLine("**Figures in the reports** (read from each headline and description, without AI):").AppendLine();
+        md.AppendLine("**Figures in the reports** (read from each headline and description by fixed rules, without AI):").AppendLine();
         foreach (var claim in claims)
         {
             var values = string.Join("; ", claim.Values.Take(6).Select(v => $"{ValueText(v)} ({Outlets(v.Sources.Select(s => s.Article.Outlet))})"));
@@ -98,12 +139,11 @@ public static class EventDocument
     private static void AppendCoverage(StringBuilder md, IReadOnlyList<WorldArticle> articles, Func<DateTimeOffset, string> formatTime)
     {
         if (articles.Count == 0) return;
-        md.AppendLine("**Who is covering it:**").AppendLine();
         foreach (var language in articles.GroupBy(a => a.Language)
                      .OrderByDescending(g => g.Select(a => a.Outlet).Distinct().Count()).ThenBy(g => g.Key, StringComparer.Ordinal))
         {
             var outlets = language.Select(a => a.Outlet).Distinct().ToList();
-            md.AppendLine($"- {language.Key}: {Count(outlets.Count, "outlet")} ({Outlets(outlets)}), " +
+            md.AppendLine($"- {language.Key}: {Count(outlets.Count, "outlet")} ({string.Join(", ", outlets.Select(Inline))}), " +
                 $"from {string.Join(", ", language.Select(a => a.Country).Distinct().Order(StringComparer.Ordinal))}");
         }
         var first = articles.MinBy(a => a.SeenAt)!;

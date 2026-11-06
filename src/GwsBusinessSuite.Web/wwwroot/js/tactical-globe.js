@@ -2344,6 +2344,10 @@ window.tacticalGlobe = (function () {
             ' OUTLETS · UPDATED ' + escapeHtml(signal.lastSeen) + '</div>' +
             (sources ? '<ul class="tg-world-news-sources">' + sources + '</ul>' : '') +
             '<div class="tg-world-news-actions">' +
+            // The latest event's document on World News: the claim, the outlets, what each leaves out
+            // and what they agree on, by SentinelGPT, then every source (06-11-26).
+            (signal.eventId ? '<a class="tg-incident-report tg-world-news-capture" href="/admin/world-news?event=' +
+                encodeURIComponent(signal.eventId) + '&read=1">READ DOCUMENT</a>' : '') +
             '<button type="button" class="tg-incident-report tg-world-news-capture tg-world-news-coverage-button">WHO\'S REPORTING</button>' +
             '<button type="button" class="tg-incident-report tg-world-news-capture tg-world-news-play-button">PLAY STORY</button>' +
             '</div>' +

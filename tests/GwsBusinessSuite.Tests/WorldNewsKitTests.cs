@@ -699,9 +699,9 @@ public sealed class WorldNewsKitTests : IDisposable
         var summary = new EventSummary("e1", 2, "Istanbul floods kill eight", "Eight people died.", "llama3.2", 4, Now);
         var md = EventDocument.ToMarkdown(e, [nhk, dawn, hindu, spiegel], summary, Format);
         md.Should().StartWith("# Istanbul floods kill eight").And.Contain("Original headline: Floods kill eight in Istanbul")
-            .And.Contain("## What the sources say\n\nEight people died.")
-            .And.Contain("_This summary is from before comparisons were added; the next one compares the coverage too._")
-            .And.Contain("_The overview was written by AI (llama3.2) from the headlines and descriptions of 4 reports, 20-10-26 15:00 (version 2).")
+            .And.Contain("## What the outlets report\n\nEight people died.\n\n_A short summary from the headlines alone._")
+            .And.Contain("## The claim\n\n_SentinelGPT hasn't analysed this coverage yet.")
+            .And.Contain("_The summary was written by AI (llama3.2) from the headlines and descriptions of 4 reports, 20-10-26 15:00 (version 2).")
             .And.Contain("### Der Spiegel: Somewhere, German, 20-10-26 11:00")
             .And.Contain("[Floods kill eight in Istanbul](https://example.com/hindu)").And.Contain("> " + wire)
             .And.Contain("Also carried by: Dawn").And.NotContain("Eight dead as floods hit Istanbul");
@@ -778,7 +778,7 @@ public sealed class WorldNewsKitTests : IDisposable
     }
 
     [Fact]
-    public void Document_ShouldOpenWithTheOverview_ThenCompareTheCoverage_ThenListTheSources()
+    public void Document_ShouldGiveTheClaim_TheReporting_TheOutlets_TheirGaps_WhatTheyAgreeOn_ThenTheSources()
     {
         var bbc = Article("bbc", "Istanbul floods leave 64 dead", "English", Now.AddHours(-4)) with { Outlet = "BBC", Country = "United Kingdom" };
         var reuters = Article("reuters", "Istanbul floods: 64 dead", "English", Now.AddHours(-3)) with { Outlet = "Reuters", Country = "United Kingdom" };
@@ -787,24 +787,152 @@ public sealed class WorldNewsKitTests : IDisposable
             Now.AddHours(-4), Now.AddHours(-1), "Istanbul floods kill 64");
         var summary = new EventSummary("e1", 1, "Istanbul floods kill 64", "Floods in Istanbul killed 64 people.", "gemma4:latest on the Mac", 3, Now,
             ["British outlets lead with the toll; NHK with the flooding itself."]);
+        var analysis = new EventAnalysis("e1", "Heavy rain caused deadly floods in Istanbul; the toll of 64 is reported as confirmed by officials.",
+            "Floods hit Istanbul on Tuesday. BBC and Reuters put the dead at 64, citing officials. NHK reports the flooding.",
+            [new AgreedFact("Flooding hit Istanbul on Tuesday.", ["BBC", "Reuters", "NHK"]), new AgreedFact("64 people died.", ["BBC", "Reuters"])],
+            [new OutletDifference("NHK", "shows the flooded metro."), new OutletDifference("", "No outlet names the districts worst hit.")],
+            "SentinelGPT on the Mac", 3, 2, Now);
         string Format(DateTimeOffset at) => at.ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture);
 
-        var md = EventDocument.ToMarkdown(e, [bbc, reuters, nhk], summary, Format);
+        var md = EventDocument.ToMarkdown(e, [bbc, reuters, nhk], summary, Format, analysis);
 
-        md.Should().Contain("## How the coverage compares\n\n- British outlets lead with the toll; NHK with the flooding itself.")
-            .And.Contain("- English: 2 outlets (BBC, Reuters), from United Kingdom")
+        md.Should().Contain("## The claim\n\nHeavy rain caused deadly floods in Istanbul")
+            .And.Contain("## What the outlets report\n\nFloods hit Istanbul on Tuesday.")
+            .And.Contain("## Who is reporting it\n\n- English: 2 outlets (BBC, Reuters), from United Kingdom")
             .And.Contain("- Japanese: 1 outlet (NHK), from Japan")
             .And.Contain("- First report: BBC, 20-10-26 11:00. Latest: NHK, 20-10-26 14:00.")
-            .And.Contain("_The overview and comparison were written by AI (gemma4:latest on the Mac)")
-            .And.MatchRegex(@"\*\*Figures in the reports\*\*[^\n]*\n\n- [^\n]*64 \(BBC, Reuters\)");
-        md.IndexOf("## What the sources say", StringComparison.Ordinal).Should()
-            .BeLessThan(md.IndexOf("## How the coverage compares", StringComparison.Ordinal));
-        md.IndexOf("## How the coverage compares", StringComparison.Ordinal).Should().BeLessThan(md.IndexOf("## Sources", StringComparison.Ordinal));
+            .And.Contain("## What each outlet leaves out or adds\n\n- **NHK:** Leaves out: 64 people died. Adds: shows the flooded metro.\n- No outlet names the districts worst hit.")
+            .And.Contain("## What they agree on\n\n- Flooding hit Istanbul on Tuesday. (3 outlets: BBC, Reuters, NHK)\n- 64 people died. (2 outlets: BBC, Reuters)")
+            .And.Contain("written by SentinelGPT (SentinelGPT on the Mac), 20-10-26 15:00, from the headlines and descriptions of 3 reports and 2 articles read in full")
+            .And.MatchRegex(@"\*\*Figures in the reports\*\*[^\n]*\n\n- [^\n]*64 \(BBC, Reuters\)")
+            .And.Contain("[Istanbul floods: 64 dead](https://example.com/reuters)");
+        var order = new[] { "## The claim", "## What the outlets report", "## Who is reporting it", "## What each outlet leaves out or adds", "## What they agree on", "## Sources" }
+            .Select(heading => md.IndexOf(heading, StringComparison.Ordinal)).ToList();
+        order.Should().BeInAscendingOrder().And.NotContain(-1);
+        md.Should().NotContain("British outlets lead", "SentinelGPT's gaps replace the summary's older comparison");
 
-        EventDocument.ToMarkdown(e, [bbc], null, Format).Should()
-            .Contain("## What the sources say\n\n_No summary yet.").And.NotContain("written by AI");
+        var bare = EventDocument.ToMarkdown(e, [bbc], null, Format);
+        bare.Should().Contain("## What the outlets report\n\n_No summary yet._").And.Contain("## What each outlet leaves out or adds\n\n_SentinelGPT hasn't analysed")
+            .And.NotContain("written by");
     }
 
+    [Fact]
+    public void Analyzer_ShouldReadItsFourParts_AndKeepDifferencesOnRealOutletsOnly()
+    {
+        var answer = """
+            **CLAIM:** Officials say heavy rain caused the floods that killed 64 people; this is presented as confirmed.
+            **SUMMARY:** Floods hit Istanbul on Tuesday after heavy rain. Most outlets put the dead at 64, citing officials. Rescue work continued overnight.
+            **AGREED:**
+            - Floods hit Istanbul on Tuesday [BBC, Reuters, Dawn, Der Spiegel, The Daily Planet].
+            * Officials put the toll at 64 [BBC, Reuters, Dawn]
+            - Rescue work went on overnight
+            **DIFFERENCES:**
+            - BBC: gives no cause for the flooding.
+            - "Der Spiegel": reports 70 dead, more than the others.
+            - The Daily Planet: says the dam broke.
+            - Coverage in Japanese leaves out the toll.
+            """;
+        var parsed = EventAnalyzer.Parse(answer, ["BBC News", "Der Spiegel", "Reuters", "Dawn"]);
+
+        parsed.Should().NotBeNull();
+        parsed!.Value.Claim.Should().StartWith("Officials say heavy rain");
+        parsed.Value.Summary.Should().StartWith("Floods hit Istanbul on Tuesday").And.EndWith("overnight.");
+        parsed.Value.Agreed.Should().BeEquivalentTo(new[]
+        {
+            new AgreedFact("Floods hit Istanbul on Tuesday.", ["BBC News", "Reuters", "Dawn", "Der Spiegel"]),
+            new AgreedFact("Officials put the toll at 64.", ["BBC News", "Reuters", "Dawn"]),
+            new AgreedFact("Rescue work went on overnight", [])
+        }, options => options.WithStrictOrdering(), "an outlet the event doesn't have is dropped from a fact");
+        var analysis = new EventAnalysis("e1", parsed.Value.Claim, parsed.Value.Summary, parsed.Value.Agreed, parsed.Value.Differences, "m", 5, 2, Now);
+        EventAnalyzer.Compare(analysis).Should().BeEquivalentTo(new[]
+        {
+            new OutletComparison("Der Spiegel", ["Officials put the toll at 64."], "reports 70 dead, more than the others."),
+            new OutletComparison("BBC News", [], "gives no cause for the flooding.")
+        }, options => options.WithStrictOrdering(), "what an outlet leaves out comes from the facts it isn't listed for, and more gaps come first");
+        parsed.Value.Differences.Should().Equal(
+            new OutletDifference("BBC News", "gives no cause for the flooding."),
+            new OutletDifference("Der Spiegel", "reports 70 dead, more than the others."),
+            new OutletDifference("", "The Daily Planet: says the dam broke."),
+            new OutletDifference("", "Coverage in Japanese leaves out the toll."));
+        EventAnalyzer.Parse("<think>CLAIM: hidden</think>No labels at all, just a sentence.", ["BBC"]).Should().BeNull();
+    }
+
+    [Fact]
+    public void Analyzer_ShouldPutTheArticlesItReadFirst_AndHearEveryOutletWithinTheBudget()
+    {
+        var reports = Enumerable.Range(0, 30).Select(i => Article($"a{i}", $"Report {i} on the floods", i % 3 == 0 ? "Spanish" : "English", Now.AddMinutes(-i))
+            with { Outlet = $"Outlet {i}", Snippet = $"Description number {i}: " + new string((char)('a' + i % 26), 130) }).ToList();
+        var e = new EventOverview("e1", "Floods", 30, 30, ["Somewhere"], ["English", "Spanish"], Now.AddHours(-1), Now, null);
+        var excerpts = new Dictionary<string, string> { ["a4"] = "The river burst its banks at dawn. " + new string('y', 2000) };
+        string Format(DateTimeOffset at) => at.ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
+        var prompt = EventAnalyzer.BuildPrompt(e, reports, excerpts, Format, maxChars: 4000);
+
+        prompt.Length.Should().BeLessThanOrEqualTo(4000);
+        prompt.Should().StartWith("Event: Floods").And.Contain("### Outlet 4 (Somewhere, English").And.Contain("Article: The river burst its banks at dawn.");
+        prompt.IndexOf("### Outlet 4", StringComparison.Ordinal).Should().BeLessThan(prompt.IndexOf("Other outlets' reports", StringComparison.Ordinal));
+        prompt.Should().Contain("(Somewhere, Spanish)", "languages take turns, so Spanish is heard even when everything doesn't fit");
+        prompt.Should().NotContain("- Outlet 4 (", "an outlet whose article was read isn't listed twice");
+
+        var due = new EventAnalysis("e1", "c", "s", [], [], "m", 30, 1, Now);
+        EventAnalyzer.IsDue(null, e).Should().BeTrue();
+        EventAnalyzer.IsDue(due, e).Should().BeFalse();
+        EventAnalyzer.IsDue(due with { ArticleCount = 20 }, e).Should().BeTrue("coverage grew by half");
+    }
+
+    [Fact]
+    public void Store_ShouldKeepTheLatestAnalysis_AndTheArticlesRead_AndPruneThemWithTheirEvents()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        SeedEvent(store, "big", Reports("big", 4));
+        var analysis = new EventAnalysis("big", "The claim.", "The summary\nwith a break.",
+            [new AgreedFact("One point.", ["Outlet big0", "Outlet big1"]), new AgreedFact("Another\tpoint.", [])],
+            [new OutletDifference("Outlet big0", "leaves out the toll."), new OutletDifference("", "No one names the town.")], "SentinelGPT on the Mac", 4, 1,
+            DateTimeOffset.FromUnixTimeSeconds(Now.ToUnixTimeSeconds()));
+
+        store.SaveAnalysis(analysis with { Claim = "An older claim." });
+        var saved = store.SaveAnalysis(analysis);
+
+        saved.Should().BeEquivalentTo(analysis with
+        {
+            Summary = "The summary with a break.",
+            Agreed = [new AgreedFact("One point.", ["Outlet big0", "Outlet big1"]), new AgreedFact("Another point.", [])]
+        });
+        store.LatestAnalysis("missing").Should().BeNull();
+        store.SaveArticleText("big0", "The river burst its banks.", null, Now);
+        store.SaveArticleText("big1", null, "answered 403", Now);
+        store.ArticleTexts(["big0", "big1", "nope"]).Should().BeEquivalentTo(new Dictionary<string, (string?, DateTimeOffset)>
+        {
+            ["big0"] = ("The river burst its banks.", DateTimeOffset.FromUnixTimeSeconds(Now.ToUnixTimeSeconds())),
+            ["big1"] = (null, DateTimeOffset.FromUnixTimeSeconds(Now.ToUnixTimeSeconds()))
+        });
+
+        store.Prune(Now.AddDays(1));
+        store.LatestAnalysis("big").Should().BeNull("an analysis goes with its event");
+        store.ArticleTexts(["big0"]).Should().BeEmpty("and what was read goes with its article");
+    }
+
+    [Fact]
+    public void ArticleReader_ShouldReadOneArticlePerOutlet_FromTheOutletsOwnSites_LanguagesTakingTurns()
+    {
+        var reports = new[]
+        {
+            Article("g1", "Via Google", "English", Now) with { Outlet = "Google-only", Url = "https://news.google.com/rss/articles/CBMiabc" },
+            Article("b1", "BBC older", "English", Now.AddHours(-2)) with { Outlet = "BBC", Url = "https://www.bbc.co.uk/news/1" },
+            Article("b2", "BBC newer", "English", Now.AddHours(-1)) with { Outlet = "BBC", Url = "https://www.bbc.co.uk/news/2" },
+            Article("r1", "Reuters", "English", Now.AddHours(-3)) with { Outlet = "Reuters", Url = "https://www.reuters.com/1" },
+            Article("e1", "El País", "Spanish", Now.AddHours(-4)) with { Outlet = "El País", Url = "https://elpais.com/1" },
+            Article("x1", "Not the web", "English", Now) with { Outlet = "Odd", Url = "ftp://example.com/1" }
+        };
+
+        GwsBusinessSuite.Infrastructure.Services.WorldNewsArticleReader.Choose(reports, max: 2).Select(a => a.Id).Should().Equal("b2", "e1");
+        GwsBusinessSuite.Infrastructure.Services.WorldNewsArticleReader.Choose(reports).Select(a => a.Id).Should().BeEquivalentTo(["b2", "r1", "e1"]);
+        GwsBusinessSuite.Infrastructure.Services.WorldNewsArticleReader.Excerpt(new GwsBusinessSuite.Infrastructure.WebCrawl.CrawledPage(
+            "t", "d", null, null, false, false, "Too short.", [])).Should().BeNull("a paywall leaves too little to go on");
+        GwsBusinessSuite.Infrastructure.Services.WorldNewsArticleReader.Excerpt(new GwsBusinessSuite.Infrastructure.WebCrawl.CrawledPage(
+            "t", "d", null, null, false, false, "The river   burst\n its banks. " + new string('z', 5000), []))!
+            .Should().StartWith("The river burst its banks.").And.HaveLength(EventAnalyzer.MaxExcerptChars * 2);
+    }
     [Fact]
     public void Summarizer_ShouldHandOutJobs_AndSaveAnotherMachinesAnswers()
     {
