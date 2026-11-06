@@ -1,0 +1,94 @@
+@using GwsBusinessSuite.Infrastructure.Services.Reach
+@inject ReachService Reach
+@inject ILogger<SentinelReachPanel> Logger
+
+@* SentinelGPT's reach outside the app (05-11-26): which channels it can read and search, what a key
+   would add, and a check of each one (Agent-Reach's "doctor"). Keys are set on the server, as
+   Reach__GitHubToken and so on (docker-compose.yml, synced from GitHub secrets). *@
+<div class="card border-0 shadow-sm mt-3">
+    <div class="card-body">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+            <h2 class="h6 mb-0"><i class="bi bi-globe2 me-1" aria-hidden="true"></i>Reach outside the app</h2>
+            <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_checking" @onclick="CheckAsync">
+                <i class="bi bi-activity me-1" aria-hidden="true"></i>@(_checking ? "Checking…" : "Check all")
+            </button>
+        </div>
+        <p class="small text-secondary">
+            SentinelGPT reads links from these places, and searches the ones that allow it, through each one's own API.
+            It never signs in as you or copies a browser session, and a site that refuses is left alone for a day.
+            @(Reach.ReadsWebPages ? "Any other link is read as a web page." : "Other web pages need OllamaWeb__ApiKey.")
+        </p>
+        @if (_checking)
+        {
+            <LoadingIndicator Message="Checking each channel…" />
+        }
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead>
+                    <tr><th scope="col">Channel</th><th scope="col">Reads</th><th scope="col">Searches</th><th scope="col">Status</th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var channel in _rows)
+                    {
+                        <tr>
+                            <td class="fw-semibold text-nowrap">@channel.Name</td>
+                            <td class="small">@channel.Reads</td>
+                            <td class="small">@(channel.Searches ?? "-")</td>
+                            <td class="small">
+                                @if (channel.Checked)
+                                {
+                                    @if (channel.Problem is null)
+                                    {
+                                        <span class="text-success"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Working</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-danger"><i class="bi bi-exclamation-circle me-1" aria-hidden="true"></i>@channel.Problem</span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="text-secondary">Not checked yet</span>
+                                }
+                                @if (channel.Needs is not null)
+                                {
+                                    <div class="text-secondary">More with: <code>@channel.Needs</code></div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (_checkedAt is not null)
+        {
+            <div class="form-text">Checked @_checkedAt.Value.ToLocalGwsDateTime().</div>
+        }
+    </div>
+</div>
+
+@code {
+    private IReadOnlyList<ReachStatus> _rows = [];
+    private bool _checking;
+    private DateTimeOffset? _checkedAt;
+
+    protected override void OnInitialized() => _rows = Reach.Describe();
+
+    private async Task CheckAsync()
+    {
+        _checking = true;
+        try
+        {
+            _rows = await Reach.CheckAllAsync(CancellationToken.None);
+            _checkedAt = DateTimeOffset.UtcNow;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Reach check failed");
+        }
+        finally
+        {
+            _checking = false;
+        }
+    }
+}

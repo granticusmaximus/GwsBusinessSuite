@@ -34,6 +34,15 @@ services:
       # Optional live internet research for SentinelGPT. Keep the actual key in the
       # gitignored .env file as OLLAMA_WEB_API_KEY, never in this Compose file.
       OllamaWeb__ApiKey: ${OLLAMA_WEB_API_KEY:-}
+      # SentinelGPT reach (05-11-26), all optional: each unlocks more on one channel (ReachOptions).
+      # Kept as GitHub secrets and written to .env by the "Sync droplet .env keys" workflow.
+      Reach__GitHubToken: ${REACH_GITHUB_TOKEN:-}
+      Reach__YouTubeApiKey: ${REACH_YOUTUBE_API_KEY:-}
+      Reach__RedditClientId: ${REACH_REDDIT_CLIENT_ID:-}
+      Reach__RedditClientSecret: ${REACH_REDDIT_CLIENT_SECRET:-}
+      Reach__BlueskyHandle: ${REACH_BLUESKY_HANDLE:-}
+      Reach__BlueskyAppPassword: ${REACH_BLUESKY_APP_PASSWORD:-}
+      Reach__XBearerToken: ${REACH_X_BEARER_TOKEN:-}
       # Optional: lets the native macOS app skip the browser's mandatory MFA challenge via
       # /auth/device-login. Absent/empty disables that endpoint entirely (fails closed). Keep the
       # actual secret in the gitignored .env file as NATIVE_APP_DEVICE_SECRET, never here.

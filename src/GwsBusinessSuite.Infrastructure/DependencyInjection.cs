@@ -1178,6 +1178,40 @@ public static class DependencyInjection
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.BoardAgentTools>();
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.SitePageAgentTools>();
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.ResearchAgentTools>();
+        // SentinelGPT's reach (05-11-26): GitHub, YouTube, Hacker News, Reddit, Bluesky, Mastodon,
+        // podcasts and X through their own APIs. Keys under Reach: are optional (ReachOptions).
+        services.AddOptions<Services.Reach.ReachOptions>().Bind(configuration.GetSection(Services.Reach.ReachOptions.SectionName));
+        services.AddHttpClient(Services.Reach.ReachHttp.Fixed, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.MaxResponseContentBufferSize = 4 * 1024 * 1024;
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(Services.Reach.ReachHttp.UserAgent);
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
+        // Hosts named by the link itself (a Mastodon server, a podcast's feed): every connection,
+        // redirects included, is refused if it resolves to a private or reserved address.
+        services.AddHttpClient(Services.Reach.ReachHttp.Open, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.MaxResponseContentBufferSize = 4 * 1024 * 1024;
+            client.DefaultRequestHeaders.UserAgent.ParseAdd(Services.Reach.ReachHttp.UserAgent);
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>().ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            ConnectCallback = AutomationDestinationValidator.ConnectAsync,
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 5,
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+            PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        });
+        services.AddScoped<Services.Reach.IReachChannel, Services.Reach.GitHubReach>();
+        services.AddScoped<Services.Reach.IReachChannel, Services.Reach.YouTubeReach>();
+        services.AddScoped<Services.Reach.IReachChannel, Services.Reach.HackerNewsReach>();
+        services.AddScoped<Services.Reach.IReachChannel, Services.Reach.RedditReach>();
+        services.AddScoped<Services.Reach.IReachChannel, Services.Reach.BlueskyReach>();
+        services.AddScoped<Services.Reach.IReachChannel, Services.Reach.MastodonReach>();
+        services.AddScoped<Services.Reach.IReachChannel, Services.Reach.PodcastReach>();
+        services.AddScoped<Services.Reach.IReachChannel, Services.Reach.XReach>();
+        services.AddScoped<Services.Reach.ReachService>();
+        services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.ReachAgentTools>();
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.MemoryAgentTools>();
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.CrmAgentTools>();
         services.AddScoped<GwsBusinessSuite.Application.SentinelAgent.ISentinelAgentToolset, Services.SentinelAgent.AutomationAgentTools>();

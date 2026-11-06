@@ -27,19 +27,26 @@ particular app installed into this, but rather the ideas and functions of that b
 - Bluesky search answers 403 without a session, so it needs an app password.
 - Reddit `.json` answers 403 anonymously, so it is reached only through its official app sign-in.
 
-## Unit 1 - Global hazards and convergence (Overwatch)
+## Unit 1 - Global hazards and convergence (Overwatch) - DONE 05-11-26 (82d3922, deployed)
 
-- [ ] **GDACS** (UN global disaster alerts) into `HazardLayerService`.
+Live run 05-11-26:
+- GDACS: 2 cyclones, 12 floods and 1 drought current. Floods' "Magnitude 0" is dropped.
+- IODA: 17 countries. Our own country names are used, and start times show the date.
+- Convergence: no square converged that night, which is expected without stories. The briefing names the top two when some do.
+- The server reaches both GDACS and IODA.
+
+
+- [x] **GDACS** (UN global disaster alerts) into `HazardLayerService`.
   - New kinds: cyclone, flood, volcano, drought, plus wildfire outside the US (NIFC covers the US).
   - GDACS earthquakes are skipped, because USGS already covers the world.
   - Red, Orange and Green map to major, moderate and minor.
   - Current events only, cached 15 min.
-- [ ] **IODA internet outages:** country-level events in the last 24 h, at the country centroid
+- [x] **IODA internet outages:** country-level events in the last 24 h, at the country centroid
   (`WorldNewsPlaces`).
   - Severity is how many independent IODA signals agree: routing (BGP), active probing, Google traffic.
   - A Google-traffic-only drop shows as minor, since it's often noise.
   - Links to IODA's country page.
-- [ ] **Convergence alerts:** worldmonitor's idea, our own code.
+- [x] **Convergence alerts:** worldmonitor's idea, our own code.
   - Grid: 1° cells over a 24 h window.
   - Point signals: city-placed World News situations, earthquakes, fires, flooding gauges, GDACS events, power outages.
   - Country-wide signals: internet outages and country-placed news count in every cell of that country.
@@ -47,27 +54,36 @@ particular app installed into this, but rather the ideas and functions of that b
   - A cell converges with 3 or more distinct kinds, at least 2 of them placed in the cell.
   - Shown as an outlined cell with the contributing items, and as a "Where signals converge" section in the Overwatch briefing and `overwatch_briefing`.
 
-## Unit 2 - SentinelGPT reach (Agent-Reach's functions, our code)
+## Unit 2 - SentinelGPT reach (Agent-Reach's functions, our code) - DONE 06-11-26
+
+Live run 06-11-26:
+- GitHub, Hacker News, YouTube (oEmbed), Bluesky, Mastodon, Podcasts and X (embed) read real links.
+- Search worked on GitHub, Hacker News and Podcasts.
+- Check all: every channel working, except Reddit ("Not set up").
+- Literal private IPs (127.0.0.1, 169.254.169.254, 10.x) are refused on connect.
+
 
 Agent-Reach gives an agent one way to search and read platforms it can't reach on its own. It lists
 "channels", routes a link to the right reader, and has a "doctor" that checks each channel. Here
 that becomes a toolset beside `search_web` and `read_web_page`:
 
-- [ ] **`read_link`**: picks the reader by the address and falls back to `read_web_page`.
-- [ ] **GitHub** (REST; `GitHub:Token` raises 60/h to 5,000/h): search repos, read a repo and its README, read an issue or PR with its comments.
-- [ ] **YouTube:**
-  - With `YouTube:ApiKey`: search, video and channel details, through the Data API.
+- [x] **`read_link`**: picks the reader by the address and falls back to `read_web_page`.
+- [x] **GitHub** (REST; `Reach:GitHubToken` raises 60/h to 5,000/h): search repos, read a repo and its README, read an issue or PR with its comments.
+- [x] **YouTube:**
+  - With `Reach:YouTubeApiKey`: search, video and channel details, through the Data API.
   - Without the key: title and channel from oEmbed.
   - No transcripts: YouTube's API gives captions only to a video's owner.
-- [ ] **Hacker News** (Algolia): search, and read a story with its comment thread.
-- [ ] **Reddit** (official app sign-in, `Reddit:ClientId`/`ClientSecret`): search, read a post with comments, list a subreddit. Off until set.
-- [ ] **Bluesky:**
+- [x] **Hacker News** (Algolia): search, and read a story with its comment thread.
+- [x] **Reddit** (official app sign-in, `Reach:RedditClientId`/`RedditClientSecret`): search, read a post with comments, list a subreddit. Off until set.
+- [x] **Bluesky:**
   - Without a session: read a profile's posts or a thread.
-  - With `Bluesky:Handle` + `Bluesky:AppPassword`: search.
-- [ ] **Mastodon:** read a post or thread by its link, on any server.
-- [ ] **Podcasts** (Apple Podcasts search, then the show's RSS): episodes, and the transcript when the show publishes one.
-- [ ] **X** (official API v2, `X:BearerToken`, paid): search recent posts, read a post or thread. Off until set.
-- [ ] **Channels and doctor:**
+  - With `Reach:BlueskyHandle` + `Reach:BlueskyAppPassword`: search.
+- [x] **Mastodon:** read a post or thread by its link, on any server.
+- [x] **Podcasts** (Apple Podcasts search, then the show's RSS): episodes, and the transcript when the show publishes one.
+- [x] **X:**
+  - Without the token, a post's own text from X's embed service (`publish.x.com/oembed`).
+  - With `Reach:XBearerToken` (official API v2, paid): search recent posts, replies and numbers.
+- [x] **Channels and doctor:**
   - `list_channels` tells the model what it can reach.
   - Settings shows each channel as ready, needs a key (and which one), or paused because the site refused, with a Check button.
 
@@ -103,11 +119,11 @@ that becomes a toolset beside `search_web` and `read_web_page`:
 
 ## Needs Grant
 
-- Keys, each optional:
-  - `GitHub:Token`
-  - `YouTube:ApiKey`
-  - `Reddit:ClientId`/`ClientSecret`
-  - `Bluesky:Handle`/`AppPassword`
-  - `X:BearerToken`
-  - `SecEdgar:ContactEmail`
+- Keys, each optional. Set each with `gh secret set NAME`, then run the "Sync droplet .env keys" workflow:
+  - `REACH_GITHUB_TOKEN`
+  - `REACH_YOUTUBE_API_KEY`
+  - `REACH_REDDIT_CLIENT_ID` + `REACH_REDDIT_CLIENT_SECRET`
+  - `REACH_BLUESKY_HANDLE` + `REACH_BLUESKY_APP_PASSWORD`
+  - `REACH_X_BEARER_TOKEN`
+  - `SecEdgar:ContactEmail` (unit 7)
 - Later, if wanted: NASA FIRMS, Cloudflare Radar and ACLED keys.

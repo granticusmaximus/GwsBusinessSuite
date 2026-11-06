@@ -306,6 +306,7 @@ else
                 <div class="gws-settings-actions"><span>Overrides deployment defaults for this site.</span><button class="btn btn-primary" @onclick="SaveAiAsync" disabled="@IsBusy">@(IsBusy ? "Saving…" : "Save changes")</button></div>
             </div>
         </div>
+        <SentinelReachPanel />
     }
     else if (ActiveTab == "Developer API")
     {
@@ -437,7 +438,7 @@ else
         new("Writing", "bi-pencil", "Post defaults"),
         new("Media", "bi-image", "Upload limits"),
         new("Email", "bi-envelope-check", "Delivery status and test"),
-        new("SentinelGPT", "bi-stars", "Models and generation"),
+        new("SentinelGPT", "bi-stars", "Models, generation and reach"),
         new("Developer API", "bi-braces-asterisk", "Keys, scopes, and docs")
     ];
     private string ActiveTab { get; set; } = "General";
