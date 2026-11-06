@@ -16,9 +16,11 @@ public sealed record SituationOverview(string Id, string Title, string Latest, i
     string? Kind = null);
 
 // One version of an event's summary. Versions count up from 1; ArticleCount is how many reports
-// the event had when it was written, which decides when it's due again.
+// the event had when it was written, which decides when it's due again. Comparison is how the
+// coverage compares, one point per line: empty when the model gave none, null for a summary from
+// before comparisons (06-11-26).
 public sealed record EventSummary(string EventId, int Version, string? Headline, string Text, string Model,
-    int ArticleCount, DateTimeOffset CreatedAt);
+    int ArticleCount, DateTimeOffset CreatedAt, IReadOnlyList<string>? Comparison = null);
 
 public sealed record WorldNewsAlert(Guid Id, string Username, string SituationId, string Title, string Message,
     DateTimeOffset CreatedAt, bool IsRead);
@@ -81,6 +83,10 @@ public sealed class WorldNewsStore
         // Nor situations.kind, from before Overwatch's kinds (29-10-26).
         columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('situations') WHERE name = 'kind'";
         if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE situations ADD COLUMN kind TEXT");
+        // Nor summaries.comparison, from before the coverage comparison (06-11-26). NULL there means
+        // "written before comparisons", so a current event is asked once more; '' means none was given.
+        columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info('summaries') WHERE name = 'comparison'";
+        if ((long)columns.ExecuteScalar()! == 0) Execute(connection, "ALTER TABLE summaries ADD COLUMN comparison TEXT");
         // A new or small database gets the covering index straight away; building it over a big one
         // takes minutes, so that's EnsureCoveringIndex's job, off the startup path.
         columns.CommandText = $"SELECT COUNT(*) FROM (SELECT 1 FROM articles LIMIT {SmallArticleTable + 1})";
@@ -830,12 +836,14 @@ public sealed class WorldNewsStore
     }
 
     // The busiest events since a time, covered by at least minOutlets outlets, that have no summary
-    // yet or have grown by a quarter (and at least 3 reports) since their latest one.
+    // yet, have grown by a quarter (and at least 3 reports) since their latest one, or whose latest
+    // one is from before comparisons (asked once more, so current events get one).
     public IReadOnlyList<EventOverview> EventsDueSummary(DateTimeOffset since, int minOutlets, int limit) =>
         Overviews("WHERE e.last_seen >= $since", """
-            HAVING COUNT(DISTINCT a.outlet) >= $min AND COALESCE(e.article_count >= (
+            HAVING COUNT(DISTINCT a.outlet) >= $min AND (COALESCE(e.article_count >= (
                 SELECT article_count + MAX(3, article_count / 4) FROM summaries
                 WHERE event_id = e.id ORDER BY version DESC LIMIT 1), 1)
+                OR (SELECT comparison IS NULL FROM summaries WHERE event_id = e.id ORDER BY version DESC LIMIT 1) = 1)
             """, ("$since", since.ToUnixTimeSeconds()), ("$min", minOutlets), ("$limit", limit));
 
     public EventSummary? LatestSummary(string eventId)
@@ -843,28 +851,32 @@ public sealed class WorldNewsStore
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT event_id, version, headline, summary, model, article_count, created_at FROM summaries
+            SELECT event_id, version, headline, summary, model, article_count, created_at, comparison FROM summaries
             WHERE event_id = $event ORDER BY version DESC LIMIT 1
             """;
         command.Parameters.AddWithValue("$event", eventId);
         using var reader = command.ExecuteReader();
         return reader.Read()
             ? new EventSummary(reader.GetString(0), reader.GetInt32(1), reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetString(3),
-                reader.GetString(4), reader.GetInt32(5), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(6)))
+                reader.GetString(4), reader.GetInt32(5), DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(6)),
+                reader.IsDBNull(7) ? null : reader.GetString(7).Split('\n', StringSplitOptions.RemoveEmptyEntries))
             : null;
     }
 
     // Stores the next version of an event's summary (earlier versions are kept) and returns it.
-    public EventSummary SaveSummary(string eventId, string? headline, string text, string model, int articleCount, DateTimeOffset createdAt)
+    public EventSummary SaveSummary(string eventId, string? headline, string text, string model, int articleCount, DateTimeOffset createdAt,
+        IReadOnlyList<string>? comparison = null)
     {
+        IReadOnlyList<string> points = (comparison ?? []).Select(point => point.Replace('\n', ' ').Trim()).Where(point => point.Length > 0).ToList();
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO summaries (event_id, version, headline, summary, model, article_count, created_at)
+            INSERT INTO summaries (event_id, version, headline, summary, model, article_count, created_at, comparison)
             VALUES ($event, (SELECT COALESCE(MAX(version), 0) + 1 FROM summaries WHERE event_id = $event),
-                    $headline, $summary, $model, $count, $created)
+                    $headline, $summary, $model, $count, $created, $comparison)
             RETURNING version
             """;
+        command.Parameters.AddWithValue("$comparison", string.Join('\n', points));
         command.Parameters.AddWithValue("$event", eventId);
         command.Parameters.AddWithValue("$headline", (object?)headline ?? DBNull.Value);
         command.Parameters.AddWithValue("$summary", text);
@@ -872,7 +884,7 @@ public sealed class WorldNewsStore
         command.Parameters.AddWithValue("$count", articleCount);
         command.Parameters.AddWithValue("$created", createdAt.ToUnixTimeSeconds());
         var version = Convert.ToInt32(command.ExecuteScalar());
-        return new EventSummary(eventId, version, headline, text, model, articleCount, DateTimeOffset.FromUnixTimeSeconds(createdAt.ToUnixTimeSeconds()));
+        return new EventSummary(eventId, version, headline, text, model, articleCount, DateTimeOffset.FromUnixTimeSeconds(createdAt.ToUnixTimeSeconds()), points);
     }
 
     public IReadOnlyList<WorldArticle> ArticlesForEvent(string eventId) =>

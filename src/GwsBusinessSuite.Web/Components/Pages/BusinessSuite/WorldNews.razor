@@ -5,6 +5,7 @@
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Infrastructure.Services
 @using GwsBusinessSuite.WorldNewsKit
+@using GwsBusinessSuite.Application.Assistant
 @inject WorldNewsService News
 @inject WorldNewsMapService WorldNewsMap
 @inject ICurrentUserAccessor CurrentUserAccessor
@@ -315,12 +316,32 @@ else
                     @if (_summary is not null)
                     {
                         <p class="world-news-summary-text">@_summary.Text</p>
+                        @if (_summary.Comparison is { Count: > 0 } comparison)
+                        {
+                            <h3 class="world-news-comparison-heading">@EventDocument.ComparisonHeading</h3>
+                            <ul class="world-news-comparison">
+                                @foreach (var point in comparison)
+                                {
+                                    <li>@point</li>
+                                }
+                            </ul>
+                        }
                     }
                     <p class="world-news-summary-meta">@SummaryNote</p>
-                    <a class="btn btn-sm btn-outline-secondary" href="@($"admin/world-news/events/{_selected.Id}/document.md")" download
-                       title="Every source on this event in time order, with links and the outlets' descriptions, as a Markdown file">
-                        <i class="bi bi-download me-1" aria-hidden="true"></i>Download document
-                    </a>
+                    <div class="world-news-document-actions">
+                        <button type="button" class="btn btn-sm btn-primary" disabled="@_documentLoading" @onclick="OpenDocumentAsync"
+                                title="The overview, how the coverage compares, and every source with its link, in a window on this page">
+                            <i class="bi bi-file-earmark-text me-1" aria-hidden="true"></i>Read document
+                        </button>
+                        <a class="btn btn-sm btn-outline-secondary" href="@PdfHref(_selected.Id)" download
+                           title="The same document as a PDF">
+                            <i class="bi bi-file-earmark-pdf me-1" aria-hidden="true"></i>Download PDF
+                        </a>
+                    </div>
+                    @if (_documentError is not null)
+                    {
+                        <p class="world-news-summary-meta text-danger" role="alert">@_documentError</p>
+                    }
                 </section>
                 @if (_claims.Count > 0)
                 {
@@ -396,6 +417,28 @@ else
                 }
             }
         </section>
+    </div>
+}
+
+@if (_document is not null)
+{
+    <div class="modal-backdrop fade show"></div>
+    <div class="modal d-block world-news-document-modal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="world-news-document-title"
+         @ref="_documentDialog" @onkeydown="OnDocumentKeyDown">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen-lg-down">
+            <div class="modal-content">
+                <div class="modal-header gap-2">
+                    <h2 class="modal-title h5 text-truncate" id="world-news-document-title">@_document.Title</h2>
+                    <a class="btn btn-sm btn-outline-secondary ms-auto flex-shrink-0" href="@PdfHref(_document.EventId)" download title="This document as a PDF">
+                        <i class="bi bi-file-earmark-pdf me-1" aria-hidden="true"></i>Download PDF
+                    </a>
+                    <button type="button" class="btn-close flex-shrink-0" aria-label="Close" @onclick="CloseDocument"></button>
+                </div>
+                <div class="modal-body">
+                    <article class="world-news-document">@((MarkupString)_document.Html)</article>
+                </div>
+            </div>
+        </div>
     </div>
 }
 
@@ -599,6 +642,7 @@ else
         _selected = e;
         _summary = null;
         _claims = [];
+        _documentError = null;
         (_articles, _summary, _claims) = await Task.Run(() =>
         {
             var articles = News.Store.ArticlesForEvent(e.Id);
@@ -606,13 +650,7 @@ else
         });
     }
 
-    private static string ValueText(ClaimValue value) => value.Qualifier switch
-    {
-        ClaimQualifier.AtLeast => $"at least {value.Value:N0}",
-        ClaimQualifier.About => $"about {value.Value:N0}",
-        ClaimQualifier.UpTo => $"up to {value.Value:N0}",
-        _ => value.Value.ToString("N0", System.Globalization.CultureInfo.CurrentCulture)
-    };
+    private static string ValueText(ClaimValue value) => EventDocument.ValueText(value);
 
     // A read takes from seconds to a few minutes; the page follows it through News.Changed.
     private void ReadNow() => _ = News.RefreshAsync(CancellationToken.None);
@@ -642,6 +680,61 @@ else
         || story.Event.Headline?.Contains(filter.Trim(), StringComparison.CurrentCultureIgnoreCase) == true;
 
     private static string Count(int n, string one, string? many = null) => $"{n:N0} {(n == 1 ? one : many ?? one + "s")}";
+
+    // The event's document, rendered from the same Markdown the PDF is made from.
+    private sealed record OpenDocument(string EventId, string Title, string Html);
+
+    private OpenDocument? _document;
+    private bool _documentLoading;
+    private string? _documentError;
+    private ElementReference _documentDialog;
+    private bool _focusDocument;
+
+    private static string PdfHref(string eventId) => $"admin/world-news/events/{Uri.EscapeDataString(eventId)}/document.pdf";
+
+    private async Task OpenDocumentAsync()
+    {
+        if (_selected is not { } e) return;
+        _documentLoading = true;
+        _documentError = null;
+        try
+        {
+            var document = await Task.Run(() => News.Document(e.Id));
+            if (document is null)
+            {
+                _documentError = "This event isn't there any more (events are merged and pruned as coverage changes).";
+                return;
+            }
+            _document = new OpenDocument(e.Id, document.Title, AssistantMarkdown.ToSafeHtml(document.Markdown, linksInNewTab: true));
+            _focusDocument = true;
+        }
+        finally
+        {
+            _documentLoading = false;
+        }
+    }
+
+    private void CloseDocument() => _document = null;
+
+    private void OnDocumentKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") CloseDocument();
+    }
+
+    // Focus goes into the dialog when it opens, so Escape reaches it and screen readers land there.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusDocument || _document is null) return;
+        _focusDocument = false;
+        try
+        {
+            await _documentDialog.FocusAsync();
+        }
+        catch (JSException)
+        {
+            // The dialog closed before the browser got to it.
+        }
+    }
 
     public void Dispose() => News.Changed -= OnNewsChanged;
 }

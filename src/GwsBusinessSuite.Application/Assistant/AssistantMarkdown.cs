@@ -1,5 +1,6 @@
 using Markdig;
 using Markdig.Renderers;
+using Markdig.Renderers.Html;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 
@@ -17,17 +18,21 @@ public static class AssistantMarkdown
         .DisableHtml()
         .Build();
 
-    public static string ToSafeHtml(string markdown)
+    // linksInNewTab: web links open in a new tab (a document read in a dialog, which a link
+    // shouldn't replace).
+    public static string ToSafeHtml(string markdown, bool linksInNewTab = false)
     {
         var document = Markdown.Parse(markdown, Pipeline);
         foreach (var link in document.Descendants<LinkInline>())
         {
             link.IsImage = false;
             if (!IsSafeUrl(link.Url)) link.Url = "#";
+            if (linksInNewTab && IsWebUrl(link.Url)) NewTab(link);
         }
         foreach (var link in document.Descendants<AutolinkInline>())
         {
             if (!IsSafeUrl(link.Url)) link.Url = "#";
+            if (linksInNewTab && IsWebUrl(link.Url)) NewTab(link);
         }
 
         using var writer = new StringWriter();
@@ -35,6 +40,16 @@ public static class AssistantMarkdown
         Pipeline.Setup(renderer);
         renderer.Render(document);
         return writer.ToString();
+    }
+
+    private static bool IsWebUrl(string? url) =>
+        url is not null && (url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || url.StartsWith("http://", StringComparison.OrdinalIgnoreCase));
+
+    private static void NewTab(Inline link)
+    {
+        var attributes = link.GetAttributes();
+        attributes.AddPropertyIfNotExist("target", "_blank");
+        attributes.AddPropertyIfNotExist("rel", "noopener noreferrer");
     }
 
     private static bool IsSafeUrl(string? url) =>

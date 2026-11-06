@@ -6,12 +6,19 @@ namespace GwsBusinessSuite.WorldNewsKit;
 // carried the same wire copy (the same description, or the same headline when there's none).
 public sealed record DocumentSource(WorldArticle Report, IReadOnlyList<string> AlsoCarriedBy);
 
-// The combined document for one event (the plan's "single document"): a header, the summary
-// if there is one, then every source in time order with its link and its outlet's description.
-// The same sources, trimmed to fit, are what the summary model reads. Times go through
-// formatTime so the host shows them its own way (dd-MM-yy HH:mm in GWS).
+// The combined document for one event (the plan's "single document"). It opens with an overview
+// to read first (06-11-26, Grant: "a summary of what is being said from all sources so that I can
+// get an overview comparison"): what the sources say, how their coverage compares (the summary
+// model's points, the figures each report gives, read without AI, and who is covering it), then
+// every source in time order with its link and its outlet's description. The same sources, trimmed
+// to fit, are what the summary model reads. Times go through formatTime so the host shows them its
+// own way (dd-MM-yy HH:mm in GWS). The app shows this Markdown rendered and downloads it as a PDF.
 public static class EventDocument
 {
+    public const string OverviewHeading = "What the sources say";
+    public const string ComparisonHeading = "How the coverage compares";
+    public const string SourcesHeading = "Sources";
+
     public static IReadOnlyList<DocumentSource> Sources(IEnumerable<WorldArticle> articles) =>
         articles.OrderBy(a => a.SeenAt).ThenBy(a => a.Outlet)
             .GroupBy(CopyKey)
@@ -31,13 +38,33 @@ public static class EventDocument
         md.AppendLine($"- Reported from: {string.Join(", ", e.Countries.Order())}");
         md.AppendLine($"- First seen {formatTime(e.FirstSeen)}, latest {formatTime(e.LastSeen)}").AppendLine();
 
+        md.AppendLine($"## {OverviewHeading}").AppendLine();
+        md.AppendLine(summary is not null
+            ? summary.Text
+            : "_No summary yet. After each read, the busiest events covered by 3 or more outlets are summarized in English._").AppendLine();
+
+        md.AppendLine($"## {ComparisonHeading}").AppendLine();
+        if (summary?.Comparison is { Count: > 0 } points)
+        {
+            foreach (var point in points) md.AppendLine($"- {Inline(point)}");
+            md.AppendLine();
+        }
+        else if (summary is not null)
+        {
+            md.AppendLine(summary.Comparison is null
+                ? "_This summary is from before comparisons were added; the next one compares the coverage too._"
+                : "_The model didn't compare the coverage this time._").AppendLine();
+        }
+        AppendFigures(md, CoverageClaims.For(articles));
+        AppendCoverage(md, articles, formatTime);
         if (summary is not null)
         {
-            md.AppendLine("## Summary").AppendLine().AppendLine(summary.Text).AppendLine();
-            md.AppendLine($"_Written by {summary.Model} from {summary.ArticleCount} reports, {formatTime(summary.CreatedAt)} (version {summary.Version})._").AppendLine();
+            var what = summary.Comparison is { Count: > 0 } ? "The overview and comparison were" : "The overview was";
+            md.AppendLine($"_{what} written by AI ({Inline(summary.Model)}) from the headlines and descriptions of {Count(summary.ArticleCount, "report")}, " +
+                $"{formatTime(summary.CreatedAt)} (version {summary.Version}). Check the sources below before relying on a detail._").AppendLine();
         }
 
-        md.AppendLine("## Sources").AppendLine();
+        md.AppendLine($"## {SourcesHeading}").AppendLine();
         foreach (var source in Sources(articles))
         {
             var a = source.Report;
@@ -48,6 +75,60 @@ public static class EventDocument
         }
         return md.ToString();
     }
+
+    // The figures the reports give, read with plain patterns (CoverageClaims), each with the outlets behind it.
+    private static void AppendFigures(StringBuilder md, IReadOnlyList<CoverageClaim> claims)
+    {
+        if (claims.Count == 0) return;
+        md.AppendLine("**Figures in the reports** (read from each headline and description, without AI):").AppendLine();
+        foreach (var claim in claims)
+        {
+            var values = string.Join("; ", claim.Values.Take(6).Select(v => $"{ValueText(v)} ({Outlets(v.Sources.Select(s => s.Article.Outlet))})"));
+            var verdict = claim.Corroborated ? " The coverage disagrees."
+                : claim.Disputed ? " The figures vary."
+                : claim.Consensus ? $" {Count(claim.Values[0].Outlets, "outlet")} agree."
+                : string.Empty;
+            if (claim.MayHaveRisen) verdict += " The lower figures all came first, so the number may have risen.";
+            md.AppendLine($"- {claim.Label}: {values}.{verdict}");
+        }
+        md.AppendLine();
+    }
+
+    // Each language's outlets and where they're based, biggest first, then who reported first and last.
+    private static void AppendCoverage(StringBuilder md, IReadOnlyList<WorldArticle> articles, Func<DateTimeOffset, string> formatTime)
+    {
+        if (articles.Count == 0) return;
+        md.AppendLine("**Who is covering it:**").AppendLine();
+        foreach (var language in articles.GroupBy(a => a.Language)
+                     .OrderByDescending(g => g.Select(a => a.Outlet).Distinct().Count()).ThenBy(g => g.Key, StringComparer.Ordinal))
+        {
+            var outlets = language.Select(a => a.Outlet).Distinct().ToList();
+            md.AppendLine($"- {language.Key}: {Count(outlets.Count, "outlet")} ({Outlets(outlets)}), " +
+                $"from {string.Join(", ", language.Select(a => a.Country).Distinct().Order(StringComparer.Ordinal))}");
+        }
+        var first = articles.MinBy(a => a.SeenAt)!;
+        var latest = articles.MaxBy(a => a.SeenAt)!;
+        md.AppendLine($"- First report: {Inline(first.Outlet)}, {formatTime(first.SeenAt)}. Latest: {Inline(latest.Outlet)}, {formatTime(latest.SeenAt)}.")
+            .AppendLine();
+    }
+
+    public static string ValueText(ClaimValue value) => value.Qualifier switch
+    {
+        ClaimQualifier.AtLeast => $"at least {Number(value.Value)}",
+        ClaimQualifier.About => $"about {Number(value.Value)}",
+        ClaimQualifier.UpTo => $"up to {Number(value.Value)}",
+        _ => Number(value.Value)
+    };
+
+    private static string Number(long value) => value.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string Outlets(IEnumerable<string> outlets)
+    {
+        var names = outlets.Distinct().Select(Inline).ToList();
+        return names.Count <= 5 ? string.Join(", ", names) : $"{string.Join(", ", names.Take(5))} and {names.Count - 5} more";
+    }
+
+    private static string Count(int n, string noun) => $"{n} {noun}{(n == 1 ? "" : "s")}";
 
     // The sources as the summary model reads them, one line each, within maxChars. When they don't
     // all fit, languages take turns (biggest first), so every language's coverage is heard; the

@@ -699,7 +699,9 @@ public sealed class WorldNewsKitTests : IDisposable
         var summary = new EventSummary("e1", 2, "Istanbul floods kill eight", "Eight people died.", "llama3.2", 4, Now);
         var md = EventDocument.ToMarkdown(e, [nhk, dawn, hindu, spiegel], summary, Format);
         md.Should().StartWith("# Istanbul floods kill eight").And.Contain("Original headline: Floods kill eight in Istanbul")
-            .And.Contain("## Summary").And.Contain("_Written by llama3.2 from 4 reports, 20-10-26 15:00 (version 2)._")
+            .And.Contain("## What the sources say\n\nEight people died.")
+            .And.Contain("_This summary is from before comparisons were added; the next one compares the coverage too._")
+            .And.Contain("_The overview was written by AI (llama3.2) from the headlines and descriptions of 4 reports, 20-10-26 15:00 (version 2).")
             .And.Contain("### Der Spiegel: Somewhere, German, 20-10-26 11:00")
             .And.Contain("[Floods kill eight in Istanbul](https://example.com/hindu)").And.Contain("> " + wire)
             .And.Contain("Also carried by: Dawn").And.NotContain("Eight dead as floods hit Istanbul");
@@ -723,6 +725,84 @@ public sealed class WorldNewsKitTests : IDisposable
         EventSummarizer.Parse($"<think>Let me see.</think>{text}").Should().Be(((string?)null, text));
         EventSummarizer.Parse($"SUMMARY: {text}\nHEADLINE: Floods in Istanbul").Should().Be(("Floods in Istanbul", text));
         EventSummarizer.Parse("SUMMARY: Too short.").Should().BeNull();
+        EventSummarizer.ParseComparison($"HEADLINE: x\nSUMMARY: {text}").Should().BeEmpty("an answer without a comparison has none");
+    }
+
+    [Fact]
+    public void Summarizer_ShouldReadTheComparison_AndKeepItOutOfTheSummary()
+    {
+        var text = "Heavy rain flooded Istanbul on Tuesday and eight people died, officials said.";
+        var answer = $"""
+            **HEADLINE:** Floods kill eight in Istanbul
+            **SUMMARY:** {text}
+            **COMPARISON:**
+            - Turkish outlets lead with the rescue effort, while European ones stress the climate.
+            * Dawn and The Hindu give eight dead; Der Spiegel gives seven.
+            2. Only NHK reports the airport closure.
+            - ok
+            """;
+
+        EventSummarizer.Parse(answer).Should().Be(("Floods kill eight in Istanbul", text));
+        EventSummarizer.ParseComparison(answer).Should().Equal(
+            "Turkish outlets lead with the rescue effort, while European ones stress the climate.",
+            "Dawn and The Hindu give eight dead; Der Spiegel gives seven.",
+            "Only NHK reports the airport closure.");
+        EventSummarizer.ParseComparison($"<think>COMPARISON: hidden thoughts here</think>COMPARISON: All outlets tell the same story.\nSUMMARY: {text}")
+            .Should().Equal("All outlets tell the same story.");
+    }
+
+    [Fact]
+    public void Store_ShouldKeepTheComparison_AndAskOnceMoreForSummariesFromBeforeIt()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        SeedEvent(store, "old", Reports("old", 4));
+        SeedEvent(store, "new", Reports("new", 4));
+        SeedEvent(store, "none", Reports("none", 4));
+        store.SaveSummary("new", "New", "A summary with a comparison.", "gemma4", 4, Now, ["Outlets agree.", "Only one names the town."])
+            .Comparison.Should().Equal("Outlets agree.", "Only one names the town.");
+        store.SaveSummary("none", "None", "A summary the model gave no comparison with.", "gemma4", 4, Now);
+        store.SaveSummary("old", "Old", "A summary from before comparisons.", "gemma4", 4, Now);
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE summaries SET comparison = NULL WHERE event_id = 'old'";
+            command.ExecuteNonQuery();
+        }
+
+        store.LatestSummary("new")!.Comparison.Should().Equal("Outlets agree.", "Only one names the town.");
+        store.LatestSummary("none")!.Comparison.Should().BeEmpty();
+        store.LatestSummary("old")!.Comparison.Should().BeNull();
+        store.EventsDueSummary(Now.AddDays(-1), 3, 10).Select(e => e.Id).Should().Equal(["old"],
+            "only the summary from before comparisons is asked again; the others haven't grown");
+    }
+
+    [Fact]
+    public void Document_ShouldOpenWithTheOverview_ThenCompareTheCoverage_ThenListTheSources()
+    {
+        var bbc = Article("bbc", "Istanbul floods leave 64 dead", "English", Now.AddHours(-4)) with { Outlet = "BBC", Country = "United Kingdom" };
+        var reuters = Article("reuters", "Istanbul floods: 64 dead", "English", Now.AddHours(-3)) with { Outlet = "Reuters", Country = "United Kingdom" };
+        var nhk = Article("nhk", "イスタンブールで洪水", "Japanese", Now.AddHours(-1)) with { Outlet = "NHK", Country = "Japan" };
+        var e = new EventOverview("e1", "Istanbul floods leave 64 dead", 3, 3, ["Japan", "United Kingdom"], ["English", "Japanese"],
+            Now.AddHours(-4), Now.AddHours(-1), "Istanbul floods kill 64");
+        var summary = new EventSummary("e1", 1, "Istanbul floods kill 64", "Floods in Istanbul killed 64 people.", "gemma4:latest on the Mac", 3, Now,
+            ["British outlets lead with the toll; NHK with the flooding itself."]);
+        string Format(DateTimeOffset at) => at.ToString("dd-MM-yy HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+
+        var md = EventDocument.ToMarkdown(e, [bbc, reuters, nhk], summary, Format);
+
+        md.Should().Contain("## How the coverage compares\n\n- British outlets lead with the toll; NHK with the flooding itself.")
+            .And.Contain("- English: 2 outlets (BBC, Reuters), from United Kingdom")
+            .And.Contain("- Japanese: 1 outlet (NHK), from Japan")
+            .And.Contain("- First report: BBC, 20-10-26 11:00. Latest: NHK, 20-10-26 14:00.")
+            .And.Contain("_The overview and comparison were written by AI (gemma4:latest on the Mac)")
+            .And.MatchRegex(@"\*\*Figures in the reports\*\*[^\n]*\n\n- [^\n]*64 \(BBC, Reuters\)");
+        md.IndexOf("## What the sources say", StringComparison.Ordinal).Should()
+            .BeLessThan(md.IndexOf("## How the coverage compares", StringComparison.Ordinal));
+        md.IndexOf("## How the coverage compares", StringComparison.Ordinal).Should().BeLessThan(md.IndexOf("## Sources", StringComparison.Ordinal));
+
+        EventDocument.ToMarkdown(e, [bbc], null, Format).Should()
+            .Contain("## What the sources say\n\n_No summary yet.").And.NotContain("written by AI");
     }
 
     [Fact]

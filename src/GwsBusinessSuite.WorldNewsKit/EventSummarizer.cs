@@ -27,7 +27,9 @@ public sealed record SummaryJob(string EventId, string Title, int ArticleCount, 
 
 // Writes an English headline and summary for the busiest events, from their reports' headlines
 // and outlets' descriptions (never fetched article text). An event is summarized again only once
-// it has grown (see WorldNewsStore.EventsDueSummary), and every version is kept.
+// it has grown (see WorldNewsStore.EventsDueSummary), and every version is kept. Since 06-11-26 the
+// answer also compares the coverage (what each outlet or country puts first, where they disagree),
+// for the top of the event's document.
 public sealed partial class EventSummarizer(WorldNewsStore store, TextGenerator generate, string model, TimeProvider time,
     Func<DateTimeOffset, string> formatTime, SummaryOptions options)
 {
@@ -39,7 +41,8 @@ public sealed partial class EventSummarizer(WorldNewsStore store, TextGenerator 
         - Write in English, in your own words, without copying sentences.
         Answer in exactly this form:
         HEADLINE: one plain English headline, at most 12 words
-        SUMMARY: 2 to 4 short sentences on what happened, where, and who is involved. If outlets disagree on a number or a fact, say so and name them.
+        SUMMARY: 2 to 4 short sentences on what happened, where, and who is involved.
+        COMPARISON: 2 to 5 lines, each starting with "- ". Each line is one point about how the coverage compares, naming together the outlets that share it (never one line per outlet): what different outlets or countries put first, any number or fact they disagree on (name the outlets on each side), and anything only some of them report. If they all tell the same story, write one line saying so.
         """;
 
     // The events due a summary now, oldest growth first, for another machine to write.
@@ -54,7 +57,7 @@ public sealed partial class EventSummarizer(WorldNewsStore store, TextGenerator 
     {
         if (store.Event(eventId) is null) return "That event isn't there any more.";
         if (Parse(answer) is not { } parsed) return "That answer has no usable summary.";
-        store.SaveSummary(eventId, parsed.Headline, parsed.Text, writtenBy, articleCount, time.GetUtcNow());
+        store.SaveSummary(eventId, parsed.Headline, parsed.Text, writtenBy, articleCount, time.GetUtcNow(), ParseComparison(answer));
         return null;
     }
 
@@ -90,7 +93,7 @@ public sealed partial class EventSummarizer(WorldNewsStore store, TextGenerator 
                 notes.Add($"{model} gave no usable summary for \"{e.Title}\"");
                 continue;
             }
-            store.SaveSummary(e.Id, parsed.Headline, parsed.Text, model, e.ArticleCount, time.GetUtcNow());
+            store.SaveSummary(e.Id, parsed.Headline, parsed.Text, model, e.ArticleCount, time.GetUtcNow(), ParseComparison(raw));
             written++;
         }
         return new SummaryRunReport(written, notes);
@@ -103,10 +106,32 @@ public sealed partial class EventSummarizer(WorldNewsStore store, TextGenerator 
         var text = Think().Replace(raw ?? string.Empty, string.Empty).Replace("**", string.Empty).Trim();
         var headline = Field(text, Headline());
         var summaryAt = SummaryLabel().Match(text);
-        var summary = summaryAt.Success ? text[(summaryAt.Index + summaryAt.Length)..] : text;
+        var comparisonAt = ComparisonLabel().Match(text);
+        var start = summaryAt.Success ? summaryAt.Index + summaryAt.Length : 0;
+        var end = comparisonAt.Success && comparisonAt.Index >= start ? comparisonAt.Index : text.Length;
+        var summary = text[start..end];
         summary = Whitespace().Replace(HeadlineLine().Replace(summary, string.Empty), " ").Trim();
         if (summary.Length < 40) return null;
         return (headline is { Length: > 0 and <= 160 } ? headline.Trim('"', '“', '”', ' ') : null, summary);
+    }
+
+    // The COMPARISON lines, without their bullets: up to MaxComparisonLines, each a real sentence.
+    // None when the model left it out (an answer from before 06-11-26 has none either).
+    public const int MaxComparisonLines = 6;
+
+    public static IReadOnlyList<string> ParseComparison(string raw)
+    {
+        var text = Think().Replace(raw ?? string.Empty, string.Empty).Replace("**", string.Empty);
+        var at = ComparisonLabel().Match(text);
+        if (!at.Success) return [];
+        var rest = text[(at.Index + at.Length)..];
+        if (OtherLabel().Match(rest) is { Success: true } next) rest = rest[..next.Index];
+        return rest.Split('\n')
+            .Select(line => Whitespace().Replace(Bullet().Replace(line.Trim(), string.Empty), " ").Trim())
+            .Where(line => line.Length >= 12)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxComparisonLines)
+            .ToList();
     }
 
     private static string? Field(string text, Regex pattern) =>
@@ -123,6 +148,15 @@ public sealed partial class EventSummarizer(WorldNewsStore store, TextGenerator 
 
     [GeneratedRegex(@"^\s*#*\s*SUMMARY\s*:", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
     private static partial Regex SummaryLabel();
+
+    [GeneratedRegex(@"^\s*#*\s*COMPARISON\s*:", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex ComparisonLabel();
+
+    [GeneratedRegex(@"^\s*#*\s*(HEADLINE|SUMMARY)\s*:", RegexOptions.Multiline | RegexOptions.IgnoreCase)]
+    private static partial Regex OtherLabel();
+
+    [GeneratedRegex(@"^([-*•–]|\d+[.)])\s*")]
+    private static partial Regex Bullet();
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex Whitespace();

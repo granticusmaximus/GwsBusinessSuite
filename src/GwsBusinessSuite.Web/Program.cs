@@ -1114,11 +1114,12 @@ app.MapGet("/admin/sentinel/databases/{wikiDatabaseId:guid}/export.csv", async (
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");
 
-// World News: one event's combined document (header, summary, every source with its link and
-// outlet description), downloaded from the event on /admin/world-news.
-app.MapGet("/admin/world-news/events/{eventId}/document.md", (string eventId, GwsBusinessSuite.Infrastructure.Services.WorldNewsService news) =>
-    news.Document(eventId) is { } document
-        ? Results.File(Encoding.UTF8.GetBytes(document.Markdown), "text/markdown; charset=utf-8", document.FileName)
+// World News: one event's combined document (overview, how the coverage compares, every source
+// with its link and outlet description) as a PDF made from the Markdown the page shows rendered,
+// downloaded from the event on /admin/world-news. (A Markdown download until 06-11-26.)
+app.MapGet("/admin/world-news/events/{eventId}/document.pdf", (string eventId, GwsBusinessSuite.Infrastructure.Services.WorldNewsService news) =>
+    news.DocumentPdf(eventId) is { } document
+        ? Results.File(document.Pdf, "application/pdf", document.FileName)
         : Results.NotFound())
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");

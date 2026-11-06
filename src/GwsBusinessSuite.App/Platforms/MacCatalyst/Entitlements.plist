@@ -19,6 +19,11 @@
              paths on disk. -->
         <key>com.apple.security.files.user-selected.read-write</key>
         <true/>
+        <!-- Downloads (a World News PDF, a CSV export) are saved straight to ~/Downloads and opened,
+             as in Safari, instead of going to the share sheet (06-11-26). A standard sandbox
+             entitlement: no provisioning profile needed. -->
+        <key>com.apple.security.files.downloads.read-write</key>
+        <true/>
         <!-- SecureApiKeyStore's grounding-key save fails with errSecMissingEntitlement under App
              Sandbox (confirmed empirically via a DEBUG-only spike) - Keychain writes need a
              keychain-access-groups entitlement. Tried adding it (both with and without

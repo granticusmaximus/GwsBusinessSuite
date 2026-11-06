@@ -127,5 +127,16 @@ public sealed class AssistantMarkdownTests
         html.Should().Contain("href=\"/admin/billing\"").And.Contain("href=\"https://example.com\"").And.Contain("href=\"#\"").And.NotContain("javascript:");
         html.Should().NotContain("<img").And.Contain("href=\"https://tracker.example/p.png\"");
         AssistantMarkdown.ToSafeHtml("//evil.example/x and [x](//evil.example)").Should().Contain("href=\"#\"");
+        html.Should().NotContain("target=", "links open in place unless asked");
+    }
+
+    [Fact]
+    public void ToSafeHtml_ShouldOpenWebLinksInANewTab_WhenAsked()
+    {
+        var html = AssistantMarkdown.ToSafeHtml("[web](https://example.com/a) [app](/admin/billing) https://example.com/b", linksInNewTab: true);
+
+        html.Should().Contain("<a href=\"https://example.com/a\" target=\"_blank\" rel=\"noopener noreferrer\">web</a>")
+            .And.Contain("<a href=\"/admin/billing\">app</a>")
+            .And.Contain("href=\"https://example.com/b\" target=\"_blank\"");
     }
 }

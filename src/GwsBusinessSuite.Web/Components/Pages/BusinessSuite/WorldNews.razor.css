@@ -319,6 +319,76 @@
     align-items: center;
 }
 
+/* How the coverage compares (the summary model's points, 06-11-26). */
+.world-news-comparison-heading {
+    font-size: .8rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--gws-text-soft);
+    margin: .25rem 0 .35rem;
+}
+
+.world-news-comparison {
+    margin: 0 0 .6rem;
+    padding-left: 1.1rem;
+    line-height: 1.5;
+}
+
+.world-news-document-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+}
+
+/* The event document, read in a dialog: the Markdown the PDF is made from, rendered. */
+.world-news-document-modal .modal-content {
+    background: var(--gws-panel-bg, var(--bs-body-bg));
+    color: var(--gws-text-strong, var(--bs-body-color));
+}
+
+.world-news-document {
+    max-width: 46rem;
+    margin: 0 auto;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.world-news-document ::deep h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0 0 .5rem;
+}
+
+.world-news-document ::deep h2 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 1.5rem 0 .6rem;
+    padding-bottom: .3rem;
+    border-bottom: 1px solid var(--gws-panel-border, var(--bs-border-color));
+}
+
+.world-news-document ::deep h3 {
+    font-size: .95rem;
+    font-weight: 700;
+    margin: 1rem 0 .3rem;
+}
+
+.world-news-document ::deep ul {
+    padding-left: 1.2rem;
+}
+
+.world-news-document ::deep blockquote {
+    margin: 0 0 .75rem;
+    padding-left: .75rem;
+    border-left: 3px solid var(--gws-panel-border, var(--bs-border-color));
+    color: var(--gws-text-soft);
+}
+
+.world-news-document ::deep em {
+    color: var(--gws-text-soft);
+}
+
 .world-news-world {
     display: grid;
     grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);

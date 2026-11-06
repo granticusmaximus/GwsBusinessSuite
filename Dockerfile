@@ -42,6 +42,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     libfontconfig1 \
     fonts-liberation \
+    # World News PDFs carry headlines in Japanese, Korean, Chinese, Arabic, Persian, Urdu and Hindi
+    # (MarkdownPdf falls back to these after Liberation).
+    fonts-noto-core \
+    fonts-noto-cjk \
     libssl3 \
     ca-certificates \
     # Lets TZ (docker-compose.yml) resolve, so admin pages show times in Grant's zone, not UTC.

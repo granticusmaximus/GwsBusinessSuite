@@ -18,7 +18,9 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // headline and summary from the same model and service Media Watch summarizes with (summaries
 // are what Light mode keeps on the server). The data lives in its own SQLite file beside the
 // main database (no migrations), keeping 30 days.
-public sealed class WorldNewsService : IDisposable
+public sealed record WorldNewsDocument(string Title, string FileName, string Markdown);
+
+public sealed partial class WorldNewsService : IDisposable
 {
     public const string HttpClientName = "world-news";
     // The last finished read is kept in the news database, so a restart doesn't show "Not read yet".
@@ -421,13 +423,26 @@ public sealed class WorldNewsService : IDisposable
             e.Countries, e.Languages, e.FirstSeen, e.LastSeen, situation, WorldNewsSearch.Sources(Store.ArticlesForEvent(eventId)));
     }
 
-    // The event's combined document as Markdown, or null when the event is gone.
-    public (string FileName, string Markdown)? Document(string eventId)
+    // The event's combined document as Markdown (shown rendered on the page), or null when the
+    // event is gone. FileName is the PDF's (DocumentPdf).
+    public WorldNewsDocument? Document(string eventId)
     {
         if (Store.Event(eventId) is not { } e) return null;
         var markdown = EventDocument.ToMarkdown(e, Store.ArticlesForEvent(eventId), Store.LatestSummary(eventId), at => at.ToLocalGwsDateTime());
-        return ($"world-news-{e.FirstSeen.ToLocalTime():yyyyMMdd}-{eventId[..Math.Min(8, eventId.Length)]}.md", markdown);
+        var title = e.Headline ?? e.Title;
+        var slug = string.Join('-', NonSlug().Split(title.ToLowerInvariant()).Where(part => part.Length > 0));
+        var name = slug.Length == 0 ? eventId[..Math.Min(8, eventId.Length)] : slug[..Math.Min(slug.Length, 60)].TrimEnd('-');
+        return new WorldNewsDocument(title, $"world-news-{e.FirstSeen.ToLocalTime():yyyyMMdd}-{name}.pdf", markdown);
     }
+
+    // The same document as a PDF, made from its Markdown (06-11-26: downloads are PDFs, not Markdown).
+    public (string FileName, byte[] Pdf)? DocumentPdf(string eventId) =>
+        Document(eventId) is { } document
+            ? (document.FileName, MarkdownPdf.Render(document.Markdown, $"World News · made {DateTimeOffset.UtcNow.ToLocalGwsDateTime()}"))
+            : null;
+
+    [System.Text.RegularExpressions.GeneratedRegex("[^a-z0-9]+")]
+    private static partial System.Text.RegularExpressions.Regex NonSlug();
 
     public void Dispose()
     {

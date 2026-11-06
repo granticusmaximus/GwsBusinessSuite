@@ -84,6 +84,10 @@ internal sealed class TrustedDownloadNavigationDelegate(IWebViewHandler handler)
         Uri.TryCreate(url?.AbsoluteString, UriKind.Absolute, out var uri) && AppEndpoints.IsTrusted(uri);
 }
 
+// Where a download goes. On the Mac it's saved to Downloads and opened in its app (a PDF in
+// Preview), as Safari does; before 06-11-26 every download went to the share sheet, which reads as
+// "send this to someone". On iOS, or if Downloads can't be written (an app build without the
+// entitlement), it's still handed to the share sheet, whose "Save to Files" is the iOS way.
 internal sealed class TrustedAppleDownloadDelegate : WKDownloadDelegate
 {
     private readonly Dictionary<WKDownload, string> _destinationPaths = [];
@@ -95,7 +99,7 @@ internal sealed class TrustedAppleDownloadDelegate : WKDownloadDelegate
         Action<NSUrl> completionHandler)
     {
         var fileName = SanitizeFileName(suggestedFilename);
-        var destinationPath = CreateUniquePath(FileSystem.Current.CacheDirectory, fileName);
+        var destinationPath = CreateUniquePath(DownloadsFolder() ?? FileSystem.Current.CacheDirectory, fileName);
         _destinationPaths[download] = destinationPath;
         completionHandler(NSUrl.FromFilename(destinationPath));
     }
@@ -107,8 +111,51 @@ internal sealed class TrustedAppleDownloadDelegate : WKDownloadDelegate
             return;
         }
 
-        _ = MainThread.InvokeOnMainThreadAsync(() => Share.Default.RequestAsync(
-            new ShareFileRequest("Save or share GWS download", new ShareFile(completedPath))));
+        _ = MainThread.InvokeOnMainThreadAsync(() => ShowAsync(completedPath));
+    }
+
+    private static async Task ShowAsync(string path)
+    {
+#if MACCATALYST
+        if (DownloadsPath() is { } downloads && path.StartsWith(downloads, StringComparison.Ordinal)
+            && await UIKit.UIApplication.SharedApplication.OpenUrlAsync(NSUrl.FromFilename(path), new UIKit.UIApplicationOpenUrlOptions()))
+        {
+            return;
+        }
+#endif
+        await Share.Default.RequestAsync(new ShareFileRequest("Save or share GWS download", new ShareFile(path)));
+    }
+
+    private static string? DownloadsPath() =>
+#if MACCATALYST
+        NSFileManager.DefaultManager.GetUrls(NSSearchPathDirectory.DownloadsDirectory, NSSearchPathDomain.User).FirstOrDefault()?.Path is { Length: > 0 } path
+            ? path
+            : null;
+#else
+        null;
+#endif
+
+    // The user's Downloads folder when this app may write there (the sandbox's Downloads
+    // entitlement), else null.
+    private static string? DownloadsFolder()
+    {
+#if MACCATALYST
+        try
+        {
+            if (DownloadsPath() is not { } folder) return null;
+            Directory.CreateDirectory(folder);
+            var probe = Path.Combine(folder, $".gws-write-check-{Guid.NewGuid():N}");
+            File.WriteAllBytes(probe, []);
+            File.Delete(probe);
+            return folder;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+#else
+        return null;
+#endif
     }
 
     public override void DidFail(WKDownload download, NSError error, NSData? resumeData)
