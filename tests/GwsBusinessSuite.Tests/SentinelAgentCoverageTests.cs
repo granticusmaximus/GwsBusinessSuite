@@ -164,6 +164,15 @@ public sealed class SentinelAgentCoverageTests
             return Task.CompletedTask;
         }
 
+        public Task<MailActionResult> ApplyAsync(string username, Guid accountId, IReadOnlyList<string> messageIds, string action,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public Task UndoAsync(string username, Guid accountId, MailUndo undo, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
+        public Task<IReadOnlyDictionary<Guid, int>> GetUnreadByAccountAsync(string username, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<MailAccountView> SaveImapAccountAsync(string username, Guid? accountId, MailImapAccountInput input, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<MailAccountView> SaveGoogleAccountAsync(string username, string tokenJson, string address, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task RemoveAccountAsync(string username, Guid accountId, CancellationToken cancellationToken = default) => throw new NotSupportedException();

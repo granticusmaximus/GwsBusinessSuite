@@ -89,7 +89,35 @@ public static class MailLimits
     public const long MaxAttachmentBytes = 25L * 1024 * 1024;
     public const int MaxAttachments = 20;
     public const int MaxAccounts = 10;
+    // Messages one action can take (a selection of loaded messages).
+    public const int MaxBulk = 500;
 }
+
+// What can be done to one or many messages at once (06-11-26: select, right-click, swipe).
+public static class MailActions
+{
+    public const string MarkRead = "read";
+    public const string MarkUnread = "unread";
+    public const string Star = "star";
+    public const string Unstar = "unstar";
+    public const string Archive = "archive";
+    public const string Trash = "trash";
+    // In Trash: gone for good, no Undo.
+    public const string DeleteForever = "delete-forever";
+
+    public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
+        { MarkRead, MarkUnread, Star, Unstar, Archive, Trash, DeleteForever };
+
+    // Archive and both deletes take messages out of the folder they're in.
+    public static bool Removes(string action) => action is Archive or Trash or DeleteForever;
+}
+
+// How to put messages back after Archive or Trash: the action it undoes, the messages as they are
+// now (an IMAP move gives them new ids in the folder they went to) and the folder they came from.
+public sealed record MailUndo(string Action, IReadOnlyList<string> Ids, string? FromFolder);
+
+// Undo: null when it can't be undone (Delete forever, or an IMAP server without UIDPLUS).
+public sealed record MailActionResult(int Count, MailUndo? Undo);
 
 public sealed class MailException(string message) : Exception(message);
 
@@ -117,6 +145,12 @@ public interface IMailService
     Task SetStarredAsync(string username, Guid accountId, string messageId, bool starred, CancellationToken cancellationToken = default);
     Task ArchiveAsync(string username, Guid accountId, string messageId, CancellationToken cancellationToken = default);
     Task TrashAsync(string username, Guid accountId, string messageId, CancellationToken cancellationToken = default);
+    // One MailActions action on up to MailLimits.MaxBulk messages, all in the same folder. Throws MailException.
+    Task<MailActionResult> ApplyAsync(string username, Guid accountId, IReadOnlyList<string> messageIds, string action, CancellationToken cancellationToken = default);
+    // Puts back what an Archive or Trash moved (MailActionResult.Undo).
+    Task UndoAsync(string username, Guid accountId, MailUndo undo, CancellationToken cancellationToken = default);
     // Unread messages across all the person's inboxes; null when no mailbox is connected.
     Task<int?> GetUnreadCountAsync(string username, CancellationToken cancellationToken = default);
+    // Each mailbox's unread inbox count, for the account switcher (a mailbox that can't be read is left out).
+    Task<IReadOnlyDictionary<Guid, int>> GetUnreadByAccountAsync(string username, CancellationToken cancellationToken = default);
 }

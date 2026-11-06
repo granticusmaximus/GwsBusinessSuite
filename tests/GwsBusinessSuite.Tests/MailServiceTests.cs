@@ -344,6 +344,65 @@ public sealed class MailServiceTests
         calls.Should().Contain("DELETE /gmail/v1/users/me/drafts/r-77");
     }
 
+    [Fact]
+    public async Task ManyMessagesAtOnce_ShouldGoToTheMailboxInOneCall_AndTrashShouldBeUndoable()
+    {
+        var f = await CreateAsync();
+        var mailbox = await f.UseImapAsync();
+
+        var result = await f.Service.ApplyAsync("grant", mailbox.Id, ["a", "b", "a", " "], MailActions.Trash);
+
+        result.Count.Should().Be(2, "duplicates and blanks are dropped");
+        var applied = f.Imap.Applied.Should().ContainSingle().Subject;
+        applied.Ids.Should().Equal("a", "b");
+        applied.Action.Should().Be(MailActions.Trash);
+        result.Undo.Should().BeEquivalentTo(new MailUndo(MailActions.Trash, ["trash-a", "trash-b"], "folder:INBOX"));
+        await f.Service.UndoAsync("grant", mailbox.Id, result.Undo!);
+        f.Imap.Undone.Should().ContainSingle();
+
+        (await f.Service.ApplyAsync("grant", mailbox.Id, [], MailActions.MarkRead)).Should().Be(new MailActionResult(0, null));
+        await f.Service.Invoking(s => s.ApplyAsync("grant", mailbox.Id, ["a"], "explode")).Should().ThrowAsync<MailException>();
+        await f.Service.Invoking(s => s.ApplyAsync("grant", mailbox.Id, Enumerable.Range(0, MailLimits.MaxBulk + 1).Select(i => $"m{i}").ToList(), MailActions.MarkRead))
+            .Should().ThrowAsync<MailException>().WithMessage("*up to 500*");
+        await f.Service.Invoking(s => s.ApplyAsync("sam", mailbox.Id, ["a"], MailActions.MarkRead))
+            .Should().ThrowAsync<MailException>("someone else's mailbox id finds nothing");
+        (await f.Service.GetUnreadByAccountAsync("grant")).Should().Equal(new Dictionary<Guid, int> { [mailbox.Id] = 7 });
+    }
+
+    [Fact]
+    public async Task Gmail_ShouldChangeLabelsInBatches_TrashOneByOne_AndPutTrashBack()
+    {
+        var protector = new DataProtectionSecretProtector(new EphemeralDataProtectionProvider());
+        var calls = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var handler = new StubHandler(async request =>
+        {
+            var body = request.Content is null ? "" : await request.Content.ReadAsStringAsync();
+            calls.Enqueue($"{request.Method} {request.RequestUri!.AbsolutePath.Replace("/gmail/v1/users/me/", "")} {body}".TrimEnd());
+            return request.RequestUri.AbsolutePath.EndsWith("/gone/trash", StringComparison.Ordinal)
+                ? Json(HttpStatusCode.NotFound, """{"error":{"message":"Not Found"}}""")
+                : new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        var gmail = new GmailMailboxBackend(protector, new Factory(handler),
+            Options.Create(new GoogleOAuthOptions { ClientId = "id", ClientSecret = "secret", RedirectUri = "https://example.test/cb" }));
+        var account = new MailAccount { Username = "grant", Provider = MailProviders.Google, TokenProtected = protector.Protect("""{"accessToken":"t"}""") };
+
+        (await gmail.ApplyAsync(account, ["m1", "m2"], MailActions.MarkRead, CancellationToken.None)).Should().BeNull();
+        calls.Should().Equal("POST messages/batchModify {\"ids\":[\"m1\",\"m2\"],\"addLabelIds\":[],\"removeLabelIds\":[\"UNREAD\"]}");
+
+        calls.Clear();
+        var undo = await gmail.ApplyAsync(account, ["m1", "gone", "m3"], MailActions.Trash, CancellationToken.None);
+        calls.Order().Should().Equal("POST messages/gone/trash {}", "POST messages/m1/trash {}", "POST messages/m3/trash {}");
+        undo.Should().BeEquivalentTo(new MailUndo(MailActions.Trash, ["m1", "gone", "m3"], null), "a message already gone is skipped, not an error");
+
+        calls.Clear();
+        await gmail.UndoAsync(account, new MailUndo(MailActions.Trash, ["m1"], null), CancellationToken.None);
+        (await gmail.ApplyAsync(account, ["m4"], MailActions.Archive, CancellationToken.None)).Should().BeEquivalentTo(new MailUndo(MailActions.Archive, ["m4"], MailFolders.Inbox));
+        (await gmail.ApplyAsync(account, ["m5"], MailActions.DeleteForever, CancellationToken.None)).Should().BeNull("deleting for good can't be undone");
+        calls.Should().Equal("POST messages/m1/untrash {}",
+            "POST messages/batchModify {\"ids\":[\"m4\"],\"addLabelIds\":[],\"removeLabelIds\":[\"INBOX\"]}",
+            "POST messages/batchDelete {\"ids\":[\"m5\"]}");
+    }
+
     [Theory]
     [InlineData("inbox", true)]
     [InlineData("label:Label_12", true)]
@@ -419,6 +478,21 @@ public sealed class MailServiceTests
         public Task ArchiveAsync(MailAccount account, string id, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task TrashAsync(MailAccount account, string id, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken) => Task.FromResult(7);
+        public List<(IReadOnlyList<string> Ids, string Action)> Applied { get; } = [];
+        public List<MailUndo> Undone { get; } = [];
+
+        public Task<MailUndo?> ApplyAsync(MailAccount account, IReadOnlyList<string> ids, string action, CancellationToken cancellationToken)
+        {
+            Applied.Add((ids, action));
+            return Task.FromResult(action == MailActions.Trash ? new MailUndo(action, ids.Select(id => "trash-" + id).ToList(), "folder:INBOX") : null);
+        }
+
+        public Task UndoAsync(MailAccount account, MailUndo undo, CancellationToken cancellationToken)
+        {
+            Undone.Add(undo);
+            return Task.CompletedTask;
+        }
+
         public Dictionary<string, MimeMessage> Drafts { get; } = [];
         public List<string> DeletedDrafts { get; } = [];
 

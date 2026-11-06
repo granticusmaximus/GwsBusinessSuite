@@ -33,6 +33,9 @@ public interface IMailboxBackend
     Task SetStarredAsync(MailAccount account, string id, bool starred, CancellationToken cancellationToken);
     Task ArchiveAsync(MailAccount account, string id, CancellationToken cancellationToken);
     Task TrashAsync(MailAccount account, string id, CancellationToken cancellationToken);
+    // A MailActions action on many messages from one folder; returns how to undo it, if it can be.
+    Task<MailUndo?> ApplyAsync(MailAccount account, IReadOnlyList<string> ids, string action, CancellationToken cancellationToken);
+    Task UndoAsync(MailAccount account, MailUndo undo, CancellationToken cancellationToken);
     Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken);
     // The provider's own folders and labels (MailFolders.LabelPrefix / FolderPrefix keys).
     Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(MailAccount account, CancellationToken cancellationToken);
@@ -139,6 +142,80 @@ public sealed class GmailMailboxBackend(
 
     public async Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken) =>
         (await CallAsync(account, HttpMethod.Get, "labels/INBOX", null, cancellationToken))?["messagesUnread"]?.GetValue<int>() ?? 0;
+
+    // Labels change in batches (batchModify, up to 1,000 ids a call). Trash uses the documented
+    // messages.trash one message at a time: the first alone, so an expired sign-in is renewed once,
+    // then four at a time. A message that's already gone is skipped.
+    public const int BatchSize = 1000;
+    private const int MaxParallel = 4;
+
+    public async Task<MailUndo?> ApplyAsync(MailAccount account, IReadOnlyList<string> ids, string action, CancellationToken cancellationToken)
+    {
+        switch (action)
+        {
+            case MailActions.Trash:
+                await EachAsync(ids, id => CallAsync(account, HttpMethod.Post, $"messages/{Uri.EscapeDataString(id)}/trash", new JsonObject(), cancellationToken), cancellationToken);
+                return new MailUndo(action, ids, null);
+            case MailActions.DeleteForever:
+                foreach (var batch in ids.Chunk(BatchSize))
+                    await CallAsync(account, HttpMethod.Post, "messages/batchDelete", new JsonObject { ["ids"] = Ids(batch) }, cancellationToken);
+                return null;
+        }
+        var (add, remove) = action switch
+        {
+            MailActions.MarkRead => (Array.Empty<string>(), new[] { "UNREAD" }),
+            MailActions.MarkUnread => (["UNREAD"], []),
+            MailActions.Star => (["STARRED"], []),
+            MailActions.Unstar => ([], ["STARRED"]),
+            MailActions.Archive => ([], ["INBOX"]),
+            _ => throw new MailException("That isn't something Mail can do.")
+        };
+        await BatchModifyAsync(account, ids, add, remove, cancellationToken);
+        return action == MailActions.Archive ? new MailUndo(action, ids, MailFolders.Inbox) : null;
+    }
+
+    public async Task UndoAsync(MailAccount account, MailUndo undo, CancellationToken cancellationToken)
+    {
+        if (undo.Action == MailActions.Trash)
+            await EachAsync(undo.Ids, id => CallAsync(account, HttpMethod.Post, $"messages/{Uri.EscapeDataString(id)}/untrash", new JsonObject(), cancellationToken), cancellationToken);
+        else if (undo.Action == MailActions.Archive)
+            await BatchModifyAsync(account, undo.Ids, ["INBOX"], [], cancellationToken);
+    }
+
+    private async Task BatchModifyAsync(MailAccount account, IReadOnlyList<string> ids, string[] add, string[] remove, CancellationToken cancellationToken)
+    {
+        foreach (var batch in ids.Chunk(BatchSize))
+        {
+            await CallAsync(account, HttpMethod.Post, "messages/batchModify", new JsonObject
+            {
+                ["ids"] = Ids(batch),
+                ["addLabelIds"] = new JsonArray(add.Select(label => (JsonNode)label).ToArray()),
+                ["removeLabelIds"] = new JsonArray(remove.Select(label => (JsonNode)label).ToArray())
+            }, cancellationToken);
+        }
+    }
+
+    private static JsonArray Ids(IEnumerable<string> ids) => new(ids.Select(id => (JsonNode)id).ToArray());
+
+    private static async Task EachAsync(IReadOnlyList<string> ids, Func<string, Task<JsonNode?>> call, CancellationToken cancellationToken)
+    {
+        if (ids.Count == 0) return;
+        await Gone(call(ids[0]));
+        await Parallel.ForEachAsync(ids.Skip(1), new ParallelOptions { MaxDegreeOfParallelism = MaxParallel, CancellationToken = cancellationToken },
+            async (id, _) => await Gone(call(id)));
+
+        static async Task Gone(Task<JsonNode?> work)
+        {
+            try
+            {
+                await work;
+            }
+            catch (MailException ex) when (ex.Message == "That message is gone.")
+            {
+                // Already deleted elsewhere: nothing to do.
+            }
+        }
+    }
 
     // The labels the person made (Gmail's own - Inbox, Sent, CATEGORY_* - are the standard folders).
     public async Task<IReadOnlyList<MailFolderView>> ListFoldersAsync(MailAccount account, CancellationToken cancellationToken)
@@ -458,6 +535,79 @@ public sealed class ImapMailboxBackend(ISecretProtector secretProtector) : IMail
 
     public Task TrashAsync(MailAccount account, string id, CancellationToken cancellationToken) =>
         MoveAsync(account, id, MailFolders.Trash, cancellationToken);
+
+    // One sign-in for the whole selection: flags or a move on the UID set. The move's UID map
+    // (UIDPLUS) says where the messages went, which is the Undo; without it there's none.
+    public async Task<MailUndo?> ApplyAsync(MailAccount account, IReadOnlyList<string> ids, string action, CancellationToken cancellationToken)
+    {
+        if (!MailActions.All.Contains(action)) throw new MailException("That isn't something Mail can do.");
+        var groups = ids.Select(ImapMessageId.Decode).GroupBy(id => (id.Folder, id.UidValidity)).ToList();
+        using var client = await ConnectAsync(account, cancellationToken);
+        var moved = new List<string>();
+        var undoable = MailActions.Removes(action) && action != MailActions.DeleteForever && groups.Count == 1;
+        string? from = null;
+        foreach (var group in groups)
+        {
+            var folder = await client.GetFolderAsync(group.Key.Folder, cancellationToken);
+            await folder.OpenAsync(FolderAccess.ReadWrite, cancellationToken);
+            if (folder.UidValidity != group.Key.UidValidity) throw new MailException("That folder changed on the server - reload the list.");
+            var uids = group.Select(id => new UniqueId(id.UidValidity, id.Uid)).ToList();
+            switch (action)
+            {
+                case MailActions.MarkRead: await folder.AddFlagsAsync(uids, MessageFlags.Seen, true, cancellationToken); break;
+                case MailActions.MarkUnread: await folder.RemoveFlagsAsync(uids, MessageFlags.Seen, true, cancellationToken); break;
+                case MailActions.Star: await folder.AddFlagsAsync(uids, MessageFlags.Flagged, true, cancellationToken); break;
+                case MailActions.Unstar: await folder.RemoveFlagsAsync(uids, MessageFlags.Flagged, true, cancellationToken); break;
+                case MailActions.DeleteForever: await DeleteForGoodAsync(client, folder, uids, cancellationToken); break;
+                default:
+                    var destination = await FolderAsync(client, action == MailActions.Archive ? MailFolders.Archive : MailFolders.Trash, cancellationToken);
+                    if (destination is not null && destination.FullName != folder.FullName)
+                    {
+                        // Each message's new UID, looked up by its old one (a server can report a wider
+                        // range than was moved: GreenMail answered 4 pairs for 3 messages on 06-11-26).
+                        var map = await folder.MoveToAsync(uids, destination, cancellationToken);
+                        foreach (var uid in uids)
+                        {
+                            if (map.TryGetValue(uid, out var now)) moved.Add(ImapMessageId.Encode(destination.FullName, now.Validity, now.Id));
+                            else undoable = false;
+                        }
+                        from = folder.FullName;
+                    }
+                    else if (action == MailActions.Trash)
+                    {
+                        // Already in Trash (or there's none): delete it for good.
+                        await DeleteForGoodAsync(client, folder, uids, cancellationToken);
+                        undoable = false;
+                    }
+                    else throw new MailException("This mailbox has no Archive folder.");
+                    break;
+            }
+        }
+        await client.DisconnectAsync(true, cancellationToken);
+        return undoable && from is not null && moved.Count == ids.Count ? new MailUndo(action, moved, MailFolders.FolderPrefix + from) : null;
+    }
+
+    public async Task UndoAsync(MailAccount account, MailUndo undo, CancellationToken cancellationToken)
+    {
+        if (undo.FromFolder is null || undo.Ids.Count == 0) return;
+        using var client = await ConnectAsync(account, cancellationToken);
+        var back = await FolderAsync(client, undo.FromFolder, cancellationToken) ?? throw new MailException("The folder they came from is gone.");
+        foreach (var group in undo.Ids.Select(ImapMessageId.Decode).GroupBy(id => (id.Folder, id.UidValidity)))
+        {
+            var folder = await client.GetFolderAsync(group.Key.Folder, cancellationToken);
+            await folder.OpenAsync(FolderAccess.ReadWrite, cancellationToken);
+            if (folder.UidValidity != group.Key.UidValidity) throw new MailException("That folder changed on the server, so they can't be put back.");
+            await folder.MoveToAsync(group.Select(id => new UniqueId(id.UidValidity, id.Uid)).ToList(), back, cancellationToken);
+        }
+        await client.DisconnectAsync(true, cancellationToken);
+    }
+
+    private static async Task DeleteForGoodAsync(ImapClient client, IMailFolder folder, IList<UniqueId> uids, CancellationToken cancellationToken)
+    {
+        await folder.AddFlagsAsync(uids, MessageFlags.Deleted, true, cancellationToken);
+        if (client.Capabilities.HasFlag(ImapCapabilities.UidPlus)) await folder.ExpungeAsync(uids, cancellationToken);
+        else await folder.ExpungeAsync(cancellationToken);
+    }
 
     public async Task<int> UnreadCountAsync(MailAccount account, CancellationToken cancellationToken)
     {

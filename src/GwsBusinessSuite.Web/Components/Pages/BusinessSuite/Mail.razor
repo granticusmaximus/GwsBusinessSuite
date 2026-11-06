@@ -24,7 +24,7 @@
     <Actions>
         @if (_account is not null)
         {
-            <button type="button" class="btn btn-primary btn-sm" @onclick="() => StartCompose(ComposeKind.New)"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Compose</button>
+            <button type="button" class="btn btn-primary btn-sm mail-header-compose" @onclick="() => StartCompose(ComposeKind.New)"><i class="bi bi-pencil-square me-1" aria-hidden="true"></i>Compose</button>
         }
     </Actions>
 </PageHeader>
@@ -138,13 +138,31 @@ else if (_account is null || _changingAccount)
 }
 else
 {
-    <div class="mail-shell @(_compose is not null || _detail is not null || _loadingDetail ? "mail-shell--reading" : string.Empty)">
+    <div class="mail-shell @(Reading ? "mail-shell--reading" : "mail-shell--list")">
         <nav class="mail-folders" aria-label="Mail folders">
+            <button type="button" class="mail-account-button" @ref="_accountButton" aria-haspopup="menu" aria-expanded="@(_accountMenuOpen ? "true" : "false")"
+                    title="@_account.Address" @onclick="OpenAccountMenu">
+                <span class="mail-avatar" aria-hidden="true">@Initial(_account)</span>
+                <span class="mail-account-address text-truncate">@_account.Address</span>
+                @if (_accounts.Count > 1 && _unread.Where(pair => pair.Key != _account.Id).Sum(pair => pair.Value) is > 0 and var elsewhere)
+                {
+                    <span class="mail-count" title="Unread in your other mailboxes">@elsewhere</span>
+                }
+                <i class="bi bi-chevron-down" aria-hidden="true"></i>
+                <span class="visually-hidden">Switch or add a mailbox</span>
+            </button>
+            <button type="button" class="mail-compose-button" @onclick="() => StartCompose(ComposeKind.New)" title="Compose (c)">
+                <i class="bi bi-pencil" aria-hidden="true"></i><span>Compose</span>
+            </button>
             @foreach (var (key, label, icon) in MailFolders.All)
             {
                 <button type="button" class="mail-folder @(key == _folder ? "active" : string.Empty)" aria-current="@(key == _folder ? "page" : null)"
                         @onclick="() => OpenFolderAsync(key)">
                     <i class="bi @icon" aria-hidden="true"></i><span>@label</span>
+                    @if (key == MailFolders.Inbox && _unread.GetValueOrDefault(_account.Id) is > 0 and var unread)
+                    {
+                        <span class="mail-count">@unread<span class="visually-hidden"> unread</span></span>
+                    }
                 </button>
             }
             @if (_customFolders.Count > 0)
@@ -158,37 +176,67 @@ else
                     </button>
                 }
             }
-            <div class="mail-account small text-secondary">
-                @if (_accounts.Count > 1)
+            <button type="button" class="mail-folder mail-shortcuts-link small" @onclick="() => _showShortcuts = true">
+                <i class="bi bi-keyboard" aria-hidden="true"></i><span>Shortcuts (?)</span>
+            </button>
+        </nav>
+
+        <section class="mail-list" aria-label="Messages" @ref="_listRef">
+            <div class="mail-list-head">
+            <form class="mail-search" @onsubmit="SearchAsync" @onsubmit:preventDefault>
+                <input type="search" class="form-control form-control-sm" placeholder="Search mail (/)" aria-label="Search mail" @bind="_search" @bind:event="oninput" />
+            </form>
+            <div class="mail-list-toolbar" role="toolbar" aria-label="Messages">
+                <span class="mail-select">
+                    <button type="button" class="mail-tool" role="checkbox" aria-checked="@SelectAllState" aria-label="Select all"
+                            title="Select" disabled="@(_messages.Count == 0)" @onclick="ToggleSelectAll">
+                        <i class="bi @(SelectAllState == "true" ? "bi-check-square-fill" : SelectAllState == "mixed" ? "bi-dash-square-fill" : "bi-square")" aria-hidden="true"></i>
+                    </button>
+                    <button type="button" class="mail-tool mail-tool--narrow" @ref="_selectButton" aria-haspopup="menu" aria-expanded="@(_selectMenuOpen ? "true" : "false")"
+                            aria-label="Select which messages" disabled="@(_messages.Count == 0)" @onclick="OpenSelectMenu">
+                        <i class="bi bi-caret-down-fill" aria-hidden="true"></i>
+                    </button>
+                </span>
+                @if (_checked.Count == 0)
                 {
-                    <label class="visually-hidden" for="mail-account-switch">Mailbox</label>
-                    <select id="mail-account-switch" class="form-select form-select-sm" value="@_account.Id" @onchange="SwitchAccountAsync">
-                        @foreach (var account in _accounts)
-                        {
-                            <option value="@account.Id">@account.Address</option>
-                        }
-                    </select>
+                    <button type="button" class="mail-tool" title="Refresh" aria-label="Refresh" disabled="@_loadingList" @onclick="() => LoadListAsync(reset: true)">
+                        <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+                    </button>
+                    <span class="mail-list-count small text-secondary">@ListCount</span>
                 }
                 else
                 {
-                    <div class="text-truncate" title="@_account.Address"><i class="bi @(_account.Provider == MailProviders.Google ? "bi-google" : "bi-envelope-at") me-1" aria-hidden="true"></i>@_account.Address</div>
+                    var selected = Checked;
+                    <span class="mail-selected small">@selected.Count selected</span>
+                    @if (_folder is not MailFolders.Archive and not MailFolders.Trash)
+                    {
+                        <button type="button" class="mail-tool" title="Archive (e)" aria-label="Archive selected" @onclick="() => ApplyAsync(selected, MailActions.Archive)">
+                            <i class="bi bi-archive" aria-hidden="true"></i>
+                        </button>
+                    }
+                    <button type="button" class="mail-tool" title="@(InTrash ? "Delete forever" : "Delete (#)")" aria-label="@(InTrash ? "Delete selected forever" : "Delete selected")"
+                            @onclick="() => ApplyAsync(selected, MailActions.Trash)">
+                        <i class="bi bi-trash" aria-hidden="true"></i>
+                    </button>
+                    @if (selected.Any(m => m.Unread))
+                    {
+                        <button type="button" class="mail-tool" title="Mark as read (Shift+I)" aria-label="Mark selected as read" @onclick="() => ApplyAsync(selected, MailActions.MarkRead)">
+                            <i class="bi bi-envelope-open" aria-hidden="true"></i>
+                        </button>
+                    }
+                    @if (selected.Any(m => !m.Unread))
+                    {
+                        <button type="button" class="mail-tool" title="Mark as unread (Shift+U)" aria-label="Mark selected as unread" @onclick="() => ApplyAsync(selected, MailActions.MarkUnread)">
+                            <i class="bi bi-envelope" aria-hidden="true"></i>
+                        </button>
+                    }
+                    <button type="button" class="mail-tool" title="@(selected.Any(m => !m.Starred) ? "Star" : "Unstar")" aria-label="@(selected.Any(m => !m.Starred) ? "Star selected" : "Unstar selected")"
+                            @onclick="() => ApplyAsync(selected, selected.Any(m => !m.Starred) ? MailActions.Star : MailActions.Unstar)">
+                        <i class="bi @(selected.Any(m => !m.Starred) ? "bi-star" : "bi-star-fill")" aria-hidden="true"></i>
+                    </button>
                 }
-                <button type="button" class="btn btn-link btn-sm p-0" @onclick="StartAddAccount"><i class="bi bi-plus-lg me-1" aria-hidden="true"></i>Add a mailbox</button>
-                @if (_account.Provider == MailProviders.Imap)
-                {
-                    <button type="button" class="btn btn-link btn-sm p-0" @onclick="StartEditAccount">Edit this mailbox</button>
-                }
-                <button type="button" class="btn btn-link btn-sm p-0 text-danger" @onclick="DisconnectAsync">Remove this mailbox</button>
             </div>
-        </nav>
-
-        <section class="mail-list" aria-label="Messages">
-            <form class="mail-search" @onsubmit="SearchAsync" @onsubmit:preventDefault>
-                <input type="search" class="form-control form-control-sm" placeholder="Search mail" aria-label="Search mail" @bind="_search" @bind:event="oninput" />
-                <button type="button" class="btn btn-sm btn-outline-secondary" title="Refresh" aria-label="Refresh" @onclick="() => LoadListAsync(reset: true)">
-                    <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
-                </button>
-            </form>
+            </div>
             @if (_loadingList && _messages.Count == 0)
             {
                 <LoadingIndicator Message="Getting your mail…" />
@@ -202,25 +250,52 @@ else
                 <ul class="mail-items list-unstyled mb-0">
                     @foreach (var message in _messages)
                     {
-                        <li class="mail-item @(message.Unread ? "unread" : string.Empty) @(message.Id == _selectedId ? "selected" : string.Empty)" @key="message.Id">
-                            <button type="button" class="mail-item-open" @onclick="() => OpenMessageAsync(message)">
-                                <span class="mail-item-top">
+                        var isChecked = _checked.Contains(message.Id);
+                        <li class="mail-item @(message.Unread ? "unread" : string.Empty) @(message.Id == _selectedId ? "selected" : string.Empty) @(isChecked ? "checked" : string.Empty) @(message.Id == _cursorId ? "cursor" : string.Empty)"
+                            @key="message.Id" data-id="@message.Id" @oncontextmenu="e => OpenMenu(e, message)" @oncontextmenu:preventDefault="true">
+                            <span class="mail-item-swipe mail-item-swipe--read" aria-hidden="true">
+                                <i class="bi @(message.Unread ? "bi-envelope-open" : "bi-envelope")"></i>@(message.Unread ? "Read" : "Unread")
+                            </span>
+                            <span class="mail-item-swipe mail-item-swipe--delete" aria-hidden="true">
+                                @(InTrash ? "Delete forever" : "Delete")<i class="bi bi-trash"></i>
+                            </span>
+                            <div class="mail-item-row">
+                                <input type="checkbox" class="form-check-input mail-item-check" checked="@isChecked" title="Select (x)"
+                                       aria-label="@($"Select {(string.IsNullOrWhiteSpace(message.Subject) ? "(no subject)" : message.Subject)}")" @onclick="e => ToggleCheck(message, e)" />
+                                <button type="button" class="mail-item-star @(message.Starred ? "on" : string.Empty)" title="@(message.Starred ? "Unstar" : "Star")"
+                                        aria-label="@(message.Starred ? "Unstar" : "Star")" aria-pressed="@(message.Starred ? "true" : "false")"
+                                        @onclick="() => ApplyAsync([message], message.Starred ? MailActions.Unstar : MailActions.Star)">
+                                    <i class="bi @(message.Starred ? "bi-star-fill" : "bi-star")" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" class="mail-item-open" @onclick="() => OpenMessageAsync(message)">
                                     <span class="mail-item-from text-truncate">@(_folder is MailFolders.Sent or MailFolders.Drafts ? "To: " + Names(message.To) : Name(message.From))</span>
-                                    <span class="mail-item-date">@ListDate(message.Date)</span>
-                                </span>
-                                <span class="mail-item-subject text-truncate">
-                                    @if (message.HasAttachments)
+                                    <span class="mail-item-text text-truncate">
+                                        <span class="mail-item-subject">@(string.IsNullOrWhiteSpace(message.Subject) ? "(no subject)" : message.Subject)</span>
+                                        @if (!string.IsNullOrWhiteSpace(message.Snippet))
+                                        {
+                                            <span class="mail-item-snippet"><span class="mail-item-dash"> - </span>@message.Snippet</span>
+                                        }
+                                    </span>
+                                    <span class="mail-item-date">
+                                        @if (message.HasAttachments)
+                                        {
+                                            <i class="bi bi-paperclip me-1" aria-label="Has attachments"></i>
+                                        }
+                                        @ListDate(message.Date)
+                                    </span>
+                                </button>
+                                <span class="mail-item-quick" role="group" aria-label="Quick actions">
+                                    @if (_folder is not MailFolders.Archive and not MailFolders.Trash)
                                     {
-                                        <i class="bi bi-paperclip me-1" aria-label="Has attachments"></i>
+                                        <button type="button" title="Archive" aria-label="Archive" @onclick="() => ApplyAsync([message], MailActions.Archive)"><i class="bi bi-archive" aria-hidden="true"></i></button>
                                     }
-                                    @(string.IsNullOrWhiteSpace(message.Subject) ? "(no subject)" : message.Subject)
+                                    <button type="button" title="@(InTrash ? "Delete forever" : "Delete")" aria-label="@(InTrash ? "Delete forever" : "Delete")" @onclick="() => ApplyAsync([message], MailActions.Trash)"><i class="bi bi-trash" aria-hidden="true"></i></button>
+                                    <button type="button" title="@(message.Unread ? "Mark as read" : "Mark as unread")" aria-label="@(message.Unread ? "Mark as read" : "Mark as unread")"
+                                            @onclick="() => ApplyAsync([message], message.Unread ? MailActions.MarkRead : MailActions.MarkUnread)">
+                                        <i class="bi @(message.Unread ? "bi-envelope-open" : "bi-envelope")" aria-hidden="true"></i>
+                                    </button>
                                 </span>
-                                <span class="mail-item-snippet text-truncate">@message.Snippet</span>
-                            </button>
-                            <button type="button" class="mail-item-star @(message.Starred ? "on" : string.Empty)" title="@(message.Starred ? "Unstar" : "Star")"
-                                    aria-label="@(message.Starred ? "Unstar" : "Star")" aria-pressed="@message.Starred" @onclick="() => ToggleStarAsync(message)">
-                                <i class="bi @(message.Starred ? "bi-star-fill" : "bi-star")" aria-hidden="true"></i>
-                            </button>
+                            </div>
                         </li>
                     }
                 </ul>
@@ -243,6 +318,23 @@ else
                         <button type="button" class="btn btn-sm btn-link mail-back" @onclick="CloseReader"><i class="bi bi-arrow-left" aria-hidden="true"></i> Back</button>
                         <strong class="me-auto">@_compose.Title</strong>
                     </div>
+                    @if (_accounts.Count > 1)
+                    {
+                        <label class="form-label small mb-1" for="mail-from">From</label>
+                        @if (_compose.Kind == ComposeKind.New)
+                        {
+                            <select id="mail-from" class="form-select form-select-sm mb-2" @bind="_compose.From">
+                                @foreach (var account in _accounts)
+                                {
+                                    <option value="@account.Id">@FromLabel(account)</option>
+                                }
+                            </select>
+                        }
+                        else
+                        {
+                            <input id="mail-from" class="form-control form-control-sm mb-2" readonly value="@FromLabel(_account)" title="A reply, forward or draft goes from the mailbox it's in" />
+                        }
+                    }
                     <label class="form-label small mb-1" for="mail-to">To</label>
                     <input id="mail-to" class="form-control form-control-sm mb-2" placeholder="name@example.com, …" @bind="_compose.To" @bind:event="oninput" />
                     @if (_compose.ShowCc)
@@ -321,7 +413,7 @@ else
                     }
                     <div class="btn-group btn-group-sm" role="group" aria-label="Organise">
                         <button type="button" class="btn btn-outline-secondary" title="Archive" aria-label="Archive" disabled="@_busy" @onclick="ArchiveAsync"><i class="bi bi-archive" aria-hidden="true"></i></button>
-                        <button type="button" class="btn btn-outline-secondary" title="Delete" aria-label="Delete" disabled="@_busy" @onclick="TrashAsync"><i class="bi bi-trash" aria-hidden="true"></i></button>
+                        <button type="button" class="btn btn-outline-secondary" title="@(InTrash ? "Delete forever" : "Delete (#)")" aria-label="@(InTrash ? "Delete forever" : "Delete")" disabled="@_busy" @onclick="TrashAsync"><i class="bi bi-trash" aria-hidden="true"></i></button>
                         <button type="button" class="btn btn-outline-secondary" title="Mark unread" aria-label="Mark unread" disabled="@_busy" @onclick="MarkUnreadAsync"><i class="bi bi-envelope" aria-hidden="true"></i></button>
                     </div>
                 </div>
@@ -369,7 +461,157 @@ else
             }
         </section>
     </div>
+
+    @if (_menu is { } menu)
+    {
+        var targets = menu.Targets;
+        var single = targets.Count == 1;
+        <div class="mail-menu-backdrop" @onclick="CloseMenus" @oncontextmenu="CloseMenus" @oncontextmenu:preventDefault="true"></div>
+        <div class="mail-menu mail-menu--floating" role="menu" aria-label="@(single ? "Message" : $"{targets.Count} messages")" @ref="_menuRef" @onkeydown="OnMenuKeyDown">
+            @if (single)
+            {
+                <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => MenuOpenAsync(menu.Message, null)"><i class="bi bi-envelope-open" aria-hidden="true"></i>Open</button>
+                @if (_folder != MailFolders.Drafts)
+                {
+                    <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => MenuOpenAsync(menu.Message, ComposeKind.Reply)"><i class="bi bi-reply" aria-hidden="true"></i>Reply</button>
+                    <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => MenuOpenAsync(menu.Message, ComposeKind.ReplyAll)"><i class="bi bi-reply-all" aria-hidden="true"></i>Reply all</button>
+                    <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => MenuOpenAsync(menu.Message, ComposeKind.Forward)"><i class="bi bi-forward" aria-hidden="true"></i>Forward</button>
+                }
+                <div class="mail-menu-separator" role="separator"></div>
+            }
+            else
+            {
+                <div class="mail-menu-heading">@targets.Count selected</div>
+            }
+            @if (targets.Any(m => m.Unread))
+            {
+                <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => MenuApplyAsync(MailActions.MarkRead)"><i class="bi bi-envelope-open" aria-hidden="true"></i>Mark as read</button>
+            }
+            @if (targets.Any(m => !m.Unread))
+            {
+                <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => MenuApplyAsync(MailActions.MarkUnread)"><i class="bi bi-envelope" aria-hidden="true"></i>Mark as unread</button>
+            }
+            @if (targets.Any(m => !m.Starred))
+            {
+                <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => MenuApplyAsync(MailActions.Star)"><i class="bi bi-star" aria-hidden="true"></i>Star</button>
+            }
+            else
+            {
+                <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => MenuApplyAsync(MailActions.Unstar)"><i class="bi bi-star-fill" aria-hidden="true"></i>Remove star</button>
+            }
+            <div class="mail-menu-separator" role="separator"></div>
+            @if (_folder is not MailFolders.Archive and not MailFolders.Trash)
+            {
+                <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => MenuApplyAsync(MailActions.Archive)"><i class="bi bi-archive" aria-hidden="true"></i>Archive</button>
+            }
+            <button type="button" role="menuitem" class="mail-menu-item mail-menu-item--danger" @onclick="() => MenuApplyAsync(MailActions.Trash)">
+                <i class="bi bi-trash" aria-hidden="true"></i>@(InTrash ? "Delete forever" : "Delete")
+            </button>
+            @if (single && !string.IsNullOrWhiteSpace(menu.Message.From.Address))
+            {
+                <div class="mail-menu-separator" role="separator"></div>
+                <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => FindFromAsync(menu.Message.From)">
+                    <i class="bi bi-search" aria-hidden="true"></i><span class="text-truncate">Find emails from @Name(menu.Message.From)</span>
+                </button>
+            }
+        </div>
+    }
+
+    @if (_selectMenuOpen)
+    {
+        <div class="mail-menu-backdrop" @onclick="CloseMenus"></div>
+        <div class="mail-menu mail-menu--floating" role="menu" aria-label="Select" @ref="_menuRef" @onkeydown="OnMenuKeyDown">
+            <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => SelectWhere(_ => true)">All</button>
+            <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => SelectWhere(_ => false)">None</button>
+            <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => SelectWhere(m => !m.Unread)">Read</button>
+            <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => SelectWhere(m => m.Unread)">Unread</button>
+            <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => SelectWhere(m => m.Starred)">Starred</button>
+            <button type="button" role="menuitem" class="mail-menu-item" @onclick="() => SelectWhere(m => !m.Starred)">Unstarred</button>
+        </div>
+    }
+
+    @if (_accountMenuOpen)
+    {
+        <div class="mail-menu-backdrop" @onclick="CloseMenus"></div>
+        <div class="mail-menu mail-menu--floating mail-account-menu" role="menu" aria-label="Mailboxes" @ref="_menuRef" @onkeydown="OnMenuKeyDown">
+            @foreach (var account in _accounts)
+            {
+                <button type="button" role="menuitemradio" aria-checked="@(account.Id == _account.Id ? "true" : "false")" class="mail-menu-item @(account.Id == _account.Id ? "active" : string.Empty)"
+                        @onclick="() => ChooseAccountAsync(account)">
+                    <span class="mail-avatar mail-avatar--small" aria-hidden="true">@Initial(account)</span>
+                    <span class="mail-menu-account">
+                        <span class="text-truncate">@account.Address</span>
+                        <span class="small text-secondary">@(account.Provider == MailProviders.Google ? "Gmail" : "IMAP")@(account.LastError is null ? string.Empty : " · needs attention")</span>
+                    </span>
+                    @if (_unread.GetValueOrDefault(account.Id) is > 0 and var count)
+                    {
+                        <span class="mail-count">@count<span class="visually-hidden"> unread</span></span>
+                    }
+                </button>
+            }
+            <div class="mail-menu-separator" role="separator"></div>
+            @if (_accounts.Count < MailLimits.MaxAccounts)
+            {
+                <button type="button" role="menuitem" class="mail-menu-item" @onclick="StartAddAccount"><i class="bi bi-plus-lg" aria-hidden="true"></i>Add another mailbox</button>
+            }
+            @if (_account.Provider == MailProviders.Imap)
+            {
+                <button type="button" role="menuitem" class="mail-menu-item" @onclick="StartEditAccount"><i class="bi bi-pencil" aria-hidden="true"></i>Edit this mailbox</button>
+            }
+            <button type="button" role="menuitem" class="mail-menu-item mail-menu-item--danger" @onclick="() => { _accountMenuOpen = false; _confirmRemove = true; }">
+                <i class="bi bi-box-arrow-right" aria-hidden="true"></i><span class="text-truncate">Remove @_account.Address</span>
+            </button>
+        </div>
+    }
+
+    <ConfirmModal Show="@(_confirmForever is not null)" Title="Delete forever?" ConfirmText="Delete forever"
+                  Message="@($"{Count(_confirmForever?.Count ?? 0, "message")} will be deleted for good. This can't be undone.")"
+                  OnConfirm="ConfirmForeverAsync" OnCancel="() => _confirmForever = null" />
+    <ConfirmModal Show="_confirmRemove" Title="Remove this mailbox?" ConfirmText="Remove"
+                  Message="@($"{_account.Address} leaves Mail. Nothing from it is kept in the app, and you can connect it again any time.")"
+                  OnConfirm="DisconnectAsync" OnCancel="() => _confirmRemove = false" />
+
+    @if (_showShortcuts)
+    {
+        <div class="modal-backdrop fade show"></div>
+        <div class="modal d-block" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="mail-shortcuts-title" @onkeydown="OnShortcutsKeyDown">
+            <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content">
+                <div class="modal-header">
+                    <h2 class="modal-title h5" id="mail-shortcuts-title">Keyboard shortcuts</h2>
+                    <button type="button" class="btn-close" aria-label="Close" @onclick="() => _showShortcuts = false"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-secondary">The same keys as Gmail. They work while you aren't typing.</p>
+                    <dl class="mail-shortcuts">
+                        @foreach (var (keys, what) in Shortcuts)
+                        {
+                            <dt>@foreach (var key in keys) { <kbd>@key</kbd> }</dt>
+                            <dd>@what</dd>
+                        }
+                    </dl>
+                    <p class="small text-secondary mb-0">
+                        Swipe a message right with two fingers (or your finger on a touch screen) to mark it read or unread, and left to delete it.
+                        Right-click a message, or press the Menu key, for everything else.
+                    </p>
+                </div>
+            </div></div>
+        </div>
+    }
 }
+
+<div class="mail-snack-region" role="status" aria-live="polite">
+    @if (_snack is { } snack)
+    {
+        <div class="mail-snack">
+            <span>@snack.Text</span>
+            @if (snack.Undo is not null)
+            {
+                <button type="button" class="mail-snack-undo" @onclick="UndoAsync">Undo</button>
+            }
+            <button type="button" class="mail-snack-close" aria-label="Dismiss" @onclick="DismissSnack"><i class="bi bi-x-lg" aria-hidden="true"></i></button>
+        </div>
+    }
+</div>
 
 @code {
     [SupplyParameterFromQuery(Name = "google")] public string? GoogleResult { get; set; }
@@ -393,6 +635,8 @@ else
         public bool Preview { get; set; }
         public bool Listening { get; set; }
         public List<MailAttachmentUpload> Files { get; } = [];
+        // The mailbox it goes from (an account id): a new message can pick; the rest go from this one.
+        public string From { get; set; } = string.Empty;
     }
 
     private sealed class SetupState
@@ -484,11 +728,12 @@ else
                 if (_account is null || _loadingList || _busy || !string.IsNullOrWhiteSpace(_search)) continue;
                 try
                 {
-                    var page = await MailService.ListAsync(_username, AccountId, _folder, null, null, cancellationToken);
+                    var page = await GatedAsync(() => MailService.ListAsync(_username, AccountId, _folder, null, null, cancellationToken));
                     var fresh = page.Messages.Where(message => _messages.All(existing => existing.Id != message.Id)).ToList();
                     if (fresh.Count == 0) continue;
                     _messages.InsertRange(0, fresh);
                     MailUnread.Invalidate(_username);
+                    await RefreshUnreadAsync();
                     await InvokeAsync(StateHasChanged);
                 }
                 catch (MailException)
@@ -506,9 +751,17 @@ else
     {
         _closing.Cancel();
         _closing.Dispose();
+        _snackTimer?.Cancel();
+        _snackTimer?.Dispose();
         try
         {
             if (_composeModule is not null) await _composeModule.DisposeAsync();
+            if (_listModule is not null)
+            {
+                if (_swipeHandle is { } swipe) await _listModule.InvokeVoidAsync("detach", swipe);
+                if (_keysHandle is { } keys) await _listModule.InvokeVoidAsync("detach", keys);
+                await _listModule.DisposeAsync();
+            }
         }
         catch (JSDisconnectedException)
         {
@@ -551,10 +804,12 @@ else
         {
             _messages.Clear();
             _nextPage = null;
+            _checked.Clear();
+            _anchorId = null;
         }
         try
         {
-            var page = await MailService.ListAsync(_username, AccountId, _folder, _search, reset ? null : _nextPage);
+            var page = await GatedAsync(() => MailService.ListAsync(_username, AccountId, _folder, _search, reset ? null : _nextPage));
             _messages.AddRange(page.Messages.Where(message => _messages.All(existing => existing.Id != message.Id)));
             _nextPage = page.NextPageToken;
         }
@@ -570,15 +825,21 @@ else
 
     private async Task OpenMessageAsync(MailMessageSummary message, bool showImages = false)
     {
+        CloseMenus();
         _compose = null;
         _selectedId = message.Id;
+        _cursorId = message.Id;
         _loadingDetail = true;
         _detail = null;
         try
         {
-            _detail = await MailService.GetAsync(_username, AccountId, message.Id, showImages);
-            if (message.Unread) MailUnread.Invalidate(_username);
+            _detail = await GatedAsync(() => MailService.GetAsync(_username, AccountId, message.Id, showImages));
             Replace(message.Id, item => item with { Unread = false });
+            if (message.Unread)
+            {
+                MailUnread.Invalidate(_username);
+                _unread = _unread.ToDictionary(pair => pair.Key, pair => pair.Key == AccountId ? Math.Max(0, pair.Value - 1) : pair.Value);
+            }
         }
         catch (MailException ex)
         {
@@ -598,42 +859,473 @@ else
         await OpenMessageAsync(summary, showImages: true);
     }
 
-    private async Task ToggleStarAsync(MailMessageSummary message)
-    {
-        await RunAsync(() => MailService.SetStarredAsync(_username, AccountId, message.Id, !message.Starred));
-        if (_error is null) Replace(message.Id, item => item with { Starred = !message.Starred });
-    }
+    // The reading pane's buttons act on the open message the same way the list does.
+    private MailMessageSummary? OpenSummary => _detail is null ? null
+        : _messages.FirstOrDefault(m => m.Id == _detail.Id)
+          ?? new MailMessageSummary(_detail.Id, _detail.ThreadId, _detail.From, _detail.To, _detail.Subject, string.Empty, _detail.Date, _detail.Unread, _detail.Starred, false);
 
     private async Task ArchiveAsync()
     {
-        if (_detail is null) return;
-        var id = _detail.Id;
-        await RunAsync(() => MailService.ArchiveAsync(_username, AccountId, id), "Archived.");
-        if (_error is null) RemoveFromList(id);
+        if (OpenSummary is { } open) await ApplyAsync([open], MailActions.Archive);
     }
 
     private async Task TrashAsync()
     {
-        if (_detail is null) return;
-        var id = _detail.Id;
-        await RunAsync(() => MailService.TrashAsync(_username, AccountId, id), _folder == MailFolders.Trash ? "Deleted for good." : "Moved to Trash.");
-        if (_error is null) RemoveFromList(id);
+        if (OpenSummary is { } open) await ApplyAsync([open], MailActions.Trash);
     }
 
     private async Task MarkUnreadAsync()
     {
-        if (_detail is null) return;
-        var id = _detail.Id;
-        await RunAsync(() => MailService.SetReadAsync(_username, AccountId, id, false));
-        MailUnread.Invalidate(_username);
-        if (_error is null)
+        if (OpenSummary is { } open && await ApplyAsync([open], MailActions.MarkUnread)) CloseReader();
+    }
+
+    // ---- Many messages at once (06-11-26): the toolbar, right-click, swipes and shortcuts all come here.
+
+    private bool InTrash => _folder == MailFolders.Trash;
+    private bool Reading => _compose is not null || _detail is not null || _loadingDetail;
+    private List<MailMessageSummary> Checked => _messages.Where(m => _checked.Contains(m.Id)).ToList();
+    private MailMessageSummary? Cursor => _messages.FirstOrDefault(m => m.Id == _cursorId);
+    private string SelectAllState => _checked.Count == 0 ? "false" : _messages.All(m => _checked.Contains(m.Id)) ? "true" : "mixed";
+    private string ListCount => _messages.Count == 0 ? string.Empty : $"{_messages.Count}{(_nextPage is null ? string.Empty : "+")} {(_messages.Count == 1 && _nextPage is null ? "message" : "messages")}";
+
+    // Shows the change at once, then asks the mailbox; puts it back if the mailbox refuses. Archive
+    // and Delete leave an Undo bar. Deleting from Trash is for good, so it asks first. True when done.
+    private async Task<bool> ApplyAsync(IReadOnlyList<MailMessageSummary> targets, string action, bool confirmed = false)
+    {
+        CloseMenus();
+        if (_account is not { } account || targets.Count == 0) return false;
+        if (action == MailActions.Trash && InTrash) action = MailActions.DeleteForever;
+        if (action == MailActions.DeleteForever && !confirmed)
         {
-            Replace(id, item => item with { Unread = true });
-            CloseReader();
+            _confirmForever = targets;
+            return false;
+        }
+        var folder = _folder;
+        var ids = targets.Select(t => t.Id).ToList();
+        var chosen = ids.ToHashSet(StringComparer.Ordinal);
+        var before = _messages.Select((message, index) => (Message: message, Index: index)).Where(x => chosen.Contains(x.Message.Id)).ToList();
+        var removes = MailActions.Removes(action);
+        if (removes)
+        {
+            // The keyboard cursor moves on to the next message, as in Gmail.
+            var cursorAt = _cursorId is not null && chosen.Contains(_cursorId) ? _messages.FindIndex(m => m.Id == _cursorId) : -1;
+            _messages.RemoveAll(m => chosen.Contains(m.Id));
+            _checked.ExceptWith(ids);
+            if (cursorAt >= 0)
+            {
+                var next = _messages.Skip(cursorAt).FirstOrDefault() ?? _messages.LastOrDefault();
+                _cursorId = next?.Id;
+                _focusCursor = next is not null;
+            }
+            if (_detail is not null && chosen.Contains(_detail.Id)) CloseReader();
+        }
+        else
+        {
+            foreach (var id in ids) Replace(id, m => Changed(m, action));
+        }
+        _error = null;
+        StateHasChanged();
+        try
+        {
+            var result = await GatedAsync(() => MailService.ApplyAsync(_username, account.Id, ids, action));
+            if (removes) ShowSnack(SnackText(action, ids.Count), result.Undo, account.Id);
+            if (action is MailActions.MarkRead or MailActions.MarkUnread || removes)
+            {
+                MailUnread.Invalidate(_username);
+                StateHasChanged();
+                await RefreshUnreadAsync();
+            }
+            return true;
+        }
+        catch (MailException ex)
+        {
+            if (_account?.Id == account.Id && _folder == folder)
+            {
+                if (removes)
+                {
+                    foreach (var (message, index) in before) _messages.Insert(Math.Min(index, _messages.Count), message);
+                }
+                else
+                {
+                    foreach (var (message, _) in before) Replace(message.Id, _ => message);
+                }
+            }
+            _error = ex.Message;
+            return false;
+        }
+    }
+
+    private static MailMessageSummary Changed(MailMessageSummary message, string action) => action switch
+    {
+        MailActions.MarkRead => message with { Unread = false },
+        MailActions.MarkUnread => message with { Unread = true },
+        MailActions.Star => message with { Starred = true },
+        MailActions.Unstar => message with { Starred = false },
+        _ => message
+    };
+
+    private static string SnackText(string action, int count) => action switch
+    {
+        MailActions.Archive => count == 1 ? "Message archived." : $"{count} messages archived.",
+        MailActions.DeleteForever => count == 1 ? "Message deleted for good." : $"{count} messages deleted for good.",
+        _ => count == 1 ? "Message moved to Trash." : $"{count} messages moved to Trash."
+    };
+
+    private async Task ConfirmForeverAsync()
+    {
+        if (_confirmForever is not { } targets) return;
+        _confirmForever = null;
+        await ApplyAsync(targets, MailActions.DeleteForever, confirmed: true);
+    }
+
+    // ---- The Undo bar (Gmail's, bottom left, for 8 seconds).
+
+    private static readonly TimeSpan SnackFor = TimeSpan.FromSeconds(8);
+    private sealed record Snack(string Text, MailUndo? Undo, Guid AccountId);
+    private Snack? _snack;
+    private CancellationTokenSource? _snackTimer;
+
+    private void ShowSnack(string text, MailUndo? undo, Guid accountId)
+    {
+        _snackTimer?.Cancel();
+        _snackTimer?.Dispose();
+        _snack = new Snack(text, undo, accountId);
+        var timer = _snackTimer = new CancellationTokenSource();
+        _ = HideSnackLaterAsync(timer.Token);
+    }
+
+    private async Task HideSnackLaterAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(SnackFor, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        await InvokeAsync(() =>
+        {
+            _snack = null;
+            StateHasChanged();
+        });
+    }
+
+    private void DismissSnack()
+    {
+        _snackTimer?.Cancel();
+        _snack = null;
+    }
+
+    private async Task UndoAsync()
+    {
+        if (_snack is not { Undo: { } undo } snack) return;
+        DismissSnack();
+        try
+        {
+            await GatedAsync(async () =>
+            {
+                await MailService.UndoAsync(_username, snack.AccountId, undo);
+                return true;
+            });
+            MailUnread.Invalidate(_username);
+            ShowSnack(undo.Ids.Count == 1 ? "Message put back." : $"{undo.Ids.Count} messages put back.", null, snack.AccountId);
+            // Back in its folder an IMAP message has a new id, so the list is read again.
+            if (_account?.Id == snack.AccountId) await LoadListAsync(reset: true);
+            await RefreshUnreadAsync();
+        }
+        catch (MailException ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    // ---- Selection: the boxes, Shift-click for a range, and the select menu.
+
+    private readonly HashSet<string> _checked = new(StringComparer.Ordinal);
+    private string? _anchorId;
+    private string? _cursorId;
+    private bool _focusCursor;
+
+    private void ToggleCheck(MailMessageSummary message, MouseEventArgs e)
+    {
+        var on = !_checked.Contains(message.Id);
+        var from = _anchorId is null ? -1 : _messages.FindIndex(m => m.Id == _anchorId);
+        var to = _messages.FindIndex(m => m.Id == message.Id);
+        if (e.ShiftKey && from >= 0 && to >= 0)
+        {
+            foreach (var item in _messages.Skip(Math.Min(from, to)).Take(Math.Abs(to - from) + 1))
+            {
+                if (on) _checked.Add(item.Id);
+                else _checked.Remove(item.Id);
+            }
+        }
+        else if (on) _checked.Add(message.Id);
+        else _checked.Remove(message.Id);
+        _anchorId = message.Id;
+        _cursorId = message.Id;
+    }
+
+    private void ToggleSelectAll()
+    {
+        if (_checked.Count > 0) _checked.Clear();
+        else _checked.UnionWith(_messages.Select(m => m.Id));
+    }
+
+    private void SelectWhere(Func<MailMessageSummary, bool> which)
+    {
+        CloseMenus();
+        _checked.Clear();
+        _checked.UnionWith(_messages.Where(which).Select(m => m.Id));
+    }
+
+    // ---- Menus: right-click on a message, the select menu and the mailbox switcher.
+
+    private sealed record MenuState(MailMessageSummary Message, IReadOnlyList<MailMessageSummary> Targets, double X, double Y);
+    private MenuState? _menu;
+    private bool _selectMenuOpen;
+    private bool _accountMenuOpen;
+    private ElementReference _menuRef;
+    private ElementReference _selectButton;
+    private ElementReference _accountButton;
+    // What to place on the next render: the menu at the pointer, or under its button.
+    private (double X, double Y, ElementReference? Anchor, string? RowId)? _placeMenu;
+
+    private void OpenMenu(MouseEventArgs e, MailMessageSummary message)
+    {
+        CloseMenus();
+        // On a message that's part of a selection, the menu is for the whole selection, as in Gmail.
+        var targets = _checked.Contains(message.Id) && _checked.Count > 1 ? Checked : [message];
+        _menu = new MenuState(message, targets, e.ClientX, e.ClientY);
+        _cursorId = message.Id;
+        _placeMenu = (e.ClientX, e.ClientY, _listRef, message.Id);
+    }
+
+    private void OpenSelectMenu()
+    {
+        var wasOpen = _selectMenuOpen;
+        CloseMenus();
+        if (wasOpen) return;
+        _selectMenuOpen = true;
+        _placeMenu = (0, 0, _selectButton, null);
+    }
+
+    private void OpenAccountMenu()
+    {
+        var wasOpen = _accountMenuOpen;
+        CloseMenus();
+        if (wasOpen) return;
+        _accountMenuOpen = true;
+        _placeMenu = (0, 0, _accountButton, null);
+    }
+
+    private void CloseMenus()
+    {
+        _menu = null;
+        _selectMenuOpen = false;
+        _accountMenuOpen = false;
+    }
+
+    private void OnMenuKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key is "Escape" or "Tab") CloseMenus();
+    }
+
+    private Task MenuApplyAsync(string action) =>
+        _menu is { } menu ? ApplyAsync(menu.Targets, action) : Task.CompletedTask;
+
+    private async Task MenuOpenAsync(MailMessageSummary message, ComposeKind? then)
+    {
+        CloseMenus();
+        await OpenMessageAsync(message);
+        if (then is { } kind && _detail?.Id == message.Id) StartCompose(kind);
+    }
+
+    private async Task FindFromAsync(MailAddress from)
+    {
+        CloseMenus();
+        _search = _account?.Provider == MailProviders.Google ? $"from:{from.Address}" : from.Address;
+        CloseReader();
+        await LoadListAsync(reset: true);
+    }
+
+    private async Task ChooseAccountAsync(MailAccountView account)
+    {
+        CloseMenus();
+        if (account.Id != _account?.Id) await SelectAccountAsync(account);
+    }
+
+    // ---- Swipes and keys, from mail-list.js.
+
+    private ElementReference _listRef;
+    private IJSObjectReference? _listModule;
+    private DotNetObjectReference<Mail>? _self;
+    private string? _attachedTo;
+    private int? _swipeHandle;
+    private int? _keysHandle;
+    private bool _showShortcuts;
+
+    // Right: read or unread. Left: delete. True when the message left the list.
+    [JSInvokable]
+    public async Task<bool> OnSwipe(string id, string side)
+    {
+        var removed = false;
+        await InvokeAsync(async () =>
+        {
+            if (_messages.FirstOrDefault(m => m.Id == id) is not { } message) return;
+            if (side == "read") await ApplyAsync([message], message.Unread ? MailActions.MarkRead : MailActions.MarkUnread);
+            else removed = await ApplyAsync([message], MailActions.Trash);
+            StateHasChanged();
+        });
+        return removed;
+    }
+
+    [JSInvokable]
+    public Task OnShortcut(string key) => InvokeAsync(async () =>
+    {
+        await ShortcutAsync(key);
+        StateHasChanged();
+    });
+
+    private IReadOnlyList<MailMessageSummary> ShortcutTargets() =>
+        _checked.Count > 0 ? Checked : OpenSummary is { } open ? [open] : Cursor is { } cursor ? [cursor] : [];
+
+    private async Task ShortcutAsync(string key)
+    {
+        if (key == "Escape")
+        {
+            if (_menu is not null || _selectMenuOpen || _accountMenuOpen) CloseMenus();
+            else if (_showShortcuts) _showShortcuts = false;
+            else if (Reading) CloseReader();
+            else _checked.Clear();
+            return;
+        }
+        if (_account is null || _changingAccount || _compose is not null || _confirmForever is not null || _confirmRemove) return;
+        if (key == "?")
+        {
+            _showShortcuts = !_showShortcuts;
+            return;
+        }
+        if (_showShortcuts) return;
+        switch (key)
+        {
+            case "j" or "k":
+                MoveCursor(key == "j" ? 1 : -1);
+                if (_detail is not null && Cursor is { } next) await OpenMessageAsync(next);
+                break;
+            case "o" or "Enter":
+                if (Cursor is { } cursor) await OpenMessageAsync(cursor);
+                break;
+            case "u":
+                CloseReader();
+                _focusCursor = true;
+                break;
+            case "x":
+                if (Cursor is { } toCheck && !_checked.Add(toCheck.Id)) _checked.Remove(toCheck.Id);
+                break;
+            case "s":
+                if (ShortcutTargets() is { Count: > 0 } toStar)
+                    await ApplyAsync(toStar, toStar.Any(m => !m.Starred) ? MailActions.Star : MailActions.Unstar);
+                break;
+            case "e":
+                if (_folder is not MailFolders.Archive and not MailFolders.Trash) await ApplyAsync(ShortcutTargets(), MailActions.Archive);
+                break;
+            case "#":
+                await ApplyAsync(ShortcutTargets(), MailActions.Trash);
+                break;
+            case "I":
+                await ApplyAsync(ShortcutTargets(), MailActions.MarkRead);
+                break;
+            case "U":
+                var unreadTargets = ShortcutTargets();
+                if (await ApplyAsync(unreadTargets, MailActions.MarkUnread) && _detail is not null && unreadTargets.Any(m => m.Id == _detail.Id)) CloseReader();
+                break;
+            case "r" or "a" or "f":
+                if (_detail is not null && _folder != MailFolders.Drafts)
+                    StartCompose(key == "r" ? ComposeKind.Reply : key == "a" ? ComposeKind.ReplyAll : ComposeKind.Forward);
+                break;
+            case "c":
+                StartCompose(ComposeKind.New);
+                break;
+        }
+    }
+
+    private void MoveCursor(int step)
+    {
+        if (_messages.Count == 0) return;
+        var at = _messages.FindIndex(m => m.Id == (_cursorId ?? _selectedId));
+        var next = at < 0 ? 0 : Math.Clamp(at + step, 0, _messages.Count - 1);
+        _cursorId = _messages[next].Id;
+        _focusCursor = true;
+    }
+
+    private void OnShortcutsKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key is "Escape" or "?") _showShortcuts = false;
+    }
+
+    private static readonly (string[] Keys, string What)[] Shortcuts =
+    [
+        (["j", "k"], "Next / previous message"), (["o", "Enter"], "Open"), (["u"], "Back to the list"), (["x"], "Select"),
+        (["s"], "Star or unstar"), (["e"], "Archive"), (["#"], "Delete"), (["Shift", "I"], "Mark as read"), (["Shift", "U"], "Mark as unread"),
+        (["r"], "Reply"), (["a"], "Reply all"), (["f"], "Forward"), (["c"], "Compose"), (["/"], "Search"), (["Esc"], "Close or clear the selection"),
+        (["?"], "These shortcuts")
+    ];
+
+    // ---- Several mailboxes.
+
+    private IReadOnlyDictionary<Guid, int> _unread = new Dictionary<Guid, int>();
+    private IReadOnlyList<MailMessageSummary>? _confirmForever;
+    private bool _confirmRemove;
+
+    private async Task RefreshUnreadAsync()
+    {
+        try
+        {
+            _unread = await GatedAsync(() => MailService.GetUnreadByAccountAsync(_username));
+        }
+        catch (MailException)
+        {
+            // The counts just stay as they were.
+        }
+    }
+
+    private static string Initial(MailAccountView account) =>
+        (account.DisplayName.Length > 0 ? account.DisplayName : account.Address).Trim() is { Length: > 0 } name ? char.ToUpperInvariant(name[0]).ToString() : "?";
+
+    private static string FromLabel(MailAccountView? account) =>
+        account is null ? string.Empty : account.DisplayName.Length > 0 ? $"{account.DisplayName} <{account.Address}>" : account.Address;
+
+    private Guid ComposeAccount(ComposeState compose) =>
+        Guid.TryParse(compose.From, out var id) && _accounts.Any(account => account.Id == id) ? id : AccountId;
+
+    private static string Count(int n, string noun) => $"{n} {noun}{(n == 1 ? string.Empty : "s")}";
+
+    // One mailbox call at a time from this page: they share the circuit's database context, and
+    // swipes and keys can come faster than the mailbox answers.
+    private readonly SemaphoreSlim _gate = new(1, 1);
+
+    private async Task<T> GatedAsync<T>(Func<Task<T>> call)
+    {
+        await _gate.WaitAsync();
+        try
+        {
+            return await call();
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 
     private void StartCompose(ComposeKind kind)
+    {
+        CloseMenus();
+        ComposeFor(kind);
+        if (_compose is not null) _compose.From = AccountId.ToString();
+    }
+
+    private void ComposeFor(ComposeKind kind)
     {
         if (kind == ComposeKind.New || _detail is null)
         {
@@ -683,7 +1375,7 @@ else
         if (_compose is null) return;
         var compose = _compose;
         var sentFromDraft = compose.DraftId is not null;
-        await RunAsync(() => MailService.SendAsync(_username, AccountId, DraftOf(compose)), "Sent.");
+        await RunAsync(() => MailService.SendAsync(_username, ComposeAccount(compose), DraftOf(compose)), "Sent.");
         if (_error is not null) return;
         _compose = null;
         if (sentFromDraft && _folder == MailFolders.Drafts) await LoadListAsync(reset: true);
@@ -694,8 +1386,16 @@ else
         if (_compose is null) return;
         var compose = _compose;
         string? savedId = null;
-        await RunAsync(async () => savedId = await MailService.SaveDraftAsync(_username, AccountId, DraftOf(compose)), "Saved to Drafts.");
+        var from = ComposeAccount(compose);
+        await RunAsync(async () => savedId = await MailService.SaveDraftAsync(_username, from, DraftOf(compose)),
+            from == AccountId ? "Saved to Drafts." : $"Saved to Drafts in {_accounts.FirstOrDefault(a => a.Id == from)?.Address}.");
         if (savedId is null) return;
+        if (from != AccountId)
+        {
+            // A draft lives in its own mailbox: keep writing it from there.
+            compose.DraftId = null;
+            return;
+        }
         // Saved again later, it replaces this one; the files are in the draft now.
         compose.DraftId = savedId;
         compose.Files.Clear();
@@ -715,12 +1415,49 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        try
+        {
+            await ListBehaviourAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            return;
+        }
+        catch (JSException)
+        {
+            // The list was replaced before the browser got to it; the next render tries again.
+        }
         // The message box's ⌘B/⌘I/⌘K, once per compose.
         if (_compose is { Listening: false } compose)
         {
             compose.Listening = true;
             _composeModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/mail-compose.js");
             await _composeModule.InvokeVoidAsync("listen", _bodyRef);
+        }
+    }
+
+    private async Task ListBehaviourAsync()
+    {
+        if (_account is null || _changingAccount) return;
+        _listModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/mail-list.js");
+        _self ??= DotNetObjectReference.Create(this);
+        _keysHandle ??= await _listModule.InvokeAsync<int>("listenForShortcuts", _self);
+        // The list element is new after the setup screen or a mailbox switch.
+        if (_listRef.Id is { } listId && listId != _attachedTo)
+        {
+            if (_swipeHandle is { } old) await _listModule.InvokeVoidAsync("detach", old);
+            _swipeHandle = await _listModule.InvokeAsync<int>("attach", _listRef, _self);
+            _attachedTo = listId;
+        }
+        if (_placeMenu is { } place)
+        {
+            _placeMenu = null;
+            await _listModule.InvokeVoidAsync("showMenu", _menuRef, place.X, place.Y, place.Anchor, place.RowId);
+        }
+        if (_focusCursor && _cursorId is { } cursor)
+        {
+            _focusCursor = false;
+            await _listModule.InvokeVoidAsync("focusRow", _listRef, cursor);
         }
     }
 
@@ -732,7 +1469,9 @@ else
         try
         {
             var saved = await MailService.SaveImapAccountAsync(_username, _editingAccount ? _account?.Id : null, new MailImapAccountInput(
-                _setup.Address, _setup.DisplayName, _setup.ImapHost, _setup.ImapPort, _setup.SmtpHost, _setup.SmtpPort, _setup.SmtpSecurity,
+                _setup.Address, _setup.DisplayName, _setup.ImapHost, _setup.ImapPort, _setup.SmtpHost, _setup.SmtpPort,
+                // Port 465 is TLS from the start; STARTTLS there fails (06-11-26: only the presets set this).
+                _setup.SmtpPort == 465 ? MailServerSecurity.SslOnConnect : _setup.SmtpSecurity,
                 _setup.Login, _setup.Password));
             if (saved.Warning is { } warning)
             {
@@ -760,6 +1499,7 @@ else
 
     private void StartAddAccount()
     {
+        CloseMenus();
         _setup = new SetupState();
         (_changingAccount, _editingAccount) = (true, false);
     }
@@ -767,12 +1507,14 @@ else
     // Change this IMAP mailbox's settings; the password stays unless retyped.
     private void StartEditAccount()
     {
+        CloseMenus();
         _setup = new SetupState { Address = _account?.Address ?? string.Empty, DisplayName = _account?.DisplayName ?? string.Empty };
         (_changingAccount, _editingAccount) = (true, true);
     }
 
     private async Task DisconnectAsync()
     {
+        _confirmRemove = false;
         if (_account is null) return;
         var removed = _account;
         await MailService.RemoveAccountAsync(_username, removed.Id);
@@ -796,18 +1538,24 @@ else
         _customFolders = [];
         _messages.Clear();
         _nextPage = null;
+        _checked.Clear();
+        _cursorId = _anchorId = null;
+        CloseMenus();
         CloseReader();
         if (account is null) return;
         if (account.LastError is { } lastError && _error is null) _error = $"Last time: {lastError}";
         await LoadListAsync(reset: true);
         try
         {
-            _customFolders = await MailService.ListFoldersAsync(_username, account.Id);
+            _customFolders = await GatedAsync(() => MailService.ListFoldersAsync(_username, account.Id));
         }
         catch (MailException)
         {
             // The standard folders still work; the list itself says what's wrong.
         }
+        // Every mailbox's unread count, for the switcher (a new mailbox has none yet).
+        StateHasChanged();
+        await RefreshUnreadAsync();
     }
 
     private void ApplyPreset(Preset preset)
@@ -849,12 +1597,6 @@ else
     {
         var index = _messages.FindIndex(m => m.Id == id);
         if (index >= 0) _messages[index] = change(_messages[index]);
-    }
-
-    private void RemoveFromList(string id)
-    {
-        _messages.RemoveAll(m => m.Id == id);
-        CloseReader();
     }
 
     private static IReadOnlyList<string> Split(string value) =>

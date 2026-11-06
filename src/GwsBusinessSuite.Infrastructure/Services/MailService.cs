@@ -181,6 +181,42 @@ public sealed class MailService(
         RunAsync(username, accountId, (backend, account) => backend.TrashAsync(account, messageId, cancellationToken), cancellationToken);
 
     // Each inbox counted on its own; one that can't be reached is left out rather than failing the rest.
+    public Task<MailActionResult> ApplyAsync(string username, Guid accountId, IReadOnlyList<string> messageIds, string action,
+        CancellationToken cancellationToken = default)
+    {
+        if (!MailActions.All.Contains(action)) throw new MailException("That isn't something Mail can do.");
+        var ids = messageIds.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal).ToList();
+        if (ids.Count == 0) return Task.FromResult(new MailActionResult(0, null));
+        if (ids.Count > MailLimits.MaxBulk) throw new MailException($"Mail can act on up to {MailLimits.MaxBulk} messages at a time.");
+        return RunAsync(username, accountId, async (backend, account) =>
+            new MailActionResult(ids.Count, await backend.ApplyAsync(account, ids, action, cancellationToken)), cancellationToken);
+    }
+
+    public Task UndoAsync(string username, Guid accountId, MailUndo undo, CancellationToken cancellationToken = default) =>
+        RunAsync(username, accountId, async (backend, account) =>
+        {
+            await backend.UndoAsync(account, undo, cancellationToken);
+            return true;
+        }, cancellationToken);
+
+    public async Task<IReadOnlyDictionary<Guid, int>> GetUnreadByAccountAsync(string username, CancellationToken cancellationToken = default)
+    {
+        var ids = await db.MailAccounts.AsNoTracking().Where(account => account.Username == username).Select(account => account.Id).ToListAsync(cancellationToken);
+        var counts = new Dictionary<Guid, int>();
+        foreach (var id in ids)
+        {
+            try
+            {
+                counts[id] = await RunAsync(username, id, (backend, account) => backend.UnreadCountAsync(account, cancellationToken), cancellationToken);
+            }
+            catch (MailException)
+            {
+                // That mailbox's own page says what's wrong.
+            }
+        }
+        return counts;
+    }
+
     public async Task<int?> GetUnreadCountAsync(string username, CancellationToken cancellationToken = default)
     {
         var ids = await db.MailAccounts.AsNoTracking().Where(account => account.Username == username).Select(account => account.Id).ToListAsync(cancellationToken);
