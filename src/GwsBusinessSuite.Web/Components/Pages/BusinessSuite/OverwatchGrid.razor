@@ -42,6 +42,8 @@
 @inject GwsBusinessSuite.Application.LiveLayers.PowerOutageService PowerOutageService
 @inject GwsBusinessSuite.Infrastructure.Services.InternetOutageService InternetOutageService
 @inject GwsBusinessSuite.Infrastructure.Services.SignalConvergenceService SignalConvergenceService
+@inject GwsBusinessSuite.Application.LiveLayers.AirportStatusService AirportStatusService
+@inject GwsBusinessSuite.Application.LiveLayers.SpaceWeatherService SpaceWeatherService
 @inject ICameraFavoritesService CameraFavoritesService
 @inject ICameraSnapshotAnalysisService CameraSnapshotAnalysisService
 @inject IBusinessInfoService BusinessInfoService
@@ -274,10 +276,31 @@
                         title="Air quality index across the view (Open-Meteo, hourly model)" @onclick="ToggleAirQualityAsync">
                     AIR QUALITY [@(_airQualityOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="airports" class="tg-toggle @(_airportsOn ? "tg-toggle-on" : "")"
+                        title="US airport ground stops, delay programs, delays and closures (FAA airport status, about 80 major airports)" @onclick="ToggleAirportsAsync">
+                    AIRPORT DELAYS [@(_airportsOn ? "ON" : "OFF")]
+                </button>
             </div>
             @if ((_aircraftOn || _airQualityOn) && !string.IsNullOrWhiteSpace(_airSummary))
             {
                 <div class="tg-hazard-summary">@_airSummary</div>
+            }
+            @if (_airportsOn && !string.IsNullOrWhiteSpace(_airportSummary))
+            {
+                <div class="tg-hazard-summary">@_airportSummary</div>
+            }
+        </div>
+        <div class="tg-layer-group">
+            <div class="tg-layer-group-title">SPACE</div>
+            <div class="tg-layer-buttons">
+                <button type="button" data-tg-toggle="aurora" class="tg-toggle @(_auroraOn ? "tg-toggle-on" : "")"
+                        title="Where the aurora may be seen in the next hour (NOAA SWPC's OVATION forecast), and the planetary Kp index" @onclick="ToggleAuroraAsync">
+                    AURORA [@(_auroraOn ? "ON" : "OFF")]
+                </button>
+            </div>
+            @if (_auroraOn && !string.IsNullOrWhiteSpace(_auroraSummary))
+            {
+                <div class="tg-hazard-summary">@_auroraSummary</div>
             }
         </div>
         <div class="tg-layer-group">
@@ -1791,6 +1814,8 @@
             _outagesOn ? TimedAsync("power outages", PushOutagesAsync) : Task.CompletedTask,
             _internetOn ? TimedAsync("internet outages", PushInternetAsync) : Task.CompletedTask,
             _convergenceOn ? TimedAsync("convergence", PushConvergenceAsync) : Task.CompletedTask,
+            _airportsOn ? TimedAsync("airports", PushAirportsAsync) : Task.CompletedTask,
+            _auroraOn ? TimedAsync("aurora", PushAuroraAsync) : Task.CompletedTask,
             _cityTrafficOn ? TimedAsync("city traffic", PushCityTrafficAsync) : Task.CompletedTask);
         if (Current()) StateHasChanged();
     }
@@ -2389,7 +2414,7 @@
     private bool _helpOpen;
 
     private int ActiveLayerCount =>
-        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
+        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _airportsOn, _auroraOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
 
     private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {
@@ -3867,6 +3892,98 @@
         {
             Logger.LogWarning(ex, "Overwatch convergence layer failed");
             _convergenceSummary = "Convergence couldn't be worked out just now.";
+        }
+    }
+
+    // ---- Airport status (FAA) and the aurora (NOAA SWPC), 05-11-26. ----
+    private bool _airportsOn;
+    private string? _airportSummary;
+    private bool _auroraOn;
+    private string? _auroraSummary;
+    // The forecast drawn last, so a pan doesn't redraw the same aurora.
+    private DateTimeOffset? _auroraDrawn;
+
+    private async Task ToggleAirportsAsync()
+    {
+        _airportsOn = !_airportsOn;
+        if (_airportsOn)
+        {
+            await PushAirportsAsync();
+        }
+        else
+        {
+            _airportSummary = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearAirportStatus");
+        }
+    }
+
+    private async Task PushAirportsAsync()
+    {
+        try
+        {
+            var airports = await AirportStatusService.GetAsync();
+            await JS.InvokeVoidAsync("tacticalGlobe.setAirportStatus", HazardPayload(airports));
+            var stops = airports.Where(a => a.Severity == "major").Select(a => a.Id["faa-".Length..]).ToList();
+            _airportSummary = airports.Count == 0
+                ? "FAA: no ground stops, delay programs or delays reported right now."
+                : $"FAA: {airports.Count} {(airports.Count == 1 ? "AIRPORT" : "AIRPORTS")} WITH DELAYS" +
+                  (stops.Count > 0 ? $" · stopped or closed: {string.Join(", ", stops)}" : string.Empty);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch airport status layer failed");
+            _airportSummary = "Airport status couldn't be shown just now.";
+        }
+    }
+
+    private async Task ToggleAuroraAsync()
+    {
+        _auroraOn = !_auroraOn;
+        if (_auroraOn)
+        {
+            await PushAuroraAsync();
+        }
+        else
+        {
+            _auroraSummary = null;
+            _auroraDrawn = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearAurora");
+        }
+    }
+
+    private async Task PushAuroraAsync()
+    {
+        try
+        {
+            var forecast = await SpaceWeatherService.GetAsync();
+            if (forecast is null)
+            {
+                _auroraSummary = "The aurora forecast couldn't be reached just now.";
+                return;
+            }
+            var drawn = forecast.ForecastFor ?? DateTimeOffset.MinValue;
+            if (_auroraDrawn != drawn)
+            {
+                await JS.InvokeVoidAsync("tacticalGlobe.setAurora", new
+                {
+                    rows = GwsBusinessSuite.Application.LiveLayers.AuroraForecast.Rows,
+                    columns = GwsBusinessSuite.Application.LiveLayers.AuroraForecast.Columns,
+                    edge = GwsBusinessSuite.Application.LiveLayers.AuroraForecast.BandEdge,
+                    north = Convert.ToBase64String(forecast.North),
+                    south = Convert.ToBase64String(forecast.South)
+                });
+                _auroraDrawn = drawn;
+            }
+            _auroraSummary = (forecast.Kp is { } kp ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"KP {kp:0.0} ({forecast.KpLabel.ToUpperInvariant()})") : "KP NOT KNOWN") +
+                $" · best chance of seeing it {forecast.Peak}%" +
+                (forecast.ForecastFor is { } at ? $" · forecast for {at.ToLocalTime().ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture)}" : string.Empty);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch aurora layer failed");
+            _auroraSummary = "The aurora couldn't be shown just now.";
         }
     }
 

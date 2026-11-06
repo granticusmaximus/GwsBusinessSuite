@@ -18,6 +18,8 @@ public static class HazardKinds
     public const string Drought = "drought";
     // IODA internet outages (InternetOutageService), drawn by their own layer.
     public const string Internet = "internet";
+    // FAA airport ground stops, delays and closures (AirportStatusService), drawn by their own layer.
+    public const string Airport = "airport";
 }
 
 public sealed record HazardFeature(

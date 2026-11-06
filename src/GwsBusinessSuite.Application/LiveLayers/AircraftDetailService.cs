@@ -338,6 +338,13 @@ public sealed partial class AircraftDetailService(HttpClient httpClient, IMemory
         return [.. airports];
     });
 
+    // One airport by its IATA code (the FAA's status feed names US airports this way).
+    public static AirportInfo? AirportByCode(string? code) =>
+        code is not null && AirportsByCode.Value.TryGetValue(code.Trim(), out var airport) ? airport : null;
+
+    private static readonly Lazy<Dictionary<string, AirportInfo>> AirportsByCode = new(() =>
+        Airports.Value.GroupBy(a => a.Code, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase));
+
     private static double Bearing(double lat1, double lon1, double lat2, double lon2)
     {
         var dLon = ToRadians(lon2 - lon1);

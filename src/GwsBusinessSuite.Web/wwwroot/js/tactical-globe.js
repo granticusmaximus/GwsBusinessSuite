@@ -266,6 +266,8 @@ window.tacticalGlobe = (function () {
         await viewer.dataSources.add(internetDataSource);
         const convergenceDataSource = new Cesium.CustomDataSource('tg-convergence');
         await viewer.dataSources.add(convergenceDataSource);
+        const airportDataSource = new Cesium.CustomDataSource('tg-airports');
+        await viewer.dataSources.add(airportDataSource);
         const signDataSource = new Cesium.CustomDataSource('tg-signs');
         await viewer.dataSources.add(signDataSource);
         const roadWeatherDataSource = new Cesium.CustomDataSource('tg-road-weather');
@@ -366,7 +368,7 @@ window.tacticalGlobe = (function () {
 
         viewers.set(containerId, {
             containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities, worldNewsDataSource,
-            hazardDataSource, internetDataSource, convergenceDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
+            hazardDataSource, internetDataSource, convergenceDataSource, airportDataSource, auroraLayers: [], signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
             ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null,
             renderTimer, pulseTimer: null
         });
@@ -2488,7 +2490,7 @@ window.tacticalGlobe = (function () {
 
     const hazardColors = {
         earthquake: '#ff6bd6', wildfire: '#ff5a1f', river: '#3ba7ff',
-        cyclone: '#00e0c6', flood: '#2f6bff', volcano: '#ff2e4d', drought: '#d4a72c', internet: '#9dff3c'
+        cyclone: '#00e0c6', flood: '#2f6bff', volcano: '#ff2e4d', drought: '#d4a72c', internet: '#9dff3c', airport: '#ffe14d'
     };
     const hazardSizes = { major: 20, moderate: 15, minor: 11 };
 
@@ -2505,6 +2507,76 @@ window.tacticalGlobe = (function () {
     function clearInternetOutages(containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (entry) entry.internetDataSource.entities.removeAll();
+    }
+
+    function setAirportStatus(airports, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) drawHazardPins(entry.airportDataSource, airports);
+    }
+
+    function clearAirportStatus(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) entry.airportDataSource.entities.removeAll();
+    }
+
+    // aurora: { rows, columns, edge, north, south }. Each band is base64 of rows x columns bytes,
+    // the chance (0-100) of seeing the aurora: north from 90° down to the edge latitude, south
+    // from -edge down to -90°, each row from 180°W eastward. Painted as two imagery layers, so they
+    // drape over the poles and the date line like any map tile.
+    function setAurora(aurora, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry || !aurora) return Promise.resolve();
+        clearAurora(containerId);
+        const bands = [
+            { data: aurora.north, rectangle: Cesium.Rectangle.fromDegrees(-180, aurora.edge - 0.5, 180, 90) },
+            { data: aurora.south, rectangle: Cesium.Rectangle.fromDegrees(-180, -90, 180, -aurora.edge + 0.5) }
+        ];
+        const token = entry.auroraToken = (entry.auroraToken || 0) + 1;
+        return Promise.all(bands.map(function (band) {
+            const url = auroraImage(band.data, aurora.rows, aurora.columns);
+            return url ? Cesium.SingleTileImageryProvider.fromUrl(url, { rectangle: band.rectangle }) : null;
+        })).then(function (providers) {
+            // A newer draw (or a clear) since this one started wins.
+            if (entry.auroraToken !== token || entry.viewer.isDestroyed()) return;
+            providers.forEach(function (provider) {
+                if (!provider) return;
+                const layer = entry.viewer.imageryLayers.addImageryProvider(provider);
+                layer.alpha = 0.85;
+                entry.auroraLayers.push(layer);
+            });
+            entry.viewer.scene.requestRender();
+        });
+    }
+
+    function auroraImage(base64, rows, columns) {
+        const bytes = Uint8Array.from(atob(base64 || ''), function (c) { return c.charCodeAt(0); });
+        if (bytes.length !== rows * columns || !bytes.some(function (b) { return b >= 3; })) return null;
+        const canvas = document.createElement('canvas');
+        canvas.width = columns;
+        canvas.height = rows;
+        const context = canvas.getContext('2d');
+        const image = context.createImageData(columns, rows);
+        for (let i = 0; i < bytes.length; i++) {
+            const chance = bytes[i];
+            if (chance < 3) continue;
+            // Green, turning yellow-white where the chance is high.
+            const strong = Math.min(1, chance / 50);
+            image.data[i * 4] = Math.round(60 + 195 * strong);
+            image.data[i * 4 + 1] = 255;
+            image.data[i * 4 + 2] = Math.round(120 + 80 * strong);
+            image.data[i * 4 + 3] = Math.min(230, 40 + chance * 6);
+        }
+        context.putImageData(image, 0, 0);
+        return canvas.toDataURL('image/png');
+    }
+
+    function clearAurora(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.auroraToken = (entry.auroraToken || 0) + 1;
+        entry.auroraLayers.forEach(function (layer) { entry.viewer.imageryLayers.remove(layer, true); });
+        entry.auroraLayers = [];
+        if (!entry.viewer.isDestroyed()) entry.viewer.scene.requestRender();
     }
 
     function drawHazardPins(dataSource, hazards) {
@@ -2697,7 +2769,7 @@ window.tacticalGlobe = (function () {
 
     const hazardKindLabels = {
         earthquake: 'EARTHQUAKE', wildfire: 'WILDFIRE', river: 'RIVER FLOODING',
-        cyclone: 'TROPICAL CYCLONE', flood: 'FLOOD', volcano: 'VOLCANO', drought: 'DROUGHT', internet: 'INTERNET OUTAGE'
+        cyclone: 'TROPICAL CYCLONE', flood: 'FLOOD', volcano: 'VOLCANO', drought: 'DROUGHT', internet: 'INTERNET OUTAGE', airport: 'AIRPORT STATUS'
     };
 
     // Reuses the incident window (same chrome, same single-instance handling).
@@ -3683,6 +3755,10 @@ window.tacticalGlobe = (function () {
         clearInternetOutages: clearInternetOutages,
         setConvergence: setConvergence,
         clearConvergence: clearConvergence,
+        setAirportStatus: setAirportStatus,
+        clearAirportStatus: clearAirportStatus,
+        setAurora: setAurora,
+        clearAurora: clearAurora,
         clearCoverageMarkers: clearCoverageMarkers,
         setWeatherSnapshot: setWeatherSnapshot,
         dispose: dispose,

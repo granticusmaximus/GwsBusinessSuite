@@ -87,11 +87,17 @@ that becomes a toolset beside `search_web` and `read_web_page`:
   - `list_channels` tells the model what it can reach.
   - Settings shows each channel as ready, needs a key (and which one), or paused because the site refused, with a Check button.
 
-## Unit 3 - Small global layers (Overwatch)
+## Unit 3 - Small global layers (Overwatch) - DONE 06-11-26
 
-- [ ] WMO severe-weather alerts outside the US (WEATHER, beside the NWS alerts).
-- [ ] FAA airport ground stops and delays (AIR).
-- [ ] NOAA SWPC aurora oval and Kp index (new SPACE group).
+- [x] **FAA airport ground stops, delays and closures** (AIR > AIRPORT DELAYS), placed from airports.csv.
+  - The live run showed most "closures" are pilot notices (NOTAMs) closing the airport to some
+    traffic: LAX, LAS and SAN were closed only to visiting private planes. Those, and closures at
+    set hours each day, are minor.
+- [x] **NOAA SWPC aurora oval** (OVATION) and Kp index (SPACE > AURORA), drawn as two imagery layers from byte grids.
+- [ ] **WMO severe-weather alerts:** not built.
+  - `wmo_all.json` has 2,051 alerts with no coordinates, only an area name and a link to each alert's CAP file.
+  - Placing them would mean fetching about 2,000 files per refresh, and a guessed CAP path answered 403.
+  - GDACS already covers the world's cyclones and floods.
 
 ## Unit 4 - Cyber incidents on the globe (Overwatch)
 

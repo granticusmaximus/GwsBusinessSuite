@@ -418,6 +418,50 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         consoleErrors.Should().BeEmpty();
     }
 
+    // Unit 3 (06-11-26): FAA airport pins, and the aurora as two imagery layers that a clear removes.
+    [Fact]
+    public async Task SkyLayers_ShouldDrawAirportsAndTheAurora_AndClearThem()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        var counts = await page.EvaluateAsync<int[]>("""
+            async () => {
+                // Counts the imagery layers added and removed from here on (the basemap came before).
+                let live = 0;
+                const add = Cesium.ImageryLayerCollection.prototype.addImageryProvider;
+                Cesium.ImageryLayerCollection.prototype.addImageryProvider = function (provider, index) { live++; return add.call(this, provider, index); };
+                const remove = Cesium.ImageryLayerCollection.prototype.remove;
+                Cesium.ImageryLayerCollection.prototype.remove = function (layer, destroy) { live--; return remove.call(this, layer, destroy); };
+                window.tacticalGlobe.setAirportStatus([
+                    { id: 'faa-JFK', kind: 'airport', title: 'JFK (New York): ground stop', detail: 'Ground stop (thunderstorms)', severity: 'major', url: 'https://nasstatus.faa.gov/', lat: 40.64, lon: -73.78 }
+                ]);
+                const rows = 51, columns = 360;
+                const band = new Uint8Array(rows * columns);
+                for (let c = 0; c < columns; c++) { band[20 * columns + c] = 30; band[21 * columns + c] = 8; }
+                let binary = '';
+                band.forEach(function (b) { binary += String.fromCharCode(b); });
+                const base64 = btoa(binary);
+                await window.tacticalGlobe.setAurora({ rows, columns, edge: 40, north: base64, south: base64 });
+                const drawn = live;
+                await window.tacticalGlobe.setAurora({ rows, columns, edge: 40, north: base64, south: base64 });
+                const redrawn = live;
+                window.tacticalGlobe.clearAurora();
+                const cleared = live;
+                window.tacticalGlobe.clearAirportStatus();
+                // A forecast with no aurora anywhere draws nothing.
+                const quiet = btoa(String.fromCharCode.apply(null, Array.from(new Uint8Array(rows * columns))));
+                await window.tacticalGlobe.setAurora({ rows, columns, edge: 40, north: quiet, south: quiet });
+                return [drawn, redrawn, cleared, live];
+            }
+            """);
+        await page.WaitForTimeoutAsync(300);
+
+        counts.Should().Equal([2, 2, 0, 0], "one layer per polar band, replaced (not stacked) on a redraw, and gone after a clear");
+        consoleErrors.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task ClickingAnAircraft_ShouldShowItsDetails_AndDrawItsPath()
     {
