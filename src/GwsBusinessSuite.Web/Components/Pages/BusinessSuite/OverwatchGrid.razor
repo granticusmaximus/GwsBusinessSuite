@@ -44,6 +44,7 @@
 @inject GwsBusinessSuite.Infrastructure.Services.SignalConvergenceService SignalConvergenceService
 @inject GwsBusinessSuite.Application.LiveLayers.AirportStatusService AirportStatusService
 @inject GwsBusinessSuite.Application.LiveLayers.SpaceWeatherService SpaceWeatherService
+@inject GwsBusinessSuite.Infrastructure.Services.SatelliteService SatelliteService
 @inject ICameraFavoritesService CameraFavoritesService
 @inject ICameraSnapshotAnalysisService CameraSnapshotAnalysisService
 @inject IBusinessInfoService BusinessInfoService
@@ -304,10 +305,18 @@
                         title="Where the aurora may be seen in the next hour (NOAA SWPC's OVATION forecast), and the planetary Kp index" @onclick="ToggleAuroraAsync">
                     AURORA [@(_auroraOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="satellites" class="tg-toggle @(_satellitesOn ? "tg-toggle-on" : "")"
+                        title="Space stations (with their next orbit) and the brightest satellites, from CelesTrak's orbital elements, moving every 30 seconds" @onclick="ToggleSatellitesAsync">
+                    SATELLITES [@(_satellitesOn ? "ON" : "OFF")]
+                </button>
             </div>
             @if (_auroraOn && !string.IsNullOrWhiteSpace(_auroraSummary))
             {
                 <div class="tg-hazard-summary">@_auroraSummary</div>
+            }
+            @if (_satellitesOn && !string.IsNullOrWhiteSpace(_satelliteSummary))
+            {
+                <div class="tg-hazard-summary">@_satelliteSummary</div>
             }
         </div>
         <div class="tg-layer-group">
@@ -2423,7 +2432,7 @@
     private bool _helpOpen;
 
     private int ActiveLayerCount =>
-        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _airportsOn, _auroraOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
+        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _airportsOn, _auroraOn, _satellitesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
 
     private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {
@@ -3996,6 +4005,67 @@
         }
     }
 
+    // ---- Satellites (CelesTrak elements, SGP4 here), 06-11-26: moved every 30 seconds. ----
+    private bool _satellitesOn;
+    private string? _satelliteSummary;
+    private CancellationTokenSource? _satellitesCts;
+
+    private async Task ToggleSatellitesAsync()
+    {
+        _satellitesOn = !_satellitesOn;
+        _satellitesCts?.Cancel();
+        _satellitesCts = null;
+        if (!_satellitesOn)
+        {
+            _satelliteSummary = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearSatellites");
+            return;
+        }
+        await PushSatellitesAsync();
+        var cts = _satellitesCts = new CancellationTokenSource();
+        _ = RefreshSatellitesAsync(cts.Token);
+    }
+
+    private async Task RefreshSatellitesAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                await InvokeAsync(async () =>
+                {
+                    if (!_satellitesOn || ct.IsCancellationRequested) return;
+                    await PushSatellitesAsync();
+                    StateHasChanged();
+                });
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task PushSatellitesAsync()
+    {
+        try
+        {
+            var result = await SatelliteService.GetAsync();
+            await JS.InvokeVoidAsync("tacticalGlobe.setSatellites", result.Satellites.Select(s => new
+            {
+                id = s.Id, name = s.Name, group = s.Group, lat = s.Latitude, lon = s.Longitude, altitudeKm = s.AltitudeKm,
+                periodMinutes = s.PeriodMinutes, with = s.With,
+                path = s.Path.SelectMany(p => new[] { p.Longitude, p.Latitude, p.AltitudeKm * 1000 })
+            }));
+            var stations = result.Satellites.Count(s => s.Group == GwsBusinessSuite.Infrastructure.Services.SatelliteService.StationGroup);
+            _satelliteSummary = result.Note ?? $"{stations} SPACE STATIONS · {result.Satellites.Count - stations} OTHER SATELLITES · moved {DateTimeOffset.Now.ToGwsTime()}" +
+                (result.ElementsFrom is { } from ? $" · orbits from {from.ToLocalGwsDateTime()}" : string.Empty);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch satellites layer failed");
+            _satelliteSummary = "Satellites couldn't be shown just now.";
+        }
+    }
+
     private static int SeverityRank(string severity) => severity switch { "major" => 0, "moderate" => 1, _ => 2 };
 
     private static IEnumerable<object> HazardPayload(IEnumerable<GwsBusinessSuite.Application.Hazards.HazardFeature> features) =>
@@ -4223,6 +4293,7 @@
         _driveCts?.Cancel();
         _aircraftCts?.Cancel();
         _shipsCts?.Cancel();
+        _satellitesCts?.Cancel();
         // The prerendered instance never initializes the browser viewport.
         if (_dotNetRef is null) return;
         try

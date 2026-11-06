@@ -1031,6 +1031,21 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
         }).AddHttpMessageHandler<RefusedHostPauseHandler>();
+        // Threat Intelligence fresh feeds (06-11-26): CIRCL new CVEs, GitHub malicious packages, and
+        // SEC 8-K Item 1.05 filings once SecEdgar:ContactEmail is set.
+        services.AddOptions<SecEdgarOptions>().Bind(configuration.GetSection(SecEdgarOptions.SectionName));
+        services.AddHttpClient<ThreatFeedService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(25);
+            client.MaxResponseContentBufferSize = 8 * 1024 * 1024;
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-ThreatIntel/1.0 (+https://www.gwsapp.net)");
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
+        // Satellites from CelesTrak's elements (06-11-26), fetched at most every 2 hours.
+        services.AddHttpClient<SatelliteService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(25);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
         services.AddHttpClient<GwsBusinessSuite.Application.LiveLayers.SpaceWeatherService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(25);

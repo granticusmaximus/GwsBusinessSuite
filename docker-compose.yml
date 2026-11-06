@@ -43,6 +43,8 @@ services:
       Reach__BlueskyHandle: ${REACH_BLUESKY_HANDLE:-}
       Reach__BlueskyAppPassword: ${REACH_BLUESKY_APP_PASSWORD:-}
       Reach__XBearerToken: ${REACH_X_BEARER_TOKEN:-}
+      # Threat Intelligence's SEC 8-K feed: SEC asks automated requests to name a contact address.
+      SecEdgar__ContactEmail: ${SEC_EDGAR_CONTACT_EMAIL:-}
       # Optional: lets the native macOS app skip the browser's mandatory MFA challenge via
       # /auth/device-login. Absent/empty disables that endpoint entirely (fails closed). Keep the
       # actual secret in the gitignored .env file as NATIVE_APP_DEVICE_SECRET, never here.

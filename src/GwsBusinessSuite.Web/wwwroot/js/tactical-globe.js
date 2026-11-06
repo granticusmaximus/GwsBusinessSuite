@@ -268,6 +268,8 @@ window.tacticalGlobe = (function () {
         await viewer.dataSources.add(convergenceDataSource);
         const airportDataSource = new Cesium.CustomDataSource('tg-airports');
         await viewer.dataSources.add(airportDataSource);
+        const satelliteDataSource = new Cesium.CustomDataSource('tg-satellites');
+        await viewer.dataSources.add(satelliteDataSource);
         const signDataSource = new Cesium.CustomDataSource('tg-signs');
         await viewer.dataSources.add(signDataSource);
         const roadWeatherDataSource = new Cesium.CustomDataSource('tg-road-weather');
@@ -347,6 +349,8 @@ window.tacticalGlobe = (function () {
                 openHazardPanel(entity._tacticalGlobeHazard);
             } else if (entity && entity._tacticalGlobeConvergence) {
                 openConvergencePanel(entity._tacticalGlobeConvergence);
+            } else if (entity && entity._tacticalGlobeSatellite) {
+                openSatellitePanel(entity._tacticalGlobeSatellite);
             } else if (entity && entity._tacticalGlobePhoto) {
                 openPhotoPanel(entity._tacticalGlobePhoto);
             } else if (entity && entity._tacticalGlobeSign) {
@@ -370,7 +374,7 @@ window.tacticalGlobe = (function () {
 
         viewers.set(containerId, {
             containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities, worldNewsDataSource,
-            hazardDataSource, internetDataSource, convergenceDataSource, airportDataSource, auroraLayers: [], signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
+            hazardDataSource, internetDataSource, convergenceDataSource, airportDataSource, auroraLayers: [], satelliteDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
             ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null,
             renderTimer, pulseTimer: null
         });
@@ -2768,6 +2772,72 @@ window.tacticalGlobe = (function () {
         if (!entry.viewer.isDestroyed()) entry.viewer.scene.requestRender();
     }
 
+    // satellites: [{ id, name, group, lat, lon, altitudeKm, periodMinutes, with: [..], path: [lon, lat, metres, ...] }].
+    // Drawn at their real height; stations carry their next orbit as a line, and names show once
+    // the camera is within about 8,000 km.
+    function setSatellites(satellites, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        const entities = entry.satelliteDataSource.entities;
+        entities.suspendEvents();
+        entities.removeAll();
+        const near = new Cesium.DistanceDisplayCondition(0, 8.0e6);
+        (satellites || []).forEach(function (sat) {
+            const station = sat.group === 'space station';
+            const color = Cesium.Color.fromCssColorString(station ? '#7ff3ff' : '#d9e4ff');
+            const dot = entities.add({
+                position: Cesium.Cartesian3.fromDegrees(sat.lon, sat.lat, sat.altitudeKm * 1000),
+                point: { pixelSize: station ? 9 : 5, color: color, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                label: {
+                    text: String(sat.name || '').toUpperCase(), font: '600 10px monospace', fillColor: color, outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -14),
+                    distanceDisplayCondition: station ? undefined : near, disableDepthTestDistance: Number.POSITIVE_INFINITY
+                }
+            });
+            dot._tacticalGlobeSatellite = sat;
+            if (station && sat.path && sat.path.length >= 6) {
+                entities.add({
+                    polyline: {
+                        positions: Cesium.Cartesian3.fromDegreesArrayHeights(sat.path), width: 1.5, arcType: Cesium.ArcType.NONE,
+                        material: new Cesium.PolylineDashMaterialProperty({ color: color.withAlpha(0.7), dashLength: 12 })
+                    }
+                });
+            }
+        });
+        entities.resumeEvents();
+        entry.viewer.scene.requestRender();
+    }
+
+    function clearSatellites(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.satelliteDataSource.entities.removeAll();
+        entry.viewer.scene.requestRender();
+    }
+
+    function openSatellitePanel(sat) {
+        closeIncidentPanel();
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel';
+        const facts = [['KIND', sat.group], ['ALTITUDE', Math.round(sat.altitudeKm).toLocaleString('en-US') + ' KM'],
+            ['ONE ORBIT', Math.round(sat.periodMinutes) + ' MIN'], ['NORAD ID', sat.id]];
+        if (sat.with && sat.with.length) facts.push(['WITH', sat.with.join(', ')]);
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header"><span>' + escapeHtml(sat.name) + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button></div>' +
+            '<div class="tg-stream-panel-body">' +
+            '<dl class="tg-incident-facts">' + facts.map(function (f) {
+                return '<dt>' + f[0] + '</dt><dd>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
+            }).join('') + '</dl>' +
+            (sat.group === 'space station' ? '<div>The dashed line is where it goes over its next orbit.</div>' : '') +
+            '<div class="tg-stream-panel-meta"><a href="https://celestrak.org/satcat/table-satcat.php?CATNR=' + encodeURIComponent(sat.id) +
+            '" target="_blank" rel="noopener noreferrer">CELESTRAK CATALOG ENTRY</a></div>' +
+            '</div>';
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        if (!openAsModal(panel, closeIncidentPanel)) return;
+        incidentPanel = panel;
+    }
+
     function drawHazardPins(dataSource, hazards) {
         dataSource.entities.suspendEvents();
         dataSource.entities.removeAll();
@@ -3949,6 +4019,8 @@ window.tacticalGlobe = (function () {
         setAurora: setAurora,
         clearAurora: clearAurora,
         readPhotoExif: readPhotoExif,
+        setSatellites: setSatellites,
+        clearSatellites: clearSatellites,
         placePhoto: placePhoto,
         clearCoverageMarkers: clearCoverageMarkers,
         setWeatherSnapshot: setWeatherSnapshot,

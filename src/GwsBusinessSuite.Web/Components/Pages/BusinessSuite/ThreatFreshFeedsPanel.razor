@@ -1,0 +1,146 @@
+@using GwsBusinessSuite.Infrastructure.Services
+@inject ThreatFeedService Feeds
+@inject ILogger<ThreatFreshFeedsPanel> Logger
+
+@* Three fresh feeds for Threat Intelligence (06-11-26): new CVEs (CIRCL), malicious packages
+   (GitHub Advisory Database) and cyber-incident 8-K filings (SEC EDGAR, once a contact is set).
+   Rendered inside the page's card row; each card loads on its own. *@
+<div class="col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-white border-bottom py-3">
+            <span class="fw-semibold"><i class="bi bi-lightning-charge" aria-hidden="true"></i> New CVEs (last 72 hours)</span>
+        </div>
+        <div class="card-body">
+            @if (_cves is null)
+            {
+                <LoadingIndicator Message="Loading new CVEs…" />
+            }
+            else if (_cves.Count == 0)
+            {
+                <p class="text-secondary mb-0">No new CVEs came back from CIRCL just now.</p>
+            }
+            else
+            {
+                <ul class="list-group list-group-flush">
+                    @foreach (var cve in _cves.Take(Shown))
+                    {
+                        <li class="list-group-item px-0">
+                            <div class="d-flex justify-content-between gap-2">
+                                <a class="fw-semibold" href="https://vulnerability.circl.lu/vuln/@Uri.EscapeDataString(cve.Id)" target="_blank" rel="noopener noreferrer">@cve.Id</a>
+                                @if (cve.Score is { } score)
+                                {
+                                    <span class="badge @(score >= 9 ? "bg-danger" : score >= 7 ? "bg-warning text-dark" : "bg-secondary")">@score.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)</span>
+                                }
+                            </div>
+                            <div class="small text-secondary">
+                                @Origin(cve)published @cve.Published.ToLocalGwsDateTime()
+                            </div>
+                            <div class="small">@cve.Summary</div>
+                        </li>
+                    }
+                </ul>
+                <div class="form-text">@_cves.Count in all, from CIRCL's Vulnerability-Lookup.</div>
+            }
+        </div>
+    </div>
+</div>
+
+<div class="col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-white border-bottom py-3">
+            <span class="fw-semibold"><i class="bi bi-box-seam" aria-hidden="true"></i> Malicious packages</span>
+        </div>
+        <div class="card-body">
+            @if (_packages is null)
+            {
+                <LoadingIndicator Message="Loading malicious packages…" />
+            }
+            else if (_packages.Count == 0)
+            {
+                <p class="text-secondary mb-0">The GitHub Advisory Database didn't answer just now.</p>
+            }
+            else
+            {
+                <ul class="list-group list-group-flush">
+                    @foreach (var package in _packages.Take(Shown))
+                    {
+                        <li class="list-group-item px-0">
+                            <div class="d-flex justify-content-between gap-2">
+                                <a class="fw-semibold text-break" href="@package.Url" target="_blank" rel="noopener noreferrer">@package.Name</a>
+                                <span class="badge bg-secondary-subtle text-secondary-emphasis">@package.Ecosystem</span>
+                            </div>
+                            <div class="small text-secondary">@package.Id @(package.Published is { } at ? $"· {at.ToLocalGwsDateTime()}" : "")</div>
+                        </li>
+                    }
+                </ul>
+                <div class="form-text">Packages published to steal or damage. Never install these; if one is in a project, treat that machine as compromised.</div>
+            }
+        </div>
+    </div>
+</div>
+
+<div class="col-lg-4">
+    <div class="card border-0 shadow-sm h-100">
+        <div class="card-header bg-white border-bottom py-3">
+            <span class="fw-semibold"><i class="bi bi-building-exclamation" aria-hidden="true"></i> Cyber incidents filed with the SEC</span>
+        </div>
+        <div class="card-body">
+            @if (_disclosures is null)
+            {
+                <LoadingIndicator Message="Loading SEC filings…" />
+            }
+            else if (!_disclosures.Configured)
+            {
+                <p class="text-secondary mb-0">@_disclosures.Note</p>
+            }
+            else if (_disclosures.Filings.Count == 0)
+            {
+                <p class="text-secondary mb-0">No 8-K cyber-incident filings (Item 1.05) in the last @ThreatFeedService.DisclosureDays days, or EDGAR didn't answer.</p>
+            }
+            else
+            {
+                <ul class="list-group list-group-flush">
+                    @foreach (var filing in _disclosures.Filings.Take(Shown))
+                    {
+                        <li class="list-group-item px-0">
+                            <a class="fw-semibold" href="@filing.Url" target="_blank" rel="noopener noreferrer">@filing.Company</a>
+                            <div class="small text-secondary">8-K, Item 1.05 · filed @filing.Filed.ToGwsDate()</div>
+                        </li>
+                    }
+                </ul>
+                <div class="form-text">US public companies must file within four business days of deciding an incident is material.</div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private const int Shown = 8;
+
+    // "Vendor · Product · " when the CNA named them.
+    private static string Origin(NewCve cve) =>
+        string.Concat(new[] { cve.Vendor, cve.Product }.Where(part => part is not null).Select(part => part + " · "));
+    private IReadOnlyList<NewCve>? _cves;
+    private IReadOnlyList<MaliciousPackage>? _packages;
+    private CyberDisclosures? _disclosures;
+
+    protected override async Task OnInitializedAsync() =>
+        await Task.WhenAll(
+            Load(async () => _cves = await Feeds.NewCvesAsync(), () => _cves = []),
+            Load(async () => _packages = await Feeds.MaliciousPackagesAsync(), () => _packages = []),
+            Load(async () => _disclosures = await Feeds.CyberDisclosuresAsync(), () => _disclosures = new CyberDisclosures(true, [], null)));
+
+    private async Task Load(Func<Task> load, Action fallback)
+    {
+        try
+        {
+            await load();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Threat Intelligence fresh feed failed");
+            fallback();
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+}

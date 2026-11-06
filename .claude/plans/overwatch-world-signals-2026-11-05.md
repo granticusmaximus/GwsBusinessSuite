@@ -108,9 +108,12 @@ that becomes a toolset beside `search_web` and `read_web_page`:
   - Read from the story's headlines. A denial outweighs a confirmation, which outweighs an attacker's claim.
   - Shown in the Overwatch news window and on the World News page.
 
-## Unit 5 - Satellites (Overwatch)
+## Unit 5 - Satellites (Overwatch) - DONE 06-11-26
 
-- [ ] CelesTrak stations and visible groups, refreshed every 2 h as CelesTrak asks, drawn on orbit in Cesium (SPACE).
+- [x] CelesTrak's stations and visible groups (SPACE > SATELLITES), fetched at most every 2 h as CelesTrak asks, with the last good copy kept for 2 days.
+  - Propagated here with SGP4 (SGP.NET 1.6.0, MIT, no dependencies), and moved every 30 s.
+  - Modules and craft docked to a station share its orbit and show as one dot (live: ISS with Poisk, Nauka and Progress MS-34).
+  - The ISS and Tiangong carry their next orbit as a dashed line. The rest of the stations group (debris, cubesats) shows as plain dots.
 
 ## Unit 6 - Photo placement (Overwatch) - DONE 06-11-26
 
@@ -119,13 +122,15 @@ that becomes a toolset beside `search_web` and `read_web_page`:
   - It flies there, with a pin and a 300 m line the way the camera faced. Clicking the pin shows the details.
   - A photo with no location says so: apps often remove it when sharing.
 
-## Unit 7 - Threat Intel additions
+## Unit 7 - Threat Intel additions - DONE 06-11-26
 
-- [ ] New-CVE ticker (CIRCL, minutes after publication).
-- [ ] Malicious-package advisories (GitHub, `type=malware`).
-- [ ] "Am I affected?": pick the products you use, and get alerted when they appear in CISA KEV
-  (already downloaded) or in new critical CVEs.
-- [ ] SEC 8-K Item 1.05 cyber disclosures. SEC requires requests to state a contact address in the User-Agent header, so this stays off until `SecEdgar:ContactEmail` is set.
+Three new cards on Threat Intelligence (`ThreatFreshFeedsPanel`, `ThreatFeedService`):
+- [x] **New CVEs** (last 72 h) from CIRCL's CVE-list feed (`/api/vulnerability/last/cvelistv5/100`), with the CNA's score.
+  - Its plain `/api/last` was not used: it mixes advisory sources and sorts by "modified".
+- [x] **Malicious packages:** GitHub advisories with `type=malware`. `Reach:GitHubToken`, when set, raises the limit.
+- [x] **"Am I affected?":** already built, as Threat Intelligence > Exposure's software stack (`ThreatStackItem`: KEV in the last 365 days plus NVD in the last 30, as findings and the digest). Nothing new was needed.
+- [x] **SEC 8-K Item 1.05 cyber filings:** off until `SecEdgar:ContactEmail` is set (secret `SEC_EDGAR_CONTACT_EMAIL`).
+  - The parser follows EDGAR's full-text search response but hasn't been called live. It can be once the contact is set.
 
 ## Needs Grant
 
@@ -135,5 +140,5 @@ that becomes a toolset beside `search_web` and `read_web_page`:
   - `REACH_REDDIT_CLIENT_ID` + `REACH_REDDIT_CLIENT_SECRET`
   - `REACH_BLUESKY_HANDLE` + `REACH_BLUESKY_APP_PASSWORD`
   - `REACH_X_BEARER_TOKEN`
-  - `SecEdgar:ContactEmail` (unit 7)
+  - `SEC_EDGAR_CONTACT_EMAIL` (unit 7: SEC asks automated requests to name a contact)
 - Later, if wanted: NASA FIRMS, Cloudflare Radar and ACLED keys.

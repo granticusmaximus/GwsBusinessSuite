@@ -530,6 +530,39 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         return [0xFF, 0xD8, 0xFF, 0xE1, (byte)(app1Length >> 8), (byte)app1Length, (byte)'E', (byte)'x', (byte)'i', (byte)'f', 0, 0, .. tiff, 0xFF, 0xD9];
     }
 
+    // Unit 5 (06-11-26): satellites at their real height, a station's next orbit, and its window.
+    [Fact]
+    public async Task Satellites_ShouldDrawAtTheirHeight_AndOpenAStationsWindow()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        // The globe opens centred on 39.8, -98.5, from far enough out that a station there sits mid-canvas.
+        var error = await page.EvaluateAsync<string?>("""
+            () => {
+                try {
+                    window.tacticalGlobe.setSatellites([
+                        { id: '25544', name: 'ISS (ZARYA)', group: 'space station', lat: 39.8, lon: -98.5, altitudeKm: 415, periodMinutes: 92.9, with: ['POISK'],
+                          path: [-98.5, 39.8, 415000, -95, 42, 415000, -90, 44, 416000] },
+                        { id: '20580', name: 'HST', group: 'visible', lat: 10, lon: 20, altitudeKm: 530, periodMinutes: 95, with: [], path: [] }
+                    ]);
+                    return null;
+                } catch (e) { return String(e && e.stack || e); }
+            }
+            """);
+        error.Should().BeNull();
+        await page.WaitForTimeoutAsync(800);
+        await page.Mouse.ClickAsync(400, 300);
+        await page.WaitForSelectorAsync(".tg-incident-panel:has-text('ISS (ZARYA)')", new PageWaitForSelectorOptions { Timeout = 5000 });
+        var panel = await page.InnerTextAsync(".tg-incident-panel");
+        panel.Should().Contain("415 KM").And.Contain("93 MIN").And.Contain("POISK").And.Contain("next orbit");
+
+        await page.ClickAsync(".tg-incident-panel .tg-stream-panel-close");
+        await page.EvaluateAsync("() => window.tacticalGlobe.clearSatellites()");
+        consoleErrors.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task ClickingAnAircraft_ShouldShowItsDetails_AndDrawItsPath()
     {
