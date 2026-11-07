@@ -88,14 +88,14 @@ public sealed partial class PwaTests(PlaywrightBrowserFixture fixture)
         var page = await context.NewPageAsync();
 
         await page.GotoAsync($"{server.Origin}/admin/home");
-        await page.WaitForFunctionAsync("navigator.serviceWorker.ready.then(() => true)", null, new() { Timeout = 15000 });
-        // The first load isn't controlled yet (clients.claim takes over open pages).
-        await page.WaitForFunctionAsync("!!navigator.serviceWorker.controller", null, new() { Timeout = 15000 });
+        // The first load isn't controlled yet: clients.claim takes over open pages once it's active.
+        await page.WaitForFunctionAsync("!!navigator.serviceWorker.controller", null, new() { Timeout = 30000 });
         (await page.EvaluateAsync<string>("navigator.serviceWorker.controller.scriptURL")).Should().Be($"{server.Origin}/sw.js");
 
-        // Offline: the browser's switch and, in case it doesn't reach the worker, no server either.
+        // Offline: the browser's switch and, in case it doesn't reach the worker, a server that drops
+        // every connection (still listening: a restarted listener isn't dependable on every platform).
         await context.SetOfflineAsync(true);
-        server.Stop();
+        server.Refusing = true;
         await page.GotoAsync($"{server.Origin}/admin/world-news");
         (await page.TextContentAsync("h1")).Should().Be("You're offline");
         (await page.EvaluateAsync<bool>("document.querySelector('main img').complete && document.querySelector('main img').naturalWidth > 0"))
@@ -106,9 +106,18 @@ public sealed partial class PwaTests(PlaywrightBrowserFixture fixture)
         (await page.EvaluateAsync<string>("fetch('/admin/api/anything').then(() => 'answered', () => 'failed')")).Should().Be("failed");
 
         // Back online, the offline page reloads itself (js/offline-retry.js) and gets the real page.
-        server.Start();
+        // "online" is also fired here: the emulated one didn't arrive on CI's Linux (07-11-26).
+        server.Refusing = false;
         await context.SetOfflineAsync(false);
-        await page.WaitForFunctionAsync("document.querySelector('h1')?.textContent === 'Admin page'", null, new() { Timeout = 15000 });
+        try
+        {
+            await page.EvaluateAsync("window.dispatchEvent(new Event('online'))");
+        }
+        catch (PlaywrightException)
+        {
+            // The real event already started the reload.
+        }
+        await page.WaitForFunctionAsync("document.querySelector('h1')?.textContent === 'Admin page'", null, new() { Timeout = 30000 });
         (await page.EvaluateAsync<string>("location.pathname")).Should().Be("/admin/world-news");
     }
 
@@ -142,6 +151,38 @@ public sealed partial class PwaTests(PlaywrightBrowserFixture fixture)
         await page.WaitForTimeoutAsync(5000);
         (await page.Locator("#gws-install-offer").CountAsync()).Should().Be(0);
         (await page.EvaluateAsync<int>("navigator.serviceWorker.getRegistrations().then(r => r.filter(x => x.scope.endsWith('/public')).length)")).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("Mozilla/5.0 (iPad; CPU OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/131.0.6778.73 Mobile/15E148 Safari/604.1",
+        "In Chrome, tap the Share button")]
+    [InlineData("Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) EdgiOS/120.0 Version/17.0 Mobile/15E148 Safari/604.1",
+        "In Edge, tap the Share button")]
+    [InlineData("Mozilla/5.0 (iPhone; CPU iPhone OS 15_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/109.0 Mobile/15E148 Safari/604.1",
+        null)]
+    public async Task InstallOffer_ShouldSayHowInEachIOSBrowser_ThatCanAddToTheHomeScreen(string userAgent, string? expected)
+    {
+        // 07-11-26: Grant looked for it in Chrome on his iPad. Chrome, Edge and Firefox add to the
+        // Home Screen from their Share menu since iOS 16.4; before that only Safari could.
+        using var server = new WwwRootServer(WwwRoot);
+        await using var context = await fixture.Browser.NewContextAsync(new()
+        {
+            UserAgent = userAgent,
+            ViewportSize = new() { Width = 820, Height = 1180 },
+            IsMobile = true,
+            HasTouch = true
+        });
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{server.Origin}/admin/home");
+        if (expected is null)
+        {
+            await page.WaitForTimeoutAsync(5000);
+            (await page.Locator("#gws-install-offer").CountAsync()).Should().Be(0, "that browser can't add to the Home Screen");
+            return;
+        }
+        await page.WaitForSelectorAsync("#gws-install-offer", new() { Timeout = 10000 });
+        (await page.TextContentAsync("#gws-install-offer")).Should().Contain(expected).And.Contain("Add to Home Screen").And.NotContain("Install\n");
+        (await page.Locator("#gws-install-offer button:has-text('Install')").CountAsync()).Should().Be(0, "no iOS browser can prompt");
     }
 
     [Fact]
@@ -252,8 +293,14 @@ public sealed partial class PwaTests(PlaywrightBrowserFixture fixture)
             _ = Task.Run(ServeAsync);
         }
 
-        // Refuses connections until Start, on the same origin (the service worker's).
-        public void Stop() => _listener.Stop();
+        private volatile bool _refusing;
+
+        // While true, every connection is dropped unanswered (what a page load sees with no network).
+        public bool Refusing
+        {
+            get => _refusing;
+            set => _refusing = value;
+        }
 
         private async Task ServeAsync()
         {
@@ -281,6 +328,11 @@ public sealed partial class PwaTests(PlaywrightBrowserFixture fixture)
 
         private void Respond(HttpListenerContext context)
         {
+            if (Refusing)
+            {
+                context.Response.Abort();
+                return;
+            }
             var path = context.Request.Url!.AbsolutePath;
             byte[] body;
             string type;
