@@ -299,6 +299,26 @@ if [[ "$install_playwright_deps" == true ]]; then
   # A stalled mirror has also failed the gate outright (2026-10-26, the apt step cut off by the
   # timeout mid-download on the same runner image that had just passed), so it gets one more try
   # before it fails.
+  # apt settings for this install, on runners with passwordless sudo (CI): a stalled mirror
+  # connection is dropped after 30 s and retried by apt itself, rather than sitting until the
+  # timeout below; and an apt-get that finds another one running waits for the lock.
+  if sudo -n true 2>/dev/null; then
+    printf '%s\n' 'Acquire::http::Timeout "30";' 'Acquire::https::Timeout "30";' 'Acquire::Retries "3";' \
+      'DPkg::Lock::Timeout "180";' | sudo -n tee /etc/apt/apt.conf.d/99gws-release-gate >/dev/null || true
+  fi
+  # When the timeout stops an attempt, the apt-get Playwright started as root keeps running (timeout
+  # can't signal a root process) and holds the package lock, so the retry failed at once on the lock
+  # (07-11-26, b360926). Stop it, let dpkg finish what it was doing, and repair before trying again.
+  stop_leftover_apt() {
+    sudo -n true 2>/dev/null || return 0
+    sudo -n pkill -TERM -x apt-get 2>/dev/null || true
+    local waited=0
+    while (pgrep -x apt-get || pgrep -x dpkg) >/dev/null && ((waited < 60)); do
+      sleep 2
+      waited=$((waited + 2))
+    done
+    sudo -n dpkg --configure -a >/dev/null 2>&1 || true
+  }
   install_playwright() {
     local attempt
     for attempt in 1 2; do
@@ -306,6 +326,7 @@ if [[ "$install_playwright_deps" == true ]]; then
         return 0
       fi
       echo "Playwright browser install attempt $attempt failed or timed out."
+      stop_leftover_apt
     done
     return 1
   }
