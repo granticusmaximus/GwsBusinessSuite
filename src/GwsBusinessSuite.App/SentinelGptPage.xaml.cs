@@ -775,10 +775,14 @@ public partial class SentinelGptPage : ContentPage
 
         try
         {
-            // In the app first (it can make changes there), unless a folder is attached or deep
-            // analysis is on - those are this Mac's own agent's work.
-            var localSucceeded = (_devTools is null && !_useDeepAnalysis && await TryRunAppAgentTurnAsync(prompt, answer, _turnCts.Token))
-                || (_agent is not null && await TryRunLocalTurnAsync(prompt, answer, _turnCts.Token));
+            // In the app first (it can make changes there), unless a folder is attached - that's this
+            // Mac's own agent's work. Deep Analysis no longer skips the app (06-11-26: with it on,
+            // SentinelGPT said it couldn't create Kanban boards): the advisers' context is worked
+            // out once and goes with the request to whichever agent answers.
+            var advisory = _useDeepAnalysis ? await AdvisoryAsync(prompt, answer, _turnCts.Token) : null;
+            var appPrompt = advisory is null ? prompt : ClipMessage($"{prompt}\n\n{advisory}", MaxAppAgentMessage);
+            var localSucceeded = (_devTools is null && await TryRunAppAgentTurnAsync(appPrompt, answer, _turnCts.Token))
+                || (_agent is not null && await TryRunLocalTurnAsync(prompt, answer, _turnCts.Token, advisory));
             if (!localSucceeded)
                 await RunFallbackTurnAsync(prompt, answer, _turnCts.Token);
         }
@@ -905,7 +909,33 @@ public partial class SentinelGptPage : ContentPage
     // caller falls back to the server. A genuine navigate-away (turnToken itself cancelled, not
     // just this attempt's own linked timeout) still propagates as OperationCanceledException -
     // there's nothing to fall back to once the page is gone.
-    private async Task<bool> TryRunLocalTurnAsync(string prompt, ChatMessageViewModel answer, CancellationToken turnToken)
+    // The server takes up to 8,000 characters for an agent turn's message.
+    private const int MaxAppAgentMessage = 8000;
+
+    private static string ClipMessage(string text, int max) => text.Length <= max ? text : text[..max];
+
+    // Deep Analysis: the specialist advisers' context for this request, or null when they add none.
+    private async Task<string?> AdvisoryAsync(string prompt, ChatMessageViewModel answer, CancellationToken turnToken)
+    {
+        using var adviceCts = CancellationTokenSource.CreateLinkedTokenSource(turnToken);
+        adviceCts.CancelAfter(LocalTurnTimeout);
+        answer.Text = "Consulting specialist advisers...";
+        try
+        {
+            var advisory = await _deepAnalysis.BuildAdvisoryContextAsync(prompt, adviceCts.Token);
+            return string.IsNullOrWhiteSpace(advisory) ? null : advisory;
+        }
+        catch (OperationCanceledException) when (!turnToken.IsCancellationRequested)
+        {
+            return null;
+        }
+        finally
+        {
+            answer.Text = string.Empty;
+        }
+    }
+
+    private async Task<bool> TryRunLocalTurnAsync(string prompt, ChatMessageViewModel answer, CancellationToken turnToken, string? advisory = null)
     {
         if (_agent is null) return false;
 
@@ -915,14 +945,7 @@ public partial class SentinelGptPage : ContentPage
         var effectivePrompt = prompt;
         try
         {
-            if (_useDeepAnalysis)
-            {
-                answer.Text = "Consulting specialist advisers...";
-                var advisory = await _deepAnalysis.BuildAdvisoryContextAsync(prompt, localCts.Token);
-                if (!string.IsNullOrWhiteSpace(advisory))
-                    effectivePrompt = $"{prompt}\n\n{advisory}";
-                answer.Text = string.Empty;
-            }
+            if (advisory is not null) effectivePrompt = $"{prompt}\n\n{advisory}";
 
             var approvedContext = await _approvedMemory.BuildContextAsync(prompt, localCts.Token);
             if (!string.IsNullOrWhiteSpace(approvedContext))
