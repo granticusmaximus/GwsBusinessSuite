@@ -317,7 +317,7 @@ html:has(.gws-admin-bar) {
 }
 
 /* Admin pages size their layouts to the room they actually have: the window minus the
-   sidebar (272px: a 72px workspace rail and the sub-nav; 72px collapsed, none in Fullscreen or the full-screen page editor).
+   sidebar (272px: a 60px workspace rail and the sub-nav; 60px collapsed, none in Fullscreen or the full-screen page editor).
    Components query it with @container gws-main (...) instead of a viewport @media. */
 .gws-content {
     container: gws-main / inline-size;

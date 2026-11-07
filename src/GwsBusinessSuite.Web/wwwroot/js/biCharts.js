@@ -124,5 +124,10 @@ export function downloadPng(canvasId, fileName) {
     const link = document.createElement('a');
     link.href = copy.toDataURL('image/png');
     link.download = fileName;
+    // In the page while it's clicked, so the installed iPhone and iPad app (js/pwa.js) can send the
+    // image to the Share sheet instead of opening it over the app.
+    link.hidden = true;
+    document.body.append(link);
     link.click();
+    link.remove();
 }

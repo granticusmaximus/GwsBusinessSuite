@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using FluentAssertions;
@@ -247,6 +248,92 @@ public sealed partial class PwaTests(PlaywrightBrowserFixture fixture)
         opened.Should().Be($"{server.Origin}/admin/community/messages/1");
     }
 
+    // 07-11-26: in the installed app on Grant's iPad, a World News story's Download PDF opened the
+    // PDF over the whole app, with no Back button to leave it by. There a download goes to the Share
+    // sheet, and the app stays on the page it was on.
+    [Fact]
+    public async Task Download_ShouldGoToTheShareSheet_AndStayOnThePage_InTheInstalledAppOnAnIPad()
+    {
+        using var server = new WwwRootServer(WwwRoot);
+        await using var context = await fixture.Browser.NewContextAsync(IPad);
+        await context.AddInitScriptAsync(ShareSheetStandIn(installed: true, expiredTaps: 0));
+        var page = await context.NewPageAsync();
+        var downloads = 0;
+        page.Download += (_, _) => downloads++;
+        await page.GotoAsync($"{server.Origin}/admin/home");
+
+        await page.ClickAsync("#gws-test-download");
+        await page.WaitForFunctionAsync("() => window.__shared.length === 1", null, new() { Timeout = 10000 });
+
+        var shared = await page.EvaluateAsync<JsonElement>("() => window.__shared[0]");
+        shared.GetProperty("name").GetString().Should().Be("World news — a story.pdf", "the server's UTF-8 name wins");
+        shared.GetProperty("type").GetString().Should().Be("application/pdf");
+        shared.GetProperty("size").GetInt32().Should().Be(WwwRootServer.StoryPdf.Length);
+        page.Url.Should().Be($"{server.Origin}/admin/home", "the app stays where it was");
+        downloads.Should().Be(0);
+        (await page.Locator("#gws-download-card").CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Download_ShouldOfferOneMoreTap_WhenTheFileArrivesAfterTheTapHasExpired()
+    {
+        // A tap only lets a page open the Share sheet for a few seconds; a big file can take longer.
+        using var server = new WwwRootServer(WwwRoot);
+        await using var context = await fixture.Browser.NewContextAsync(IPad);
+        await context.AddInitScriptAsync(ShareSheetStandIn(installed: true, expiredTaps: 1));
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{server.Origin}/admin/home");
+
+        await page.ClickAsync("#gws-test-download");
+        await page.WaitForSelectorAsync("#gws-download-card", new() { Timeout = 10000 });
+        (await page.TextContentAsync("#gws-download-card")).Should().Contain("Your file is ready").And.Contain("World news — a story.pdf");
+
+        await page.ClickAsync("#gws-download-card button:has-text('Save or share')");
+        await page.WaitForFunctionAsync("() => window.__shared.length === 1", null, new() { Timeout = 10000 });
+        (await page.Locator("#gws-download-card").CountAsync()).Should().Be(0);
+        page.Url.Should().Be($"{server.Origin}/admin/home");
+    }
+
+    [Fact]
+    public async Task Download_ShouldStayAnOrdinaryDownload_InABrowserTab()
+    {
+        // Safari on the same iPad has its own downloads and a Back button: nothing changes there.
+        using var server = new WwwRootServer(WwwRoot);
+        await using var context = await fixture.Browser.NewContextAsync(IPad);
+        await context.AddInitScriptAsync(ShareSheetStandIn(installed: false, expiredTaps: 0));
+        var page = await context.NewPageAsync();
+        await page.GotoAsync($"{server.Origin}/admin/home");
+
+        var download = await page.RunAndWaitForDownloadAsync(() => page.ClickAsync("#gws-test-download"), new() { Timeout = 10000 });
+        download.SuggestedFilename.Should().EndWith(".pdf");
+        (await page.EvaluateAsync<int>("() => window.__shared.length")).Should().Be(0);
+    }
+
+    private static BrowserNewContextOptions IPad => new()
+    {
+        UserAgent = "Mozilla/5.0 (iPad; CPU OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1",
+        ViewportSize = new() { Width = 820, Height = 1180 },
+        IsMobile = true,
+        HasTouch = true
+    };
+
+    // Stand-ins for what this test browser hasn't got: the Home Screen app (navigator.standalone,
+    // as on iOS) and the Share sheet, which records each file and refuses the first expiredTaps
+    // calls the way Safari does once a tap has expired.
+    private static string ShareSheetStandIn(bool installed, int expiredTaps) => $$"""
+        (() => {
+            if ({{(installed ? "true" : "false")}}) Object.defineProperty(Navigator.prototype, 'standalone', { configurable: true, get: () => true });
+            window.__shared = [];
+            let refusals = {{expiredTaps}};
+            Object.defineProperty(Navigator.prototype, 'canShare', { configurable: true, value: (data) => !!(data && data.files && data.files.length) });
+            Object.defineProperty(Navigator.prototype, 'share', { configurable: true, value: async (data) => {
+                if (refusals > 0) { refusals--; throw new DOMException('The tap has expired.', 'NotAllowedError'); }
+                const file = data.files[0];
+                window.__shared.push({ name: file.name, type: file.type, size: file.size });
+            } });
+        })();
+        """;
+
     private static (int Width, int Height) PngSize(string src)
     {
         var bytes = File.ReadAllBytes(Path.Combine(WwwRoot, src.TrimStart('/')));
@@ -272,6 +359,10 @@ public sealed partial class PwaTests(PlaywrightBrowserFixture fixture)
     {
         private readonly HttpListener _listener = new();
         private readonly string _root;
+
+        // A World News story's PDF, as the admin page's download link fetches it.
+        public const string StoryPdfPath = "/admin/world-news/events/e1/document.pdf";
+        public static readonly byte[] StoryPdf = "%PDF-1.7\n% a story\n%%EOF\n"u8.ToArray();
 
         public string Origin { get; }
 
@@ -336,12 +427,21 @@ public sealed partial class PwaTests(PlaywrightBrowserFixture fixture)
             var path = context.Request.Url!.AbsolutePath;
             byte[] body;
             string type;
-            if (path.StartsWith("/admin", StringComparison.Ordinal) || path == "/public")
+            if (path == StoryPdfPath)
             {
-                body = """
+                // As the app's endpoint sends it: an attachment, its name in plain and UTF-8 forms.
+                body = StoryPdf;
+                type = "application/pdf";
+                context.Response.AddHeader("Content-Disposition",
+                    "attachment; filename=\"World news - a story.pdf\"; filename*=UTF-8''World%20news%20%E2%80%94%20a%20story.pdf");
+            }
+            else if (path.StartsWith("/admin", StringComparison.Ordinal) || path == "/public")
+            {
+                body = Encoding.UTF8.GetBytes($"""
                     <!DOCTYPE html><html><head><link rel="manifest" href="/manifest.webmanifest" /></head>
-                    <body><h1>Admin page</h1><script src="/js/pwa.js"></script></body></html>
-                    """u8.ToArray();
+                    <body><h1>Admin page</h1><a id="gws-test-download" href="{StoryPdfPath}" download>Download PDF</a>
+                    <script src="/js/pwa.js"></script></body></html>
+                    """);
                 type = "text/html; charset=utf-8";
             }
             else

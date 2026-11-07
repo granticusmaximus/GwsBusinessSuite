@@ -8,8 +8,9 @@
    automatically - only the values changed. */
 :root {
     /* The sidebar is the workspace rail plus the current workspace's sub-nav; collapsed, only
-       the rail shows. On phones a bottom bar replaces both (see the Responsive section). */
-    --gws-rail-width: 72px;
+       the rail shows. On phones a bottom bar replaces both (see the Responsive section). The rail
+       is icons only since 07-11-26, so it's 60px (was 72px with labels); the sub-nav took the room. */
+    --gws-rail-width: 60px;
     --gws-sidebar-width: 272px;
     --gws-sidebar-collapsed-width: var(--gws-rail-width);
     --gws-bottom-bar-height: 0px;
@@ -879,10 +880,9 @@ h1:focus { outline: none; }
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: .2rem;
     width: 100%;
-    min-height: 3.4rem;
-    padding: .4rem 0;
+    min-height: 2.9rem;
+    padding: .3rem 0;
     border: 1px solid transparent;
     border-radius: 12px;
     background: transparent;
@@ -899,13 +899,26 @@ h1:focus { outline: none; }
 
 .gws-rail-item i {
     display: grid;
-    width: 1.8rem;
-    height: 1.8rem;
+    width: 2rem;
+    height: 2rem;
     place-items: center;
     border-radius: 9px;
-    font-size: 1.05rem;
+    font-size: 1.15rem;
 }
-.gws-rail-item span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Icons only (07-11-26: the labels under them crowded the rail, most of all in the installed app
+   on an iPad). Each label is still there for screen readers, and the item's tooltip (title) and
+   the column beside the rail, headed with the workspace's name, say it too. */
+.gws-rail-item > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
 .gws-rail-item:hover { background: color-mix(in srgb, var(--gws-sidebar-hover-bg) 72%, transparent); color: var(--gws-sidebar-text); }
 .gws-rail-item.is-active,
 .gws-rail-item.active {
@@ -7133,3 +7146,5 @@ a.wiki-live-title:hover { text-decoration: underline; }
 .gws-install-offer-text span { color: var(--gws-text-soft); }
 .gws-install-offer-actions { display: flex; flex-direction: column; gap: .4rem; flex-shrink: 0; margin-left: auto; }
 .gws-install-offer-actions .btn { min-height: 2.25rem; }
+/* A download on its way to the Share sheet (js/pwa.js: the installed app on iPhone and iPad). */
+a[download][aria-busy="true"] { opacity: .6; cursor: progress; }
