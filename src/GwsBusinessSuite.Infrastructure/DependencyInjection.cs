@@ -790,6 +790,7 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(20);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GWSuite-Overwatch/1.0; +https://grantwatson.dev)");
         });
+        AddNovember2026CameraProviders(services);
         // October 2026 international batch (each verified live 2026-10-08, no key).
         services.AddHttpClient<IcelandRoadCameraProvider>(client =>
         {
@@ -1418,5 +1419,39 @@ public static class DependencyInjection
         services.AddScoped<IPodcastListenProgressService, PodcastListenProgressService>();
 
         return services;
+    }
+
+    // November 2026 camera batch (each verified live 07-11-26, no key): London, Toronto, Calgary,
+    // Luxembourg. Its own method: AddInfrastructure is one very long method already.
+    private static void AddNovember2026CameraProviders(IServiceCollection services)
+    {
+        services.AddHttpClient<TflJamCamProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://api.tfl.gov.uk/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GWSuite-Overwatch/1.0 (+https://grantwatson.dev)");
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<TflJamCamProvider>());
+        services.AddHttpClient<TorontoTrafficCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://ckan0.cf.opendata.inter.prod-toronto.ca/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GWSuite-Overwatch/1.0 (+https://grantwatson.dev)");
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<TorontoTrafficCameraProvider>());
+        services.AddHttpClient<CalgaryTrafficCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://data.calgary.ca/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GWSuite-Overwatch/1.0 (+https://grantwatson.dev)");
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<CalgaryTrafficCameraProvider>());
+        services.AddHttpClient<LuxembourgCitaCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://www.cita.lu/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GWSuite-Overwatch/1.0 (+https://grantwatson.dev)");
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<LuxembourgCitaCameraProvider>());
     }
 }

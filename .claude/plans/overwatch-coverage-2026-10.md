@@ -87,3 +87,34 @@ challenge), NM WZDx (blyncsy still 503 on 2026-10-09).
 
 Nothing researchable without Grant remains in this file; open items are the 511-platform key
 decision (A/B/C above) plus Massachusetts/Colorado if he picks B.
+
+## Cameras worldwide, 07-11-26 (Grant: "more camera views ... not just in the USA, but everywhere")
+
+**Built:**
+- London: `TflJamCamProvider` (TfL Unified API `Place/Type/JamCam`, 889 listed, about 790 with
+  available=true).
+- Toronto: `TorontoTrafficCameraProvider` (open.toronto.ca GeoJSON, 336, Open Government Licence).
+- Calgary: `CalgaryTrafficCameraProvider` (data.calgary.ca Socrata k7p9-kppz, 217).
+- Luxembourg: `LuxembourgCitaCameraProvider` (CITA KML on data.public.lu, CC0, 96; image
+  `info_trafic/cameras/images/cccam_{n}.jpg` from the viewer page each placemark frames).
+- `CameraDirectoryService` keeps one pin per image (host and path), agencies before aggregators:
+  Datumfeed already re-published TfL's and Toronto's cameras, capped at 200 a view and 60
+  anonymous requests an hour.
+- Windy fixed against the OpenAPI schema in its docs page: `bbox=N,E,S,W` (it was sending the
+  map endpoint's northLat/southLat), numeric `webcamId`, `sortKey=popularity`, cached 5 minutes
+  (free-tier image tokens last 10). `CAMERA_INTEL_WINDY_API_KEY` is now synced from GitHub secrets
+  by deploy.yml; Grant adds the secret (free key at api.windy.com/keys).
+
+**Checked, not added:**
+- Québec: the open data has 683 cameras, but every image and viewer is on quebec511.info, which
+  answers scripted requests with a Cloudflare challenge (403).
+- Ottawa: not in the city's open-data portal, only traffic.ottawa.ca's own list. No terms found.
+- Germany: the Autobahn API's `/services/webcam` lists are empty.
+- Ireland: no camera datasets on data.gov.ie.
+- Slovenia: promet.si unreachable.
+- Lithuania: the eismoinfo WEBCAM layer returned an empty list.
+- Free key needed: NSW (Sydney) Live Traffic API and FAA WeatherCams (both 401 without one).
+- The 511-platform regions (Alaska, Arizona, Wisconsin, Nevada, Utah, Louisiana, Connecticut,
+  Pennsylvania, Ontario, Alberta, Saskatchewan, Manitoba, Nova Scotia, New Brunswick, PEI, Yukon)
+  were already built on 29-10-26 (`Platform511CameraProvider`), key-less. The "waiting on
+  Grant" note above is out of date.

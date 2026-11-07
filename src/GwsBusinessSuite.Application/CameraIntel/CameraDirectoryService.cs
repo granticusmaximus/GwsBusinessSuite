@@ -20,12 +20,30 @@ public sealed class CameraDirectoryService(
     public async Task<IReadOnlyList<CameraFeed>> GetCamerasInBoundingBoxAsync(BoundingBox bbox, CancellationToken cancellationToken = default)
     {
         // Providers that declare a coverage area are only asked about views that overlap it.
+        // Agencies' own sources first, aggregators last (see below).
         var tasks = providers
             .Where(provider => provider.Coverage is not { } coverage || coverage.Intersects(bbox))
+            .OrderBy(provider => Aggregators.Contains(provider.SourceName) ? 1 : 0)
             .Select(provider => FetchSafelyAsync(provider, bbox, cancellationToken));
         var results = await Task.WhenAll(tasks);
-        return results.SelectMany(cameras => cameras).ToList();
+        // One pin per camera: an aggregator re-publishing an agency's camera (Datumfeed carries TfL's
+        // JamCams and Toronto's RESCU, 07-11-26) gives the same image as the agency's own source,
+        // which is kept (complete, and without the aggregator's per-view cap and rate limit).
+        // Task.WhenAll keeps the providers' order, so the first copy is the agency's.
+        return results.SelectMany(cameras => cameras)
+            .DistinctBy(camera => SameImage(camera.StreamUrl))
+            .ToList();
     }
+
+    // Providers that re-publish other sources' cameras (by ICameraFeedProvider.SourceName; their
+    // cameras carry the original agency's name).
+    private static readonly HashSet<string> Aggregators = new(StringComparer.OrdinalIgnoreCase) { "Datumfeed", "Windy" };
+
+    // The image a stream URL shows, whatever the scheme or cache-busting query: host and path.
+    public static string SameImage(string streamUrl) =>
+        Uri.TryCreate(streamUrl, UriKind.Absolute, out var uri)
+            ? uri.Host.ToLowerInvariant() + uri.AbsolutePath
+            : streamUrl;
 
     private async Task<IReadOnlyList<CameraFeed>> FetchSafelyAsync(ICameraFeedProvider provider, BoundingBox bbox, CancellationToken cancellationToken)
     {

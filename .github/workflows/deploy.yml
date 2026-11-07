@@ -163,10 +163,12 @@ jobs:
         uses: appleboy/ssh-action@v1.2.5
         env:
           OVERWATCH_TOMTOM_API_KEY: ${{ secrets.OVERWATCH_TOMTOM_API_KEY }}
+          # Overwatch's worldwide webcams (Windy Webcams API, free key from api.windy.com/keys).
+          CAMERA_INTEL_WINDY_API_KEY: ${{ secrets.CAMERA_INTEL_WINDY_API_KEY }}
         with:
           host: ${{ secrets.DO_HOST }}
           # Secrets the script writes into the droplet's .env (see sync_env_secret below).
-          envs: OVERWATCH_TOMTOM_API_KEY
+          envs: OVERWATCH_TOMTOM_API_KEY,CAMERA_INTEL_WINDY_API_KEY
           username: root
           # appleboy/ssh-action's command_timeout defaults to 10m, which the remote script now
           # exceeds on a cold/no-cache Docker build alone (dotnet publish ~8m, plus apt-get and
@@ -217,6 +219,7 @@ jobs:
               echo "$name written to .env from its GitHub secret."
             }
             sync_env_secret OVERWATCH_TOMTOM_API_KEY "${OVERWATCH_TOMTOM_API_KEY:-}"
+            sync_env_secret CAMERA_INTEL_WINDY_API_KEY "${CAMERA_INTEL_WINDY_API_KEY:-}"
 
             PREVIOUS_COMMIT=$(git rev-parse HEAD)
 

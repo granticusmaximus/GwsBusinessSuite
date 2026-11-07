@@ -22,6 +22,26 @@ public sealed class CameraDirectoryServiceTests
     }
 
     [Fact]
+    public async Task GetCamerasInBoundingBoxAsync_ShouldKeepOnePinPerImage_PreferringTheAgencyOverAnAggregator()
+    {
+        // Datumfeed re-publishes TfL's JamCams under TfL's name; registered first here on purpose.
+        var aggregator = new FakeCameraFeedProvider("Datumfeed",
+        [
+            Camera("tfl-1", "Transport for London") with { StreamUrl = "http://S3-EU-WEST-1.amazonaws.com/jamcams.tfl.gov.uk/00001.jpg?x=1" },
+            Camera("only-here", "Transport for London")
+        ]);
+        var agency = new FakeCameraFeedProvider("TfL",
+        [
+            Camera("tfl-00001", "TfL") with { StreamUrl = "https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00001.jpg" }
+        ]);
+        var service = new CameraDirectoryService([aggregator, agency], NullLogger<CameraDirectoryService>.Instance);
+
+        var result = await service.GetCamerasInBoundingBoxAsync(AnyBbox);
+
+        result.Select(c => c.Id).Should().BeEquivalentTo(["tfl-00001", "only-here"]);
+    }
+
+    [Fact]
     public async Task GetCamerasInBoundingBoxAsync_ShouldIsolateAFailingProvider_FromTheOthers()
     {
         var healthy = new FakeCameraFeedProvider("Healthy", [Camera("a", "Healthy")]);

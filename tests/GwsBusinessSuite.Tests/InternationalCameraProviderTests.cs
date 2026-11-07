@@ -80,6 +80,118 @@ public sealed class InternationalCameraProviderTests
         (await new HongKongTdCameraProvider(Client("https://a/", Fail), cache, NullLogger<HongKongTdCameraProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
         (await new EstoniaRoadCameraProvider(Client("https://a/", Fail), cache, NullLogger<EstoniaRoadCameraProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
         (await new NorwayRoadCameraProvider(Client("https://a/", Fail), cache, NullLogger<NorwayRoadCameraProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
+        (await new TflJamCamProvider(Client("https://a/", Fail), cache, NullLogger<TflJamCamProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
+        (await new TorontoTrafficCameraProvider(Client("https://a/", Fail), cache, NullLogger<TorontoTrafficCameraProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
+        (await new CalgaryTrafficCameraProvider(Client("https://a/", Fail), cache, NullLogger<CalgaryTrafficCameraProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
+        (await new LuxembourgCitaCameraProvider(Client("https://a/", Fail), cache, NullLogger<LuxembourgCitaCameraProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
+        // A malformed answer is a failure too, not an exception.
+        (await new LuxembourgCitaCameraProvider(Client("https://a/", _ => Json("<kml><Placemark>")), new MemoryCache(new MemoryCacheOptions()),
+            NullLogger<LuxembourgCitaCameraProvider>.Instance).GetCamerasAsync(World)).Should().BeEmpty();
+    }
+
+    // Fixtures below are trimmed copies of the live responses captured 07-11-26.
+    [Fact]
+    public async Task London_ShouldMapTflJamCams_SkippingSwitchedOffOnes()
+    {
+        const string json = """
+            [
+              {"id":"JamCams_00002.00865","commonName":"A406 Billet Upass E","lat":51.60067,"lon":-0.01594,"additionalProperties":[
+                {"key":"available","value":"true"},{"key":"imageUrl","value":"https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00002.00865.jpg"},
+                {"key":"videoUrl","value":"https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00002.00865.mp4"},{"key":"view","value":"West"}]},
+              {"id":"JamCams_00001.01251","commonName":"Switched off","lat":51.5,"lon":-0.1,"additionalProperties":[
+                {"key":"available","value":"false"},{"key":"imageUrl","value":"https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00001.01251.jpg"}]},
+              {"id":"JamCams_00001.09999","commonName":"No image","lat":51.5,"lon":-0.1,"additionalProperties":[{"key":"available","value":"true"}]}
+            ]
+            """;
+        var provider = new TflJamCamProvider(Client("https://api.tfl.gov.uk/", request =>
+            request.RequestUri!.AbsolutePath == "/Place/Type/JamCam" ? Json(json) : new HttpResponseMessage(HttpStatusCode.NotFound)),
+            new MemoryCache(new MemoryCacheOptions()), NullLogger<TflJamCamProvider>.Instance);
+
+        var cameras = await provider.GetCamerasAsync(World);
+
+        cameras.Should().ContainSingle().Which.Should().Match<CameraFeed>(camera =>
+            camera.Id == "tfl-00002.00865"
+            && camera.Name == "London: A406 Billet Upass E (West)"
+            && camera.StreamUrl == "https://s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/00002.00865.jpg"
+            && camera.StreamKind == CameraStreamKind.Snapshot);
+        provider.Coverage!.Contains(51.5072, -0.1276).Should().BeTrue("central London");
+    }
+
+    [Fact]
+    public async Task Toronto_ShouldMapTheOpenDataGeoJson_WithReadableNames()
+    {
+        const string json = """
+            {"type":"FeatureCollection","features":[
+              {"type":"Feature","properties":{"_id":1,"REC_ID":8001,"IMAGEURL":"https://opendata.toronto.ca/transportation/tmc/rescucameraimages/CameraImages/loc8001.jpg",
+                "MAINROAD":"YORK ST","CROSSROAD":"BREMNER BLVD / RAPTORS WAY"},"geometry":{"type":"MultiPoint","coordinates":[[-79.3813860009273,43.6431200069527]]}},
+              {"type":"Feature","properties":{"REC_ID":8002,"IMAGEURL":"http://opendata.toronto.ca/insecure.jpg","MAINROAD":"KING ST"},"geometry":{"type":"Point","coordinates":[-79.38,43.64]}},
+              {"type":"Feature","properties":{"REC_ID":8003,"IMAGEURL":"https://opendata.toronto.ca/loc8003.jpg","MAINROAD":"NOWHERE"},"geometry":{"type":"Point","coordinates":[0,0]}}
+            ]}
+            """;
+        var provider = new TorontoTrafficCameraProvider(Client("https://ckan0.cf.opendata.inter.prod-toronto.ca/", request =>
+            request.RequestUri!.AbsolutePath == "/" + TorontoTrafficCameraProvider.ListPath ? Json(json) : new HttpResponseMessage(HttpStatusCode.NotFound)),
+            new MemoryCache(new MemoryCacheOptions()), NullLogger<TorontoTrafficCameraProvider>.Instance);
+
+        var cameras = await provider.GetCamerasAsync(World);
+
+        cameras.Should().ContainSingle().Which.Should().Match<CameraFeed>(camera =>
+            camera.Id == "toronto-8001"
+            && camera.Name == "Toronto: York St at Bremner Blvd / Raptors Way"
+            && Math.Abs(camera.Latitude - 43.64312) < 0.0001 && Math.Abs(camera.Longitude + 79.38139) < 0.0001);
+    }
+
+    [Fact]
+    public async Task Calgary_ShouldMapTheOpenDataCameras()
+    {
+        const string json = """
+            [
+              {"camera_url":{"url":"https://trafficcam.calgary.ca/loc0.jpg","description":"Camera 1"},"quadrant":"SW/SE","camera_location":"Glenmore Trail / Macleod Trail S",
+               "point":{"type":"Point","coordinates":[-114.0715855,50.993989]}},
+              {"camera_url":{"url":"https://trafficcam.calgary.ca/loc1.jpg"},"camera_location":"No point"},
+              {"camera_url":{"url":"javascript:alert(1)"},"camera_location":"Bad link","point":{"type":"Point","coordinates":[-114.07,50.99]}}
+            ]
+            """;
+        var provider = new CalgaryTrafficCameraProvider(Client("https://data.calgary.ca/", request =>
+            request.RequestUri!.AbsolutePath == "/resource/k7p9-kppz.json" ? Json(json) : new HttpResponseMessage(HttpStatusCode.NotFound)),
+            new MemoryCache(new MemoryCacheOptions()), NullLogger<CalgaryTrafficCameraProvider>.Instance);
+
+        var cameras = await provider.GetCamerasAsync(World);
+
+        cameras.Should().ContainSingle().Which.Should().Match<CameraFeed>(camera =>
+            camera.Id == "calgary-loc0"
+            && camera.Name == "Calgary: Glenmore Trail / Macleod Trail S (SW/SE)"
+            && camera.StreamUrl == "https://trafficcam.calgary.ca/loc0.jpg");
+    }
+
+    [Fact]
+    public async Task Luxembourg_ShouldMapCitaPlacemarks_ToTheirViewersCurrentJpeg()
+    {
+        const string kml = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+              <Placemark id="camera_3">
+                <name>A6 - Camera 3</name>
+                <description><![CDATA[<iframe class="cam-frame" src="https://www.cita.lu/webcam/map/3" height="245" width="270" scrolling="no" ></iframe>]]></description>
+                <Point><coordinates>5.921276000000001,49.63694099999999,0</coordinates></Point>
+              </Placemark>
+              <Placemark id="camera_x">
+                <name>No viewer</name>
+                <description>Something else</description>
+                <Point><coordinates>6.0,49.6,0</coordinates></Point>
+              </Placemark>
+            </Document></kml>
+            """;
+        var provider = new LuxembourgCitaCameraProvider(Client("https://www.cita.lu/", request =>
+            request.RequestUri!.AbsolutePath == "/kml/cameras.kml" ? Json(kml) : new HttpResponseMessage(HttpStatusCode.NotFound)),
+            new MemoryCache(new MemoryCacheOptions()), NullLogger<LuxembourgCitaCameraProvider>.Instance);
+
+        var cameras = await provider.GetCamerasAsync(World);
+
+        cameras.Should().ContainSingle().Which.Should().Match<CameraFeed>(camera =>
+            camera.Id == "cita-3"
+            && camera.Name == "Luxembourg: A6 - Camera 3"
+            && camera.StreamUrl == "https://www.cita.lu/info_trafic/cameras/images/cccam_3.jpg"
+            && Math.Abs(camera.Latitude - 49.636941) < 0.0001);
     }
 
     [Fact]

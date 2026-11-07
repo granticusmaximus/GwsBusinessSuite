@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -8,22 +10,30 @@ namespace GwsBusinessSuite.Application.CameraIntel;
 // Windy's public Webcams API v3 (https://api.windy.com/webcams/docs) - a broad, free-tier-
 // available aggregator of public webcams worldwide, used here for wide-but-shallow global
 // coverage rather than official traffic infrastructure. Requires a free self-registered API key
-// (https://api.windy.com/webcams/dev), sent as the "x-windy-api-key" header.
+// (https://api.windy.com/keys), sent as the "x-windy-api-key" header. Production gets it from the
+// CAMERA_INTEL_WINDY_API_KEY GitHub secret (deploy.yml writes it into the droplet's .env).
 //
-// The exact nested shape of a webcam's "images"/"player" object is inferred from partial public
-// documentation, not a fully confirmed live response (Windy's full v3 schema docs were not
-// completely accessible during implementation) - parsing below is deliberately defensive
-// (JsonNode + safe navigation, skip-on-miss rather than throw) so an unexpected shape drops that
-// one camera instead of the whole call. Verify this against a live registered key and adjust the
-// property paths below if Windy's real response differs.
+// Checked against the OpenAPI schema embedded in the docs page on 07-11-26 (the first version
+// guessed, and asked the list endpoint for the map endpoint's northLat/southLat parameters and read
+// a string "id"):
+// - GET /webcams/api/v3/webcams takes bbox={north},{east},{south},{west}, include=, limit (0-50),
+//   offset (free tier: up to 1,000) and sortKey/sortDirection.
+// - The answer is { total, webcams: [ { webcamId (number), title, status, location { latitude,
+//   longitude, ... }, images { current { preview, ... }, ... } } ] }.
+// The parsing stays defensive (skip one camera on an unexpected shape, never throw).
 //
-// The free tier's image URLs are token-secured and expire after 10 minutes, so nothing here
-// caches a resolved image URL past this call - see CameraDirectoryService's short cache window.
+// The free tier's image URLs carry a token that expires after 10 minutes, so a view's list is kept
+// for 5 minutes at most: a camera opened from it always has 5 minutes or more left. (A panel left
+// open longer stops refreshing; the paid tier's tokens last 24 hours.)
 public sealed class WindyWebcamProvider(
     HttpClient httpClient,
     IOptions<CameraIntelOptions> options,
+    IMemoryCache cache,
     ILogger<WindyWebcamProvider> logger) : ICameraFeedProvider
 {
+    private const int PageSize = 50;
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
+
     public string SourceName => "Windy";
 
     public async Task<IReadOnlyList<CameraFeed>> GetCamerasAsync(BoundingBox bbox, CancellationToken cancellationToken = default)
@@ -34,22 +44,43 @@ public sealed class WindyWebcamProvider(
             return [];
         }
 
+        // Windy wants -90..90 and -180..180; a view wider than the world is asked about the world.
+        var north = Math.Clamp(bbox.North, -90, 90);
+        var south = Math.Clamp(bbox.South, -90, 90);
+        var east = Math.Clamp(bbox.East, -180, 180);
+        var west = Math.Clamp(bbox.West, -180, 180);
+        if (north <= south) return [];
+        if (east <= west)
+        {
+            // Across the antimeridian: Windy's box can't wrap, so ask about the whole longitude band.
+            east = 180;
+            west = -180;
+        }
+
+        // Rounded so small pans reuse the same answer.
+        var box = string.Join(',', new[] { north, east, south, west }.Select(v => Math.Round(v, 2).ToString("0.##", CultureInfo.InvariantCulture)));
+        var cacheKey = $"camera-intel:windy:{box}";
+        if (cache.TryGetValue(cacheKey, out IReadOnlyList<CameraFeed>? cached) && cached is not null)
+        {
+            return cached;
+        }
+
         try
         {
+            // The most-viewed webcams in the view first: with 50 a call, the ones people actually watch.
             using var request = new HttpRequestMessage(HttpMethod.Get,
-                $"webcams/api/v3/webcams?northLat={bbox.North}&southLat={bbox.South}&eastLon={bbox.East}&westLon={bbox.West}&include=location,images&limit=50");
+                $"webcams/api/v3/webcams?bbox={box}&include=location,images&limit={PageSize}&sortKey=popularity&sortDirection=desc");
             request.Headers.Add("x-windy-api-key", apiKey);
 
             using var response = await httpClient.SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
 
             var root = JsonNode.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-            var webcams = root?["webcams"]?.AsArray();
+            var webcams = Get(root, "webcams") as JsonArray;
             if (webcams is null)
             {
-                logger.LogWarning(
-                    "Windy webcams: response had no \"webcams\" array - raw response: {RawResponse}",
-                    root?.ToJsonString());
+                logger.LogWarning("Windy webcams: response had no \"webcams\" array - raw response: {RawResponse}",
+                    Truncate(root?.ToJsonString()));
                 return [];
             }
 
@@ -68,17 +99,15 @@ public sealed class WindyWebcamProvider(
                 }
             }
 
-            // The exact response shape was never confirmed against a live key (see the class
-            // comment) - this makes a real-world "why are so few Windy cameras showing up"
-            // report diagnosable from the logs instead of requiring another guess at the schema.
+            // Makes a "why are so few Windy cameras showing up" report diagnosable from the logs.
             if (skipped > 0)
             {
                 logger.LogWarning(
-                    "Windy webcams: {Skipped} of {Total} entries were skipped (missing id/location/image field) - " +
-                    "sample raw entry: {SampleEntry}",
-                    skipped, webcams.Count, webcams.Count > 0 ? webcams[0]?.ToJsonString() : null);
+                    "Windy webcams: {Skipped} of {Total} entries were skipped (inactive, or missing id/location/image) - sample raw entry: {SampleEntry}",
+                    skipped, webcams.Count, Truncate(webcams.Count > 0 ? webcams[0]?.ToJsonString() : null));
             }
 
+            cache.Set(cacheKey, (IReadOnlyList<CameraFeed>)results, CacheDuration);
             return results;
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
@@ -90,24 +119,44 @@ public sealed class WindyWebcamProvider(
 
     private CameraFeed? TryParse(JsonNode? webcam)
     {
-        var id = webcam?["id"]?.GetValue<string>();
-        var latitude = webcam?["location"]?["latitude"]?.GetValue<double>();
-        var longitude = webcam?["location"]?["longitude"]?.GetValue<double>();
-        var imageUrl = webcam?["images"]?["current"]?["preview"]?.GetValue<string>();
-        if (string.IsNullOrWhiteSpace(id) || latitude is null || longitude is null || string.IsNullOrWhiteSpace(imageUrl))
+        if (webcam is not JsonObject) return null;
+        var id = Text(Get(webcam, "webcamId")) ?? Text(Get(webcam, "id"));
+        var latitude = Number(Get(Get(webcam, "location"), "latitude"));
+        var longitude = Number(Get(Get(webcam, "location"), "longitude"));
+        var imageUrl = Text(Get(Get(Get(webcam, "images"), "current"), "preview"));
+        var status = Text(Get(webcam, "status"));
+        if (string.IsNullOrWhiteSpace(id) || latitude is null || longitude is null
+            || !Uri.TryCreate(imageUrl, UriKind.Absolute, out var image) || image.Scheme != Uri.UriSchemeHttps
+            || status is not null && status != "active")
         {
             return null;
         }
 
-        var title = webcam?["title"]?.GetValue<string>();
+        var title = Text(Get(webcam, "title"));
         return new CameraFeed(
             Id: $"windy-{id}",
             Name: string.IsNullOrWhiteSpace(title) ? $"Windy Webcam {id}" : title,
             Latitude: latitude.Value,
             Longitude: longitude.Value,
-            StreamUrl: imageUrl,
+            StreamUrl: image.AbsoluteUri,
             StreamKind: CameraStreamKind.Snapshot,
             SourceName: SourceName,
-            SourceAttributionUrl: "https://www.windy.com/webcams");
+            SourceAttributionUrl: $"https://www.windy.com/webcams/{id}");
     }
+
+    // A JSON object's property, or null when the node isn't an object (indexing one would throw).
+    private static JsonNode? Get(JsonNode? node, string name) =>
+        node is JsonObject json && json.TryGetPropertyValue(name, out var value) ? value : null;
+
+    // A JSON string or number as text; anything else (or a missing node) as null.
+    private static string? Text(JsonNode? node) => node is JsonValue value
+        ? value.TryGetValue(out string? text) ? text
+        : value.TryGetValue(out long whole) ? whole.ToString(CultureInfo.InvariantCulture)
+        : value.TryGetValue(out double real) ? real.ToString(CultureInfo.InvariantCulture)
+        : null
+        : null;
+
+    private static double? Number(JsonNode? node) => node is JsonValue value && value.TryGetValue(out double number) && double.IsFinite(number) ? number : null;
+
+    private static string? Truncate(string? text) => text is null || text.Length <= 2000 ? text : text[..2000] + "…";
 }

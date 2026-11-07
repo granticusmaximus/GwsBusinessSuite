@@ -27,8 +27,8 @@ public static class CameraCoverageRegions
         new("California (Datumfeed / Caltrans)", "Datumfeed", 36.78, -119.42, 1_200_000),
         new("Ontario (Datumfeed / MTO)", "Datumfeed", 43.65, -79.38, 400_000),
         new("Ottawa (Datumfeed)", "Datumfeed", 45.42, -75.70, 150_000),
-        new("Toronto (Datumfeed / RESCU)", "Datumfeed", 43.65, -79.38, 150_000),
-        new("London (Datumfeed / JamCams)", "Datumfeed", 51.51, -0.13, 150_000),
+        new("Toronto (City of Toronto RESCU)", "City of Toronto", 43.65, -79.38, 150_000),
+        new("London (TfL JamCams)", "TfL", 51.51, -0.13, 150_000),
         new("Florida (FL511)", "FL511", 28.10, -81.60, 900_000),
         new("Illinois (IDOT)", "IDOT", 40.00, -89.20, 700_000),
         new("Iowa (Iowa DOT)", "Iowa DOT", 41.90, -93.60, 500_000),
@@ -100,5 +100,8 @@ public static class CameraCoverageRegions
         new("New Brunswick (511 New Brunswick)", "511 New Brunswick", 46.13, -66.22, 500_000),
         new("Prince Edward Island (511 PEI)", "511 PEI", 46.28, -63.31, 300_000),
         new("Yukon (511 Yukon)", "511 Yukon", 61.02, -134.99, 900_000),
+        // November 2026 batch (07-11-26). London and Toronto (above) now come from the agencies directly.
+        new("Calgary (City of Calgary)", "City of Calgary", 51.04, -114.07, 150_000),
+        new("Luxembourg (CITA)", "CITA", 49.70, 6.10, 150_000),
     ];
 }
