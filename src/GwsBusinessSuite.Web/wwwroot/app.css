@@ -3334,6 +3334,9 @@ audio.wiki-embed-media { max-width: 100%; }
     z-index: 20;
     min-width: 9rem;
 }
+.wiki-tree-row-backdrop { display: none; }
+/* Favorite and Move up/down in the row menu: touch screens only (elsewhere they're the row's own buttons). */
+.wiki-tree-row-dropdown .wiki-tree-touch-only { display: none; }
 .wiki-tree-toggle,
 .wiki-tree-spacer {
     width: 1rem;
@@ -3985,6 +3988,16 @@ audio.wiki-embed-media { max-width: 100%; }
     min-height: 26rem;
 }
 
+/* Sentinel's sidebars scroll up and down only (07-11-26). With overflow-y: auto the browser makes
+   overflow-x auto too, so on an iPad the page tree panned sideways: its rows' touch-sized buttons
+   were wider than the sidebar. The rows now fit (the touch rules below), and nothing can pan. */
+.sentinel-local-sidebar,
+.sentinel-context-sidebar,
+.sentinel-tree-scroll {
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+}
+
 .sentinel-nav-toolbar {
     display: flex;
     align-items: center;
@@ -3995,7 +4008,10 @@ audio.wiki-embed-media { max-width: 100%; }
     border-bottom: 1px solid var(--sentinel-border);
 }
 
+.sentinel-nav-toolbar { flex-wrap: wrap; }
+
 .sentinel-nav-toolbar > div:first-child {
+    min-width: 0;
     display: flex;
     flex-direction: column;
     min-width: 0;
@@ -4080,6 +4096,9 @@ audio.wiki-embed-media { max-width: 100%; }
 }
 
 .sentinel-workspace .wiki-tree-row {
+    /* --tree-depth is set per row (capped at 8 levels), so deep pages indent without pushing the
+       row past the sidebar; touch screens indent less (below). */
+    padding-left: calc(.4rem + var(--tree-depth, 0) * 1.15rem);
     min-height: 2rem;
     margin: 1px 0;
     padding-top: .24rem;
@@ -4248,7 +4267,8 @@ audio.wiki-embed-media { max-width: 100%; }
 .sentinel-template-error { margin-bottom: .5rem; color: #f87171; font-size: .78rem; }
 
 .sentinel-template-save-row { display: flex; gap: .4rem; margin-bottom: .5rem; }
-.sentinel-template-save-row .form-control { min-height: 2rem; font-size: .78rem; }
+.sentinel-template-save-row .form-control { flex: 1 1 6rem; width: auto; min-width: 0; min-height: 2rem; font-size: .78rem; }
+.sentinel-template-save-row .btn { flex-shrink: 0; }
 
 .sentinel-template-empty {
     padding: 1rem .5rem;
@@ -6024,6 +6044,44 @@ a.wiki-live-title:hover { text-decoration: underline; }
     .sentinel-page-affordances,
     .sentinel-page-cover-actions,
     .sentinel-workspace .wiki-tree-actions { opacity: 1; transform: none; }
+
+    /* Each page row keeps only its ⋯ menu here (it has Favorite and Move up/down too): four 44px
+       buttons were wider than the sidebar (07-11-26). Nesting indents less, up to 5 levels. */
+    .sentinel-workspace .wiki-tree-actions > .btn { display: none; }
+    /* The title shrinks (with its ellipsis) so the row fits: gws-responsive.css's 44px touch rule
+       stops every button shrinking, and the title is a button. */
+    .sentinel-workspace .wiki-tree-row .wiki-tree-label { flex-shrink: 1; }
+    .wiki-tree-row-dropdown .wiki-tree-touch-only { display: block; }
+    .sentinel-workspace .wiki-tree-row { padding-left: calc(.4rem + min(var(--tree-depth, 0), 5) * .85rem); }
+
+    /* The row's ⋯ menu as a sheet at the bottom right of the screen: inside the page tree it was cut
+       off by the tree's own scroll area. On the right, clear of the app's own navigation (which
+       draws above Sentinel), and above the bottom bar and status strip. Tapping the backdrop closes it. */
+    .sentinel-workspace .wiki-tree-row-dropdown {
+        position: fixed;
+        top: auto;
+        left: auto;
+        right: max(1rem, env(safe-area-inset-right, 0px));
+        bottom: calc(var(--gws-bottom-bar-height, 0px) + var(--gws-status-strip-height, 0px) + max(1rem, env(safe-area-inset-bottom, 0px)));
+        width: min(22rem, calc(100vw - 2rem));
+        max-height: 70dvh;
+        overflow-y: auto;
+        z-index: 1061;
+        border-radius: 14px;
+        box-shadow: 0 .75rem 2.5rem rgba(0, 0, 0, .45);
+    }
+
+    .sentinel-workspace .wiki-tree-row-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 1060;
+        background: rgba(0, 0, 0, .35);
+    }
+
+    /* The sidebar is sticky, which makes it its own stacking layer: while the sheet is open, lift
+       it above the page's own sidebar (also sticky, and later), or that took taps meant for the sheet. */
+    .sentinel-workspace .sentinel-local-sidebar:has(.wiki-tree-row-dropdown) { z-index: 1062; }
 
     .sentinel-workspace button,
     .sentinel-workspace .btn,
