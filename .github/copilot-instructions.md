@@ -15,6 +15,6 @@ These rules are repeated here because breaking them has broken production:
    add a parallel service.
 4. **Before you call work done, run `./scripts/verify-release.sh`** (the full CI build and tests,
    7-8 minutes). `dotnet build` and `dotnet test` alone aren't enough. Report the result, and
-   keep zero warnings.
+   keep zero warnings: they're errors here (`TreatWarningsAsErrors`), so one fails the build.
 5. **Update the matching `docs/*_USER_GUIDE.md`** for user-visible changes, and track multi-part
    work in `.claude/plans/`.

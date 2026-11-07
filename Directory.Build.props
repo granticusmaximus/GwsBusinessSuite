@@ -4,5 +4,13 @@
     <NuGetAuditMode>all</NuGetAuditMode>
     <NuGetAuditLevel>low</NuGetAuditLevel>
     <WarningsAsErrors>$(WarningsAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsAsErrors>
+    <!-- Warnings are errors (07-11-26) in every project and every build: local, verify-release.sh, CI and
+         the Docker publish. Fix the cause. When one truly can't be fixed yet, suppress it on that one line
+         with #pragma and the reason beside it (see OnDeviceSpeechTranscriber.cs), never project-wide.
+         NU1900/NU1905 stay warnings: they mean the vulnerability feed couldn't be reached (offline, an
+         outage), not that a package has a problem, and would otherwise stop offline builds. Real findings
+         (NU1901-NU1904) are errors, above. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1900;NU1905</WarningsNotAsErrors>
   </PropertyGroup>
 </Project>

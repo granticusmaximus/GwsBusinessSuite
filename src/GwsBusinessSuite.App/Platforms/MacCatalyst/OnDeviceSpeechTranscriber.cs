@@ -43,7 +43,13 @@ public sealed class OnDeviceSpeechTranscriber : IDisposable
         _engine = new AVAudioEngine();
         var input = _engine.InputNode;
         var format = input.GetBusOutputFormat(0);
+        // CA1422: the Mac Catalyst 27 SDK (CI's Xcode 27 runner) obsoletes this overload for one with
+        // an `out NSError`, but that overload doesn't exist in the 26.5 workload local builds use, so
+        // there's nothing to switch to everywhere yet. This one still works on 27. Move to the NSError
+        // overload, and drop this suppression, once every build has the 27 SDK.
+#pragma warning disable CA1422
         input.InstallTapOnBus(0, 1024, format, (buffer, _) => _request?.Append(buffer));
+#pragma warning restore CA1422
         _engine.Prepare();
         if (!_engine.StartAndReturnError(out var error))
         {

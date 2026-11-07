@@ -11,7 +11,7 @@ name: Sync droplet .env keys
 #   gh workflow run droplet-env.yml
 #
 # A secret that isn't set in GitHub is left alone on the droplet (never blanked). To manage another
-# key, add it to the step's env + envs below and to MANAGED in the script, as "ENV_NAME:Config__Key"
+# key, add it to OPTIONAL_KEYS and envs below and to MANAGED in the script, as "ENV_NAME:Config__Key"
 # (the variable the container sees, from docker-compose.yml).
 
 on:
@@ -30,21 +30,29 @@ jobs:
       group: deploy-production
       cancel-in-progress: false
     steps:
+      # The keys come from whichever of these exist as GitHub secrets: one that isn't set simply
+      # isn't passed on, and nothing names a secret that doesn't exist (VS Code's Actions extension
+      # warns on that; 07-11-26). Only these names reach the next step, as environment variables
+      # (envs below, never pasted into the script text, so a value can't change the script);
+      # GitHub masks their values in the log.
+      - name: Collect the keys that are set
+        env:
+          REPO_SECRETS: ${{ toJSON(secrets) }}
+          OPTIONAL_KEYS: >-
+            OVERWATCH_CESIUM_ION_TOKEN OVERWATCH_AISSTREAM_API_KEY REACH_GITHUB_TOKEN REACH_YOUTUBE_API_KEY
+            REACH_REDDIT_CLIENT_ID REACH_REDDIT_CLIENT_SECRET REACH_BLUESKY_HANDLE REACH_BLUESKY_APP_PASSWORD
+            REACH_X_BEARER_TOKEN SEC_EDGAR_CONTACT_EMAIL
+        run: |
+          set -eu
+          for name in $OPTIONAL_KEYS; do
+            value="$(jq -r --arg name "$name" '.[$name] // empty' <<<"$REPO_SECRETS")"
+            [ -n "$value" ] || continue
+            delimiter="GWS_$(openssl rand -hex 8)"
+            { echo "$name<<$delimiter"; printf '%s\n' "$value"; echo "$delimiter"; } >> "$GITHUB_ENV"
+          done
+
       - name: Update .env on the droplet
         uses: appleboy/ssh-action@v1.2.5
-        env:
-          # Passed as environment variables (envs below), not pasted into the script text, so a
-          # value can't change the script and GitHub masks them in the log.
-          OVERWATCH_CESIUM_ION_TOKEN: ${{ secrets.OVERWATCH_CESIUM_ION_TOKEN }}
-          OVERWATCH_AISSTREAM_API_KEY: ${{ secrets.OVERWATCH_AISSTREAM_API_KEY }}
-          REACH_GITHUB_TOKEN: ${{ secrets.REACH_GITHUB_TOKEN }}
-          REACH_YOUTUBE_API_KEY: ${{ secrets.REACH_YOUTUBE_API_KEY }}
-          REACH_REDDIT_CLIENT_ID: ${{ secrets.REACH_REDDIT_CLIENT_ID }}
-          REACH_REDDIT_CLIENT_SECRET: ${{ secrets.REACH_REDDIT_CLIENT_SECRET }}
-          REACH_BLUESKY_HANDLE: ${{ secrets.REACH_BLUESKY_HANDLE }}
-          REACH_BLUESKY_APP_PASSWORD: ${{ secrets.REACH_BLUESKY_APP_PASSWORD }}
-          REACH_X_BEARER_TOKEN: ${{ secrets.REACH_X_BEARER_TOKEN }}
-          SEC_EDGAR_CONTACT_EMAIL: ${{ secrets.SEC_EDGAR_CONTACT_EMAIL }}
         with:
           host: ${{ secrets.DO_HOST }}
           username: root

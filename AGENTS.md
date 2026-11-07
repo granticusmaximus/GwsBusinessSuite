@@ -24,7 +24,12 @@ all need to know belongs here.
 - **No pushing, PRs or merges unless Grant gives permission in the current session.** That
   permission covers that session's work only and doesn't carry over to later sessions. Force
   push only when Grant says to force push for that specific case.
-- **Zero warnings.** The build has none, and new code mustn't add any.
+- **Zero warnings, and warnings are errors.** `Directory.Build.props` sets `TreatWarningsAsErrors`
+  for every project (07-11-26), so a warning fails the build. Fix the cause. If one truly can't be
+  fixed yet, suppress it on that one line with `#pragma` and the reason beside it, never with a
+  project-wide `NoWarn`. Workflows count too: keep `actionlint` clean, and don't name a
+  `secrets.X` that isn't set in the repo (read optional ones through `toJSON(secrets)`, as
+  `deploy.yml` does).
 - **Finish what you start.** For anything with several sequenced pieces, finish and verify the
   whole unit before stopping. Don't leave it half-applied.
 

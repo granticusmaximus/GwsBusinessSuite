@@ -1,0 +1,5 @@
+# actionlint's settings (07-11-26: warnings are treated as errors here).
+self-hosted-runner:
+  # The Xcode 27 macOS runner the Native Clients workflow builds the Apple apps on (clients.yml).
+  labels:
+    - xcode-27
