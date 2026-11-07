@@ -1080,7 +1080,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
               id: 'situation-1', title: 'United States rail disruption', latest: 'Services begin to recover',
               country: 'United States', lat: 39.8, lon: -98.5, eventCount: 3, outletCount: 12,
               reportCount: 18, lastSeen: '29-10-26 10:30', summary: 'Several operators reported delays.',
-              href: '/admin/world-news?situation=situation-1',
+              href: '/admin/world-news?situation=situation-1', eventId: 'event 1/a',
               sources: [{ outlet: 'Example News', title: 'Rail services delayed', url: 'https://example.test/report' }]
             }])
             """);
@@ -1092,8 +1092,11 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         var panelText = await page.EvaluateAsync<string>("document.querySelector('.tg-incident-panel').textContent");
         panelText.Should().Contain("REPORTED NEWS").And.Contain("NOT A CONFIRMED INCIDENT")
             .And.Contain("United States rail disruption").And.Contain("12 OUTLETS");
-        (await page.GetAttributeAsync(".tg-incident-panel a.tg-incident-report", "href"))
+        (await page.GetAttributeAsync(".tg-incident-panel a.tg-incident-report:not(.tg-world-news-document)", "href"))
             .Should().Be("/admin/world-news?situation=situation-1");
+        // READ DOCUMENT opens the latest event's story page (06-11-26).
+        (await page.GetAttributeAsync(".tg-incident-panel a.tg-world-news-document", "href"))
+            .Should().Be("/admin/world-news/events/event%201%2Fa");
     }
 
     [Fact]

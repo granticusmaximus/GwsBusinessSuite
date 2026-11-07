@@ -429,33 +429,16 @@ else
             <div class="modal-content">
                 <div class="modal-header gap-2">
                     <h2 class="modal-title h5 text-truncate" id="world-news-document-title">@_document.Title</h2>
-                    <a class="btn btn-sm btn-outline-secondary ms-auto flex-shrink-0" href="@PdfHref(_document.EventId)" download title="This document as a PDF">
+                    <a class="btn btn-sm btn-outline-secondary ms-auto flex-shrink-0" href="@StoryHref(_document.EventId)" title="This story on its own page, to bookmark or share">
+                        <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>Open as page
+                    </a>
+                    <a class="btn btn-sm btn-outline-secondary flex-shrink-0" href="@PdfHref(_document.EventId)" download title="This document as a PDF">
                         <i class="bi bi-file-earmark-pdf me-1" aria-hidden="true"></i>Download PDF
                     </a>
                     <button type="button" class="btn-close flex-shrink-0" aria-label="Close" @onclick="CloseDocument"></button>
                 </div>
                 <div class="modal-body">
-                    <div class="world-news-analysis" role="status">
-                        @if (_analysisStatus is not null)
-                        {
-                            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
-                            <span>@_analysisStatus The sections below fill in when it's done.</span>
-                        }
-                        else if (_analysisError is not null)
-                        {
-                            <i class="bi bi-exclamation-triangle text-warning" aria-hidden="true"></i>
-                            <span>@_analysisError</span>
-                            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => AnalyseAsync(_document.EventId)">Try again</button>
-                        }
-                        else
-                        {
-                            <i class="bi bi-stars" aria-hidden="true"></i>
-                            <span>The claim, the summary, what each outlet leaves out or adds, and what they agree on are SentinelGPT's.</span>
-                            <button type="button" class="btn btn-sm btn-link" title="Read the outlets' articles and compare the coverage again"
-                                    @onclick="() => AnalyseAsync(_document.EventId)">Analyse again</button>
-                        }
-                    </div>
-                    <article class="world-news-document">@((MarkupString)_document.Html)</article>
+                    <WorldNewsStoryView EventId="@_document.EventId" />
                 </div>
             </div>
         </div>
@@ -716,20 +699,19 @@ else
 
     private static string Count(int n, string one, string? many = null) => $"{n:N0} {(n == 1 ? one : many ?? one + "s")}";
 
-    // The event's document, rendered from the same Markdown the PDF is made from.
-    private sealed record OpenDocument(string EventId, string Title, string Html);
+    // The event's document in a dialog (WorldNewsStoryView, as on the story page), which writes
+    // SentinelGPT's analysis when it's due.
+    private sealed record OpenDocument(string EventId, string Title);
 
     private OpenDocument? _document;
     private bool _documentLoading;
     private string? _documentError;
-    // SentinelGPT's analysis while it's being written, or why it couldn't be.
-    private string? _analysisStatus;
-    private string? _analysisError;
-    private bool _disposed;
     private ElementReference _documentDialog;
     private bool _focusDocument;
 
     private static string PdfHref(string eventId) => $"admin/world-news/events/{Uri.EscapeDataString(eventId)}/document.pdf";
+
+    private static string StoryHref(string eventId) => $"admin/world-news/events/{Uri.EscapeDataString(eventId)}";
 
     private async Task OpenDocumentAsync()
     {
@@ -738,58 +720,19 @@ else
         _documentError = null;
         try
         {
-            _analysisError = null;
-            if (!await ShowDocumentAsync(e.Id)) return;
+            // Merged or pruned since the list was read.
+            if (await Task.Run(() => News.Store.Event(e.Id)) is not { } current)
+            {
+                _documentError = "This event isn't there any more (events are merged and pruned as coverage changes).";
+                return;
+            }
+            _document = new OpenDocument(current.Id, current.Headline ?? current.Title);
             _focusDocument = true;
-            // No analysis yet, or coverage has grown since: SentinelGPT writes one now.
-            if (_analysisStatus is null && await Task.Run(() => News.AnalysisDue(e.Id))) _ = AnalyseAsync(e.Id);
         }
         finally
         {
             _documentLoading = false;
         }
-    }
-
-    private async Task<bool> ShowDocumentAsync(string eventId)
-    {
-        var username = string.IsNullOrWhiteSpace(_username) ? null : _username;
-        var document = await Task.Run(() => News.Document(eventId, username));
-        if (document is null)
-        {
-            _documentError = "This event isn't there any more (events are merged and pruned as coverage changes).";
-            _document = null;
-            return false;
-        }
-        _document = new OpenDocument(eventId, document.Title, AssistantMarkdown.ToSafeHtml(document.Markdown, linksInNewTab: true));
-        // Seen: the next "what changed since you last read" starts from this analysis.
-        if (username is not null && document.AnalysisAt is { } analysisAt) await Task.Run(() => News.MarkStoryRead(username, eventId, analysisAt));
-        return true;
-    }
-
-    // Follows the analysis (it runs on the server and carries on if this page closes), then shows
-    // the document again with it.
-    private async Task AnalyseAsync(string eventId)
-    {
-        _analysisError = null;
-        var analysis = News.AnalyzeAsync(eventId);
-        while (!analysis.IsCompleted && !_disposed)
-        {
-            _analysisStatus = News.AnalysisStatus(eventId) ?? "SentinelGPT is working…";
-            await InvokeAsync(StateHasChanged);
-            await Task.WhenAny(analysis, Task.Delay(750));
-        }
-        _analysisStatus = null;
-        if (_disposed) return;
-        try
-        {
-            await analysis;
-            if (_document?.EventId == eventId) await ShowDocumentAsync(eventId);
-        }
-        catch (InvalidOperationException ex)
-        {
-            _analysisError = ex.Message;
-        }
-        await InvokeAsync(StateHasChanged);
     }
 
     private void CloseDocument() => _document = null;
@@ -814,9 +757,5 @@ else
         }
     }
 
-    public void Dispose()
-    {
-        _disposed = true;
-        News.Changed -= OnNewsChanged;
-    }
+    public void Dispose() => News.Changed -= OnNewsChanged;
 }

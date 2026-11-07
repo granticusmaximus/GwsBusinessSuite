@@ -14,7 +14,7 @@ Found before planning (grep first):
   - Dagens Nyheter, WELT, YNET, Yonhap, n-tv, G1, De Telegraaf, Le Figaro, La Nación.
   - Al Arabiya, Clarín, The Independent, Expressen, Chosun.
 
-## Phase 1 - the story document, deeper - 1a, 1d, 1e DONE (06-11-26); 1b, 1c TO DO
+## Phase 1 - the story document, deeper - DONE (06/07-11-26)
 
 Done:
 - `StoryDocument` (WorldNewsKit) is the one record the document is drawn from.
@@ -24,9 +24,13 @@ Done:
 - 1d: headlines translated after each analysis (`HeadlineTranslator`, `article_translations`).
 - 1e: "what changed" (`StoryChangesFinder`, `analysis_history`, `story_reads`), marked read when
   the dialog opens.
-- 1b and 1c need a Razor view of `StoryDocument` (the chips filter the grid and sources live),
-  shared by the dialog and a new `/admin/world-news/events/{id}` page. See
-  `GwsBusinessSuite-handoff/HANDOFF-2026-11-06.md`.
+- 1b and 1c (07-11-26): `WorldNewsStoryView.razor` draws `StoryDocument` (the dialog no longer
+  renders the Markdown; the PDF still does). It owns the analysis bar, analyse-when-due, Analyse
+  again and marking the story read, and fetches the story again at each analysis step, so the
+  analysis shows before the translations finish. `WorldNewsStory.razor` is the page
+  (`/admin/world-news/events/{id}`); the dialog has "Open as page" and Overwatch's READ DOCUMENT
+  goes to the page. Chips: `StoryFilter` (WorldNewsKit). Checked locally in WebKit on a copy of
+  the database with the local model (Serbia election story: 31 outlets, 9 languages).
 
 - 1a **Who reports what:** a grid, rows the outlets and columns the agreed facts, a tick or a gap.
   It goes on the page, in the dialog and in the PDF (MarkdownPdf learns pipe tables).

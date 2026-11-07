@@ -341,69 +341,10 @@
     gap: .5rem;
 }
 
-/* The event document, read in a dialog: the Markdown the PDF is made from, rendered. */
+/* The event document, read in a dialog (WorldNewsStoryView draws it, with its own styles). */
 .world-news-document-modal .modal-content {
     background: var(--gws-panel-bg, var(--bs-body-bg));
     color: var(--gws-text-strong, var(--bs-body-color));
-}
-
-/* SentinelGPT's analysis: working on it, couldn't, or done (with Analyse again). */
-.world-news-analysis {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: .5rem;
-    max-width: 46rem;
-    margin: 0 auto 1rem;
-    padding: .55rem .8rem;
-    border-radius: var(--gws-radius-sm, 6px);
-    background: var(--gws-body-bg, var(--bs-tertiary-bg));
-    color: var(--gws-text-soft);
-    font-size: .875rem;
-}
-
-.world-news-analysis .btn-link { padding: 0; }
-
-.world-news-document {
-    max-width: 46rem;
-    margin: 0 auto;
-    line-height: 1.6;
-    overflow-wrap: anywhere;
-}
-
-.world-news-document ::deep h1 {
-    font-size: 1.5rem;
-    font-weight: 700;
-    margin: 0 0 .5rem;
-}
-
-.world-news-document ::deep h2 {
-    font-size: 1.15rem;
-    font-weight: 700;
-    margin: 1.5rem 0 .6rem;
-    padding-bottom: .3rem;
-    border-bottom: 1px solid var(--gws-panel-border, var(--bs-border-color));
-}
-
-.world-news-document ::deep h3 {
-    font-size: .95rem;
-    font-weight: 700;
-    margin: 1rem 0 .3rem;
-}
-
-.world-news-document ::deep ul {
-    padding-left: 1.2rem;
-}
-
-.world-news-document ::deep blockquote {
-    margin: 0 0 .75rem;
-    padding-left: .75rem;
-    border-left: 3px solid var(--gws-panel-border, var(--bs-border-color));
-    color: var(--gws-text-soft);
-}
-
-.world-news-document ::deep em {
-    color: var(--gws-text-soft);
 }
 
 .world-news-world {

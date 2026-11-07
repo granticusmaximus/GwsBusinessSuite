@@ -1,0 +1,513 @@
+@implements IDisposable
+@using GwsBusinessSuite.Application.Abstractions
+@using GwsBusinessSuite.Infrastructure.Services
+@using GwsBusinessSuite.WorldNewsKit
+@inject WorldNewsService News
+@inject ICurrentUserAccessor CurrentUserAccessor
+
+@* A World News story's document, drawn from StoryDocument (06-11-26): the same content as the PDF,
+   which is made from EventDocument.ToMarkdown. Shared by the World News dialog and the story page.
+   The region and language chips filter who's reporting it, the grid, the per-outlet comparisons and
+   the sources. Opening it writes SentinelGPT's analysis when there's none yet or coverage has grown. *@
+
+@if (_story is null)
+{
+    if (_gone)
+    {
+        <p class="text-danger" role="alert">This event isn't there any more (events are merged and pruned as coverage changes).</p>
+    }
+    else
+    {
+        <LoadingIndicator Message="Loading the story…" />
+    }
+}
+else
+{
+    var e = _story.Event;
+    var analysis = _story.Analysis;
+    var outlets = _story.Outlets.Where(_filter.Matches).ToList();
+    var regions = StoryFilter.Regions(_story);
+    var languages = StoryFilter.Languages(_story);
+
+    <div class="story-analysis" role="status">
+        @if (_analysisStatus is not null)
+        {
+            <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+            <span>@_analysisStatus The sections below fill in when it's done.</span>
+        }
+        else if (_analysisError is not null)
+        {
+            <i class="bi bi-exclamation-triangle text-warning" aria-hidden="true"></i>
+            <span>@_analysisError</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="AnalyseAgain">Try again</button>
+        }
+        else
+        {
+            <i class="bi bi-stars" aria-hidden="true"></i>
+            <span>The claim, the summary, what each outlet leaves out or adds, and what they agree on are SentinelGPT's.</span>
+            <button type="button" class="btn btn-sm btn-link" title="Read the outlets' articles and compare the coverage again"
+                    @onclick="AnalyseAgain">Analyse again</button>
+        }
+    </div>
+
+    <article class="story-document">
+        @if (e.Headline is not null)
+        {
+            <p class="story-original">Original headline: @e.Title</p>
+        }
+        <ul class="story-meta">
+            <li>@Count(e.OutletCount, "outlet") · @Count(e.ArticleCount, "report")</li>
+            <li>Languages: @string.Join(", ", e.Languages.Order())</li>
+            <li>Reported from: @string.Join(", ", e.Countries.Order())</li>
+            <li>First seen @e.FirstSeen.ToLocalGwsDateTime(), latest @e.LastSeen.ToLocalGwsDateTime()</li>
+        </ul>
+
+        @if (_story.Changes is { Any: true } changes)
+        {
+            <section class="story-changes" aria-labelledby="story-changes-heading">
+                <h2 id="story-changes-heading">@EventDocument.ChangesHeading (@changes.Since.ToLocalGwsDateTime())</h2>
+                <ul>
+                    @foreach (var line in EventDocument.ChangeLines(changes))
+                    {
+                        <li>@line</li>
+                    }
+                </ul>
+            </section>
+        }
+
+        <h2>@EventDocument.ClaimHeading</h2>
+        @if (analysis is { Claim.Length: > 0 })
+        {
+            <p class="story-claim">@analysis.Claim</p>
+        }
+        else
+        {
+            <p class="story-quiet">@WaitingText</p>
+        }
+
+        <h2>@EventDocument.OverviewHeading</h2>
+        @if (analysis is { Summary.Length: > 0 })
+        {
+            <p>@analysis.Summary</p>
+        }
+        else if (_story.Summary is { } summary)
+        {
+            <p>@summary.Text</p>
+            <p class="story-quiet">A short summary from the headlines alone.</p>
+        }
+        else
+        {
+            <p class="story-quiet">No summary yet.</p>
+        }
+
+        @if (regions.Count > 0 || languages.Count > 0)
+        {
+            <div class="story-filters">
+                @if (regions.Count > 0)
+                {
+                    <div class="story-chips" role="group" aria-label="Show outlets by region">
+                        <button type="button" class="story-chip @On(_filter.Region is null)" aria-pressed="@Pressed(_filter.Region is null)"
+                                @onclick="() => _filter = _filter.WithRegion(null)">
+                            All regions <span class="story-chip-count">@_story.Outlets.Count</span>
+                        </button>
+                        @foreach (var (region, count) in regions)
+                        {
+                            <button type="button" class="story-chip @On(_filter.Region == region)" aria-pressed="@Pressed(_filter.Region == region)"
+                                    title="@RegionTitle(region)" @onclick="() => _filter = _filter.WithRegion(region)">
+                                @region <span class="story-chip-count">@count</span>
+                            </button>
+                        }
+                    </div>
+                }
+                @if (languages.Count > 0)
+                {
+                    <div class="story-chips" role="group" aria-label="Show outlets by language">
+                        <button type="button" class="story-chip @On(_filter.Language is null)" aria-pressed="@Pressed(_filter.Language is null)"
+                                @onclick="() => _filter = _filter.WithLanguage(null)">
+                            All languages <span class="story-chip-count">@_story.Outlets.Count</span>
+                        </button>
+                        @foreach (var (language, count) in languages)
+                        {
+                            <button type="button" class="story-chip @On(_filter.Language == language)" aria-pressed="@Pressed(_filter.Language == language)"
+                                    @onclick="() => _filter = _filter.WithLanguage(language)">
+                                @language <span class="story-chip-count">@count</span>
+                            </button>
+                        }
+                    </div>
+                }
+                @if (!_filter.IsEverything)
+                {
+                    <p class="story-filter-note" role="status">
+                        Showing @Count(outlets.Count, "outlet") of @_story.Outlets.Count: who's reporting it, who reports what, what each leaves out or adds, and the sources.
+                        <button type="button" class="btn btn-sm btn-link" @onclick="() => _filter = StoryFilter.Everything">Show all</button>
+                    </p>
+                }
+            </div>
+        }
+
+        <h2>@EventDocument.OutletsHeading</h2>
+        @if (outlets.Count == 0)
+        {
+            <p class="story-quiet">No outlet matches both of these.</p>
+        }
+        else
+        {
+            <ul>
+                @foreach (var language in outlets.GroupBy(outlet => outlet.Language)
+                              .OrderByDescending(group => group.Count()).ThenBy(group => group.Key, StringComparer.Ordinal))
+                {
+                    <li>
+                        <strong>@language.Key:</strong> @Count(language.Count(), "outlet") (@string.Join(", ", language.Select(outlet => outlet.Name))),
+                        from @string.Join(", ", language.Select(outlet => outlet.Country).Distinct().Order(StringComparer.Ordinal))
+                    </li>
+                }
+                @if (_filter.IsEverything && _story.FirstReport is { } first && _story.LatestReport is { } latest)
+                {
+                    <li>First report: @first.Outlet, @first.SeenAt.ToLocalGwsDateTime(). Latest: @latest.Outlet, @latest.SeenAt.ToLocalGwsDateTime().</li>
+                }
+            </ul>
+            <details class="story-outlets">
+                <summary>Every outlet (@outlets.Count)</summary>
+                <div class="story-table-scroll" tabindex="0" role="region" aria-label="Every outlet">
+                    <table class="story-table">
+                        <thead>
+                            <tr>
+                                <th scope="col">Outlet</th>
+                                <th scope="col">Based in</th>
+                                <th scope="col">Language</th>
+                                <th scope="col" class="text-end">Reports</th>
+                                <th scope="col">First report</th>
+                                <th scope="col">Read in full</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var outlet in outlets)
+                            {
+                                <tr>
+                                    <th scope="row">@outlet.Name</th>
+                                    <td>@outlet.Country</td>
+                                    <td>@outlet.Language</td>
+                                    <td class="text-end">@outlet.Reports</td>
+                                    <td>@outlet.FirstSeen.ToLocalGwsDateTime()</td>
+                                    <td>@(outlet.ReadInFull ? "Yes" : string.Empty)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+        }
+
+        <h2>@EventDocument.GapsHeading</h2>
+        @if (analysis is not null)
+        {
+            var comparisons = _story.Comparisons.Where(c => _filter.Matches(_story, c.Outlet)).ToList();
+            var general = analysis.Differences.Where(d => d.Outlet.Length == 0).ToList();
+            var hidden = _story.Comparisons.Count - comparisons.Count;
+            if (_story.Comparisons.Count == 0 && analysis.Differences.Count == 0)
+            {
+                <p class="story-quiet">SentinelGPT found no outlet whose coverage stands out from the rest.</p>
+            }
+            if (comparisons.Count > 0 || general.Count > 0)
+            {
+                <ul class="story-comparisons">
+                    @foreach (var comparison in comparisons)
+                    {
+                        <li>
+                            <strong>@comparison.Outlet:</strong>
+                            @if (comparison.LeavesOut.Count > 0)
+                            {
+                                <span class="story-label">Leaves out:</span> @string.Join(" ", comparison.LeavesOut)
+                            }
+                            @if (comparison.Adds is { } adds)
+                            {
+                                <span class="story-label">Adds:</span> @adds
+                            }
+                        </li>
+                    }
+                    @foreach (var point in general)
+                    {
+                        <li>@point.Text</li>
+                    }
+                </ul>
+            }
+            if (hidden > 0)
+            {
+                <p class="story-quiet">@Count(hidden, "more outlet") hidden by the filters.</p>
+            }
+            if (comparisons.Any(c => c.LeavesOut.Count > 0))
+            {
+                <p class="story-quiet">"Leaves out" lists the agreed facts below that an outlet's report doesn't state, going by the outlets SentinelGPT names for each fact.</p>
+            }
+        }
+        else if (_story.Summary?.Comparison is { Count: > 0 } points)
+        {
+            <ul>
+                @foreach (var point in points)
+                {
+                    <li>@point</li>
+                }
+            </ul>
+        }
+        else
+        {
+            <p class="story-quiet">@WaitingText</p>
+        }
+
+        <h2>@EventDocument.AgreedHeading</h2>
+        @if (analysis is { Agreed.Count: > 0 })
+        {
+            <ol class="story-facts">
+                @foreach (var fact in analysis.Agreed)
+                {
+                    <li>
+                        @fact.Text
+                        @if (fact.Outlets.Count > 0)
+                        {
+                            <span class="story-fact-outlets">(@Count(fact.Outlets.Count, "outlet"): @string.Join(", ", fact.Outlets))</span>
+                        }
+                    </li>
+                }
+            </ol>
+            var rows = _story.Grid.Where(row => _filter.Matches(_story, row.Outlet)).ToList();
+            var numbers = GridNumbers(analysis);
+            if (numbers.Count > 0 && rows.Count > 0)
+            {
+                <h3 class="story-subhead">@EventDocument.GridHeading</h3>
+                <p class="story-quiet">@EventDocument.Stated the outlet's report states the fact, @EventDocument.NotStated it doesn't. The columns are the facts numbered above.</p>
+                <div class="story-table-scroll" tabindex="0" role="region" aria-label="@EventDocument.GridHeading">
+                    <table class="story-table story-grid">
+                        <thead>
+                            <tr>
+                                <th scope="col">Outlet</th>
+                                @foreach (var (number, fact) in numbers)
+                                {
+                                    <th scope="col" class="text-center" title="@fact.Text">@number</th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in rows)
+                            {
+                                <tr>
+                                    <th scope="row">@row.Outlet</th>
+                                    @for (var i = 0; i < row.States.Count && i < numbers.Count; i++)
+                                    {
+                                        var stated = row.States[i];
+                                        <td class="text-center @(stated ? "is-stated" : string.Empty)">
+                                            <span aria-hidden="true">@(stated ? EventDocument.Stated : EventDocument.NotStated)</span>
+                                            <span class="visually-hidden">@(stated ? "States" : "Doesn't state") fact @(numbers[i].Number)</span>
+                                        </td>
+                                    }
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+        else if (analysis is null)
+        {
+            <p class="story-quiet">@WaitingText</p>
+        }
+
+        @if (_story.Figures.Count > 0)
+        {
+            <h3 class="story-subhead">Figures in the reports</h3>
+            <p class="story-quiet">Read from each headline and description by fixed rules, without AI.</p>
+            <ul>
+                @foreach (var claim in _story.Figures)
+                {
+                    <li>@claim.Label: @FigureText(claim)</li>
+                }
+            </ul>
+        }
+
+        @if (analysis is not null)
+        {
+            <p class="story-quiet story-credit">
+                The claim, the summary, what each outlet leaves out or adds, and what they agree on were written by SentinelGPT (@analysis.Model),
+                @analysis.CreatedAt.ToLocalGwsDateTime(), from the headlines and descriptions of @Count(analysis.ArticleCount, "report")@(analysis.ArticlesRead > 0 ? $" and {Count(analysis.ArticlesRead, "article")} read in full" : string.Empty).
+                Check the sources below before relying on a detail.
+            </p>
+        }
+        else if (_story.Summary is { } written)
+        {
+            <p class="story-quiet story-credit">
+                The summary was written by AI (@written.Model) from the headlines and descriptions of @Count(written.ArticleCount, "report"),
+                @written.CreatedAt.ToLocalGwsDateTime() (version @written.Version). Check the sources below before relying on a detail.
+            </p>
+        }
+
+        <h2>@EventDocument.SourcesHeading</h2>
+        @{
+            var sources = _story.Sources.Where(source => _filter.Matches(source.Report)).ToList();
+        }
+        @if (!_filter.IsEverything)
+        {
+            <p class="story-quiet">@sources.Count of @Count(_story.Sources.Count, "source") match the filters.</p>
+        }
+        <ol class="story-sources">
+            @foreach (var source in sources.Take(_sourcesShown))
+            {
+                var a = source.Report;
+                <li>
+                    <div class="story-source-meta"><strong>@a.Outlet</strong> · @a.Country · @a.Language · @a.SeenAt.ToLocalGwsDateTime()</div>
+                    @if (WebLink(a.Url) is { } href)
+                    {
+                        <a href="@href" target="_blank" rel="noopener noreferrer">@a.Title</a>
+                    }
+                    else
+                    {
+                        <span>@a.Title</span>
+                    }
+                    @if (_story.English.TryGetValue(a.Id, out var english))
+                    {
+                        <div class="story-english">In English: @english</div>
+                    }
+                    @if (a.Snippet is not null)
+                    {
+                        <blockquote>@a.Snippet</blockquote>
+                    }
+                    @if (source.AlsoCarriedBy.Count > 0)
+                    {
+                        <div class="story-quiet">Also carried by: @string.Join(", ", source.AlsoCarriedBy)</div>
+                    }
+                </li>
+            }
+        </ol>
+        @if (sources.Count > _sourcesShown)
+        {
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _sourcesShown += SourcesPage">
+                Show @Math.Min(SourcesPage, sources.Count - _sourcesShown) more (@(sources.Count - _sourcesShown) left)
+            </button>
+        }
+    </article>
+}
+
+@code {
+    // The event whose story this shows.
+    [Parameter, EditorRequired] public string EventId { get; set; } = string.Empty;
+
+    private const int SourcesPage = 50;
+
+    private StoryDocument? _story;
+    private bool _gone;
+    private string? _shownFor;
+    private string? _username;
+    private StoryFilter _filter = StoryFilter.Everything;
+    private int _sourcesShown = SourcesPage;
+    // SentinelGPT's analysis while it's being written, or why it couldn't be.
+    private string? _analysisStatus;
+    private string? _analysisError;
+    private bool _disposed;
+
+    private string WaitingText => _analysisStatus is not null ? "SentinelGPT is writing this now." : EventDocument.Waiting;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (EventId == _shownFor) return;
+        _shownFor = EventId;
+        _story = null;
+        _gone = false;
+        _filter = StoryFilter.Everything;
+        _sourcesShown = SourcesPage;
+        _analysisStatus = null;
+        _analysisError = null;
+        if (_username is null)
+        {
+            var username = await CurrentUserAccessor.GetCurrentUsernameAsync();
+            _username = string.IsNullOrWhiteSpace(username) ? null : username;
+        }
+        await LoadAsync();
+        // No analysis yet, or coverage has grown since: SentinelGPT writes one now. One already
+        // running (started from another page) is followed instead.
+        var id = EventId;
+        if (_story is not null && (News.AnalysisStatus(id) is not null || await Task.Run(() => News.AnalysisDue(id))))
+            _ = FollowAnalysisAsync(id);
+    }
+
+    private async Task LoadAsync()
+    {
+        var id = EventId;
+        var story = await Task.Run(() => News.Story(id, _username));
+        if (id != EventId || _disposed) return;
+        _story = story;
+        _gone = story is null;
+        // Seen: the next "what changed since you last read" starts from this analysis.
+        if (_username is { } username && story?.Analysis is { } analysis)
+            await Task.Run(() => News.MarkStoryRead(username, id, analysis.CreatedAt));
+    }
+
+    private void AnalyseAgain() => _ = FollowAnalysisAsync(EventId);
+
+    // Follows the analysis (it runs on the server and carries on if this closes). The story is
+    // fetched again whenever the analysis moves to its next step, so it shows as soon as it's saved,
+    // before the headline translations finish, and each batch of translations shows as it lands.
+    private async Task FollowAnalysisAsync(string eventId)
+    {
+        _analysisError = null;
+        var analysis = News.AnalyzeAsync(eventId);
+        string? step = null;
+        while (!analysis.IsCompleted && !_disposed && eventId == EventId)
+        {
+            var now = News.AnalysisStatus(eventId) ?? "SentinelGPT is working…";
+            if (step is not null && now != step) await LoadAsync();
+            step = now;
+            _analysisStatus = now;
+            await InvokeAsync(StateHasChanged);
+            await Task.WhenAny(analysis, Task.Delay(750));
+        }
+        if (_disposed || eventId != EventId) return;
+        _analysisStatus = null;
+        try
+        {
+            await analysis;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _analysisError = ex.Message;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or TimeoutException)
+        {
+            _analysisError = "SentinelGPT couldn't finish the analysis. Try again in a minute.";
+        }
+        await LoadAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // The grid's columns: each agreed fact that names outlets, numbered as in the list.
+    private static IReadOnlyList<(int Number, AgreedFact Fact)> GridNumbers(EventAnalysis analysis) =>
+        analysis.Agreed.Select((fact, index) => (Number: index + 1, Fact: fact)).Where(column => column.Fact.Outlets.Count > 0).ToList();
+
+    private static string FigureText(CoverageClaim claim)
+    {
+        var values = string.Join("; ", claim.Values.Take(6).Select(value =>
+            $"{EventDocument.ValueText(value)} ({string.Join(", ", value.Sources.Select(source => source.Article.Outlet).Distinct())})"));
+        var verdict = claim.Corroborated ? " The coverage disagrees."
+            : claim.Disputed ? " The figures vary."
+            : claim.Consensus ? $" {Count(claim.Values[0].Outlets, "outlet")} agree."
+            : string.Empty;
+        if (claim.MayHaveRisen) verdict += " The lower figures all came first, so the number may have risen.";
+        return $"{values}.{verdict}";
+    }
+
+    // Only web links: a feed's link is shown as text when it's anything else.
+    private static string? WebLink(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp) ? uri.AbsoluteUri : null;
+
+    private static string RegionTitle(string region) => region switch
+    {
+        StoryFilter.Western => "Outlets based in Europe, North America, Australia and New Zealand",
+        StoryFilter.NonWestern => "Outlets based anywhere else",
+        _ => $"Outlets based in {region}"
+    };
+
+    private static string On(bool on) => on ? "is-on" : string.Empty;
+
+    private static string Pressed(bool on) => on ? "true" : "false";
+
+    private static string Count(int n, string noun) => $"{n:N0} {noun}{(n == 1 ? string.Empty : "s")}";
+
+    public void Dispose() => _disposed = true;
+}

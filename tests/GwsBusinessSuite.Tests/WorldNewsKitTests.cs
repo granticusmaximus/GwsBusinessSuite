@@ -855,6 +855,42 @@ public sealed class WorldNewsKitTests : IDisposable
     }
 
     [Fact]
+    public void StoryFilter_ShouldOfferTheRegionsAndLanguagesPresent_AndKeepOnlyTheirOutlets()
+    {
+        var bbc = Article("bbc", "Istanbul floods leave 64 dead", "English", Now.AddHours(-4)) with { Outlet = "BBC", Country = "United Kingdom" };
+        var nhk = Article("nhk", "イスタンブールで洪水", "Japanese", Now.AddHours(-1)) with { Outlet = "NHK", Country = "Japan" };
+        var dawn = Article("dawn", "Floods in Istanbul", "English", Now.AddHours(-2)) with { Outlet = "Dawn", Country = "Pakistan" };
+        var e = new EventOverview("e1", "Istanbul floods", 3, 3, ["Japan", "Pakistan", "United Kingdom"], ["English", "Japanese"], Now.AddHours(-4), Now);
+        var analysis = new EventAnalysis("e1", "Floods hit Istanbul.", "s",
+            [new AgreedFact("Flooding hit Istanbul on Tuesday.", ["BBC", "NHK", "Dawn"]), new AgreedFact("64 people died.", ["BBC", "Dawn"])],
+            [new OutletDifference("Spiegel Online", "Adds a dam breach.")], "m", 3, 0, Now);
+        var story = EventDocument.Build(e, [bbc, nhk, dawn], null, analysis);
+
+        StoryFilter.Regions(story).Should().Equal(
+            (StoryFilter.Western, 1), (StoryFilter.NonWestern, 2), (WorldRegions.Europe, 1), (WorldRegions.Asia, 2));
+        StoryFilter.Languages(story).Should().Equal(("English", 2), ("Japanese", 1));
+
+        var nonWestern = StoryFilter.Everything.WithRegion(StoryFilter.NonWestern);
+        story.Outlets.Where(nonWestern.Matches).Select(outlet => outlet.Name).Should().BeEquivalentTo("NHK", "Dawn");
+        story.Grid.Where(row => nonWestern.Matches(story, row.Outlet)).Select(row => row.Outlet).Should().BeEquivalentTo("NHK", "Dawn");
+        story.Sources.Where(source => nonWestern.Matches(source.Report)).Select(source => source.Report.Id).Should().BeEquivalentTo("nhk", "dawn");
+
+        var englishInAsia = nonWestern.WithRegion(WorldRegions.Asia).WithLanguage("english");
+        story.Outlets.Where(englishInAsia.Matches).Select(outlet => outlet.Name).Should().Equal("Dawn");
+        englishInAsia.WithRegion(null).WithLanguage(null).IsEverything.Should().BeTrue();
+
+        // An outlet the analysis names that isn't among the story's outlets shows only unfiltered.
+        StoryFilter.Everything.Matches(story, "Spiegel Online").Should().BeTrue();
+        nonWestern.Matches(story, "Spiegel Online").Should().BeFalse();
+        StoryFilter.Everything.WithRegion(StoryFilter.Western).Matches(story, "Spiegel Online").Should().BeFalse();
+
+        // One region and one language: no chips to offer.
+        var single = EventDocument.Build(e with { Countries = ["United Kingdom"], Languages = ["English"] }, [bbc], null, null);
+        StoryFilter.Regions(single).Should().BeEmpty();
+        StoryFilter.Languages(single).Should().BeEmpty();
+    }
+
+    [Fact]
     public void Translator_ShouldAskOncePerHeadline_AndReadNumberedAnswers()
     {
         var reports = new[]

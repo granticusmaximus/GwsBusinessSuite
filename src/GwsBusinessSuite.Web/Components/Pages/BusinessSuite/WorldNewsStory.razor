@@ -1,0 +1,46 @@
+@page "/admin/world-news/events/{EventId}"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using GwsBusinessSuite.Infrastructure.Services
+@inject WorldNewsService News
+
+@* One World News story on its own page (06-11-26), to bookmark, share or open from Overwatch's
+   READ DOCUMENT; the World News dialog shows the same view. *@
+
+<PageTitle>@(_title ?? "World News story")</PageTitle>
+
+<PageHeader Title="@(_title ?? "World News story")" Icon="bi-globe-europe-africa"
+            ParentLabel="World News" ParentHref="@WorldNewsHref"
+            Description="One event's coverage across outlets and languages: the claim, what the outlets report, who's reporting it, what each leaves out or adds, what they agree on, and every source.">
+    <Actions>
+        @if (_title is not null)
+        {
+            <a class="btn btn-outline-secondary" href="@PdfHref" download title="This document as a PDF">
+                <i class="bi bi-file-earmark-pdf me-1" aria-hidden="true"></i>Download PDF
+            </a>
+        }
+    </Actions>
+</PageHeader>
+
+<WorldNewsStoryView EventId="@EventId" />
+
+@code {
+    [Parameter] public string EventId { get; set; } = string.Empty;
+
+    private string? _title;
+    private string? _shownFor;
+
+    // Back to World News with this event selected.
+    private string WorldNewsHref => $"admin/world-news?event={Uri.EscapeDataString(EventId)}";
+
+    private string PdfHref => $"admin/world-news/events/{Uri.EscapeDataString(EventId)}/document.pdf";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (EventId == _shownFor) return;
+        _shownFor = EventId;
+        var id = EventId;
+        var e = await Task.Run(() => News.Store.Event(id));
+        _title = e is null ? null : e.Headline ?? e.Title;
+    }
+}
