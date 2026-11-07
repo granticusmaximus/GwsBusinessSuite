@@ -28,8 +28,10 @@ all need to know belongs here.
   for every project (07-11-26), so a warning fails the build. Fix the cause. If one truly can't be
   fixed yet, suppress it on that one line with `#pragma` and the reason beside it, never with a
   project-wide `NoWarn`. Workflows count too: keep `actionlint` clean, and don't name a
-  `secrets.X` that isn't set in the repo (read optional ones through `toJSON(secrets)`, as
-  `deploy.yml` does).
+  `secrets.X` that isn't set in the repo. An optional key's line stays commented out until its
+  secret is set (see `deploy.yml`). Never read every secret at once (`toJSON(secrets)`): on this
+  public repo GitHub holds such a run for approval as possibly malicious, so nothing deploys
+  (07-11-26).
 - **Finish what you start.** For anything with several sequenced pieces, finish and verify the
   whole unit before stopping. Don't leave it half-applied.
 

@@ -159,32 +159,16 @@ jobs:
       # No .NET setup here: the final verification runs with --deployed-only (HTTP checks only;
       # this commit was already built and tested by the test job).
 
-      # Optional keys for the droplet's .env (sync_env_secret below), taken from whichever exist as
-      # GitHub secrets: one that isn't set simply isn't passed on, and nothing names a secret that
-      # doesn't exist (VS Code's Actions extension warns on that; 07-11-26). Only these names reach
-      # the next step, as environment variables; GitHub masks their values in the log.
-      #   CAMERA_INTEL_WINDY_API_KEY: Overwatch's worldwide webcams (free key at api.windy.com/keys).
-      - name: Collect optional .env keys
-        env:
-          REPO_SECRETS: ${{ toJSON(secrets) }}
-          OPTIONAL_KEYS: CAMERA_INTEL_WINDY_API_KEY
-        run: |
-          set -eu
-          for name in $OPTIONAL_KEYS; do
-            value="$(jq -r --arg name "$name" '.[$name] // empty' <<<"$REPO_SECRETS")"
-            if [ -z "$value" ]; then
-              echo "$name: no GitHub secret set - left as it is on the droplet."
-              continue
-            fi
-            delimiter="GWS_$(openssl rand -hex 8)"
-            { echo "$name<<$delimiter"; printf '%s\n' "$value"; echo "$delimiter"; } >> "$GITHUB_ENV"
-            echo "$name: passed on."
-          done
-
       - name: SSH into droplet and deploy
         uses: appleboy/ssh-action@v1.2.5
         env:
           OVERWATCH_TOMTOM_API_KEY: ${{ secrets.OVERWATCH_TOMTOM_API_KEY }}
+          # Optional keys: uncomment a key's line once its GitHub secret is set. Only secrets that
+          # exist are named here (07-11-26). Naming one that isn't set is a warning in VS Code, and
+          # reading every secret at once instead got the deploy held by GitHub for approval, as a
+          # possibly malicious workflow (it does that on public repos).
+          # Overwatch's worldwide webcams (Windy Webcams API, free key from api.windy.com/keys):
+          # CAMERA_INTEL_WINDY_API_KEY: ${{ secrets.CAMERA_INTEL_WINDY_API_KEY }}
         with:
           host: ${{ secrets.DO_HOST }}
           # Secrets the script writes into the droplet's .env (see sync_env_secret below).
