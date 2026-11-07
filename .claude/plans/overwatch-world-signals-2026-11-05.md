@@ -134,11 +134,19 @@ Three new cards on Threat Intelligence (`ThreatFreshFeedsPanel`, `ThreatFeedServ
 
 ## Needs Grant
 
-- Keys, each optional. Set each with `gh secret set NAME`, then run the "Sync droplet .env keys" workflow:
+- Keys, each optional. Set each with `gh secret set NAME`, uncomment its line under `env:` in
+  droplet-env.yml (since 07-11-26 the workflow names only secrets that exist), then run the "Sync
+  droplet .env keys" workflow:
   - `REACH_GITHUB_TOKEN`
   - `REACH_YOUTUBE_API_KEY`
   - `REACH_REDDIT_CLIENT_ID` + `REACH_REDDIT_CLIENT_SECRET`
   - `REACH_BLUESKY_HANDLE` + `REACH_BLUESKY_APP_PASSWORD`
   - `REACH_X_BEARER_TOKEN`
   - `SEC_EDGAR_CONTACT_EMAIL` (unit 7: SEC asks automated requests to name a contact)
-- Later, if wanted: NASA FIRMS, Cloudflare Radar and ACLED keys.
+- No more keys (07-11-26: Grant wants key-less routes only; each checked live that day):
+  - Fires: NASA FIRMS's public 24-hour files (NOAA-20 VIIRS and MODIS CSV, no MAP_KEY).
+  - Conflict: GDELT's 15-minute event files ("reported") and UCDP's candidate GED downloads
+    ("confirmed", monthly). The UCDP token is only for its API.
+  - Humanitarian: ReliefWeb's RSS feeds (its API needs an approved appname) and the IFRC GO API.
+  - Outages stay on IODA.
+  - Dropped: Cloudflare Radar (CC BY-NC data) and ACLED (businesses need a corporate licence).

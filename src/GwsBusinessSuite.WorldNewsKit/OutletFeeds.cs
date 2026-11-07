@@ -17,12 +17,45 @@ public sealed record NewsOutlet(string Name, string Language, string Country, st
 // RSS 1.0 (RDF, DW's feeds) and Atom.
 public static partial class OutletFeeds
 {
+    // Where a newsroom that belongs to no country is based (UN News, WHO). Region: Other.
+    public const string International = "International";
+
     // Every feed answered with stories on 21-10-26. Left out after that check: Euronews French
     // and German (HTTP 406), CBC (no answer), El Mundo (timed out), Folha (no items).
     // Taken out 05-11-26: France 24 (all four languages) and The Times of Israel answer the
     // server 403 Access Denied, so their refusal page was being parsed as RSS on every read.
+    // Added 07-11-26, each answering with that day's stories: the US outlets that only came
+    // through Google News, then the ones below them. Names are as Google News gives them (or
+    // OutletNames maps them), so both routes count as one outlet. Left out that day: CNN (its feed
+    // stopped in April 2023), USA Today (402), Al Arabiya and Arab News (403 to the app), Kyodo and
+    // Mail & Guardian (404).
     public static readonly IReadOnlyList<NewsOutlet> Outlets =
     [
+        new("The New York Times", "English", "United States", "https://rss.nytimes.com/services/xml/rss/nyt/World.xml"),
+        new("The New York Times", "English", "United States", "https://rss.nytimes.com/services/xml/rss/nyt/US.xml"),
+        new("The Washington Post", "English", "United States", "https://feeds.washingtonpost.com/rss/world"),
+        new("The Wall Street Journal", "English", "United States", "https://feeds.content.dowjones.io/public/rss/RSSWorldNews"),
+        new("CBS News", "English", "United States", "https://www.cbsnews.com/latest/rss/world"),
+        new("NBC News", "English", "United States", "https://feeds.nbcnews.com/nbcnews/public/world"),
+        new("ABC News (US)", "English", "United States", "https://abcnews.go.com/abcnews/internationalheadlines"),
+        new("Fox News", "English", "United States", "https://moxie.foxnews.com/google-publisher/world.xml"),
+        new("PBS News", "English", "United States", "https://www.pbs.org/newshour/feeds/rss/world"),
+        new("Politico", "English", "United States", "https://rss.politico.com/politics-news.xml"),
+        new("The Hill", "English", "United States", "https://thehill.com/news/feed/"),
+        new("Axios", "English", "United States", "https://api.axios.com/feed/"),
+        new("Los Angeles Times", "English", "United States", "https://www.latimes.com/world-nation/rss2.0.xml"),
+        new("Bloomberg", "English", "United States", "https://feeds.bloomberg.com/politics/news.rss"),
+        new("The Christian Science Monitor", "English", "United States", "https://rss.csmonitor.com/feeds/world"),
+        new("ProPublica", "English", "United States", "https://feeds.propublica.org/propublica/main"),
+        new("New York Post", "English", "United States", "https://nypost.com/world-news/feed/"),
+        new("CNBC", "English", "United States", "https://www.cnbc.com/id/100727362/device/rss/rss.html"),
+        new("Infobae", "Spanish", "Argentina", "https://www.infobae.com/arc/outboundfeeds/rss/"),
+        new("G1", "Portuguese", "Brazil", "https://g1.globo.com/rss/g1/mundo/"),
+        new("The Globe and Mail", "English", "Canada", "https://www.theglobeandmail.com/arc/outboundfeeds/rss/category/world/"),
+        new("Africanews", "English", "Republic of the Congo", "https://www.africanews.com/feed/rss"),
+        new("The Moscow Times", "English", "Netherlands", "https://www.themoscowtimes.com/rss/news"),
+        new("CGTN", "English", "China", "https://www.cgtn.com/subscribe/rss/section/world.xml"),
+        new("UN News", "English", International, "https://news.un.org/feed/subscribe/en/news/all/rss.xml"),
         new("Al Jazeera", "English", "Qatar", "https://www.aljazeera.com/xml/rss/all.xml"),
         new("BBC News", "English", "United Kingdom", "https://feeds.bbci.co.uk/news/world/rss.xml"),
         new("The Guardian", "English", "United Kingdom", "https://www.theguardian.com/world/rss"),
@@ -38,7 +71,7 @@ public static partial class OutletFeeds
         new("The Straits Times", "English", "Singapore", "https://www.straitstimes.com/news/world/rss.xml"),
         new("CNA", "English", "Singapore", "https://www.channelnewsasia.com/rssfeeds/8395884"),
         new("The Japan Times", "English", "Japan", "https://www.japantimes.co.jp/feed/"),
-        new("ABC News", "English", "Australia", "https://www.abc.net.au/news/feed/51120/rss.xml"),
+        new("ABC News (Australia)", "English", "Australia", "https://www.abc.net.au/news/feed/51120/rss.xml"),
         new("RNZ", "English", "New Zealand", "https://www.rnz.co.nz/rss/world.xml"),
         new("Daily Maverick", "English", "South Africa", "https://www.dailymaverick.co.za/dmrss/"),
         new("Premium Times", "English", "Nigeria", "https://www.premiumtimesng.com/feed"),

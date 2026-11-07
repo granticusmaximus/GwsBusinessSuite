@@ -1157,6 +1157,108 @@ public sealed class WorldNewsKitTests : IDisposable
         store.ArticlesToEmbed(10).Should().Contain(a => a.Feed == working.Feed && a.Snippet == "Heavy rain flooded streets & homes in Istanbul on Tuesday.");
     }
 
+    // 07-11-26: the US outlets' own feeds came in beside their Google News reports, and Google News
+    // names some outlets by their site's title or a short form.
+    [Fact]
+    public void OutletNames_ShouldGiveOneNamePerOutlet_AndTellTheTwoAbcsApart()
+    {
+        OutletNames.Canonical("WSJ").Should().Be("The Wall Street Journal");
+        OutletNames.Canonical("Bloomberg.com").Should().Be("Bloomberg");
+        OutletNames.Canonical("ABC News - Breaking News, Latest News and Videos").Should().Be("ABC News (US)");
+        OutletNames.Canonical("ABC News & Headlines – Australian Broadcasting Corporation").Should().Be("ABC News (Australia)");
+        OutletNames.Canonical("Le Monde.fr").Should().Be("Le Monde.fr");
+
+        const string feed = """
+            <rss version="2.0"><channel><item>
+              <title>Senate passes the budget - WSJ</title>
+              <link>https://news.google.com/rss/articles/WSJ1?oc=5</link>
+              <guid isPermaLink="false">wsj-1</guid>
+              <pubDate>Tue, 20 Oct 2026 14:00:00 GMT</pubDate>
+              <source url="https://www.wsj.com">WSJ</source>
+            </item></channel></rss>
+            """;
+        var report = GoogleNewsFeed.Parse(feed, new NewsEdition("United States", "English", "en-US", "US", "US:en")).Should().ContainSingle().Subject;
+        report.Outlet.Should().Be("The Wall Street Journal");
+        report.Title.Should().Be("Senate passes the budget", "the short name still comes off the headline");
+    }
+
+    [Fact]
+    public void OutletFeeds_ShouldListEachFeedOnce_UnderItsOneName_WithARegionForEachCountry()
+    {
+        OutletFeeds.Outlets.Select(o => o.Url).Should().OnlyHaveUniqueItems();
+        OutletFeeds.Outlets.Should().OnlyContain(o => OutletNames.Canonical(o.Name) == o.Name, "an own feed uses the name its Google News reports get");
+        OutletFeeds.Outlets.Where(o => o.Country != OutletFeeds.International)
+            .Should().OnlyContain(o => WorldRegions.Of(o.Country) != WorldRegions.Other, "the region chips need each outlet's region");
+        OutletFeeds.Outlets.Should().Contain(o => o.Name == "ABC News (US)").And.Contain(o => o.Name == "ABC News (Australia)");
+    }
+
+    [Fact]
+    public void OutletNames_ShouldMarkStateRunOutlets_NotPublicBroadcasters()
+    {
+        OutletNames.IsStateMedia("TASS").Should().BeTrue();
+        OutletNames.IsStateMedia("新华网").Should().BeTrue();
+        OutletNames.IsStateMedia("CGTN").Should().BeTrue();
+        OutletNames.IsStateMedia("BBC News").Should().BeFalse();
+        OutletNames.IsStateMedia("NHK").Should().BeFalse();
+        OutletNames.IsStateMedia(null).Should().BeFalse();
+
+        var tass = Article("tass", "Floods in Istanbul", "English", Now.AddHours(-2)) with { Outlet = "TASS", Country = "Russia" };
+        var e = new EventOverview("e1", "Floods in Istanbul", 1, 1, ["Russia"], ["English"], Now.AddHours(-2), Now.AddHours(-2), "Floods in Istanbul");
+        EventDocument.ToMarkdown(EventDocument.Build(e, [tass], null, null), at => at.ToString("O", System.Globalization.CultureInfo.InvariantCulture))
+            .Should().Contain("### TASS: Russia, English, state media, 1 report");
+    }
+
+    [Fact]
+    public void WhoOutbreakNews_ShouldReadTheNewestItems_AsTheAgencysOwnReports()
+    {
+        const string json = """
+            {"value":[
+              {"UrlName":"2026-DON625","Title":"Ebola disease caused by Bundibugyo virus, Democratic Republic of the Congo, Kenya and Nigeria",
+               "UseOverrideTitle":false,"OverrideTitle":"","PublicationDateAndTime":"2026-10-20T10:42:12Z",
+               "Summary":"<p>Since the previous Disease Outbreak News, the outbreak has <b>expanded</b> in the Democratic Republic of the Congo.</p>"},
+              {"UrlName":"2026-DON624","Title":"Old title","UseOverrideTitle":true,"OverrideTitle":"Yellow fever - WHO African Region",
+               "PublicationDateAndTime":"2026-10-21T19:00:00Z","Summary":""},
+              {"UrlName":"","Title":"No page","PublicationDateAndTime":"2026-10-19T19:00:00Z"}
+            ]}
+            """;
+        var reports = WhoOutbreakNews.Parse(json, Now);
+
+        reports.Should().HaveCount(2, "an item without a page is skipped");
+        var ebola = reports[0];
+        ebola.Outlet.Should().Be("World Health Organization");
+        ebola.Country.Should().Be(OutletFeeds.International);
+        ebola.Url.Should().Be("https://www.who.int/emergencies/disease-outbreak-news/item/2026-DON625");
+        ebola.Snippet.Should().Be("Since the previous Disease Outbreak News, the outbreak has expanded in the Democratic Republic of the Congo.");
+        ebola.SeenAt.Should().Be(DateTimeOffset.Parse("2026-10-20T10:42:12Z", System.Globalization.CultureInfo.InvariantCulture));
+        reports[1].Title.Should().Be("Yellow fever - WHO African Region");
+        reports[1].SeenAt.Should().Be(Now, "a date after now is taken as now");
+        reports[1].Snippet.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Pipeline_ShouldReadWhoOutbreakNews_OnlyWhenTheHostTurnsItOn()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var whoUp = true;
+        var http = new HttpClient(new FakeHttp(request => request.RequestUri!.Host switch
+        {
+            "www.who.int" when whoUp => (HttpStatusCode.OK,
+                """{"value":[{"UrlName":"2026-DON625","Title":"Ebola - Kenya","PublicationDateAndTime":"2026-10-20T10:00:00Z","Summary":""}]}"""),
+            "www.who.int" => (HttpStatusCode.ServiceUnavailable, ""),
+            _ => (HttpStatusCode.InternalServerError, "no model")
+        }));
+        WorldNewsPipeline Pipeline(bool on) => new(store, http, new GdeltDocClient(http, new ManualTime(Now)),
+            new OllamaClient(new Uri("http://localhost:11434/"), http), new ManualTime(Now),
+            new WorldNewsOptions { Editions = [], Outlets = [], ReadWhoOutbreakNews = on });
+
+        (await Pipeline(false).RunCycleAsync(CancellationToken.None)).Added.Should().Be(0, "it's off unless the host turns it on");
+        (await Pipeline(true).RunCycleAsync(CancellationToken.None)).Added.Should().Be(1);
+        store.ArticlesToEmbed(10).Should().ContainSingle(a => a.Outlet == WhoOutbreakNews.Outlet && a.Feed == WhoOutbreakNews.Feed);
+
+        whoUp = false;
+        (await Pipeline(true).RunCycleAsync(CancellationToken.None)).Notes.Should().Contain(n => n.StartsWith("WHO outbreak news:"));
+    }
+
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();

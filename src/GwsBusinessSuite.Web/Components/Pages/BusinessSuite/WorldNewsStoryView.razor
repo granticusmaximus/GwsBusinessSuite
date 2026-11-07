@@ -318,6 +318,10 @@ else
                             <summary>
                                 <span class="story-outlet-line">
                                     <span class="story-outlet-name">@outlet.Outlet.Name</span>
+                                    @if (OutletNames.IsStateMedia(outlet.Outlet.Name))
+                                    {
+                                        <span class="story-state-media" title="State-run: a government agency, ruling-party paper or state-controlled broadcaster">state media</span>
+                                    }
                                     <span class="story-outlet-meta">@outlet.Outlet.Country · @outlet.Outlet.Language · @Count(outlet.Outlet.Reports, "report")</span>
                                     @if (outlet.States is { } states)
                                     {

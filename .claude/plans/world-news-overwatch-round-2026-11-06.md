@@ -83,3 +83,35 @@ Done:
   SentinelGPT (with that item as context), Capture.
 - 5b **The layer panel:** search, active layers as chips at the top, a count per layer, a legend.
 - 5c **Clustering** of markers when zoomed out; panels as a bottom sheet on phones.
+
+## Phase 6 - Key-less sources (07-11-26)
+
+Grant: "Let's actually find routes where I do not need a key from someone", then "GO" on the
+list. Every route was checked live on 07-11-26 with the app's own client; refusals are left out.
+6a goes first and lands on its own; 6b-6f (Overwatch) are built in the scratch worktree and land
+together; 6g last.
+
+- 6a **US outlets' own feeds, then global ones** (World News):
+  - US: NYT (World and US), Washington Post, WSJ, CBS, NBC, ABC (US), Fox, PBS News, Politico,
+    The Hill, Axios, LA Times, Bloomberg, CS Monitor, ProPublica, NY Post, CNBC. Not CNN (its
+    feed stopped in April 2023) or USA Today (HTTP 402).
+  - Global: Infobae, G1, The Globe and Mail, Africanews, The Moscow Times, CGTN. Not Al Arabiya
+    or Arab News (403 to the app; Arab News answered curl), Kyodo or Mail & Guardian (404).
+  - Official: UN News, and WHO's disease outbreak news (its JSON API, newest first).
+  - One name per outlet (`OutletNames`): Google News's site-title and short names ("ABC News -
+    Breaking News, Latest News and Videos", "WSJ", "Bloomberg.com") map to the outlet's own, and
+    the two ABCs become "ABC News (US)" and "ABC News (Australia)".
+  - "State media" on state-run outlets (TASS, Xinhua, CGTN, Anadolu...) in the coverage list and
+    the PDF. Public broadcasters with independent editors (BBC, NHK, DW) aren't labelled.
+- 6b **Travel advice** (Overwatch): the US State Department's level for each of 218 countries as
+  country shading.
+- 6c **More hazards** (Overwatch, `HazardLayerService`): NOAA hurricane center storms (one per
+  storm with GDACS), and NASA EONET kinds nothing else covers (landslides, dust, sea ice).
+- 6d **Fire hotspots** (Overwatch): NASA FIRMS's public 24-hour files (NOAA-20 VIIRS, MODIS),
+  grouped into cells so the globe isn't drawing 100,000 points.
+- 6e **Conflict** (Overwatch): GDELT's 15-minute event files as "Reported" (material conflict
+  described by several articles) and UCDP's candidate events as "Confirmed" (monthly, with deaths).
+- 6f **Humanitarian** (Overwatch): ReliefWeb's disasters feed and IFRC GO's emergencies, at the
+  country.
+- 6g **World News signals:** Wikipedia's most-read pages matched to stories ("Most read on
+  Wikipedia"), and a GDELT search trial with its answer rate logged.

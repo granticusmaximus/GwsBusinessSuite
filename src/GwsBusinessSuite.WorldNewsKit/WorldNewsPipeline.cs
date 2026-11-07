@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Xml;
 using GwsBusinessSuite.OllamaKit;
 
@@ -19,6 +20,9 @@ public sealed record WorldNewsOptions
     public IReadOnlyList<NewsOutlet> Outlets { get; init; } = OutletFeeds.Outlets;
     // Outlet feeds are read this many at a time (several share a host, such as the BBC's).
     public int OutletConcurrency { get; init; } = 6;
+    // WHO's Disease Outbreak News (WhoOutbreakNews), read with the outlets' feeds. Off unless the
+    // host turns it on, so a test's pipeline asks no one it wasn't told to.
+    public bool ReadWhoOutbreakNews { get; init; }
     public IReadOnlyList<string> GdeltQueries { get; init; } = [];
     public int EmbedBatchSize { get; init; } = 64;
     // Taken for each embedding batch and released after it, so a host can queue embedding with its
@@ -83,6 +87,20 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
             if (articles is null) continue;
             fetched += articles.Count;
             added += store.AddArticles(articles);
+        }
+
+        if (options.ReadWhoOutbreakNews)
+        {
+            try
+            {
+                var articles = WhoOutbreakNews.Parse(await http.GetStringAsync(WhoOutbreakNews.Url, ct), time.GetUtcNow());
+                fetched += articles.Count;
+                added += store.AddArticles(articles);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException && !ct.IsCancellationRequested)
+            {
+                notes.Add($"WHO outbreak news: {ex.Message}");
+            }
         }
 
         foreach (var query in options.GdeltQueries)

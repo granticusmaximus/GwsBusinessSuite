@@ -69,6 +69,8 @@ public sealed partial class WorldNewsService : IDisposable
         _options = new WorldNewsOptions
         {
             MaxEmbedPerCycle = configuration.GetValue("WorldNews:MaxEmbedPerCycle", 1500),
+            // WHO's own outbreak reports alongside the outlets' (07-11-26).
+            ReadWhoOutbreakNews = configuration.GetValue("WorldNews:ReadWhoOutbreakNews", true),
             EmbedElsewhere = () => EmbedRelayActive(DateTimeOffset.UtcNow),
             EmbedSlot = workloads is null ? null : ct => workloads.AcquireAsync(OllamaWorkloadPriority.Background, ct).AsTask()
         };

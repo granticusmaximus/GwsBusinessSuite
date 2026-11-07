@@ -178,7 +178,7 @@ public static class EventDocument
     private static void AppendOutlet(StringBuilder md, StoryDocument story, OutletCoverage coverage, Func<DateTimeOffset, string> formatTime)
     {
         var outlet = coverage.Outlet;
-        md.AppendLine($"### {Inline(outlet.Name)}: {outlet.Country}, {outlet.Language}, {Count(outlet.Reports, "report")}{(outlet.ReadInFull ? ", read in full" : string.Empty)}").AppendLine();
+        md.AppendLine($"### {Inline(outlet.Name)}: {outlet.Country}, {outlet.Language}{(OutletNames.IsStateMedia(outlet.Name) ? ", state media" : string.Empty)}, {Count(outlet.Reports, "report")}{(outlet.ReadInFull ? ", read in full" : string.Empty)}").AppendLine();
         var notes = new List<string>();
         if (coverage.LeavesOut.Count > 0) notes.Add("Leaves out: " + string.Join(" ", coverage.LeavesOut.Select(number => story.Analysis!.Agreed[number - 1].Text)));
         if (coverage.Adds is { } adds) notes.Add("Adds: " + adds);

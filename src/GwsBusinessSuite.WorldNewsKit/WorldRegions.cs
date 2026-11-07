@@ -35,6 +35,7 @@ public static class WorldRegions
         ["United Arab Emirates"] = MiddleEast, ["Turkey"] = MiddleEast, ["Iran"] = MiddleEast, ["Iraq"] = MiddleEast,
         ["Lebanon"] = MiddleEast, ["Jordan"] = MiddleEast, ["Morocco"] = MiddleEast, ["Algeria"] = MiddleEast, ["Tunisia"] = MiddleEast,
         ["Kenya"] = Africa, ["Nigeria"] = Africa, ["South Africa"] = Africa, ["Ghana"] = Africa, ["Ethiopia"] = Africa,
+        ["Republic of the Congo"] = Africa, ["Democratic Republic of the Congo"] = Africa,
         ["China"] = Asia, ["Hong Kong"] = Asia, ["India"] = Asia, ["Indonesia"] = Asia, ["Japan"] = Asia, ["Pakistan"] = Asia,
         ["Philippines"] = Asia, ["Singapore"] = Asia, ["South Korea"] = Asia, ["Taiwan"] = Asia, ["Thailand"] = Asia,
         ["Vietnam"] = Asia, ["Bangladesh"] = Asia, ["Malaysia"] = Asia,

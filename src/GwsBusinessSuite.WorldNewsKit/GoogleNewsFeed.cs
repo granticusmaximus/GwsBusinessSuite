@@ -81,7 +81,7 @@ public static partial class GoogleNewsFeed
                     if (title.Length == 0) continue;
                     var url = System.Net.WebUtility.HtmlDecode(report.Groups["href"].Value);
                     articles.Add(new WorldArticle(ArticleNormalizer.IdFor(url), url, title,
-                        ArticleNormalizer.CleanTitle(report.Groups["outlet"].Value), edition.Language, edition.Country, seenAt, feed, group));
+                        OutletNames.Canonical(ArticleNormalizer.CleanTitle(report.Groups["outlet"].Value)), edition.Language, edition.Country, seenAt, feed, group));
                 }
                 continue;
             }
@@ -91,7 +91,7 @@ public static partial class GoogleNewsFeed
             if (outlet.Length > 0 && headline.EndsWith(" - " + outlet, StringComparison.Ordinal))
                 headline = headline[..^(outlet.Length + 3)];
             if (headline.Length == 0) continue;
-            articles.Add(new WorldArticle(ArticleNormalizer.IdFor(link), link, headline, outlet, edition.Language, edition.Country, seenAt, feed, group));
+            articles.Add(new WorldArticle(ArticleNormalizer.IdFor(link), link, headline, OutletNames.Canonical(outlet), edition.Language, edition.Country, seenAt, feed, group));
         }
         return articles;
     }
