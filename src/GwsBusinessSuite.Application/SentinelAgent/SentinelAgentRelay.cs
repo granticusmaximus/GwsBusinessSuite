@@ -43,6 +43,11 @@ public sealed class SentinelAgentRelay(TimeProvider time, TimeSpan? callTimeout 
             ? SentinelAgentModels.LocalCandidates(mac.Models)
             : [];
 
+    // Everything this person's Mac has installed, while it's online: Deep Analysis's advisers
+    // (DeepAnalysisAdvice) needn't be able to use tools, so they aren't in ModelsFor (07-11-26).
+    public IReadOnlyList<string> InstalledFor(string username) =>
+        _macs.TryGetValue(username, out var mac) && IsOnline(mac) ? mac.Models.ToList() : [];
+
     // The online Admin Mac that asked most recently, with everything it has installed, for shared
     // work. Null when there's none.
     public (string Username, IReadOnlyList<string> Models)? SharedWorkMac() =>

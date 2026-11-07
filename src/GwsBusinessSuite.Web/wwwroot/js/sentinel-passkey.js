@@ -65,11 +65,30 @@ export async function get(optionsJson) {
     });
 }
 
+// What this device calls the unlock a passkey uses (07-11-26: phones and tablets use passkeys too,
+// in the browser or the app added to the Home Screen). short names a button, long fits a sentence.
+export function unlockName() {
+    const ua = navigator.userAgent || '';
+    const appleTouch = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    const phoneOrTablet = appleTouch || /Android|Mobile/.test(ua);
+    const name = appleTouch ? { short: 'Face ID', long: 'Face ID or Touch ID' }
+        : /Android/.test(ua) ? { short: 'Fingerprint', long: 'your fingerprint or screen lock' }
+        : /Macintosh/.test(ua) ? { short: 'Touch ID', long: 'Touch ID' }
+        : /Windows/.test(ua) ? { short: 'Windows Hello', long: 'Windows Hello' }
+        : { short: 'Passkey', long: 'your passkey' };
+    return { ...name, appleTouch, device: phoneOrTablet ? 'this device' : 'this computer' };
+}
+
 // The GWS Mac app's web view (WKWebView): WebKit without Safari's "Safari/" token. Passkeys don't
 // work there, so the page offers the app's own Touch ID (a gws-native:// link the app handles).
 export function isEmbeddedWebKit() {
     const ua = navigator.userAgent || '';
-    return /AppleWebKit\//.test(ua) && /Macintosh|iPhone|iPad/.test(ua) && !/Safari\/|Chrome\/|Edg\//.test(ua);
+    // The app installed from Safari onto an iPhone or iPad's Home Screen (PWA, 07-11-26) leaves out
+    // "Safari/" too, but it's Safari: passkeys work and there's no Mac app to hand over to.
+    const installedWebApp = navigator.standalone === true
+        || (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
+    return !installedWebApp
+        && /AppleWebKit\//.test(ua) && /Macintosh|iPhone|iPad/.test(ua) && !/Safari\/|Chrome\/|Edg\//.test(ua);
 }
 
 // The Mac app tells the page when its Touch ID step is done by dispatching a "gws-native" event

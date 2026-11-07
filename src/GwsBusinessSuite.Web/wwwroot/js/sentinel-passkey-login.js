@@ -5,7 +5,7 @@
 //     shows a number; the Mac app shows three and the person picks this one with Touch ID.
 //   - In the Mac app's own web view, its native Touch ID (gws-native://signin).
 // The server checks everything; this page only runs the scanner and goes where sign-in was headed.
-import { get, isAvailable, isEmbeddedWebKit } from './sentinel-passkey.js?v=2';
+import { get, isAvailable, isEmbeddedWebKit, unlockName } from './sentinel-passkey.js?v=3';
 
 const panel = document.getElementById('gws-touchid');
 const title = document.getElementById('gws-touchid-title');
@@ -22,6 +22,12 @@ const UsernameKey = 'gws-last-username';
 const PollMs = 2000;
 let idleText = '';
 let waiting = null;
+
+// What this device calls its unlock (07-11-26: phones and tablets sign in with passkeys too).
+const unlock = unlockName();
+const appleTouch = unlock.appleTouch;
+const thisDevice = unlock.device;
+const capital = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 
 function remember(key, value) {
     try { localStorage.setItem(key, value); } catch { /* private mode */ }
@@ -42,15 +48,15 @@ function setState(state, heading, text) {
 }
 
 function reset() {
-    setState('idle', 'Sign in with your fingerprint', idleText);
+    setState('idle', appleTouch ? 'Sign in with Face ID or Touch ID' : 'Sign in with your fingerprint', idleText);
 }
 
 async function signInHere() {
-    setState('scanning', 'Touch the sensor', 'Use Touch ID on this computer.');
+    setState('scanning', appleTouch ? 'Look at or touch your device' : 'Touch the sensor', `Use ${unlock.long} on ${thisDevice}.`);
     try {
         const optionsResponse = await fetch('auth/passkey/options', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
         const begun = await optionsResponse.json();
-        if (!optionsResponse.ok) throw new Error(begun.error || 'Touch ID sign-in is unavailable.');
+        if (!optionsResponse.ok) throw new Error(begun.error || `${unlock.short} sign-in is unavailable.`);
         const assertion = await get(begun.options);
         const loginResponse = await fetch('auth/passkey/login', {
             method: 'POST',
@@ -58,14 +64,14 @@ async function signInHere() {
             body: JSON.stringify({ ceremonyId: begun.ceremonyId, assertion, returnUrl })
         });
         const done = await loginResponse.json();
-        if (!loginResponse.ok) throw new Error(done.error || 'Touch ID sign-in didn\'t work.');
+        if (!loginResponse.ok) throw new Error(done.error || `${unlock.short} sign-in didn't work.`);
         setState('done', 'Signed in', 'Opening your workspace…');
         window.location.assign(done.redirect || '/admin');
     } catch (e) {
         const cancelled = e && e.name === 'NotAllowedError';
-        setState('error', cancelled ? 'Touch ID was cancelled' : 'That didn\'t work',
+        setState('error', cancelled ? `${unlock.short} was cancelled` : 'That didn\'t work',
             cancelled ? 'Try again, approve on your Mac, or use your password.'
-                : (e && e.message) || 'Touch ID sign-in didn\'t work. If you haven\'t added Touch ID for this browser yet, approve on your Mac or use your password.');
+                : (e && e.message) || `${unlock.short} sign-in didn't work. If you haven't added ${unlock.short} for this browser yet, approve on your Mac or use your password.`);
     }
 }
 
@@ -135,8 +141,9 @@ if (panel) {
         mac.addEventListener('click', approveOnMac);
         if (await isAvailable()) {
             here.hidden = false;
+            here.lastChild.textContent = ' ' + unlock.short;
             here.addEventListener('click', signInHere);
-            idleText = 'Touch ID on this computer, or approve with the GWS app on your Mac.';
+            idleText = `${capital(unlock.long)} on ${thisDevice}, or approve with the GWS app on your Mac.`;
         } else {
             idleText = 'Approve with Touch ID in the GWS app on your Mac.';
         }

@@ -78,6 +78,10 @@ public partial class App : Application
 		_worldNewsEmbeddings.Start();
 		_agentRelay.Start();
 		_signInApprovals.Start();
+#if MACCATALYST
+		// This Mac is the AI server for your phone and tablet: keep the relays answering in the background (PWA phase 4).
+		MacAiServer.KeepRelayAnswering();
+#endif
 	}
 
 	protected override Window CreateWindow(IActivationState? activationState)

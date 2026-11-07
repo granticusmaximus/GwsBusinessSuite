@@ -5,6 +5,21 @@
 @inject GwsBusinessSuite.Application.Abstractions.ICurrentUserAccessor CurrentUser
 @using System.Security.Claims
 
+@if (IsAdminRoute)
+{
+    @* Installable as an app on phones, tablets and desktops (PWA, 07-11-26): the manifest, colours
+       and Apple tags. js/pwa.js registers the service worker. Admin pages only, not the public site. *@
+    <HeadContent>
+        <link rel="manifest" href="manifest.webmanifest" />
+        <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+        <meta name="theme-color" content="#141210" media="(prefers-color-scheme: dark)" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="GWS Suite" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <link rel="apple-touch-icon" href="img/app-icons/apple-touch-icon.png" />
+    </HeadContent>
+}
 @if (!string.IsNullOrEmpty(_adminThemeCss))
 {
     @* The live website's theme (accent, sidebar, top bar) - see AdminThemeCss. After app.css,
@@ -222,6 +237,9 @@
             && await Preferences.GetAsync(username, GwsBusinessSuite.Application.AdminPortal.UserPreferenceKeys.DensityOffer)
                 == GwsBusinessSuite.Application.AdminPortal.DensityOffers.Unanswered;
     }
+
+    private bool IsAdminRoute =>
+        Navigation.ToBaseRelativePath(Navigation.Uri).StartsWith("admin", StringComparison.OrdinalIgnoreCase);
 
     private bool IsChromelessRoute
     {

@@ -42,10 +42,22 @@ public class AppDelegate : MauiUIApplicationDelegate
 		var checkForUpdates = UICommand.Create("Check for Updates…", null, new Selector("gwsCheckForUpdates:"), null);
 		var setUpTouchId = UICommand.Create("Set Up Touch ID…", null, new Selector("gwsSetUpTouchId:"), null);
 		var signInWithTouchId = UICommand.Create("Sign In with Touch ID", null, new Selector("gwsSignInWithTouchId:"), null);
+		// PWA phase 4 (07-11-26): this Mac is SentinelGPT's model for your phone and tablet.
+		var openAtLogin = UICommand.Create("Open at Login…", null, new Selector("gwsOpenAtLogin:"), null);
 		builder.InsertSiblingMenuAfter(
-			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [checkForUpdates, setUpTouchId, signInWithTouchId]),
+			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [checkForUpdates, setUpTouchId, signInWithTouchId, openAtLogin]),
 			UIMenuIdentifier.About.GetConstant()!);
 	}
+
+	// Says why (your phone's SentinelGPT runs here), then opens Login Items to add the app.
+	[Export("gwsOpenAtLogin:")]
+	public void OpenAtLogin(NSObject sender) => MainThread.BeginInvokeOnMainThread(async () =>
+	{
+		var page = Microsoft.Maui.Controls.Application.Current?.Windows.FirstOrDefault()?.Page;
+		if (page is not null && !await page.DisplayAlertAsync("Open at Login", MacAiServer.LoginItemsHelp, "Open Login Items", "Not Now")) return;
+		if (!await MacAiServer.OpenLoginItemsSettingsAsync() && page is not null)
+			await page.DisplayAlertAsync("Open at Login", "Open System Settings → General → Login Items yourself, then add GWS Business Suite under \"Open at Login\".", "OK");
+	});
 
 	[Export("gwsSignInWithTouchId:")]
 	public void SignInWithTouchId(NSObject sender) => MainThread.BeginInvokeOnMainThread(() =>

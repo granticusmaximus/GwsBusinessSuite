@@ -7053,3 +7053,18 @@ a.wiki-live-title:hover { text-decoration: underline; }
 .gws-density-offer-text { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; }
 .gws-density-offer-text span { color: var(--gws-text-soft); }
 .gws-density-offer-actions { display: flex; flex-direction: column; gap: .4rem; flex-shrink: 0; }
+
+/* The one-time offer to install the app on a phone or tablet (js/pwa.js, PWA 07-11-26), above the
+   bottom bar. */
+.gws-install-offer {
+    position: fixed; z-index: 1040; left: 1rem; right: 1rem;
+    bottom: calc(var(--gws-bottom-bar-height, 0px) + var(--gws-status-strip-height, 0px) + 1rem);
+    display: flex; align-items: center; gap: .75rem; max-width: 30rem; margin: 0 auto; padding: .8rem .9rem;
+    border: 1px solid var(--gws-panel-border); border-radius: var(--gws-radius-md);
+    background: var(--gws-panel-bg); color: var(--gws-text-strong); box-shadow: 0 .75rem 2rem rgba(0, 0, 0, .25);
+}
+.gws-install-offer-icon { width: 2.5rem; height: 2.5rem; border-radius: .6rem; flex-shrink: 0; }
+.gws-install-offer-text { display: flex; flex-direction: column; gap: .15rem; min-width: 0; font-size: .85rem; }
+.gws-install-offer-text span { color: var(--gws-text-soft); }
+.gws-install-offer-actions { display: flex; flex-direction: column; gap: .4rem; flex-shrink: 0; margin-left: auto; }
+.gws-install-offer-actions .btn { min-height: 2.25rem; }

@@ -791,6 +791,7 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GWSuite-Overwatch/1.0; +https://grantwatson.dev)");
         });
         AddNovember2026CameraProviders(services);
+        AddWebPush(services);
         // October 2026 international batch (each verified live 2026-10-08, no key).
         services.AddHttpClient<IcelandRoadCameraProvider>(client =>
         {
@@ -1419,6 +1420,20 @@ public static class DependencyInjection
         services.AddScoped<IPodcastListenProgressService, PodcastListenProgressService>();
 
         return services;
+    }
+
+    // Web Push for the installed app (PWA phase 2, 07-11-26): the bell's notifications on phones,
+    // tablets and computers, sent by WebPushDispatcher.
+    private static void AddWebPush(IServiceCollection services)
+    {
+        services.AddHttpClient(WebPushService.HttpClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GWSuite-WebPush/1.0 (+https://grantwatson.dev)");
+        });
+        services.AddSingleton<WebPushService>();
+        services.AddSingleton<IWebPushSender>(sp => sp.GetRequiredService<WebPushService>());
+        services.AddHostedService<WebPushDispatcher>();
     }
 
     // November 2026 camera batch (each verified live 07-11-26, no key): London, Toronto, Calgary,

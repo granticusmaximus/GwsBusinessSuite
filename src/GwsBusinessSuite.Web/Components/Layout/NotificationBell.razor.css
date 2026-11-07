@@ -273,3 +273,37 @@
         max-height: calc(100dvh - var(--gws-admin-bar-height, 3.25rem) - var(--gws-bottom-bar-height, 0px) - 1rem);
     }
 }
+
+/* This device's notifications as Web Push (js/push.js, PWA phase 2). */
+.notif-bell-push {
+    display: flex;
+    align-items: flex-start;
+    gap: .5rem;
+    padding: .65rem .85rem;
+    border-top: 1px solid var(--gws-panel-border);
+    color: var(--gws-text-soft);
+    font-size: .8rem;
+}
+
+.notif-bell-push[hidden] { display: none; }
+
+.notif-bell-push > i { margin-top: .1rem; }
+
+.notif-bell-push-text { flex: 1; min-width: 0; }
+
+.notif-bell-push-actions { display: flex; flex-wrap: wrap; gap: .35rem; justify-content: flex-end; }
+
+.notif-bell-push-button {
+    min-height: 2rem;
+    padding: .2rem .65rem;
+    border: 1px solid var(--gws-panel-border);
+    border-radius: var(--gws-radius-sm, 6px);
+    background: transparent;
+    color: var(--gws-text-strong);
+    font-size: .78rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.notif-bell-push-button:hover { background: var(--gws-body-bg); }
+.notif-bell-push-button[hidden] { display: none; }

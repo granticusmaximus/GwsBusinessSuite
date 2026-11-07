@@ -600,6 +600,60 @@ public sealed class SentinelAgentTests
     }
 
     [Fact]
+    public async Task WebPanelTurn_WithDeepAnalysisAndFiles_ShouldAskTheMacsAdvisersFirst_AndGiveTheAgentBoth()
+    {
+        await using var harness = await Harness.CreateAsync();
+        var relay = new SentinelAgentRelay(TimeProvider.System);
+        var turns = new SentinelAgentTurns(harness.Runner, relay, TimeProvider.System, NullLogger<SentinelAgentTurns>.Instance);
+        var asked = new List<string>();
+        string? agentPrompt = null;
+        using var closeApp = new CancellationTokenSource();
+        var mac = Task.Run(async () =>
+        {
+            while (true)
+            {
+                if (await relay.TakeAsync("grant", ["sentinelgpt:latest", "qwen2.5-coder:latest", "deepseek-r1:latest"], closeApp.Token) is { } call)
+                {
+                    var payload = JsonNode.Parse(call.PayloadJson)!;
+                    var model = payload["model"]!.GetValue<string>();
+                    lock (asked) asked.Add(model);
+                    var reply = model switch
+                    {
+                        "qwen2.5-coder:latest" => TextReply("Check the board exists before adding the card."),
+                        "deepseek-r1:latest" => TextReply("The request names no column; ask or use the first."),
+                        _ => TextReply("Added it to To do.")
+                    };
+                    if (model == "sentinelgpt:latest") agentPrompt ??= payload["messages"]![0]!["content"]!.GetValue<string>();
+                    relay.Complete("grant", call.Id, reply, null);
+                }
+            }
+        });
+        for (var i = 0; i < 200 && relay.ModelsFor("grant").Count == 0; i++) await Task.Delay(10);
+
+        var (id, problem) = turns.Start(Admin, Guid.NewGuid(), "Add a card for the launch checklist", "sentinelgpt:latest",
+            deepAnalysis: true, attachments: "--- checklist.md ---\n- Book the venue\n- Send invites");
+        problem.Should().BeNull();
+        SentinelAgentTurns.Snapshot? snapshot = null;
+        for (var i = 0; i < 300 && snapshot is not { Status: not SentinelAgentTurns.Statuses.Running }; i++)
+        {
+            await Task.Delay(20);
+            snapshot = turns.Get(id!.Value, "grant");
+        }
+
+        snapshot!.Status.Should().Be(SentinelAgentTurns.Statuses.Done);
+        snapshot.Answer.Should().Be("Added it to To do.");
+        snapshot.Steps.Should().StartWith(["Deep Analysis: asking qwen2.5-coder:latest for a second opinion",
+            "Deep Analysis: asking deepseek-r1:latest for a second opinion"]);
+        lock (asked) asked.Take(3).Should().Equal("qwen2.5-coder:latest", "deepseek-r1:latest", "sentinelgpt:latest");
+        agentPrompt.Should().Contain("Deep Analysis: specialist models' opinions").And.Contain("Check the board exists")
+            .And.Contain("QWEN ENGINEERING REVIEW").And.Contain("DEEPSEEK REASONING REVIEW")
+            .And.Contain("Files the person attached to this question").And.Contain("- Book the venue");
+
+        closeApp.Cancel();
+        await mac.Invoking(task => task).Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task Crm_ShouldAddAContactNoteAndDeal_AsThePerson_AndUndoAStageMove()
     {
         await using var harness = await Harness.CreateAsync();

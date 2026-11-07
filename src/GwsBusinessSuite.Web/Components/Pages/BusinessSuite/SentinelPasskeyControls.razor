@@ -53,26 +53,26 @@ else
             }
         </ul>
     }
-    <div class="fw-semibold small mb-1 mt-2">Touch ID passkeys (this browser)</div>
+    <div class="fw-semibold small mb-1 mt-2">@_unlock.Short passkeys (this browser)</div>
     @if (!_checked)
     {
-        <p class="small text-secondary mb-1">Checking for Touch ID...</p>
+        <p class="small text-secondary mb-1">Checking for Touch ID or Face ID...</p>
     }
     else if (!_available)
     {
-        <p class="small text-secondary mb-1">This browser can't use Touch ID passkeys here. Use Safari or Chrome on the Mac (in the Mac app, use its Touch ID option).</p>
+        <p class="small text-secondary mb-1">This browser can't use passkeys here. Use Safari or Chrome on a Mac, iPhone, iPad or Android phone with its screen lock set up (in the Mac app, use its Touch ID option).</p>
     }
     else
     {
         @* One clear button (31-10-26: the small "Add" read as optional); naming it is optional. *@
         <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
             <button type="button" class="btn btn-primary text-nowrap" disabled="@_busy" @onclick="AddAsync">
-                <i class="bi bi-fingerprint me-1" aria-hidden="true"></i>Add Touch ID for this browser
+                <i class="bi bi-fingerprint me-1" aria-hidden="true"></i>Add @_unlock.Short for this browser
             </button>
-            <input class="form-control form-control-sm" style="max-width: 15rem" maxlength="60" placeholder="Name (optional), e.g. MacBook Chrome"
+            <input class="form-control form-control-sm" style="max-width: 15rem" maxlength="60" placeholder="Name (optional), e.g. MacBook Chrome or iPhone"
                    aria-label="Passkey name" @bind="_name" @bind:event="oninput" />
         </div>
-        <p class="small text-secondary mb-2">Your browser then asks for Touch ID. If it offers a phone or security key instead, choose "this device" or iCloud Keychain.</p>
+        <p class="small text-secondary mb-2">Your browser then asks for @_unlock.Long. If it offers a phone or security key instead, choose "this device" or iCloud Keychain.</p>
     }
     @if (_keys.Count > 0)
     {
@@ -113,6 +113,11 @@ else
     private string _name = "MacBook Touch ID";
     private string? _message;
     private bool _isError;
+    // What this device calls its unlock (sentinel-passkey.js unlockName): Touch ID on a Mac, Face ID
+    // on an iPhone or iPad, a fingerprint on Android (07-11-26).
+    private UnlockName _unlock = new("Touch ID", "Touch ID");
+
+    private sealed record UnlockName(string Short, string Long);
 
     private string Origin => new Uri(Navigation.BaseUri).GetLeftPart(UriPartial.Authority);
 
@@ -128,10 +133,17 @@ else
         if (!firstRender) return;
         try
         {
-            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-passkey.js?v=2");
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-passkey.js?v=3");
             _embedded = await _module.InvokeAsync<bool>("isEmbeddedWebKit");
             // Passkeys can't work inside the Mac app's web view; its own Touch ID does instead.
             _available = !_embedded && await _module.InvokeAsync<bool>("isAvailable");
+            if (!_embedded)
+            {
+                _unlock = await _module.InvokeAsync<UnlockName>("unlockName");
+                // The suggested name, when it hasn't been changed: what this device is.
+                if (_name == "MacBook Touch ID")
+                    _name = _unlock.Short switch { "Face ID" => "iPhone or iPad", "Fingerprint" => "Android phone", "Windows Hello" => "Windows PC", _ => _name };
+            }
             if (_embedded)
             {
                 _selfRef = DotNetObjectReference.Create(this);

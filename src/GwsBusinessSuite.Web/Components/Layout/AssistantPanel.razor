@@ -4,7 +4,9 @@
 @using GwsBusinessSuite.Application.SentinelAgent
 @using GwsBusinessSuite.Domain.Entities
 @using GwsBusinessSuite.Web.Services
+@using GwsBusinessSuite.Infrastructure.Services
 @using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
 @inject AssistantContext Assistant
 @inject RightPanelState RightPanels
 @inject SentinelAgentRunner AgentRunner
@@ -54,7 +56,22 @@
             }
             @foreach (var turn in _turns)
             {
-                <div class="gws-assistant-question">@turn.Question</div>
+                <div class="gws-assistant-question">
+                    @turn.Question
+                    @if (turn.Files.Count > 0 || turn.DeepAnalysis)
+                    {
+                        <span class="gws-assistant-question-extras">
+                            @if (turn.Files.Count > 0)
+                            {
+                                <span><i class="bi bi-paperclip" aria-hidden="true"></i> @string.Join(", ", turn.Files.Select(file => file.Name))</span>
+                            }
+                            @if (turn.DeepAnalysis)
+                            {
+                                <span><i class="bi bi-stars" aria-hidden="true"></i> Deep Analysis</span>
+                            }
+                        </span>
+                    }
+                </div>
                 <div class="gws-assistant-answer">
                     @if (turn.Steps.Count > 0)
                     {
@@ -181,6 +198,41 @@
                     <button type="submit" class="btn btn-primary" disabled="@string.IsNullOrWhiteSpace(_input)">Send</button>
                 }
             </form>
+            @* PWA phase 3 (07-11-26): what the Mac app's SentinelGPT tab has, on any device. Files where the
+               Mac attaches a folder; dictation (js/dictate.js, shown where the browser can do it); Deep
+               Analysis (the advisers on your Mac, DeepAnalysisAdvice). *@
+            <div class="gws-assistant-options">
+                <label class="btn btn-sm btn-outline-secondary gws-assistant-attach @(_busy || _attached.Count >= AssistantAttachments.MaxFiles ? "disabled" : string.Empty)"
+                       title="Attach text files or PDFs (up to @AssistantAttachments.MaxFiles) for SentinelGPT to read with your question">
+                    <i class="bi bi-paperclip" aria-hidden="true"></i> Attach
+                    <InputFile OnChange="AttachAsync" multiple accept="@AssistantAttachments.Accept" class="visually-hidden"
+                               disabled="@(_busy || _attached.Count >= AssistantAttachments.MaxFiles)" />
+                </label>
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-gws-dictate="gws-assistant-input" hidden
+                        title="Dictate your question" aria-pressed="false" disabled="@_busy">
+                    <i class="bi bi-mic" aria-hidden="true"></i><span class="visually-hidden">Dictate</span>
+                </button>
+                <div class="form-check form-switch gws-assistant-deep" title="Before answering, two adviser models on your Mac (Qwen, DeepSeek) give a second opinion. Slower.">
+                    <input class="form-check-input" type="checkbox" role="switch" id="gws-assistant-deep" @bind="_deepAnalysis" disabled="@_busy" />
+                    <label class="form-check-label" for="gws-assistant-deep">Deep Analysis</label>
+                </div>
+            </div>
+            @if (_attached.Count > 0 || _attachProblem is not null)
+            {
+                <div class="gws-assistant-attached">
+                    @foreach (var file in _attached)
+                    {
+                        <span class="gws-assistant-file">
+                            <i class="bi bi-file-earmark-text" aria-hidden="true"></i>@file.Name@(file.Cut ? " (its start)" : string.Empty)
+                            <button type="button" class="btn-close" aria-label="Remove @file.Name" @onclick="() => _attached.Remove(file)" disabled="@_busy"></button>
+                        </span>
+                    }
+                    @if (_attachProblem is not null)
+                    {
+                        <span class="text-danger small" role="alert">@_attachProblem</span>
+                    }
+                </div>
+            }
         </footer>
     </aside>
 }
@@ -189,6 +241,9 @@
     private static readonly TimeSpan LocalRetryAfter = TimeSpan.FromMinutes(5);
 
     private readonly List<Turn> _turns = [];
+    private readonly List<AssistantAttachments.Attachment> _attached = [];
+    private string? _attachProblem;
+    private bool _deepAnalysis;
     private bool _open;
     private bool _busy;
     private string _input = string.Empty;
@@ -254,6 +309,38 @@
         RightPanels.NotifyAssistantClosed();
     }
 
+    // Read now, kept in memory until the question is sent (nothing is stored).
+    private async Task AttachAsync(InputFileChangeEventArgs e)
+    {
+        _attachProblem = null;
+        foreach (var file in e.GetMultipleFiles(AssistantAttachments.MaxFiles))
+        {
+            if (_attached.Count >= AssistantAttachments.MaxFiles)
+            {
+                _attachProblem = $"Up to {AssistantAttachments.MaxFiles} files a question.";
+                break;
+            }
+            if (file.Size > AssistantAttachments.MaxBytes)
+            {
+                _attachProblem = $"{file.Name} is over 5 MB.";
+                continue;
+            }
+            try
+            {
+                await using var stream = file.OpenReadStream(AssistantAttachments.MaxBytes);
+                using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer);
+                var (attachment, problem) = AssistantAttachments.Read(file.Name, buffer.ToArray());
+                if (attachment is not null) _attached.Add(attachment);
+                else _attachProblem = problem;
+            }
+            catch (IOException)
+            {
+                _attachProblem = $"{file.Name} couldn't be read.";
+            }
+        }
+    }
+
     private void NewChat()
     {
         _turns.Clear();
@@ -268,7 +355,11 @@
         if (question.Length == 0 || _busy) return;
         _busy = true;
         _input = string.Empty;
-        var turn = new Turn(question) { Activity = "Reading the page…" };
+        var turn = new Turn(question) { Activity = "Reading the page…", DeepAnalysis = _deepAnalysis };
+        // This question's files go with it; the next starts with none.
+        turn.Files.AddRange(_attached);
+        _attached.Clear();
+        _attachProblem = null;
         _turns.Add(turn);
         _scrollToEnd = true;
         _stop = new CancellationTokenSource();
@@ -352,8 +443,10 @@
         _username ??= await CurrentUserAccessor.GetCurrentUsernameAsync();
         turn.Activity = "Asking SentinelGPT on the server…";
         StateHasChanged();
+        // Answers only: the files go with the page context (its own limit applies there).
+        var withFiles = turn.Attachments is { } files ? context + "\n\nFiles the person attached:\n" + files : context;
         var generation = await Coordinator.StartAsync(_conversationId, wikiPageId: null, turn.Question, _username,
-            includeInternet: false, useDeepAnalysis: false, pageContext: context);
+            includeInternet: false, useDeepAnalysis: turn.DeepAnalysis, pageContext: withFiles);
         _generationId = generation.Id;
         while (true)
         {
@@ -382,8 +475,18 @@
     private async Task RunTurnAsync(
         Turn turn, SentinelAgentUser user, string context, IOllamaService model, string modelName, int rounds, string source, CancellationToken stop)
     {
+        string? advice = null;
+        if (turn.DeepAnalysis)
+        {
+            advice = await DeepAnalysisAdvice.BuildAsync(model, await model.ListModelsAsync(stop), turn.Question,
+                text => InvokeAsync(() =>
+                {
+                    turn.Steps.Add(text);
+                    StateHasChanged();
+                }), stop);
+        }
         var result = await AgentRunner.RunAsync(
-            new SentinelAgentRequest(_conversationId, user, turn.Question, context, model, modelName, rounds),
+            new SentinelAgentRequest(_conversationId, user, turn.Question, context, model, modelName, rounds, Advice: advice, Attachments: turn.Attachments),
             agentEvent => InvokeAsync(() =>
             {
                 switch (agentEvent)
@@ -415,7 +518,7 @@
     // model there uses tools), so the server's SentinelGPT answers instead.
     private async Task<bool> FollowMacTurnAsync(Turn turn, SentinelAgentUser user, string context, CancellationToken stop)
     {
-        var (id, _) = AgentTurns.Start(user, _conversationId, turn.Question, null, context);
+        var (id, _) = AgentTurns.Start(user, _conversationId, turn.Question, null, context, deepAnalysis: turn.DeepAnalysis, attachments: turn.Attachments);
         if (id is not { } turnId) return false;
         _macTurnId = turnId;
         _username ??= user.Username;
@@ -664,6 +767,13 @@
             {
                 // An older app.js without the hook: the palette's Ask just opens the panel.
             }
+            // The installed app's SentinelGPT shortcut (manifest.webmanifest, PWA 07-11-26):
+            // /admin?assistant=open opens it once the page is live.
+            if (!_open && new Uri(Navigation.Uri).Query.Contains("assistant=open", StringComparison.OrdinalIgnoreCase))
+            {
+                await ToggleAsync();
+                StateHasChanged();
+            }
         }
         if (!_scrollToEnd || !_open) return;
         _scrollToEnd = false;
@@ -711,6 +821,9 @@
         public List<SentinelAgentActionView> Actions { get; } = [];
         public string? ActionError { get; set; }
         public bool AnswersOnlyNote { get; set; }
+        public bool DeepAnalysis { get; init; }
+        public List<AssistantAttachments.Attachment> Files { get; } = [];
+        public string? Attachments => AssistantAttachments.Format(Files);
 
         public void Upsert(SentinelAgentActionView action)
         {

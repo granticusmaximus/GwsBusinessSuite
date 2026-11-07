@@ -3256,7 +3256,7 @@
         {
             try
             {
-                _workspaceModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-workspace.js");
+                _workspaceModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-workspace.js?v=3");
                 await _workspaceModule.InvokeVoidAsync("setTitleValue", _titleInput, _titleSnapshot);
                 _titleAppliedVersion = _titleSnapshotVersion;
             }
@@ -3283,7 +3283,7 @@
         if (firstRender)
         {
             _blockEditorRef ??= DotNetObjectReference.Create(this);
-            _workspaceModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-workspace.js?v=2");
+            _workspaceModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/sentinel-workspace.js?v=3");
             await _workspaceModule.InvokeVoidAsync("initialize", _workspaceSearchInput, _blockEditorRef);
         }
 

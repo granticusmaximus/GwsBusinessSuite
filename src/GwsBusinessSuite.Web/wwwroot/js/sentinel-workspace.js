@@ -68,7 +68,12 @@ export function initialize(input, dotNetRef = null) {
 
 function isEmbeddedWebKit() {
     const ua = navigator.userAgent || '';
-    return /AppleWebKit\//.test(ua) && /Macintosh|iPhone|iPad/.test(ua) && !/Safari\/|Chrome\/|Edg\//.test(ua);
+    // The app installed from Safari onto an iPhone or iPad's Home Screen (PWA, 07-11-26) leaves out
+    // "Safari/" too, but it's Safari: passkeys work and there's no Mac app to hand over to.
+    const installedWebApp = navigator.standalone === true
+        || (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches);
+    return !installedWebApp
+        && /AppleWebKit\//.test(ua) && /Macintosh|iPhone|iPad/.test(ua) && !/Safari\/|Chrome\/|Edg\//.test(ua);
 }
 
 function initializeEmbeddedWebKitTreeDrag() {

@@ -159,6 +159,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<AdminListView> AdminListViews => Set<AdminListView>();
     public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
     public DbSet<UserNotificationState> UserNotificationStates => Set<UserNotificationState>();
+    public DbSet<WebPushSubscription> WebPushSubscriptions => Set<WebPushSubscription>();
+    public DbSet<WebPushKey> WebPushKeys => Set<WebPushKey>();
     public DbSet<SentinelQuestion> SentinelQuestions => Set<SentinelQuestion>();
     public DbSet<PageTag> PageTags => Set<PageTag>();
     public DbSet<PageView> PageViews => Set<PageView>();
@@ -557,6 +559,15 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<UserNotificationState>().HasIndex(x => new { x.Username, x.Kind, x.ItemId }).IsUnique();
         modelBuilder.Entity<UserNotificationState>().Property(x => x.Username).HasMaxLength(100);
         modelBuilder.Entity<UserNotificationState>().Property(x => x.Kind).HasMaxLength(40);
+        modelBuilder.Entity<WebPushSubscription>().HasIndex(x => x.Endpoint).IsUnique();
+        modelBuilder.Entity<WebPushSubscription>().HasIndex(x => x.Username);
+        modelBuilder.Entity<WebPushSubscription>().Property(x => x.Username).HasMaxLength(100);
+        modelBuilder.Entity<WebPushSubscription>().Property(x => x.Endpoint).HasMaxLength(1000);
+        modelBuilder.Entity<WebPushSubscription>().Property(x => x.P256dh).HasMaxLength(100);
+        modelBuilder.Entity<WebPushSubscription>().Property(x => x.Auth).HasMaxLength(40);
+        modelBuilder.Entity<WebPushSubscription>().Property(x => x.Device).HasMaxLength(60);
+        modelBuilder.Entity<WebPushKey>().Property(x => x.PublicKey).HasMaxLength(100);
+        modelBuilder.Entity<WebPushKey>().Property(x => x.ProtectedPrivateKey).HasMaxLength(1000);
         modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Title).HasMaxLength(80);
         modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Body).HasMaxLength(2000);
         modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Color).HasMaxLength(9);

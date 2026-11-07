@@ -1124,6 +1124,45 @@ app.MapGet("/admin/world-news/events/{eventId}/document.pdf", (string eventId, G
     .RequireAuthorization("AdminOnly")
     .RequireRateLimiting("public-read");
 
+// Web Push for the installed app (PWA phase 2, 07-11-26): js/push.js turns it on per device from
+// the bell, and WebPushDispatcher sends the bell's notifications. Writes need the X-GWS-Push header,
+// which makes them requests another site can't send without CORS (this app allows none), on top
+// of the SameSite sign-in cookie.
+var webPushApi = app.MapGroup("/admin/api/push").RequireAuthorization("PortalAccess");
+webPushApi.MapGet("/key", async (GwsBusinessSuite.Infrastructure.Services.WebPushService webPush, CancellationToken ct) =>
+    Results.Json(new { publicKey = await webPush.PublicKeyAsync(ct) }));
+webPushApi.MapGet("/devices", async (HttpContext httpContext, GwsBusinessSuite.Infrastructure.Services.WebPushService webPush, CancellationToken ct) =>
+    Results.Json((await webPush.DevicesAsync(httpContext.User.Identity?.Name ?? string.Empty, ct))
+        .Select(device => new { device.Id, device.Device, device.Endpoint, addedAt = device.AddedAt.ToLocalGwsDateTime() })));
+webPushApi.MapPost("/subscriptions", async (PushSubscribeRequest request, HttpContext httpContext,
+    GwsBusinessSuite.Infrastructure.Services.WebPushService webPush, CancellationToken ct) =>
+{
+    if (!httpContext.Request.Headers.ContainsKey("X-GWS-Push")) return Results.BadRequest(new { error = "Missing X-GWS-Push." });
+    try
+    {
+        var device = await webPush.SubscribeAsync(httpContext.User.Identity?.Name ?? string.Empty, request.Endpoint ?? string.Empty,
+            request.Keys?.P256dh ?? string.Empty, request.Keys?.Auth ?? string.Empty, request.Device, ct);
+        return Results.Json(new { device.Id, device.Device });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+webPushApi.MapPost("/unsubscribe", async (PushUnsubscribeRequest request, HttpContext httpContext,
+    GwsBusinessSuite.Infrastructure.Services.WebPushService webPush, CancellationToken ct) =>
+{
+    if (!httpContext.Request.Headers.ContainsKey("X-GWS-Push")) return Results.BadRequest(new { error = "Missing X-GWS-Push." });
+    return Results.Json(new { removed = await webPush.UnsubscribeAsync(httpContext.User.Identity?.Name ?? string.Empty, request.Endpoint ?? string.Empty, ct) });
+});
+webPushApi.MapPost("/test", async (HttpContext httpContext, GwsBusinessSuite.Infrastructure.Services.WebPushService webPush, CancellationToken ct) =>
+{
+    if (!httpContext.Request.Headers.ContainsKey("X-GWS-Push")) return Results.BadRequest(new { error = "Missing X-GWS-Push." });
+    var sent = await webPush.SendAsync([httpContext.User.Identity?.Name ?? string.Empty],
+        new GwsBusinessSuite.Infrastructure.Services.PushNotice("GWS Business Suite", "Notifications are on. The bell's alerts now reach this device too.", "/admin", "test"), ct);
+    return Results.Json(new { sent });
+});
+
 // Portable JSON export of a workflow's live draft (positions/notes included, unlike the
 // position-free publish snapshot) - imported back via AutomationTemplateService-style graph
 // rebuild (Automation.razor's Import button), which mints fresh node/connection ids and never
@@ -5541,6 +5580,9 @@ record MobileDeviceRegistrationRequest(string Platform, string PushToken, string
 record TouchIdChallengeRequest(Guid KeyId);
 record TouchIdLoginRequest(Guid KeyId, string? Signature);
 record PasskeyLoginRequest(string? CeremonyId, string? Assertion, string? ReturnUrl);
+record PushSubscribeRequest(string? Endpoint, PushSubscribeKeys? Keys, string? Device);
+record PushSubscribeKeys(string? P256dh, string? Auth);
+record PushUnsubscribeRequest(string? Endpoint);
 record MacApprovalStartRequest(string? Username);
 record NativeSignInApproval(Guid KeyId, string? Signature, int Number);
 record NativeLockPinRequest(string? Pin);

@@ -103,8 +103,10 @@ public sealed class SentinelAgentTurns(SentinelAgentRunner runner, SentinelAgent
 
     // Null with a reason when this person's Mac isn't connected to the relay (the tab then
     // answers the way it did before).
+    // deepAnalysis (07-11-26, the web panel): the advisers' opinions are asked for on the person's
+    // Mac first (DeepAnalysisAdvice), unless the client brought its own advice (the Mac app does).
     public (Guid? Id, string? Problem) Start(SentinelAgentUser user, Guid conversationId, string message, string? preferredModel, string? pageContext = null,
-        string? advice = null)
+        string? advice = null, bool deepAnalysis = false, string? attachments = null)
     {
         var models = relay.ModelsFor(user.Username).ToList();
         if (models.Count == 0) return (null, "This Mac isn't connected to SentinelGPT's relay yet.");
@@ -129,7 +131,7 @@ public sealed class SentinelAgentTurns(SentinelAgentRunner runner, SentinelAgent
         _turns[turnId] = turn;
         _ = Task.Run(async () =>
         {
-            await RunAsync(turn, user, conversationId, message, pageContext, models, advice);
+            await RunAsync(turn, user, conversationId, message, pageContext, models, advice, deepAnalysis, attachments);
             NoteIfUnwatched(turnId, turn);
         });
         return (turnId, null);
@@ -159,14 +161,35 @@ public sealed class SentinelAgentTurns(SentinelAgentRunner runner, SentinelAgent
             .ToList();
 
     private async Task RunAsync(Turn turn, SentinelAgentUser user, Guid conversationId, string message, string? pageContext, IReadOnlyList<string> models,
-        string? advice)
+        string? advice, bool deepAnalysis, string? attachments)
     {
+        if (deepAnalysis && advice is null)
+        {
+            try
+            {
+                advice = await DeepAnalysisAdvice.BuildAsync(new RelayedOllamaService(relay, user.Username), relay.InstalledFor(user.Username), message,
+                    text =>
+                    {
+                        turn.Add(new SentinelAgentStep(text));
+                        return Task.CompletedTask;
+                    },
+                    turn.Stop.Token);
+                if (advice is null) turn.Add(new SentinelAgentStep("Deep Analysis: no adviser model on this Mac answered, so this is SentinelGPT alone"));
+            }
+            catch (OperationCanceledException)
+            {
+                turn.Fail("Stopped.");
+                return;
+            }
+        }
+
         foreach (var model in models)
         {
             try
             {
                 var result = await runner.RunAsync(
-                    new SentinelAgentRequest(conversationId, user, message, pageContext, new RelayedOllamaService(relay, user.Username), model, Advice: advice),
+                    new SentinelAgentRequest(conversationId, user, message, pageContext, new RelayedOllamaService(relay, user.Username), model,
+                        Advice: advice, Attachments: attachments),
                     agentEvent =>
                     {
                         turn.Add(agentEvent);

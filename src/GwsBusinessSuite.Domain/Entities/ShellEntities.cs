@@ -55,3 +55,27 @@ public sealed class UserNotificationState : AuditableEntity
     public long? SnoozedAtUnix { get; set; }
     public long? SnoozedUntilUnix { get; set; }
 }
+
+// A browser or installed app that gets this person's notifications as Web Push (PWA, 07-11-26).
+// Endpoint is the push service's address for that device (Apple, Google, Mozilla or Microsoft);
+// P256dh and Auth are the keys its messages are encrypted to (RFC 8291).
+public sealed class WebPushSubscription : AuditableEntity
+{
+    public required string Username { get; set; }
+    public required string Endpoint { get; set; }
+    public required string P256dh { get; set; }
+    public required string Auth { get; set; }
+    // What the person sees in the list, e.g. "iPhone" or "Chrome on Android".
+    public string? Device { get; set; }
+    public long? LastDeliveredAtUnix { get; set; }
+    // Failed sends in a row; the push service saying the subscription is gone removes it at once.
+    public int Failures { get; set; }
+}
+
+// The server's VAPID key pair (one row): push services check each push is signed with it. The
+// private key is kept encrypted with Data Protection.
+public sealed class WebPushKey : AuditableEntity
+{
+    public required string PublicKey { get; set; }
+    public required string ProtectedPrivateKey { get; set; }
+}
