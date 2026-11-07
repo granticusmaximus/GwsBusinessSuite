@@ -1033,6 +1033,9 @@ h1:focus { outline: none; }
     white-space: nowrap;
 }
 
+/* A nav entry that's a button (SentinelGPT opens a panel, not a page). */
+button.gws-nav-button { width: 100%; background: none; text-align: left; font-family: inherit; cursor: pointer; }
+
 /* Touch screens wide enough to show the sub-nav (tablets) need the audit's 44px targets. */
 @media (pointer: coarse) { .gws-nav-link { min-height: 44px; } }
 

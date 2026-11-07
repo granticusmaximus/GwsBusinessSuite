@@ -29,7 +29,7 @@
    the page's own "Use..." button. *@
 <button type="button" class="gws-assistant-toggle @(_open ? "is-active" : string.Empty)" @onclick="ToggleAsync"
         title="SentinelGPT" aria-label="SentinelGPT assistant" aria-expanded="@(_open ? "true" : "false")" aria-controls="gws-assistant">
-    <i class="bi bi-stars" aria-hidden="true"></i>
+    <i class="bi bi-stars" aria-hidden="true"></i><span class="gws-assistant-toggle-label">SentinelGPT</span>
 </button>
 @if (_open)
 {

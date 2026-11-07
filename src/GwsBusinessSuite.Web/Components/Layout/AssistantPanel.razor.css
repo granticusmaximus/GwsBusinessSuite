@@ -12,6 +12,15 @@
     cursor: pointer;
 }
 
+/* Named where there's room (07-11-26: on an iPad the bare icon went unnoticed); a phone has
+   SentinelGPT in its bottom bar instead. */
+.gws-assistant-toggle-label { display: none; }
+
+@media (min-width: 768px) {
+    .gws-assistant-toggle { width: auto; gap: .4rem; padding: 0 .7rem; }
+    .gws-assistant-toggle-label { display: inline; font-size: .8rem; font-weight: 600; }
+}
+
 .gws-assistant-toggle:hover,
 .gws-assistant-toggle.is-active {
     color: var(--gws-sidebar-accent, #f59e0b);
