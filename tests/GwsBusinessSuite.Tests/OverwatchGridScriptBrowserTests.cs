@@ -51,7 +51,7 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; " +
         "img-src 'self' data: blob: https:; " +
         "font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net; " +
-        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://mesonet.agron.iastate.edu; " +
+        "connect-src 'self' wss: ws: https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://mesonet.agron.iastate.edu https://gibs.earthdata.nasa.gov; " +
         "media-src 'self' blob: https:; " +
         "worker-src 'self' blob: https://cdn.jsdelivr.net; " +
         "frame-src 'self'; " +
@@ -560,6 +560,91 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
 
         await page.ClickAsync(".tg-incident-panel .tg-stream-panel-close");
         await page.EvaluateAsync("() => window.tacticalGlobe.clearSatellites()");
+        consoleErrors.Should().BeEmpty();
+    }
+
+    // 07-11-26 (Grant: "If it has data, I want to be able to view that data"): a satellite's window
+    // shows what it sees now and lays its NASA GIBS imagery over the globe (the CSP lets the tiles
+    // in), and the ISS's shows who's aboard.
+    [Fact]
+    public async Task Satellites_ShouldShowTheirPublicData_AndLayTheirImageryOverTheGlobe()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        var tiles = 0;
+        await page.RouteAsync("https://gibs.earthdata.nasa.gov/**", route =>
+        {
+            Interlocked.Increment(ref tiles);
+            return route.FulfillAsync(new()
+            {
+                Status = 200,
+                ContentType = "image/png",
+                Headers = new Dictionary<string, string> { ["Access-Control-Allow-Origin"] = "*" },
+                BodyBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+            });
+        });
+        (await InitAsync(page)).Should().BeNull();
+
+        var error = await page.EvaluateAsync<string?>("""
+            () => {
+                try {
+                    window.__imagery = [];
+                    const add = Cesium.ImageryLayerCollection.prototype.addImageryProvider;
+                    Cesium.ImageryLayerCollection.prototype.addImageryProvider = function (provider, index) {
+                        const layer = add.call(this, provider, index);
+                        window.__imagery.push({ url: String(provider.url || ''), layer: layer, removed: false });
+                        return layer;
+                    };
+                    const remove = Cesium.ImageryLayerCollection.prototype.remove;
+                    Cesium.ImageryLayerCollection.prototype.remove = function (layer, destroy) {
+                        window.__imagery.forEach(function (i) { if (i.layer === layer) i.removed = true; });
+                        return remove.call(this, layer, destroy);
+                    };
+                    window.tacticalGlobe.setSatellites([
+                        { id: '43013', name: 'NOAA-20', group: 'whole-Earth imagery', lat: 39.8, lon: -98.5, altitudeKm: 825, periodMinutes: 101.4, with: [], path: [],
+                          data: { operator: 'NOAA', about: 'VIIRS true-colour imagery of the whole Earth every day.',
+                                  layer: 'VIIRS_NOAA20_CorrectedReflectance_TrueColor', tileMatrixSet: 'GoogleMapsCompatible_Level9', format: 'image/jpeg',
+                                  time: '2026-11-06', maxLevel: 9,
+                                  snapshot: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+                                  snapshotCaption: 'Below it now, as NOAA-20 saw it on 06-11-26 (NASA GIBS)', crew: [], link: 'https://www.nesdis.noaa.gov/' } }
+                    ]);
+                    return null;
+                } catch (e) { return String(e && e.stack || e); }
+            }
+            """);
+        error.Should().BeNull();
+        await page.WaitForTimeoutAsync(800);
+        await page.Mouse.ClickAsync(400, 300);
+        await page.WaitForSelectorAsync(".tg-incident-panel:has-text('NOAA-20')", new PageWaitForSelectorOptions { Timeout = 5000 });
+        (await page.InnerTextAsync(".tg-incident-panel")).Should().Contain("WHOLE-EARTH IMAGERY").And.Contain("RUN BY").And.Contain("IMAGERY FROM")
+            .And.Contain("06-11-26").And.Contain("Below it now, as NOAA-20 saw it");
+        (await page.Locator(".tg-sat-snapshot img").CountAsync()).Should().Be(1);
+
+        await page.ClickAsync(".tg-sat-imagery");
+        (await page.EvaluateAsync<string>("() => window.__imagery.length ? window.__imagery[0].url : ''")).Should()
+            .Contain("gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_CorrectedReflectance_TrueColor/default/2026-11-06/GoogleMapsCompatible_Level9/");
+        (await page.TextContentAsync(".tg-sat-imagery")).Should().Be("HIDE ITS IMAGERY");
+        await page.WaitForTimeoutAsync(1500);
+        tiles.Should().BeGreaterThan(0, "the globe asks GIBS for the imagery's tiles, which the CSP allows");
+
+        await page.ClickAsync(".tg-sat-imagery");
+        (await page.EvaluateAsync<bool>("() => window.__imagery[0].removed")).Should().BeTrue();
+        (await page.TextContentAsync(".tg-sat-imagery")).Should().Be("SHOW ITS IMAGERY ON THE GLOBE");
+
+        await page.ClickAsync(".tg-incident-panel .tg-stream-panel-close");
+        await page.EvaluateAsync("""
+            () => window.tacticalGlobe.setSatellites([
+                { id: '25544', name: 'ISS', group: 'space station', lat: 39.8, lon: -98.5, altitudeKm: 415, periodMinutes: 92.9, with: [], path: [],
+                  data: { operator: 'NASA, Roscosmos, ESA, JAXA and CSA', about: 'The International Space Station, crewed, about 400 km up.',
+                          layer: null, tileMatrixSet: null, format: null, time: null, maxLevel: 0, snapshot: null, snapshotCaption: null,
+                          crew: ['Anil Menon', 'Anna Kikina'], link: 'https://www.nasa.gov/international-space-station/' } }
+            ])
+            """);
+        await page.WaitForTimeoutAsync(800);
+        await page.Mouse.ClickAsync(400, 300);
+        await page.WaitForSelectorAsync(".tg-incident-panel:has-text('ABOARD NOW (2)')", new PageWaitForSelectorOptions { Timeout = 5000 });
+        (await page.InnerTextAsync(".tg-incident-panel")).Should().Contain("Anil Menon, Anna Kikina");
+        (await page.Locator(".tg-sat-imagery").CountAsync()).Should().Be(0, "the ISS has no imagery to lay over the globe");
         consoleErrors.Should().BeEmpty();
     }
 

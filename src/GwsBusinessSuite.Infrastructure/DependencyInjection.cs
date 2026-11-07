@@ -961,6 +961,13 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(30);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GwsBusinessSuite-WorldNews/1.0; +https://www.gwsapp.net)");
         });
+        // Wikipedia's most-read list beside a story (07-11-26), key-less; Wikimedia asks for a UA that
+        // says who's asking.
+        services.AddHttpClient<WikipediaMostReadService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (compatible; GwsBusinessSuite-WorldNews/1.0; +https://www.gwsapp.net)");
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
         // The outlets' own articles, for SentinelGPT's analysis of an event: links come from feeds, so
         // every connection (redirects included) is refused if it resolves to a private address, and a
         // site that refuses this server is left alone for a day.
@@ -1059,8 +1066,32 @@ public static class DependencyInjection
             client.MaxResponseContentBufferSize = 8 * 1024 * 1024;
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-ThreatIntel/1.0 (+https://www.gwsapp.net)");
         }).AddHttpMessageHandler<RefusedHostPauseHandler>();
-        // Satellites from CelesTrak's elements (06-11-26), fetched at most every 2 hours.
+        // Satellites from CelesTrak's elements (06-11-26), fetched at most every 2 hours; since
+        // 07-11-26 also NASA GIBS's capabilities (about 6 MB, every 6 hours) and the ISS crew list.
         services.AddHttpClient<SatelliteService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(45);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
+        // Key-less world layers (07-11-26): State Department travel advice, NASA FIRMS fire hotspots
+        // (two files of up to about 10 MB), GDELT and UCDP conflict events, and IFRC GO's
+        // humanitarian emergencies (ReliefWeb's RSS answered 406, so it isn't used).
+        services.AddHttpClient<TravelAdvisoryService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(25);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
+        services.AddHttpClient<GwsBusinessSuite.Application.Hazards.FireHotspotService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(90);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
+        services.AddHttpClient<GwsBusinessSuite.Application.Hazards.ConflictEventService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(45);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
+        services.AddHttpClient<HumanitarianService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(25);
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");

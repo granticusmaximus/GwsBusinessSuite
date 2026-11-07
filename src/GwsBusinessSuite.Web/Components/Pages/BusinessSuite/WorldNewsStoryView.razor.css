@@ -309,6 +309,19 @@
     font-weight: 600;
 }
 
+/* Wikipedia's most-read articles the headlines name (07-11-26). */
+.story-most-read {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .2rem .8rem;
+    margin: -.5rem 0 1rem;
+    font-size: .88rem;
+    color: var(--gws-text-soft);
+}
+
+.story-most-read-rank { margin-left: .25rem; font-variant-numeric: tabular-nums; }
+
 /* State-run outlets (OutletNames.IsStateMedia), 07-11-26. */
 .story-state-media {
     padding: 0 .4rem;

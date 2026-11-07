@@ -270,6 +270,15 @@ window.tacticalGlobe = (function () {
         await viewer.dataSources.add(airportDataSource);
         const satelliteDataSource = new Cesium.CustomDataSource('tg-satellites');
         await viewer.dataSources.add(satelliteDataSource);
+        // Key-less world layers (07-11-26): travel advice, fire hotspots, conflict, humanitarian.
+        const travelDataSource = new Cesium.CustomDataSource('tg-travel');
+        await viewer.dataSources.add(travelDataSource);
+        const fireDataSource = new Cesium.CustomDataSource('tg-fires');
+        await viewer.dataSources.add(fireDataSource);
+        const conflictDataSource = new Cesium.CustomDataSource('tg-conflict');
+        await viewer.dataSources.add(conflictDataSource);
+        const humanitarianDataSource = new Cesium.CustomDataSource('tg-humanitarian');
+        await viewer.dataSources.add(humanitarianDataSource);
         const signDataSource = new Cesium.CustomDataSource('tg-signs');
         await viewer.dataSources.add(signDataSource);
         const roadWeatherDataSource = new Cesium.CustomDataSource('tg-road-weather');
@@ -375,6 +384,7 @@ window.tacticalGlobe = (function () {
         viewers.set(containerId, {
             containerId, viewer, dotNetRef, cameraDataSource, cameraEntities, alertEntities, incidentDataSource, incidentEntities, worldNewsDataSource,
             hazardDataSource, internetDataSource, convergenceDataSource, airportDataSource, auroraLayers: [], satelliteDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
+            travelDataSource, fireDataSource, conflictDataSource, humanitarianDataSource, satelliteImagery: null,
             ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null,
             renderTimer, pulseTimer: null
         });
@@ -2687,7 +2697,10 @@ window.tacticalGlobe = (function () {
 
     const hazardColors = {
         earthquake: '#ff6bd6', wildfire: '#ff5a1f', river: '#3ba7ff',
-        cyclone: '#00e0c6', flood: '#2f6bff', volcano: '#ff2e4d', drought: '#d4a72c', internet: '#9dff3c', airport: '#ffe14d'
+        cyclone: '#00e0c6', flood: '#2f6bff', volcano: '#ff2e4d', drought: '#d4a72c', internet: '#9dff3c', airport: '#ffe14d',
+        // 07-11-26: NASA EONET's natural events, and the travel, fire, conflict and humanitarian layers.
+        landslide: '#b5794a', dust: '#d9b26f', ice: '#bfe8ff',
+        travel: '#ffd166', hotspot: '#ff7b00', conflict: '#ff4d6d', 'conflict-confirmed': '#c1121f', humanitarian: '#4cc9f0'
     };
     const hazardSizes = { major: 20, moderate: 15, minor: 11 };
 
@@ -2714,6 +2727,105 @@ window.tacticalGlobe = (function () {
     function clearAirportStatus(containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (entry) entry.airportDataSource.entities.removeAll();
+    }
+
+    // Travel advice (07-11-26): a pin at each country's centre for levels 2-4, and the country shaded
+    // by level from the same outlines as the news shading. levels: [{ code, level }].
+    const travelShades = {
+        2: Cesium.Color.fromCssColorString('#ffd166').withAlpha(0.22),
+        3: Cesium.Color.fromCssColorString('#ff8c42').withAlpha(0.3),
+        4: Cesium.Color.fromCssColorString('#ef233c').withAlpha(0.36)
+    };
+
+    function setTravelAdvice(pins, levels, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return Promise.resolve();
+        drawHazardPins(entry.travelDataSource, pins);
+        return setTravelShading(entry, levels || []);
+    }
+
+    async function setTravelShading(entry, levels) {
+        let outlines;
+        try {
+            outlines = await loadNewsOutlines();
+        } catch (err) {
+            return;
+        }
+        if (!entry.travelShading) {
+            entry.travelShading = new Cesium.CustomDataSource('tg-travel-shading');
+            await entry.viewer.dataSources.add(entry.travelShading);
+        }
+        if (!entry.travelShapes) entry.travelShapes = new Map();
+        const byCode = new Map(levels.map(function (l) { return [l.code, l.level]; }));
+        const entities = entry.travelShading.entities;
+        entities.suspendEvents();
+        outlines.features.forEach(function (feature) {
+            const iso = feature.properties.iso;
+            const level = byCode.get(iso);
+            let shapes = entry.travelShapes.get(iso);
+            if (!travelShades[level]) {
+                if (shapes) shapes.forEach(function (shape) { shape.show = false; });
+                return;
+            }
+            if (!shapes) {
+                const polygons = feature.geometry.type === 'MultiPolygon' ? feature.geometry.coordinates : [feature.geometry.coordinates];
+                const toPositions = function (ring) { return Cesium.Cartesian3.fromDegreesArray(ring.flat()); };
+                shapes = polygons.map(function (rings) {
+                    return entities.add({
+                        polygon: {
+                            hierarchy: new Cesium.PolygonHierarchy(toPositions(rings[0]),
+                                rings.slice(1).map(function (hole) { return new Cesium.PolygonHierarchy(toPositions(hole)); })),
+                            material: travelShades[level]
+                        }
+                    });
+                });
+                entry.travelShapes.set(iso, shapes);
+            }
+            shapes.forEach(function (shape) {
+                shape.polygon.material = travelShades[level];
+                shape.show = true;
+            });
+        });
+        entities.resumeEvents();
+        entry.viewer.scene.requestRender();
+    }
+
+    function clearTravelAdvice(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.travelDataSource.entities.removeAll();
+        if (entry.travelShapes) entry.travelShapes.forEach(function (shapes) { shapes.forEach(function (shape) { shape.show = false; }); });
+        entry.viewer.scene.requestRender();
+    }
+
+    function setFireHotspots(cells, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) drawHazardPins(entry.fireDataSource, cells);
+    }
+
+    function clearFireHotspots(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) entry.fireDataSource.entities.removeAll();
+    }
+
+    function setConflict(events, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) drawHazardPins(entry.conflictDataSource, events);
+    }
+
+    function clearConflict(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) entry.conflictDataSource.entities.removeAll();
+    }
+
+    function setHumanitarian(items, containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) drawHazardPins(entry.humanitarianDataSource, items);
+    }
+
+    function clearHumanitarian(containerId) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (entry) entry.humanitarianDataSource.entities.removeAll();
     }
 
     // aurora: { rows, columns, edge, north, south }. Each band is base64 of rows x columns bytes,
@@ -2776,26 +2888,30 @@ window.tacticalGlobe = (function () {
         if (!entry.viewer.isDestroyed()) entry.viewer.scene.requestRender();
     }
 
-    // satellites: [{ id, name, group, lat, lon, altitudeKm, periodMinutes, with: [..], path: [lon, lat, metres, ...] }].
-    // Drawn at their real height; stations carry their next orbit as a line, and names show once
-    // the camera is within about 8,000 km.
+    // satellites: [{ id, name, group, lat, lon, altitudeKm, periodMinutes, with: [..], path: [lon, lat, metres, ...],
+    //   data: { operator, about, layer, tileMatrixSet, format, time, maxLevel, snapshot, snapshotCaption, crew: [..], link } }].
+    // Since 07-11-26 only satellites with public data are sent (a dozen or so), coloured by the kind
+    // of data and always named. Drawn at their real height; the ISS carries its next orbit as a line.
+    const satelliteColors = {
+        'space station': '#7ff3ff', 'whole-Earth imagery': '#9dff3c', 'land imagery': '#ffd166', 'geostationary weather': '#ff9dfc'
+    };
+
     function setSatellites(satellites, containerId) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
         const entities = entry.satelliteDataSource.entities;
         entities.suspendEvents();
         entities.removeAll();
-        const near = new Cesium.DistanceDisplayCondition(0, 8.0e6);
         (satellites || []).forEach(function (sat) {
             const station = sat.group === 'space station';
-            const color = Cesium.Color.fromCssColorString(station ? '#7ff3ff' : '#d9e4ff');
+            const color = Cesium.Color.fromCssColorString(satelliteColors[sat.group] || '#d9e4ff');
             const dot = entities.add({
                 position: Cesium.Cartesian3.fromDegrees(sat.lon, sat.lat, sat.altitudeKm * 1000),
-                point: { pixelSize: station ? 9 : 5, color: color, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                point: { pixelSize: station ? 9 : 7, color: color, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY },
                 label: {
                     text: String(sat.name || '').toUpperCase(), font: '600 10px monospace', fillColor: color, outlineColor: Cesium.Color.BLACK,
                     outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -14),
-                    distanceDisplayCondition: station ? undefined : near, disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY
                 }
             });
             dot._tacticalGlobeSatellite = sat;
@@ -2816,27 +2932,98 @@ window.tacticalGlobe = (function () {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return;
         entry.satelliteDataSource.entities.removeAll();
+        hideSatelliteImagery(entry);
         entry.viewer.scene.requestRender();
     }
 
+    // A satellite's imagery as NASA GIBS map tiles over the globe (07-11-26), one satellite's at a time.
+    function showSatelliteImagery(entry, sat) {
+        hideSatelliteImagery(entry);
+        const data = sat.data;
+        const extension = data.format === 'image/png' ? 'png' : 'jpg';
+        const provider = new Cesium.WebMapTileServiceImageryProvider({
+            url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/' + data.layer + '/default/' + (data.time || 'default') + '/' +
+                data.tileMatrixSet + '/{TileMatrix}/{TileRow}/{TileCol}.' + extension,
+            layer: data.layer, style: 'default', format: data.format, tileMatrixSetID: data.tileMatrixSet,
+            maximumLevel: data.maxLevel, tilingScheme: new Cesium.WebMercatorTilingScheme(), credit: 'NASA GIBS'
+        });
+        entry.satelliteImagery = { id: sat.id, layer: entry.viewer.imageryLayers.addImageryProvider(provider) };
+        entry.viewer.scene.requestRender();
+    }
+
+    function hideSatelliteImagery(entry) {
+        if (!entry || !entry.satelliteImagery) return;
+        entry.viewer.imageryLayers.remove(entry.satelliteImagery.layer, true);
+        entry.satelliteImagery = null;
+        entry.viewer.scene.requestRender();
+    }
+
+    function escapeAttribute(text) {
+        return escapeHtml(text).replace(/"/g, '&quot;');
+    }
+
+    // "2026-11-06" as 06-11-26; a moment ("2026-11-07T20:10:00Z") as local dd-MM-yy HH:mm.
+    function formatImageryTime(time) {
+        const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(time);
+        if (day) return day[3] + '-' + day[2] + '-' + day[1].slice(2);
+        const at = new Date(time);
+        if (isNaN(at.getTime())) return time;
+        const pad = function (n) { return String(n).padStart(2, '0'); };
+        return pad(at.getDate()) + '-' + pad(at.getMonth() + 1) + '-' + String(at.getFullYear()).slice(2) + ' ' + pad(at.getHours()) + ':' + pad(at.getMinutes());
+    }
+
+    // What the satellite is and its public data: a picture of what it sees now, who's aboard (the
+    // ISS), and a button that lays its imagery over the globe.
     function openSatellitePanel(sat) {
         closeIncidentPanel();
+        const entry = viewers.get('tg-viewport');
+        const data = sat.data || null;
+        const station = sat.group === 'space station';
         const panel = document.createElement('div');
         panel.className = 'tg-stream-panel tg-incident-panel';
-        const facts = [['KIND', sat.group], ['ALTITUDE', Math.round(sat.altitudeKm).toLocaleString('en-US') + ' KM'],
-            ['ONE ORBIT', Math.round(sat.periodMinutes) + ' MIN'], ['NORAD ID', sat.id]];
+        const facts = [['KIND', sat.group]];
+        if (data && data.operator) facts.push(['RUN BY', data.operator]);
+        facts.push(['ALTITUDE', Math.round(sat.altitudeKm).toLocaleString('en-US') + ' KM'], ['ONE ORBIT', Math.round(sat.periodMinutes) + ' MIN'], ['NORAD ID', sat.id]);
         if (sat.with && sat.with.length) facts.push(['WITH', sat.with.join(', ')]);
+        if (data && data.layer && data.time) facts.push(['IMAGERY FROM', formatImageryTime(data.time)]);
+        const showing = !!(entry && entry.satelliteImagery && entry.satelliteImagery.id === sat.id);
+        const imageryLabel = function (on) { return on ? 'HIDE ITS IMAGERY' : 'SHOW ITS IMAGERY ON THE GLOBE'; };
         panel.innerHTML =
             '<div class="tg-stream-panel-header"><span>' + escapeHtml(sat.name) + '</span>' +
             '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button></div>' +
             '<div class="tg-stream-panel-body">' +
+            (data && data.about ? '<div class="tg-sat-about">' + escapeHtml(data.about) + '</div>' : '') +
             '<dl class="tg-incident-facts">' + facts.map(function (f) {
                 return '<dt>' + f[0] + '</dt><dd>' + escapeHtml(String(f[1]).toUpperCase()) + '</dd>';
             }).join('') + '</dl>' +
-            (sat.group === 'space station' ? '<div>The dashed line is where it goes over its next orbit.</div>' : '') +
-            '<div class="tg-stream-panel-meta"><a href="https://celestrak.org/satcat/table-satcat.php?CATNR=' + encodeURIComponent(sat.id) +
+            (data && data.snapshot
+                ? '<figure class="tg-sat-snapshot"><img src="' + escapeAttribute(data.snapshot) + '" alt="' + escapeAttribute(data.snapshotCaption || ('What ' + sat.name + ' sees')) +
+                  '" loading="lazy"><figcaption>' + escapeHtml(data.snapshotCaption || '') + '</figcaption></figure>'
+                : '') +
+            (data && data.crew && data.crew.length
+                ? '<div class="tg-sat-crew"><span>ABOARD NOW (' + data.crew.length + ')</span> ' + escapeHtml(data.crew.join(', ')) + '</div>'
+                : '') +
+            (data && data.layer
+                ? '<button type="button" class="tg-toggle tg-sat-imagery' + (showing ? ' tg-toggle-on' : '') + '" aria-pressed="' + (showing ? 'true' : 'false') + '">' +
+                  imageryLabel(showing) + '</button>'
+                : '') +
+            (station ? '<div>The dashed line is where it goes over its next orbit.</div>' : '') +
+            '<div class="tg-stream-panel-meta">' +
+            (data && data.link ? '<a href="' + escapeAttribute(data.link) + '" target="_blank" rel="noopener noreferrer">ABOUT IT</a> · ' : '') +
+            '<a href="https://celestrak.org/satcat/table-satcat.php?CATNR=' + encodeURIComponent(sat.id) +
             '" target="_blank" rel="noopener noreferrer">CELESTRAK CATALOG ENTRY</a></div>' +
             '</div>';
+        const imagery = panel.querySelector('.tg-sat-imagery');
+        if (imagery && entry) {
+            imagery.addEventListener('click', function () {
+                const on = !!(entry.satelliteImagery && entry.satelliteImagery.id === sat.id);
+                if (on) hideSatelliteImagery(entry);
+                else showSatelliteImagery(entry, sat);
+                imagery.classList.toggle('tg-toggle-on', !on);
+                imagery.setAttribute('aria-pressed', on ? 'false' : 'true');
+                imagery.textContent = imageryLabel(!on);
+            });
+        }
         panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
         if (!openAsModal(panel, closeIncidentPanel)) return;
         incidentPanel = panel;
@@ -3032,7 +3219,9 @@ window.tacticalGlobe = (function () {
 
     const hazardKindLabels = {
         earthquake: 'EARTHQUAKE', wildfire: 'WILDFIRE', river: 'RIVER FLOODING',
-        cyclone: 'TROPICAL CYCLONE', flood: 'FLOOD', volcano: 'VOLCANO', drought: 'DROUGHT', internet: 'INTERNET OUTAGE', airport: 'AIRPORT STATUS'
+        cyclone: 'TROPICAL CYCLONE', flood: 'FLOOD', volcano: 'VOLCANO', drought: 'DROUGHT', internet: 'INTERNET OUTAGE', airport: 'AIRPORT STATUS',
+        landslide: 'LANDSLIDE', dust: 'DUST AND HAZE', ice: 'SEA AND LAKE ICE', travel: 'TRAVEL ADVICE', hotspot: 'FIRE HOTSPOTS',
+        conflict: 'CONFLICT (REPORTED)', 'conflict-confirmed': 'CONFLICT (CONFIRMED)', humanitarian: 'HUMANITARIAN'
     };
 
     // Reuses the incident window (same chrome, same single-instance handling).
@@ -4025,6 +4214,14 @@ window.tacticalGlobe = (function () {
         readPhotoExif: readPhotoExif,
         setSatellites: setSatellites,
         clearSatellites: clearSatellites,
+        setTravelAdvice: setTravelAdvice,
+        clearTravelAdvice: clearTravelAdvice,
+        setFireHotspots: setFireHotspots,
+        clearFireHotspots: clearFireHotspots,
+        setConflict: setConflict,
+        clearConflict: clearConflict,
+        setHumanitarian: setHumanitarian,
+        clearHumanitarian: clearHumanitarian,
         placePhoto: placePhoto,
         clearCoverageMarkers: clearCoverageMarkers,
         setWeatherSnapshot: setWeatherSnapshot,

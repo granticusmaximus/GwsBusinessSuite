@@ -20,6 +20,16 @@ public static class HazardKinds
     public const string Internet = "internet";
     // FAA airport ground stops, delays and closures (AirportStatusService), drawn by their own layer.
     public const string Airport = "airport";
+    // NASA EONET (07-11-26): natural events nothing else here covers.
+    public const string Landslide = "landslide";
+    public const string Dust = "dust";
+    public const string Ice = "ice";
+    // Each drawn by its own Overwatch layer (07-11-26).
+    public const string Travel = "travel";
+    public const string Hotspot = "hotspot";
+    public const string Conflict = "conflict";
+    public const string ConflictConfirmed = "conflict-confirmed";
+    public const string Humanitarian = "humanitarian";
 }
 
 public sealed record HazardFeature(
@@ -43,6 +53,10 @@ public sealed record HazardLayerResult(IReadOnlyList<HazardFeature> Features, IR
 //   - GDACS, the UN's Global Disaster Alert and Coordination System (05-11-26): current tropical
 //     cyclones, floods, volcanoes and droughts worldwide, and wildfires outside the US (NIFC has
 //     the US ones). Its earthquakes are left out because USGS already covers the world.
+//   - NOAA's National Hurricane Center (07-11-26): the Atlantic and Pacific storms it advises on,
+//     with winds, pressure and movement. GDACS's entry for the same storm is then left out.
+//   - NASA EONET (07-11-26): open landslides, dust and haze, and sea and lake ice (icebergs),
+//     the natural events nothing above covers.
 // Fire *locations* rather than perimeter polygons: ~500 current fires' polygons would be heavy to
 // send on every pan, and the point carries the facts that matter (size, containment).
 public sealed partial class HazardLayerService(
@@ -56,6 +70,8 @@ public sealed partial class HazardLayerService(
     // GDACS's SEARCH endpoint (MAP answered 400 on 05-11-26). It returns at most 100 rows and green
     // wildfires alone fill them, so wildfires are asked for on their own.
     private const string GdacsUrl = "https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?alertlevel=Green;Orange;Red&eventlist=";
+    private const string NhcUrl = "https://www.nhc.noaa.gov/CurrentStorms.json";
+    private const string EonetUrl = "https://eonet.gsfc.nasa.gov/api/v3/events?status=open&category=landslides,dustHaze,seaLakeIce";
     // The gauge API returns every gauge in the box (~570 for Georgia alone, ~0.6 MB), so it is
     // only asked about views up to roughly a few states across.
     public const double MaxGaugeViewDegrees = 12;
@@ -76,14 +92,25 @@ public sealed partial class HazardLayerService(
         }
         var disastersTask = GetGdacsAsync("TC;FL;VO;DR", cancellationToken);
         var worldFiresTask = GetGdacsAsync("WF", cancellationToken);
-        await Task.WhenAll(quakesTask, firesTask, gaugesTask, disastersTask, worldFiresTask);
+        var stormsTask = CachedAsync("hazards:nhc", TimeSpan.FromMinutes(15), async () =>
+            ParseNhc(await httpClient.GetStringAsync(NhcUrl, cancellationToken)));
+        var naturalTask = CachedAsync("hazards:eonet", TimeSpan.FromMinutes(30), async () =>
+            ParseEonet(await httpClient.GetStringAsync(EonetUrl, cancellationToken)));
+        await Task.WhenAll(quakesTask, firesTask, gaugesTask, disastersTask, worldFiresTask, stormsTask, naturalTask);
 
+        var storms = stormsTask.Result;
         var features = quakesTask.Result.Concat(firesTask.Result).Concat(gaugesTask.Result)
-            .Concat(disastersTask.Result).Concat(worldFiresTask.Result)
+            .Concat(disastersTask.Result.Where(d => !storms.Any(storm => SameStorm(storm, d))))
+            .Concat(worldFiresTask.Result).Concat(storms).Concat(naturalTask.Result)
             .Where(f => bbox.Contains(f.Latitude, f.Longitude))
             .ToList();
         return new HazardLayerResult(features, notes);
     }
+
+    // GDACS names a storm "PENA-26"; NOAA's entry for it is the one kept.
+    private static bool SameStorm(HazardFeature noaa, HazardFeature gdacs) =>
+        gdacs.Kind == HazardKinds.Cyclone && noaa.Title.Split(' ')[^1] is { Length: > 2 } name
+        && gdacs.Title.Contains(name, StringComparison.OrdinalIgnoreCase);
 
     private Task<IReadOnlyList<HazardFeature>> GetQuakesAsync(CancellationToken ct) =>
         CachedAsync("hazards:quakes", TimeSpan.FromMinutes(5), async () =>
@@ -265,6 +292,77 @@ public sealed partial class HazardLayerService(
         }
         return list;
     }
+
+    // NOAA NHC's CurrentStorms.json: a hurricane is major from 96 kt (category 3), other hurricanes
+    // moderate, weaker storms minor. Intensity is in knots, movement speed in mph.
+    public static IReadOnlyList<HazardFeature> ParseNhc(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var list = new List<HazardFeature>();
+        if (!doc.RootElement.TryGetProperty("activeStorms", out var storms) || storms.ValueKind != JsonValueKind.Array) return list;
+        foreach (var s in storms.EnumerateArray())
+        {
+            if (Num(s, "latitudeNumeric") is not { } lat || Num(s, "longitudeNumeric") is not { } lon) continue;
+            var name = Str(s, "name") ?? "Unnamed";
+            var classification = Str(s, "classification") ?? string.Empty;
+            double? knots = double.TryParse(Str(s, "intensity"), NumberStyles.Float, CultureInfo.InvariantCulture, out var kt) ? kt : null;
+            var type = classification switch
+            {
+                "HU" => "Hurricane",
+                "TS" => "Tropical Storm",
+                "TD" => "Tropical Depression",
+                "STS" => "Subtropical Storm",
+                "STD" => "Subtropical Depression",
+                "PTC" => "Potential Tropical Cyclone",
+                "PC" => "Post-tropical Cyclone",
+                _ => "Storm"
+            };
+            var detail = string.Join(" · ", new[]
+            {
+                knots is { } k ? string.Create(CultureInfo.InvariantCulture, $"{k:0} kt winds") : null,
+                Str(s, "pressure") is { Length: > 0 } mb ? $"{mb} mb" : null,
+                Num(s, "movementDir") is { } direction && Num(s, "movementSpeed") is { } mph
+                    ? string.Create(CultureInfo.InvariantCulture, $"moving {Compass(direction)} at {mph:0} mph") : null,
+                "NOAA National Hurricane Center"
+            }.Where(part => part is not null));
+            var severity = classification == "HU" ? knots >= 96 ? "major" : "moderate" : "minor";
+            var time = DateTimeOffset.TryParse(Str(s, "lastUpdate"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) ? at : (DateTimeOffset?)null;
+            var advisory = s.TryGetProperty("publicAdvisory", out var adv) ? Str(adv, "url") : null;
+            list.Add(new($"nhc-{Str(s, "id") ?? name}", HazardKinds.Cyclone, $"{type} {name}", detail, lat, lon, severity,
+                advisory ?? "https://www.nhc.noaa.gov/", time));
+        }
+        return list;
+    }
+
+    // NASA EONET's open events, each at its latest point (an event given only as an area is left
+    // out). Landslides are moderate; dust and ice minor.
+    public static IReadOnlyList<HazardFeature> ParseEonet(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var list = new List<HazardFeature>();
+        if (!doc.RootElement.TryGetProperty("events", out var events) || events.ValueKind != JsonValueKind.Array) return list;
+        foreach (var e in events.EnumerateArray())
+        {
+            var category = e.TryGetProperty("categories", out var categories) && categories.ValueKind == JsonValueKind.Array && categories.GetArrayLength() > 0
+                ? Str(categories[0], "id") : null;
+            var kind = category switch { "landslides" => HazardKinds.Landslide, "dustHaze" => HazardKinds.Dust, "seaLakeIce" => HazardKinds.Ice, _ => null };
+            if (kind is null || !e.TryGetProperty("geometry", out var geometry) || geometry.ValueKind != JsonValueKind.Array
+                || geometry.GetArrayLength() == 0) continue;
+            var latest = geometry[geometry.GetArrayLength() - 1];
+            if (Str(latest, "type") != "Point" || !latest.TryGetProperty("coordinates", out var c) || c.ValueKind != JsonValueKind.Array
+                || c.GetArrayLength() < 2 || c[0].ValueKind != JsonValueKind.Number || c[1].ValueKind != JsonValueKind.Number) continue;
+            var title = Str(e, "title") ?? kind;
+            var source = e.TryGetProperty("sources", out var sources) && sources.ValueKind == JsonValueKind.Array && sources.GetArrayLength() > 0
+                ? Str(sources[0], "url") : null;
+            var time = DateTimeOffset.TryParse(Str(latest, "date"), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) ? at : (DateTimeOffset?)null;
+            list.Add(new($"eonet-{Str(e, "id") ?? title}", kind, title, "NASA EONET", c[1].GetDouble(), c[0].GetDouble(),
+                kind == HazardKinds.Landslide ? "moderate" : "minor", source ?? Str(e, "link") ?? "https://eonet.gsfc.nasa.gov", time));
+        }
+        return list;
+    }
+
+    private static string Compass(double degrees) =>
+        new[] { "N", "NE", "E", "SE", "S", "SW", "W", "NW" }[(int)Math.Round(((degrees % 360) + 360) % 360 / 45) % 8];
 
     // GDACS gives floods "Magnitude 0", which says nothing.
     private static string? SeverityText(string? text)

@@ -45,6 +45,10 @@
 @inject GwsBusinessSuite.Application.LiveLayers.AirportStatusService AirportStatusService
 @inject GwsBusinessSuite.Application.LiveLayers.SpaceWeatherService SpaceWeatherService
 @inject GwsBusinessSuite.Infrastructure.Services.SatelliteService SatelliteService
+@inject GwsBusinessSuite.Infrastructure.Services.TravelAdvisoryService TravelAdvisoryService
+@inject GwsBusinessSuite.Application.Hazards.FireHotspotService FireHotspotService
+@inject GwsBusinessSuite.Application.Hazards.ConflictEventService ConflictEventService
+@inject GwsBusinessSuite.Infrastructure.Services.HumanitarianService HumanitarianService
 @inject ICameraFavoritesService CameraFavoritesService
 @inject ICameraSnapshotAnalysisService CameraSnapshotAnalysisService
 @inject IBusinessInfoService BusinessInfoService
@@ -204,10 +208,50 @@
                         @onclick="ToggleConvergenceAsync">
                     CONVERGENCE [@(_convergenceOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="conflict" class="tg-toggle @(_conflictOn ? "tg-toggle-on" : "")"
+                        title="Conflict: UCDP's human-coded events with deaths (monthly, confirmed) and GDELT's events machine-read from the news in the last day (reported, not confirmed)"
+                        @onclick="ToggleConflictAsync">
+                    CONFLICT [@(_conflictOn ? "ON" : "OFF")]
+                </button>
+                <button type="button" data-tg-toggle="travel" class="tg-toggle @(_travelOn ? "tg-toggle-on" : "")"
+                        title="The US State Department's travel advice: countries at level 2 (increased caution), 3 (reconsider travel) and 4 (do not travel), shaded and pinned"
+                        @onclick="ToggleTravelAsync">
+                    TRAVEL ADVICE [@(_travelOn ? "ON" : "OFF")]
+                </button>
+                <button type="button" data-tg-toggle="humanitarian" class="tg-toggle @(_humanitarianOn ? "tg-toggle-on" : "")"
+                        title="Humanitarian emergencies: the IFRC's emergencies of the last 60 days (IFRC GO), at each country they name"
+                        @onclick="ToggleHumanitarianAsync">
+                    HUMANITARIAN [@(_humanitarianOn ? "ON" : "OFF")]
+                </button>
             </div>
             @if (_convergenceOn && !string.IsNullOrWhiteSpace(_convergenceSummary))
             {
                 <div class="tg-hazard-summary">@_convergenceSummary</div>
+            }
+            @if (_conflictOn)
+            {
+                <div class="tg-layer-buttons" role="group" aria-label="Which conflict events to show">
+                    <button type="button" class="tg-toggle @(_conflictConfirmed ? "tg-toggle-on" : "")" aria-pressed="@(_conflictConfirmed ? "true" : "false")"
+                            title="UCDP's candidate events: human-coded each month, with deaths; a month or more behind" @onclick="ToggleConflictConfirmedAsync">
+                        CONFIRMED (UCDP)
+                    </button>
+                    <button type="button" class="tg-toggle @(_conflictReported ? "tg-toggle-on" : "")" aria-pressed="@(_conflictReported ? "true" : "false")"
+                            title="GDELT's events machine-read from the news in the last day: some are crime, policy talk or a misread place" @onclick="ToggleConflictReportedAsync">
+                        REPORTED (GDELT)
+                    </button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_conflictSummary))
+                {
+                    <div class="tg-hazard-summary">@_conflictSummary</div>
+                }
+            }
+            @if (_travelOn && !string.IsNullOrWhiteSpace(_travelSummary))
+            {
+                <div class="tg-hazard-summary">@_travelSummary</div>
+            }
+            @if (_humanitarianOn && !string.IsNullOrWhiteSpace(_humanitarianSummary))
+            {
+                <div class="tg-hazard-summary">@_humanitarianSummary</div>
             }
             @if (_worldNewsOn)
             {
@@ -248,7 +292,7 @@
             <div class="tg-layer-group-title">HAZARDS</div>
             <div class="tg-layer-buttons">
                 <button type="button" data-tg-toggle="hazards" class="tg-toggle @(_hazardsOn ? "tg-toggle-on" : "")"
-                        title="Earthquakes (USGS), wildfires (NIFC in the US, GDACS elsewhere), flooding river gauges (NOAA), and tropical cyclones, floods, volcanoes and droughts worldwide (GDACS)" @onclick="ToggleHazardsAsync">
+                        title="Earthquakes (USGS), wildfires (NIFC in the US, GDACS elsewhere), flooding river gauges (NOAA), tropical storms (NOAA's hurricane center, GDACS elsewhere), floods, volcanoes and droughts worldwide (GDACS), and landslides, dust and sea ice (NASA EONET)" @onclick="ToggleHazardsAsync">
                     HAZARDS [@(_hazardsOn ? "ON" : "OFF")]
                 </button>
                 <button type="button" data-tg-toggle="outages" class="tg-toggle @(_outagesOn ? "tg-toggle-on" : "")"
@@ -259,7 +303,15 @@
                         title="Internet outages by country in the last day, from Georgia Tech's IODA (routing, active probing and Google traffic)" @onclick="ToggleInternetAsync">
                     INTERNET OUTAGES [@(_internetOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="fires" class="tg-toggle @(_firesOn ? "tg-toggle-on" : "")"
+                        title="Every satellite heat detection worldwide in the last day (NASA FIRMS: VIIRS on NOAA-20 and MODIS), grouped into half-degree cells" @onclick="ToggleFiresAsync">
+                    FIRE HOTSPOTS [@(_firesOn ? "ON" : "OFF")]
+                </button>
             </div>
+            @if (_firesOn && !string.IsNullOrWhiteSpace(_fireSummary))
+            {
+                <div class="tg-hazard-summary">@_fireSummary</div>
+            }
             @if (_hazardsOn && !string.IsNullOrWhiteSpace(_hazardSummary))
             {
                 <div class="tg-hazard-summary">@_hazardSummary</div>
@@ -306,7 +358,7 @@
                     AURORA [@(_auroraOn ? "ON" : "OFF")]
                 </button>
                 <button type="button" data-tg-toggle="satellites" class="tg-toggle @(_satellitesOn ? "tg-toggle-on" : "")"
-                        title="Space stations (with their next orbit) and the brightest satellites, from CelesTrak's orbital elements, moving every 30 seconds" @onclick="ToggleSatellitesAsync">
+                        title="Only satellites whose data the public can see: the ISS (with who's aboard) and the weather and Earth-imaging satellites, whose imagery you can open and lay over the globe; from CelesTrak's orbital elements, moving every 30 seconds" @onclick="ToggleSatellitesAsync">
                     SATELLITES [@(_satellitesOn ? "ON" : "OFF")]
                 </button>
             </div>
@@ -1831,6 +1883,10 @@
             _internetOn ? TimedAsync("internet outages", PushInternetAsync) : Task.CompletedTask,
             _convergenceOn ? TimedAsync("convergence", PushConvergenceAsync) : Task.CompletedTask,
             _airportsOn ? TimedAsync("airports", PushAirportsAsync) : Task.CompletedTask,
+            _travelOn ? TimedAsync("travel advice", PushTravelAsync) : Task.CompletedTask,
+            _firesOn ? TimedAsync("fire hotspots", PushFiresAsync) : Task.CompletedTask,
+            _conflictOn ? TimedAsync("conflict", PushConflictAsync) : Task.CompletedTask,
+            _humanitarianOn ? TimedAsync("humanitarian", PushHumanitarianAsync) : Task.CompletedTask,
             _auroraOn ? TimedAsync("aurora", PushAuroraAsync) : Task.CompletedTask,
             _cityTrafficOn ? TimedAsync("city traffic", PushCityTrafficAsync) : Task.CompletedTask);
         if (Current()) StateHasChanged();
@@ -2432,7 +2488,7 @@
     private bool _helpOpen;
 
     private int ActiveLayerCount =>
-        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _airportsOn, _auroraOn, _satellitesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn }.Count(on => on);
+        new[] { _radarOn, _alertsOn, _incidentsOn, _worldNewsOn, _hazardsOn, _signsOn, _roadWeatherOn, _aircraftOn, _airQualityOn, _shipsOn, _outagesOn, _internetOn, _convergenceOn, _airportsOn, _auroraOn, _satellitesOn, _cityTrafficOn, _liveFlowOn, _hideUnhealthy, _selectModeOn, _travelOn, _firesOn, _conflictOn, _humanitarianOn }.Count(on => on);
 
     private async Task SelectPanelTabAsync(string tab, bool keepOpen = false)
     {
@@ -4044,6 +4100,173 @@
         catch (OperationCanceledException) { }
     }
 
+    // ---- Key-less world layers (07-11-26): travel advice, fire hotspots, conflict, humanitarian. ----
+    private bool _travelOn;
+    private string? _travelSummary;
+    private bool _firesOn;
+    private string? _fireSummary;
+    private bool _conflictOn;
+    private bool _conflictConfirmed = true;
+    private bool _conflictReported = true;
+    private string? _conflictSummary;
+    private bool _humanitarianOn;
+    private string? _humanitarianSummary;
+    // The most fire cells drawn at once, strongest first (the whole world has about 8,000).
+    private const int MaxFireCells = 1500;
+
+    private async Task ToggleTravelAsync()
+    {
+        _travelOn = !_travelOn;
+        if (_travelOn)
+        {
+            await PushTravelAsync();
+        }
+        else
+        {
+            _travelSummary = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearTravelAdvice");
+        }
+    }
+
+    private async Task PushTravelAsync()
+    {
+        try
+        {
+            var advisories = await TravelAdvisoryService.GetAsync();
+            var pins = GwsBusinessSuite.Infrastructure.Services.TravelAdvisoryService.Pins(advisories,
+                GwsBusinessSuite.Infrastructure.Services.WorldNewsPlaces.Instance);
+            await JS.InvokeVoidAsync("tacticalGlobe.setTravelAdvice", HazardPayload(pins),
+                advisories.Where(a => a.Level >= 2).Select(a => new { code = a.Code, level = a.Level }));
+            _travelSummary = advisories.Count == 0
+                ? "The State Department's travel advice couldn't be loaded just now."
+                : $"US STATE DEPARTMENT: {advisories.Count(a => a.Level == 4)} DO NOT TRAVEL (red) · {advisories.Count(a => a.Level == 3)} RECONSIDER (orange) · " +
+                  $"{advisories.Count(a => a.Level == 2)} INCREASED CAUTION (yellow) · click a pin for the advice";
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch travel advice layer failed");
+            _travelSummary = "Travel advice couldn't be shown just now.";
+        }
+    }
+
+    private async Task ToggleFiresAsync()
+    {
+        _firesOn = !_firesOn;
+        if (_firesOn)
+        {
+            await PushFiresAsync();
+        }
+        else
+        {
+            _fireSummary = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearFireHotspots");
+        }
+    }
+
+    private async Task PushFiresAsync()
+    {
+        try
+        {
+            var cells = await FireHotspotService.GetAsync();
+            var inView = cells.Where(c => _lastBbox.Contains(c.Latitude, c.Longitude)).ToList();
+            var drawn = inView.Take(MaxFireCells).ToList();
+            await JS.InvokeVoidAsync("tacticalGlobe.setFireHotspots", HazardPayload(drawn));
+            _fireSummary = cells.Count == 0
+                ? "NASA FIRMS's fire detections couldn't be loaded just now."
+                : $"NASA FIRMS: {inView.Count:N0} HOTSPOT {(inView.Count == 1 ? "CELL" : "CELLS")} IN VIEW (half-degree, last 24 h)" +
+                  (inView.Count > drawn.Count ? $" · the {drawn.Count:N0} strongest drawn; zoom in for the rest" : string.Empty);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch fire hotspot layer failed");
+            _fireSummary = "Fire hotspots couldn't be shown just now.";
+        }
+    }
+
+    private async Task ToggleConflictAsync()
+    {
+        _conflictOn = !_conflictOn;
+        if (_conflictOn)
+        {
+            await PushConflictAsync();
+        }
+        else
+        {
+            _conflictSummary = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearConflict");
+        }
+    }
+
+    private async Task ToggleConflictConfirmedAsync()
+    {
+        _conflictConfirmed = !_conflictConfirmed;
+        await PushConflictAsync();
+    }
+
+    private async Task ToggleConflictReportedAsync()
+    {
+        _conflictReported = !_conflictReported;
+        await PushConflictAsync();
+    }
+
+    private async Task PushConflictAsync()
+    {
+        try
+        {
+            var layer = await ConflictEventService.GetAsync();
+            var shown = (_conflictConfirmed ? layer.Confirmed : Array.Empty<GwsBusinessSuite.Application.Hazards.HazardFeature>())
+                .Concat(_conflictReported ? layer.Reported : Array.Empty<GwsBusinessSuite.Application.Hazards.HazardFeature>())
+                .ToList();
+            await JS.InvokeVoidAsync("tacticalGlobe.setConflict", HazardPayload(shown));
+            var hours = (int)Math.Round(layer.ReportedSpan.TotalHours);
+            var release = layer.ConfirmedRelease?.Replace("GEDEvent_", string.Empty, StringComparison.Ordinal).Replace('_', '.');
+            _conflictSummary = $"CONFIRMED (UCDP{(release is null ? string.Empty : " " + release)}): {layer.Confirmed.Count:N0} areas, its last 90 days · " +
+                               $"REPORTED (GDELT): {layer.Reported.Count:N0} places in the last {hours} h" +
+                               (hours < 24 ? " (the rest of the day fills in over the next refreshes)" : string.Empty);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch conflict layer failed");
+            _conflictSummary = "Conflict events couldn't be shown just now.";
+        }
+    }
+
+    private async Task ToggleHumanitarianAsync()
+    {
+        _humanitarianOn = !_humanitarianOn;
+        if (_humanitarianOn)
+        {
+            await PushHumanitarianAsync();
+        }
+        else
+        {
+            _humanitarianSummary = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearHumanitarian");
+        }
+    }
+
+    private async Task PushHumanitarianAsync()
+    {
+        try
+        {
+            var items = await HumanitarianService.GetAsync();
+            await JS.InvokeVoidAsync("tacticalGlobe.setHumanitarian", HazardPayload(items));
+            var emergencies = items.Select(i => i.Url).Distinct(StringComparer.Ordinal).Count();
+            _humanitarianSummary = items.Count == 0
+                ? "No humanitarian emergencies could be loaded just now."
+                : $"IFRC GO: {emergencies} {(emergencies == 1 ? "EMERGENCY" : "EMERGENCIES")} IN THE LAST 60 DAYS · a pin for each country one names";
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Logger.LogWarning(ex, "Overwatch humanitarian layer failed");
+            _humanitarianSummary = "Humanitarian emergencies couldn't be shown just now.";
+        }
+    }
+
     private async Task PushSatellitesAsync()
     {
         try
@@ -4053,10 +4276,13 @@
             {
                 id = s.Id, name = s.Name, group = s.Group, lat = s.Latitude, lon = s.Longitude, altitudeKm = s.AltitudeKm,
                 periodMinutes = s.PeriodMinutes, with = s.With,
-                path = s.Path.SelectMany(p => new[] { p.Longitude, p.Latitude, p.AltitudeKm * 1000 })
+                path = s.Path.SelectMany(p => new[] { p.Longitude, p.Latitude, p.AltitudeKm * 1000 }),
+                data = s.Data
             }));
-            var stations = result.Satellites.Count(s => s.Group == GwsBusinessSuite.Infrastructure.Services.SatelliteService.StationGroup);
-            _satelliteSummary = result.Note ?? $"{stations} SPACE STATIONS · {result.Satellites.Count - stations} OTHER SATELLITES · moved {DateTimeOffset.Now.ToGwsTime()}" +
+            var withImagery = result.Satellites.Count(s => s.Data?.Layer is not null);
+            var crew = result.Satellites.FirstOrDefault(s => s.Group == GwsBusinessSuite.Infrastructure.Services.SatelliteService.StationGroup)?.Data?.Crew.Count ?? 0;
+            _satelliteSummary = result.Note ?? $"{result.Satellites.Count} SATELLITES WITH PUBLIC DATA · {withImagery} WITH IMAGERY" +
+                (crew > 0 ? $" · {crew} ABOARD THE ISS" : string.Empty) + $" · click one for its data · moved {DateTimeOffset.Now.ToGwsTime()}" +
                 (result.ElementsFrom is { } from ? $" · orbits from {from.ToLocalGwsDateTime()}" : string.Empty);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -4175,7 +4401,10 @@
                     (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Cyclone, Label: "CYCLONES"),
                     (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Flood, Label: "FLOODS"),
                     (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Volcano, Label: "VOLCANOES"),
-                    (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Drought, Label: "DROUGHTS")
+                    (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Drought, Label: "DROUGHTS"),
+                    (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Landslide, Label: "LANDSLIDES"),
+                    (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Dust, Label: "DUST"),
+                    (Kind: GwsBusinessSuite.Application.Hazards.HazardKinds.Ice, Label: "SEA ICE")
                 }.Select(k => (k.Label, Count: result.Features.Count(f => f.Kind == k.Kind))).Where(k => k.Count > 0).Select(k => $"{k.Label} {k.Count}"));
             _hazardSummary = string.Join(" · ", counts) + (result.Notes.Count > 0 ? " - " + string.Join(" ", result.Notes) : string.Empty);
             await JS.InvokeVoidAsync("tacticalGlobe.setHazards", payload);

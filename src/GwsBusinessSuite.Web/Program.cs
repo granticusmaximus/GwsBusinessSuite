@@ -719,7 +719,9 @@ app.Use(async (context, next) =>
             // the server never runs the heavy model in light server-AI mode.
             // api.cesium.com / assets(.ion).cesium.com: Overwatch 3D cities (Cesium ion terrain
             // and OSM buildings), only requested when Overwatch:CesiumIonToken is set.
-            "connect-src 'self' wss: ws: http://localhost:11434 http://127.0.0.1:11434 https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://mesonet.agron.iastate.edu https://api.cesium.com https://assets.ion.cesium.com https://assets.cesium.com"
+            // gibs.earthdata.nasa.gov (07-11-26): a satellite's imagery laid over the Overwatch globe,
+            // which Cesium fetches as tiles.
+            "connect-src 'self' wss: ws: http://localhost:11434 http://127.0.0.1:11434 https://nominatim.openstreetmap.org https://*.azurewebsites.net https://cdn.jsdelivr.net https://server.arcgisonline.com https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://mesonet.agron.iastate.edu https://gibs.earthdata.nasa.gov https://api.cesium.com https://assets.ion.cesium.com https://assets.cesium.com"
                 + (allowTurnstile ? " https://www.qksrv.net;" : ";"),
             "media-src 'self' blob: https:;",
             // A real incident: script-src trusting cdn.jsdelivr.net does NOT cover Worker

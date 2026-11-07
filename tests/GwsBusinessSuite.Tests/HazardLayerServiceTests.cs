@@ -98,4 +98,52 @@ public sealed class HazardLayerServiceTests
         events[3].Url.Should().Be("https://www.gdacs.org");
         events[4].Detail.Should().Be("GDACS green alert", "a flood's \"Magnitude 0\" says nothing");
     }
+
+    // 07-11-26: NOAA's National Hurricane Center (live: Tropical Storm Pena).
+    [Fact]
+    public void ParseNhc_ShouldDescribeEachStorm_AndRateHurricanesByWind()
+    {
+        const string json = """
+            {"activeStorms":[
+              {"id":"cp042026","name":"Pena","classification":"TS","intensity":"45","pressure":"998","latitudeNumeric":11.5,"longitudeNumeric":-153.9,
+               "movementDir":285,"movementSpeed":9,"lastUpdate":"2026-11-07T21:00:00.000Z","publicAdvisory":{"url":"https://www.nhc.noaa.gov/text/HFOTCPCP4.shtml"}},
+              {"id":"al142026","name":"Tony","classification":"HU","intensity":"105","pressure":"960","latitudeNumeric":25.4,"longitudeNumeric":-71.2},
+              {"id":"bad","name":"NoPlace","classification":"TS"}
+            ]}
+            """;
+
+        var storms = HazardLayerService.ParseNhc(json);
+
+        storms.Should().HaveCount(2, "a storm without a position is skipped");
+        storms[0].Should().Match<HazardFeature>(s => s.Kind == HazardKinds.Cyclone && s.Title == "Tropical Storm Pena" && s.Severity == "minor"
+            && s.Detail == "45 kt winds · 998 mb · moving W at 9 mph · NOAA National Hurricane Center"
+            && s.Url == "https://www.nhc.noaa.gov/text/HFOTCPCP4.shtml");
+        storms[1].Should().Match<HazardFeature>(s => s.Title == "Hurricane Tony" && s.Severity == "major" && s.Url == "https://www.nhc.noaa.gov/",
+            "105 kt is category 3");
+    }
+
+    // 07-11-26: NASA EONET, for the natural events nothing else here covers (live: 35 icebergs).
+    [Fact]
+    public void ParseEonet_ShouldKeepOnlyWhatNothingElseCovers_AtTheLatestPoint()
+    {
+        const string json = """
+            {"events":[
+              {"id":"EONET_1","title":"Iceberg B22K","categories":[{"id":"seaLakeIce"}],"sources":[{"url":"https://usicecenter.gov/pub/Iceberg_Tabular.csv"}],
+               "geometry":[{"date":"2026-10-01T00:00:00Z","type":"Point","coordinates":[-100,-70]},{"date":"2026-10-30T00:00:00Z","type":"Point","coordinates":[-101.5,-71.2]}]},
+              {"id":"EONET_2","title":"Landslide in Nepal","categories":[{"id":"landslides"}],"link":"https://eonet.gsfc.nasa.gov/api/v3/events/EONET_2",
+               "geometry":[{"date":"2026-11-01T00:00:00Z","type":"Point","coordinates":[85.3,27.7]}]},
+              {"id":"EONET_3","title":"Wildfire","categories":[{"id":"wildfires"}],"geometry":[{"date":"2026-11-01T00:00:00Z","type":"Point","coordinates":[1,1]}]},
+              {"id":"EONET_4","title":"Dust area","categories":[{"id":"dustHaze"}],
+               "geometry":[{"date":"2026-11-01T00:00:00Z","type":"Polygon","coordinates":[[[1,1],[2,2],[3,1],[1,1]]]}]}
+            ]}
+            """;
+
+        var events = HazardLayerService.ParseEonet(json);
+
+        events.Should().HaveCount(2, "wildfires are covered by NIFC and GDACS, and an event given only as an area is left out");
+        events[0].Should().Match<HazardFeature>(e => e.Kind == HazardKinds.Ice && e.Latitude == -71.2 && e.Longitude == -101.5 && e.Severity == "minor"
+            && e.Url == "https://usicecenter.gov/pub/Iceberg_Tabular.csv");
+        events[1].Should().Match<HazardFeature>(e => e.Kind == HazardKinds.Landslide && e.Severity == "moderate"
+            && e.Url == "https://eonet.gsfc.nasa.gov/api/v3/events/EONET_2");
+    }
 }

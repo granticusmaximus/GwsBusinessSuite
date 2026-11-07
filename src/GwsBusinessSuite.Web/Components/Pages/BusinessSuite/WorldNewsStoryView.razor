@@ -4,6 +4,7 @@
 @using GwsBusinessSuite.WorldNewsKit
 @inject WorldNewsService News
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject WikipediaMostReadService MostRead
 
 @* A World News story's document, drawn from StoryDocument: the same content as the PDF
    (EventDocument.ToMarkdown). Shared by the World News dialog and the story page. Since 07-11-26 it's
@@ -68,6 +69,20 @@ else
             <p class="story-original">Original headline: @e.Title</p>
         }
         <p class="story-numbers">@EventDocument.KeyNumbers(e, at => at.ToLocalGwsDateTime())</p>
+        @if (_mostRead.Count > 0)
+        {
+            @* What people looked up yesterday that the headlines name (07-11-26). *@
+            <p class="story-most-read">
+                <span class="story-label">Most read on Wikipedia yesterday</span>
+                @foreach (var article in _mostRead)
+                {
+                    <span class="story-most-read-item">
+                        <a href="@article.Url" target="_blank" rel="noopener noreferrer">@article.Title</a>
+                        <span class="story-most-read-rank">#@article.Rank, @article.Views.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) views</span>
+                    </span>
+                }
+            </p>
+        }
 
         @if (_story.Changes is { Any: true } changes)
         {
@@ -421,6 +436,8 @@ else
     private enum CoverageSort { MostReports, FirstToReport }
 
     private StoryDocument? _story;
+    // Wikipedia's most-read articles that this story's headlines name.
+    private IReadOnlyList<MostReadArticle> _mostRead = [];
     private bool _gone;
     private string? _shownFor;
     private string? _username;
@@ -439,6 +456,7 @@ else
         if (EventId == _shownFor) return;
         _shownFor = EventId;
         _story = null;
+        _mostRead = [];
         _gone = false;
         _filter = StoryFilter.Everything;
         _sort = CoverageSort.MostReports;
@@ -451,6 +469,11 @@ else
             _username = string.IsNullOrWhiteSpace(username) ? null : username;
         }
         await LoadAsync();
+        if (_story is { } loaded)
+        {
+            var mostRead = WikipediaMostReadService.Matching([loaded.Event.Headline, loaded.Event.Title], await MostRead.GetAsync());
+            if (loaded.Event.Id == EventId) _mostRead = mostRead;
+        }
         // No analysis yet, or coverage has grown since: SentinelGPT writes one now. One already
         // running (started from another page) is followed instead.
         var id = EventId;

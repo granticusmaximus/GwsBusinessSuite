@@ -84,14 +84,16 @@ Done:
 - 5b **The layer panel:** search, active layers as chips at the top, a count per layer, a legend.
 - 5c **Clustering** of markers when zoomed out; panels as a bottom sheet on phones.
 
-## Phase 6 - Key-less sources (07-11-26)
+## Phase 6 - Key-less sources (07-11-26) - DONE 07-11-26
 
 Grant: "Let's actually find routes where I do not need a key from someone", then "GO" on the
 list. Every route was checked live on 07-11-26 with the app's own client; refusals are left out.
 6a goes first and lands on its own; 6b-6f (Overwatch) are built in the scratch worktree and land
 together; 6g last.
 
-- 6a **US outlets' own feeds, then global ones** (World News):
+- 6a **US outlets' own feeds, then global ones** (World News) - DONE (2e2f3dc). Each new feed was
+  read live through `OutletFeeds.Parse`; WHO's API is read newest by DateCreated (ordering by
+  PublicationDateAndTime left out that week's items).
   - US: NYT (World and US), Washington Post, WSJ, CBS, NBC, ABC (US), Fox, PBS News, Politico,
     The Hill, Axios, LA Times, Bloomberg, CS Monitor, ProPublica, NY Post, CNBC. Not CNN (its
     feed stopped in April 2023) or USA Today (HTTP 402).
@@ -103,15 +105,24 @@ together; 6g last.
     the two ABCs become "ABC News (US)" and "ABC News (Australia)".
   - "State media" on state-run outlets (TASS, Xinhua, CGTN, Anadolu...) in the coverage list and
     the PDF. Public broadcasters with independent editors (BBC, NHK, DW) aren't labelled.
-- 6b **Travel advice** (Overwatch): the US State Department's level for each of 218 countries as
-  country shading.
-- 6c **More hazards** (Overwatch, `HazardLayerService`): NOAA hurricane center storms (one per
-  storm with GDACS), and NASA EONET kinds nothing else covers (landslides, dust, sea ice).
-- 6d **Fire hotspots** (Overwatch): NASA FIRMS's public 24-hour files (NOAA-20 VIIRS, MODIS),
-  grouped into cells so the globe isn't drawing 100,000 points.
-- 6e **Conflict** (Overwatch): GDELT's 15-minute event files as "Reported" (material conflict
-  described by several articles) and UCDP's candidate events as "Confirmed" (monthly, with deaths).
-- 6f **Humanitarian** (Overwatch): ReliefWeb's disasters feed and IFRC GO's emergencies, at the
-  country.
-- 6g **World News signals:** Wikipedia's most-read pages matched to stories ("Most read on
-  Wikipedia"), and a GDELT search trial with its answer rate logged.
+- 6b **Travel advice** (Overwatch) - DONE: the US State Department's level for each of 218 countries
+  as country shading, with a pin for levels 2-4. Placed by name (the feed's codes are FIPS): 208 of
+  218 on 07-11-26; overseas territories aren't countries in the places table.
+- 6c **More hazards** (Overwatch, `HazardLayerService`) - DONE: NOAA hurricane center storms (one
+  per storm with GDACS), and NASA EONET kinds nothing else covers (landslides, dust, sea ice).
+- 6d **Fire hotspots** (Overwatch) - DONE: NASA FIRMS's public 24-hour files (NOAA-20 VIIRS, MODIS),
+  in half-degree cells (about 8,000 worldwide); the strongest 1,500 in view are drawn.
+- 6e **Conflict** (Overwatch) - DONE: GDELT's 15-minute event files as "Reported" (material conflict
+  from 2+ sources or in 5+ articles, lead paragraph, a named place; 2 sources alone kept 8 of 222)
+  and UCDP's candidate events as "Confirmed" (monthly, with deaths), each switchable.
+- 6f **Humanitarian** (Overwatch) - DONE, IFRC GO only: ReliefWeb's RSS answered the Overwatch
+  client 406, a refusal, so it isn't used (trying other UAs is circumvention, and was blocked).
+- 6g **World News signals:** DONE: Wikipedia's most-read pages matched to stories ("Most read on
+  Wikipedia yesterday" on the story page; whole titles of 2+ words only). The GDELT search trial
+  wasn't enabled: on 07-11-26 it gave an empty answer, then HTTP 429 at 7 s spacing (its limit is
+  5 s), as in October; the conflict layer uses GDELT's event files, which answer reliably.
+- 6h **Satellites with public data** (Grant, mid-build: "show only public view of data. If it has
+  data, I want to be able to view that data") - DONE: SPACE > SATELLITES shows only the ISS (with
+  its crew) and 13 weather and Earth-imaging satellites; a satellite's window shows what it sees
+  (NASA GIBS or NOAA) and lays its imagery over the globe. Rocket bodies, debris and China's
+  station (no public data) are gone.
