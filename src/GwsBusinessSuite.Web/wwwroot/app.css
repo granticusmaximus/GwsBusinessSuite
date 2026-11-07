@@ -746,6 +746,10 @@ h1:focus { outline: none; }
     padding: var(--gws-content-pad-y) var(--gws-content-pad-x) 2rem;
 }
 
+/* On the World News story page the window scrolls, so its jump strip sticks to the window: with the
+   content's own overflow it would stick to a box that never scrolls (07-11-26). */
+.gws-content:has(.story-page) { overflow: visible; }
+
 .gws-content > *,
 .gws-content .card,
 .gws-content .card-body,

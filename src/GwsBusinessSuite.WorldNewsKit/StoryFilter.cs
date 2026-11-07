@@ -1,8 +1,8 @@
 namespace GwsBusinessSuite.WorldNewsKit;
 
-// The story document's region and language chips (06-11-26): which outlets "Who is reporting it",
-// the who-reports-what grid, the per-outlet comparisons and the sources show. Region is null (all),
-// Western, NonWestern or one of WorldRegions; Language is null (all) or a language name.
+// The story document's region and language chips (06-11-26): which outlets its coverage shows (each
+// outlet with its reports, and the who-reports-what grid). Region is null (all), Western, NonWestern
+// or one of WorldRegions; Language is null (all) or a language name.
 public sealed record StoryFilter(string? Region = null, string? Language = null)
 {
     public const string Western = "Western";

@@ -699,12 +699,15 @@ public sealed class WorldNewsKitTests : IDisposable
         var summary = new EventSummary("e1", 2, "Istanbul floods kill eight", "Eight people died.", "llama3.2", 4, Now);
         var md = EventDocument.ToMarkdown(e, [nhk, dawn, hindu, spiegel], summary, Format);
         md.Should().StartWith("# Istanbul floods kill eight").And.Contain("Original headline: Floods kill eight in Istanbul")
-            .And.Contain("## What the outlets report\n\nEight people died.\n\n_A short summary from the headlines alone._")
-            .And.Contain("## The claim\n\n_SentinelGPT hasn't analysed this coverage yet.")
+            .And.Contain("4 outlets · 4 reports · 3 languages · 1 country · first seen 20-10-26 11:00, latest 20-10-26 14:00")
+            .And.Contain("## The story\n\n_SentinelGPT hasn't analysed this coverage yet.")
+            .And.Contain("Eight people died.\n\n_A short summary from the headlines alone._")
             .And.Contain("_The summary was written by AI (llama3.2) from the headlines and descriptions of 4 reports, 20-10-26 15:00 (version 2).")
-            .And.Contain("### Der Spiegel: Somewhere, German, 20-10-26 11:00")
-            .And.Contain("[Floods kill eight in Istanbul](https://example.com/hindu)").And.Contain("> " + wire)
+            .And.Contain("### Der Spiegel: Somewhere, German, 1 report")
+            .And.Contain("[Floods kill eight in Istanbul](https://example.com/hindu) · 20-10-26 12:00\n\n> " + wire)
             .And.Contain("Also carried by: Dawn").And.NotContain("Eight dead as floods hit Istanbul");
+        // The wire copy also sits under the outlet that ran it second, saying who published it first.
+        md.Should().Contain("### Dawn: Somewhere, English, 1 report\n\n[Floods kill eight in Istanbul](https://example.com/hindu) · 20-10-26 12:00 · first published by The Hindu");
         md.IndexOf("Flut in Istanbul", StringComparison.Ordinal).Should().BeLessThan(md.IndexOf("イスタンブール", StringComparison.Ordinal));
 
         // Five English sources and room for three lines: English, German and Japanese each get one.
@@ -778,7 +781,10 @@ public sealed class WorldNewsKitTests : IDisposable
     }
 
     [Fact]
-    public void Document_ShouldGiveTheClaim_TheReporting_TheOutlets_TheirGaps_WhatTheyAgreeOn_ThenTheSources()
+    // Grant's six (06-11-26): the claim, what the outlets report, who they are, what each leaves out,
+    // what they agree on, and every outlet's links. Since 07-11-26 in three parts: the story,
+    // agreement (agreed facts, figures, where they differ), then coverage (each outlet once, with its reports).
+    public void Document_ShouldGiveTheStory_ThenAgreement_ThenEachOutletWithItsGapsAndReports()
     {
         var bbc = Article("bbc", "Istanbul floods leave 64 dead", "English", Now.AddHours(-4)) with { Outlet = "BBC", Country = "United Kingdom" };
         var reuters = Article("reuters", "Istanbul floods: 64 dead", "English", Now.AddHours(-3)) with { Outlet = "Reuters", Country = "United Kingdom" };
@@ -796,25 +802,24 @@ public sealed class WorldNewsKitTests : IDisposable
 
         var md = EventDocument.ToMarkdown(e, [bbc, reuters, nhk], summary, Format, analysis);
 
-        md.Should().Contain("## The claim\n\nHeavy rain caused deadly floods in Istanbul")
-            .And.Contain("## What the outlets report\n\nFloods hit Istanbul on Tuesday.")
-            .And.Contain("## Who is reporting it\n\n- English: 2 outlets (BBC, Reuters), from United Kingdom")
-            .And.Contain("- Japanese: 1 outlet (NHK), from Japan")
-            .And.Contain("- First report: BBC, 20-10-26 11:00. Latest: NHK, 20-10-26 14:00.")
-            .And.Contain("## What each outlet leaves out or adds\n\n- **NHK:** Leaves out: 64 people died. Adds: shows the flooded metro.\n- No outlet names the districts worst hit.")
-            .And.Contain("## What they agree on\n\n1. Flooding hit Istanbul on Tuesday. (3 outlets: BBC, Reuters, NHK)\n2. 64 people died. (2 outlets: BBC, Reuters)")
-            .And.Contain("| Outlet | 1 | 2 |\n| --- | :-: | :-: |\n| BBC | ● | ● |\n| Reuters | ● | ● |\n| NHK | ● | – |")
+        md.Should().Contain("## The story\n\n**The claim:** Heavy rain caused deadly floods in Istanbul")
+            .And.Contain("Floods hit Istanbul on Tuesday. BBC and Reuters put the dead at 64")
+            .And.Contain("## Agreement\n\n### What they agree on\n\n1. Flooding hit Istanbul on Tuesday. (3 outlets: BBC, Reuters, NHK)\n2. 64 people died. (2 outlets: BBC, Reuters)")
+            .And.MatchRegex(@"### The figures\n\n_Read from each headline[^\n]*\n\n- [^\n]*64 \(BBC, Reuters\)")
+            .And.Contain("### Where they differ\n\n- **NHK** adds: shows the flooded metro.\n- No outlet names the districts worst hit.")
             .And.Contain("written by SentinelGPT (SentinelGPT on the Mac), 20-10-26 15:00, from the headlines and descriptions of 3 reports and 2 articles read in full")
-            .And.MatchRegex(@"\*\*Figures in the reports\*\*[^\n]*\n\n- [^\n]*64 \(BBC, Reuters\)")
-            .And.Contain("[Istanbul floods: 64 dead](https://example.com/reuters)");
-        var order = new[] { "## The claim", "## What the outlets report", "## Who is reporting it", "## What each outlet leaves out or adds", "## What they agree on", "## Sources" }
+            .And.Contain("## Coverage\n\n3 outlets in 2 languages (English, Japanese), from 2 countries (Japan, United Kingdom). First report: BBC, 20-10-26 11:00. Latest: NHK, 20-10-26 14:00.")
+            .And.Contain("| Outlet | 1 | 2 |\n| --- | :-: | :-: |\n| BBC | ● | ● |\n| Reuters | ● | ● |\n| NHK | ● | – |")
+            .And.Contain("### NHK: Japan, Japanese, 1 report\n\nLeaves out: 64 people died. Adds: shows the flooded metro.")
+            .And.Contain("[Istanbul floods: 64 dead](https://example.com/reuters) · 20-10-26 12:00");
+        var order = new[] { "## The story", "## Agreement", "### What they agree on", "### Where they differ", "## Coverage", "### BBC:" }
             .Select(heading => md.IndexOf(heading, StringComparison.Ordinal)).ToList();
         order.Should().BeInAscendingOrder().And.NotContain(-1);
-        md.Should().NotContain("British outlets lead", "SentinelGPT's gaps replace the summary's older comparison");
+        md.Should().NotContain("British outlets lead", "SentinelGPT's comparison replaces the summary's older one");
 
         var bare = EventDocument.ToMarkdown(e, [bbc], null, Format);
-        bare.Should().Contain("## What the outlets report\n\n_No summary yet._").And.Contain("## What each outlet leaves out or adds\n\n_SentinelGPT hasn't analysed")
-            .And.NotContain("written by");
+        bare.Should().Contain("## The story\n\n_SentinelGPT hasn't analysed").And.Contain("_No summary yet._")
+            .And.Contain("### Where they differ\n\n_SentinelGPT hasn't analysed").And.NotContain("written by");
     }
 
     [Fact]
@@ -851,7 +856,48 @@ public sealed class WorldNewsKitTests : IDisposable
             .And.Contain("- The claim changed. It was: Floods killed 64 in Istanbul.")
             .And.Contain("- Now agreed: Officials blame a dam breach.")
             .And.Contain("_In English: Floods in Istanbul_");
-        md.IndexOf("## What changed", StringComparison.Ordinal).Should().BeLessThan(md.IndexOf("## The claim", StringComparison.Ordinal));
+        md.IndexOf("## What changed", StringComparison.Ordinal).Should().BeLessThan(md.IndexOf("## The story", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Coverage_ShouldGiveEachOutletOnce_WithItsPlaceInTheComparison_AndItsReports()
+    {
+        var wire = "Heavy rain flooded streets and homes across Istanbul on Tuesday, officials said, as eight people died.";
+        var bbc = Article("bbc", "Istanbul floods leave 64 dead", "English", Now.AddHours(-4)) with { Outlet = "BBC", Country = "United Kingdom", Snippet = wire };
+        var bbc2 = Article("bbc2", "Istanbul: the clean-up begins", "English", Now.AddHours(-1)) with { Outlet = "BBC", Country = "United Kingdom" };
+        var dawn = Article("dawn", "Eight dead as floods hit Istanbul", "English", Now.AddHours(-2)) with { Outlet = "Dawn", Country = "Pakistan", Snippet = wire };
+        var nhk = Article("nhk", "イスタンブールで洪水", "Japanese", Now.AddHours(-3)) with { Outlet = "NHK", Country = "Japan" };
+        var e = new EventOverview("e1", "Istanbul floods", 4, 3, ["Japan", "Pakistan", "United Kingdom"], ["English", "Japanese"], Now.AddHours(-4), Now.AddHours(-1));
+        var analysis = new EventAnalysis("e1", "Floods hit Istanbul.", "s",
+            [new AgreedFact("Flooding hit Istanbul on Tuesday.", ["BBC", "nhk"]), new AgreedFact("Officials gave the toll.", []), new AgreedFact("64 people died.", ["BBC"])],
+            [new OutletDifference("NHK", "shows the flooded metro."), new OutletDifference("Spiegel Online", "blames a dam.")], "m", 4, 1, Now);
+        var story = EventDocument.Build(e, [bbc, bbc2, dawn, nhk], null, analysis, readInFull: new HashSet<string> { "nhk" });
+
+        StoryCoverage.GridNumbers(story).Should().Equal([1, 3], "the second fact names no outlets, so it isn't a column");
+        var coverage = StoryCoverage.ByOutlet(story);
+        coverage.Select(c => c.Outlet.Name).Should().Equal(["BBC", "Dawn", "NHK"], "most reports first, then by name");
+
+        var bbcCoverage = coverage[0];
+        bbcCoverage.States.Should().Equal(true, true);
+        bbcCoverage.Reports.Select(r => r.Report.Id).Should().Equal(["bbc", "bbc2"], "oldest first");
+        bbcCoverage.Reports[0].AlsoCarriedBy.Should().Equal("Dawn");
+
+        var dawnCoverage = coverage[1];
+        dawnCoverage.States.Should().BeNull("the comparison never named Dawn: it's shown as not compared, not as stating nothing");
+        dawnCoverage.Reports.Should().ContainSingle().Which.Should().Match<OutletReport>(r => r.Report.Id == "bbc" && r.FirstPublishedBy == "BBC",
+            "Dawn ran BBC's wire copy");
+
+        var nhkCoverage = coverage[2];
+        nhkCoverage.States.Should().Equal(new[] { true, false }, "names match whatever their case");
+        nhkCoverage.LeavesOut.Should().BeEmpty("one outlet behind a fact isn't enough to say others leave it out");
+        nhkCoverage.Adds.Should().Be("shows the flooded metro.");
+        nhkCoverage.Outlet.ReadInFull.Should().BeTrue();
+
+        StoryCoverage.Unmatched(story).Select(c => c.Outlet).Should().Equal(["Spiegel Online"], "what SentinelGPT said about it isn't dropped");
+        var spread = StoryCoverage.Spread(story, 8);
+        spread.Should().HaveCount(8).And.BeInAscendingOrder();
+        spread[0].Should().Be(1, "BBC was first");
+        spread[^1].Should().Be(3, "every outlet by the latest report");
     }
 
     [Fact]

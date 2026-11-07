@@ -11,7 +11,7 @@
 
 <PageHeader Title="@(_title ?? "World News story")" Icon="bi-globe-europe-africa"
             ParentLabel="World News" ParentHref="@WorldNewsHref"
-            Description="One event's coverage across outlets and languages: the claim, what the outlets report, who's reporting it, what each leaves out or adds, what they agree on, and every source.">
+            Description="One event's coverage across outlets and languages: what happened, how solid it is, and who's saying what, with every outlet's reports.">
     <Actions>
         @if (_title is not null)
         {
@@ -22,7 +22,10 @@
     </Actions>
 </PageHeader>
 
-<WorldNewsStoryView EventId="@EventId" />
+@* story-page: the jump strip sticks under the admin bar here (WorldNewsStory.razor.css, app.css). *@
+<div class="story-page">
+    <WorldNewsStoryView EventId="@EventId" />
+</div>
 
 @code {
     [Parameter] public string EventId { get; set; } = string.Empty;

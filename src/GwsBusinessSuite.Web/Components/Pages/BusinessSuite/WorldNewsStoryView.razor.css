@@ -1,4 +1,5 @@
-/* A World News story's document (WorldNewsStoryView): in the World News dialog and on its own page. */
+/* A World News story's document (WorldNewsStoryView): in the World News dialog and on its own page.
+   Three parts since 07-11-26: the story, agreement, coverage (one entry per outlet). */
 
 /* SentinelGPT's analysis: working on it, couldn't, or done (with Analyse again). */
 .story-analysis {
@@ -7,7 +8,7 @@
     align-items: center;
     gap: .5rem;
     max-width: 50rem;
-    margin: 0 auto 1rem;
+    margin: 0 auto .75rem;
     padding: .55rem .8rem;
     border-radius: var(--gws-radius-sm, 6px);
     background: var(--gws-body-bg, var(--bs-tertiary-bg));
@@ -16,10 +17,40 @@
 }
 
 .story-analysis .btn-link,
-.story-filter-note .btn-link {
+.story-filter-note .btn-link,
+.story-coverage-tools .btn-link {
     padding: 0;
     vertical-align: baseline;
 }
+
+/* Story · Agreement · Coverage, kept in view while reading (top: where the scrolling box starts). */
+.story-jump {
+    position: sticky;
+    top: var(--story-jump-top, 0px);
+    z-index: 3;
+    display: flex;
+    gap: .35rem;
+    max-width: 50rem;
+    margin: 0 auto 1rem;
+    padding: .4rem 0;
+    background: var(--story-jump-bg, var(--gws-panel-bg, var(--bs-body-bg)));
+    border-bottom: 1px solid var(--gws-panel-border, var(--bs-border-color));
+}
+
+.story-jump button {
+    min-height: 2.25rem;
+    padding: .25rem .8rem;
+    border: 1px solid var(--gws-panel-border, var(--bs-border-color));
+    border-radius: 999px;
+    background: transparent;
+    color: var(--gws-text-strong);
+    font-size: .85rem;
+    font-weight: 600;
+}
+
+.story-jump button:hover { background: var(--gws-body-bg, var(--bs-tertiary-bg)); }
+.story-jump button:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; }
+.story-jump-count { margin-left: .2rem; color: var(--gws-text-soft); font-variant-numeric: tabular-nums; }
 
 .story-document {
     max-width: 50rem;
@@ -28,10 +59,13 @@
     overflow-wrap: anywhere;
 }
 
+/* Each part clears the sticky strip (and, on the page, the admin bar) when jumped to. */
+.story-part { scroll-margin-top: calc(var(--story-jump-top, 0px) + 4.5rem); }
+
 .story-document h2 {
-    font-size: 1.15rem;
+    font-size: 1.2rem;
     font-weight: 700;
-    margin: 1.5rem 0 .6rem;
+    margin: 1.75rem 0 .6rem;
     padding-bottom: .3rem;
     border-bottom: 1px solid var(--gws-panel-border, var(--bs-border-color));
 }
@@ -39,7 +73,7 @@
 .story-subhead {
     font-size: .95rem;
     font-weight: 700;
-    margin: 1.1rem 0 .3rem;
+    margin: 1.1rem 0 .35rem;
 }
 
 .story-document ul,
@@ -49,7 +83,7 @@
 
 .story-original,
 .story-quiet,
-.story-meta {
+.story-numbers {
     color: var(--gws-text-soft);
 }
 
@@ -58,16 +92,26 @@
     font-style: italic;
 }
 
-.story-meta {
-    list-style: none;
-    padding-left: 0 !important;
+.story-numbers {
     margin: 0 0 1rem;
     font-size: .9rem;
+    font-variant-numeric: tabular-nums;
 }
 
 .story-claim {
-    font-size: 1.05rem;
+    font-size: 1.08rem;
     font-weight: 600;
+    line-height: 1.5;
+}
+
+.story-label {
+    display: inline-block;
+    margin-right: .35rem;
+    color: var(--gws-text-soft);
+    font-size: .75rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
 }
 
 .story-changes {
@@ -83,11 +127,61 @@
     border-bottom: 0;
 }
 
-/* The region and language chips. */
+/* Agreement. */
+.story-facts li,
+.story-figures li,
+.story-differences li {
+    margin-bottom: .4rem;
+}
+
+.story-badge {
+    display: inline-block;
+    margin-left: .35rem;
+    padding: 0 .45rem;
+    border-radius: 999px;
+    background: var(--bs-success-bg-subtle);
+    color: var(--bs-success-text-emphasis);
+    font-size: .72rem;
+    font-weight: 700;
+    white-space: nowrap;
+    vertical-align: .1em;
+}
+
+.story-fact-outlets {
+    display: block;
+    color: var(--gws-text-soft);
+    font-size: .82rem;
+}
+
+.story-figures li.is-disputed strong { color: var(--bs-warning-text-emphasis); }
+
+.story-credit { margin-top: 1rem; }
+
+/* Coverage. */
+.story-coverage-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem 1rem;
+}
+
+.story-coverage-head p { margin: 0; flex: 1 1 18rem; color: var(--gws-text-soft); font-size: .9rem; }
+
+.story-spread {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    width: 9rem;
+    color: var(--gws-text-soft);
+}
+
+.story-spread small { font-size: .72rem; }
+
 .story-filters {
     display: grid;
     gap: .5rem;
-    margin: 1.5rem 0 0;
+    margin: .9rem 0 0;
     padding: .75rem;
     border: 1px solid var(--gws-panel-border, var(--bs-border-color));
     border-radius: var(--gws-radius-md, 8px);
@@ -114,9 +208,7 @@
     cursor: pointer;
 }
 
-.story-chip:hover {
-    color: var(--gws-text-strong);
-}
+.story-chip:hover { color: var(--gws-text-strong); }
 
 .story-chip:focus-visible {
     outline: 2px solid var(--bs-primary);
@@ -136,19 +228,122 @@
     font-variant-numeric: tabular-nums;
 }
 
+.story-coverage-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    margin: .75rem 0 .25rem;
+}
+
 .story-filter-note {
-    margin: 0;
+    margin: .25rem 0;
     font-size: .85rem;
     color: var(--gws-text-soft);
 }
 
-/* Tables (every outlet; who reports what) scroll sideways on narrow screens, the first column staying put. */
-.story-outlets summary {
+/* One entry per outlet: a line that opens to its reports. */
+.story-outlets {
+    list-style: none;
+    margin: .5rem 0 0;
+    padding: 0 !important;
+    border-top: 1px solid var(--gws-panel-border, var(--bs-border-color));
+}
+
+.story-outlets > li { border-bottom: 1px solid var(--gws-panel-border, var(--bs-border-color)); }
+
+.story-outlet summary {
+    display: flex;
+    flex-direction: column;
+    gap: .15rem;
+    padding: .55rem .25rem;
     cursor: pointer;
+    list-style: none;
+}
+
+.story-outlet summary::-webkit-details-marker { display: none; }
+
+.story-outlet summary:focus-visible { outline: 2px solid var(--bs-primary); outline-offset: 2px; }
+
+.story-outlet-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .2rem .6rem;
+}
+
+/* An arrow that turns when the outlet is open. */
+.story-outlet-line::before {
+    content: "▸";
+    color: var(--gws-text-soft);
+    transition: transform .15s ease;
+}
+
+.story-outlet[open] .story-outlet-line::before { transform: rotate(90deg); }
+
+.story-outlet-name { font-weight: 700; }
+
+.story-outlet-meta,
+.story-dots-none {
+    color: var(--gws-text-soft);
+    font-size: .82rem;
+}
+
+.story-dots {
+    display: inline-flex;
+    gap: .2rem;
+    color: var(--gws-text-soft);
+    font-size: .82rem;
+    letter-spacing: .05em;
+}
+
+.story-dots .is-stated { color: var(--bs-success); }
+
+.story-read {
+    padding: 0 .4rem;
+    border-radius: 999px;
+    background: var(--gws-body-bg, var(--bs-tertiary-bg));
+    color: var(--gws-text-soft);
+    font-size: .72rem;
+    font-weight: 600;
+}
+
+.story-outlet-notes {
+    padding-left: 1.1rem;
+    color: var(--gws-text-soft);
+    font-size: .85rem;
+}
+
+.story-reports {
+    list-style: none;
+    margin: 0 0 .75rem;
+    padding: 0 0 0 1.1rem !important;
+}
+
+.story-reports li { margin-bottom: .75rem; }
+
+.story-report-time {
+    display: block;
+    color: var(--gws-text-soft);
+    font-size: .78rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.story-english {
+    font-size: .9rem;
+    font-style: italic;
+}
+
+.story-reports blockquote {
+    margin: .25rem 0 0;
+    padding-left: .75rem;
+    border-left: 3px solid var(--gws-panel-border, var(--bs-border-color));
     color: var(--gws-text-soft);
     font-size: .9rem;
 }
 
+/* Compare all outlets: the full grid, scrolling sideways on narrow screens with the outlet column fixed. */
 .story-table-scroll {
     max-width: 100%;
     overflow-x: auto;
@@ -173,9 +368,7 @@
     white-space: nowrap;
 }
 
-.story-table tbody tr:last-child > * {
-    border-bottom: 0;
-}
+.story-table tbody tr:last-child > * { border-bottom: 0; }
 
 .story-table thead th {
     font-weight: 700;
@@ -195,56 +388,9 @@
     font-weight: 600;
 }
 
-.story-grid td {
-    color: var(--gws-text-soft);
-}
+.story-grid td { color: var(--gws-text-soft); }
 
 .story-grid td.is-stated {
     color: var(--bs-success);
     font-weight: 700;
-}
-
-.story-comparisons li,
-.story-facts li {
-    margin-bottom: .35rem;
-}
-
-.story-label {
-    font-weight: 600;
-    color: var(--gws-text-soft);
-}
-
-.story-fact-outlets {
-    color: var(--gws-text-soft);
-    font-size: .9rem;
-}
-
-.story-credit {
-    margin-top: 1rem;
-}
-
-.story-sources {
-    padding-left: 1.4rem;
-}
-
-.story-sources li {
-    margin-bottom: .9rem;
-}
-
-.story-source-meta {
-    font-size: .85rem;
-    color: var(--gws-text-soft);
-}
-
-.story-english {
-    font-size: .9rem;
-    font-style: italic;
-}
-
-.story-sources blockquote {
-    margin: .25rem 0 0;
-    padding-left: .75rem;
-    border-left: 3px solid var(--gws-panel-border, var(--bs-border-color));
-    color: var(--gws-text-soft);
-    font-size: .9rem;
 }

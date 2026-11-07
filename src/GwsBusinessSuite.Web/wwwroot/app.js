@@ -1304,3 +1304,12 @@
 window.gwsClientTime = {
 	utcOffsetMinutesWest: function () { return new Date().getTimezoneOffset(); }
 };
+
+// The World News story's jump links (Story · Agreement · Coverage, WorldNewsStoryView, 07-11-26).
+// Buttons rather than "#…" links: those resolve against <base href="/"> and would leave the page.
+document.addEventListener('click', function (event) {
+	var jump = event.target instanceof Element ? event.target.closest('[data-story-jump]') : null;
+	if (!jump) return;
+	var part = document.getElementById(jump.getAttribute('data-story-jump'));
+	if (part) part.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});

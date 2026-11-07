@@ -15,12 +15,14 @@ public sealed record DocumentSource(WorldArticle Report, IReadOnlyList<string> A
 // with no AI. Times go through formatTime so the host shows them its own way (dd-MM-yy HH:mm in GWS).
 public static class EventDocument
 {
-    public const string ClaimHeading = "The claim";
-    public const string OverviewHeading = "What the outlets report";
-    public const string OutletsHeading = "Who is reporting it";
-    public const string GapsHeading = "What each outlet leaves out or adds";
+    // The three parts (07-11-26), the questions a reader asks in order: what happened, how solid it
+    // is, and who's saying what (each outlet once, with its reports), and the parts within them.
+    public const string StoryHeading = "The story";
+    public const string AgreementHeading = "Agreement";
+    public const string CoverageHeading = "Coverage";
     public const string AgreedHeading = "What they agree on";
-    public const string SourcesHeading = "Sources";
+    public const string FiguresHeading = "The figures";
+    public const string DifferencesHeading = "Where they differ";
     // Before 06-11-26 (the summary model's own comparison points).
     public const string ComparisonHeading = "How the coverage compares";
 
@@ -64,10 +66,7 @@ public static class EventDocument
         var md = new StringBuilder();
         md.AppendLine($"# {Inline(e.Headline ?? e.Title)}").AppendLine();
         if (e.Headline is not null) md.AppendLine($"Original headline: {Inline(e.Title)}").AppendLine();
-        md.AppendLine($"- Outlets: {e.OutletCount}, reports: {e.ArticleCount}");
-        md.AppendLine($"- Languages: {string.Join(", ", e.Languages.Order())}");
-        md.AppendLine($"- Reported from: {string.Join(", ", e.Countries.Order())}");
-        md.AppendLine($"- First seen {formatTime(e.FirstSeen)}, latest {formatTime(e.LastSeen)}").AppendLine();
+        md.AppendLine(KeyNumbers(e, formatTime)).AppendLine();
 
         if (story.Changes is { Any: true } changes)
         {
@@ -76,38 +75,17 @@ public static class EventDocument
             md.AppendLine();
         }
 
+        // 1. What happened: the claim and what the outlets report.
         var waiting = $"_{Waiting}_";
-        md.AppendLine($"## {ClaimHeading}").AppendLine();
-        md.AppendLine(analysis is { Claim.Length: > 0 } ? Inline(analysis.Claim) : waiting).AppendLine();
-
-        md.AppendLine($"## {OverviewHeading}").AppendLine();
+        md.AppendLine($"## {StoryHeading}").AppendLine();
+        md.AppendLine(analysis is { Claim.Length: > 0 } ? $"**The claim:** {Inline(analysis.Claim)}" : waiting).AppendLine();
         if (analysis is { Summary.Length: > 0 }) md.AppendLine(Inline(analysis.Summary)).AppendLine();
         else if (summary is not null) md.AppendLine(Inline(summary.Text)).AppendLine().AppendLine("_A short summary from the headlines alone._").AppendLine();
         else md.AppendLine("_No summary yet._").AppendLine();
 
-        md.AppendLine($"## {OutletsHeading}").AppendLine();
-        AppendCoverage(md, story, formatTime);
-
-        md.AppendLine($"## {GapsHeading}").AppendLine();
-        if (analysis is not null)
-        {
-            var comparisons = story.Comparisons;
-            if (comparisons.Count == 0 && analysis.Differences.Count == 0)
-                md.AppendLine("_SentinelGPT found no outlet whose coverage stands out from the rest._").AppendLine();
-            foreach (var comparison in comparisons) md.AppendLine($"- **{Inline(comparison.Outlet)}:** {Inline(ComparisonText(comparison))}");
-            foreach (var general in analysis.Differences.Where(d => d.Outlet.Length == 0)) md.AppendLine($"- {Inline(general.Text)}");
-            md.AppendLine();
-            if (comparisons.Any(c => c.LeavesOut.Count > 0))
-                md.AppendLine("_\"Leaves out\" lists the agreed facts below that an outlet's report doesn't state, going by the outlets SentinelGPT names for each fact._").AppendLine();
-        }
-        else if (summary?.Comparison is { Count: > 0 } points)
-        {
-            foreach (var point in points) md.AppendLine($"- {Inline(point)}");
-            md.AppendLine();
-        }
-        else md.AppendLine(waiting).AppendLine();
-
-        md.AppendLine($"## {AgreedHeading}").AppendLine();
+        // 2. How solid it is: what they agree on, the figures, and where they differ.
+        md.AppendLine($"## {AgreementHeading}").AppendLine();
+        md.AppendLine($"### {AgreedHeading}").AppendLine();
         if (analysis is { Agreed.Count: > 0 })
         {
             var number = 0;
@@ -115,10 +93,22 @@ public static class EventDocument
                 md.AppendLine(fact.Outlets.Count == 0 ? $"{++number}. {Inline(fact.Text)}"
                     : $"{++number}. {Inline(fact.Text)} ({Count(fact.Outlets.Count, "outlet")}: {Outlets(fact.Outlets)})");
             md.AppendLine();
-            AppendGrid(md, story);
         }
-        else if (analysis is null) md.AppendLine(waiting).AppendLine();
-        AppendFigures(md, story.Figures);
+        else md.AppendLine(analysis is null ? waiting : "_SentinelGPT found no fact most outlets report alike._").AppendLine();
+        if (story.Figures.Count > 0)
+        {
+            md.AppendLine($"### {FiguresHeading}").AppendLine();
+            AppendFigures(md, story.Figures);
+        }
+        md.AppendLine($"### {DifferencesHeading}").AppendLine();
+        var differences = Differences(story);
+        if (differences.Count > 0)
+        {
+            foreach (var line in differences) md.AppendLine($"- {line}");
+            md.AppendLine();
+        }
+        else md.AppendLine(analysis is null && summary?.Comparison is not { Count: > 0 } ? waiting
+            : "_SentinelGPT found no outlet whose coverage stands out from the rest._").AppendLine();
 
         if (analysis is not null)
         {
@@ -133,17 +123,75 @@ public static class EventDocument
                 $"{formatTime(summary.CreatedAt)} (version {summary.Version}). Check the sources below before relying on a detail._").AppendLine();
         }
 
-        md.AppendLine($"## {SourcesHeading}").AppendLine();
-        foreach (var source in story.Sources)
+        // 3. Who's saying what: each outlet once, with what it leaves out or adds and its reports.
+        md.AppendLine($"## {CoverageHeading}").AppendLine();
+        md.AppendLine(CoverageLine(story, formatTime)).AppendLine();
+        AppendGrid(md, story);
+        foreach (var outlet in StoryCoverage.ByOutlet(story)) AppendOutlet(md, story, outlet, formatTime);
+        var unmatched = StoryCoverage.Unmatched(story);
+        if (unmatched.Count > 0)
         {
-            var a = source.Report;
-            md.AppendLine($"### {Inline(a.Outlet)}: {a.Country}, {a.Language}, {formatTime(a.SeenAt)}").AppendLine();
-            md.AppendLine($"[{Inline(a.Title)}]({a.Url})").AppendLine();
-            if (story.English.TryGetValue(a.Id, out var english)) md.AppendLine($"_In English: {Inline(english)}_").AppendLine();
-            if (a.Snippet is not null) md.AppendLine($"> {Inline(a.Snippet)}").AppendLine();
-            if (source.AlsoCarriedBy.Count > 0) md.AppendLine($"Also carried by: {string.Join(", ", source.AlsoCarriedBy)}").AppendLine();
+            md.AppendLine("**SentinelGPT also wrote about outlets it named differently:**").AppendLine();
+            foreach (var comparison in unmatched) md.AppendLine($"- **{Inline(comparison.Outlet)}:** {Inline(ComparisonText(comparison))}");
+            md.AppendLine();
         }
         return md.ToString();
+    }
+
+    // "31 outlets · 41 reports · 9 languages · 12 countries · first seen …, latest …"
+    public static string KeyNumbers(EventOverview e, Func<DateTimeOffset, string> formatTime) =>
+        $"{Count(e.OutletCount, "outlet")} · {Count(e.ArticleCount, "report")} · {Count(e.Languages.Count, "language")} · " +
+        $"{Count(e.Countries.Count, "country", "countries")} · first seen {formatTime(e.FirstSeen)}, latest {formatTime(e.LastSeen)}";
+
+    // Where the outlets differ: figures that don't match, what only some outlets report, and the
+    // analysis's other points (or, before it, the summary's comparison).
+    public static IReadOnlyList<string> Differences(StoryDocument story)
+    {
+        var lines = story.Figures.Where(claim => claim.Disputed)
+            .Select(claim => $"{claim.Label}: the reports give different figures ({FigureValues(claim, 3)}).")
+            .ToList();
+        if (story.Analysis is { } analysis)
+        {
+            lines.AddRange(story.Comparisons.Where(comparison => comparison.Adds is not null)
+                .Select(comparison => $"**{Inline(comparison.Outlet)}** adds: {Inline(comparison.Adds!)}"));
+            lines.AddRange(analysis.Differences.Where(d => d.Outlet.Length == 0).Select(d => Inline(d.Text)));
+        }
+        else if (story.Summary?.Comparison is { Count: > 0 } points)
+        {
+            lines.AddRange(points.Select(Inline));
+        }
+        return lines;
+    }
+
+    private static string CoverageLine(StoryDocument story, Func<DateTimeOffset, string> formatTime)
+    {
+        var e = story.Event;
+        var line = $"{Count(story.Outlets.Count, "outlet")} in {Count(e.Languages.Count, "language")} ({string.Join(", ", e.Languages.Order())}), " +
+            $"from {Count(e.Countries.Count, "country", "countries")} ({string.Join(", ", e.Countries.Order())}).";
+        if (story.FirstReport is { } first && story.LatestReport is { } latest)
+            line += $" First report: {Inline(first.Outlet)}, {formatTime(first.SeenAt)}. Latest: {Inline(latest.Outlet)}, {formatTime(latest.SeenAt)}.";
+        return line;
+    }
+
+    // One outlet: where it is, what it leaves out or adds, then its reports (a wire copy it ran says
+    // who published it first).
+    private static void AppendOutlet(StringBuilder md, StoryDocument story, OutletCoverage coverage, Func<DateTimeOffset, string> formatTime)
+    {
+        var outlet = coverage.Outlet;
+        md.AppendLine($"### {Inline(outlet.Name)}: {outlet.Country}, {outlet.Language}, {Count(outlet.Reports, "report")}{(outlet.ReadInFull ? ", read in full" : string.Empty)}").AppendLine();
+        var notes = new List<string>();
+        if (coverage.LeavesOut.Count > 0) notes.Add("Leaves out: " + string.Join(" ", coverage.LeavesOut.Select(number => story.Analysis!.Agreed[number - 1].Text)));
+        if (coverage.Adds is { } adds) notes.Add("Adds: " + adds);
+        if (notes.Count > 0) md.AppendLine(Inline(string.Join(" ", notes))).AppendLine();
+        foreach (var report in coverage.Reports)
+        {
+            var a = report.Report;
+            md.AppendLine($"[{Inline(a.Title)}]({a.Url}) · {formatTime(a.SeenAt)}" +
+                (report.FirstPublishedBy is { } firstBy ? $" · first published by {Inline(firstBy)}" : string.Empty)).AppendLine();
+            if (story.English.TryGetValue(a.Id, out var english)) md.AppendLine($"_In English: {Inline(english)}_").AppendLine();
+            if (a.Snippet is not null && report.FirstPublishedBy is null) md.AppendLine($"> {Inline(a.Snippet)}").AppendLine();
+            if (report.AlsoCarriedBy.Count > 0) md.AppendLine($"Also carried by: {string.Join(", ", report.AlsoCarriedBy)}").AppendLine();
+        }
     }
 
     public const string ChangesHeading = "What changed since you last read";
@@ -192,33 +240,24 @@ public static class EventDocument
     private static void AppendFigures(StringBuilder md, IReadOnlyList<CoverageClaim> claims)
     {
         if (claims.Count == 0) return;
-        md.AppendLine("**Figures in the reports** (read from each headline and description by fixed rules, without AI):").AppendLine();
-        foreach (var claim in claims)
-        {
-            var values = string.Join("; ", claim.Values.Take(6).Select(v => $"{ValueText(v)} ({Outlets(v.Sources.Select(s => s.Article.Outlet))})"));
-            var verdict = claim.Corroborated ? " The coverage disagrees."
-                : claim.Disputed ? " The figures vary."
-                : claim.Consensus ? $" {Count(claim.Values[0].Outlets, "outlet")} agree."
-                : string.Empty;
-            if (claim.MayHaveRisen) verdict += " The lower figures all came first, so the number may have risen.";
-            md.AppendLine($"- {claim.Label}: {values}.{verdict}");
-        }
+        md.AppendLine("_Read from each headline and description by fixed rules, without AI._").AppendLine();
+        foreach (var claim in claims) md.AppendLine($"- {claim.Label}: {FigureValues(claim, 6)}.{FigureVerdict(claim)}");
         md.AppendLine();
     }
 
-    // Each language's outlets and where they're based, biggest first, then who reported first and last.
-    private static void AppendCoverage(StringBuilder md, StoryDocument story, Func<DateTimeOffset, string> formatTime)
+    // "64 (BBC, Reuters); 70 (NHK)": a figure's values, each with the outlets that give it.
+    public static string FigureValues(CoverageClaim claim, int max) =>
+        string.Join("; ", claim.Values.Take(max).Select(v => $"{ValueText(v)} ({Outlets(v.Sources.Select(s => s.Article.Outlet))})"));
+
+    // " The coverage disagrees." and the like, after a figure's values.
+    public static string FigureVerdict(CoverageClaim claim)
     {
-        if (story.Outlets.Count == 0) return;
-        foreach (var language in story.Outlets.GroupBy(outlet => outlet.Language)
-                     .OrderByDescending(group => group.Count()).ThenBy(group => group.Key, StringComparer.Ordinal))
-        {
-            md.AppendLine($"- {language.Key}: {Count(language.Count(), "outlet")} ({string.Join(", ", language.Select(outlet => Inline(outlet.Name)))}), " +
-                $"from {string.Join(", ", language.Select(outlet => outlet.Country).Distinct().Order(StringComparer.Ordinal))}");
-        }
-        if (story.FirstReport is { } first && story.LatestReport is { } latest)
-            md.AppendLine($"- First report: {Inline(first.Outlet)}, {formatTime(first.SeenAt)}. Latest: {Inline(latest.Outlet)}, {formatTime(latest.SeenAt)}.");
-        md.AppendLine();
+        var verdict = claim.Corroborated ? " The coverage disagrees."
+            : claim.Disputed ? " The figures vary."
+            : claim.Consensus ? $" {Count(claim.Values[0].Outlets, "outlet")} agree."
+            : string.Empty;
+        if (claim.MayHaveRisen) verdict += " The lower figures all came first, so the number may have risen.";
+        return verdict;
     }
 
     public static string ValueText(ClaimValue value) => value.Qualifier switch
@@ -237,7 +276,7 @@ public static class EventDocument
         return names.Count <= 5 ? string.Join(", ", names) : $"{string.Join(", ", names.Take(5))} and {names.Count - 5} more";
     }
 
-    private static string Count(int n, string noun) => $"{n} {noun}{(n == 1 ? "" : "s")}";
+    private static string Count(int n, string noun, string? plural = null) => $"{n} {(n == 1 ? noun : plural ?? noun + "s")}";
 
     // The sources as the summary model reads them, one line each, within maxChars. When they don't
     // all fit, languages take turns (biggest first), so every language's coverage is heard; the

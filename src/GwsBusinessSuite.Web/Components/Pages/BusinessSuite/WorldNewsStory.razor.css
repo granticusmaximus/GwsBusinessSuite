@@ -1,0 +1,6 @@
+/* The story page (07-11-26): the view's jump strip sticks under the admin bar, in the page's colour
+   (in the World News dialog it sticks to the top of the dialog's own scrolling body). */
+.story-page {
+    --story-jump-top: var(--gws-admin-bar-height, 3.5rem);
+    --story-jump-bg: var(--gws-body-bg, var(--bs-body-bg));
+}
