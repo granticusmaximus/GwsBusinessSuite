@@ -1455,9 +1455,10 @@ app.MapPost("/admin/api/native/agent/turns", (NativeAgentTurnRequest request, Ht
     GwsBusinessSuite.Application.SentinelAgent.SentinelAgentTurns turns) =>
 {
     if (NativeAgentUser(httpContext) is not { } user) return Results.BadRequest(new { error = "Missing X-GWS-Native header." });
-    if (request.ConversationId == Guid.Empty || string.IsNullOrWhiteSpace(request.Message) || request.Message.Length > 8000)
+    if (request.ConversationId == Guid.Empty || string.IsNullOrWhiteSpace(request.Message) || request.Message.Length > 8000
+        || request.Advice?.Length > 40_000)
         return Results.BadRequest(new { error = "Send the chat and the message." });
-    var (id, problem) = turns.Start(user, request.ConversationId, request.Message, request.Model);
+    var (id, problem) = turns.Start(user, request.ConversationId, request.Message, request.Model, advice: request.Advice);
     return id is { } turnId ? Results.Json(new { id = turnId }) : Results.Conflict(new { error = problem });
 })
     .RequireAuthorization("ContentAccess")
@@ -5553,7 +5554,8 @@ record NativeWorldNewsEmbeddings(string? Model, List<NativeWorldNewsEmbedding>? 
 record NativeWorldNewsEmbedding(string Id, float[] Vector);
 // The Mac's answer to one relayed agent model call: Ollama's /api/chat body, or what went wrong.
 record NativeAgentChatReply(string? Body, string? Error);
-record NativeAgentTurnRequest(Guid ConversationId, string? Message, string? Model);
+// Advice: Deep Analysis's specialist opinions, when it's on in the Mac app (06-11-26).
+record NativeAgentTurnRequest(Guid ConversationId, string? Message, string? Model, string? Advice = null);
 record NativeAgentActionRequest(bool Approve);
 record NativeCameraWatchReading(string? CameraId, string? ModelOutput, string? ImageBase64);
 record NativeContactRequest(string? FullName, string? Email, string? Company);

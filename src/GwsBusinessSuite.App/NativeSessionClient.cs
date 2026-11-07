@@ -207,9 +207,11 @@ public sealed class NativeSessionClient(HttpClient httpClient)
 
     // The SentinelGPT tab's agent turns (30-10-26): started and followed on the server, thinking on
     // this Mac through the relay. No id means "not available"; the tab then answers locally.
-    public async Task<(Guid? Id, string? Error)> StartAgentTurnAsync(Guid conversationId, string message, string? model, CancellationToken cancellationToken = default)
+    // advice: Deep Analysis's specialist opinions, read by the agent as advice (an older server ignores it).
+    public async Task<(Guid? Id, string? Error)> StartAgentTurnAsync(Guid conversationId, string message, string? model, CancellationToken cancellationToken = default,
+        string? advice = null)
     {
-        var (json, error) = await PostAsync("/admin/api/native/agent/turns", new { conversationId, message, model }, cancellationToken);
+        var (json, error) = await PostAsync("/admin/api/native/agent/turns", new { conversationId, message, model, advice }, cancellationToken);
         return json is { } root && root.TryGetProperty("id", out var id) && id.TryGetGuid(out var turnId) ? (turnId, null) : (null, error);
     }
 

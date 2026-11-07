@@ -103,7 +103,8 @@ public sealed class SentinelAgentTurns(SentinelAgentRunner runner, SentinelAgent
 
     // Null with a reason when this person's Mac isn't connected to the relay (the tab then
     // answers the way it did before).
-    public (Guid? Id, string? Problem) Start(SentinelAgentUser user, Guid conversationId, string message, string? preferredModel, string? pageContext = null)
+    public (Guid? Id, string? Problem) Start(SentinelAgentUser user, Guid conversationId, string message, string? preferredModel, string? pageContext = null,
+        string? advice = null)
     {
         var models = relay.ModelsFor(user.Username).ToList();
         if (models.Count == 0) return (null, "This Mac isn't connected to SentinelGPT's relay yet.");
@@ -128,7 +129,7 @@ public sealed class SentinelAgentTurns(SentinelAgentRunner runner, SentinelAgent
         _turns[turnId] = turn;
         _ = Task.Run(async () =>
         {
-            await RunAsync(turn, user, conversationId, message, pageContext, models);
+            await RunAsync(turn, user, conversationId, message, pageContext, models, advice);
             NoteIfUnwatched(turnId, turn);
         });
         return (turnId, null);
@@ -157,14 +158,15 @@ public sealed class SentinelAgentTurns(SentinelAgentRunner runner, SentinelAgent
             .OrderByDescending(job => job.FinishedAt)
             .ToList();
 
-    private async Task RunAsync(Turn turn, SentinelAgentUser user, Guid conversationId, string message, string? pageContext, IReadOnlyList<string> models)
+    private async Task RunAsync(Turn turn, SentinelAgentUser user, Guid conversationId, string message, string? pageContext, IReadOnlyList<string> models,
+        string? advice)
     {
         foreach (var model in models)
         {
             try
             {
                 var result = await runner.RunAsync(
-                    new SentinelAgentRequest(conversationId, user, message, pageContext, new RelayedOllamaService(relay, user.Username), model),
+                    new SentinelAgentRequest(conversationId, user, message, pageContext, new RelayedOllamaService(relay, user.Username), model, Advice: advice),
                     agentEvent =>
                     {
                         turn.Add(agentEvent);

@@ -780,8 +780,7 @@ public partial class SentinelGptPage : ContentPage
             // SentinelGPT said it couldn't create Kanban boards): the advisers' context is worked
             // out once and goes with the request to whichever agent answers.
             var advisory = _useDeepAnalysis ? await AdvisoryAsync(prompt, answer, _turnCts.Token) : null;
-            var appPrompt = advisory is null ? prompt : ClipMessage($"{prompt}\n\n{advisory}", MaxAppAgentMessage);
-            var localSucceeded = (_devTools is null && await TryRunAppAgentTurnAsync(appPrompt, answer, _turnCts.Token))
+            var localSucceeded = (_devTools is null && await TryRunAppAgentTurnAsync(prompt, answer, _turnCts.Token, advisory))
                 || (_agent is not null && await TryRunLocalTurnAsync(prompt, answer, _turnCts.Token, advisory));
             if (!localSucceeded)
                 await RunFallbackTurnAsync(prompt, answer, _turnCts.Token);
@@ -808,9 +807,9 @@ public partial class SentinelGptPage : ContentPage
     // in the app as you, and thinks on this Mac through the relay (SentinelAgentMacRelay). False,
     // with nothing shown, when that isn't available (offline, not signed in, relay not connected
     // yet), so the turn runs on this Mac's own agent as before.
-    private async Task<bool> TryRunAppAgentTurnAsync(string prompt, ChatMessageViewModel answer, CancellationToken turnToken)
+    private async Task<bool> TryRunAppAgentTurnAsync(string prompt, ChatMessageViewModel answer, CancellationToken turnToken, string? advice = null)
     {
-        var (turnId, _) = await _session.StartAgentTurnAsync(_appAgentConversation, prompt, SelectedModel?.Name, turnToken);
+        var (turnId, _) = await _session.StartAgentTurnAsync(_appAgentConversation, prompt, SelectedModel?.Name, turnToken, advice);
         if (turnId is not { } id) return false;
 
         AgentTurnSnapshot? snapshot = null;
@@ -909,11 +908,6 @@ public partial class SentinelGptPage : ContentPage
     // caller falls back to the server. A genuine navigate-away (turnToken itself cancelled, not
     // just this attempt's own linked timeout) still propagates as OperationCanceledException -
     // there's nothing to fall back to once the page is gone.
-    // The server takes up to 8,000 characters for an agent turn's message.
-    private const int MaxAppAgentMessage = 8000;
-
-    private static string ClipMessage(string text, int max) => text.Length <= max ? text : text[..max];
-
     // Deep Analysis: the specialist advisers' context for this request, or null when they add none.
     private async Task<string?> AdvisoryAsync(string prompt, ChatMessageViewModel answer, CancellationToken turnToken)
     {

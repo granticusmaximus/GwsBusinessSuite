@@ -70,6 +70,35 @@ public sealed class SentinelAgentTests
         (await harness.ToDosAsync("Groceries")).Should().Equal("milk", "eggs", "bread", "butter");
     }
 
+    // 06-11-26: with Deep Analysis on, the Mac tab skipped the agent and SentinelGPT said it
+    // couldn't create Kanban boards. Now the advisers' opinions go to the agent as advice, its
+    // board tools stay offered, and the advice isn't kept with the conversation.
+    [Fact]
+    public async Task Agent_ShouldWeighDeepAnalysisAdvice_AndKeepItsTools()
+    {
+        await using var harness = await Harness.CreateAsync();
+        string? system = null;
+        var model = new ScriptedModel(messages =>
+        {
+            system = messages[0].Content;
+            return Say("ok");
+        });
+        var chat = Guid.NewGuid();
+
+        await harness.Runner.RunAsync(new SentinelAgentRequest(chat, Admin, "Create a kanban board for my C# learning path", null, model, "test",
+            Advice: "QWEN ENGINEERING REVIEW: start with async/await before parallelism."), _ => Task.CompletedTask, default);
+
+        system.Should().Contain("Deep Analysis: specialist models' opinions").And.Contain("start with async/await before parallelism");
+        model.Tools[0].Select(tool => tool.Name).Should().Contain("create_board");
+        var again = new ScriptedModel(messages =>
+        {
+            system = messages[0].Content;
+            return Say("ok");
+        });
+        await harness.Runner.RunAsync(new SentinelAgentRequest(chat, Admin, "Thanks", null, again, "test"), _ => Task.CompletedTask, default);
+        system.Should().NotContain("async/await before parallelism", "the advice was for that request only");
+    }
+
     [Fact]
     public async Task Agent_ShouldOnlyOfferTheToolsTheUsersRoleAllows()
     {
