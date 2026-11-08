@@ -97,15 +97,8 @@ window.tacticalGlobe = (function () {
         const baseLayer = new Cesium.ImageryLayer(
             await Cesium.ArcGisMapServerImageryProvider.fromUrl(
                 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'));
-        // A dark, high-contrast tint reads more "military terminal" than the raw aerial
-        // photography's natural daylight colors - these are plain mutable properties Cesium
-        // reads per-frame at draw time, so setting them immediately here is safe. Toned down
-        // from the old map-tile values (which pushed hue harder for cartographic flat colors) -
-        // a strong hue rotation looks wrong on photographic imagery.
-        baseLayer.brightness = 0.7;
-        baseLayer.contrast = 1.2;
-        baseLayer.gamma = 0.9;
-        baseLayer.saturation = 0.4;
+        // Natural daylight imagery without custom shader color correction to prevent WebGL
+        // fragment shader compilation failures on macOS / Apple Silicon GPU drivers.
 
         // Every default Cesium widget is disabled - this page builds its own retro-terminal
         // chrome around the bare 3D viewport instead (see OverwatchGrid.razor.css). The globe
@@ -2567,6 +2560,7 @@ window.tacticalGlobe = (function () {
                         polygon: {
                             hierarchy: new Cesium.PolygonHierarchy(toPositions(rings[0]),
                                 rings.slice(1).map(function (hole) { return new Cesium.PolygonHierarchy(toPositions(hole)); })),
+                            height: 0,
                             material: newsShades[step]
                         }
                     });
@@ -2775,6 +2769,7 @@ window.tacticalGlobe = (function () {
                         polygon: {
                             hierarchy: new Cesium.PolygonHierarchy(toPositions(rings[0]),
                                 rings.slice(1).map(function (hole) { return new Cesium.PolygonHierarchy(toPositions(hole)); })),
+                            height: 0,
                             material: travelShades[level]
                         }
                     });
