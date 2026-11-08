@@ -2,6 +2,9 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
+using GwsBusinessSuite.Application.CameraIntel;
+using GwsBusinessSuite.Application.Hazards;
+using GwsBusinessSuite.Infrastructure.Services;
 using GwsBusinessSuite.OllamaKit;
 using GwsBusinessSuite.WorldNewsKit;
 
@@ -1375,14 +1378,16 @@ public sealed class WorldNewsKitTests : IDisposable
     public void WorldNewsMapService_AdaptiveThreshold_AllowsOperationalStoriesWithTwoOutlets()
     {
         var operational = new SituationOverview("sit-1", "Train derailment halts line", "Train derails near station", 
-            Kind: SituationKinds.Transport, OutletCount: 2, ArticleCount: 2, EventCount: 1, 
-            FirstSeen: DateTimeOffset.UtcNow.AddHours(-1), LastSeen: DateTimeOffset.UtcNow);
+            1, 2, 2, ["FR"], ["fr"],
+            DateTimeOffset.UtcNow.AddHours(-1), DateTimeOffset.UtcNow,
+            Kind: SituationKinds.Transport);
 
         Assert.True(WorldNewsMapService.QualifiesForMap(operational));
 
         var entertainment = new SituationOverview("sit-2", "Pop star releases single", "Album tops streaming charts", 
-            Kind: SituationKinds.Other, OutletCount: 2, ArticleCount: 2, EventCount: 1, 
-            FirstSeen: DateTimeOffset.UtcNow.AddHours(-1), LastSeen: DateTimeOffset.UtcNow);
+            1, 2, 2, ["FR"], ["fr"],
+            DateTimeOffset.UtcNow.AddHours(-1), DateTimeOffset.UtcNow,
+            Kind: SituationKinds.Other);
 
         Assert.False(WorldNewsMapService.QualifiesForMap(entertainment));
     }
@@ -1422,8 +1427,16 @@ public sealed class WorldNewsKitTests : IDisposable
     public void SignalConvergenceService_DetectReportingBlackouts_FindsUncoveredHazards()
     {
         var bounds = new BoundingBox(45, 30, 20, 10);
-        var hazard = new HazardFeature("hz-1", "earthquake", "major", "Major 7.1 earthquake strikes remote basin", 
-            35.0, 15.0, "https://usgs.gov", DateTimeOffset.UtcNow);
+        var hazard = new HazardFeature(
+            Id: "hz-1",
+            Kind: "earthquake",
+            Title: "Major 7.1 earthquake strikes remote basin",
+            Detail: "Felt across region",
+            Latitude: 35.0,
+            Longitude: 15.0,
+            Severity: "major",
+            Url: "https://usgs.gov",
+            ObservedAt: DateTimeOffset.UtcNow);
         
         var blackouts = SignalConvergenceService.DetectReportingBlackouts([hazard], [], [], bounds);
         Assert.Single(blackouts);
