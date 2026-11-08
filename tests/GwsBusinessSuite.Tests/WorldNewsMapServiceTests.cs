@@ -63,8 +63,11 @@ public sealed class WorldNewsMapServiceTests
             new("s1", title, title, 2, 9, outlets, ["gb"], ["en"], lastSeen.AddDays(-1), lastSeen);
 
         map.Place(Situation("Japan earthquake aftershocks", 5, Now), since)!.Country.Should().Be("Japan");
-        map.Place(Situation("Japan earthquake aftershocks", 2, Now), since)
-            .Should().BeNull("two outlets is below the layer's corroboration bar");
+        map.Place(Situation("Japan earthquake aftershocks", 2, Now), since)!.Country.Should().Be("Japan");
+        map.Place(Situation("Japan earthquake aftershocks", 1, Now), since)
+            .Should().BeNull("one outlet is below the operational corroboration bar");
+        map.Place(Situation("Japan election campaign begins", 2, Now), since)
+            .Should().BeNull("two outlets is below the bar for non-operational stories");
         map.Place(Situation("Japan earthquake aftershocks", 5, Now.AddDays(-2)), since)
             .Should().BeNull("the layer only looks back a day");
         map.Place(Situation("Markets rally after rate decision", 5, Now), since).Should().BeNull();
