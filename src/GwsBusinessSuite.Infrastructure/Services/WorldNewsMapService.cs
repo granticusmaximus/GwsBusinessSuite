@@ -54,7 +54,7 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
     public static bool QualifiesForMap(SituationOverview situation) =>
         situation.OutletCount >= MinimumOutlets ||
         (situation.OutletCount >= MinimumOutletsOperational &&
-         (SituationKinds.Operational.Contains(KindOf(situation)) || situation.Surge is not null));
+         SituationKinds.Operational.Contains(KindOf(situation)));
     public const int MaximumSignals = 50;
 
     // How far back Brief me and World News's "Show on Overwatch" link look; the layer itself can
