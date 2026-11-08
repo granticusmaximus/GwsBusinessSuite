@@ -49,6 +49,12 @@ public sealed record WorldNewsTimelineStep(string Title, DateTimeOffset FirstSee
 public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache? cache = null)
 {
     public const int MinimumOutlets = 3;
+    public const int MinimumOutletsOperational = 2;
+
+    public static bool QualifiesForMap(SituationOverview situation) =>
+        situation.OutletCount >= MinimumOutlets ||
+        (situation.OutletCount >= MinimumOutletsOperational &&
+         (SituationKinds.Operational.Contains(KindOf(situation)) || situation.Surge is not null));
     public const int MaximumSignals = 50;
 
     // How far back Brief me and World News's "Show on Overwatch" link look; the layer itself can
@@ -142,7 +148,7 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
         var corrections = Corrections();
         foreach (var situation in Cached($"top:{since:yyyyMMddHHmm}", () => store.TopSituations(since, 300)))
         {
-            if (situation.OutletCount < MinimumOutlets || (kinds is not null && !kinds.Contains(KindOf(situation)))) continue;
+            if (!QualifiesForMap(situation) || (kinds is not null && !kinds.Contains(KindOf(situation)))) continue;
             if (Locate(situation, corrections) is { } location) yield return (situation, location);
         }
     }
@@ -159,7 +165,7 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
 
     // Where the layer would put a situation, or null when it stays off the globe.
     public WorldNewsLocation? Place(SituationOverview situation, DateTimeOffset since) =>
-        situation.OutletCount >= MinimumOutlets && situation.LastSeen >= since ? Locate(situation, Corrections()) : null;
+        QualifiesForMap(situation) && situation.LastSeen >= since ? Locate(situation, Corrections()) : null;
 
     // Where the headlines alone put it, ignoring any correction (for "Wrong place?").
     public static WorldNewsLocation? Named(SituationOverview situation) => Locate(situation.Title, situation.Latest);
@@ -255,4 +261,17 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
 
     public static WorldNewsLocation? Locate(string title, string latest, string? detail = null) =>
         WorldNewsPlaces.Instance.Locate($"{title} {latest}", detail);
+
+    // Viewport-adaptive querying: returns localized stories strictly within the camera bounding box with detailed density metrics.
+    public IReadOnlyList<WorldNewsMapSignal> SignalsInBounds(BoundingBox bounds, DateTimeOffset since,
+        IReadOnlyCollection<string>? kinds = null, int limit = MaximumSignals) =>
+        Signals(bounds, since, kinds, limit);
+
+    public (int StoryCount, int OutletCount, IReadOnlyList<string> CountriesInView) ViewportNewsSummary(
+        BoundingBox bounds, DateTimeOffset since, IReadOnlyCollection<string>? kinds = null)
+    {
+        var signals = Signals(bounds, since, kinds, MaximumSignals);
+        var countries = signals.Select(s => s.Country).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return (signals.Count, signals.Sum(s => s.OutletCount), countries);
+    }
 }

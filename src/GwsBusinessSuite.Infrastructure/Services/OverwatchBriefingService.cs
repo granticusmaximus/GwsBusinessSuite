@@ -306,4 +306,34 @@ public sealed class OverwatchBriefingBackgroundService(IServiceScopeFactory scop
             }
         }
     }
+
+    // Viewport Intelligence Brief: synthesizes active news, hazards, and traffic inside the camera's bounding box.
+    public IReadOnlyList<string> SummarizeViewport(
+        IReadOnlyList<WorldNewsMapSignal> newsSignals,
+        IReadOnlyList<HazardFeature> hazards,
+        int cameraCount)
+    {
+        var points = new List<string>();
+        if (newsSignals.Count > 0)
+        {
+            var surging = newsSignals.Where(s => s.Surge is not null).ToList();
+            if (surging.Count > 0)
+            {
+                points.Add($"{surging.Count} SURGING news development(s) in view: {string.Join("; ", surging.Select(s => s.Title))}");
+            }
+            points.Add($"{newsSignals.Count} active reported news situation(s) across {newsSignals.Select(s => s.Country).Distinct().Count()} countries.");
+        }
+        else
+        {
+            points.Add("No active major news situations in this viewport.");
+        }
+
+        if (hazards.Count > 0)
+        {
+            points.Add($"{hazards.Count} environmental/civil hazard(s) active in view ({string.Join(", ", hazards.Select(h => h.Kind).Distinct())}).");
+        }
+
+        points.Add($"{cameraCount} public traffic/infrastructure camera(s) monitoring this sector.");
+        return points;
+    }
 }

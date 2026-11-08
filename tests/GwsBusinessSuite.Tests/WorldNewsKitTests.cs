@@ -1370,4 +1370,63 @@ public sealed class WorldNewsKitTests : IDisposable
             return new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8) };
         }
     }
+
+    [Fact]
+    public void WorldNewsMapService_AdaptiveThreshold_AllowsOperationalStoriesWithTwoOutlets()
+    {
+        var operational = new SituationOverview("sit-1", "Train derailment halts line", "Train derails near station", 
+            Kind: SituationKinds.Transport, OutletCount: 2, ArticleCount: 2, EventCount: 1, 
+            FirstSeen: DateTimeOffset.UtcNow.AddHours(-1), LastSeen: DateTimeOffset.UtcNow);
+
+        Assert.True(WorldNewsMapService.QualifiesForMap(operational));
+
+        var entertainment = new SituationOverview("sit-2", "Pop star releases single", "Album tops streaming charts", 
+            Kind: SituationKinds.Other, OutletCount: 2, ArticleCount: 2, EventCount: 1, 
+            FirstSeen: DateTimeOffset.UtcNow.AddHours(-1), LastSeen: DateTimeOffset.UtcNow);
+
+        Assert.False(WorldNewsMapService.QualifiesForMap(entertainment));
+    }
+
+    [Fact]
+    public void OutletFeeds_ContainsExpandedRegionalNewsrooms()
+    {
+        Assert.Contains(OutletFeeds.Outlets, o => o.Name == "The National" && o.Country == "United Arab Emirates");
+        Assert.Contains(OutletFeeds.Outlets, o => o.Name == "Focus Taiwan" && o.Country == "Taiwan");
+        Assert.Contains(OutletFeeds.Outlets, o => o.Name == "Civil.ge" && o.Country == "Georgia");
+        Assert.Contains(OutletFeeds.Outlets, o => o.Name == "El Tiempo" && o.Country == "Colombia");
+    }
+
+    [Fact]
+    public void WorldNewsMapService_SignalsInBounds_FiltersCorrectly()
+    {
+        var service = new WorldNewsMapService(new WorldNewsStore(":memory:"));
+        var bounds = new BoundingBox(40, 30, -80, -90);
+        var signals = service.SignalsInBounds(bounds, DateTimeOffset.UtcNow);
+        Assert.NotNull(signals);
+    }
+
+    [Fact]
+    public void OverwatchBriefingService_SummarizeViewport_ProducesKeyPoints()
+    {
+        var service = new OverwatchBriefingService(null!, null!, null!, null!, null!, null!, null!, null!, TimeProvider.System, null!);
+        var signal = new WorldNewsMapSignal("sit-1", "Conflict flares in capital", "Shelling reported near port",
+            new WorldNewsLocation("Tripoli", "Libya", "LY", 32.8872, 13.1913, WorldNewsPrecision.City),
+            1, 6, 12, DateTimeOffset.UtcNow, "Port shelling continues", [], Surge: "Surging +5 outlets in 2h");
+
+        var summary = service.SummarizeViewport([signal], [], 8);
+        Assert.Contains(summary, s => s.Contains("SURGING"));
+        Assert.Contains(summary, s => s.Contains("8 public traffic/infrastructure camera(s)"));
+    }
+
+    [Fact]
+    public void SignalConvergenceService_DetectReportingBlackouts_FindsUncoveredHazards()
+    {
+        var bounds = new BoundingBox(45, 30, 20, 10);
+        var hazard = new HazardFeature("hz-1", "earthquake", "major", "Major 7.1 earthquake strikes remote basin", 
+            35.0, 15.0, "https://usgs.gov", DateTimeOffset.UtcNow);
+        
+        var blackouts = SignalConvergenceService.DetectReportingBlackouts([hazard], [], [], bounds);
+        Assert.Single(blackouts);
+        Assert.Contains("Major earthquake hazard", blackouts[0].Reason);
+    }
 }

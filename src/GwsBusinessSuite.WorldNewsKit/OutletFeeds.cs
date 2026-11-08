@@ -115,6 +115,24 @@ public static partial class OutletFeeds
         new("BBC Indonesia", "Indonesian", "United Kingdom", "https://feeds.bbci.co.uk/indonesia/rss.xml"),
         new("BBC News Brasil", "Portuguese", "United Kingdom", "https://feeds.bbci.co.uk/portuguese/rss.xml"),
         new("BBC Swahili", "Swahili", "United Kingdom", "https://feeds.bbci.co.uk/swahili/rss.xml"),
+        // Regional Outlets: Middle East & North Africa
+        new("The National", "English", "United Arab Emirates", "https://www.thenationalnews.com/arc/outboundfeeds/rss/"),
+        new("Ahram Online", "English", "Egypt", "https://english.ahram.org.eg/rss/World.aspx"),
+        new("Roya News", "English", "Jordan", "https://en.royanews.tv/rss/world"),
+        // Regional Outlets: Asia-Pacific & South Asia
+        new("Focus Taiwan", "English", "Taiwan", "https://focustaiwan.tw/rss/all.xml"),
+        new("Taipei Times", "English", "Taiwan", "https://www.taipeitimes.com/xml/index.rss"),
+        new("The Diplomat", "English", International, "https://thediplomat.com/feed/"),
+        new("Bernama", "English", "Malaysia", "https://www.bernama.com/en/rss/general.php"),
+        new("Philippine News Agency", "English", "Philippines", "https://www.pna.gov.ph/rss/national"),
+        // Regional Outlets: Europe & Americas
+        new("EFE", "Spanish", "Spain", "https://efe.com/feed/"),
+        new("PAP", "English", "Poland", "https://www.pap.pl/en/rss.xml"),
+        new("Civil.ge", "English", "Georgia", "https://civil.ge/feed"),
+        new("Balkan Insight", "English", "Bosnia and Herzegovina", "https://balkaninsight.com/feed/"),
+        new("El Tiempo", "Spanish", "Colombia", "https://www.eltiempo.com/rss/mundo.xml"),
+        new("El Universal", "Spanish", "Mexico", "https://www.eluniversal.com.mx/rss/mundo.xml"),
+        new("MercoPress", "English", "Uruguay", "https://en.mercopress.com/rss/"),
     ];
 
     // Bytes rather than a string, so the XML declaration picks the encoding (some feeds are

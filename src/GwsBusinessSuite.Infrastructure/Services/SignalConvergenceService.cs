@@ -110,4 +110,35 @@ public sealed class SignalConvergenceService(
             return [];
         }
     }
+
+    // Reporting Blackouts & Silence Detection: detects active hazard/outage clusters with zero news coverage.
+    public static IReadOnlyList<(double Latitude, double Longitude, string Reason)> DetectReportingBlackouts(
+        IEnumerable<HazardFeature> hazardList,
+        IEnumerable<HazardFeature> internetOutages,
+        IEnumerable<WorldNewsMapSignal> newsList,
+        BoundingBox bounds)
+    {
+        var blackouts = new List<(double Latitude, double Longitude, string Reason)>();
+        var newsPoints = newsList.Select(n => (n.Latitude, n.Longitude)).ToList();
+        
+        foreach (var outage in internetOutages.Where(o => o.Severity != "minor"))
+        {
+            bool hasNearbyNews = newsPoints.Any(p => Math.Abs(p.Latitude - outage.Latitude) < 2.0 && Math.Abs(p.Longitude - outage.Longitude) < 2.0);
+            if (!hasNearbyNews && bounds.Contains(outage.Latitude, outage.Longitude))
+            {
+                blackouts.Add((outage.Latitude, outage.Longitude, $"Internet blackout ({outage.Title}) without active news coverage"));
+            }
+        }
+
+        foreach (var hazard in hazardList.Where(h => h.Severity == "major"))
+        {
+            bool hasNearbyNews = newsPoints.Any(p => Math.Abs(p.Latitude - hazard.Latitude) < 1.5 && Math.Abs(p.Longitude - hazard.Longitude) < 1.5);
+            if (!hasNearbyNews && bounds.Contains(hazard.Latitude, hazard.Longitude))
+            {
+                blackouts.Add((hazard.Latitude, hazard.Longitude, $"Major {hazard.Kind} hazard ({hazard.Title}) with zero reporting news"));
+            }
+        }
+
+        return blackouts;
+    }
 }
