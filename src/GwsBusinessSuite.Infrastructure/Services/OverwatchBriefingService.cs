@@ -284,28 +284,6 @@ public sealed class OverwatchBriefingService(
     }
 
     private static string LocalDate(DateTimeOffset local) => local.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-}
-
-public sealed class OverwatchBriefingBackgroundService(IServiceScopeFactory scopeFactory, ILogger<OverwatchBriefingBackgroundService> logger) : BackgroundService
-{
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(5));
-        while (await timer.WaitForNextTickAsync(stoppingToken))
-        {
-            try
-            {
-                await using var scope = scopeFactory.CreateAsyncScope();
-                var sent = await scope.ServiceProvider.GetRequiredService<OverwatchBriefingService>().SendDueAsync(stoppingToken);
-                if (sent > 0) logger.LogInformation("Overwatch: {Count} morning briefing(s) sent", sent);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Overwatch morning briefing run failed");
-            }
-        }
-    }
 
     // Viewport Intelligence Brief: synthesizes active news, hazards, and traffic inside the camera's bounding box.
     public IReadOnlyList<string> SummarizeViewport(
@@ -337,3 +315,26 @@ public sealed class OverwatchBriefingBackgroundService(IServiceScopeFactory scop
         return points;
     }
 }
+
+public sealed class OverwatchBriefingBackgroundService(IServiceScopeFactory scopeFactory, ILogger<OverwatchBriefingBackgroundService> logger) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(5));
+        while (await timer.WaitForNextTickAsync(stoppingToken))
+        {
+            try
+            {
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var sent = await scope.ServiceProvider.GetRequiredService<OverwatchBriefingService>().SendDueAsync(stoppingToken);
+                if (sent > 0) logger.LogInformation("Overwatch: {Count} morning briefing(s) sent", sent);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Overwatch morning briefing run failed");
+            }
+        }
+    }
+}
+
