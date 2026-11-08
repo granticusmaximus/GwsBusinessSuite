@@ -1404,7 +1404,7 @@ public sealed class WorldNewsKitTests : IDisposable
     [Fact]
     public void WorldNewsMapService_SignalsInBounds_FiltersCorrectly()
     {
-        var service = new WorldNewsMapService(new WorldNewsStore(":memory:"));
+        var service = new WorldNewsMapService(new WorldNewsStore(_dbPath));
         var bounds = new BoundingBox(40, 30, -80, -90);
         var signals = service.SignalsInBounds(bounds, DateTimeOffset.UtcNow);
         Assert.NotNull(signals);
