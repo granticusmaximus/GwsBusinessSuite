@@ -120,19 +120,34 @@ window.tacticalGlobe = (function () {
             selectionIndicator: false,
             skyBox: false,
             skyAtmosphere: false,
+            orderIndependentTransparency: false,
             creditContainer: makeCreditContainer(container),
             // Draw only when something changed (see renderOnChange), not 60 times a second.
             requestRenderMode: true,
             maximumRenderTimeChange: Infinity
         });
         // Overwatch is a tactical command terminal with a satellite basemap - it does not use
-        // Cesium's celestial bodies or atmospheric scattering. Disabling the Sun, Moon, and
-        // atmosphere shaders bypasses Cesium's Sun compute pass (sunComputeCommand / H9 fragment
-        // shader) which fails to compile under Metal ANGLE on macOS / Apple Silicon GPU drivers.
+        // Cesium's celestial bodies, atmospheric haze, fog scattering, HDR, or multi-render-target
+        // transparency. Disabling these bypasses the WebGL fragment shader compilation failures that
+        // occur under Metal ANGLE on macOS / Apple Silicon GPU drivers (specifically Cesium's sun
+        // compute pass, globe fog/ground atmosphere scattering, and OIT shaders).
         if (viewer.scene.sun) viewer.scene.sun.show = false;
         if (viewer.scene.moon) viewer.scene.moon.show = false;
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
-        if (viewer.scene.globe) viewer.scene.globe.showGroundAtmosphere = false;
+        if (viewer.scene.globe) {
+            viewer.scene.globe.showGroundAtmosphere = false;
+            viewer.scene.globe.enableLighting = false;
+            viewer.scene.globe.dynamicAtmosphereLighting = false;
+            viewer.scene.globe.dynamicAtmosphereLightingFromSun = false;
+        }
+        if (viewer.scene.fog) {
+            viewer.scene.fog.enabled = false;
+            viewer.scene.fog.renderable = false;
+        }
+        if (viewer.scene.highDynamicRange !== undefined) viewer.scene.highDynamicRange = false;
+        if (viewer.scene.postProcessStages && viewer.scene.postProcessStages.fxaa) {
+            viewer.scene.postProcessStages.fxaa.enabled = false;
+        }
         const renderTimer = renderOnChange(viewer);
 
         viewer.camera.setView({
