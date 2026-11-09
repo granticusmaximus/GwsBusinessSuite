@@ -31,7 +31,9 @@ public class AppDelegate : NSApplicationDelegate
             }
         }
 
-        return "https://gws-pooldp";
+        // The DigitalOcean droplet name is not itself a resolvable HTTPS origin. Keep the
+        // certificate-backed app hostname as the safe default; the variables above override it.
+        return "https://admin.gwsapp.net";
     }
 
     private static readonly string HostUrl = ResolveHostUrl() + "/";

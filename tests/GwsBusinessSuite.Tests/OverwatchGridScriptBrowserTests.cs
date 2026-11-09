@@ -226,19 +226,16 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
 
         var result = await page.EvaluateAsync<string>("""
             async () => {
-                const originalViewer = window.Cesium.Viewer;
-                const originalImageryLayer = window.Cesium.ImageryLayer;
-                const originalFromUrl = window.Cesium.ArcGisMapServerImageryProvider.fromUrl;
-                window.Cesium.Viewer = function () { throw new Error('Fragment shader failed to compile. Compile log: test'); };
-                window.Cesium.ImageryLayer = function () { return {}; };
-                window.Cesium.ArcGisMapServerImageryProvider.fromUrl = async function () { return {}; };
+                const viewerDescriptor = Object.getOwnPropertyDescriptor(window.Cesium, 'Viewer');
+                Object.defineProperty(window.Cesium, 'Viewer', {
+                    configurable: true,
+                    value: function () { throw new Error('Fragment shader failed to compile. Compile log: test'); }
+                });
                 try {
                     const initResult = await window.tacticalGlobe.init('tg-viewport', { invokeMethodAsync: async () => {} });
                     return JSON.stringify({ initResult: initResult === null ? 'null' : String(initResult), fallback: document.getElementById('tg-viewport').dataset.globeFallback || 'missing' });
                 } finally {
-                    window.Cesium.Viewer = originalViewer;
-                    window.Cesium.ImageryLayer = originalImageryLayer;
-                    window.Cesium.ArcGisMapServerImageryProvider.fromUrl = originalFromUrl;
+                    Object.defineProperty(window.Cesium, 'Viewer', viewerDescriptor);
                 }
             }
             """);
@@ -246,6 +243,52 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         result.Should().Contain("\"fallback\":\"true\"");
         result.Should().Contain("\"initResult\":\"null\"");
         consoleErrors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Render_WhenCesiumReportsShaderCompileFailure_ShouldDisposeAndFallBackWithoutThrowing()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+
+        await page.EvaluateAsync("""
+            () => {
+                const viewerDescriptor = Object.getOwnPropertyDescriptor(window.Cesium, 'Viewer');
+                const OriginalViewer = viewerDescriptor.value;
+                const CapturingViewer = function (...args) {
+                    const viewer = new OriginalViewer(...args);
+                    window.__capturedViewer = viewer;
+                    return viewer;
+                };
+                CapturingViewer.prototype = OriginalViewer.prototype;
+                Object.defineProperty(window.Cesium, 'Viewer', { configurable: true, value: CapturingViewer });
+                window.__restoreViewer = () => { Object.defineProperty(window.Cesium, 'Viewer', viewerDescriptor); };
+            }
+            """);
+
+        try
+        {
+            (await InitAsync(page)).Should().BeNull();
+            await page.EvaluateAsync("""
+                () => window.__capturedViewer.scene.renderError.raiseEvent(
+                    window.__capturedViewer.scene,
+                    new Error('Fragment shader failed to compile. Compile log: deferred test'))
+                """);
+            await page.WaitForFunctionAsync(
+                "document.getElementById('tg-viewport').dataset.globeFallback === 'true'",
+                null,
+                new PageWaitForFunctionOptions { Timeout = 5000 });
+
+            (await page.EvaluateAsync<string>("document.getElementById('tg-viewport').textContent"))
+                .Should().Contain("3D globe unavailable on this GPU/browser");
+            (await page.EvaluateAsync<bool>("window.__capturedViewer.isDestroyed()"))
+                .Should().BeTrue();
+            consoleErrors.Should().BeEmpty();
+        }
+        finally
+        {
+            await page.EvaluateAsync("() => window.__restoreViewer()");
+        }
     }
 
     [Fact]

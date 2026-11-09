@@ -117,18 +117,32 @@ window.tacticalGlobe = (function () {
             || /WebGLRenderingContext/i.test(reason));
     }
 
+    function handleShaderFailure(containerId, error) {
+        const reason = error && error.message ? error.message : String(error || '');
+        if (!isShaderFailureReason(reason)) return false;
+
+        const container = document.getElementById(containerId);
+        if (viewers.has(containerId)) {
+            // Scene.renderError fires inside Cesium's render pass. Defer destruction until that
+            // stack unwinds; destroying the Viewer from its own event can cause another error.
+            queueMicrotask(function () {
+                try { dispose(containerId); } catch (disposeError) {}
+                showGlobeFallback(container, reason);
+            });
+        } else {
+            showGlobeFallback(container, reason);
+        }
+        return true;
+    }
+
     function installShaderFallbackListener() {
         if (window.__tacticalGlobeShaderFallbackInstalled) return;
         window.__tacticalGlobeShaderFallbackInstalled = true;
         window.addEventListener('error', function (event) {
             const reason = event && (event.message || (event.error && event.error.message) || String(event));
             if (!isShaderFailureReason(reason)) return;
-            const container = document.getElementById('tg-viewport');
-            if (container) showGlobeFallback(container, reason);
-            if (viewers.size > 0) {
-                const ids = Array.from(viewers.keys());
-                ids.forEach(function (id) { try { dispose(id); } catch (e) {} });
-            }
+            const ids = viewers.size > 0 ? Array.from(viewers.keys()) : ['tg-viewport'];
+            ids.forEach(function (id) { handleShaderFailure(id, event.error || reason); });
         });
     }
 
@@ -202,6 +216,16 @@ window.tacticalGlobe = (function () {
             throw error;
         }
         const renderTimer = renderOnChange(viewer);
+
+        // Viewer construction can succeed while WebKit/Metal fails only when Cesium compiles a
+        // later globe/material variant. Cesium reports that path through Scene.renderError; it
+        // is not guaranteed to become an uncaught window error.
+        const onRenderError = function (scene, error) {
+            if (handleShaderFailure(containerId, error)) {
+                console.warn('Overwatch 3D globe unavailable on this GPU/browser; falling back to a non-3D placeholder.', error);
+            }
+        };
+        viewer.scene.renderError.addEventListener(onRenderError);
 
         viewer.camera.setView({
             destination: Cesium.Cartesian3.fromDegrees(-98.5, 39.8, 18000000)
@@ -457,7 +481,7 @@ window.tacticalGlobe = (function () {
             hazardDataSource, internetDataSource, convergenceDataSource, airportDataSource, auroraLayers: [], satelliteDataSource, signDataSource, roadWeatherDataSource, radar, clickHandler, selectMode: false, selectedCameras: new Map(), currentView: null,
             travelDataSource, fireDataSource, conflictDataSource, humanitarianDataSource, satelliteImagery: null,
             ionToken: options && typeof options.ionToken === 'string' && options.ionToken.length > 0 ? options.ionToken : null, threeD: null,
-            renderTimer, pulseTimer: null
+            renderTimer, pulseTimer: null, onRenderError
         });
 
         // Fire once for the initial view so cameras appear without requiring a drag/zoom first.
@@ -4185,6 +4209,7 @@ window.tacticalGlobe = (function () {
         if (entry.radar.bar) entry.radar.bar.remove();
         if (entry.hoverIdentify) entry.hoverIdentify.dispose();
         clearInterval(entry.renderTimer);
+        entry.viewer.scene.renderError.removeEventListener(entry.onRenderError);
         setPulsing(entry, false);
         entry.viewer.dataSources.remove(entry.cameraDataSource, true);
         entry.viewer.destroy();

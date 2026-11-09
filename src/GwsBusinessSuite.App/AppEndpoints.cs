@@ -2,8 +2,11 @@ namespace GwsBusinessSuite.App;
 
 public static class AppEndpoints
 {
-    public const string DefaultAppHost = "https://gws-pooldp";
-    public const string ProductionBaseUrl = "https://gws-pooldp";
+    // A DigitalOcean droplet name is not automatically a public DNS name or HTTPS origin.
+    // admin.gwsapp.net terminates TLS on the app droplet; an eventual replacement hostname can
+    // be supplied through the environment variables below without shipping another client build.
+    public const string DefaultAppHost = "https://admin.gwsapp.net";
+    public const string ProductionBaseUrl = DefaultAppHost;
     public const string AdminPortalPath = "/admin";
 
     private static string ResolveBaseUrl(string fallback)
