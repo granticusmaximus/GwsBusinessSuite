@@ -513,6 +513,10 @@
             <div class="tg-tm-label" role="status">
                 <strong>@TimeMachineAt.ToLocalGwsDateTime()</strong>
                 <span>@(_tmMinutesAgo == 0 ? "now" : $"{_tmMinutesAgo / 60} h {_tmMinutesAgo % 60:00} min ago")</span>
+                @if (_worldNewsOn)
+                {
+                    <span>· WORLD NEWS REPLAY</span>
+                }
                 @if (_timeMachine is { } tm)
                 {
                     <span>· RADAR · @tm.Incidents.Count INCIDENTS · @tm.Earthquakes.Count QUAKES · @tm.Cameras.Count CAMERAS</span>
@@ -2053,7 +2057,8 @@
     private readonly HashSet<string> _worldNewsKinds = [.. GwsBusinessSuite.WorldNewsKit.SituationKinds.Operational];
     private int _worldNewsHours = 24;
 
-    private DateTimeOffset WorldNewsSince => DateTimeOffset.UtcNow.AddHours(-_worldNewsHours);
+    private DateTimeOffset WorldNewsAt => _timeMachineOn ? TimeMachineAt : DateTimeOffset.UtcNow;
+    private DateTimeOffset WorldNewsSince => WorldNewsAt.AddHours(-_worldNewsHours);
 
     private async Task ToggleWorldNewsKindAsync(string kind)
     {
@@ -2074,8 +2079,8 @@
     // the view (only on the kinds and window, which redo it themselves).
     private async Task PushWorldNewsAsync()
     {
-        var (bounds, since, kinds, generation) = (_lastBbox, WorldNewsSince, _worldNewsKinds.ToList(), _viewGeneration);
-        var signals = await Task.Run(() => WorldNewsMap.Signals(bounds, since, kinds));
+        var (bounds, since, at, kinds, generation) = (_lastBbox, WorldNewsSince, _timeMachineOn ? TimeMachineAt : (DateTimeOffset?)null, _worldNewsKinds.ToList(), _viewGeneration);
+        var signals = await Task.Run(() => WorldNewsMap.SignalsAt(bounds, since, at, kinds));
         // A later move's markers win over this one's, whichever read finishes first.
         if (!_worldNewsOn || generation != _viewGeneration) return;
         _worldNewsCount = signals.Count;
@@ -2101,8 +2106,8 @@
     // The whole world, not just the view: shading is the overview before any one story is in sight.
     private async Task PushWorldNewsShadingAsync()
     {
-        var (since, kinds) = (WorldNewsSince, _worldNewsKinds.ToList());
-        var totals = await Task.Run(() => WorldNewsMap.CountryTotals(since, kinds));
+        var (since, at, kinds) = (WorldNewsSince, _timeMachineOn ? TimeMachineAt : (DateTimeOffset?)null, _worldNewsKinds.ToList());
+        var totals = await Task.Run(() => WorldNewsMap.CountryTotalsAt(since, at, kinds));
         await JS.InvokeVoidAsync("tacticalGlobe.setNewsShading", totals.Select(t => new
         {
             code = t.Code,
@@ -2720,6 +2725,8 @@
             _tmNow = DateTimeOffset.UtcNow;
             _tmMinutesAgo = 60;
             await LoadTimeMachineAsync();
+            if (_worldNewsOn) await PushWorldNewsAsync();
+            if (_worldNewsShading) await PushWorldNewsShadingAsync();
             return;
         }
         StopTimeMachinePlay();
@@ -2729,6 +2736,8 @@
         if (_tmSavedLayers.Radar && !_radarOn) await ToggleRadarAsync();
         if (_tmSavedLayers.Incidents && !_incidentsOn) await ToggleIncidentsAsync();
         if (_tmSavedLayers.Hazards && !_hazardsOn) await ToggleHazardsAsync();
+        if (_worldNewsOn) await PushWorldNewsAsync();
+        if (_worldNewsShading) await PushWorldNewsShadingAsync();
     }
 
     private void OnTimeMachineSliding(ChangeEventArgs args)
@@ -2761,6 +2770,8 @@
                 }),
                 earthquakes = snapshot.Earthquakes.Select(q => new { lat = q.Latitude, lon = q.Longitude, title = q.Title })
             });
+            if (_worldNewsOn) await PushWorldNewsAsync();
+            if (_worldNewsShading) await PushWorldNewsShadingAsync();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

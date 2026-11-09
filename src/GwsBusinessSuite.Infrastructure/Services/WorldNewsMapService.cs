@@ -64,10 +64,15 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
 
     public IReadOnlyList<WorldNewsMapSignal> Signals(BoundingBox bounds, DateTimeOffset since,
         IReadOnlyCollection<string>? kinds = null, int limit = MaximumSignals)
+        => SignalsAt(bounds, since, at: null, kinds: kinds, limit: limit);
+
+    // A replay projection contains only reports known by `at`, rather than today's aggregate.
+    public IReadOnlyList<WorldNewsMapSignal> SignalsAt(BoundingBox bounds, DateTimeOffset since, DateTimeOffset? at,
+        IReadOnlyCollection<string>? kinds = null, int limit = MaximumSignals)
     {
         if (limit <= 0) return [];
         var growth = Growth();
-        return Placed(since, kinds)
+        return Placed(since, kinds, at)
             .Where(item => bounds.Contains(item.Location.Latitude, item.Location.Longitude))
             .OrderByDescending(item => item.Situation.OutletCount)
             .ThenByDescending(item => item.Situation.LastSeen)
@@ -116,7 +121,11 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
     // Outlets on the stories placed in each country (city-level ones count for their country), for
     // shading. Stories lists a few of each country's biggest for its panel.
     public IReadOnlyList<WorldNewsCountryTotal> CountryTotals(DateTimeOffset since, IReadOnlyCollection<string>? kinds, int storiesEach = 5) =>
-        Placed(since, kinds)
+        CountryTotalsAt(since, at: null, kinds: kinds, storiesEach: storiesEach);
+
+    public IReadOnlyList<WorldNewsCountryTotal> CountryTotalsAt(DateTimeOffset since, DateTimeOffset? at,
+        IReadOnlyCollection<string>? kinds, int storiesEach = 5) =>
+        Placed(since, kinds, at)
             .GroupBy(item => item.Location.CountryCode, StringComparer.OrdinalIgnoreCase)
             .Select(group => new WorldNewsCountryTotal(group.Key, group.First().Location.Country, group.Sum(item => item.Situation.OutletCount),
                 group.OrderByDescending(item => item.Situation.OutletCount).Take(storiesEach)
@@ -143,10 +152,12 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
 
     // Every situation the layer could show, with where it goes. Placing needs only the overview;
     // the latest event, summary and sources are read later, for the few that are kept.
-    private IEnumerable<(SituationOverview Situation, WorldNewsLocation Location)> Placed(DateTimeOffset since, IReadOnlyCollection<string>? kinds)
+    private IEnumerable<(SituationOverview Situation, WorldNewsLocation Location)> Placed(DateTimeOffset since,
+        IReadOnlyCollection<string>? kinds, DateTimeOffset? at = null)
     {
         var corrections = Corrections();
-        foreach (var situation in Cached($"top:{since:yyyyMMddHHmm}", () => store.TopSituations(since, 300)))
+        var key = at is null ? $"top:{since:yyyyMMddHHmm}" : $"top:{since:yyyyMMddHHmm}:{at:yyyyMMddHHmm}";
+        foreach (var situation in Cached(key, () => at is null ? store.TopSituations(since, 300) : store.TopSituationsAt(since, at.Value, 300)))
         {
             if (!QualifiesForMap(situation) || (kinds is not null && !kinds.Contains(KindOf(situation)))) continue;
             if (Locate(situation, corrections) is { } location) yield return (situation, location);

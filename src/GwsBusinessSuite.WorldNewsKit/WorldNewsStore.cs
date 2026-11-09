@@ -407,17 +407,22 @@ public sealed class WorldNewsStore
     // Situations of two or more events with news since a time, busiest (by distinct outlets) first.
     public IReadOnlyList<SituationOverview> TopSituations(DateTimeOffset since, int limit) => Situations(since, limit, onlyId: null);
 
+    // The same situation list as it was known at a point in time. Replay must aggregate articles
+    // by their seen time: filtering today's already-aggregated situations would leak later reports.
+    public IReadOnlyList<SituationOverview> TopSituationsAt(DateTimeOffset since, DateTimeOffset at, int limit) =>
+        Situations(since, limit, onlyId: null, at);
+
     // One situation straight from its id (a link, a panel), rather than ranking every one.
     public SituationOverview? Situation(string situationId) =>
         Situations(DateTimeOffset.UnixEpoch, 1, onlyId: situationId).FirstOrDefault();
 
-    private IReadOnlyList<SituationOverview> Situations(DateTimeOffset since, int limit, string? onlyId)
+    private IReadOnlyList<SituationOverview> Situations(DateTimeOffset since, int limit, string? onlyId, DateTimeOffset? at = null)
     {
         using var connection = Open();
         var rows = new List<(string Id, int Events, int Articles, int Outlets, string? Countries, string? Languages, long First, long Last, string? Kind)>();
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = """
+            command.CommandText = at is null ? """
                 SELECT e.situation_id, COUNT(DISTINCT e.id), COUNT(*), COUNT(DISTINCT a.outlet),
                        GROUP_CONCAT(DISTINCT a.country), GROUP_CONCAT(DISTINCT a.language), MIN(e.first_seen), MAX(e.last_seen),
                        (SELECT kind FROM situations s WHERE s.id = e.situation_id)
@@ -427,8 +432,22 @@ public sealed class WorldNewsStore
                                          GROUP BY situation_id HAVING COUNT(*) >= 2 AND MAX(last_seen) >= $since)
                 GROUP BY e.situation_id
                 ORDER BY COUNT(DISTINCT a.outlet) DESC, MAX(e.last_seen) DESC LIMIT $limit
+                """ : """
+                SELECT e.situation_id, COUNT(DISTINCT e.id), COUNT(*), COUNT(DISTINCT a.outlet),
+                       GROUP_CONCAT(DISTINCT a.country), GROUP_CONCAT(DISTINCT a.language), MIN(e.first_seen), MAX(a.seen_at),
+                       (SELECT kind FROM situations s WHERE s.id = e.situation_id)
+                FROM events e JOIN articles a ON a.event_id = e.id
+                WHERE e.situation_id IN (
+                    SELECT e2.situation_id FROM events e2 JOIN articles a2 ON a2.event_id = e2.id
+                    WHERE e2.situation_id IS NOT NULL AND e2.first_seen <= $at AND a2.seen_at <= $at
+                      AND ($only IS NULL OR e2.situation_id = $only)
+                    GROUP BY e2.situation_id HAVING COUNT(DISTINCT e2.id) >= 2 AND MAX(a2.seen_at) >= $since)
+                  AND e.first_seen <= $at AND a.seen_at <= $at
+                GROUP BY e.situation_id
+                ORDER BY COUNT(DISTINCT a.outlet) DESC, MAX(a.seen_at) DESC LIMIT $limit
                 """;
             command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+            command.Parameters.AddWithValue("$at", at is { } replayAt ? replayAt.ToUnixTimeSeconds() : DBNull.Value);
             command.Parameters.AddWithValue("$limit", limit);
             command.Parameters.AddWithValue("$only", (object?)onlyId ?? DBNull.Value);
             using var reader = command.ExecuteReader();
@@ -447,9 +466,10 @@ public sealed class WorldNewsStore
             command.CommandText = $"""
                 SELECT situation_id, COALESCE((SELECT headline FROM summaries WHERE event_id = e.id AND headline IS NOT NULL
                        ORDER BY version DESC LIMIT 1), title), title_language, article_count, last_seen
-                FROM events e WHERE situation_id IN ({string.Join(", ", names)})
+                FROM events e WHERE situation_id IN ({string.Join(", ", names)}){(at is null ? "" : " AND first_seen <= $at")}
                 """;
             for (var i = 0; i < rows.Count; i++) command.Parameters.AddWithValue(names[i], rows[i].Id);
+            if (at is not null) command.Parameters.AddWithValue("$at", at.Value.ToUnixTimeSeconds());
             using var reader = command.ExecuteReader();
             while (reader.Read())
             {

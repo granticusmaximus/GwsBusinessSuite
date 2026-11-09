@@ -124,6 +124,20 @@ public sealed class WorldNewsMapServiceTests
     }
 
     [Fact]
+    public void SignalsAt_ShouldExcludeReportsThatArrivedAfterTheReplayPoint()
+    {
+        using var temp = new WorldNewsTestStore();
+        temp.SeedSituation("quake", "Quake shakes Tokyo, Japan", "Tokyo aftershocks continue");
+        temp.SeedEvent("later", "later-1", "Flooding hits Seoul, South Korea", ["Outlet 0", "Outlet 1", "Outlet 2"], Now.AddMinutes(-30));
+        temp.SeedEvent("later", "later-2", "Seoul flood response expands", ["Outlet 0", "Outlet 1", "Outlet 2"], Now.AddMinutes(-30));
+        var map = new WorldNewsMapService(temp.Store);
+        var world = new BoundingBox(90, -90, 180, -180);
+
+        map.SignalsAt(world, Now.AddHours(-24), Now.AddHours(-2), SituationKinds.Operational)
+            .Select(signal => signal.SituationId).Should().Contain("quake").And.NotContain("later");
+    }
+
+    [Fact]
     public void AlongRoute_ShouldFindNearbyStories_AndCountryWideStrikesOrUnrest()
     {
         using var temp = new WorldNewsTestStore();
