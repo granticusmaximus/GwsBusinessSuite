@@ -30,5 +30,9 @@ public sealed class OverwatchCesiumVersionTests
         var tacticalGlobe = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
         tacticalGlobe.Should().Contain("cesiumVersionCacheBuster = 'v=1.144.0'",
             "the Mac WKWebView must bypass stale Cesium bundles with a versioned cache-buster");
+        tacticalGlobe.Should().Contain("showRenderLoopErrors: false",
+            "Cesium's blocking render-error dialog must not replace the contained globe fallback");
+        tacticalGlobe.Should().Contain("viewer.scene.renderError.addEventListener(onRenderError)",
+            "shader variants that fail after Viewer construction must use the same fallback");
     }
 }

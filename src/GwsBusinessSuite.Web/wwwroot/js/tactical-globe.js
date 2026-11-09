@@ -202,6 +202,11 @@ window.tacticalGlobe = (function () {
                 infoBox: false,
                 selectionIndicator: false,
                 creditContainer: makeCreditContainer(container),
+                // Cesium's default response to Scene.renderError is its own blocking error
+                // dialog (the exact "Rendering has stopped" panel seen in WKWebView). Our
+                // renderError listener below replaces the failed Viewer with a contained,
+                // non-blocking fallback, so the library must not show its competing dialog.
+                showRenderLoopErrors: false,
                 // Draw only when something changed (see renderOnChange), not 60 times a second.
                 requestRenderMode: true,
                 maximumRenderTimeChange: Infinity
@@ -4321,6 +4326,7 @@ window.tacticalGlobe = (function () {
         placePhoto: placePhoto,
         clearCoverageMarkers: clearCoverageMarkers,
         setWeatherSnapshot: setWeatherSnapshot,
+        reportRenderError: handleShaderFailure,
         dispose: dispose,
         whenDrawn: whenDrawn,
         isCoverageBannerDismissed: isCoverageBannerDismissed,
