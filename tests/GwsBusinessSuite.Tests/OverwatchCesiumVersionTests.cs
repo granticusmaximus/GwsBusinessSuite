@@ -26,5 +26,9 @@ public sealed class OverwatchCesiumVersionTests
             source.Should().NotContain("cesium@1.145" + ".0",
                 $"{file} must not restore the Cesium release with the globe shader regression");
         }
+
+        var tacticalGlobe = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        tacticalGlobe.Should().Contain("cesiumVersionCacheBuster = 'v=1.144.0'",
+            "the Mac WKWebView must bypass stale Cesium bundles with a versioned cache-buster");
     }
 }

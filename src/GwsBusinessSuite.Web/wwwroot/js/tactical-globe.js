@@ -11,6 +11,15 @@
 // <script> block in the .razor page (the usual place this line lives in Cesium's own getting-
 // started docs) would simply never run.
 window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.144.0/Build/Cesium/';
+const cesiumVersionCacheBuster = 'v=1.144.0';
+if (window.Cesium && typeof window.Cesium.buildModuleUrl === 'function') {
+    const originalBuildModuleUrl = window.Cesium.buildModuleUrl.bind(window.Cesium);
+    window.Cesium.buildModuleUrl = function (url) {
+        const resolved = originalBuildModuleUrl(url);
+        return resolved.includes('?') ? resolved : resolved + '?' + cesiumVersionCacheBuster;
+    };
+}
+
 
 // A real, confirmed production incident: this <script> tag lives inline in OverwatchGrid.razor's
 // own markup (not the shared root layout), and Blazor Web Apps that combine server-side
