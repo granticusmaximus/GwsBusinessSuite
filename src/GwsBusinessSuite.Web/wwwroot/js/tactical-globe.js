@@ -118,11 +118,21 @@ window.tacticalGlobe = (function () {
             fullscreenButton: false,
             infoBox: false,
             selectionIndicator: false,
+            skyBox: false,
+            skyAtmosphere: false,
             creditContainer: makeCreditContainer(container),
             // Draw only when something changed (see renderOnChange), not 60 times a second.
             requestRenderMode: true,
             maximumRenderTimeChange: Infinity
         });
+        // Overwatch is a tactical command terminal with a satellite basemap - it does not use
+        // Cesium's celestial bodies or atmospheric scattering. Disabling the Sun, Moon, and
+        // atmosphere shaders bypasses Cesium's Sun compute pass (sunComputeCommand / H9 fragment
+        // shader) which fails to compile under Metal ANGLE on macOS / Apple Silicon GPU drivers.
+        if (viewer.scene.sun) viewer.scene.sun.show = false;
+        if (viewer.scene.moon) viewer.scene.moon.show = false;
+        if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
+        if (viewer.scene.globe) viewer.scene.globe.showGroundAtmosphere = false;
         const renderTimer = renderOnChange(viewer);
 
         viewer.camera.setView({
