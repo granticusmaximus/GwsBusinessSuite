@@ -19,7 +19,7 @@ public sealed class RuntimeDependencyInventory(ILogger<RuntimeDependencyInventor
         new("npm", "bootstrap", "5.3.3"),
         new("npm", "highlight.js", "11.10.0"),
         new("npm", "bootstrap-icons", "1.11.3"),
-        new("npm", "cesium", "1.145.0"),
+        new("npm", "cesium", "1.144.0"),
         new("npm", "easymde", "2.20.0"),
         new("npm", "hls.js", "1.5.17"),
         new("npm", "leaflet", "1.9.4"),

@@ -66,9 +66,13 @@
 
 @* Share Tech Mono comes with the layout's fonts. Cesium is usually in the browser's cache already:
    js/overwatch-prefetch.js fetches it while the rest of the portal is idle. *@
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Widgets/widgets.css" />
+@* Cesium 1.145 introduced a globe fragment-sampler budgeting regression (CesiumGS/cesium#13909)
+   that can stop rendering on GPUs with a 16-texture-unit limit. Stay on the last unaffected
+   release until upstream ships and verifies its fix. Keep this version aligned with
+   tactical-globe.js, overwatch-prefetch.js and the real-browser harness. *@
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.144.0/Build/Cesium/Widgets/widgets.css" />
 <link rel="stylesheet" href="/tactical-globe.css" />
-<script src="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Cesium.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/cesium@1.144.0/Build/Cesium/Cesium.js"></script>
 <script src="@Assets["js/tactical-globe.js"]"></script>
 <script src="@Assets["js/street-view.js"]"></script>
 

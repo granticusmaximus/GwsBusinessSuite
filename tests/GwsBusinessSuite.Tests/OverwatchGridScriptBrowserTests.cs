@@ -77,8 +77,8 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         <!doctype html>
         <html>
         <head>
-          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Widgets/widgets.css" />
-          <script src="https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Cesium.js"></script>
+          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/cesium@1.144.0/Build/Cesium/Widgets/widgets.css" />
+          <script src="https://cdn.jsdelivr.net/npm/cesium@1.144.0/Build/Cesium/Cesium.js"></script>
           <script src="/js/tactical-globe.js"></script>
           <style>
             /* A real, found-the-hard-way gap: without this, the browser's default 8px <body>

@@ -10,7 +10,7 @@
 // here, in an external file - this app's CSP has no 'unsafe-inline' in script-src, so an inline
 // <script> block in the .razor page (the usual place this line lives in Cesium's own getting-
 // started docs) would simply never run.
-window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/';
+window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.144.0/Build/Cesium/';
 
 // A real, confirmed production incident: this <script> tag lives inline in OverwatchGrid.razor's
 // own markup (not the shared root layout), and Blazor Web Apps that combine server-side
@@ -97,8 +97,15 @@ window.tacticalGlobe = (function () {
         const baseLayer = new Cesium.ImageryLayer(
             await Cesium.ArcGisMapServerImageryProvider.fromUrl(
                 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'));
-        // Natural daylight imagery without custom shader color correction to prevent WebGL
-        // fragment shader compilation failures on macOS / Apple Silicon GPU drivers.
+        // A dark, high-contrast tint reads more "military terminal" than the raw aerial
+        // photography's natural daylight colors - these are plain mutable properties Cesium
+        // reads per-frame at draw time, so setting them immediately here is safe. Toned down
+        // from the old map-tile values (which pushed hue harder for cartographic flat colors) -
+        // a strong hue rotation looks wrong on photographic imagery.
+        baseLayer.brightness = 0.7;
+        baseLayer.contrast = 1.2;
+        baseLayer.gamma = 0.9;
+        baseLayer.saturation = 0.4;
 
         // Every default Cesium widget is disabled - this page builds its own retro-terminal
         // chrome around the bare 3D viewport instead (see OverwatchGrid.razor.css). The globe
@@ -118,36 +125,11 @@ window.tacticalGlobe = (function () {
             fullscreenButton: false,
             infoBox: false,
             selectionIndicator: false,
-            skyBox: false,
-            skyAtmosphere: false,
-            orderIndependentTransparency: false,
             creditContainer: makeCreditContainer(container),
             // Draw only when something changed (see renderOnChange), not 60 times a second.
             requestRenderMode: true,
             maximumRenderTimeChange: Infinity
         });
-        // Overwatch is a tactical command terminal with a satellite basemap - it does not use
-        // Cesium's celestial bodies, atmospheric haze, fog scattering, HDR, or multi-render-target
-        // transparency. Disabling these bypasses the WebGL fragment shader compilation failures that
-        // occur under Metal ANGLE on macOS / Apple Silicon GPU drivers (specifically Cesium's sun
-        // compute pass, globe fog/ground atmosphere scattering, and OIT shaders).
-        if (viewer.scene.sun) viewer.scene.sun.show = false;
-        if (viewer.scene.moon) viewer.scene.moon.show = false;
-        if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
-        if (viewer.scene.globe) {
-            viewer.scene.globe.showGroundAtmosphere = false;
-            viewer.scene.globe.enableLighting = false;
-            viewer.scene.globe.dynamicAtmosphereLighting = false;
-            viewer.scene.globe.dynamicAtmosphereLightingFromSun = false;
-        }
-        if (viewer.scene.fog) {
-            viewer.scene.fog.enabled = false;
-            viewer.scene.fog.renderable = false;
-        }
-        if (viewer.scene.highDynamicRange !== undefined) viewer.scene.highDynamicRange = false;
-        if (viewer.scene.postProcessStages && viewer.scene.postProcessStages.fxaa) {
-            viewer.scene.postProcessStages.fxaa.enabled = false;
-        }
         const renderTimer = renderOnChange(viewer);
 
         viewer.camera.setView({
@@ -2585,7 +2567,6 @@ window.tacticalGlobe = (function () {
                         polygon: {
                             hierarchy: new Cesium.PolygonHierarchy(toPositions(rings[0]),
                                 rings.slice(1).map(function (hole) { return new Cesium.PolygonHierarchy(toPositions(hole)); })),
-                            height: 0,
                             material: newsShades[step]
                         }
                     });
@@ -2794,7 +2775,6 @@ window.tacticalGlobe = (function () {
                         polygon: {
                             hierarchy: new Cesium.PolygonHierarchy(toPositions(rings[0]),
                                 rings.slice(1).map(function (hole) { return new Cesium.PolygonHierarchy(toPositions(hole)); })),
-                            height: 0,
                             material: travelShades[level]
                         }
                     });

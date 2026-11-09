@@ -4,7 +4,7 @@
 // own CSP allows, and an enhanced navigation keeps the previous page's.
 (function () {
     // The same address as OverwatchGrid.razor's <script>, so that load is a cache hit.
-    var CesiumScript = 'https://cdn.jsdelivr.net/npm/cesium@1.145.0/Build/Cesium/Cesium.js';
+    var CesiumScript = 'https://cdn.jsdelivr.net/npm/cesium@1.144.0/Build/Cesium/Cesium.js';
 
     function prefetchCesium() {
         if (window.Cesium || !document.querySelector('a[href="admin/osint"]')) return;
