@@ -12,9 +12,32 @@ namespace GwsBusinessSuite.SentinelMenuBar;
 [Register("AppDelegate")]
 public class AppDelegate : NSApplicationDelegate
 {
-    private const string HostUrl = "https://admin.gwsapp.net/";
-    private const string BaseUrl = HostUrl + "admin";
-    private const string SentinelUrl = BaseUrl + "/sentinel";
+    private static string ResolveHostUrl()
+    {
+        foreach (var candidate in new[]
+                 {
+                     Environment.GetEnvironmentVariable("GWS_APP_BASE_URL"),
+                     Environment.GetEnvironmentVariable("GWS_BASE_URL"),
+                     Environment.GetEnvironmentVariable("GWS_HOST_URL")
+                 })
+        {
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                var trimmed = candidate.TrimEnd('/');
+                if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+                {
+                    return trimmed;
+                }
+            }
+        }
+
+        return "https://gws-pooldp";
+    }
+
+    private static readonly string HostUrl = ResolveHostUrl() + "/";
+    private const string BaseUrlSuffix = "/admin";
+    private static string BaseUrl => HostUrl + "admin";
+    private static string SentinelUrl => BaseUrl + "/sentinel";
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromMinutes(2);
 
     private const string LastBoardKey = "LastBoardId";

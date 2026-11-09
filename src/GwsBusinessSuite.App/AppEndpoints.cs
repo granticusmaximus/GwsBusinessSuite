@@ -2,19 +2,36 @@ namespace GwsBusinessSuite.App;
 
 public static class AppEndpoints
 {
-    public const string ProductionBaseUrl = "https://admin.gwsapp.net";
+    public const string DefaultAppHost = "https://gws-pooldp";
+    public const string ProductionBaseUrl = "https://gws-pooldp";
     public const string AdminPortalPath = "/admin";
 
-    public static string BaseUrl
+    private static string ResolveBaseUrl(string fallback)
     {
-        get
+        foreach (var candidate in new[]
+                 {
+                     Environment.GetEnvironmentVariable("GWS_APP_BASE_URL"),
+                     Environment.GetEnvironmentVariable("GWS_BASE_URL"),
+                     Environment.GetEnvironmentVariable("GWS_HOST_URL")
+                 })
         {
-            var configured = Preferences.Default.Get(nameof(BaseUrl), ProductionBaseUrl).TrimEnd('/');
-            return Uri.TryCreate(configured, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps
-                ? configured
-                : ProductionBaseUrl;
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                var trimmed = candidate.TrimEnd('/');
+                if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps)
+                {
+                    return trimmed;
+                }
+            }
         }
+
+        var configured = Preferences.Default.Get(nameof(BaseUrl), fallback).TrimEnd('/');
+        return Uri.TryCreate(configured, UriKind.Absolute, out var uri2) && uri2.Scheme == Uri.UriSchemeHttps
+            ? configured
+            : fallback;
     }
+
+    public static string BaseUrl => ResolveBaseUrl(DefaultAppHost);
 
     public static string StartUrl => $"{BaseUrl}{AdminPortalPath}";
 
