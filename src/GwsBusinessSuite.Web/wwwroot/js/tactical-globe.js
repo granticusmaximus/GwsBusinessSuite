@@ -429,11 +429,16 @@ window.tacticalGlobe = (function () {
                 }
                 return;
             }
-            const picked = viewer.scene.pick(movement.position);
-            const entity = picked && picked.id;
+            let picked = viewer.scene.pick(movement.position);
+            if (!picked || !picked.id) {
+                const drill = viewer.scene.drillPick(movement.position);
+                picked = drill && drill.length ? drill[0] : picked;
+            }
+            const entity = picked && (picked.id || (picked.primitive && picked.primitive.id));
             // A clustered pin's pick.id is an array of the entities it groups (Cesium's own
             // clustering behavior), not a single Entity - zoom into the cluster instead of
-            // treating it as a camera/incident click.
+            // treating it as a camera/incident click. Also fall back to drillPick when a dense
+            // cluster or label is sitting on top of the billboard and a plain scene.pick misses it.
             if (Array.isArray(entity)) {
                 const positions = entity
                     .map(function (e) { return e.position && e.position.getValue(viewer.clock.currentTime); })
@@ -750,10 +755,10 @@ window.tacticalGlobe = (function () {
         const photo = Object.assign({ name: name || 'Photo' }, info);
         const pin = entities.add({
             position: Cesium.Cartesian3.fromDegrees(info.longitude, info.latitude),
-            billboard: { image: pinBillboardImage, width: 22, height: 22, color: Cesium.Color.fromCssColorString('#ff8bd1'), disableDepthTestDistance: Number.POSITIVE_INFINITY },
+            billboard: { image: pinBillboardImage, width: 22, height: 22, color: Cesium.Color.fromCssColorString('#ff8bd1'), disableDepthTestDistance: 0 },
             label: {
                 text: 'PHOTO', font: '600 11px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -20), disableDepthTestDistance: Number.POSITIVE_INFINITY
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -20), disableDepthTestDistance: 0
             }
         });
         pin._tacticalGlobePhoto = photo;
@@ -1044,7 +1049,7 @@ window.tacticalGlobe = (function () {
                     width: 14,
                     height: 14,
                     color: Cesium.Color.fromCssColorString('#7dffb0'),
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    disableDepthTestDistance: 0
                 }
             });
             entity._tacticalGlobeCamera = pin;
@@ -1096,10 +1101,10 @@ window.tacticalGlobe = (function () {
         entry.streetViewEntity = entry.viewer.entities.add({
             position: Cesium.Cartesian3.fromDegrees(Number(lon), Number(lat)),
             point: { pixelSize: 15, color: Cesium.Color.fromCssColorString('#ffd166'), outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                disableDepthTestDistance: 0 },
             label: { text: 'STREET VIEW', font: 'bold 11px monospace', fillColor: Cesium.Color.fromCssColorString('#ffd166'),
                 outlineColor: Cesium.Color.BLACK, outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                pixelOffset: new Cesium.Cartesian2(0, -18), disableDepthTestDistance: Number.POSITIVE_INFINITY }
+                pixelOffset: new Cesium.Cartesian2(0, -18), disableDepthTestDistance: 0 }
         });
     }
 
@@ -1161,10 +1166,10 @@ window.tacticalGlobe = (function () {
             position: Cesium.Cartesian3.fromDegrees(Number(item.lon), Number(item.lat)),
             name: item.title,
             point: { pixelSize: size, color: Cesium.Color.fromCssColorString(colour).withAlpha(0.9),
-                outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: 0 },
             label: { text: item.title, font: '11px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -14),
-                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 60000), disableDepthTestDistance: Number.POSITIVE_INFINITY }
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 60000), disableDepthTestDistance: 0 }
         }));
         (snapshot.incidents || []).forEach(item => add(item, TIME_MACHINE_COLOURS[item.category] || '#ffffff', 10));
         (snapshot.earthquakes || []).forEach(item => add(item, TIME_MACHINE_COLOURS.earthquake, 12));
@@ -1227,7 +1232,7 @@ window.tacticalGlobe = (function () {
             billboards.add({
                 id: pickId, position: position, image: aircraftIcon, width: selected ? 26 : 20, height: selected ? 26 : 20, color: colour,
                 rotation: -Cesium.Math.toRadians(Number(plane.heading) || 0), alignedAxis: Cesium.Cartesian3.ZERO,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY
+                disableDepthTestDistance: 0
             });
             if (selected) updateSelectedAircraft(entry, plane);
             if (!withLabels) return;
@@ -1236,7 +1241,7 @@ window.tacticalGlobe = (function () {
                 text: (plane.callsign || plane.id) + (altitude !== null ? '  ' + altitude.toLocaleString('en-US') + ' FT' : ''),
                 font: '10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16),
-                distanceDisplayCondition: nearOnly, disableDepthTestDistance: Number.POSITIVE_INFINITY
+                distanceDisplayCondition: nearOnly, disableDepthTestDistance: 0
             });
         });
     }
@@ -1380,9 +1385,9 @@ window.tacticalGlobe = (function () {
         [path.origin, path.destination].filter(Boolean).forEach(function (airport) {
                 add({
                     position: Cesium.Cartesian3.fromDegrees(airport.longitude, airport.latitude),
-                    point: { pixelSize: 9, color: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                    point: { pixelSize: 9, color: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: 0 },
                     label: { text: airport.code, font: 'bold 12px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
-                        style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16), disableDepthTestDistance: Number.POSITIVE_INFINITY }
+                        style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16), disableDepthTestDistance: 0 }
                 });
         });
     }
@@ -1469,7 +1474,7 @@ window.tacticalGlobe = (function () {
             billboards.add({
                 position: position, image: shipIcon, width: 14, height: 18, color: colour,
                 rotation: hasHeading ? -Cesium.Math.toRadians(Number(ship.heading)) : 0, alignedAxis: Cesium.Cartesian3.ZERO,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY
+                disableDepthTestDistance: 0
             });
             if (!withLabels) return;
             const speed = Number.isFinite(ship.speedKnots) ? '  ' + Number(ship.speedKnots).toFixed(1) + ' KN' : '';
@@ -1479,7 +1484,7 @@ window.tacticalGlobe = (function () {
                 text: String(ship.name || ship.id) + speed + (detail ? '\n' + detail.toUpperCase() : ''),
                 font: '10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -18),
-                distanceDisplayCondition: nearOnly, disableDepthTestDistance: Number.POSITIVE_INFINITY
+                distanceDisplayCondition: nearOnly, disableDepthTestDistance: 0
             });
         });
     }
@@ -1497,10 +1502,10 @@ window.tacticalGlobe = (function () {
             const colour = Cesium.Color.fromCssColorString(AQI_COLOURS.find(function (band) { return aqi <= band[0]; })[1]);
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(reading.lon), Number(reading.lat)),
-                point: { pixelSize: 22, color: colour.withAlpha(0.55), outlineColor: colour, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                point: { pixelSize: 22, color: colour.withAlpha(0.55), outlineColor: colour, outlineWidth: 2, disableDepthTestDistance: 0 },
                 label: {
                     text: 'AQI ' + aqi, font: 'bold 10px monospace', fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
-                    style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -20), disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -20), disableDepthTestDistance: 0
                 }
             });
         });
@@ -1535,7 +1540,7 @@ window.tacticalGlobe = (function () {
                     text: area.name + '\n' + Number(area.customersOut).toLocaleString('en-US') + ' OUT',
                     font: 'bold 10px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                     style: Cesium.LabelStyle.FILL_AND_OUTLINE, horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
-                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1500000), disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1500000), disableDepthTestDistance: 0
                 }
             }));
         });
@@ -1737,7 +1742,7 @@ window.tacticalGlobe = (function () {
         const label = function (text, colour) {
             return { text: text, font: 'bold 11px monospace', fillColor: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
                 style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16),
-                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 400000), disableDepthTestDistance: Number.POSITIVE_INFINITY };
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 400000), disableDepthTestDistance: 0 };
         };
         (notes || []).forEach(function (note) {
             const points = (note.points || []).filter(function (p) { return p && p.length === 2; });
@@ -1759,7 +1764,7 @@ window.tacticalGlobe = (function () {
             }
             const pin = entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(points[0][1]), Number(points[0][0])),
-                point: { pixelSize: 13, color: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                point: { pixelSize: 13, color: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: 0 },
                 label: label(note.title, colour)
             });
             pin._tacticalGlobeNote = note.id;
@@ -1770,7 +1775,7 @@ window.tacticalGlobe = (function () {
             const positions = Cesium.Cartesian3.fromDegreesArray(draft.points.flatMap(function (p) { return [Number(p[1]), Number(p[0])]; }));
             positions.forEach(function (position) {
                 added.push(entry.viewer.entities.add({ position: position,
-                    point: { pixelSize: 9, color: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY } }));
+                    point: { pixelSize: 9, color: colour, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: 0 } }));
             });
             if (positions.length >= 2) {
                 added.push(entry.viewer.entities.add({ polyline: {
@@ -1854,7 +1859,7 @@ window.tacticalGlobe = (function () {
             position: Cesium.Cartesian3.fromDegrees(0, 0),
             show: false,
             point: { pixelSize: 16, color: Cesium.Color.fromCssColorString('#4dabff'), outlineColor: Cesium.Color.WHITE, outlineWidth: 3,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY }
+                disableDepthTestDistance: 0 }
         });
         const report = function (position) {
             const c = position.coords;
@@ -2347,7 +2352,7 @@ window.tacticalGlobe = (function () {
                     width: 14,
                     height: 14,
                     color: incidentTypeColor(incident.category || incident.eventType),
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    disableDepthTestDistance: 0
                 }
             });
             entity._tacticalGlobeIncident = incident;
@@ -2384,7 +2389,7 @@ window.tacticalGlobe = (function () {
                 width: size,
                 height: size,
                 color: color,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY
+                disableDepthTestDistance: 0
             };
             let label;
             if (signal.surge) {
@@ -2402,7 +2407,7 @@ window.tacticalGlobe = (function () {
                     outlineWidth: 3,
                     style: Cesium.LabelStyle.FILL_AND_OUTLINE,
                     pixelOffset: new Cesium.Cartesian2(0, -size),
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    disableDepthTestDistance: 0
                 };
             }
             const entity = entry.worldNewsDataSource.entities.add({
@@ -2574,7 +2579,7 @@ window.tacticalGlobe = (function () {
                 color: Cesium.Color.fromCssColorString('#f3e3ff'),
                 outlineColor: Cesium.Color.fromCssColorString('#c77dff'),
                 outlineWidth: 3,
-                disableDepthTestDistance: Number.POSITIVE_INFINITY
+                disableDepthTestDistance: 0
             }
         });
         function show(index) {
@@ -3007,11 +3012,11 @@ window.tacticalGlobe = (function () {
             const color = Cesium.Color.fromCssColorString(satelliteColors[sat.group] || '#d9e4ff');
             const dot = entities.add({
                 position: Cesium.Cartesian3.fromDegrees(sat.lon, sat.lat, sat.altitudeKm * 1000),
-                point: { pixelSize: station ? 9 : 7, color: color, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+                point: { pixelSize: station ? 9 : 7, color: color, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: 0 },
                 label: {
                     text: String(sat.name || '').toUpperCase(), font: '600 10px monospace', fillColor: color, outlineColor: Cesium.Color.BLACK,
                     outlineWidth: 3, style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -14),
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    disableDepthTestDistance: 0
                 }
             });
             dot._tacticalGlobeSatellite = sat;
@@ -3141,7 +3146,7 @@ window.tacticalGlobe = (function () {
                     width: size,
                     height: size,
                     color: Cesium.Color.fromCssColorString(hazardColors[hazard.kind] || '#ffffff'),
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    disableDepthTestDistance: 0
                 }
             });
             entity._tacticalGlobeHazard = hazard;
@@ -3175,7 +3180,7 @@ window.tacticalGlobe = (function () {
                     width: 18,
                     height: 18,
                     color: color,
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    disableDepthTestDistance: 0
                 },
                 label: {
                     text: (cell.kinds || []).length + ' SIGNALS',
@@ -3185,7 +3190,7 @@ window.tacticalGlobe = (function () {
                     outlineWidth: 3,
                     style: Cesium.LabelStyle.FILL_AND_OUTLINE,
                     pixelOffset: new Cesium.Cartesian2(0, -18),
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    disableDepthTestDistance: 0
                 }
             });
             marker._tacticalGlobeConvergence = cell;
@@ -3218,7 +3223,7 @@ window.tacticalGlobe = (function () {
                     width: 12,
                     height: 12,
                     color: Cesium.Color.fromCssColorString('#ffb000'),
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    disableDepthTestDistance: 0
                 }
             });
             entity._tacticalGlobeSign = sign;
@@ -3249,7 +3254,7 @@ window.tacticalGlobe = (function () {
                     width: station.risk === 'clear' ? 9 : 14,
                     height: station.risk === 'clear' ? 9 : 14,
                     color: Cesium.Color.fromCssColorString(roadRiskColors[station.risk] || '#ffffff'),
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY
+                    disableDepthTestDistance: 0
                 }
             });
             entity._tacticalGlobeRoadWeather = station;
@@ -3402,8 +3407,8 @@ window.tacticalGlobe = (function () {
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(stop.lon), Number(stop.lat)),
                 point: { pixelSize: 16, color: Cesium.Color.fromCssColorString('#00e5ff'), outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY },
-                label: { text: text, font: 'bold 11px monospace', fillColor: Cesium.Color.BLACK, disableDepthTestDistance: Number.POSITIVE_INFINITY }
+                    disableDepthTestDistance: 0 },
+                label: { text: text, font: 'bold 11px monospace', fillColor: Cesium.Color.BLACK, disableDepthTestDistance: 0 }
             });
         });
         const flat = [];
@@ -3459,7 +3464,7 @@ window.tacticalGlobe = (function () {
             return entry.viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(Number(point.lon), Number(point.lat)),
                 point: { pixelSize: 14, color: Cesium.Color.fromCssColorString(conditionColors[point.level] || '#8a8a8a'),
-                    outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY }
+                    outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: 0 }
             });
         });
     }
