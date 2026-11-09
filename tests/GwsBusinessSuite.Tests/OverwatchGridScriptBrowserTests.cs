@@ -219,6 +219,36 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
 
     // Overwatch's boot screen lifts on this (30-10-26) instead of after a fixed 1.8 s.
     [Fact]
+    public async Task Init_WhenCesiumShaderCompileFails_ShouldFallBackWithoutThrowing()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+
+        var result = await page.EvaluateAsync<string>("""
+            async () => {
+                const originalViewer = window.Cesium.Viewer;
+                const originalImageryLayer = window.Cesium.ImageryLayer;
+                const originalFromUrl = window.Cesium.ArcGisMapServerImageryProvider.fromUrl;
+                window.Cesium.Viewer = function () { throw new Error('Fragment shader failed to compile. Compile log: test'); };
+                window.Cesium.ImageryLayer = function () { return {}; };
+                window.Cesium.ArcGisMapServerImageryProvider.fromUrl = async function () { return {}; };
+                try {
+                    const initResult = await window.tacticalGlobe.init('tg-viewport', { invokeMethodAsync: async () => {} });
+                    return JSON.stringify({ initResult: initResult === null ? 'null' : String(initResult), fallback: document.getElementById('tg-viewport').dataset.globeFallback || 'missing' });
+                } finally {
+                    window.Cesium.Viewer = originalViewer;
+                    window.Cesium.ImageryLayer = originalImageryLayer;
+                    window.Cesium.ArcGisMapServerImageryProvider.fromUrl = originalFromUrl;
+                }
+            }
+            """);
+
+        result.Should().Contain(""fallback":"true"");
+        result.Should().Contain(""initResult":"null"");
+        consoleErrors.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task WhenDrawn_ShouldResolveOnceTheFirstTilesAreIn_AndAtOnceForAMissingGlobe()
     {
         var (page, _) = await OpenHarnessAsync(fixture.Browser);

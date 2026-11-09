@@ -122,23 +122,53 @@ window.tacticalGlobe = (function () {
         // Ion-backed default imagery layer, and terrain stays the flat ellipsoid until
         // setThreeD switches on Cesium ion terrain + OSM buildings (only when the server has an
         // ion token - options.ionToken).
-        const viewer = new Cesium.Viewer(container, {
-            baseLayer: baseLayer,
-            baseLayerPicker: false,
-            geocoder: false,
-            homeButton: false,
-            sceneModePicker: false,
-            navigationHelpButton: false,
-            animation: false,
-            timeline: false,
-            fullscreenButton: false,
-            infoBox: false,
-            selectionIndicator: false,
-            creditContainer: makeCreditContainer(container),
-            // Draw only when something changed (see renderOnChange), not 60 times a second.
-            requestRenderMode: true,
-            maximumRenderTimeChange: Infinity
-        });
+        let viewer;
+        try {
+            viewer = new Cesium.Viewer(container, {
+                baseLayer: baseLayer,
+                baseLayerPicker: false,
+                geocoder: false,
+                homeButton: false,
+                sceneModePicker: false,
+                navigationHelpButton: false,
+                animation: false,
+                timeline: false,
+                fullscreenButton: false,
+                infoBox: false,
+                selectionIndicator: false,
+                creditContainer: makeCreditContainer(container),
+                // Draw only when something changed (see renderOnChange), not 60 times a second.
+                requestRenderMode: true,
+                maximumRenderTimeChange: Infinity
+            });
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            if (message.includes('Fragment shader failed to compile') || message.includes('WebGL') || /shader/i.test(message)) {
+                console.warn('Overwatch 3D globe unavailable on this GPU/browser; falling back to a non-3D placeholder.', error);
+                container.replaceChildren();
+                const fallback = document.createElement('div');
+                Object.assign(fallback.style, {
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    height: '100%',
+                    width: '100%',
+                    padding: '1.25rem',
+                    color: '#dfe7ff',
+                    background: 'radial-gradient(circle at top, rgba(51,71,108,0.9), rgba(10,13,18,1))',
+                    textAlign: 'center',
+                    fontSize: '0.95rem',
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    boxSizing: 'border-box'
+                });
+                fallback.textContent = '3D globe unavailable on this GPU/browser';
+                container.appendChild(fallback);
+                container.dataset.globeFallback = 'true';
+                return null;
+            }
+            throw error;
+        }
         const renderTimer = renderOnChange(viewer);
 
         viewer.camera.setView({
