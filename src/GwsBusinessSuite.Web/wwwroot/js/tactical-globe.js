@@ -84,6 +84,56 @@ window.tacticalGlobe = (function () {
     const pinBillboardImage = createPinBillboardImage('#05080a', 2);
     const pinBillboardImageSelected = createPinBillboardImage('#ffe066', 4);
 
+    function showGlobeFallback(container, reason) {
+        if (!container || container.dataset.globeFallback === 'true') return;
+        container.dataset.globeFallback = 'true';
+        container.replaceChildren();
+        const fallback = document.createElement('div');
+        Object.assign(fallback.style, {
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '100%',
+            width: '100%',
+            padding: '1.25rem',
+            color: '#dfe7ff',
+            background: 'radial-gradient(circle at top, rgba(51,71,108,0.9), rgba(10,13,18,1))',
+            textAlign: 'center',
+            fontSize: '0.95rem',
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            boxSizing: 'border-box'
+        });
+        fallback.textContent = reason && /WebGL|shader/i.test(reason)
+            ? '3D globe unavailable on this GPU/browser'
+            : '3D globe unavailable';
+        container.appendChild(fallback);
+    }
+
+    function isShaderFailureReason(reason) {
+        return !!reason && (/Fragment shader failed to compile/i.test(reason)
+            || /shader.*compile/i.test(reason)
+            || /WebGL/i.test(reason)
+            || /WebGLRenderingContext/i.test(reason));
+    }
+
+    function installShaderFallbackListener() {
+        if (window.__tacticalGlobeShaderFallbackInstalled) return;
+        window.__tacticalGlobeShaderFallbackInstalled = true;
+        window.addEventListener('error', function (event) {
+            const reason = event && (event.message || (event.error && event.error.message) || String(event));
+            if (!isShaderFailureReason(reason)) return;
+            const container = document.getElementById('tg-viewport');
+            if (container) showGlobeFallback(container, reason);
+            if (viewers.size > 0) {
+                const ids = Array.from(viewers.keys());
+                ids.forEach(function (id) { try { dispose(id); } catch (e) {} });
+            }
+        });
+    }
+
+    installShaderFallbackListener();
+
     async function init(containerId, dotNetRef, options) {
         const container = document.getElementById(containerId);
         if (!container || viewers.has(containerId)) return;
@@ -103,27 +153,28 @@ window.tacticalGlobe = (function () {
         // ArcGisMapServerImageryProvider has an async `fromUrl` factory in this Cesium version
         // (confirmed directly against the loaded library) since it has to fetch the service's
         // own metadata first.
-        const baseLayer = new Cesium.ImageryLayer(
-            await Cesium.ArcGisMapServerImageryProvider.fromUrl(
-                'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'));
-        // A dark, high-contrast tint reads more "military terminal" than the raw aerial
-        // photography's natural daylight colors - these are plain mutable properties Cesium
-        // reads per-frame at draw time, so setting them immediately here is safe. Toned down
-        // from the old map-tile values (which pushed hue harder for cartographic flat colors) -
-        // a strong hue rotation looks wrong on photographic imagery.
-        baseLayer.brightness = 0.7;
-        baseLayer.contrast = 1.2;
-        baseLayer.gamma = 0.9;
-        baseLayer.saturation = 0.4;
-
-        // Every default Cesium widget is disabled - this page builds its own retro-terminal
-        // chrome around the bare 3D viewport instead (see OverwatchGrid.razor.css). The globe
-        // starts token-free: the explicit baseLayer above means Cesium never falls back to an
-        // Ion-backed default imagery layer, and terrain stays the flat ellipsoid until
-        // setThreeD switches on Cesium ion terrain + OSM buildings (only when the server has an
-        // ion token - options.ionToken).
         let viewer;
+        let baseLayer;
         try {
+            baseLayer = new Cesium.ImageryLayer(
+                await Cesium.ArcGisMapServerImageryProvider.fromUrl(
+                    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'));
+            // A dark, high-contrast tint reads more "military terminal" than the raw aerial
+            // photography's natural daylight colors - these are plain mutable properties Cesium
+            // reads per-frame at draw time, so setting them immediately here is safe. Toned down
+            // from the old map-tile values (which pushed hue harder for cartographic flat colors) -
+            // a strong hue rotation looks wrong on photographic imagery.
+            baseLayer.brightness = 0.7;
+            baseLayer.contrast = 1.2;
+            baseLayer.gamma = 0.9;
+            baseLayer.saturation = 0.4;
+
+            // Every default Cesium widget is disabled - this page builds its own retro-terminal
+            // chrome around the bare 3D viewport instead (see OverwatchGrid.razor.css). The globe
+            // starts token-free: the explicit baseLayer above means Cesium never falls back to an
+            // Ion-backed default imagery layer, and terrain stays the flat ellipsoid until
+            // setThreeD switches on Cesium ion terrain + OSM buildings (only when the server has an
+            // ion token - options.ionToken).
             viewer = new Cesium.Viewer(container, {
                 baseLayer: baseLayer,
                 baseLayerPicker: false,
@@ -143,28 +194,9 @@ window.tacticalGlobe = (function () {
             });
         } catch (error) {
             const message = error && error.message ? error.message : String(error);
-            if (message.includes('Fragment shader failed to compile') || message.includes('WebGL') || /shader/i.test(message)) {
+            if (isShaderFailureReason(message)) {
                 console.warn('Overwatch 3D globe unavailable on this GPU/browser; falling back to a non-3D placeholder.', error);
-                container.replaceChildren();
-                const fallback = document.createElement('div');
-                Object.assign(fallback.style, {
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    height: '100%',
-                    width: '100%',
-                    padding: '1.25rem',
-                    color: '#dfe7ff',
-                    background: 'radial-gradient(circle at top, rgba(51,71,108,0.9), rgba(10,13,18,1))',
-                    textAlign: 'center',
-                    fontSize: '0.95rem',
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
-                    boxSizing: 'border-box'
-                });
-                fallback.textContent = '3D globe unavailable on this GPU/browser';
-                container.appendChild(fallback);
-                container.dataset.globeFallback = 'true';
+                showGlobeFallback(container, message);
                 return null;
             }
             throw error;
