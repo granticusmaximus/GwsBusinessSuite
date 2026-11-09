@@ -243,8 +243,8 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
             }
             """);
 
-        result.Should().Contain(""fallback":"true"");
-        result.Should().Contain(""initResult":"null"");
+        result.Should().Contain("\"fallback\":\"true\"");
+        result.Should().Contain("\"initResult\":\"null\"");
         consoleErrors.Should().BeEmpty();
     }
 
