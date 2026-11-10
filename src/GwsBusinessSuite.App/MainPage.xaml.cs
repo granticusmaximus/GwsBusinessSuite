@@ -148,7 +148,8 @@ public partial class MainPage : ContentPage
             WKWebsiteDataType.DiskCache,
             WKWebsiteDataType.MemoryCache,
             WKWebsiteDataType.OfflineWebApplicationCache,
-            WKWebsiteDataType.FetchCache
+            WKWebsiteDataType.FetchCache,
+            WKWebsiteDataType.ServiceWorkerRegistrations
         });
         return WKWebsiteDataStore.DefaultDataStore.RemoveDataOfTypesAsync(cacheTypes, NSDate.DistantPast);
     }
