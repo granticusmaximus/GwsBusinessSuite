@@ -278,6 +278,11 @@ window.tacticalGlobe = (function () {
         viewer.scene.logarithmicDepthBuffer = false;
         viewer.scene.fxaa = false;
         viewer.scene.useDepthPicking = false;
+        if (window.__gwsMacCatalystWebView === true) {
+            // WebKit's Metal backend rejects Cesium's cosmetic SunTextureFS burst shader. The
+            // sun has no tactical value here; hiding it preserves the interactive 3D globe.
+            viewer.scene.sun.show = false;
+        }
 
         // Viewer construction can succeed while WebKit/Metal fails only when Cesium compiles a
         // later globe/material variant. Cesium reports that path through Scene.renderError; it

@@ -42,6 +42,8 @@ public sealed class OverwatchCesiumVersionTests
             "a native-only renderer failure must retain the actual WebKit/Cesium diagnostic");
         tacticalGlobe.Should().Contain("installNativeShaderDiagnostics()",
             "an empty WebKit shader compiler log must retain the failing shader source locally");
+        tacticalGlobe.Should().Contain("viewer.scene.sun.show = false",
+            "the native renderer must avoid WebKit's incompatible cosmetic SunTextureFS shader");
         tacticalGlobe.Should().Contain("viewer.scene.highDynamicRange = false",
             "the portable WebKit renderer must avoid HDR shader variants");
         tacticalGlobe.Should().Contain("viewer.scene.logarithmicDepthBuffer = false",
