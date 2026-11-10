@@ -1131,6 +1131,36 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         panelText.Should().Contain("I-85 Northbound").And.Contain("Multi-vehicle crash").And.Contain("ACCIDENT");
     }
 
+    [Fact]
+    public async Task OverlappingDecorativeMarker_ShouldNotPreventTheActionablePinFromOpening()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        await page.EvaluateAsync("""
+            () => {
+              window.tacticalGlobe.setTrafficIncidents([{
+                id: 'incident-under-marker', roadwayName: 'US 36', description: 'Closure beneath another marker.',
+                eventType: 'closures', severity: 'major', lat: 39.8, lon: -98.5,
+                sourceName: 'Test feed', sourceAttributionUrl: 'https://example.test/incidents'
+              }]);
+              // Added second at the same pixel so scene.pick can return this non-actionable
+              // decorative marker before the incident below it.
+              window.tacticalGlobe.setStreetViewMarker('tg-viewport', 39.8, -98.5);
+            }
+            """);
+        await page.WaitForTimeoutAsync(1000);
+
+        await page.Mouse.ClickAsync(400, 300);
+        await page.WaitForFunctionAsync("!!document.querySelector('.tg-incident-panel')",
+            new PageWaitForFunctionOptions { Timeout = 5000 });
+
+        (await page.InnerTextAsync(".tg-incident-panel"))
+            .Should().Contain("US 36").And.Contain("Closure beneath another marker");
+        consoleErrors.Should().BeEmpty();
+    }
+
     // Render-on-demand (30-10-26): an idle globe draws about once a second instead of every frame,
     // and a SURGING marker's pulse keeps it drawing only while one is on the globe. Measured as the
     // share of animation ticks that drew, not frames per second: CI's software WebGL draws only a few

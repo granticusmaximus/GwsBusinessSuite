@@ -416,14 +416,15 @@ window.tacticalGlobe = (function () {
             cluster.billboard.width = 20;
             cluster.billboard.height = 20;
             cluster.billboard.color = Cesium.Color.fromCssColorString('#7dffb0');
-            cluster.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            cluster.billboard.disableDepthTestDistance = 0;
+            cluster.point.show = false;
             cluster.label.show = true;
             cluster.label.text = clusteredEntities.length.toString();
             cluster.label.font = 'bold 13px "Share Tech Mono", monospace';
             cluster.label.fillColor = Cesium.Color.fromCssColorString('#05080a');
             cluster.label.verticalOrigin = Cesium.VerticalOrigin.CENTER;
             cluster.label.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
-            cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            cluster.label.disableDepthTestDistance = 0;
         });
 
         // Incidents get the same treatment: statewide work-zone feeds (WZDx) mean thousands of
@@ -440,14 +441,15 @@ window.tacticalGlobe = (function () {
             cluster.billboard.width = 18;
             cluster.billboard.height = 18;
             cluster.billboard.color = Cesium.Color.fromCssColorString('#ffb347');
-            cluster.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            cluster.billboard.disableDepthTestDistance = 0;
+            cluster.point.show = false;
             cluster.label.show = true;
             cluster.label.text = clusteredEntities.length.toString();
             cluster.label.font = 'bold 12px "Share Tech Mono", monospace';
             cluster.label.fillColor = Cesium.Color.fromCssColorString('#05080a');
             cluster.label.verticalOrigin = Cesium.VerticalOrigin.CENTER;
             cluster.label.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
-            cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            cluster.label.disableDepthTestDistance = 0;
         });
 
         // World News is an intelligence overlay, not a confirmed incident layer. Purple markers
@@ -463,14 +465,15 @@ window.tacticalGlobe = (function () {
             cluster.billboard.width = 20;
             cluster.billboard.height = 20;
             cluster.billboard.color = Cesium.Color.fromCssColorString('#c77dff');
-            cluster.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            cluster.billboard.disableDepthTestDistance = 0;
+            cluster.point.show = false;
             cluster.label.show = true;
             cluster.label.text = clusteredEntities.length.toString();
             cluster.label.font = 'bold 12px "Share Tech Mono", monospace';
             cluster.label.fillColor = Cesium.Color.fromCssColorString('#05080a');
             cluster.label.verticalOrigin = Cesium.VerticalOrigin.CENTER;
             cluster.label.horizontalOrigin = Cesium.HorizontalOrigin.CENTER;
-            cluster.label.disableDepthTestDistance = Number.POSITIVE_INFINITY;
+            cluster.label.disableDepthTestDistance = 0;
         });
 
         // Hazard layer (earthquakes, wildfires, flooding river gauges) - unclustered: there are
@@ -545,12 +548,28 @@ window.tacticalGlobe = (function () {
                 }
                 return;
             }
-            let picked = viewer.scene.pick(movement.position);
-            if (!picked || !picked.id) {
-                const drill = viewer.scene.drillPick(movement.position);
-                picked = drill && drill.length ? drill[0] : picked;
+            const picked = viewer.scene.pick(movement.position);
+            const pickIdentifier = function (candidate) {
+                return candidate && (candidate.id || (candidate.primitive && candidate.primitive.id));
+            };
+            const isActionable = function (candidate) {
+                return Array.isArray(candidate) || !!(candidate && (
+                    candidate._tacticalGlobeCamera || candidate._tacticalGlobeIncident ||
+                    candidate._tacticalGlobeWorldNews || candidate._tacticalGlobeNewsCountry ||
+                    candidate._tacticalGlobeHazard || candidate._tacticalGlobeConvergence ||
+                    candidate._tacticalGlobeSatellite || candidate._tacticalGlobePhoto ||
+                    candidate._tacticalGlobeSign || candidate._tacticalGlobeRoadWeather ||
+                    candidate._tacticalGlobeAircraft || candidate._tacticalGlobeSpeed ||
+                    candidate._tacticalGlobeRoad || candidate._tacticalGlobeNote));
+            };
+            let entity = pickIdentifier(picked);
+            if (!isActionable(entity)) {
+                // Labels, route geometry, and dense layers can sit over an actionable billboard.
+                // Examine every object at the pixel instead of letting the top decorative
+                // primitive turn a valid click into a no-op.
+                const drill = viewer.scene.drillPick(movement.position, 32) || [];
+                entity = drill.map(pickIdentifier).find(isActionable) || entity;
             }
-            const entity = picked && (picked.id || (picked.primitive && picked.primitive.id));
             // A clustered pin's pick.id is an array of the entities it groups (Cesium's own
             // clustering behavior), not a single Entity - zoom into the cluster instead of
             // treating it as a camera/incident click. Also fall back to drillPick when a dense
