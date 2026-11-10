@@ -253,12 +253,11 @@ window.tacticalGlobe = (function () {
                 // options keep the full 3D globe while selecting the portable shader path.
                 msaaSamples: 1,
                 contextOptions: {
-                    // WKWebView's WebGL 2 shader compiler can fail for Cesium's globe path
-                    // even with the optional effects below disabled. Cesium supports WebGL 1
-                    // directly; selecting it avoids that Metal-specific compiler path while
-                    // retaining the interactive 3D globe. Browsers and PWAs retain WebGL 2;
-                    // the native shell sets this flag before the document's scripts execute.
-                    requestWebgl1: window.__gwsMacCatalystWebView === true,
+                    // This WKWebView's WebGL 1 compiler rejects even Cesium's trivial
+                    // texture-copy shader. Keep its capable WebGL 2 path selected; the
+                    // native-only sun and MRT compositor exclusions above avoid the two
+                    // WebGL 2 shaders confirmed to fail on its Metal backend.
+                    requestWebgl1: false,
                     webgl: {
                         alpha: false,
                         antialias: false,

@@ -36,8 +36,8 @@ public sealed class OverwatchCesiumVersionTests
             "shader variants that fail after Viewer construction must use the same fallback");
         tacticalGlobe.Should().Contain("msaaSamples: 1",
             "the portable WebKit renderer must avoid multisample shader variants");
-        tacticalGlobe.Should().Contain("requestWebgl1: window.__gwsMacCatalystWebView === true",
-            "only the portable Mac Catalyst renderer must avoid WKWebView's WebGL 2 Metal shader path");
+        tacticalGlobe.Should().Contain("requestWebgl1: false",
+            "the native renderer must avoid WKWebView's defective WebGL 1 shader compiler");
         tacticalGlobe.Should().Contain("reportNativeRendererFailure(reason)",
             "a native-only renderer failure must retain the actual WebKit/Cesium diagnostic");
         tacticalGlobe.Should().Contain("installNativeShaderDiagnostics()",
