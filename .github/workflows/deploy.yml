@@ -247,7 +247,11 @@ jobs:
               # script's `set -e`, that meant the fallback existing specifically to avoid
               # aborting the deploy could itself abort the deploy - the one path where the check
               # is most needed (no fresh backup was just verified).
-              docker compose exec -T gwssuite sh -lc 'ls /app/backups/gws-backup-*.gwsbackup >/dev/null 2>&1'
+              if docker compose ps -q gwssuite | grep -q .; then
+                docker compose exec -T gwssuite sh -lc 'ls /app/backups/gws-backup-*.gwsbackup >/dev/null 2>&1'
+              else
+                echo "No running application container is available for a pre-deploy backup check; continuing to start the prepared release."
+              fi
             fi
 
             if [ "$REHEARSE_MIGRATION_COPY" = "true" ]; then
