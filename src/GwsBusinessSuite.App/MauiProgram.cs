@@ -117,45 +117,7 @@ public static class MauiProgram
 #if MACCATALYST
 		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
 			"MacCatalystWebGlCompatibility",
-			(handler, _) =>
-			{
-				handler.PlatformView.Configuration.UserContentController.AddUserScript(
-					new WebKit.WKUserScript(
-						new Foundation.NSString("""
-							window.__gwsMacCatalystWebView = true;
-							window.__gwsNativeRendererDiagnostic = function (message) {
-								try {
-									window.webkit.messageHandlers.gwsRendererDiagnostics.postMessage(String(message).slice(0, 2000));
-								} catch (_) {}
-							};
-							(function installMacCatalystShaderCompatibility() {
-								if (window.__gwsMacCatalystShaderCompatibilityInstalled) return;
-								window.__gwsMacCatalystShaderCompatibilityInstalled = true;
-								[window.WebGLRenderingContext, window.WebGL2RenderingContext].forEach(function (contextType) {
-									if (!contextType) return;
-									const originalShaderSource = contextType.prototype.shaderSource;
-									contextType.prototype.shaderSource = function (shader, source) {
-										let compatibleSource = source;
-										if (typeof source === 'string' && this.getShaderParameter(shader, this.SHADER_TYPE) === this.FRAGMENT_SHADER) {
-											// WebKit's Metal translator rejects Cesium's WebGL 2 float-feature
-											// defines even though it advertises the corresponding core support.
-											// Removing only these feature switches selects Cesium's built-in
-											// non-float branches; Safari and every normal browser remain untouched.
-											compatibleSource = source.replace(/^\s*#define OES_texture_float(?:_linear)?\s*$/gm, '');
-											if (compatibleSource !== source && !window.__gwsMacCatalystFloatShaderSanitized) {
-												window.__gwsMacCatalystFloatShaderSanitized = true;
-												window.__gwsNativeRendererDiagnostic('Removed Cesium float-texture feature defines before native shader compilation.');
-											}
-										}
-										return originalShaderSource.call(this, shader, compatibleSource);
-									};
-								});
-							})();
-							"""),
-						WebKit.WKUserScriptInjectionTime.AtDocumentStart,
-						false));
-				RendererDiagnosticsBridge.Attach(handler.PlatformView);
-			});
+			(handler, _) => MacWebViewCompatibility.Configure(handler.PlatformView));
 		// Content Studio's local Ollama calls go through the app (see LocalOllamaBridge).
 		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
 			"LocalOllamaBridge",

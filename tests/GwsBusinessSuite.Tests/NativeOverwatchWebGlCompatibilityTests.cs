@@ -9,13 +9,21 @@ public sealed class NativeOverwatchWebGlCompatibilityTests
     [Fact]
     public void MacWebView_ShouldRemoveTheConfirmedFailingFloatDefinesBeforeShaderCompilation()
     {
-        var mauiProgram = File.ReadAllText(Path.Combine(
-            RepoRoot, "src/GwsBusinessSuite.App/MauiProgram.cs"));
+        var compatibility = File.ReadAllText(Path.Combine(
+            RepoRoot, "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacWebViewCompatibility.cs"));
+        var mainPage = File.ReadAllText(Path.Combine(
+            RepoRoot, "src/GwsBusinessSuite.App/MainPage.xaml.cs"));
 
-        mauiProgram.Should().Contain("WKUserScriptInjectionTime.AtDocumentStart",
+        compatibility.Should().Contain("WKUserScriptInjectionTime.AtDocumentStart",
             "the compatibility shim must exist before Cesium captures WebGL methods");
-        mauiProgram.Should().Contain("contextType.prototype.shaderSource");
-        mauiProgram.Should().Contain("#define OES_texture_float(?:_linear)?");
-        mauiProgram.Should().Contain("originalShaderSource.call(this, shader, compatibleSource)");
+        compatibility.Should().Contain("contextType.prototype.shaderSource");
+        compatibility.Should().Contain("#define OES_texture_float(?:_linear)?");
+        compatibility.Should().Contain("sampler3D\\s*;",
+            "the confirmed failing shader also contains an unused sampler3D precision declaration");
+        compatibility.Should().Contain("originalShaderSource.call(this, shader, compatibleSource)");
+        mainPage.Should().Contain("WorkspaceView.HandlerChanged += OnWorkspaceViewHandlerChanged",
+            "the compatibility setup must be attached to the WKWebView that actually hosts the workspace");
+        mainPage.Should().Contain("OnWorkspaceViewHandlerChanged(WorkspaceView, EventArgs.Empty)",
+            "the handler can already exist before the constructor subscribes to HandlerChanged");
     }
 }

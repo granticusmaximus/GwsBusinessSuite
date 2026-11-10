@@ -50,7 +50,21 @@ public partial class MainPage : ContentPage
         _cameraWatcher = cameraWatcher;
         _touchIdKeys = touchIdKeys;
         _touchIdLock = touchIdLock;
+#if MACCATALYST
+        WorkspaceView.HandlerChanged += OnWorkspaceViewHandlerChanged;
+        OnWorkspaceViewHandlerChanged(WorkspaceView, EventArgs.Empty);
+#endif
     }
+
+#if MACCATALYST
+    private void OnWorkspaceViewHandlerChanged(object? sender, EventArgs e)
+    {
+        if (WorkspaceView.Handler?.PlatformView is WKWebView webView)
+        {
+            MacWebViewCompatibility.Configure(webView);
+        }
+    }
+#endif
 
     protected override async void OnAppearing()
     {
