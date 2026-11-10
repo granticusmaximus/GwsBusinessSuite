@@ -1499,5 +1499,12 @@ public static class DependencyInjection
             client.DefaultRequestHeaders.UserAgent.ParseAdd("GWSuite-Overwatch/1.0 (+https://grantwatson.dev)");
         });
         services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<LuxembourgCitaCameraProvider>());
+        services.AddHttpClient<TransportForNswCameraProvider>(client =>
+        {
+            client.BaseAddress = new Uri("https://data.livetraffic.com/");
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GWSuite-Overwatch/1.0 (+https://grantwatson.dev)");
+        });
+        services.AddScoped<ICameraFeedProvider>(sp => sp.GetRequiredService<TransportForNswCameraProvider>());
     }
 }
