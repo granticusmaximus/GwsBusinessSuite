@@ -26,7 +26,6 @@ public static class MauiProgram
 #if MACCATALYST
 				// MAUI's own Mac picker crashes this Mac-idiom app; see MacMenuPickerHandler.
 				handlers.AddHandler<Picker, MacMenuPickerHandler>();
-				handlers.AddHandler<NativeOverwatchMap, NativeOverwatchMapHandler>();
 #endif
 			})
 			.ConfigureFonts(fonts =>

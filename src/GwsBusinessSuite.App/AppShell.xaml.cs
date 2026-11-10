@@ -5,7 +5,6 @@ public partial class AppShell : Shell
 	public AppShell()
 	{
 		InitializeComponent();
-		Routing.RegisterRoute(nameof(NativeOverwatchPage), typeof(NativeOverwatchPage));
 
 #if MACCATALYST
 		// The Mac window's native toolbar (see Platforms/MacCatalyst/MacWindowToolbar.cs) is the
