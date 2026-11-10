@@ -52,6 +52,8 @@ public sealed class OverwatchCesiumVersionTests
             "the native renderer must suppress WebKit's falsely advertised float-texture extensions");
         tacticalGlobe.Should().Contain("orderIndependentTranslucency: window.__gwsMacCatalystWebView !== true",
             "the native renderer must avoid WebKit's incompatible MRT transparency compositor");
+        tacticalGlobe.Should().Contain("HTMLCanvasElement.prototype.getContext",
+            "the native renderer must block WebKit's falsely advertised float-texture extensions on each Cesium context");
         tacticalGlobe.Should().Contain("viewer.scene.highDynamicRange = false",
             "the portable WebKit renderer must avoid HDR shader variants");
         tacticalGlobe.Should().Contain("viewer.scene.logarithmicDepthBuffer = false",

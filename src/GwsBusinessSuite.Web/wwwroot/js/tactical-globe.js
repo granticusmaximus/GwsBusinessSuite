@@ -119,18 +119,44 @@ window.tacticalGlobe = (function () {
         if (window.__gwsMacCatalystWebView !== true || window.__gwsNativeWebGlCompatibilityInstalled) return;
         window.__gwsNativeWebGlCompatibilityInstalled = true;
 
-        [window.WebGLRenderingContext, window.WebGL2RenderingContext].forEach(function (contextType) {
-            if (!contextType) return;
-            const originalGetExtension = contextType.prototype.getExtension;
-            contextType.prototype.getExtension = function (name) {
-                // This WKWebView advertises float-texture extensions but rejects every Cesium
-                // fragment shader containing the corresponding OES_texture_float* defines,
-                // including a one-line texture copy. Cesium has supported non-float fallback
-                // paths, which are sufficient for the Overwatch globe.
-                if (name === 'OES_texture_float' || name === 'OES_texture_float_linear') return null;
-                return originalGetExtension.call(this, name);
-            };
-        });
+        const blockedExtensions = new Set(['OES_texture_float', 'OES_texture_float_linear']);
+        const originalGetContext = HTMLCanvasElement.prototype.getContext;
+        HTMLCanvasElement.prototype.getContext = function (contextType) {
+            const context = originalGetContext.apply(this, arguments);
+            if (!context || (contextType !== 'webgl' && contextType !== 'webgl2' && contextType !== 'experimental-webgl')) {
+                return context;
+            }
+
+            try {
+                const originalGetExtension = context.getExtension.bind(context);
+                Object.defineProperty(context, 'getExtension', {
+                    configurable: true,
+                    value: function (name) {
+                        // This WKWebView advertises float-texture extensions but rejects every Cesium
+                        // fragment shader containing the corresponding OES_texture_float* defines,
+                        // including a one-line texture copy. Cesium has supported non-float fallback
+                        // paths, which are sufficient for the Overwatch globe.
+                        return blockedExtensions.has(name) ? null : originalGetExtension(name);
+                    }
+                });
+                const originalGetSupportedExtensions = context.getSupportedExtensions.bind(context);
+                Object.defineProperty(context, 'getSupportedExtensions', {
+                    configurable: true,
+                    value: function () {
+                        return originalGetSupportedExtensions().filter(function (name) {
+                            return !blockedExtensions.has(name);
+                        });
+                    }
+                });
+                if (!window.__gwsNativeFloatExtensionBlocked) {
+                    window.__gwsNativeFloatExtensionBlocked = true;
+                    window.__gwsNativeRendererDiagnostic('Blocked float-texture extensions on the Cesium WebGL context.');
+                }
+            } catch (error) {
+                window.__gwsNativeRendererDiagnostic('Could not block float-texture extensions: ' + String(error));
+            }
+            return context;
+        };
     }
 
     installNativeShaderDiagnostics();
