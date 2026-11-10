@@ -114,6 +114,13 @@ public static class MauiProgram
 			"DisableFraudulentWebsiteWarning",
 			(handler, _) => handler.PlatformView.Configuration.Preferences.FraudulentWebsiteWarningEnabled = false);
 #if MACCATALYST
+		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
+			"MacCatalystWebGlCompatibility",
+			(handler, _) => handler.PlatformView.Configuration.UserContentController.AddUserScript(
+				new WebKit.WKUserScript(
+					new Foundation.NSString("window.__gwsMacCatalystWebView = true;"),
+					WebKit.WKUserScriptInjectionTime.AtDocumentStart,
+					false)));
 		// Content Studio's local Ollama calls go through the app (see LocalOllamaBridge).
 		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
 			"LocalOllamaBridge",
