@@ -84,12 +84,38 @@ window.tacticalGlobe = (function () {
     const pinBillboardImage = createPinBillboardImage('#05080a', 2);
     const pinBillboardImageSelected = createPinBillboardImage('#ffe066', 4);
     let nativeRendererFailureReported = false;
+    let latestNativeFragmentShaderSource = '';
 
     function reportNativeRendererFailure(reason) {
         if (nativeRendererFailureReported || typeof window.__gwsNativeRendererDiagnostic !== 'function') return;
         nativeRendererFailureReported = true;
-        window.__gwsNativeRendererDiagnostic(String(reason || '').slice(0, 2000));
+        const shader = latestNativeFragmentShaderSource;
+        const shaderExcerpt = shader.length > 1_500
+            ? shader.slice(0, 900) + '\n...\n' + shader.slice(-600)
+            : shader;
+        const diagnostic = shaderExcerpt
+            ? String(reason || '') + '\nLast fragment shader:\n' + shaderExcerpt
+            : String(reason || '');
+        window.__gwsNativeRendererDiagnostic(diagnostic.slice(0, 2000));
     }
+
+    function installNativeShaderDiagnostics() {
+        if (window.__gwsMacCatalystWebView !== true || window.__gwsNativeShaderDiagnosticsInstalled) return;
+        window.__gwsNativeShaderDiagnosticsInstalled = true;
+
+        [window.WebGLRenderingContext, window.WebGL2RenderingContext].forEach(function (contextType) {
+            if (!contextType) return;
+            const originalShaderSource = contextType.prototype.shaderSource;
+            contextType.prototype.shaderSource = function (shader, source) {
+                if (this.getShaderParameter(shader, this.SHADER_TYPE) === this.FRAGMENT_SHADER) {
+                    latestNativeFragmentShaderSource = String(source || '');
+                }
+                return originalShaderSource.call(this, shader, source);
+            };
+        });
+    }
+
+    installNativeShaderDiagnostics();
 
     function showGlobeFallback(container, reason) {
         if (!container || container.dataset.globeFallback === 'true') return;

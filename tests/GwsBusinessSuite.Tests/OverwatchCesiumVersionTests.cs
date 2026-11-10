@@ -40,6 +40,8 @@ public sealed class OverwatchCesiumVersionTests
             "only the portable Mac Catalyst renderer must avoid WKWebView's WebGL 2 Metal shader path");
         tacticalGlobe.Should().Contain("reportNativeRendererFailure(reason)",
             "a native-only renderer failure must retain the actual WebKit/Cesium diagnostic");
+        tacticalGlobe.Should().Contain("installNativeShaderDiagnostics()",
+            "an empty WebKit shader compiler log must retain the failing shader source locally");
         tacticalGlobe.Should().Contain("viewer.scene.highDynamicRange = false",
             "the portable WebKit renderer must avoid HDR shader variants");
         tacticalGlobe.Should().Contain("viewer.scene.logarithmicDepthBuffer = false",
