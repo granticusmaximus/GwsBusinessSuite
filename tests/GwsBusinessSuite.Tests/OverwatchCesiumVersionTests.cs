@@ -44,6 +44,8 @@ public sealed class OverwatchCesiumVersionTests
             "an empty WebKit shader compiler log must retain the failing shader source locally");
         tacticalGlobe.Should().Contain("viewer.scene.sun.show = false",
             "the native renderer must avoid WebKit's incompatible cosmetic SunTextureFS shader");
+        tacticalGlobe.Should().Contain("orderIndependentTranslucency: window.__gwsMacCatalystWebView !== true",
+            "the native renderer must avoid WebKit's incompatible MRT transparency compositor");
         tacticalGlobe.Should().Contain("viewer.scene.highDynamicRange = false",
             "the portable WebKit renderer must avoid HDR shader variants");
         tacticalGlobe.Should().Contain("viewer.scene.logarithmicDepthBuffer = false",

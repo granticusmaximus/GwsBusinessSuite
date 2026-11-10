@@ -244,6 +244,10 @@ window.tacticalGlobe = (function () {
                 // Draw only when something changed (see renderOnChange), not 60 times a second.
                 requestRenderMode: true,
                 maximumRenderTimeChange: Infinity,
+                // WKWebView reports multiple render targets while compiling Cesium's
+                // order-independent-translucency compositor fails. The effect is optional and
+                // has no bearing on the globe, imagery, or map interaction.
+                orderIndependentTranslucency: window.__gwsMacCatalystWebView !== true,
                 // WKWebView's Metal-backed WebGL path has failed compiling Cesium's HDR,
                 // logarithmic-depth and multisample fragment variants on real Macs. These
                 // options keep the full 3D globe while selecting the portable shader path.
