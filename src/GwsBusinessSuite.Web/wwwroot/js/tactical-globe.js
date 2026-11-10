@@ -263,7 +263,6 @@ window.tacticalGlobe = (function () {
                 // Draw only when something changed (see renderOnChange), not 60 times a second.
                 requestRenderMode: true,
                 maximumRenderTimeChange: Infinity,
-                skyAtmosphere: window.__gwsMacCatalystWebView !== true,
                 // WKWebView reports multiple render targets while compiling Cesium's
                 // order-independent-transparency compositor fails. The effect is optional and
                 // has no bearing on the globe, imagery, or map interaction.
