@@ -6,7 +6,6 @@ namespace GwsBusinessSuite.App;
 internal sealed class RendererDiagnosticsBridge : WKScriptMessageHandler
 {
     public const string Name = "gwsRendererDiagnostics";
-    private static int _externalFallbackOpened;
 
     private static readonly string LogPath =
         Path.Combine(FileSystem.Current.AppDataDirectory, "gws-renderer-diagnostics.log");
@@ -33,10 +32,5 @@ internal sealed class RendererDiagnosticsBridge : WKScriptMessageHandler
         {
             // Diagnostics must never disrupt the hosted workspace.
         }
-
-        if (Interlocked.Exchange(ref _externalFallbackOpened, 1) != 0) return;
-
-        MainThread.BeginInvokeOnMainThread(() =>
-            _ = Launcher.Default.OpenAsync(new Uri($"{AppEndpoints.BaseUrl}/admin/osint")));
     }
 }
