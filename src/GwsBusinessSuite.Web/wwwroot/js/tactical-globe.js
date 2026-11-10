@@ -209,7 +209,19 @@ window.tacticalGlobe = (function () {
                 showRenderLoopErrors: false,
                 // Draw only when something changed (see renderOnChange), not 60 times a second.
                 requestRenderMode: true,
-                maximumRenderTimeChange: Infinity
+                maximumRenderTimeChange: Infinity,
+                // WKWebView's Metal-backed WebGL path has failed compiling Cesium's HDR,
+                // logarithmic-depth and multisample fragment variants on real Macs. These
+                // options keep the full 3D globe while selecting the portable shader path.
+                msaaSamples: 1,
+                contextOptions: {
+                    webgl: {
+                        alpha: false,
+                        antialias: false,
+                        stencil: false,
+                        preserveDrawingBuffer: false
+                    }
+                }
             });
         } catch (error) {
             const message = error && error.message ? error.message : String(error);
@@ -221,6 +233,10 @@ window.tacticalGlobe = (function () {
             throw error;
         }
         const renderTimer = renderOnChange(viewer);
+        viewer.scene.highDynamicRange = false;
+        viewer.scene.logarithmicDepthBuffer = false;
+        viewer.scene.fxaa = false;
+        viewer.scene.useDepthPicking = false;
 
         // Viewer construction can succeed while WebKit/Metal fails only when Cesium compiles a
         // later globe/material variant. Cesium reports that path through Scene.renderError; it

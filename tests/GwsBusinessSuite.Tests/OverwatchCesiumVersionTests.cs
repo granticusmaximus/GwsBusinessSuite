@@ -34,5 +34,11 @@ public sealed class OverwatchCesiumVersionTests
             "Cesium's blocking render-error dialog must not replace the contained globe fallback");
         tacticalGlobe.Should().Contain("viewer.scene.renderError.addEventListener(onRenderError)",
             "shader variants that fail after Viewer construction must use the same fallback");
+        tacticalGlobe.Should().Contain("msaaSamples: 1",
+            "the portable WebKit renderer must avoid multisample shader variants");
+        tacticalGlobe.Should().Contain("viewer.scene.highDynamicRange = false",
+            "the portable WebKit renderer must avoid HDR shader variants");
+        tacticalGlobe.Should().Contain("viewer.scene.logarithmicDepthBuffer = false",
+            "the portable WebKit renderer must avoid logarithmic-depth shader variants");
     }
 }
