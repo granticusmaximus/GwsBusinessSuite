@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # Working in this repo
 
 ## No push authorization

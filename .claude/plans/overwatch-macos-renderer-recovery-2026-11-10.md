@@ -24,3 +24,13 @@ Restore Overwatch in the Mac Catalyst app's WKWebView without changing the worki
 ## Acceptance boundary
 
 A successful build and source tests do not prove the WKWebView renderer works. Completion requires loading Overwatch in the rebuilt, authenticated Mac app and checking both the rendered globe and the native renderer diagnostics log.
+
+## 10-11-26 failure investigation
+
+The visible `3D globe unavailable on this GPU/browser` message is the generic JavaScript fallback
+for a shader compile failure, not a platform block. The current source clears WebView caches,
+installs the Catalyst shader shim at document start, and retries Overwatch once from origin. The
+latest synced commits still require a rebuild and authenticated Mac acceptance. Inspect
+`gws-renderer-diagnostics.log` under the app's `FileSystem.Current.AppDataDirectory` to determine
+whether the shim ran and which fragment shader WebKit rejected; source-only inspection cannot
+identify that device-specific error.
