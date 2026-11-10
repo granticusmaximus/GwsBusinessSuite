@@ -261,18 +261,6 @@ public partial class MainPage : ContentPage
             _ = HandleNativeRequestAsync(nativeUri.Host);
             return;
         }
-#if MACCATALYST
-        if (Uri.TryCreate(args.Url, UriKind.Absolute, out var overwatchUri)
-            && AppEndpoints.IsTrusted(overwatchUri)
-            && string.Equals(overwatchUri.AbsolutePath, "/admin/osint", StringComparison.OrdinalIgnoreCase))
-        {
-            args.Cancel = true;
-            NavigationProgress.IsVisible = false;
-            SlowNavigationNotice.IsVisible = false;
-            OverwatchSafariPresenter.Present(overwatchUri);
-            return;
-        }
-#endif
         SlowNavigationNotice.IsVisible = false;
         NavigationProgress.IsVisible = !LoadingOverlay.IsVisible;
         if (!Uri.TryCreate(args.Url, UriKind.Absolute, out var uri) || AppEndpoints.IsTrusted(uri))
