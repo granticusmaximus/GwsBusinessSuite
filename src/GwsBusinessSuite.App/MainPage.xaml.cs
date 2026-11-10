@@ -33,6 +33,9 @@ public partial class MainPage : ContentPage
     private bool _wasOffline;
     private bool _startedLoading;
     private CancellationTokenSource? _navigationTimeoutCts;
+#if MACCATALYST
+    private bool _nativeOverwatchCompatibilityReloaded;
+#endif
 
     private readonly CameraWatcher _cameraWatcher;
 
@@ -69,6 +72,9 @@ public partial class MainPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+#if MACCATALYST
+        OnWorkspaceViewHandlerChanged(WorkspaceView, EventArgs.Empty);
+#endif
         if (!_connectivitySubscribed)
         {
             Connectivity.Current.ConnectivityChanged += OnConnectivityChanged;
@@ -525,7 +531,7 @@ public partial class MainPage : ContentPage
 #endif
     }
 
-    private void OnWorkspaceNavigated(object? sender, WebNavigatedEventArgs args)
+    private async void OnWorkspaceNavigated(object? sender, WebNavigatedEventArgs args)
     {
         DebugLog($"OnWorkspaceNavigated url={args.Url} result={args.Result}");
         StopNavigationTimeout();
@@ -548,6 +554,20 @@ public partial class MainPage : ContentPage
         if (args.Result == WebNavigationResult.Success)
         {
             StatusOverlay.IsVisible = false;
+#if MACCATALYST
+            if (WorkspaceView.Handler?.PlatformView is WKWebView webView)
+            {
+                MacWebViewCompatibility.Configure(webView);
+                await WorkspaceView.EvaluateJavaScriptAsync(MacWebViewCompatibility.Script);
+                if (!_nativeOverwatchCompatibilityReloaded
+                    && args.Url.Contains("/admin/osint", StringComparison.OrdinalIgnoreCase))
+                {
+                    _nativeOverwatchCompatibilityReloaded = true;
+                    webView.ReloadFromOrigin();
+                    return;
+                }
+            }
+#endif
             _ = OfferTouchIdOnceAsync(args.Url);
             _ = VerifyTouchIdSessionAsync(args.Url);
             return;
