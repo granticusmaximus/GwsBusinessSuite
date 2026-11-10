@@ -48,6 +48,8 @@ public sealed class OverwatchCesiumVersionTests
             "the native renderer must avoid WebKit's incompatible cosmetic EllipsoidFS moon shader");
         tacticalGlobe.Should().Contain("viewer.scene.postProcessStages.enabled = false",
             "the native renderer must avoid WebKit's incompatible pass-through compositor shader");
+        tacticalGlobe.Should().Contain("installNativeWebGlCompatibility()",
+            "the native renderer must suppress WebKit's falsely advertised float-texture extensions");
         tacticalGlobe.Should().Contain("orderIndependentTranslucency: window.__gwsMacCatalystWebView !== true",
             "the native renderer must avoid WebKit's incompatible MRT transparency compositor");
         tacticalGlobe.Should().Contain("viewer.scene.highDynamicRange = false",

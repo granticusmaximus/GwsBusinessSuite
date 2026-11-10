@@ -115,7 +115,26 @@ window.tacticalGlobe = (function () {
         });
     }
 
+    function installNativeWebGlCompatibility() {
+        if (window.__gwsMacCatalystWebView !== true || window.__gwsNativeWebGlCompatibilityInstalled) return;
+        window.__gwsNativeWebGlCompatibilityInstalled = true;
+
+        [window.WebGLRenderingContext, window.WebGL2RenderingContext].forEach(function (contextType) {
+            if (!contextType) return;
+            const originalGetExtension = contextType.prototype.getExtension;
+            contextType.prototype.getExtension = function (name) {
+                // This WKWebView advertises float-texture extensions but rejects every Cesium
+                // fragment shader containing the corresponding OES_texture_float* defines,
+                // including a one-line texture copy. Cesium has supported non-float fallback
+                // paths, which are sufficient for the Overwatch globe.
+                if (name === 'OES_texture_float' || name === 'OES_texture_float_linear') return null;
+                return originalGetExtension.call(this, name);
+            };
+        });
+    }
+
     installNativeShaderDiagnostics();
+    installNativeWebGlCompatibility();
 
     function showGlobeFallback(container, reason) {
         if (!container || container.dataset.globeFallback === 'true') return;
