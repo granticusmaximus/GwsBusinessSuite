@@ -266,7 +266,7 @@ window.tacticalGlobe = (function () {
                 // WKWebView reports multiple render targets while compiling Cesium's
                 // order-independent-transparency compositor fails. The effect is optional and
                 // has no bearing on the globe, imagery, or map interaction.
-                orderIndependentTransparency: window.__gwsMacCatalystWebView !== true,
+                orderIndependentTranslucency: window.__gwsMacCatalystWebView !== true,
                 // WKWebView's Metal-backed WebGL path has failed compiling Cesium's HDR,
                 // logarithmic-depth and multisample fragment variants on real Macs. These
                 // options keep the full 3D globe while selecting the portable shader path.
