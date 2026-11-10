@@ -287,6 +287,7 @@ window.tacticalGlobe = (function () {
             // 3D globe while avoiding their incompatible shaders.
             viewer.scene.sun.show = false;
             viewer.scene.moon.show = false;
+            viewer.scene.postProcessStages.enabled = false;
         }
 
         // Viewer construction can succeed while WebKit/Metal fails only when Cesium compiles a
