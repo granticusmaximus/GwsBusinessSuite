@@ -36,8 +36,17 @@ public sealed record WorldNewsMapSignal(
     public double Longitude => Location.Longitude;
 }
 
-public sealed record WorldNewsMapSource(string Outlet, string Title, string Url);
+// The original-language headline is retained even when a previously generated English
+// translation is available. The map never generates translations or sends source content to a
+// third party; it only reuses World News's stored, user-visible translation.
+public sealed record WorldNewsMapSource(string Outlet, string Title, string Url, string Language = "Unknown",
+    string? EnglishTitle = null);
 public sealed record WorldNewsRouteItem(WorldNewsMapSignal Signal, string Reason);
+public sealed record WorldNewsLocalLens(
+    IReadOnlyList<WorldNewsMapSignal> Signals,
+    int CityLevelCount,
+    int CountryLevelCount,
+    IReadOnlyList<string> Countries);
 // A country's share of the placed stories, for Overwatch's country shading.
 public sealed record WorldNewsCountryTotal(string Code, string Name, int Outlets, IReadOnlyList<(string Id, string Title)> Stories);
 // One edition country reporting a story, for the coverage lines.
@@ -79,6 +88,30 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
             .Take(Math.Min(limit, MaximumSignals))
             .Select(item => Project(item.Situation, item.Location, growth))
             .ToList();
+    }
+
+    // Global Local Lens is deliberately inclusive: the viewport decides relevance, not a
+    // country allow-list. At city scale, city placements nearest the view centre lead; country
+    // placements remain available for regional stories rather than disappearing.
+    public WorldNewsLocalLens LocalLens(BoundingBox bounds, DateTimeOffset since, DateTimeOffset? at = null,
+        IReadOnlyCollection<string>? kinds = null, int limit = MaximumSignals)
+    {
+        if (limit <= 0) return new([], 0, 0, []);
+        var centerLatitude = (bounds.North + bounds.South) / 2;
+        var centerLongitude = ViewCenterLongitude(bounds);
+        var growth = Growth();
+        var placed = Placed(since, kinds, at)
+            .Where(item => bounds.Contains(item.Location.Latitude, item.Location.Longitude))
+            .Select(item => Project(item.Situation, item.Location, growth))
+            .OrderBy(signal => signal.Location.City is null ? 1 : 0)
+            .ThenBy(signal => DistanceSquared(signal.Latitude, signal.Longitude, centerLatitude, centerLongitude))
+            .ThenByDescending(signal => signal.OutletCount)
+            .ThenByDescending(signal => signal.LastSeen)
+            .Take(Math.Min(limit, MaximumSignals))
+            .ToList();
+        return new(placed, placed.Count(signal => signal.Location.City is not null),
+            placed.Count(signal => signal.Location.City is null),
+            placed.Select(signal => signal.Country).Distinct(StringComparer.OrdinalIgnoreCase).Order().ToList());
     }
 
     // How close a city-level story has to be to a watched route, and how far back trips look
@@ -261,13 +294,17 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
             .DistinctBy(a => a.Outlet, StringComparer.OrdinalIgnoreCase)
             .OrderByDescending(a => a.SeenAt)
             .Take(4)
-            .Select(a => new WorldNewsMapSource(a.Outlet, a.Title, a.Url))
+            .ToList();
+        var translations = store.Translations(sources.Select(article => article.Id));
+        var mappedSources = sources
+            .Select(article => new WorldNewsMapSource(article.Outlet, article.Title, article.Url, article.Language,
+                translations.GetValueOrDefault(article.Id)))
             .ToList();
         // The summary often names the city the headline leaves out ("near Madrid, in Toledo province").
         if (location.Precision == WorldNewsPrecision.Country && summary is not null
             && Locate(situation.Title, situation.Latest, summary) is { City: not null } sharper && sharper.CountryCode == location.CountryCode)
             location = sharper;
-        return new Details(summary, sources, location, latestEvent?.Id);
+        return new Details(summary, mappedSources, location, latestEvent?.Id);
     }
 
     public static WorldNewsLocation? Locate(string title, string latest, string? detail = null) =>
@@ -285,4 +322,17 @@ public sealed class WorldNewsMapService(WorldNewsStore store, WorldNewsMapCache?
         var countries = signals.Select(s => s.Country).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         return (signals.Count, signals.Sum(s => s.OutletCount), countries);
     }
+
+    private static double ViewCenterLongitude(BoundingBox bounds) =>
+        bounds.West <= bounds.East ? (bounds.West + bounds.East) / 2 : NormalizeLongitude((bounds.West + bounds.East + 360) / 2);
+
+    private static double DistanceSquared(double latitude, double longitude, double centerLatitude, double centerLongitude)
+    {
+        var longitudeDelta = Math.Abs(longitude - centerLongitude);
+        longitudeDelta = Math.Min(longitudeDelta, 360 - longitudeDelta);
+        var latitudeDelta = latitude - centerLatitude;
+        return latitudeDelta * latitudeDelta + longitudeDelta * longitudeDelta;
+    }
+
+    private static double NormalizeLongitude(double longitude) => longitude > 180 ? longitude - 360 : longitude;
 }

@@ -63,4 +63,38 @@ public sealed class NativeOverwatchRendererContractTests
                 "the native renderer must receive every set/clear payload that the web renderer receives");
         }
     }
+
+    [Fact]
+    public void PayloadAdapter_ShouldRetainEveryMappedPayloadWithoutRewritingIt()
+    {
+        using var document = System.Text.Json.JsonDocument.Parse("""{"privateNote":"only-this-user","pins":[{"lat":42.1,"lon":-71.2}]}""");
+        var viewport = new NativeOverwatchViewport(
+            "2026-11-10",
+            DateTimeOffset.UtcNow,
+            new NativeOverwatchViewportRequest(new NativeOverwatchBounds(45, 40, -70, -75), new NativeOverwatchControls(WorldNews: true)),
+            [new NativeOverwatchCommand(NativeOverwatchOperations.SetMapNotes, document.RootElement)]);
+        var adapter = new NativeOverwatchPayloadAdapter();
+
+        adapter.Apply(viewport, "2026-11-10");
+
+        adapter.Request!.Controls.WorldNews.Should().BeTrue();
+        adapter.TryGetPayload(NativeOverwatchOperations.SetMapNotes, out var payload).Should().BeTrue();
+        payload.GetProperty("privateNote").GetString().Should().Be("only-this-user");
+        payload.GetProperty("pins")[0].GetProperty("lat").GetDouble().Should().Be(42.1);
+    }
+
+    [Fact]
+    public void PayloadAdapter_ShouldRejectUnknownOperationsAndContractVersions()
+    {
+        using var document = System.Text.Json.JsonDocument.Parse("{}");
+        var request = new NativeOverwatchViewportRequest(new NativeOverwatchBounds(45, 40, -70, -75), new NativeOverwatchControls());
+        var adapter = new NativeOverwatchPayloadAdapter();
+
+        Action wrongVersion = () => adapter.Apply(new NativeOverwatchViewport("other", DateTimeOffset.UtcNow, request, []), "2026-11-10");
+        Action unknownOperation = () => adapter.Apply(new NativeOverwatchViewport(
+            "2026-11-10", DateTimeOffset.UtcNow, request, [new NativeOverwatchCommand("setUntrustedLayer", document.RootElement)]), "2026-11-10");
+
+        wrongVersion.Should().Throw<InvalidOperationException>();
+        unknownOperation.Should().Throw<InvalidOperationException>();
+    }
 }

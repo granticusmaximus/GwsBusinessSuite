@@ -69,6 +69,7 @@ public static class MauiProgram
 		builder.Services.AddSingleton<NativeFallbackChatService>();
 		builder.Services.AddTransient<MainPage>();
 		builder.Services.AddSingleton<NativeSessionClient>();
+		builder.Services.AddSingleton<NativeOverwatchContractClient>();
 		builder.Services.AddSingleton<CameraWatcher>();
 		builder.Services.AddTransient<VoiceNotesPage>();
 		builder.Services.AddTransient<CapturePage>();

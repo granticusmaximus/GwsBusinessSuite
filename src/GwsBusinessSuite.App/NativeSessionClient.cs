@@ -331,6 +331,11 @@ public sealed class NativeSessionClient(HttpClient httpClient)
     public async Task<(JsonElement? Json, string? Error)> GetCameraWatchListAsync(CancellationToken cancellationToken = default) =>
         await GetJsonAsync("/admin/api/native/overwatch/watch-list", cancellationToken);
 
+    // The native renderer uses the Workspace WebView's admin cookie, exactly like camera watch
+    // and Quick Notes. It never uses an API key and therefore cannot see another user's notes.
+    public async Task<(JsonElement? Json, string? Error)> GetNativeOverwatchContractAsync(CancellationToken cancellationToken = default) =>
+        await GetJsonAsync(NativeOverwatchContractClient.ContractPath, cancellationToken);
+
     public async Task<byte[]?> GetCameraWatchSnapshotAsync(string cameraId, CancellationToken cancellationToken = default)
     {
         using var request = await SessionRequestAsync(HttpMethod.Get, $"/admin/api/native/overwatch/watch-snapshot?id={Uri.EscapeDataString(cameraId)}");

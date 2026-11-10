@@ -2,7 +2,7 @@
 
 namespace GwsBusinessSuite.App;
 
-public partial class App : Application
+public partial class App : Microsoft.Maui.Controls.Application
 {
 	private readonly OfflineSyncService _offlineSync;
 	private readonly NativeSessionClient _session;

@@ -78,6 +78,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\GwsBusinessSuite.Application\GwsBusinessSuite.Application.csproj" />
 		<ProjectReference Include="..\GwsBusinessSuite.OllamaKit\GwsBusinessSuite.OllamaKit.csproj" />
 		<ProjectReference Include="..\GwsBusinessSuite.SentinelAgentKit\GwsBusinessSuite.SentinelAgentKit.csproj" />
 	</ItemGroup>

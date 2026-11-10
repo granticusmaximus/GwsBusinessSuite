@@ -6,11 +6,16 @@ namespace GwsBusinessSuite.Application.CameraIntel;
 // Camera.computeViewRectangle() returns with no reprojection needed.
 public sealed record BoundingBox(double North, double South, double East, double West)
 {
-    // Doesn't handle an antimeridian-crossing view (West > East, e.g. centered near +/-180deg
-    // longitude) - an acceptable v1 gap since no pilot provider has cameras anywhere near there.
     public bool Contains(double latitude, double longitude) =>
-        latitude <= North && latitude >= South && longitude <= East && longitude >= West;
+        latitude <= North && latitude >= South &&
+        (West <= East
+            ? longitude >= West && longitude <= East
+            : longitude >= West || longitude <= East);
 
     public bool Intersects(BoundingBox other) =>
-        South <= other.North && North >= other.South && West <= other.East && East >= other.West;
+        South <= other.North && North >= other.South &&
+        LongitudeIntervals().Any(left => other.LongitudeIntervals().Any(right => left.Start <= right.End && left.End >= right.Start));
+
+    private IReadOnlyList<(double Start, double End)> LongitudeIntervals() =>
+        West <= East ? [(West, East)] : [(West, 180), (-180, East)];
 }
