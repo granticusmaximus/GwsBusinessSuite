@@ -116,11 +116,22 @@ public static class MauiProgram
 #if MACCATALYST
 		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
 			"MacCatalystWebGlCompatibility",
-			(handler, _) => handler.PlatformView.Configuration.UserContentController.AddUserScript(
-				new WebKit.WKUserScript(
-					new Foundation.NSString("window.__gwsMacCatalystWebView = true;"),
-					WebKit.WKUserScriptInjectionTime.AtDocumentStart,
-					false)));
+			(handler, _) =>
+			{
+				handler.PlatformView.Configuration.UserContentController.AddUserScript(
+					new WebKit.WKUserScript(
+						new Foundation.NSString("""
+							window.__gwsMacCatalystWebView = true;
+							window.__gwsNativeRendererDiagnostic = function (message) {
+								try {
+									window.webkit.messageHandlers.gwsRendererDiagnostics.postMessage(String(message).slice(0, 2000));
+								} catch (_) {}
+							};
+							"""),
+						WebKit.WKUserScriptInjectionTime.AtDocumentStart,
+						false));
+				RendererDiagnosticsBridge.Attach(handler.PlatformView);
+			});
 		// Content Studio's local Ollama calls go through the app (see LocalOllamaBridge).
 		Microsoft.Maui.Handlers.WebViewHandler.Mapper.AppendToMapping(
 			"LocalOllamaBridge",

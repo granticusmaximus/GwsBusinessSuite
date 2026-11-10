@@ -83,6 +83,13 @@ window.tacticalGlobe = (function () {
 
     const pinBillboardImage = createPinBillboardImage('#05080a', 2);
     const pinBillboardImageSelected = createPinBillboardImage('#ffe066', 4);
+    let nativeRendererFailureReported = false;
+
+    function reportNativeRendererFailure(reason) {
+        if (nativeRendererFailureReported || typeof window.__gwsNativeRendererDiagnostic !== 'function') return;
+        nativeRendererFailureReported = true;
+        window.__gwsNativeRendererDiagnostic(String(reason || '').slice(0, 2000));
+    }
 
     function showGlobeFallback(container, reason) {
         if (!container || container.dataset.globeFallback === 'true') return;
@@ -121,6 +128,7 @@ window.tacticalGlobe = (function () {
         const reason = error && error.message ? error.message : String(error || '');
         if (!isShaderFailureReason(reason)) return false;
 
+        reportNativeRendererFailure(reason);
         const container = document.getElementById(containerId);
         if (viewers.has(containerId)) {
             // Scene.renderError fires inside Cesium's render pass. Defer destruction until that
@@ -232,6 +240,7 @@ window.tacticalGlobe = (function () {
         } catch (error) {
             const message = error && error.message ? error.message : String(error);
             if (isShaderFailureReason(message)) {
+                reportNativeRendererFailure(message);
                 console.warn('Overwatch 3D globe unavailable on this GPU/browser; falling back to a non-3D placeholder.', error);
                 showGlobeFallback(container, message);
                 return null;
