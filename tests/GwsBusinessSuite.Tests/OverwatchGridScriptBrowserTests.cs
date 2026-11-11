@@ -1294,7 +1294,10 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
             () => {
               window.__mockInvoke = {
                 WorldNewsContextAsync: { backing: [{ source: 'USGS', text: 'M 5.4 - 12 km NE of Tokyo, Japan', url: null }],
-                  precise: true, cameras: [], alerts: ['Flood Warning'], hazards: [], outages: [] },
+                                    precise: true, cameras: [], alerts: ['Flood Warning'], hazards: [], outages: [],
+                                    aircraft: [{ callsign: 'NH123', country: 'Japan', miles: 4.2, altitudeFeet: 29000, speedKnots: 420 }],
+                                    ships: [{ name: 'Kanto Maru', type: 'Cargo', destination: 'Tokyo', miles: 8.1, speedKnots: 12, seenAt: '10-11-26 14:05' }],
+                                    aircraftNote: null, shipsNote: null },
                 WorldNewsTimeline: [
                   { title: 'Quake shakes Tokyo', at: '28-10-26 09:00', outlets: 4, place: 'Tokyo, Japan', lat: 35.7, lon: 139.7 },
                   { title: 'Aftershocks hit Sendai', at: '29-10-26 06:30', outlets: 9, place: 'Sendai, Japan', lat: 38.3, lon: 140.9 }
@@ -1313,7 +1316,9 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         await page.WaitForFunctionAsync("document.querySelector('.tg-world-news-context')?.textContent.includes('BACKED BY')",
             null, new PageWaitForFunctionOptions { Timeout = 5000 });
         var context = await page.TextContentAsync(".tg-world-news-context");
-        context.Should().Contain("USGS: M 5.4 - 12 km NE of Tokyo, Japan").And.Contain("WEATHER ALERTS").And.Contain("Flood Warning");
+        context.Should().Contain("USGS: M 5.4 - 12 km NE of Tokyo, Japan").And.Contain("WEATHER ALERTS").And.Contain("Flood Warning")
+            .And.Contain("AIRCRAFT NEARBY").And.Contain("Flight NH123").And.Contain("VESSELS NEARBY").And.Contain("Kanto Maru")
+            .And.Contain("do not confirm the reported event");
 
         await page.ClickAsync(".tg-world-news-play-button");
         await page.WaitForFunctionAsync("document.querySelector('.tg-world-news-step')?.textContent.includes('EVENT 1 OF 2')",

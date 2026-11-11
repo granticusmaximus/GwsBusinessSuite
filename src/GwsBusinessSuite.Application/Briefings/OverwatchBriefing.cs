@@ -1,7 +1,10 @@
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using GwsBusinessSuite.Application.Abstractions;
+using GwsBusinessSuite.Application.CameraIntel;
 using GwsBusinessSuite.Application.Hazards;
+using GwsBusinessSuite.Application.LiveLayers;
 using GwsBusinessSuite.Application.RouteWatch;
 using GwsBusinessSuite.Application.TrafficIncidents;
 using GwsBusinessSuite.Application.Weather;
@@ -24,6 +27,7 @@ public static partial class OverwatchBriefing
     private const int MaxAlerts = 4;
     private const int MaxHazards = 4;
     private const int MaxCameras = 4;
+    private const int MaxLiveSensors = 3;
     // A camera-watch reading older than this says nothing about now.
     private static readonly TimeSpan CameraReadingAge = TimeSpan.FromHours(2);
     private static readonly HashSet<string> BriefedCategories =
@@ -58,6 +62,43 @@ public static partial class OverwatchBriefing
         var onRoute = route.Path.Count == 0 ? cameras : cameras.Where(c => NearPath(route.Path, c.Latitude, c.Longitude));
         AddCommon(builder, at, route.Alerts, [], onRoute);
         return new BriefingFacts(scope, at, builder.Facts);
+    }
+
+    // Live aircraft and AIS positions are nearby context, not evidence that a reported event occurred.
+    public static BriefingFacts AddSensorContext(
+        BriefingFacts facts,
+        BoundingBox bounds,
+        IEnumerable<Aircraft> aircraft,
+        IEnumerable<Ship> ships,
+        string? aircraftNote = null,
+        string? shipsNote = null)
+    {
+        var combined = facts.Facts.ToList();
+        void Add(string kind, string text, double latitude, double longitude) =>
+            combined.Add(new BriefingFact(combined.Count + 1, kind, text, latitude, longitude));
+
+        foreach (var item in aircraft.Where(a => bounds.Contains(a.Latitude, a.Longitude)).Take(MaxLiveSensors))
+        {
+            var name = string.IsNullOrWhiteSpace(item.Callsign) ? item.Icao24 : item.Callsign;
+            var details = new List<string> { $"{name} · {item.Country}" };
+            if (item.AltitudeFeet is { } altitude) details.Add($"{altitude:0} ft");
+            if (item.SpeedKnots is { } speed) details.Add($"{speed:0} kt");
+            Add("aircraft", $"OpenSky live position: {string.Join(", ", details)}; nearby context only, not confirmation of a reported event.",
+                item.Latitude, item.Longitude);
+        }
+        foreach (var item in ships.Where(s => bounds.Contains(s.Latitude, s.Longitude)).Take(MaxLiveSensors))
+        {
+            var name = string.IsNullOrWhiteSpace(item.Name) ? item.Mmsi.ToString(CultureInfo.InvariantCulture) : item.Name;
+            var details = new List<string> { name };
+            if (!string.IsNullOrWhiteSpace(item.ShipType)) details.Add(item.ShipType);
+            if (!string.IsNullOrWhiteSpace(item.Destination)) details.Add($"to {item.Destination}");
+            if (item.SpeedKnots is { } speed) details.Add($"{speed:0} kt");
+            Add("vessel", $"AIS last reported {string.Join(", ", details)} at {item.SeenAt.ToLocalGwsDateTime()}; nearby context only, not confirmation of a reported event.",
+                item.Latitude, item.Longitude);
+        }
+        if (aircraftNote is not null) Add("sensor-note", $"OpenSky aircraft feed: {aircraftNote}", bounds.South, bounds.West);
+        if (shipsNote is not null) Add("sensor-note", $"AIS vessel feed: {shipsNote}", bounds.South, bounds.West);
+        return facts with { Facts = combined };
     }
 
     private static void AddCommon(FactList builder, DateTimeOffset at, IEnumerable<WeatherAlert> alerts,

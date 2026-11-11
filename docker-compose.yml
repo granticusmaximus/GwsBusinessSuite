@@ -17,9 +17,10 @@ services:
       # Admin pages format times with ToLocalTime(), which follows the container's zone - UTC
       # unless set. Override with TZ=... in .env if the business moves.
       TZ: ${TZ:-America/New_York}
-      # The droplet hosts no model runtime. AI generation and embeddings run on the signed-in
-      # Mac through the native relays; ordinary web/database/public-site work remains here.
-      ServerAi__Mode: None
+      # Default to no model runtime, using the native relay for approved shared work. Deployments
+      # with a separate Ollama host may opt in through their private .env (SERVER_AI_MODE=Light)
+      # and ContentStudio__BaseUrl; no inference endpoint or credential belongs in this file.
+      ServerAi__Mode: ${SERVER_AI_MODE:-None}
       # Email (form-submission notifications, Growth reports, bookings, campaigns, the client
       # portal) all fall back to ONE shared SMTP section - set it once in the gitignored .env:
       #   Smtp__Host=smtp.yourprovider.com   Smtp__Port=587   Smtp__Security=StartTls

@@ -11,8 +11,12 @@ namespace GwsBusinessSuite.Infrastructure.Services;
 // An official signal that matches a reported story in kind, place and time.
 public sealed record WorldNewsBacking(string Source, string Text, string? Url);
 public sealed record WorldNewsNearbyCamera(CameraFeed Camera, double Miles);
+public sealed record WorldNewsNearbyAircraft(Aircraft Aircraft, double Miles);
+public sealed record WorldNewsNearbyShip(Ship Ship, double Miles);
 public sealed record WorldNewsNearby(IReadOnlyList<WorldNewsNearbyCamera> Cameras, IReadOnlyList<WeatherAlert> Alerts,
-    IReadOnlyList<HazardFeature> Hazards, IReadOnlyList<PowerOutageArea> Outages);
+    IReadOnlyList<HazardFeature> Hazards, IReadOnlyList<PowerOutageArea> Outages,
+    IReadOnlyList<WorldNewsNearbyAircraft> Aircraft, IReadOnlyList<WorldNewsNearbyShip> Ships,
+    string? AircraftNote, string? ShipsNote);
 // Nearby is null for a story placed only at a country: "near" a country's centre means nothing.
 public sealed record WorldNewsStoryContext(IReadOnlyList<WorldNewsBacking> Backing, WorldNewsNearby? Nearby);
 
@@ -25,12 +29,15 @@ public sealed partial class WorldNewsContextService(
     HazardLayerService hazards,
     PowerOutageService outages,
     IncidentCaptureService captures,
-    ILogger<WorldNewsContextService> logger)
+    ILogger<WorldNewsContextService> logger,
+    AircraftService? aircraft = null,
+    ShipService? ships = null)
 {
     public const double NearbyMiles = 25;
     // How far from a city-level story an official signal can be and still back it.
     public const double BackingMiles = 150;
     public const int MaxNearbyCameras = 5;
+    public const int MaxNearbySensors = 5;
     public const double CaptureRadiusMiles = 10;
     private const int OutageBackingCustomers = 1000;
 
@@ -58,16 +65,48 @@ public sealed partial class WorldNewsContextService(
         WorldNewsNearby? nearby = null;
         if (precise)
         {
-            var cameraList = await TryAsync("cameras", () => cameras.GetCamerasInBoundingBoxAsync(Around(lat, lon, NearbyMiles), ct)) ?? [];
+            var bounds = Around(lat, lon, NearbyMiles);
+            var camerasTask = TryAsync("cameras", () => cameras.GetCamerasInBoundingBoxAsync(bounds, ct));
+            var aircraftTask = aircraft is null
+                ? Task.FromResult<AircraftResult?>(null)
+                : TryAsync("aircraft", () => aircraft.GetAsync(bounds, ct));
+            var shipsTask = ships is null
+                ? Task.FromResult<ShipResult?>(null)
+                : TryAsync("ships", () => ships.GetAsync(bounds, ct));
+            await Task.WhenAll(camerasTask, aircraftTask, shipsTask);
+
+            var cameraList = camerasTask.Result ?? [];
+            var aircraftResult = aircraftTask.Result;
+            var shipResult = shipsTask.Result;
             nearby = new WorldNewsNearby(
                 cameraList.Select(c => new WorldNewsNearbyCamera(c, RoadTrafficSummary.Miles(lat, lon, c.Latitude, c.Longitude)))
                     .Where(c => c.Miles <= NearbyMiles).OrderBy(c => c.Miles).Take(MaxNearbyCameras).ToList(),
                 alertList,
                 hazardList.Where(h => RoadTrafficSummary.Miles(lat, lon, h.Latitude, h.Longitude) <= NearbyMiles).ToList(),
-                outageList.Where(a => RoadTrafficSummary.Miles(lat, lon, a.Latitude, a.Longitude) <= NearbyMiles).ToList());
+                outageList.Where(a => RoadTrafficSummary.Miles(lat, lon, a.Latitude, a.Longitude) <= NearbyMiles).ToList(),
+                NearbyAircraft(signal, aircraftResult?.Aircraft ?? []),
+                NearbyShips(signal, shipResult?.Ships ?? []),
+                aircraftResult?.Note,
+                shipResult?.Note);
         }
         return new WorldNewsStoryContext(backing, nearby);
     }
+
+    public static IReadOnlyList<WorldNewsNearbyAircraft> NearbyAircraft(WorldNewsMapSignal signal, IEnumerable<Aircraft> aircraft) =>
+        aircraft.Select(item => new WorldNewsNearbyAircraft(item,
+                RoadTrafficSummary.Miles(signal.Latitude, signal.Longitude, item.Latitude, item.Longitude)))
+            .Where(item => item.Miles <= NearbyMiles)
+            .OrderBy(item => item.Miles)
+            .Take(MaxNearbySensors)
+            .ToList();
+
+    public static IReadOnlyList<WorldNewsNearbyShip> NearbyShips(WorldNewsMapSignal signal, IEnumerable<Ship> ships) =>
+        ships.Select(item => new WorldNewsNearbyShip(item,
+                RoadTrafficSummary.Miles(signal.Latitude, signal.Longitude, item.Latitude, item.Longitude)))
+            .Where(item => item.Miles <= NearbyMiles)
+            .OrderBy(item => item.Miles)
+            .Take(MaxNearbySensors)
+            .ToList();
 
     // The official signals that match the story in kind and place: a quake near a city-level
     // story, or one whose USGS place names a country-level story's country; a fire, flooding gauge,

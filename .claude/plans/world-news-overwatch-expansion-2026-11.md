@@ -8,17 +8,17 @@
   - [ ] 1.3 Add unit tests in `tests/GwsBusinessSuite.Tests/` to verify feed parsing and adaptive thresholds
   - [ ] 1.4 Run tests to verify Unit 1 passes
 
-- [ ] Unit 2: Viewport-Adaptive Geo-Querying (`WorldNewsMapService.cs`, `OverwatchGrid.razor`, `tactical-globe.js`)
-  - [ ] 2.1 Add viewport-based bounding-box news querying endpoint / service method in `WorldNewsMapService`
-  - [ ] 2.2 Wire viewport settle event in `tactical-globe.js` to request location-scoped stories when zoomed in (<2000 km)
-  - [ ] 2.3 Add unit tests for bounding box query logic and distance filtering
-  - [ ] 2.4 Run tests to verify Unit 2 passes
+- [x] Unit 2: Viewport-Adaptive Geo-Querying (`WorldNewsMapService.cs`, `OverwatchGrid.razor`, `tactical-globe.js`)
+  - [x] 2.1 Existing `WorldNewsMapService.SignalsAt` filters mapped situations to the requested bounds.
+  - [x] 2.2 Existing Cesium `camera.moveEnd` handler debounces settled moves and calls `OnGlobeViewChanged`; the component queries World News by those bounds.
+  - [x] 2.3 Added an explicit viewport-only regression test to `WorldNewsMapServiceTests`.
+  - [x] 2.4 Focused World News map tests pass (17 tests).
 
-- [ ] Unit 3: "Brief This View" AI Tactical Intelligence Action (`OverwatchBriefingService.cs`, `OverwatchGrid.razor`)
-  - [ ] 3.1 Implement `BriefViewportAsync(BoundingBox bounds)` in `OverwatchBriefingService` aggregating news, hazards, flights, and weather in view
-  - [ ] 3.2 Wire `BRIEF VIEW` button in Overwatch HUD to trigger viewport briefing modal
-  - [ ] 3.3 Add unit tests in `tests/GwsBusinessSuite.Tests/` for viewport briefing aggregation
-  - [ ] 3.4 Run tests to verify Unit 3 passes
+- [x] Unit 3: "Brief This View" AI Tactical Intelligence Action (`OverwatchBriefingService.cs`, `OverwatchGrid.razor`)
+  - [x] 3.1 Existing `GetViewFactsAsync` gathers bounding-box incidents, weather, hazards, cameras, World News and convergence; it now also adds bounded aircraft/AIS facts.
+  - [x] 3.2 Existing HUD Brief View action now writes with configured server Ollama when `ServerAi` is `Light`/`Full`; `None` retains the plain facts fallback.
+  - [x] 3.3 Added tests for viewport sensor facts and server-mode/model selection.
+  - [x] 3.4 Focused briefing tests pass.
 
 - [ ] Unit 4: Reporting Blackout & Silence Detection (`SignalConvergenceService.cs`, `tactical-globe.js`)
   - [ ] 4.1 Implement silence detection logic (IODA internet outages + NASA fire/conflict signals without news coverage)
@@ -26,12 +26,22 @@
   - [ ] 4.3 Add unit tests verifying reporting blackout criteria
   - [ ] 4.4 Run tests to verify Unit 4 passes
 
-- [ ] Unit 5: Multi-Sensor Correlation Dossier in Story Panel (`tactical-globe.js`, `OverwatchGrid.razor`)
-  - [ ] 5.1 Expand `WorldNewsContextAsync` to query nearby AIS ships and ADS-B aircraft
-  - [ ] 5.2 Display nearby flights and vessels in the Overwatch story detail panel
-  - [ ] 5.3 Add unit tests for expanded story context
-  - [ ] 5.4 Run tests to verify Unit 5 passes
+- [x] Unit 5: Multi-Sensor Correlation Dossier in Story Panel (`tactical-globe.js`, `OverwatchGrid.razor`)
+  - [x] 5.1 `WorldNewsContextService` queries the existing bounded OpenSky and AIS services for city-level stories.
+  - [x] 5.2 The story panel labels aircraft/vessels by source and states nearby sensors do not confirm the reported event.
+  - [x] 5.3 Added service tests for 25-mile filtering and result caps, plus browser-contract assertions.
+  - [x] 5.4 Focused World News context tests pass; browser test source compiles but needs Playwright Chromium to execute.
 
 - [ ] Unit 6: Full Verification & Release Readiness
   - [ ] 6.1 Run full solution test suite
   - [ ] 6.2 Confirm all gates pass cleanly
+
+## 10-11-26 implementation note
+
+- The viewport feature was already implemented before this work; only its plan status and explicit
+  bounding-box regression coverage were missing.
+- Brief View prose now uses `IOllamaService` and `ContentStudio:Model` only when server AI mode is
+  `Light` or `Full`. Compose retains `None` by default; `SERVER_AI_MODE=Light` and
+  `ContentStudio__BaseUrl` must be set in the private `.env` to use the separate inference host.
+- The full suite/browser test and release gate remain unverified here. The docs directory is
+  absent from this checkout.

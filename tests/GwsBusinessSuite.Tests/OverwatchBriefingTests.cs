@@ -1,9 +1,12 @@
 using System.Net;
+using System.Runtime.CompilerServices;
 using FluentAssertions;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Briefings;
 using GwsBusinessSuite.Application.CameraIntel;
+using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Geocoding;
+using GwsBusinessSuite.Application.LiveLayers;
 using GwsBusinessSuite.Application.Hazards;
 using GwsBusinessSuite.Application.RouteWatch;
 using GwsBusinessSuite.Application.TrafficIncidents;
@@ -63,6 +66,27 @@ public sealed class OverwatchBriefingTests : IAsyncDisposable
     }
 
     [Fact]
+    public void AddSensorContext_ShouldBoundFactsToTheViewport_AndLabelThemAsContext()
+    {
+        var bounds = new BoundingBox(36, 35, 141, 139);
+        var facts = new BriefingFacts("Tokyo", Now, [new BriefingFact(1, "news", "A quake was reported.")]);
+        var aircraft = new[]
+        {
+            new Aircraft("a1", "NH123", "Japan", 35.7, 139.7, 29000, 420, 90, 0),
+            new Aircraft("a2", "", "Japan", 33, 139.7, null, null, null, null)
+        };
+        var ships = new[] { new Ship(123, "Kanto Maru", 35.8, 139.8, 12, 90, 90, "Cargo", "Tokyo", Now) };
+
+        var result = OverwatchBriefing.AddSensorContext(facts, bounds, aircraft, ships);
+
+        result.Facts.Select(f => f.Number).Should().Equal(1, 2, 3);
+        result.Facts[1].Should().Match<BriefingFact>(f => f.Kind == "aircraft" && f.Text.Contains("NH123")
+            && f.Text.Contains("context only") && f.Latitude == 35.7);
+        result.Facts[2].Should().Match<BriefingFact>(f => f.Kind == "vessel" && f.Text.Contains("Kanto Maru")
+            && f.Text.Contains("not confirmation") && f.Longitude == 139.8);
+    }
+
+    [Fact]
     public void ForRoute_ShouldOrderIncidentsAlongTheDrive_AndKeepOnlyCamerasNearIt()
     {
         var route = new RouteWatchResult("Macon, GA", "Atlanta, GA", 84, 95, [new RoutePoint(32.84, -83.63), new RoutePoint(33.75, -84.39)], [],
@@ -118,13 +142,42 @@ public sealed class OverwatchBriefingTests : IAsyncDisposable
         _mail.Sent.Should().BeEmpty("no address was given");
     }
 
+    [Fact]
+    public async Task ViewBriefing_ShouldUseTheConfiguredServerModelWhenEnabled()
+    {
+        var model = new RecordingOllama();
+        var service = await CreateAsync(model, ServerAiMode.Light);
+        var facts = new BriefingFacts("Tokyo", Now, [new BriefingFact(1, "news", "A quake was reported near Tokyo.")]);
+        var chunks = new List<string>();
+
+        service.CanWriteViewBriefing.Should().BeTrue();
+        await foreach (var chunk in service.WriteViewBriefingAsync(facts)) chunks.Add(chunk);
+
+        model.Model.Should().Be("remote-brief-model");
+        model.UserPrompt.Should().Contain("[1] A quake was reported near Tokyo.");
+        model.OutputTokenLimit.Should().Be(OverwatchBriefingService.MaxViewBriefingTokens);
+        chunks.Should().Equal("Reported ", "change [1].");
+    }
+
+    [Fact]
+    public async Task ViewBriefing_ShouldNotUseAMacRelayWhenServerInferenceIsDisabled()
+    {
+        var model = new RecordingOllama();
+        var service = await CreateAsync(model, ServerAiMode.None);
+        var facts = new BriefingFacts("Tokyo", Now, [new BriefingFact(1, "news", "A quake was reported near Tokyo.")]);
+
+        service.CanWriteViewBriefing.Should().BeFalse();
+        await foreach (var _ in service.WriteViewBriefingAsync(facts)) { }
+        model.Model.Should().BeNull();
+    }
+
     private static OverwatchCameraWatchState Camera(string name, DateTimeOffset checkedAt, double lat = 33.75, double lon = -84.39) => new()
     {
         Username = "grant", CameraId = name, CameraName = name, LastLevel = "bad", LastSummary = "traffic stopped",
         Latitude = lat, Longitude = lon, LastCheckedUnix = checkedAt.ToUnixTimeSeconds()
     };
 
-    private async Task<OverwatchBriefingService> CreateAsync()
+    private async Task<OverwatchBriefingService> CreateAsync(IOllamaService? ollama = null, ServerAiMode serverAiMode = ServerAiMode.None)
     {
         await _connection.OpenAsync();
         _options = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connection).Options;
@@ -144,7 +197,43 @@ public sealed class OverwatchBriefingTests : IAsyncDisposable
             new RouteWatchService(http, new NoGeocoding(), new CameraDirectoryService([], NullLogger<CameraDirectoryService>.Instance), incidents, new NoAlerts(), NullLogger<RouteWatchService>.Instance),
             _notifier,
             Options.Create(new GrowthReportEmailOptions { Host = "smtp.example.com", FromAddress = "noreply@example.com" }),
-            _clock, NullLogger<OverwatchBriefingService>.Instance, _mail);
+            _clock, NullLogger<OverwatchBriefingService>.Instance, _mail,
+            serverAiOptions: Options.Create(new ServerAiOptions { Mode = serverAiMode }),
+            contentStudioOptions: Options.Create(new ContentStudioOptions { Model = "remote-brief-model" }),
+            ollama: ollama);
+    }
+
+    private sealed class RecordingOllama : IOllamaService
+    {
+        public string? Model { get; private set; }
+        public string? UserPrompt { get; private set; }
+        public int? OutputTokenLimit { get; private set; }
+
+        public Task<string> GenerateAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, CancellationToken ct = default) =>
+            StreamAsync(model, userPrompt, null, ct);
+
+        public IAsyncEnumerable<string> GenerateStreamAsync(string model, string systemPrompt, string userPrompt, int maxOutputTokens, CancellationToken ct = default) =>
+            StreamAsync(model, userPrompt, maxOutputTokens, ct);
+
+        private async IAsyncEnumerable<string> StreamAsync(string model, string userPrompt, int? outputTokenLimit,
+            [EnumeratorCancellation] CancellationToken ct)
+        {
+            Model = model;
+            UserPrompt = userPrompt;
+            OutputTokenLimit = outputTokenLimit;
+            await Task.Yield();
+            ct.ThrowIfCancellationRequested();
+            yield return "Reported ";
+            yield return "change [1].";
+        }
+
+        public Task<IReadOnlyCollection<string>> ListModelsAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyCollection<string>>([]);
+        public Task PullModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteModelAsync(string model, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<string> GenerateImageAsync(string model, string prompt, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     public async ValueTask DisposeAsync() => await _connection.DisposeAsync();

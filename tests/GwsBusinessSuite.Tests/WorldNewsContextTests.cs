@@ -47,6 +47,29 @@ public sealed class WorldNewsContextTests
             .Should().Equal("NWS", "Power outages");
     }
 
+    [Fact]
+    public void NearbySensors_ShouldKeepOnlyTheClosestAircraftAndVesselsWithin25Miles()
+    {
+        var story = Signal("Ship collision reported near Tokyo", "Tokyo", "JP", "Japan", 35.69, 139.69);
+        var aircraft = Enumerable.Range(1, WorldNewsContextService.MaxNearbySensors + 1)
+            .Select(index => new Aircraft($"icao-{index}", $"Flight {index}", "Japan",
+                35.69 + index * 0.01, 139.69, 10000, 250, 90, 0))
+            .Append(new Aircraft("far", "Far flight", "Japan", 36.2, 140.4, 10000, 250, 90, 0));
+        var ships = Enumerable.Range(1, WorldNewsContextService.MaxNearbySensors + 1)
+            .Select(index => new Ship(index, $"Vessel {index}", 35.69, 139.69 + index * 0.01,
+                10, 90, 90, "Cargo", "Tokyo", Now))
+            .Append(new Ship(99, "Far vessel", 36.2, 140.4, 10, 90, 90, "Cargo", "Tokyo", Now));
+
+        WorldNewsContextService.NearbyAircraft(story, aircraft).Should()
+            .HaveCount(WorldNewsContextService.MaxNearbySensors)
+            .And.OnlyContain(item => item.Miles <= WorldNewsContextService.NearbyMiles)
+            .And.BeInAscendingOrder(item => item.Miles);
+        WorldNewsContextService.NearbyShips(story, ships).Should()
+            .HaveCount(WorldNewsContextService.MaxNearbySensors)
+            .And.OnlyContain(item => item.Miles <= WorldNewsContextService.NearbyMiles)
+            .And.BeInAscendingOrder(item => item.Miles);
+    }
+
     private static HazardFeature Hazard(string kind, string title, double lat, double lon) =>
         new($"{kind}-{lat}", kind, title, string.Empty, lat, lon, "moderate", "https://example.test/hazard", Now.AddHours(-2));
 

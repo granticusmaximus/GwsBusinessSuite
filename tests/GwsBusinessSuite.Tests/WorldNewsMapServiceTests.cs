@@ -138,6 +138,19 @@ public sealed class WorldNewsMapServiceTests
     }
 
     [Fact]
+    public void Signals_ShouldReturnOnlyStoriesLocatedInsideTheSettledViewport()
+    {
+        using var temp = new WorldNewsTestStore();
+        temp.SeedSituation("tokyo", "Earthquake shakes Tokyo, Japan", "Aftershocks continue near Tokyo");
+        temp.SeedSituation("lima", "Flooding disrupts Lima, Peru", "Flood response expands in Lima");
+        var map = new WorldNewsMapService(temp.Store);
+        var tokyo = new BoundingBox(36.5, 35, 140.5, 138.5);
+
+        map.Signals(tokyo, Now.AddHours(-24), SituationKinds.Operational)
+            .Select(signal => signal.SituationId).Should().Equal("tokyo");
+    }
+
+    [Fact]
     public void AlongRoute_ShouldFindNearbyStories_AndCountryWideStrikesOrUnrest()
     {
         using var temp = new WorldNewsTestStore();

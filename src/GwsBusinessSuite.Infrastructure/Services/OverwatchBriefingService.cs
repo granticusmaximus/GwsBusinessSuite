@@ -1,9 +1,12 @@
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.Briefings;
 using GwsBusinessSuite.Application.CameraIntel;
+using GwsBusinessSuite.Application.ContentStudio;
 using GwsBusinessSuite.Application.Hazards;
+using GwsBusinessSuite.Application.LiveLayers;
 using GwsBusinessSuite.Application.RouteWatch;
 using GwsBusinessSuite.Application.TrafficIncidents;
 using GwsBusinessSuite.Application.Weather;
@@ -43,13 +46,43 @@ public sealed class OverwatchBriefingService(
     ILogger<OverwatchBriefingService> logger,
     IMailTransport? mailTransport = null,
     WorldNewsMapService? worldNewsMap = null,
-    SignalConvergenceService? convergence = null)
+    SignalConvergenceService? convergence = null,
+    IOptions<ServerAiOptions>? serverAiOptions = null,
+    IOptions<ContentStudioOptions>? contentStudioOptions = null,
+    IOllamaService? ollama = null,
+    AircraftService? aircraftService = null,
+    ShipService? shipService = null)
 {
     public const int MaxConvergences = 2;
 
     public const string AlertCreatedBy = "overwatch-briefing";
     public const int MaxMorningTrips = 5;
+    public const int MaxViewBriefingTokens = 256;
     private readonly IMailTransport _mail = mailTransport ?? MailTransport.SmtpOnly;
+    private readonly ServerAiOptions _serverAi = serverAiOptions?.Value ?? new ServerAiOptions { Mode = ServerAiMode.None };
+    private readonly string _briefingModel = string.IsNullOrWhiteSpace(contentStudioOptions?.Value.Model)
+        ? ContentStudioOptions.DefaultModel
+        : contentStudioOptions.Value.Model;
+    private readonly IOllamaService? _ollama = ollama;
+
+    public bool CanWriteViewBriefing => _serverAi.AllowsServerInference && _ollama is not null;
+
+    public async IAsyncEnumerable<string> WriteViewBriefingAsync(
+        BriefingFacts facts,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        if (!CanWriteViewBriefing || _ollama is null) yield break;
+
+        await foreach (var chunk in _ollama.GenerateStreamAsync(
+                           _briefingModel,
+                           OverwatchBriefing.SystemPrompt,
+                           OverwatchBriefing.UserPrompt(facts),
+                           MaxViewBriefingTokens,
+                           ct))
+        {
+            yield return chunk;
+        }
+    }
 
     // ---- Facts for "Brief me" ----
 
@@ -59,8 +92,17 @@ public sealed class OverwatchBriefingService(
         var incidentList = await Safely(() => incidents.GetIncidentsInBoundingBoxAsync(bounds, ct), [], "incidents");
         var alertList = await Safely(() => weatherAlerts.GetActiveAlertsAsync(bounds, ct), [], "weather alerts");
         var hazardList = await Safely(async () => (await hazards.GetHazardsAsync(bounds, ct)).Features, [], "hazards");
+        var aircraftTask = aircraftService is null
+            ? Task.FromResult(new AircraftResult([], null))
+            : SafelyResult(() => aircraftService.GetAsync(bounds, ct), new AircraftResult([], null), "aircraft");
+        var shipsTask = shipService is null
+            ? Task.FromResult(new ShipResult([], null))
+            : SafelyResult(() => shipService.GetAsync(bounds, ct), new ShipResult([], null), "ships");
         var cameras = (await CameraStatesAsync(username, ct)).Where(c => bounds.Contains(c.Latitude, c.Longitude));
+        await Task.WhenAll(aircraftTask, shipsTask);
         var facts = AddWorldNews(OverwatchBriefing.ForArea(scope, now, incidentList, alertList, hazardList, cameras), bounds);
+        facts = OverwatchBriefing.AddSensorContext(facts, bounds,
+            aircraftTask.Result.Aircraft, shipsTask.Result.Ships, aircraftTask.Result.Note, shipsTask.Result.Note);
         return convergence is null ? facts : AddConvergence(facts, await Safely(() => convergence.GetAsync(bounds, ct), [], "convergence"));
     }
 
@@ -104,6 +146,19 @@ public sealed class OverwatchBriefingService(
 
     // One unreachable source shouldn't sink the whole briefing.
     private async Task<IReadOnlyList<T>> Safely<T>(Func<Task<IReadOnlyList<T>>> load, IReadOnlyList<T> fallback, string what)
+    {
+        try
+        {
+            return await load();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Briefing: couldn't load {What}", what);
+            return fallback;
+        }
+    }
+
+    private async Task<T> SafelyResult<T>(Func<Task<T>> load, T fallback, string what)
     {
         try
         {

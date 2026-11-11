@@ -566,7 +566,7 @@
         </div>
     }
 
-    @* Briefing: "Brief me" (facts from the server, written by the local model on this computer),
+    @* Briefing: facts from the server, written by the configured server model when enabled,
        or a morning briefing opened from the bell. *@
     @if (_briefFacts is not null || _morningBrief is not null)
     {
@@ -582,18 +582,10 @@
             }
             else if (_briefFacts is { } facts)
             {
-                <div class="tg-favorites-empty">As of @facts.At.ToLocalGwsDateTime() · written by the model on this computer from the numbered sources below</div>
-                @if (_briefModels.Count > 0)
+                <div class="tg-favorites-empty">As of @facts.At.ToLocalGwsDateTime() · numbered sources used for this briefing</div>
+                @if (Briefings.CanWriteViewBriefing)
                 {
-                    <div class="tg-route-row">
-                        <select aria-label="Local model" value="@_briefModel" @onchange="e => _briefModel = e.Value?.ToString() ?? string.Empty" disabled="@_briefBusy">
-                            @foreach (var model in _briefModels)
-                            {
-                                <option value="@model">@model</option>
-                            }
-                        </select>
-                        <button type="button" disabled="@_briefBusy" @onclick="WriteBriefingAsync">@(_briefBusy ? "WRITING..." : "REWRITE")</button>
-                    </div>
+                    <button type="button" disabled="@_briefBusy" @onclick="WriteBriefingAsync">@(_briefBusy ? "WRITING..." : "REWRITE")</button>
                 }
                 @if (!string.IsNullOrEmpty(_briefError))
                 {
@@ -2173,7 +2165,27 @@
             cameras = context.Nearby?.Cameras.Select(c => new { name = c.Camera.Name, miles = Math.Round(c.Miles, 1), pin = ToPinPayload(c.Camera) }).ToList(),
             alerts = context.Nearby?.Alerts.Select(a => a.Event).Distinct().ToList(),
             hazards = context.Nearby?.Hazards.Select(h => h.Title).ToList(),
-            outages = context.Nearby?.Outages.Select(o => $"{o.CustomersOut:N0} customers out in {o.Name}, {o.State}").ToList()
+            outages = context.Nearby?.Outages.Select(o => $"{o.CustomersOut:N0} customers out in {o.Name}, {o.State}").ToList(),
+            aircraft = context.Nearby?.Aircraft.Select(item => new
+            {
+                callsign = string.IsNullOrWhiteSpace(item.Aircraft.Callsign) ? item.Aircraft.Icao24 : item.Aircraft.Callsign,
+                country = item.Aircraft.Country,
+                miles = Math.Round(item.Miles, 1),
+                altitudeFeet = item.Aircraft.AltitudeFeet,
+                speedKnots = item.Aircraft.SpeedKnots
+            }).ToList(),
+            ships = context.Nearby?.Ships.Select(item => new
+            {
+                mmsi = item.Ship.Mmsi,
+                name = string.IsNullOrWhiteSpace(item.Ship.Name) ? item.Ship.Mmsi.ToString() : item.Ship.Name,
+                type = item.Ship.ShipType,
+                destination = item.Ship.Destination,
+                miles = Math.Round(item.Miles, 1),
+                speedKnots = item.Ship.SpeedKnots,
+                seenAt = item.Ship.SeenAt.ToLocalGwsDateTime()
+            }).ToList(),
+            aircraftNote = context.Nearby?.AircraftNote,
+            shipsNote = context.Nearby?.ShipsNote
         };
     }
 
@@ -2783,14 +2795,12 @@
         }
     }
 
-    // ---- Briefings (OverwatchBriefingService): the server gathers numbered facts, and the model
-    // on this computer's Ollama writes them up citing [n]. Without Ollama the plain summary shows. ----
+    // ---- Briefings (OverwatchBriefingService): the server gathers facts and, when enabled,
+    // writes them with its configured model. With ServerAi None, the plain summary shows. ----
     private static readonly TimeSpan BriefingTimeout = TimeSpan.FromMinutes(2);
     private GwsBusinessSuite.Application.Briefings.BriefingFacts? _briefFacts;
     private GwsBusinessSuite.Application.Briefings.BriefingText? _briefText;
     private GwsBusinessSuite.Domain.Entities.OverwatchAreaAlert? _morningBrief;
-    private List<string> _briefModels = new();
-    private string _briefModel = string.Empty;
     private string _briefDraft = string.Empty;
     private string? _briefError;
     private bool _briefBusy;
@@ -2834,43 +2844,18 @@
             return;
         }
         StateHasChanged();
-        await LoadBriefModelsAsync();
-        if (_briefModels.Count == 0)
+        if (!Briefings.CanWriteViewBriefing)
         {
             _briefBusy = false;
+            _briefError = "Server model inference is disabled; showing the plain summary and numbered facts.";
             return;
         }
         await WriteBriefingAsync();
     }
 
-    private async Task LoadBriefModelsAsync()
-    {
-        if (_briefModels.Count > 0) return;
-        try
-        {
-            _localModels ??= new GwsBusinessSuite.Web.Services.BrowserLocalOllamaService(JS);
-            var status = await _localModels.ProbeAsync();
-            if (!status.IsReachable)
-            {
-                _briefError = (status.Error ?? "Ollama isn't reachable on this computer.") + " Showing the plain summary instead.";
-                return;
-            }
-            // Embedding models can't write text.
-            _briefModels = status.Models.Where(m => !m.Contains("embed", StringComparison.OrdinalIgnoreCase))
-                .OrderBy(m => m, StringComparer.OrdinalIgnoreCase).ToList();
-            _briefModel = _briefModels.FirstOrDefault(m => m.StartsWith("gemma", StringComparison.OrdinalIgnoreCase)) ?? _briefModels.FirstOrDefault() ?? string.Empty;
-            if (_briefModels.Count == 0) _briefError = "No models are installed in this computer's Ollama. Showing the plain summary instead.";
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Logger.LogWarning(ex, "Couldn't list local Ollama models for a briefing");
-            _briefError = "Couldn't reach Ollama on this computer. Showing the plain summary instead.";
-        }
-    }
-
     private async Task WriteBriefingAsync()
     {
-        if (_briefFacts is not { } facts || _localModels is null || string.IsNullOrWhiteSpace(_briefModel)) return;
+        if (_briefFacts is not { } facts || !Briefings.CanWriteViewBriefing) return;
         _briefCts?.Cancel();
         var cts = _briefCts = new CancellationTokenSource(BriefingTimeout);
         _briefBusy = true;
@@ -2880,9 +2865,7 @@
         var lastPaint = DateTime.UtcNow;
         try
         {
-            await foreach (var chunk in _localModels.GenerateStreamAsync(_briefModel,
-                               GwsBusinessSuite.Application.Briefings.OverwatchBriefing.SystemPrompt,
-                               GwsBusinessSuite.Application.Briefings.OverwatchBriefing.UserPrompt(facts), cts.Token))
+            await foreach (var chunk in Briefings.WriteViewBriefingAsync(facts, cts.Token))
             {
                 _briefDraft += chunk;
                 if (DateTime.UtcNow - lastPaint > TimeSpan.FromMilliseconds(250))

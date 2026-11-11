@@ -2885,6 +2885,7 @@ window.tacticalGlobe = (function () {
             html += '<div class="tg-world-news-context-note">Nearby cameras, alerts and capture need a city-level place. ' +
                 'Use Wrong place? on World News to pin one.</div>';
         } else {
+            html += '<div class="tg-world-news-context-note">Nearby live sensors are context only; they do not confirm the reported event.</div>';
             html += list('NEARBY CAMERAS', (context.cameras || []).map(function (c, i) {
                 return '<button type="button" class="tg-world-news-camera" data-camera-index="' + i + '">' +
                     escapeHtml(c.name + ' · ' + c.miles + ' MI') + '</button>';
@@ -2892,8 +2893,24 @@ window.tacticalGlobe = (function () {
             html += list('WEATHER ALERTS', (context.alerts || []).map(escapeHtml));
             html += list('HAZARDS NEARBY', (context.hazards || []).map(escapeHtml));
             html += list('POWER OUTAGES NEARBY', (context.outages || []).map(escapeHtml));
-            if (!(context.cameras || []).length && !(context.alerts || []).length && !(context.hazards || []).length && !(context.outages || []).length) {
-                html += '<div class="tg-world-news-context-note">No Overwatch cameras, alerts, hazards or outages within 25 miles.</div>';
+            html += list('AIRCRAFT NEARBY · OPENSKY', (context.aircraft || []).map(function (item) {
+                const flight = 'Flight ' + item.callsign + (item.country ? ' · ' + item.country : '') + ' · ' + item.miles + ' MI' +
+                    (item.altitudeFeet == null ? '' : ' · ' + Math.round(item.altitudeFeet) + ' FT') +
+                    (item.speedKnots == null ? '' : ' · ' + Math.round(item.speedKnots) + ' KT');
+                return escapeHtml(flight);
+            }));
+            html += list('VESSELS NEARBY · AIS', (context.ships || []).map(function (item) {
+                const vessel = item.name + (item.type ? ' · ' + item.type : '') + ' · ' + item.miles + ' MI' +
+                    (item.destination ? ' · TO ' + item.destination : '') +
+                    (item.speedKnots == null ? '' : ' · ' + Math.round(item.speedKnots) + ' KT') +
+                    (item.seenAt ? ' · SEEN ' + item.seenAt : '');
+                return escapeHtml(vessel);
+            }));
+            if (context.aircraftNote) html += '<div class="tg-world-news-context-note">' + escapeHtml(context.aircraftNote) + '</div>';
+            if (context.shipsNote) html += '<div class="tg-world-news-context-note">' + escapeHtml(context.shipsNote) + '</div>';
+            if (!(context.cameras || []).length && !(context.alerts || []).length && !(context.hazards || []).length &&
+                !(context.outages || []).length && !(context.aircraft || []).length && !(context.ships || []).length) {
+                html += '<div class="tg-world-news-context-note">No nearby cameras, alerts, hazards, outages, aircraft or vessels were returned.</div>';
             }
             html += '<button type="button" class="tg-incident-report tg-world-news-capture">CAPTURE NEARBY CAMERAS</button>';
         }
