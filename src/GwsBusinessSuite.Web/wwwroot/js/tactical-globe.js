@@ -4490,6 +4490,118 @@ window.tacticalGlobe = (function () {
         dismissCoverageBanner: dismissCoverageBanner
     };
 
+    // Mac Catalyst's WKWebView can lose all WebGL program compilation at the OS level. The Mac
+    // app therefore supplies an MKMapView behind this transparent viewport. Keep the Blazor page
+    // as the authenticated controller and forward its existing renderer vocabulary unchanged;
+    // browser and PWA sessions never enter this branch and continue to use Cesium above.
+    if (window.__gwsMacCatalystWebView === true
+        && window.webkit && window.webkit.messageHandlers
+        && window.webkit.messageHandlers.gwsNativeOverwatch) {
+        let nativeDotNetRef = null;
+        let nativeContainerId = 'tg-viewport';
+        let nativeDriveWatch = null;
+        let nativePickMode = false;
+
+        const postNative = function (operation, args) {
+            window.webkit.messageHandlers.gwsNativeOverwatch.postMessage({
+                operation: operation,
+                arguments: Array.from(args || [])
+            });
+        };
+
+        window.gwsNativeOverwatch = {
+            regionChanged: function (north, south, east, west) {
+                if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnGlobeViewChanged', north, south, east, west);
+            },
+            selected: function (selection) {
+                if (!selection) return;
+                const payload = selection.payload || {};
+                if (nativePickMode && nativeDotNetRef && Number.isFinite(payload.lat) && Number.isFinite(payload.lon)) {
+                    nativePickMode = false;
+                    nativeDotNetRef.invokeMethodAsync('OnMapPointPicked', payload.lat, payload.lon);
+                    return;
+                }
+                switch (selection.operation) {
+                    case 'setCameraPins': openStreamPanel(payload, nativeDotNetRef); break;
+                    case 'setWorldNews': openWorldNewsPanel(payload); break;
+                    case 'setAircraft': openAircraftPanel(nativeContainerId, payload); break;
+                    case 'setRoadWeather': openRoadWeatherPanel(payload); break;
+                    case 'setMessageSigns': openSignPanel(payload); break;
+                    case 'setTrafficIncidents': openIncidentPanel(payload); break;
+                    case 'setConvergence': openConvergencePanel(payload); break;
+                    case 'setMapNotes':
+                        if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnMapNoteClicked', payload);
+                        break;
+                    default: openHazardPanel(payload); break;
+                }
+            }
+        };
+
+        const nativeOperations = new Set([
+            'flyTo', 'flyToBounds', 'flyToStreetLevel', 'zoom', 'home', 'dispose',
+            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setAircraft', 'setShips',
+            'setAirQuality', 'setPowerOutages', 'setRoadTraffic', 'setTrafficFlow', 'setDriveFollow',
+            'setStreetViewMarker', 'clearStreetViewMarker', 'setCameraPins', 'setSelectModeEnabled',
+            'setRadarVisible', 'setRadarTimeline', 'setHourlyForecast', 'setWeatherAlerts',
+            'clearWeatherAlerts', 'setCameraAlertHighlights', 'setTrafficIncidents',
+            'clearTrafficIncidents', 'setWorldNews', 'clearWorldNews', 'setNewsShading',
+            'clearNewsShading', 'setCoverageMarkers', 'clearCoverageMarkers', 'setHazards',
+            'clearHazards', 'setMessageSigns', 'clearMessageSigns', 'setRoadWeather',
+            'clearRoadWeather', 'setRoute', 'clearRoute', 'setRouteHighlights',
+            'setRouteConditions', 'setInternetOutages', 'clearInternetOutages', 'setConvergence',
+            'clearConvergence', 'setAirportStatus', 'clearAirportStatus', 'setAurora', 'clearAurora',
+            'setSatellites', 'clearSatellites', 'setTravelAdvice', 'clearTravelAdvice',
+            'setFireHotspots', 'clearFireHotspots', 'setConflict', 'clearConflict',
+            'setHumanitarian', 'clearHumanitarian', 'setWeatherSnapshot'
+        ]);
+
+        nativeOperations.forEach(function (name) {
+            api[name] = function () { postNative(name, arguments); };
+        });
+        api.init = function (containerId, dotNetRef) {
+            nativeContainerId = containerId || 'tg-viewport';
+            nativeDotNetRef = dotNetRef;
+            const container = document.getElementById(nativeContainerId);
+            if (container) {
+                container.replaceChildren();
+                let transparentAncestor = container;
+                while (transparentAncestor && transparentAncestor !== document.body) {
+                    transparentAncestor.style.backgroundColor = 'transparent';
+                    transparentAncestor = transparentAncestor.parentElement;
+                }
+            }
+            document.documentElement.classList.add('gws-native-overwatch');
+            document.body.classList.add('gws-native-overwatch');
+            const rect = container ? container.getBoundingClientRect() : { x: 0, y: 0, width: innerWidth, height: innerHeight };
+            postNative('init', [rect.x, rect.y, rect.width, rect.height]);
+        };
+        api.whenDrawn = function () { return Promise.resolve(true); };
+        api.setThreeD = function (containerId, on) {
+            postNative('setThreeD', arguments);
+            return Promise.resolve(on ? 'on' : 'off');
+        };
+        api.startPickPoint = function () { nativePickMode = true; postNative('startPickPoint', arguments); };
+        api.cancelPickPoint = function () { nativePickMode = false; postNative('cancelPickPoint', arguments); };
+        api.startDrive = function () {
+            if (!navigator.geolocation) return Promise.resolve('Location services are not available.');
+            if (nativeDriveWatch !== null) return Promise.resolve('started');
+            nativeDriveWatch = navigator.geolocation.watchPosition(function (position) {
+                const c = position.coords;
+                postNative('flyTo', [nativeContainerId, c.latitude, c.longitude, 1200]);
+                if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnDrivePosition', c.latitude, c.longitude,
+                    c.heading == null ? null : c.heading, c.speed == null ? null : c.speed);
+            }, function (error) {
+                if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnDriveError', error.message || 'Location failed.');
+            }, { enableHighAccuracy: true, maximumAge: 1000 });
+            return Promise.resolve('started');
+        };
+        api.stopDrive = function () {
+            if (nativeDriveWatch !== null) navigator.geolocation.clearWatch(nativeDriveWatch);
+            nativeDriveWatch = null;
+            postNative('stopDrive', arguments);
+        };
+    }
+
     // Whatever the page changes through these is drawn on the next frame, including what an
     // async one changes before it settles (see renderOnChange).
     Object.keys(api).forEach(function (name) {
