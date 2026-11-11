@@ -66,4 +66,61 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bridge.Should().Contain("case \"zoom\": Zoom(arguments); return;");
         bridge.Should().Contain("_map.SetRegion(region, true)");
     }
+
+    [Fact]
+    public void MacAdapter_ShouldSelectNativeModeBeforeWebKitPublishesTheMessageHandler()
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+
+        script.Should().Contain("if (window.__gwsMacCatalystWebView === true) {");
+        script.Should().NotContain("&& window.webkit.messageHandlers.gwsNativeOverwatch) {");
+        script.Should().Contain("const waitForNativeHandler = function ()");
+        script.Should().Contain("await waitForNativeHandler();");
+        script.Should().Contain("The native Overwatch renderer did not become ready.");
+    }
+
+    [Fact]
+    public void MacAdapter_ShouldMakeTheRootWebSurfacesTransparentAboveMapKit()
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        var bridge = File.ReadAllText(Path.Combine(RepoRoot,
+            "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
+
+        script.Should().Contain("document.documentElement.style.setProperty('background-color', 'transparent', 'important')");
+        script.Should().Contain("document.body.style.setProperty('background-color', 'transparent', 'important')");
+        bridge.Should().Contain("document.documentElement.style.setProperty('background-color','transparent','important')");
+        bridge.Should().Contain("document.body.style.setProperty('background-color','transparent','important')");
+        bridge.Should().Contain("webView.Opaque = false");
+    }
+
+    [Fact]
+    public void NativeMap_ShouldBatchLargePinAndOverlayUpdates()
+    {
+        var bridge = File.ReadAllText(Path.Combine(RepoRoot,
+            "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
+
+        bridge.Should().Contain("_map.AddAnnotations(annotations.ToArray())");
+        bridge.Should().Contain("_map.AddOverlays(overlays.ToArray())");
+        bridge.Should().NotContain("_map.AddAnnotation(annotation)");
+        bridge.Should().NotContain("_map.AddOverlay(overlay)");
+        bridge.Should().Contain("view.DisplayPriority = MKFeatureDisplayPriority.DefaultLow");
+    }
+
+    [Fact]
+    public void NativeMap_ShouldForwardPanAndWheelGesturesThroughTheWebViewport()
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        var bridge = File.ReadAllText(Path.Combine(RepoRoot,
+            "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
+
+        script.Should().Contain("container.addEventListener('pointermove'");
+        script.Should().Contain("postNative('pan', [deltaX, deltaY])");
+        script.Should().Contain("container.addEventListener('wheel'");
+        script.Should().Contain("event.preventDefault()");
+        bridge.Should().Contain("case \"pan\": Pan(arguments); return;");
+        bridge.Should().Contain("private void Pan(object?[] arguments)");
+        bridge.Should().Contain("_map.SetRegion(region, false)");
+        bridge.Should().Contain("Task.Delay(250, debounce.Token)");
+        bridge.Should().Contain("owner.RegionDidChange(mapView.Region)");
+    }
 }

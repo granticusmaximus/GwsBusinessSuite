@@ -24,17 +24,24 @@ orchestration, while rendering the viewport with native MapKit.
 - [x] Inventory the current native contract and every web renderer operation.
 - [x] Add the trusted native-map bridge and lifecycle management.
 - [x] Add the JavaScript native adapter with complete contract-command forwarding and return semantics.
-- [ ] Implement native annotations, clustering, overlays, routes, camera controls, picking, and
+- [x] Implement native annotations, clustering, overlays, routes, camera controls, picking, and
   selection callbacks.
-- [ ] Map every existing Overwatch operation and prove contract/adapter parity with tests.
+- [x] Map every existing Overwatch operation and prove contract/adapter parity with tests.
 - [x] Remove the obsolete native shader interception and GPU-unavailable fallback from the Mac path.
 - [x] Scale the native map viewport from WebView CSS pixels into UIKit coordinates and initialize
   it at the world view; retain the page's zoom controls through the MapKit adapter.
-- [ ] Build and run authenticated native acceptance on this Mac.
+- [x] Build and run authenticated native acceptance on this Mac.
 - [ ] Run focused browser/PWA regression tests.
 - [ ] Run `./scripts/verify-release.sh`.
 
 ### Verification note (11-11-26)
+
+- Reproduced the stuck native boot screen in the installed app, confirmed the Mac flag, message
+  handler, and adapter were active, and identified the opaque WKWebView root covering MapKit.
+- Rebuilt and installed the Release Catalyst app with transparent root compositing. Authenticated
+  native acceptance visibly showed the MapKit hybrid globe, camera pins, numbered clusters,
+  labels, and the existing Overwatch controls together inside the app; the boot screen cleared.
+- Batched large native annotation and overlay updates to avoid one MapKit layout pass per pin.
 
 - Focused native bridge tests passed (2/2).
 - `verify-release.sh --server-only --skip-tests` passed restore, dependency audit, Release build,

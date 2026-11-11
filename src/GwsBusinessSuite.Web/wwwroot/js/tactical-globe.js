@@ -4494,18 +4494,44 @@ window.tacticalGlobe = (function () {
     // app therefore supplies an MKMapView behind this transparent viewport. Keep the Blazor page
     // as the authenticated controller and forward its existing renderer vocabulary unchanged;
     // browser and PWA sessions never enter this branch and continue to use Cesium above.
-    if (window.__gwsMacCatalystWebView === true
-        && window.webkit && window.webkit.messageHandlers
-        && window.webkit.messageHandlers.gwsNativeOverwatch) {
+    if (window.__gwsMacCatalystWebView === true) {
         let nativeDotNetRef = null;
         let nativeContainerId = 'tg-viewport';
         let nativeDriveWatch = null;
         let nativePickMode = false;
+        let nativePointer = null;
+        let nativeMoved = false;
 
+        const nativeHandler = function () {
+            return window.webkit && window.webkit.messageHandlers
+                ? window.webkit.messageHandlers.gwsNativeOverwatch
+                : null;
+        };
         const postNative = function (operation, args) {
-            window.webkit.messageHandlers.gwsNativeOverwatch.postMessage({
+            const handler = nativeHandler();
+            if (!handler) throw new Error('The native Overwatch renderer is not ready.');
+            handler.postMessage({
                 operation: operation,
                 arguments: Array.from(args || [])
+            });
+        };
+
+        const waitForNativeHandler = function () {
+            if (nativeHandler()) return Promise.resolve();
+            return new Promise(function (resolve, reject) {
+                let attempts = 0;
+                const timer = setInterval(function () {
+                    if (nativeHandler()) {
+                        clearInterval(timer);
+                        resolve();
+                        return;
+                    }
+                    attempts += 1;
+                    if (attempts >= 40) {
+                        clearInterval(timer);
+                        reject(new Error('The native Overwatch renderer did not become ready.'));
+                    }
+                }, 50);
             });
         };
 
@@ -4559,7 +4585,7 @@ window.tacticalGlobe = (function () {
         nativeOperations.forEach(function (name) {
             api[name] = function () { postNative(name, arguments); };
         });
-        api.init = function (containerId, dotNetRef) {
+        api.init = async function (containerId, dotNetRef) {
             nativeContainerId = containerId || 'tg-viewport';
             nativeDotNetRef = dotNetRef;
             const container = document.getElementById(nativeContainerId);
@@ -4567,7 +4593,36 @@ window.tacticalGlobe = (function () {
                 container.replaceChildren();
                 if (container.dataset.gwsNativeTap !== 'true') {
                     container.dataset.gwsNativeTap = 'true';
+                    container.style.touchAction = 'none';
+                    container.addEventListener('pointerdown', function (event) {
+                        if (event.button !== 0) return;
+                        nativePointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+                        nativeMoved = false;
+                        container.setPointerCapture(event.pointerId);
+                    });
+                    container.addEventListener('pointermove', function (event) {
+                        if (!nativePointer || nativePointer.id !== event.pointerId) return;
+                        const bounds = container.getBoundingClientRect();
+                        if (bounds.width <= 0 || bounds.height <= 0) return;
+                        const deltaX = (event.clientX - nativePointer.x) / bounds.width;
+                        const deltaY = (event.clientY - nativePointer.y) / bounds.height;
+                        if (Math.abs(deltaX) + Math.abs(deltaY) < 0.001) return;
+                        nativeMoved = true;
+                        nativePointer.x = event.clientX;
+                        nativePointer.y = event.clientY;
+                        postNative('pan', [deltaX, deltaY]);
+                    });
+                    const finishPan = function (event) {
+                        if (nativePointer && nativePointer.id === event.pointerId) nativePointer = null;
+                    };
+                    container.addEventListener('pointerup', finishPan);
+                    container.addEventListener('pointercancel', finishPan);
+                    container.addEventListener('wheel', function (event) {
+                        event.preventDefault();
+                        postNative('zoom', [nativeContainerId, event.deltaY < 0]);
+                    }, { passive: false });
                     container.addEventListener('click', function (event) {
+                        if (nativeMoved) { nativeMoved = false; return; }
                         const bounds = container.getBoundingClientRect();
                         if (bounds.width <= 0 || bounds.height <= 0) return;
                         postNative('mapTap', [
@@ -4584,7 +4639,10 @@ window.tacticalGlobe = (function () {
             }
             document.documentElement.classList.add('gws-native-overwatch');
             document.body.classList.add('gws-native-overwatch');
+            document.documentElement.style.setProperty('background-color', 'transparent', 'important');
+            document.body.style.setProperty('background-color', 'transparent', 'important');
             const rect = container ? container.getBoundingClientRect() : { x: 0, y: 0, width: innerWidth, height: innerHeight };
+            await waitForNativeHandler();
             postNative('init', [rect.x, rect.y, rect.width, rect.height, window.innerWidth, window.innerHeight]);
         };
         api.whenDrawn = function () { return Promise.resolve(true); };

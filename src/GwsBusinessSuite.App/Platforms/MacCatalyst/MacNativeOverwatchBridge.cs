@@ -16,6 +16,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private readonly MapDelegate _delegate;
     private readonly Dictionary<string, List<IMKAnnotation>> _annotations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<IMKOverlay>> _overlays = new(StringComparer.Ordinal);
+    private CancellationTokenSource? _regionChangeDebounce;
     private bool _pickPointMode;
     private bool _hasInitialRegion;
 
@@ -63,6 +64,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "flyToStreetLevel": FlyTo(arguments); return;
             case "flyToBounds": FlyToBounds(arguments); return;
             case "zoom": Zoom(arguments); return;
+            case "pan": Pan(arguments); return;
             case "setThreeD": SetThreeD(arguments); return;
             case "startPickPoint": _pickPointMode = true; return;
             case "cancelPickPoint": _pickPointMode = false; return;
@@ -98,6 +100,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         webView.Opaque = false;
         webView.BackgroundColor = UIColor.Clear;
         webView.ScrollView.BackgroundColor = UIColor.Clear;
+        _ = webView.EvaluateJavaScriptAsync("document.documentElement.style.setProperty('background-color','transparent','important');document.body.style.setProperty('background-color','transparent','important');");
         if (!_hasInitialRegion)
         {
             _hasInitialRegion = true;
@@ -110,6 +113,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         Clear(operation);
         var payload = arguments.FirstOrDefault() is string ? arguments.ElementAtOrDefault(1) : arguments.FirstOrDefault();
         if (payload is null) return;
+        var annotations = new List<IMKAnnotation>();
+        var overlays = new List<IMKOverlay>();
         foreach (var item in Items(payload))
         {
             if (TryCoordinate(item, out var coordinate))
@@ -119,8 +124,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
                     Title = ReadString(item, "title", "name", "label", "callsign", "code", "id") ?? operation[3..],
                     Subtitle = ReadString(item, "summary", "description", "status", "source", "kind")
                 };
-                _map.AddAnnotation(annotation);
-                Annotations(operation).Add(annotation);
+                annotations.Add(annotation);
             }
             foreach (var coordinates in Paths(item))
             {
@@ -128,9 +132,18 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
                 IMKOverlay overlay = coordinates.Length >= 3 && IsArea(operation)
                     ? MKPolygon.FromCoordinates(coordinates)
                     : MKPolyline.FromCoordinates(coordinates);
-                _map.AddOverlay(overlay);
-                Overlays(operation).Add(overlay);
+                overlays.Add(overlay);
             }
+        }
+        if (annotations.Count > 0)
+        {
+            _map.AddAnnotations(annotations.ToArray());
+            Annotations(operation).AddRange(annotations);
+        }
+        if (overlays.Count > 0)
+        {
+            _map.AddOverlays(overlays.ToArray());
+            Overlays(operation).AddRange(overlays);
         }
     }
 
@@ -196,6 +209,17 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         _map.SetRegion(region, true);
     }
 
+    private void Pan(object?[] arguments)
+    {
+        if (!AsDouble(arguments.ElementAtOrDefault(0), out var deltaX)
+            || !AsDouble(arguments.ElementAtOrDefault(1), out var deltaY)) return;
+        var region = _map.Region;
+        region.Center = new CLLocationCoordinate2D(
+            Math.Clamp(region.Center.Latitude + deltaY * region.Span.LatitudeDelta, -85, 85),
+            NormalizeLongitude(region.Center.Longitude - deltaX * region.Span.LongitudeDelta));
+        _map.SetRegion(region, false);
+    }
+
     private void SetThreeD(object?[] arguments)
     {
         var enabled = arguments.LastOrDefault() is true;
@@ -256,6 +280,26 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         if (_webView.TryGetTarget(out var webView)) await webView.EvaluateJavaScriptAsync(script);
     });
 
+    private void RegionDidChange(MKCoordinateRegion region)
+    {
+        _regionChangeDebounce?.Cancel();
+        _regionChangeDebounce?.Dispose();
+        var debounce = _regionChangeDebounce = new CancellationTokenSource();
+        var north = Math.Min(90, region.Center.Latitude + region.Span.LatitudeDelta / 2);
+        var south = Math.Max(-90, region.Center.Latitude - region.Span.LatitudeDelta / 2);
+        var east = NormalizeLongitude(region.Center.Longitude + region.Span.LongitudeDelta / 2);
+        var west = NormalizeLongitude(region.Center.Longitude - region.Span.LongitudeDelta / 2);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(250, debounce.Token);
+                await SendAsync($"window.gwsNativeOverwatch && window.gwsNativeOverwatch.regionChanged({north}, {south}, {east}, {west})");
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+
     private static bool IsTrustedSender(WKScriptMessage message)
     {
         var frame = message.FrameInfo;
@@ -295,6 +339,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     }
     private static bool AsDouble(object? value, out double number) =>
         double.TryParse(value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out number) && double.IsFinite(number);
+    private static double NormalizeLongitude(double longitude) => (longitude + 540) % 360 - 180;
     private static bool IsArea(string operation) => operation is "setPowerOutages" or "setNewsShading" or "setAurora" or "setMapNotes";
 
     private sealed class NativeAnnotation(string operation, Dictionary<string, object?> payload, CLLocationCoordinate2D coordinate) : MKPointAnnotation
@@ -311,6 +356,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             if (annotation is not NativeAnnotation native) return new MKMarkerAnnotationView(annotation, null);
             var view = mapView.DequeueReusableAnnotation("gws-native") as MKMarkerAnnotationView ?? new MKMarkerAnnotationView(annotation, "gws-native");
             view.Annotation = native; view.CanShowCallout = true; view.ClusteringIdentifier = native.Operation;
+            view.DisplayPriority = MKFeatureDisplayPriority.DefaultLow;
             view.MarkerTintColor = native.Operation switch
             {
                 "setCameraPins" => UIColor.SystemGreen, "setAircraft" => UIColor.SystemCyan,
@@ -337,13 +383,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 
         public override void RegionChanged(MKMapView mapView, bool animated)
         {
-            var region = mapView.Region;
-            var north = Math.Min(90, region.Center.Latitude + region.Span.LatitudeDelta / 2);
-            var south = Math.Max(-90, region.Center.Latitude - region.Span.LatitudeDelta / 2);
-            var east = region.Center.Longitude + region.Span.LongitudeDelta / 2;
-            var west = region.Center.Longitude - region.Span.LongitudeDelta / 2;
-            if (east > 180) east -= 360; if (west < -180) west += 360;
-            _ = owner.SendAsync($"window.gwsNativeOverwatch && window.gwsNativeOverwatch.regionChanged({north}, {south}, {east}, {west})");
+            owner.RegionDidChange(mapView.Region);
         }
     }
 }
