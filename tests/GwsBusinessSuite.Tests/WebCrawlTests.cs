@@ -5,6 +5,7 @@ using GwsBusinessSuite.Application.NewsIntelligence;
 using GwsBusinessSuite.Domain.Entities;
 using GwsBusinessSuite.Infrastructure.Data;
 using GwsBusinessSuite.Infrastructure.WebCrawl;
+using GwsBusinessSuite.WorldNewsKit;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,12 +17,14 @@ namespace GwsBusinessSuite.Tests;
 public sealed class WebCrawlTests : IDisposable
 {
     private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"webcrawl-{Guid.NewGuid():N}.db");
+    private readonly string _worldNewsPath = Path.Combine(Path.GetTempPath(), $"webcrawl-worldnews-{Guid.NewGuid():N}.db");
 
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
-        foreach (var suffix in new[] { "", "-wal", "-shm" })
-            if (File.Exists(_dbPath + suffix)) File.Delete(_dbPath + suffix);
+        foreach (var path in new[] { _dbPath, _worldNewsPath })
+            foreach (var suffix in new[] { "", "-wal", "-shm" })
+                if (File.Exists(path + suffix)) File.Delete(path + suffix);
     }
 
     [Fact]
@@ -256,6 +259,47 @@ public sealed class WebCrawlTests : IDisposable
         (await crawler.SearchAsync("MARTA")).Should().BeEmpty();
         var bad = () => crawler.AddSiteAsync("not a site");
         await bad.Should().ThrowAsync<WebCrawlException>();
+    }
+
+    [Fact]
+    public async Task Crawler_ShouldImportOnlyCuratedOutletMetadata_AndResumeWithoutDuplicateReports()
+    {
+        var clock = new MovableClock(new DateTimeOffset(2026, 11, 11, 12, 0, 0, TimeSpan.Zero));
+        var outlet = OutletFeeds.Outlets.First(item => item.Name == "The New York Times" && item.Url.EndsWith("World.xml", StringComparison.Ordinal));
+        var host = "www.nytimes.com";
+        var url = $"https://{host}/world/story";
+        var crawlStore = new WebCrawlStore(_dbPath);
+        await crawlStore.AddPageAsync(url, host, "  A headline &amp; update  ", clock.GetUtcNow().AddMinutes(-10),
+            clock.GetUtcNow().ToUnixTimeSeconds(), "Full article body must stay in the crawler database.");
+        await crawlStore.AddPageAsync("https://nytimes.com/world/story?utm_source=feed", "nytimes.com", "Duplicate headline",
+            clock.GetUtcNow().AddMinutes(-9), clock.GetUtcNow().ToUnixTimeSeconds(), "A second crawler copy.");
+        await crawlStore.AddPageAsync("https://unknown.example/story", "unknown.example", "Unvetted source",
+            clock.GetUtcNow(), clock.GetUtcNow().ToUnixTimeSeconds(), "This source is not in the curated roster.");
+
+        await using var app = await TestApp.CreateAsync();
+        var crawler = new WebCrawler(new FakeWeb(clock), app.ScopeFactory, Options.Create(new WebCrawlOptions { DatabasePath = _dbPath }),
+            clock, NullLogger<WebCrawler>.Instance);
+        var worldNews = new WorldNewsStore(_worldNewsPath);
+
+        var imported = await crawler.ImportWorldNewsPagesAsync(worldNews, 10);
+
+        imported.Scanned.Should().Be(3);
+        imported.Eligible.Should().Be(2);
+        imported.Added.Should().Be(1, "canonical URLs deduplicate crawler copies");
+        var report = worldNews.RecentReports(clock.GetUtcNow().AddDays(-1)).Should().ContainSingle().Subject;
+        report.Title.Should().Be("A headline & update");
+        report.Outlet.Should().Be(outlet.Name);
+        report.Language.Should().Be(outlet.Language);
+        report.Country.Should().Be(outlet.Country);
+        report.Snippet.Should().BeNull("article bodies remain in the crawler store");
+
+        worldNews.SetIngestionCursor("webcrawl", 9999);
+        var reusedIds = await crawler.ImportWorldNewsPagesAsync(worldNews, 10);
+        reusedIds.Scanned.Should().Be(3, "a crawler database whose retained row IDs restarted must be read from its beginning");
+        reusedIds.Added.Should().Be(0, "the destination's canonical IDs still prevent duplicate reports");
+
+        worldNews = new WorldNewsStore(_worldNewsPath);
+        (await crawler.ImportWorldNewsPagesAsync(worldNews, 10)).Scanned.Should().Be(0, "the destination cursor survives reopening the database");
     }
 
     // A small web for the crawler: canned answers by address, and a log of what was asked when.

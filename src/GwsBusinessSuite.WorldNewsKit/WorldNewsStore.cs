@@ -55,6 +55,7 @@ public sealed class WorldNewsStore
                 article_count INTEGER NOT NULL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL);
             CREATE INDEX IF NOT EXISTS ix_events_last_seen ON events (last_seen);
             CREATE TABLE IF NOT EXISTS feed_state (feed TEXT PRIMARY KEY, last_fetched INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS ingestion_cursors (source TEXT PRIMARY KEY, last_id INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS summaries (
                 event_id TEXT NOT NULL, version INTEGER NOT NULL, headline TEXT, summary TEXT NOT NULL, model TEXT NOT NULL,
                 article_count INTEGER NOT NULL, created_at INTEGER NOT NULL, PRIMARY KEY (event_id, version));
@@ -1160,6 +1161,28 @@ public sealed class WorldNewsStore
 
     public IReadOnlyList<WorldArticle> ArticlesForEvent(string eventId) =>
         QueryArticles("WHERE event_id = $event ORDER BY seen_at", ("$event", eventId));
+
+    public long IngestionCursor(string source)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT last_id FROM ingestion_cursors WHERE source = $source";
+        command.Parameters.AddWithValue("$source", source);
+        return command.ExecuteScalar() is long lastId ? lastId : 0;
+    }
+
+    public void SetIngestionCursor(string source, long lastId)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            INSERT INTO ingestion_cursors (source, last_id) VALUES ($source, $lastId)
+            ON CONFLICT(source) DO UPDATE SET last_id = excluded.last_id
+            """;
+        command.Parameters.AddWithValue("$source", source);
+        command.Parameters.AddWithValue("$lastId", lastId);
+        command.ExecuteNonQuery();
+    }
 
     public DateTimeOffset? LastFetched(string feed)
     {

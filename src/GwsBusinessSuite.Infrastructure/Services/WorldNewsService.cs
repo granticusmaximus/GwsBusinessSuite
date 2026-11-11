@@ -1,5 +1,6 @@
 using GwsBusinessSuite.Application.Abstractions;
 using GwsBusinessSuite.Application.ContentStudio;
+using GwsBusinessSuite.Infrastructure.WebCrawl;
 using GwsBusinessSuite.OllamaKit;
 using GwsBusinessSuite.WorldNewsKit;
 using Microsoft.Extensions.Configuration;
@@ -47,13 +48,18 @@ public sealed partial class WorldNewsService : IDisposable
     private readonly IServiceScopeFactory _scopes;
     private readonly string _model;
     private readonly WorldNewsArticleReader? _articleReader;
+    private readonly WebCrawler? _webCrawler;
+    private readonly int _maxCrawlPagesPerCycle;
 
     public WorldNewsService(IConfiguration configuration, IOptions<ContentStudioOptions> ollamaOptions,
         IHttpClientFactory httpClientFactory, IServiceScopeFactory scopes, ILogger<WorldNewsService> logger,
-        OllamaWorkloadScheduler? workloads = null, WorldNewsMapCache? mapCache = null, WorldNewsArticleReader? articleReader = null)
+        OllamaWorkloadScheduler? workloads = null, WorldNewsMapCache? mapCache = null, WorldNewsArticleReader? articleReader = null,
+        WebCrawler? webCrawler = null)
     {
         _scopes = scopes;
         _articleReader = articleReader;
+        _webCrawler = webCrawler;
+        _maxCrawlPagesPerCycle = Math.Clamp(configuration.GetValue("WorldNews:MaxCrawlPagesPerCycle", 500), 1, 2000);
         _mapCache = mapCache;
         _logger = logger;
         _serverHasNoModel = configuration.GetValue<ServerAiMode>($"{ServerAiOptions.SectionName}:Mode") == ServerAiMode.None;
@@ -183,7 +189,35 @@ public sealed partial class WorldNewsService : IDisposable
             Status = "Reading the world's news...";
             Changed?.Invoke();
             // Synchronous SQLite work and CPU-bound grouping: keep it off the caller's thread.
+            var crawlerImport = new WorldNewsImportResult(0, 0, 0);
+            var crawlerAttempted = 0;
+            var crawlerSucceeded = 0;
+            var crawlerNotes = new List<string>();
+            if (_webCrawler is not null)
+            {
+                crawlerAttempted = 1;
+                try
+                {
+                    crawlerImport = await _webCrawler.ImportWorldNewsPagesAsync(Store, _maxCrawlPagesPerCycle, ct);
+                    crawlerSucceeded = 1;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    crawlerNotes.Add($"Media Watch crawler import: {ex.Message}");
+                }
+            }
             var report = await Task.Run(() => _pipeline.RunCycleAsync(ct), ct);
+            if (crawlerAttempted > 0)
+            {
+                report = report with
+                {
+                    Fetched = report.Fetched + crawlerImport.Eligible,
+                    Added = report.Added + crawlerImport.Added,
+                    SourcesAttempted = report.SourcesAttempted + crawlerAttempted,
+                    SourcesSucceeded = report.SourcesSucceeded + crawlerSucceeded,
+                    Notes = report.Notes.Concat(crawlerNotes).ToList()
+                };
+            }
             await ClassifySituationsAsync(ct);
             var alerts = Store.CreateWatchAlerts(DateTimeOffset.UtcNow).Concat(CreateSurgeAlerts(DateTimeOffset.UtcNow));
             foreach (var alert in alerts) AlertCreated?.Invoke(alert.Username, alert);
@@ -200,10 +234,12 @@ public sealed partial class WorldNewsService : IDisposable
             var problems = notes.Count == 0 ? string.Empty
                 : $" {notes.Count} {(notes.Count == 1 ? "problem" : "problems")}: {notes[0]}";
             var latestReport = report.LatestReportAt is { } latest ? $" Latest report {latest.ToLocalGwsDateTime()}." : string.Empty;
+            var crawlerSummary = crawlerSucceeded == 0 ? string.Empty
+                : $" Crawler scanned {crawlerImport.Scanned:N0} pages; {crawlerImport.Eligible:N0} eligible.";
             Status = $"{report.Added:N0} new of {report.Fetched:N0} reports ({report.Deduplicated:N0} already stored); "
                 + $"{report.SourcesSucceeded}/{report.SourcesAttempted} sources succeeded; "
                 + $"{report.Embedded:N0} embedded, {report.EmbeddingBacklog:N0} awaiting embedding; "
-                + $"{report.NewEvents:N0} new events, {summaries.Written:N0} summaries written.{latestReport}{problems}";
+                + $"{report.NewEvents:N0} new events, {summaries.Written:N0} summaries written.{latestReport}{crawlerSummary}{problems}";
             if (notes.Count > 0)
                 _logger.LogWarning("World news read finished with {Count} problem(s): {Notes}", notes.Count, string.Join(" | ", notes));
         }

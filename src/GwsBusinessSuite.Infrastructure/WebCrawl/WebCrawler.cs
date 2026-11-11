@@ -11,6 +11,8 @@ using Microsoft.Extensions.Options;
 
 namespace GwsBusinessSuite.Infrastructure.WebCrawl;
 
+public sealed record WorldNewsImportResult(int Scanned, int Eligible, int Added);
+
 public sealed class WebCrawlOptions
 {
     public const string SectionName = "WebCrawl";
@@ -292,6 +294,59 @@ public sealed class WebCrawler(
             await Store.AddToCounterAsync(Today, "matches", added);
         }
         return added;
+    }
+
+    public async Task<WorldNewsImportResult> ImportWorldNewsPagesAsync(WorldNewsStore target, int limit, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        var after = target.IngestionCursor("webcrawl");
+        var through = await Store.MaxPageIdAsync();
+        if (through < after) after = 0;
+        var pages = await Store.ReadPagesAfterAsync(after, through, limit);
+        if (pages.Count == 0) return new WorldNewsImportResult(0, 0, 0);
+
+        var articles = pages.Select(ToWorldArticle).Where(article => article is not null).Select(article => article!).ToList();
+        var added = target.AddArticles(articles);
+        target.SetIngestionCursor("webcrawl", pages[^1].Id);
+        return new WorldNewsImportResult(pages.Count, articles.Count, added);
+    }
+
+    private static WorldArticle? ToWorldArticle(StoredPage page)
+    {
+        var outlets = OutletFeeds.Outlets
+            .Where(outlet => Uri.TryCreate(outlet.Url, UriKind.Absolute, out var feed) && SameHost(feed.Host, page.Host))
+            .DistinctBy(outlet => (outlet.Name, outlet.Language, outlet.Country))
+            .ToArray();
+        if (outlets.Length == 0) return null;
+
+        var title = ArticleNormalizer.CleanTitle(page.Title);
+        if (title.Length == 0) return null;
+        var names = outlets.Select(outlet => outlet.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var languages = outlets.Select(outlet => outlet.Language).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var countries = outlets.Select(outlet => outlet.Country).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var url = ArticleNormalizer.CanonicalUrl(page.Url);
+        var seenAt = page.PublishedUnix is { } published
+            ? DateTimeOffset.FromUnixTimeSeconds(published)
+            : DateTimeOffset.FromUnixTimeSeconds(page.FetchedUnix);
+        return new WorldArticle(ArticleNormalizer.IdFor(url), url, title,
+            names.Length == 1 ? names[0] : page.Host,
+            languages.Length == 1 ? languages[0] : "Unknown",
+            countries.Length == 1 ? countries[0] : "Unknown",
+            seenAt, "webcrawl");
+    }
+
+    private static bool SameHost(string left, string right)
+    {
+        var feedHost = NormalizeHost(left);
+        var pageHost = NormalizeHost(right);
+        return feedHost == pageHost || feedHost.EndsWith("." + pageHost, StringComparison.Ordinal)
+            || pageHost.EndsWith("." + feedHost, StringComparison.Ordinal);
+    }
+
+    private static string NormalizeHost(string host)
+    {
+        var normalized = host.Trim().TrimEnd('.').ToLowerInvariant();
+        return normalized.StartsWith("www.", StringComparison.Ordinal) ? normalized[4..] : normalized;
     }
 
     public Task<int> PruneAsync()

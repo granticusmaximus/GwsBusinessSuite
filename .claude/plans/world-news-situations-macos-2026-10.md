@@ -187,17 +187,20 @@ can access lawfully and politely, not unbounded crawling or bypassing a publishe
 - [x] Add source-health and throughput reporting: attempted/successful sources, fetched/added/
   deduplicated reports, latest retained report time, and embedding backlog, so low coverage can be
   distinguished from grouping or display limits.
-- [ ] Define a single, deduplicated ingestion contract for eligible articles discovered by
-  `WebCrawler`; retain normalized headlines, source, URL, language, country and published time,
-  not republished article bodies.
+- [x] Define a single, deduplicated ingestion contract for eligible articles discovered by
+  `WebCrawler`; import bounded batches from configured outlet hosts, retain normalized headlines,
+  source, URL, language, country and published time, and keep article bodies in the crawler store.
 - [x] Add a browsable report-level view and filters for time, source country, language, outlet,
   kind and text, while keeping grouped events and situations as higher-level views. Reports remain
   visible before embedding/grouping, and the source-country label does not imply event location.
-- [ ] Set storage, retention, throughput and relevance limits; measure duplicate and noise rates
-  before increasing crawl volume or enabling GDELT queries.
-- [ ] Add fixture-based source and deduplication tests; update the user guide and complete
-  `./scripts/verify-release.sh` before calling the archive phase done. Report filtering and paging
-  now have store-level regression coverage.
+- [ ] Measure duplicate and noise rates before increasing crawl volume or enabling GDELT queries.
+  World News retains 30 days, Media Watch retains crawler pages for 14 days with a 4,000/day fetch
+  cap, and this import is capped at 500 pages per read by default; per-read scanned/eligible and
+  duplicate counts are now visible for the baseline.
+- [x] Add fixture-based source and deduplication tests and update the user guide. Report filtering,
+  paging and crawler ingestion now have regression coverage.
+- [ ] Complete `./scripts/verify-release.sh` and measure duplicate/noise rates before increasing
+  crawl volume or enabling GDELT queries.
 
 ### Guardrails
 

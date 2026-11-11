@@ -6,6 +6,7 @@ namespace GwsBusinessSuite.Infrastructure.WebCrawl;
 public sealed record FrontierEntry(string Url, string Host, bool Hub, int Depth);
 
 public sealed record StoredHit(long Id, string Url, string Host, string Title, long? PublishedUnix, long FetchedUnix, string Snippet);
+public sealed record StoredPage(long Id, string Url, string Host, string Title, long? PublishedUnix, long FetchedUnix);
 
 public sealed record StoredSite(string Host, string Home, bool ByHand, int Pages, long? LastFetchUnix, string? LastError);
 
@@ -325,6 +326,29 @@ public sealed class WebCrawlStore
                 reader.IsDBNull(4) ? null : reader.GetInt64(4), reader.GetInt64(5), reader.IsDBNull(6) ? string.Empty : reader.GetString(6)));
         }
         return hits;
+    }
+
+    public async Task<IReadOnlyList<StoredPage>> ReadPagesAfterAsync(long afterId, long throughId, int limit)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT id, url, host, title, published, fetched FROM pages
+            WHERE id > $after AND id <= $through
+            ORDER BY id
+            LIMIT $limit
+            """;
+        command.Parameters.AddWithValue("$after", afterId);
+        command.Parameters.AddWithValue("$through", throughId);
+        command.Parameters.AddWithValue("$limit", Math.Clamp(limit, 1, 2000));
+        var pages = new List<StoredPage>();
+        using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            pages.Add(new StoredPage(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                reader.IsDBNull(4) ? null : reader.GetInt64(4), reader.GetInt64(5)));
+        }
+        return pages;
     }
 
     public async Task<long> MaxPageIdAsync()
