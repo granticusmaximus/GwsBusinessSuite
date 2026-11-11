@@ -4594,33 +4594,35 @@ window.tacticalGlobe = (function () {
                 if (container.dataset.gwsNativeTap !== 'true') {
                     container.dataset.gwsNativeTap = 'true';
                     container.style.touchAction = 'none';
-                    container.addEventListener('pointerdown', function (event) {
-                        if (event.button !== 0) return;
-                        nativePointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
-                        nativeMoved = false;
-                        container.setPointerCapture(event.pointerId);
-                    });
-                    container.addEventListener('pointermove', function (event) {
-                        if (!nativePointer || nativePointer.id !== event.pointerId) return;
-                        const bounds = container.getBoundingClientRect();
-                        if (bounds.width <= 0 || bounds.height <= 0) return;
-                        const deltaX = (event.clientX - nativePointer.x) / bounds.width;
-                        const deltaY = (event.clientY - nativePointer.y) / bounds.height;
-                        if (Math.abs(deltaX) + Math.abs(deltaY) < 0.001) return;
-                        nativeMoved = true;
-                        nativePointer.x = event.clientX;
-                        nativePointer.y = event.clientY;
-                        postNative('pan', [deltaX, deltaY]);
-                    });
-                    const finishPan = function (event) {
-                        if (nativePointer && nativePointer.id === event.pointerId) nativePointer = null;
-                    };
-                    container.addEventListener('pointerup', finishPan);
-                    container.addEventListener('pointercancel', finishPan);
-                    container.addEventListener('wheel', function (event) {
-                        event.preventDefault();
-                        postNative('zoom', [nativeContainerId, event.deltaY < 0]);
-                    }, { passive: false });
+                    if (container.dataset.gwsNativeAppNavigation !== 'true') {
+                        container.addEventListener('pointerdown', function (event) {
+                            if (event.button !== 0) return;
+                            nativePointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+                            nativeMoved = false;
+                            container.setPointerCapture(event.pointerId);
+                        });
+                        container.addEventListener('pointermove', function (event) {
+                            if (!nativePointer || nativePointer.id !== event.pointerId) return;
+                            const bounds = container.getBoundingClientRect();
+                            if (bounds.width <= 0 || bounds.height <= 0) return;
+                            const deltaX = (event.clientX - nativePointer.x) / bounds.width;
+                            const deltaY = (event.clientY - nativePointer.y) / bounds.height;
+                            if (Math.abs(deltaX) + Math.abs(deltaY) < 0.001) return;
+                            nativeMoved = true;
+                            nativePointer.x = event.clientX;
+                            nativePointer.y = event.clientY;
+                            postNative('pan', [deltaX, deltaY]);
+                        });
+                        const finishPan = function (event) {
+                            if (nativePointer && nativePointer.id === event.pointerId) nativePointer = null;
+                        };
+                        container.addEventListener('pointerup', finishPan);
+                        container.addEventListener('pointercancel', finishPan);
+                        container.addEventListener('wheel', function (event) {
+                            event.preventDefault();
+                            postNative('zoom', [nativeContainerId, event.deltaY < 0]);
+                        }, { passive: false });
+                    }
                     container.addEventListener('click', function (event) {
                         if (nativeMoved) { nativeMoved = false; return; }
                         const bounds = container.getBoundingClientRect();

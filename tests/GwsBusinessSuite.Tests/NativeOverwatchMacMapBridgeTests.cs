@@ -112,6 +112,8 @@ public sealed class NativeOverwatchMacMapBridgeTests
         var script = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
         var bridge = File.ReadAllText(Path.Combine(RepoRoot,
             "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
+        var bootstrap = File.ReadAllText(Path.Combine(RepoRoot,
+            "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacWebViewCompatibility.cs"));
 
         script.Should().Contain("container.addEventListener('pointermove'");
         script.Should().Contain("postNative('pan', [deltaX, deltaY])");
@@ -122,5 +124,10 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bridge.Should().Contain("_map.SetRegion(region, false)");
         bridge.Should().Contain("Task.Delay(250, debounce.Token)");
         bridge.Should().Contain("owner.RegionDidChange(mapView.Region)");
+        bootstrap.Should().Contain("gwsNativeAppNavigation");
+        bootstrap.Should().Contain("post('pan', [deltaX, deltaY])");
+        bootstrap.Should().Contain("post('zoom', ['tg-viewport', event.deltaY < 0])");
+        bootstrap.Should().Contain("new MutationObserver(installNativeNavigation)");
+        script.Should().Contain("container.dataset.gwsNativeAppNavigation !== 'true'");
     }
 }
