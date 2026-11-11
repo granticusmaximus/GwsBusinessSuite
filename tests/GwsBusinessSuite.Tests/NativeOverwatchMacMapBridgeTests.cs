@@ -48,4 +48,22 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bridge.Should().Contain("case \"setThreeD\"");
         bridge.Should().Contain("MKMapType.HybridFlyover");
     }
+
+    [Fact]
+    public void MacAdapter_ShouldScaleTheViewportIntoNativeCoordinates_AndForwardZoomControls()
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        var page = File.ReadAllText(Path.Combine(RepoRoot,
+            "src/GwsBusinessSuite.Web/Components/Pages/BusinessSuite/OverwatchGrid.razor"));
+        var bridge = File.ReadAllText(Path.Combine(RepoRoot,
+            "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
+
+        script.Should().Contain("rect.width, rect.height, window.innerWidth, window.innerHeight");
+        page.Should().Contain("aria-label=\"Zoom in\"").And.Contain("aria-label=\"Zoom out\"");
+        bridge.Should().Contain("webView.Bounds.Width / viewportWidth");
+        bridge.Should().Contain("webView.Bounds.Height / viewportHeight");
+        bridge.Should().Contain("webView.Frame.X + x * scaleX");
+        bridge.Should().Contain("case \"zoom\": Zoom(arguments); return;");
+        bridge.Should().Contain("_map.SetRegion(region, true)");
+    }
 }

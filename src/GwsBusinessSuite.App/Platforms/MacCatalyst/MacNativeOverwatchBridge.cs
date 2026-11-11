@@ -17,6 +17,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private readonly Dictionary<string, List<IMKAnnotation>> _annotations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<IMKOverlay>> _overlays = new(StringComparer.Ordinal);
     private bool _pickPointMode;
+    private bool _hasInitialRegion;
 
     private MacNativeOverwatchBridge(WKWebView webView)
     {
@@ -78,15 +79,30 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     {
         if (!_webView.TryGetTarget(out var webView)) return;
         if (_map.Superview is null) webView.Superview?.InsertSubviewBelow(_map, webView);
-        _map.Frame = arguments.Length >= 4
+        _map.Frame = webView.Frame;
+        if (arguments.Length >= 6
             && AsDouble(arguments[0], out var x) && AsDouble(arguments[1], out var y)
             && AsDouble(arguments[2], out var width) && AsDouble(arguments[3], out var height)
-            ? new CoreGraphics.CGRect(x, y, width, height)
-            : webView.Frame;
+            && AsDouble(arguments[4], out var viewportWidth) && viewportWidth > 0
+            && AsDouble(arguments[5], out var viewportHeight) && viewportHeight > 0)
+        {
+            var scaleX = webView.Bounds.Width / viewportWidth;
+            var scaleY = webView.Bounds.Height / viewportHeight;
+            _map.Frame = new CoreGraphics.CGRect(
+                webView.Frame.X + x * scaleX,
+                webView.Frame.Y + y * scaleY,
+                width * scaleX,
+                height * scaleY);
+        }
         _map.Hidden = false;
         webView.Opaque = false;
         webView.BackgroundColor = UIColor.Clear;
         webView.ScrollView.BackgroundColor = UIColor.Clear;
+        if (!_hasInitialRegion)
+        {
+            _hasInitialRegion = true;
+            _map.SetRegion(new MKCoordinateRegion(new CLLocationCoordinate2D(20, 0), new MKCoordinateSpan(140, 340)), false);
+        }
     }
 
     private void Render(string operation, object?[] arguments)

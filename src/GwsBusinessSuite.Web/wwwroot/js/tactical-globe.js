@@ -4585,7 +4585,7 @@ window.tacticalGlobe = (function () {
             document.documentElement.classList.add('gws-native-overwatch');
             document.body.classList.add('gws-native-overwatch');
             const rect = container ? container.getBoundingClientRect() : { x: 0, y: 0, width: innerWidth, height: innerHeight };
-            postNative('init', [rect.x, rect.y, rect.width, rect.height]);
+            postNative('init', [rect.x, rect.y, rect.width, rect.height, window.innerWidth, window.innerHeight]);
         };
         api.whenDrawn = function () { return Promise.resolve(true); };
         api.setThreeD = function (containerId, on) {

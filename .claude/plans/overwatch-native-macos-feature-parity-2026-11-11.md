@@ -28,6 +28,8 @@ orchestration, while rendering the viewport with native MapKit.
   selection callbacks.
 - [ ] Map every existing Overwatch operation and prove contract/adapter parity with tests.
 - [x] Remove the obsolete native shader interception and GPU-unavailable fallback from the Mac path.
+- [x] Scale the native map viewport from WebView CSS pixels into UIKit coordinates and initialize
+  it at the world view; retain the page's zoom controls through the MapKit adapter.
 - [ ] Build and run authenticated native acceptance on this Mac.
 - [ ] Run focused browser/PWA regression tests.
 - [ ] Run `./scripts/verify-release.sh`.
