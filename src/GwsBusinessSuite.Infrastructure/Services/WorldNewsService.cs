@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 namespace GwsBusinessSuite.Infrastructure.Services;
 
 // World News (Intelligence workspace, .claude/plans/world-news-situations-macos-2026-10.md):
-// WorldNewsKit's pipeline on the server. 41 Google News country editions and 59 outlets' own
+// WorldNewsKit's pipeline on the server. Google News country editions and outlet-owned RSS
 // feeds are read every 15 minutes and grouped into events across languages with embeddinggemma
 // on the server's Ollama. embeddinggemma is in ollama/server-models.txt, and Light mode allows
 // it, since it's embeddings, not generation. After each read the busiest events get an English

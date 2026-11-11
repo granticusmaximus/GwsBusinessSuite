@@ -77,6 +77,15 @@ public sealed class WorldNewsKitTests : IDisposable
     }
 
     [Fact]
+    public void GoogleNewsEditions_ShouldIncludeAdditionalVerifiedMarkets()
+    {
+        GoogleNewsFeed.Editions.Select(edition => edition.Ceid).Should().Contain(
+        [
+            "GH:en", "TZ:en", "UG:en", "BD:bn", "FI:fi", "IE:en", "CH:de", "CL:es-419", "PE:es-419", "MY:ms", "SG:en"
+        ]);
+    }
+
+    [Fact]
     public void Gdelt_ShouldParseArticlesWithTheirLanguageAndCountry()
     {
         var articles = GdeltDocClient.Parse(GdeltAnswer);
