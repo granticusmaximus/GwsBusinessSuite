@@ -22,15 +22,25 @@ orchestration, while rendering the viewport with native MapKit.
 ## Progress
 
 - [x] Inventory the current native contract and every web renderer operation.
-- [ ] Add the trusted native-map bridge and lifecycle management.
-- [ ] Add the JavaScript native adapter with complete command forwarding and return semantics.
+- [x] Add the trusted native-map bridge and lifecycle management.
+- [x] Add the JavaScript native adapter with complete contract-command forwarding and return semantics.
 - [ ] Implement native annotations, clustering, overlays, routes, camera controls, picking, and
   selection callbacks.
 - [ ] Map every existing Overwatch operation and prove contract/adapter parity with tests.
-- [ ] Remove the obsolete native shader interception and GPU-unavailable fallback from the Mac path.
+- [x] Remove the obsolete native shader interception and GPU-unavailable fallback from the Mac path.
 - [ ] Build and run authenticated native acceptance on this Mac.
 - [ ] Run focused browser/PWA regression tests.
 - [ ] Run `./scripts/verify-release.sh`.
+
+### Verification note (11-11-26)
+
+- Focused native bridge tests passed (2/2).
+- `verify-release.sh --server-only --skip-tests` passed restore, dependency audit, Release build,
+  and whitespace checks. Docker Compose and responsive lint could not run because Docker and
+  Python are unavailable; the full suite was skipped in this fallback run.
+- The default gate could not restore/build MAUI targets because the required workloads are absent.
+  Its test host remained active for more than six minutes without reporting a result and was
+  stopped. Mac Catalyst build and authenticated acceptance remain outstanding.
 
 ## Acceptance
 

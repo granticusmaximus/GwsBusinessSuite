@@ -4516,6 +4516,7 @@ window.tacticalGlobe = (function () {
             selected: function (selection) {
                 if (!selection) return;
                 const payload = selection.payload || {};
+                if (selection.operation === 'mapPoint' && !nativePickMode) return;
                 if (nativePickMode && nativeDotNetRef && Number.isFinite(payload.lat) && Number.isFinite(payload.lon)) {
                     nativePickMode = false;
                     nativeDotNetRef.invokeMethodAsync('OnMapPointPicked', payload.lat, payload.lon);
@@ -4539,7 +4540,7 @@ window.tacticalGlobe = (function () {
 
         const nativeOperations = new Set([
             'flyTo', 'flyToBounds', 'flyToStreetLevel', 'zoom', 'home', 'dispose',
-            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setAircraft', 'setShips',
+            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setAircraft', 'setShips',
             'setAirQuality', 'setPowerOutages', 'setRoadTraffic', 'setTrafficFlow', 'setDriveFollow',
             'setStreetViewMarker', 'clearStreetViewMarker', 'setCameraPins', 'setSelectModeEnabled',
             'setRadarVisible', 'setRadarTimeline', 'setHourlyForecast', 'setWeatherAlerts',
@@ -4564,6 +4565,17 @@ window.tacticalGlobe = (function () {
             const container = document.getElementById(nativeContainerId);
             if (container) {
                 container.replaceChildren();
+                if (container.dataset.gwsNativeTap !== 'true') {
+                    container.dataset.gwsNativeTap = 'true';
+                    container.addEventListener('click', function (event) {
+                        const bounds = container.getBoundingClientRect();
+                        if (bounds.width <= 0 || bounds.height <= 0) return;
+                        postNative('mapTap', [
+                            (event.clientX - bounds.left) / bounds.width,
+                            (event.clientY - bounds.top) / bounds.height
+                        ]);
+                    });
+                }
                 let transparentAncestor = container;
                 while (transparentAncestor && transparentAncestor !== document.body) {
                     transparentAncestor.style.backgroundColor = 'transparent';

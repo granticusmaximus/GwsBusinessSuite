@@ -16,6 +16,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private readonly MapDelegate _delegate;
     private readonly Dictionary<string, List<IMKAnnotation>> _annotations = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<IMKOverlay>> _overlays = new(StringComparer.Ordinal);
+    private bool _pickPointMode;
 
     private MacNativeOverwatchBridge(WKWebView webView)
     {
@@ -56,11 +57,15 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         switch (operation)
         {
             case "init": Show(arguments); return;
-            case "dispose": ClearAll(); _map.Hidden = true; return;
+            case "dispose": _pickPointMode = false; ClearAll(); _map.Hidden = true; return;
             case "flyTo":
             case "flyToStreetLevel": FlyTo(arguments); return;
             case "flyToBounds": FlyToBounds(arguments); return;
             case "zoom": Zoom(arguments); return;
+            case "setThreeD": SetThreeD(arguments); return;
+            case "startPickPoint": _pickPointMode = true; return;
+            case "cancelPickPoint": _pickPointMode = false; return;
+            case "mapTap": MapTap(arguments); return;
             case "home":
                 _map.SetRegion(new MKCoordinateRegion(new CLLocationCoordinate2D(20, 0), new MKCoordinateSpan(140, 340)), true);
                 return;
@@ -173,6 +178,45 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         region.Span = new MKCoordinateSpan(Math.Clamp(region.Span.LatitudeDelta * factor, 0.001, 180),
             Math.Clamp(region.Span.LongitudeDelta * factor, 0.001, 360));
         _map.SetRegion(region, true);
+    }
+
+    private void SetThreeD(object?[] arguments)
+    {
+        var enabled = arguments.LastOrDefault() is true;
+        _map.MapType = enabled ? MKMapType.HybridFlyover : MKMapType.Hybrid;
+    }
+
+    private void MapTap(object?[] arguments)
+    {
+        if (arguments.Length < 2 || !AsDouble(arguments[0], out var x) || !AsDouble(arguments[1], out var y)) return;
+        var point = new CoreGraphics.CGPoint(
+            Math.Clamp(x, 0, 1) * _map.Bounds.Width,
+            Math.Clamp(y, 0, 1) * _map.Bounds.Height);
+        var coordinate = _map.ConvertPointToCoordinate(point);
+        if (_pickPointMode)
+        {
+            _pickPointMode = false;
+            var json = JsonSerializer.Serialize(new
+            {
+                operation = "mapPoint",
+                payload = new { lat = coordinate.Latitude, lon = coordinate.Longitude }
+            });
+            _ = SendAsync($"window.gwsNativeOverwatch && window.gwsNativeOverwatch.selected({json})");
+            return;
+        }
+
+        var nearest = _annotations.Values.SelectMany(values => values).OfType<NativeAnnotation>()
+            .Select(annotation =>
+            {
+                var location = _map.ConvertCoordinateToPoint(annotation.Coordinate);
+                var deltaX = location.X - point.X;
+                var deltaY = location.Y - point.Y;
+                return (Annotation: annotation, DistanceSquared: deltaX * deltaX + deltaY * deltaY);
+            })
+            .Where(item => item.DistanceSquared <= 36 * 36)
+            .OrderBy(item => item.DistanceSquared)
+            .FirstOrDefault();
+        if (nearest.Annotation is not null) _map.SelectAnnotation(nearest.Annotation, true);
     }
 
     private void Clear(string operation)

@@ -20,6 +20,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
 
         forwarded.Should().BeSupersetOf(NativeOverwatchOperations.All,
             "the Mac renderer must not silently drop a layer supported by the web renderer contract");
+        script.Should().Contain("postNative('mapTap'");
     }
 
     [Fact]
@@ -39,5 +40,11 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bridge.Should().Contain("MKPolygon");
         bridge.Should().Contain("ClusteringIdentifier");
         bridge.Should().Contain("window.gwsNativeOverwatch");
+        bridge.Should().Contain("case \"startPickPoint\"");
+        bridge.Should().Contain("case \"mapTap\"");
+        bridge.Should().Contain("ConvertPointToCoordinate");
+        bridge.Should().Contain("SelectAnnotation");
+        bridge.Should().Contain("case \"setThreeD\"");
+        bridge.Should().Contain("MKMapType.HybridFlyover");
     }
 }
