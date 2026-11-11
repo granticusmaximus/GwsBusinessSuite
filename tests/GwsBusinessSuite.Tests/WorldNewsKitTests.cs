@@ -415,6 +415,44 @@ public sealed class WorldNewsKitTests : IDisposable
     }
 
     [Fact]
+    public void RecentReports_ShouldIncludeUngroupedReports_WithinTheWindowAndLimit()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var grouped = Reports("grouped", 3);
+        SeedEvent(store, "grouped", grouped);
+        store.AddArticles([
+            Article("ungrouped", "Election in Ghana", "English", Now.AddMinutes(1)),
+            Article("old", "Older report", "English", Now.AddDays(-2))
+        ]);
+
+        var reports = store.RecentReports(Now.AddDays(-1), 2);
+
+        reports.Should().HaveCount(2);
+        reports[0].Id.Should().Be("ungrouped");
+        reports[1].Id.Should().BeOneOf(grouped.Select(article => article.Id).ToArray());
+        store.RecentReports(Now.AddDays(-1), 0).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void RecentReports_ShouldFilterByTextSourceAndSituationKind()
+    {
+        var store = new WorldNewsStore(_dbPath);
+        var election = Article("election", "Election results announced", "English", Now)
+            with { Country = "Ghana", Outlet = "Daily News" };
+        SeedEvent(store, "election-event", [election]);
+        store.SaveLinks([new SituationLink("election-event", new NewsSituation { Id = "election-situation", Sum = [1f, 0f], LastSeen = Now })]);
+        store.SaveKinds([("election-situation", SituationKinds.Politics)]);
+        store.AddArticles([Article("flood", "Flood warning issued", "French", Now.AddMinutes(-1)) with { Country = "France" }]);
+
+        var reports = store.RecentReports(Now.AddDays(-1), 10, text: "election", country: "ghan",
+            language: "english", outlet: "daily", kind: SituationKinds.Politics);
+
+        reports.Should().ContainSingle().Which.Id.Should().Be("election");
+        store.RecentReports(Now.AddDays(-1), 10, kind: "unclassified").Select(report => report.Id).Should().ContainSingle().Which.Should().Be("flood");
+        store.RecentReports(Now.AddDays(-1), 1, offset: 1).Should().ContainSingle();
+    }
+
+    [Fact]
     public void Search_ShouldRankByMeaning_DropUnrelatedEvents_AndLimitEachSituation()
     {
         WorldNewsCandidate Candidate(string id, float[] direction, string? situation = null) => new(id, direction, situation);
@@ -1264,7 +1302,13 @@ public sealed class WorldNewsKitTests : IDisposable
             new WorldNewsOptions { Editions = [], Outlets = [], ReadWhoOutbreakNews = on });
 
         (await Pipeline(false).RunCycleAsync(CancellationToken.None)).Added.Should().Be(0, "it's off unless the host turns it on");
-        (await Pipeline(true).RunCycleAsync(CancellationToken.None)).Added.Should().Be(1);
+        var report = await Pipeline(true).RunCycleAsync(CancellationToken.None);
+        report.Added.Should().Be(1);
+        report.SourcesAttempted.Should().Be(1);
+        report.SourcesSucceeded.Should().Be(1);
+        report.Deduplicated.Should().Be(0);
+        report.EmbeddingBacklog.Should().Be(1, "the test model is unavailable so the report remains queued");
+        report.LatestReportAt.Should().Be(Now.AddHours(-5));
         store.ArticlesToEmbed(10).Should().ContainSingle(a => a.Outlet == WhoOutbreakNews.Outlet && a.Feed == WhoOutbreakNews.Feed);
 
         whoUp = false;

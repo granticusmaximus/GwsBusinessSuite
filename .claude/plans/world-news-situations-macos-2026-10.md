@@ -156,6 +156,57 @@ has a situation link. The projection counts only reports inside the selected win
 event's full country/language context. Focused tests cover window exclusion, deterministic country
 ordering, per-country/global ranking limits and situation tagging.
 
+## Broader World News archive (direction added 11-11-26)
+
+Grant's goal is to make World News the broad, searchable and filterable home for public reporting,
+not only grouped event summaries. "All news that can be found" means broad coverage of sources we
+can access lawfully and politely, not unbounded crawling or bypassing a publisher's controls.
+
+### Existing pieces
+
+- `WorldNewsKit` reads Google News editions and outlet RSS feeds every 15 minutes, groups reports
+  into events and situations, and keeps 30 days in its own SQLite database. The edition roster is
+  now 52: 41 existing editions plus 11 additional local editions whose feeds returned live stories
+  on 11-11-26.
+- `GdeltDocClient` supports multilingual article search, with a six-second request interval, a
+  15-minute cooldown after HTTP 429, and at most one day of lookback. Production currently passes
+  no `GdeltQueries`, so it is off. It should not be enabled broadly until a live availability and
+  query-volume check succeeds; the historical 20-10-26 check saw data on only one of five calls,
+  and a probe on 11-11-26 was rate-limited.
+- Media Watch's `WebCrawler` already discovers pages from World News outlet feeds, home pages and
+  sitemaps. It obeys robots.txt, identifies itself, spaces requests per site, caps daily fetches,
+  and stores extracted pages in a separate 14-day FTS database. Only matches for a user's watched
+  topic become Media Watch `NewsItem`s; crawled pages do not currently enter the World News event
+  pipeline.
+
+### Next phases
+
+- [x] Add 11 live-verified Google News editions for Ghana, Tanzania, Uganda, Bangladesh, Finland,
+  Ireland, Switzerland, Chile, Peru, Malaysia and Singapore; cover them with a roster regression
+  test.
+- [x] Add source-health and throughput reporting: attempted/successful sources, fetched/added/
+  deduplicated reports, latest retained report time, and embedding backlog, so low coverage can be
+  distinguished from grouping or display limits.
+- [ ] Define a single, deduplicated ingestion contract for eligible articles discovered by
+  `WebCrawler`; retain normalized headlines, source, URL, language, country and published time,
+  not republished article bodies.
+- [x] Add a browsable report-level view and filters for time, source country, language, outlet,
+  kind and text, while keeping grouped events and situations as higher-level views. Reports remain
+  visible before embedding/grouping, and the source-country label does not imply event location.
+- [ ] Set storage, retention, throughput and relevance limits; measure duplicate and noise rates
+  before increasing crawl volume or enabling GDELT queries.
+- [ ] Add fixture-based source and deduplication tests; update the user guide and complete
+  `./scripts/verify-release.sh` before calling the archive phase done. Report filtering and paging
+  now have store-level regression coverage.
+
+### Guardrails
+
+Use the existing crawler's robots, pacing, destination validation and daily limits. Respect HTTP
+403/405 and robots refusals without changing the user agent or otherwise working around them.
+Check each source's feed/API terms and retain links and short metadata rather than republishing
+article text. Keep World News's independent store and source provenance; do not make a parallel
+crawler.
+
 ## What clstr.news does (checked live 20-10-26)
 
 - **Volume:** about 700,000 articles a week from a commercial news-data provider (its ChatGPT

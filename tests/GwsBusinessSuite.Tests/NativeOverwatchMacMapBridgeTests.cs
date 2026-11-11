@@ -42,7 +42,8 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bridge.Should().Contain("window.gwsNativeOverwatch");
         bridge.Should().Contain("case \"startPickPoint\"");
         bridge.Should().Contain("case \"mapTap\"");
-        bridge.Should().Contain("ConvertPointToCoordinate");
+        bridge.Should().Contain("_map.ConvertPoint(point, _map)");
+        bridge.Should().Contain("_map.ConvertCoordinate(annotation.Coordinate, _map)");
         bridge.Should().Contain("SelectAnnotation");
         bridge.Should().Contain("case \"setThreeD\"");
         bridge.Should().Contain("MKMapType.HybridFlyover");

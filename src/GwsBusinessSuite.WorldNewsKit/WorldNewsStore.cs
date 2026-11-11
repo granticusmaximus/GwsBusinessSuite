@@ -173,6 +173,59 @@ public sealed class WorldNewsStore
         QueryArticles("WHERE embedding IS NULL AND seen_at >= $since ORDER BY seen_at DESC LIMIT $limit",
             ("$limit", limit), ("$since", since.ToUnixTimeSeconds()));
 
+    public IReadOnlyList<WorldArticle> RecentReports(DateTimeOffset since, int limit = 100, int offset = 0,
+        string? text = null, string? country = null, string? language = null, string? outlet = null, string? kind = null)
+    {
+        var conditions = new List<string> { "seen_at >= $since" };
+        var parameters = new List<(string Name, object Value)> { ("$since", since.ToUnixTimeSeconds()) };
+        AddTextFilter("title || ' ' || COALESCE(snippet, '')", text, "$text");
+        AddTextFilter("country", country, "$country");
+        AddTextFilter("language", language, "$language");
+        AddTextFilter("outlet", outlet, "$outlet");
+
+        const string classified = "SELECT 1 FROM events e JOIN situations s ON s.id = e.situation_id "
+            + "WHERE e.id = articles.event_id AND s.kind IS NOT NULL";
+        if (string.Equals(kind, "unclassified", StringComparison.OrdinalIgnoreCase))
+            conditions.Add($"NOT EXISTS ({classified})");
+        else if (!string.IsNullOrWhiteSpace(kind))
+        {
+            conditions.Add("EXISTS (SELECT 1 FROM events e JOIN situations s ON s.id = e.situation_id "
+                + "WHERE e.id = articles.event_id AND s.kind = $kind)");
+            parameters.Add(("$kind", kind));
+        }
+
+        parameters.Add(("$limit", Math.Clamp(limit, 0, 500)));
+        parameters.Add(("$offset", Math.Max(0, offset)));
+        return QueryArticles($"WHERE {string.Join(" AND ", conditions)} ORDER BY seen_at DESC, id LIMIT $limit OFFSET $offset",
+            parameters.ToArray());
+
+        void AddTextFilter(string column, string? value, string parameter)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return;
+            conditions.Add($"instr(lower({column}), lower({parameter})) > 0");
+            parameters.Add((parameter, value.Trim()));
+        }
+    }
+
+    public int RecentEmbeddingBacklog(DateTimeOffset since)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM articles WHERE embedding IS NULL AND seen_at >= $since";
+        command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+        return Convert.ToInt32(command.ExecuteScalar());
+    }
+
+    public DateTimeOffset? LatestReportAt(DateTimeOffset since)
+    {
+        using var connection = Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT MAX(seen_at) FROM articles WHERE seen_at >= $since";
+        command.Parameters.AddWithValue("$since", since.ToUnixTimeSeconds());
+        var value = command.ExecuteScalar();
+        return value is null or DBNull ? null : DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(value));
+    }
+
     public void SaveEmbeddings(IReadOnlyList<(string Id, float[] Vector)> embeddings)
     {
         using var connection = Open();

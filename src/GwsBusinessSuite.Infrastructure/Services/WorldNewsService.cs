@@ -199,7 +199,11 @@ public sealed partial class WorldNewsService : IDisposable
             var notes = report.Notes.Concat(summaries.Notes).ToList();
             var problems = notes.Count == 0 ? string.Empty
                 : $" {notes.Count} {(notes.Count == 1 ? "problem" : "problems")}: {notes[0]}";
-            Status = $"{report.Added:N0} new reports, {report.NewEvents:N0} new events, {summaries.Written:N0} summaries written.{problems}";
+            var latestReport = report.LatestReportAt is { } latest ? $" Latest report {latest.ToLocalGwsDateTime()}." : string.Empty;
+            Status = $"{report.Added:N0} new of {report.Fetched:N0} reports ({report.Deduplicated:N0} already stored); "
+                + $"{report.SourcesSucceeded}/{report.SourcesAttempted} sources succeeded; "
+                + $"{report.Embedded:N0} embedded, {report.EmbeddingBacklog:N0} awaiting embedding; "
+                + $"{report.NewEvents:N0} new events, {summaries.Written:N0} summaries written.{latestReport}{problems}";
             if (notes.Count > 0)
                 _logger.LogWarning("World news read finished with {Count} problem(s): {Notes}", notes.Count, string.Join(" | ", notes));
         }

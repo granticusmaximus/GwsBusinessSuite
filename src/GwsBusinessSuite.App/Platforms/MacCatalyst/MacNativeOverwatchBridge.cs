@@ -192,7 +192,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         var point = new CoreGraphics.CGPoint(
             Math.Clamp(x, 0, 1) * _map.Bounds.Width,
             Math.Clamp(y, 0, 1) * _map.Bounds.Height);
-        var coordinate = _map.ConvertPointToCoordinate(point);
+        var coordinate = _map.ConvertPoint(point, _map);
         if (_pickPointMode)
         {
             _pickPointMode = false;
@@ -208,7 +208,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         var nearest = _annotations.Values.SelectMany(values => values).OfType<NativeAnnotation>()
             .Select(annotation =>
             {
-                var location = _map.ConvertCoordinateToPoint(annotation.Coordinate);
+                var location = _map.ConvertCoordinate(annotation.Coordinate, _map);
                 var deltaX = location.X - point.X;
                 var deltaY = location.Y - point.Y;
                 return (Annotation: annotation, DistanceSquared: deltaX * deltaX + deltaY * deltaY);

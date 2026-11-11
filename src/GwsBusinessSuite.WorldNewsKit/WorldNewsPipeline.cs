@@ -37,7 +37,11 @@ public sealed record WorldNewsOptions
 }
 
 public sealed record CycleReport(int Fetched, int Added, int Embedded, int NewEvents, int UpdatedEvents, int MergedEvents, IReadOnlyList<string> Notes,
-    int LinkedEvents = 0);
+    int LinkedEvents = 0, int SourcesAttempted = 0, int SourcesSucceeded = 0, int EmbeddingBacklog = 0,
+    DateTimeOffset? LatestReportAt = null)
+{
+    public int Deduplicated => Math.Max(0, Fetched - Added);
+}
 
 // One refresh: read every feed (Google News editions, then outlets' own feeds), store the new
 // reports, embed their headlines with the local model, and group them into events. Only
@@ -51,12 +55,16 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         var notes = new List<string>();
         var fetched = 0;
         var added = 0;
+        var sourcesAttempted = 0;
+        var sourcesSucceeded = 0;
 
         foreach (var edition in options.Editions)
         {
+            sourcesAttempted++;
             try
             {
                 var articles = GoogleNewsFeed.Parse(await http.GetStringAsync(edition.Url, ct), edition);
+                sourcesSucceeded++;
                 fetched += articles.Count;
                 added += store.AddArticles(articles);
             }
@@ -83,17 +91,21 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
             });
         foreach (var (articles, note) in outletReads)
         {
+            sourcesAttempted++;
             if (note is not null) notes.Add(note);
             if (articles is null) continue;
+            sourcesSucceeded++;
             fetched += articles.Count;
             added += store.AddArticles(articles);
         }
 
         if (options.ReadWhoOutbreakNews)
         {
+            sourcesAttempted++;
             try
             {
                 var articles = WhoOutbreakNews.Parse(await http.GetStringAsync(WhoOutbreakNews.Url, ct), time.GetUtcNow());
+                sourcesSucceeded++;
                 fetched += articles.Count;
                 added += store.AddArticles(articles);
             }
@@ -105,6 +117,7 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
 
         foreach (var query in options.GdeltQueries)
         {
+            sourcesAttempted++;
             var feed = "gdelt:" + query;
             var startedAt = time.GetUtcNow();
             var from = (store.LastFetched(feed) ?? startedAt - options.FirstLookback) - TimeSpan.FromMinutes(15);
@@ -115,6 +128,7 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
                 if (gdelt.IsCoolingDown) break;
                 continue;
             }
+            sourcesSucceeded++;
             fetched += result.Articles.Count;
             added += store.AddArticles(result.Articles);
             store.SetLastFetched(feed, startedAt);
@@ -150,8 +164,10 @@ public sealed class WorldNewsPipeline(WorldNewsStore store, HttpClient http, Gde
         var grouped = Group();
         store.Prune(time.GetUtcNow() - options.KeepFor);
 
+        var retainedSince = time.GetUtcNow() - options.KeepFor;
         return new CycleReport(fetched, added, embedded, grouped.Clustering.Created, grouped.Clustering.Touched.Count - grouped.Clustering.Created,
-            grouped.Merged, notes, grouped.Linked);
+            grouped.Merged, notes, grouped.Linked, sourcesAttempted, sourcesSucceeded, store.RecentEmbeddingBacklog(retainedSince),
+            store.LatestReportAt(retainedSince));
     }
 
     // Groups the embedded reports not yet in an event, merges twin events and places events in
