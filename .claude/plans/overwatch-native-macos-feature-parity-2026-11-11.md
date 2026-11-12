@@ -24,8 +24,8 @@ orchestration, while rendering the viewport with native MapKit.
 - [x] Inventory the current native contract and every web renderer operation.
 - [x] Add the trusted native-map bridge and lifecycle management.
 - [x] Add the JavaScript native adapter with complete contract-command forwarding and return semantics.
-- [x] Implement native annotations, clustering, overlays, routes, camera controls, picking, and
-  selection callbacks.
+- [x] Implement native annotations, expandable clusters, overlays, routes, camera controls,
+  picking, and selection callbacks.
 - [x] Map every existing Overwatch operation and prove contract/adapter parity with tests.
 - [x] Remove the obsolete native shader interception and GPU-unavailable fallback from the Mac path.
 - [x] Scale the native map viewport from WebView CSS pixels into UIKit coordinates and initialize
@@ -42,6 +42,8 @@ orchestration, while rendering the viewport with native MapKit.
   native acceptance visibly showed the MapKit hybrid globe, camera pins, numbered clusters,
   labels, and the existing Overwatch controls together inside the app; the boot screen cleared.
 - Batched large native annotation and overlay updates to avoid one MapKit layout pass per pin.
+- Follow-up interaction fix: pan now uses MapKit's projected screen coordinates; cluster taps zoom
+  to member pins, and a drag release no longer fires a second tap on the web overlay.
 
 - Focused native bridge tests passed (2/2).
 - `verify-release.sh --server-only --skip-tests` passed restore, dependency audit, Release build,

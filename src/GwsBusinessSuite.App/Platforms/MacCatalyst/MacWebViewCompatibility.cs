@@ -16,6 +16,12 @@ internal static class MacWebViewCompatibility
                 container.dataset.gwsNativeAppNavigation = 'true';
                 container.style.touchAction = 'none';
                 let pointer = null;
+                container.addEventListener('click', function (event) {
+                    if (container.dataset.gwsNativeSuppressClick !== 'true') return;
+                    delete container.dataset.gwsNativeSuppressClick;
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                });
                 function post(operation, args) {
                     const handlers = window.webkit && window.webkit.messageHandlers;
                     const handler = handlers && handlers.gwsNativeOverwatch;
@@ -23,7 +29,7 @@ internal static class MacWebViewCompatibility
                 }
                 container.addEventListener('pointerdown', function (event) {
                     if (event.button !== 0) return;
-                    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+                    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
                     container.setPointerCapture(event.pointerId);
                 });
                 container.addEventListener('pointermove', function (event) {
@@ -33,12 +39,20 @@ internal static class MacWebViewCompatibility
                     const deltaX = (event.clientX - pointer.x) / bounds.width;
                     const deltaY = (event.clientY - pointer.y) / bounds.height;
                     if (Math.abs(deltaX) + Math.abs(deltaY) < 0.001) return;
+                    pointer.moved = true;
                     pointer.x = event.clientX;
                     pointer.y = event.clientY;
                     post('pan', [deltaX, deltaY]);
                 });
                 function finish(event) {
-                    if (pointer && pointer.id === event.pointerId) pointer = null;
+                    if (!pointer || pointer.id !== event.pointerId) return;
+                    if (pointer.moved) {
+                        container.dataset.gwsNativeSuppressClick = 'true';
+                        setTimeout(function () {
+                            delete container.dataset.gwsNativeSuppressClick;
+                        }, 0);
+                    }
+                    pointer = null;
                 }
                 container.addEventListener('pointerup', finish);
                 container.addEventListener('pointercancel', finish);

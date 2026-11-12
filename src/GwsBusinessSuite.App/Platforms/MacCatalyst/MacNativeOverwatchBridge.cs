@@ -214,9 +214,10 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         if (!AsDouble(arguments.ElementAtOrDefault(0), out var deltaX)
             || !AsDouble(arguments.ElementAtOrDefault(1), out var deltaY)) return;
         var region = _map.Region;
-        region.Center = new CLLocationCoordinate2D(
-            Math.Clamp(region.Center.Latitude + deltaY * region.Span.LatitudeDelta, -85, 85),
-            NormalizeLongitude(region.Center.Longitude - deltaX * region.Span.LongitudeDelta));
+        var center = _map.ConvertCoordinate(region.Center, _map);
+        region.Center = _map.ConvertPoint(new CoreGraphics.CGPoint(
+            center.X - deltaX * _map.Bounds.Width,
+            center.Y - deltaY * _map.Bounds.Height), _map);
         _map.SetRegion(region, false);
     }
 
@@ -245,9 +246,11 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             return;
         }
 
-        var nearest = _annotations.Values.SelectMany(values => values).OfType<NativeAnnotation>()
+        var nearest = _map.Annotations
             .Select(annotation =>
             {
+                var view = _map.ViewForAnnotation(annotation);
+                if (view is null || view.Hidden) return (Annotation: annotation, DistanceSquared: double.PositiveInfinity);
                 var location = _map.ConvertCoordinate(annotation.Coordinate, _map);
                 var deltaX = location.X - point.X;
                 var deltaY = location.Y - point.Y;
@@ -353,6 +356,16 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     {
         public override MKAnnotationView GetViewForAnnotation(MKMapView mapView, IMKAnnotation annotation)
         {
+            if (annotation is MKClusterAnnotation cluster)
+            {
+                var clusterView = mapView.DequeueReusableAnnotation("gws-cluster") as MKMarkerAnnotationView
+                    ?? new MKMarkerAnnotationView(annotation, "gws-cluster");
+                clusterView.Annotation = cluster;
+                clusterView.CanShowCallout = false;
+                clusterView.MarkerTintColor = UIColor.SystemGreen;
+                clusterView.GlyphText = cluster.MemberAnnotations.Length.ToString(CultureInfo.InvariantCulture);
+                return clusterView;
+            }
             if (annotation is not NativeAnnotation native) return new MKMarkerAnnotationView(annotation, null);
             var view = mapView.DequeueReusableAnnotation("gws-native") as MKMarkerAnnotationView ?? new MKMarkerAnnotationView(annotation, "gws-native");
             view.Annotation = native; view.CanShowCallout = true; view.ClusteringIdentifier = native.Operation;
@@ -376,6 +389,11 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 
         public override void DidSelectAnnotationView(MKMapView mapView, MKAnnotationView view)
         {
+            if (view.Annotation is MKClusterAnnotation cluster)
+            {
+                mapView.ShowAnnotations(cluster.MemberAnnotations, true);
+                return;
+            }
             if (view.Annotation is not NativeAnnotation annotation) return;
             var json = JsonSerializer.Serialize(new { operation = annotation.Operation, payload = annotation.Payload });
             _ = owner.SendAsync($"window.gwsNativeOverwatch && window.gwsNativeOverwatch.selected({json})");

@@ -130,4 +130,28 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bootstrap.Should().Contain("new MutationObserver(installNativeNavigation)");
         script.Should().Contain("container.dataset.gwsNativeAppNavigation !== 'true'");
     }
+
+    [Fact]
+    public void NativeMap_ShouldExpandClusters_OpenIndividualNodes_AndSuppressDragClicks()
+    {
+        var bridge = File.ReadAllText(Path.Combine(RepoRoot,
+            "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
+        var bootstrap = File.ReadAllText(Path.Combine(RepoRoot,
+            "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacWebViewCompatibility.cs"));
+
+        bridge.Should().Contain("var center = _map.ConvertCoordinate(region.Center, _map)")
+            .And.Contain("center.X - deltaX * _map.Bounds.Width")
+            .And.Contain("center.Y - deltaY * _map.Bounds.Height");
+        bridge.Should().Contain("var nearest = _map.Annotations")
+            .And.Contain("var view = _map.ViewForAnnotation(annotation)")
+            .And.Contain("if (view is null || view.Hidden)")
+            .And.Contain("annotation is MKClusterAnnotation cluster")
+            .And.Contain("mapView.ShowAnnotations(cluster.MemberAnnotations, true)")
+            .And.Contain("cluster.MemberAnnotations.Length.ToString(CultureInfo.InvariantCulture)");
+        bridge.Should().Contain("if (view.Annotation is not NativeAnnotation annotation) return;")
+            .And.Contain("window.gwsNativeOverwatch && window.gwsNativeOverwatch.selected({json})");
+        bootstrap.Should().Contain("pointer.moved = true")
+            .And.Contain("gwsNativeSuppressClick")
+            .And.Contain("event.stopImmediatePropagation()");
+    }
 }
