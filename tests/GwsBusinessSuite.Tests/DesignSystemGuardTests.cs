@@ -71,4 +71,32 @@ public sealed class DesignSystemGuardTests
                 .Should().OnlyContain(value => value == "var(--gws-sidebar-accent)", $"{page} shares the app's one accent");
         }
     }
+
+    [Fact]
+    public void OverwatchText_ShouldNeverDropBelowTwelvePixels()
+    {
+        string[] sheets = ["wwwroot/tactical-globe.css", "Components/Pages/BusinessSuite/OverwatchGrid.razor.css"];
+        foreach (var sheet in sheets)
+        {
+            var tiny = Regex.Matches(File.ReadAllText(Path.Combine(Web, sheet)), @"font-size:\s*(0?\.\d+)(rem|em)\b")
+                .Where(match => double.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) < 0.75)
+                .Select(match => match.Value);
+            tiny.Should().BeEmpty($"{sheet}: sizes under .75rem are written max(size, 12px)");
+        }
+    }
+
+    [Fact]
+    public void MacApp_ShouldOfferTheStandardCommands_AndAMinimumWindow()
+    {
+        var app = Path.GetFullPath(Path.Combine(Web, "../GwsBusinessSuite.App"));
+        var menu = File.ReadAllText(Path.Combine(app, "Platforms/MacCatalyst/AppDelegate.cs"));
+        menu.Should().Contain("\"gwsSettings:\"), \",\", UIKeyModifierFlags.Command")
+            .And.Contain("\"gwsBack:\"), \"[\", UIKeyModifierFlags.Command")
+            .And.Contain("\"gwsForward:\"), \"]\", UIKeyModifierFlags.Command")
+            .And.Contain("\"gwsFind:\"), \"f\", UIKeyModifierFlags.Command")
+            .And.Contain("builder.ReplaceMenu(UIMenuIdentifier.Find.GetConstant()!");
+        File.ReadAllText(Path.Combine(app, "MainPage.xaml.cs")).Should().Contain("MacToolbarActions.EvaluateScript = script =>");
+        File.ReadAllText(Path.Combine(app, "App.xaml.cs")).Should().Contain("window.MinimumWidth = 820;");
+        File.ReadAllText(Path.Combine(Web, "wwwroot/app.js")).Should().Contain("window.addEventListener('gws-find'");
+    }
 }

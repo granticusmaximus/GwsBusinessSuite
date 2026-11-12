@@ -1,3 +1,5 @@
+/* Text never drops below 12px (12-11-26): the HUD had 81 labels under it on a phone. Sizes below
+   .75rem read max(size, 12px). */
 /* Styling for every Overwatch UI element built entirely by tactical-globe.js via
    document.createElement (the stream/incident modal, watch wall, weather panel, hover
    tooltip, selection indicator) - deliberately a PLAIN, non-Blazor-scoped stylesheet, not
@@ -80,7 +82,7 @@
     border: 1px solid rgba(125, 255, 176, 0.5);
     color: #7dffb0;
     cursor: pointer;
-    font-size: 0.7rem;
+    font-size: max(0.7rem, 12px);
     line-height: 1;
     padding: 0.15rem 0.4rem;
 }
@@ -106,7 +108,7 @@
     border: 1px solid rgba(125, 255, 176, 0.5);
     color: #7dffb0;
     cursor: pointer;
-    font-size: 0.65rem;
+    font-size: max(0.65rem, 12px);
     line-height: 1;
     padding: 0.15rem 0.4rem;
 }
@@ -122,14 +124,14 @@
     padding: 0.4rem 0.5rem;
     border: 1px solid rgba(125, 255, 176, 0.25);
     border-radius: 0.25rem;
-    font-size: 0.7rem;
+    font-size: max(0.7rem, 12px);
     line-height: 1.3;
     flex-shrink: 0;
 }
 
 .tg-stream-panel-body {
     padding: 0.6rem 0.7rem;
-    font-size: 0.7rem;
+    font-size: max(0.7rem, 12px);
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -151,7 +153,7 @@
 .tg-stream-panel-meta {
     margin-top: 0.4rem;
     opacity: 0.75;
-    font-size: 0.65rem;
+    font-size: max(0.65rem, 12px);
     flex-shrink: 0;
 }
 
@@ -160,7 +162,7 @@
     padding: 0.25rem 0.5rem;
     border: 1px solid rgba(125, 255, 176, 0.35);
     border-radius: 0.25rem;
-    font-size: 0.65rem;
+    font-size: max(0.65rem, 12px);
     letter-spacing: 0.04em;
     flex-shrink: 0;
 }
@@ -216,7 +218,7 @@
     border: 1px solid rgba(125, 255, 176, 0.5);
     color: #7dffb0;
     cursor: pointer;
-    font-size: 0.7rem;
+    font-size: max(0.7rem, 12px);
     line-height: 1;
     padding: 0.15rem 0.4rem;
 }
@@ -243,7 +245,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 0.2rem 0.4rem;
-    font-size: 0.6rem;
+    font-size: max(0.6rem, 12px);
     border-bottom: 1px solid rgba(125, 255, 176, 0.25);
     flex-shrink: 0;
 }
@@ -253,7 +255,7 @@
     border: none;
     color: #7dffb0;
     cursor: pointer;
-    font-size: 0.65rem;
+    font-size: max(0.65rem, 12px);
     line-height: 1;
     padding: 0 0.2rem;
 }
@@ -277,7 +279,7 @@
 }
 
 .tg-watch-wall-tile-body .tg-stream-panel-meta {
-    font-size: 0.55rem;
+    font-size: max(0.55rem, 12px);
     padding: 0.1rem 0.3rem;
     margin-top: 0;
 }
@@ -294,7 +296,7 @@
     border: 1px solid rgba(125, 255, 176, 0.6);
     color: #7dffb0;
     font-family: "Share Tech Mono", ui-monospace, monospace;
-    font-size: 0.7rem;
+    font-size: max(0.7rem, 12px);
     letter-spacing: 0.03em;
     cursor: pointer;
     box-shadow: 0 0 14px rgba(0, 0, 0, 0.5);
@@ -483,7 +485,7 @@
 
 .tg-weather-meta {
     margin-top: 0.2rem;
-    font-size: 0.65rem;
+    font-size: max(0.65rem, 12px);
     opacity: 0.8;
 }
 
@@ -500,7 +502,7 @@
     border: 1px solid rgba(125, 255, 176, 0.5);
     color: #7dffb0;
     font-family: "Share Tech Mono", ui-monospace, monospace;
-    font-size: 0.7rem;
+    font-size: max(0.7rem, 12px);
     line-height: 1.35;
     box-shadow: 0 0 14px rgba(0, 0, 0, 0.5);
 }
@@ -555,7 +557,7 @@
 }
 
 .tg-hover-photo-count {
-    font-size: 0.62rem;
+    font-size: max(0.62rem, 12px);
     opacity: 0.75;
     white-space: nowrap;
 }
@@ -571,14 +573,14 @@
     grid-template-columns: auto 1fr;
     gap: 0.15rem 0.6rem;
     margin: 0.4rem 0;
-    font-size: 0.65rem;
+    font-size: max(0.65rem, 12px);
 }
 
 .tg-incident-facts dt { opacity: 0.7; font-weight: normal; }
 .tg-incident-facts dd { margin: 0; }
 
 /* A satellite's public data (07-11-26): what it is, a picture of what it sees, who's aboard. */
-.tg-sat-about { margin: 0.3rem 0; font-size: 0.7rem; line-height: 1.4; }
+.tg-sat-about { margin: 0.3rem 0; font-size: max(0.7rem, 12px); line-height: 1.4; }
 .tg-sat-snapshot { margin: 0.5rem 0; }
 .tg-sat-snapshot img {
     display: block;
@@ -588,8 +590,8 @@
     border: 1px solid rgba(0, 255, 200, 0.25);
     background: #000;
 }
-.tg-sat-snapshot figcaption { margin-top: 0.2rem; font-size: 0.6rem; opacity: 0.75; }
-.tg-sat-crew { margin: 0.4rem 0; font-size: 0.65rem; line-height: 1.4; }
+.tg-sat-snapshot figcaption { margin-top: 0.2rem; font-size: max(0.6rem, 12px); opacity: 0.75; }
+.tg-sat-crew { margin: 0.4rem 0; font-size: max(0.65rem, 12px); line-height: 1.4; }
 .tg-sat-crew span { opacity: 0.7; margin-right: 0.3rem; }
 .tg-sat-imagery { margin: 0.3rem 0 0.5rem; }
 
@@ -604,7 +606,7 @@
 }
 
 .tg-aircraft-route-note {
-    font-size: 0.65rem;
+    font-size: max(0.65rem, 12px);
     line-height: 1.35;
     opacity: 0.8;
 }
@@ -617,7 +619,7 @@
     color: #ffd166;
     cursor: pointer;
     font-family: inherit;
-    font-size: 0.65rem;
+    font-size: max(0.65rem, 12px);
     line-height: 1;
     padding: 0.25rem 0.5rem;
 }
@@ -641,13 +643,13 @@
     background: transparent;
     color: inherit;
     font: inherit;
-    font-size: 0.65rem;
+    font-size: max(0.65rem, 12px);
 }
 
 .tg-coverage-status {
     display: block;
     opacity: 0.6;
-    font-size: 0.6rem;
+    font-size: max(0.6rem, 12px);
 }
 
 .tg-coverage-status.is-ok { color: #7dffb0; opacity: 0.85; }
@@ -658,7 +660,7 @@
 
 .tg-hazard-summary {
     margin-top: 0.3rem;
-    font-size: 0.65rem;
+    font-size: max(0.65rem, 12px);
     opacity: 0.85;
 }
 
@@ -667,7 +669,7 @@
     align-items: center;
     gap: 0.5rem;
     margin-top: 0.4rem;
-    font-size: 0.65rem;
+    font-size: max(0.65rem, 12px);
     flex-shrink: 0;
 }
 
@@ -727,7 +729,7 @@
     background: none;
     color: #7dffb0;
     font: inherit;
-    font-size: 0.7rem;
+    font-size: max(0.7rem, 12px);
     cursor: pointer;
     flex-shrink: 0;
 }
@@ -754,7 +756,7 @@
     justify-content: space-between;
     gap: 0.2rem 0.6rem;
     margin-top: 0.3rem;
-    font-size: 0.7rem;
+    font-size: max(0.7rem, 12px);
 }
 
 .tg-radar-time { font-weight: 700; letter-spacing: 0.03em; }
@@ -766,7 +768,7 @@
     align-items: center;
     gap: 0.4rem;
     margin-top: 0.3rem;
-    font-size: 0.55rem;
+    font-size: max(0.55rem, 12px);
     opacity: 0.8;
 }
 
@@ -791,7 +793,7 @@
     justify-content: space-between;
     gap: 0.3rem 0.5rem;
     margin: 0.3rem 0;
-    font-size: 0.65rem;
+    font-size: max(0.65rem, 12px);
 }
 
 .tg-route-depart small { opacity: 0.7; }

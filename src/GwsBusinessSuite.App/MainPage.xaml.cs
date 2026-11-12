@@ -88,6 +88,7 @@ public partial class MainPage : ContentPage
         // the visible tab. Cleared in OnDisappearing so Reload is a no-op while the SentinelGPT
         // tab is showing instead of silently reloading a WebView the user can no longer see.
         MacToolbarActions.Reload = () => OnReloadClicked(this, EventArgs.Empty);
+        MacToolbarActions.EvaluateScript = script => _ = WorkspaceView.EvaluateJavaScriptAsync(script);
         MacToolbarActions.ConfigureDeviceLogin = () => OnConfigureDeviceLoginClicked(this, EventArgs.Empty);
         MacToolbarActions.SetUpTouchId = () => _ = SetUpTouchIdAsync();
         MacToolbarActions.SignInWithTouchId = () => _ = SignInWithTouchIdAsync(reportProblems: true);
@@ -238,6 +239,7 @@ public partial class MainPage : ContentPage
 
 #if MACCATALYST
         MacToolbarActions.Reload = null;
+        MacToolbarActions.EvaluateScript = null;
         MacToolbarActions.ConfigureDeviceLogin = null;
 #endif
 

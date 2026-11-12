@@ -50,6 +50,8 @@ skip_tests=false
 install_playwright_deps=false
 deployed_only=false
 server_only=false
+full=false
+with_app=false
 
 usage() {
   sed -n '2,80p' "$0" | sed -n '/^# Usage:/,/^$/p' | sed 's/^# \{0,1\}//'
@@ -58,13 +60,23 @@ usage() {
 # Usage:
 #   ./scripts/verify-release.sh [--base-url https://admin.example.com]
 #       [--public-base-url https://example.com] [--output artifacts/release-readiness/report.md]
-#       [--require-clean] [--install-playwright-deps] [--skip-tests] [--deployed-only] [--server-only]
+#       [--require-clean] [--install-playwright-deps] [--skip-tests] [--deployed-only]
+#       [--server-only] [--full] [--with-app]
 #
-# --server-only: restore, audit and build the test project (which references every server and
-# shared project) instead of the whole solution - i.e. everything except the native MAUI app,
-# which needs the maui-android workload and isn't part of the server deploy. deploy.yml/ci.yml
-# use it; the app is built and package-audited by clients.yml whenever it or its dependencies
-# change. Local runs default to the whole solution.
+# Default (since 12-11-26, also what --server-only means): restore, audit and build the test
+# project, which references every server and shared project, then run the full suite - exactly
+# deploy.yml's gate. The native MAUI app isn't part of the server deploy (clients.yml builds and
+# package-audits it), and building every platform of it, one project at a time, took 35-50
+# minutes from a cold start locally and collided with `open gws` building the same folders.
+#
+# Mac app check: on a Mac, when this branch changes the app or a project it uses (App, Application,
+# Domain, OllamaKit, SentinelAgentKit: committed but unpushed, staged, unstaged or new), the app is
+# built for Mac Catalyst in Debug (about a minute; Debug, so never the Release folders the
+# installer uses). --with-app forces it.
+#
+# --full: the old whole-solution Release build (every MAUI platform, single-threaded) instead.
+#
+# Cheap checks (breakpoint lint, whitespace, compose) run first, so a slip fails in seconds.
 #
 # --deployed-only: run ONLY the deployed endpoint checks (needs --base-url and/or
 # --public-base-url) - no restore, build, tests or local lint. deploy.yml uses it after a deploy;
@@ -113,6 +125,14 @@ while (($# > 0)); do
       ;;
     --server-only)
       server_only=true
+      shift
+      ;;
+    --full)
+      full=true
+      shift
+      ;;
+    --with-app)
+      with_app=true
       shift
       ;;
     --help|-h)
@@ -254,9 +274,16 @@ else
 # fresh checkout, not just a stale-cache artifact. Matching the configuration here avoids that.
 # dotnet restore has no -c/--configuration switch (confirmed: MSB1001 "Unknown switch") -
 # Configuration is an MSBuild property, so it must go through -p: instead.
-build_target="GwsBusinessSuite.slnx"
-if [[ "$server_only" == true ]]; then
-  build_target="tests/GwsBusinessSuite.Tests/GwsBusinessSuite.Tests.csproj"
+run_check "Responsive breakpoint lint" python3 scripts/check-responsive-breakpoints.py
+run_check "Patch whitespace" git diff --check
+run_check "Docker Compose rendering" docker compose config --quiet
+
+build_target="tests/GwsBusinessSuite.Tests/GwsBusinessSuite.Tests.csproj"
+build_parallelism=()
+if [[ "$full" == true ]]; then
+  build_target="GwsBusinessSuite.slnx"
+  # The whole solution keeps building one project at a time, as it always has.
+  build_parallelism=(-m:1)
 fi
 run_check "Restore" dotnet restore "$build_target" -p:Configuration=Release
 run_check "Dependency vulnerability audit" \
@@ -287,7 +314,24 @@ run_check "Dependency vulnerability audit" \
 # offending extended attributes - skipping codesigning here sidesteps the race entirely, and
 # costs nothing since this build's output is never run or distributed.
 run_check "Release build" \
-  dotnet build "$build_target" -c Release --no-restore --disable-build-servers -m:1 -p:RunAOTCompilation=false -p:ValidateXcodeVersion=false -p:EnableCodeSigning=false
+  dotnet build "$build_target" -c Release --no-restore --disable-build-servers ${build_parallelism[@]+"${build_parallelism[@]}"} -p:RunAOTCompilation=false -p:ValidateXcodeVersion=false -p:EnableCodeSigning=false
+
+# The Mac app, only when this branch touches it or what it builds on (see the header).
+app_changes() {
+  {
+    git diff --name-only "@{upstream}...HEAD" 2>/dev/null || git diff --name-only origin/main...HEAD 2>/dev/null || true
+    git diff --name-only
+    git diff --name-only --cached
+    git ls-files --others --exclude-standard
+  } | grep -qE '^src/GwsBusinessSuite\.(App|Application|Domain|OllamaKit|SentinelAgentKit)/'
+}
+if [[ "$(uname -s)" == "Darwin" && "$full" != true ]] && { [[ "$with_app" == true ]] || app_changes; }; then
+  run_check "Mac app build (Debug)" \
+    dotnet build src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj -f net10.0-maccatalyst -c Debug \
+      --nologo -v quiet -p:ValidateXcodeVersion=false -p:EnableCodeSigning=false
+elif [[ "$full" != true ]]; then
+  printf '| Mac app build (Debug) | NOT RUN (no app changes, or not a Mac) | 0s |\n' >>"$rows_file"
+fi
 
 if [[ "$install_playwright_deps" == true ]]; then
   # This step normally finishes in well under a minute, but its underlying `apt-get install`
@@ -354,10 +398,6 @@ if [[ -n "${GWS_AUDIT_ADMIN_BASE:-}" && "$skip_tests" != true ]]; then
 else
   printf '| Responsive audit gates | NOT RUN (target absent or tests skipped) | - |\n' >>"$rows_file"
 fi
-
-run_check "Docker Compose rendering" docker compose config --quiet
-run_check "Responsive breakpoint lint" python3 scripts/check-responsive-breakpoints.py
-run_check "Patch whitespace" git diff --check
 
 if [[ "$require_clean" == true ]]; then
   run_check "Clean working tree" check_clean_worktree

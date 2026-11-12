@@ -24,6 +24,9 @@ internal static class MacToolbarActions
     // Set by MainPage while it is on screen. Null when the SentinelGPT tab is showing, which is
     // also when the reload item should be unavailable - there is no WebView to reload.
     public static Action? Reload { get; set; }
+    // Runs script in the Workspace page (the menu bar's Back, Forward, Find and Settings, 12-11-26).
+    // Set by MainPage while it is on screen.
+    public static Action<string>? EvaluateScript { get; set; }
     public static Action? ConfigureDeviceLogin { get; set; }
     // "Set Up Touch ID..." (app menu, toolbar, first-sign-in offer). Set by MainPage and kept while
     // other tabs show - the menu switches to the Workspace tab first.

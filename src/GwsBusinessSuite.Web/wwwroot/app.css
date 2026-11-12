@@ -7131,6 +7131,15 @@ a.wiki-live-title:hover { text-decoration: underline; }
 .gws-density-offer-text { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; }
 .gws-density-offer-text span { color: var(--gws-text-soft); }
 .gws-density-offer-actions { display: flex; flex-direction: column; gap: .4rem; flex-shrink: 0; }
+.gws-density-offer { animation: gws-density-offer-life 15s ease forwards; }
+.gws-density-offer-close { position: absolute; top: .45rem; right: .45rem; width: .65rem; height: .65rem; }
+.gws-density-offer-text { padding-right: 1rem; }
+/* Fades in, waits, and fades out as the 15 seconds end (DensityOffer then records "keep"). */
+@keyframes gws-density-offer-life {
+    0% { opacity: 0; transform: translateY(.5rem); }
+    3%, 94% { opacity: 1; transform: none; }
+    100% { opacity: 0; }
+}
 
 /* The one-time offer to install the app on a phone or tablet (js/pwa.js, PWA 07-11-26), above the
    bottom bar. */
@@ -7148,3 +7157,21 @@ a.wiki-live-title:hover { text-decoration: underline; }
 .gws-install-offer-actions .btn { min-height: 2.25rem; }
 /* A download on its way to the Share sheet (js/pwa.js: the installed app on iPhone and iPad). */
 a[download][aria-busy="true"] { opacity: .6; cursor: progress; }
+
+/* Sentinel's toolbar (12-11-26): eight labelled buttons wrapped to three rows on a phone and
+   their labels broke onto two lines in a 1280px Mac window. Where they'd wrap, the buttons are
+   icons (each keeps its title tooltip and aria-label); on a phone they scroll in one row. */
+@container gws-main (max-width: 1099.98px) {
+    .sentinel-workspace-actions .sentinel-action-label,
+    .sentinel-workspace-actions .btn kbd { display: none; }
+    .sentinel-workspace-actions .btn > .bi { margin-right: 0 !important; }
+}
+@container gws-main (max-width: 575.98px) {
+    .sentinel-workspace-actions {
+        flex-wrap: nowrap !important;
+        justify-content: flex-start !important;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .sentinel-workspace-actions .btn { flex: 0 0 auto; }
+}

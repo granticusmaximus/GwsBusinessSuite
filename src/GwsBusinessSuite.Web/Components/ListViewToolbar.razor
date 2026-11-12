@@ -12,8 +12,21 @@
             <option value="@view.Id">@view.Name</option>
         }
     </select>
-    <input class="form-control form-control-sm" aria-label="View name" maxlength="80" placeholder="View name" @bind="_name" />
-    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="SaveAsync" disabled="@_busy">Save view</button>
+    @* The name box only appears once you choose to save (12-11-26): most visits never save a
+       view, and the always-open box and button took a second row on a phone. *@
+    @if (_naming)
+    {
+        <input class="form-control form-control-sm" aria-label="View name" maxlength="80" placeholder="Name this view"
+               @bind="_name" @bind:event="oninput" @onkeydown="OnNameKeyDown" @ref="_nameInput" />
+        <button type="button" class="btn btn-sm btn-primary" @onclick="SaveAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_name))">Save</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CancelNaming" disabled="@_busy">Cancel</button>
+    }
+    else
+    {
+        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="StartNaming" disabled="@_busy">
+            <i class="bi bi-bookmark-plus me-1" aria-hidden="true"></i>Save view…
+        </button>
+    }
     @if (_selectedId is not null)
     {
         <button type="button" class="btn btn-sm btn-outline-danger" title="Delete this saved view" aria-label="Delete saved view" @onclick="DeleteAsync" disabled="@_busy">
@@ -74,6 +87,43 @@
         await VisibleColumnsChanged.InvokeAsync(next);
     }
 
+    private bool _naming;
+    private bool _focusName;
+    private ElementReference _nameInput;
+
+    private void StartNaming()
+    {
+        _naming = true;
+        _focusName = true;
+        _error = string.Empty;
+    }
+
+    private void CancelNaming()
+    {
+        _naming = false;
+        _error = string.Empty;
+    }
+
+    private async Task OnNameKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && !string.IsNullOrWhiteSpace(_name)) await SaveAsync();
+        else if (args.Key == "Escape") CancelNaming();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusName || !_naming) return;
+        _focusName = false;
+        try
+        {
+            await _nameInput.FocusAsync();
+        }
+        catch (JSException)
+        {
+            // The box closed before the browser got to it.
+        }
+    }
+
     private async Task SaveAsync()
     {
         _busy = true;
@@ -85,6 +135,7 @@
             await ReloadAsync();
             _selectedId = saved.Id;
             _name = saved.Name;
+            _naming = false;
         }
         catch (ArgumentException ex) { _error = ex.Message; }
         finally { _busy = false; }

@@ -148,6 +148,18 @@
     outline-offset: 4px;
 }
 
+/* Two cards to a row on a phone: a smaller count, the description to two lines. */
+@container gws-main (max-width: 575.98px) {
+    .gws-neu-dashboard .gws-attention-card .card-body { padding: .85rem; }
+    .gws-neu-dashboard .gws-attention-count { font-size: 1.6rem; }
+    .gws-neu-dashboard .gws-attention-description {
+        display: -webkit-box;
+        overflow: hidden;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+    }
+}
+
 @container gws-main (max-width: 699.98px) {
     .gws-neu-dashboard::before {
         inset-inline: -.75rem;

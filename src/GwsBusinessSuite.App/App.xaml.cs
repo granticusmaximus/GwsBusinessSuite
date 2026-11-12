@@ -86,6 +86,13 @@ public partial class App : Microsoft.Maui.Controls.Application
 
 	protected override Window CreateWindow(IActivationState? activationState)
 	{
-		return new Window(new AppShell());
+		var window = new Window(new AppShell());
+#if MACCATALYST
+		// Small enough for the web app's tablet layout (the rail and a full-width page), never
+		// smaller, so a page can't land between its breakpoints (12-11-26).
+		window.MinimumWidth = 820;
+		window.MinimumHeight = 600;
+#endif
+		return window;
 	}
 }

@@ -162,42 +162,43 @@
         </div>
     </div>
     <div class="sentinel-workspace-actions">
-        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenInsightsForTag(null)"
+        <button type="button" aria-label="Insights" class="btn btn-sm btn-outline-secondary" @onclick="() => OpenInsightsForTag(null)"
                 title="Tags, most and never read pages, and questions the workspace couldn't answer">
-            <i class="bi bi-bar-chart-line me-1"></i>Insights
+            <i class="bi bi-bar-chart-line me-1" aria-hidden="true"></i><span class="sentinel-action-label">Insights</span>
         </button>
-        <button type="button" class="btn btn-sm btn-outline-secondary sentinel-types-toggle" @onclick="() => OpenTypesPanel(null)"
+        <button type="button" aria-label="Types" class="btn btn-sm btn-outline-secondary sentinel-types-toggle" @onclick="() => OpenTypesPanel(null)"
                 title="Page types: give pages fields, and list and filter every page of a type">
-            <i class="bi bi-tags me-1"></i>Types
+            <i class="bi bi-tags me-1" aria-hidden="true"></i><span class="sentinel-action-label">Types</span>
         </button>
-        <button type="button" class="btn btn-sm btn-outline-secondary sentinel-clipper-toggle" @onclick="() => _clipperOpen = !_clipperOpen"
+        <button type="button" aria-label="Web clipper" class="btn btn-sm btn-outline-secondary sentinel-clipper-toggle" @onclick="() => _clipperOpen = !_clipperOpen"
                 aria-expanded="@(_clipperOpen ? "true" : "false")" title="Clip web pages into Sentinel from Chrome, Edge or Safari">
-            <i class="bi bi-scissors me-1"></i>Web clipper
+            <i class="bi bi-scissors me-1" aria-hidden="true"></i><span class="sentinel-action-label">Web clipper</span>
         </button>
         @if (_isAdmin)
         {
-            <button type="button" class="btn btn-sm btn-outline-secondary sentinel-email-in-toggle" @onclick="() => _emailInOpen = !_emailInOpen"
+            <button type="button" aria-label="Email in" class="btn btn-sm btn-outline-secondary sentinel-email-in-toggle" @onclick="() => _emailInOpen = !_emailInOpen"
                     aria-expanded="@(_emailInOpen ? "true" : "false")" title="Turn emails sent to a mailbox into Sentinel pages">
-                <i class="bi bi-envelope-arrow-down me-1"></i>Email in
+                <i class="bi bi-envelope-arrow-down me-1" aria-hidden="true"></i><span class="sentinel-action-label">Email in</span>
             </button>
         }
-        <button type="button" class="btn btn-sm btn-outline-secondary sentinel-ask-toggle" @onclick="() => _askOpen = !_askOpen"
+        <button type="button" aria-label="Ask" class="btn btn-sm btn-outline-secondary sentinel-ask-toggle" @onclick="() => _askOpen = !_askOpen"
                 aria-expanded="@(_askOpen ? "true" : "false")" title="Ask a question; the answer cites the pages it comes from">
-            <i class="bi bi-chat-square-quote me-1"></i>Ask
+            <i class="bi bi-chat-square-quote me-1" aria-hidden="true"></i><span class="sentinel-action-label">Ask</span>
         </button>
-        <button type="button" class="btn btn-sm btn-outline-secondary sentinel-global-search"
+        <button type="button" aria-label="Quick find" class="btn btn-sm btn-outline-secondary sentinel-global-search"
                 @onclick="OpenCommandPaletteAsync" title="Search every Sentinel page, block, database, and row">
-            <i class="bi bi-search me-1"></i>Quick find
+            <i class="bi bi-search me-1" aria-hidden="true"></i><span class="sentinel-action-label">Quick find</span>
             <kbd>⌘K</kbd>
         </button>
-        <button type="button" class="btn btn-sm btn-outline-secondary sentinel-daily-today"
+        <button type="button" aria-label="Today" class="btn btn-sm btn-outline-secondary sentinel-daily-today"
                 @onclick="() => OpenDailyNoteAsync(Today)" disabled="@IsBusy" title="Open today's daily note (Ctrl/⌘ + Shift + D)">
-            <i class="bi bi-calendar-day me-1"></i>Today
+            <i class="bi bi-calendar-day me-1" aria-hidden="true"></i><span class="sentinel-action-label">Today</span>
         </button>
         <button type="button" class="btn btn-sm btn-outline-secondary sentinel-mobile-nav-toggle"
                 @onclick="ToggleMobileWorkspaceNav" aria-controls="sentinel-workspace-browser"
+                aria-label="@(_mobileWorkspaceNavOpen ? "Close browser" : "Browse")"
                 aria-expanded="@_mobileWorkspaceNavOpen">
-            <i class="bi bi-layout-sidebar-inset me-1"></i>@(_mobileWorkspaceNavOpen ? "Close browser" : "Browse")
+            <i class="bi bi-layout-sidebar-inset me-1" aria-hidden="true"></i><span class="sentinel-action-label">@(_mobileWorkspaceNavOpen ? "Close browser" : "Browse")</span>
         </button>
         <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="ToggleShortcutsModal"
                 title="Keyboard shortcuts" aria-label="Keyboard shortcuts">

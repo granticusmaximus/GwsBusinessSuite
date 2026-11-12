@@ -365,7 +365,7 @@
 .tg-side-panel .tg-coverage-item small {
     display: block;
     opacity: 0.7;
-    font-size: .7rem;
+    font-size: max(.7rem, 12px);
     line-height: 1.3;
 }
 
@@ -380,7 +380,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.6rem;
-    font-size: .7rem;
+    font-size: max(.7rem, 12px);
 }
 
 .tg-area-options label { display: inline-flex; align-items: center; gap: 0.25rem; min-height: 32px; }
@@ -532,7 +532,7 @@
     border-bottom: 2px solid transparent;
     color: rgba(125, 255, 176, 0.75);
     font-family: inherit;
-    font-size: 0.72rem;
+    font-size: max(0.72rem, 12px);
     letter-spacing: 0.06em;
     cursor: pointer;
 }
@@ -639,7 +639,8 @@
         right: 0;
         bottom: 0;
         width: 100%;
-        max-height: 55%;
+        /* The globe keeps most of a phone's screen (12-11-26: was 55%). */
+        max-height: 40%;
         border-left: none;
         border-right: none;
     }
@@ -808,7 +809,7 @@
     padding: 0.15rem 0.4rem;
     background: rgba(5, 8, 10, 0.6);
     color: #c9ffe0;
-    font-size: 0.7rem;
+    font-size: max(0.7rem, 12px);
     text-decoration: none;
 }
 .tg-sv-credit:hover { color: #fff; }
@@ -837,7 +838,7 @@
 .tg-depart-bar.is-poor span { background: #ff6b6b; }
 .tg-depart-bar.is-chosen span { outline: 2px solid #fff; outline-offset: 1px; }
 .tg-depart-bar:focus-visible { outline: 2px solid #7dffb0; }
-.tg-depart-axis { display: flex; justify-content: space-between; padding: 0.15rem 0.6rem 0.3rem; opacity: 0.7; font-size: 0.68rem; }
+.tg-depart-axis { display: flex; justify-content: space-between; padding: 0.15rem 0.6rem 0.3rem; opacity: 0.7; font-size: max(0.68rem, 12px); }
 .tg-depart-detail { padding: 0.35rem 0.6rem; border-top: 1px solid rgba(125, 255, 176, 0.18); }
 .tg-depart-detail ul { margin: 0.3rem 0; padding-left: 1.1rem; }
 
@@ -868,7 +869,7 @@
 .tg-tm-camera-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.4rem; padding: 0.4rem 0.6rem; }
 .tg-tm-camera-grid figure { margin: 0; }
 .tg-tm-camera-grid img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #000; }
-.tg-tm-camera-grid figcaption { padding-top: 0.15rem; font-size: 0.68rem; opacity: 0.85; overflow-wrap: anywhere; }
+.tg-tm-camera-grid figcaption { padding-top: 0.15rem; font-size: max(0.68rem, 12px); opacity: 0.85; overflow-wrap: anywhere; }
 .tg-shell:has(.tg-side-panel:not(.is-collapsed)) .tg-time-machine {
     left: calc((100% + min(360px, 100% - 1.6rem) + 0.8rem) / 2);
     width: min(720px, calc(100% - min(360px, 100% - 1.6rem) - 6rem));
@@ -902,7 +903,7 @@
 .tg-drive-cameras { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem; margin-top: 0.45rem; }
 .tg-drive-cameras figure { margin: 0; }
 .tg-drive-cameras img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: #000; }
-.tg-drive-cameras figcaption { padding-top: 0.15rem; font-size: 0.68rem; opacity: 0.85; overflow-wrap: anywhere; }
+.tg-drive-cameras figcaption { padding-top: 0.15rem; font-size: max(0.68rem, 12px); opacity: 0.85; overflow-wrap: anywhere; }
 .tg-drive-actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
 .tg-drive button,
 .tg-briefing-panel .tg-route-row button,

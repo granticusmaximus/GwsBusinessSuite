@@ -47,7 +47,49 @@ public class AppDelegate : MauiUIApplicationDelegate
 		builder.InsertSiblingMenuAfter(
 			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [checkForUpdates, setUpTouchId, signInWithTouchId, openAtLogin]),
 			UIMenuIdentifier.About.GetConstant()!);
+
+		// The standard Mac commands for the web workspace (12-11-26): Settings..., Back, Forward and
+		// Find, with their usual keys. Find replaces the system Find group so Cmd+F has one owner.
+		// Reload stays off the menu: pages such as World News use Cmd+R themselves.
+		var settings = UIKeyCommand.Create(new NSString("Settings…"), null, new Selector("gwsSettings:"), ",", UIKeyModifierFlags.Command, null);
+		builder.InsertSiblingMenuAfter(
+			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [settings]),
+			UIMenuIdentifier.About.GetConstant()!);
+		var back = UIKeyCommand.Create(new NSString("Back"), null, new Selector("gwsBack:"), "[", UIKeyModifierFlags.Command, null);
+		var forward = UIKeyCommand.Create(new NSString("Forward"), null, new Selector("gwsForward:"), "]", UIKeyModifierFlags.Command, null);
+		builder.InsertChildMenuAtStart(
+			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [back, forward]),
+			UIMenuIdentifier.View.GetConstant()!);
+		var find = UIKeyCommand.Create(new NSString("Find…"), null, new Selector("gwsFind:"), "f", UIKeyModifierFlags.Command, null);
+		builder.ReplaceMenu(UIMenuIdentifier.Find.GetConstant()!,
+			UIMenu.Create(string.Empty, null, UIMenuIdentifier.None, UIMenuOptions.DisplayInline, [find]));
 	}
+
+	[Export("gwsSettings:")]
+	public void OpenSettings(NSObject sender) =>
+		RunInWorkspace("(window.Blazor && Blazor.navigateTo) ? Blazor.navigateTo('/admin/settings') : location.assign('/admin/settings')");
+
+	[Export("gwsBack:")]
+	public void GoBack(NSObject sender) => RunInWorkspace("history.back()");
+
+	[Export("gwsForward:")]
+	public void GoForward(NSObject sender) => RunInWorkspace("history.forward()");
+
+	// The page's own search where it has one (World News, lists), else the app's command palette
+	// (app.js listens for gws-find).
+	[Export("gwsFind:")]
+	public void FindInWorkspace(NSObject sender) => RunInWorkspace("window.dispatchEvent(new CustomEvent('gws-find'))");
+
+	// Switches to the Workspace tab if another is showing; its page sets EvaluateScript as it appears.
+	private static void RunInWorkspace(string script) => MainThread.BeginInvokeOnMainThread(async () =>
+	{
+		if (MacToolbarActions.EvaluateScript is null)
+		{
+			MacToolbarActions.SelectTab?.Invoke("MainPage");
+			for (var attempt = 0; attempt < 10 && MacToolbarActions.EvaluateScript is null; attempt++) await Task.Delay(50);
+		}
+		MacToolbarActions.EvaluateScript?.Invoke(script);
+	});
 
 	// Says why (your phone's SentinelGPT runs here), then opens Login Items to add the app.
 	[Export("gwsOpenAtLogin:")]

@@ -25,17 +25,17 @@ of each step.
 
 ## Step 3: pages
 
-- [ ] 5. Phone toolbars/filters: CRM 4 rows of controls; Sentinel 8 buttons in 3 rows (labels
+- [x] 5. Phone toolbars/filters: CRM 4 rows of controls; Sentinel 8 buttons in 3 rows (labels
   wrap at 1280 in the Mac app). Search + Filters sheet; icon toolbars with More.
-- [ ] 6. Dashboard on phones: zero KPI cards one per row; two-up compact, all-zero -> "All clear".
-- [ ] 9. Overwatch phone: 81 text nodes < 12px; side panel covers the globe -> bottom sheet.
-- [ ] 10. Cesium assets fetched (and erroring) on Billing / Threat Intel: prefetch only when
+- [x] 6. Dashboard on phones: zero KPI cards one per row; two-up compact, all-zero -> "All clear".
+- [x] 9. Overwatch phone: 81 text nodes < 12px; side panel covers the globe -> bottom sheet.
+- [x] 10. Cesium assets fetched (and erroring) on Billing / Threat Intel: prefetch only when
   Overwatch is likely next.
 
 ## Step 4: Mac polish
 
-- [ ] 11. App-wide Mac shortcuts (Cmd+F, Cmd+[, Cmd+,), menu-bar commands, minimum window size.
-- [ ] 12. "Try the compact layout?" card covers content until answered -> a one-time toast.
+- [x] 11. App-wide Mac shortcuts (Cmd+F, Cmd+[, Cmd+,), menu-bar commands, minimum window size.
+- [x] 12. "Try the compact layout?" card covers content until answered -> a one-time toast.
 
 ## Progress
 
@@ -52,3 +52,15 @@ of each step.
   loaders -> LoadingIndicator; 6 page sheets @media -> @container (and the breakpoint lint
   missed `@media(` without a space: fixed); app-wide reduced motion; copy (CRM, SEO, Mail).
   DesignSystemGuardTests keeps it. Checked dark + light on 7 pages.
+- Steps 3-4 done (12-11-26): ListViewToolbar name box on demand (Save view... -> name, Save,
+  Cancel; Return/Esc); Sentinel toolbar labels in spans, icons below 1100px content width, one
+  scrolling row on phones, aria-labels; Home attention cards two-up on phones with "All clear"
+  when every count is 0; Overwatch: every font-size < .75rem is max(size, 12px) (phone tiny
+  labels 81 -> 0), phone sheet max 40%; overwatch-prefetch skips the Mac app and phones, fires on
+  hover/focus of the Overwatch link; DensityOffer is a toast (close, or 15 s visible = keep);
+  Mac app: Settings (Cmd+,), View > Back/Forward (Cmd+[ / Cmd+]), Edit > Find (Cmd+F -> gws-find:
+  page search or command palette), MacToolbarActions.EvaluateScript, window minimum 820x600.
+  Tests: OverwatchPrefetchBrowserTests, MacFind in ShellTabletNavigationBrowserTests,
+  DesignSystemGuardTests (12px floor, Mac commands). Live: 10/10 (save view, toast), phone/Mac
+  captures with no errors. Not clickable from here: the native Mac menu (built Debug, source-tested).
+

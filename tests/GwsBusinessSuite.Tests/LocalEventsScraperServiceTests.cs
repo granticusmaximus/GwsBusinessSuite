@@ -179,13 +179,16 @@ public sealed class PlaywrightBrowserFixture : IAsyncLifetime
     public IPlaywright Playwright { get; private set; } = null!;
     public IBrowser Browser { get; private set; } = null!;
 
+    private static readonly Lazy<int> Installed = new(() => Microsoft.Playwright.Program.Main(["install", "chromium"]));
+
     public async Task InitializeAsync()
     {
         // Idempotent - lets a bare `dotnet test` self-install the browser binary on a
         // fresh machine (mirrors the Docker build's --install-playwright-browsers hook),
         // though it won't install missing OS-level shared libraries the way
         // `--with-deps` does, so a fresh Linux CI runner still needs that step too.
-        Microsoft.Playwright.Program.Main(["install", "chromium"]);
+        // Three collections start their browsers at once (12-11-26), so the install runs once.
+        _ = Installed.Value;
         Playwright = await Microsoft.Playwright.Playwright.CreateAsync();
         Browser = await Playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
     }
@@ -201,3 +204,12 @@ public sealed class PlaywrightBrowserFixture : IAsyncLifetime
 
 [CollectionDefinition("Playwright")]
 public sealed class PlaywrightCollection : ICollectionFixture<PlaywrightBrowserFixture>;
+
+// Overwatch's browser tests start Cesium on software rendering, about 3 s each: 160 s in one
+// chain. In two collections of their own (each with its own browser) they run beside each other
+// and beside the rest of the browser tests, instead of after them (12-11-26).
+[CollectionDefinition("PlaywrightOverwatchA")]
+public sealed class PlaywrightOverwatchCollectionA : ICollectionFixture<PlaywrightBrowserFixture>;
+
+[CollectionDefinition("PlaywrightOverwatchB")]
+public sealed class PlaywrightOverwatchCollectionB : ICollectionFixture<PlaywrightBrowserFixture>;

@@ -25,9 +25,10 @@ Before ending a turn that changed code, run:
 ./scripts/verify-release.sh
 ```
 
-It runs the exact build + full test suite (including Playwright browser tests) that CI runs.
+It runs exactly CI's deploy gate (server and shared projects, full test suite including Playwright
+browser tests), plus a Debug build of the Mac app when the branch touches it: about 3-5 minutes.
 There is no local pre-push hook any more. Grant removed it on 2026-10-17 to make pushes instant,
-because it repeated this same 7-8 minute check. CI still runs this gate and blocks the deploy
+because it repeated this same check (7-8 minutes then). CI still runs this gate and blocks the deploy
 when it fails (`deploy.yml`: the deploy job `needs: test`), but by then the commit is already on
 `main`. That makes this local run the only check before a push, so don't skip it.
 

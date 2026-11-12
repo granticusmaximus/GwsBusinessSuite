@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Playwright;
+using static Microsoft.Playwright.Assertions;
 
 namespace GwsBusinessSuite.Tests;
 
@@ -25,7 +26,7 @@ public sealed class ShellTabletNavigationBrowserTests(PlaywrightBrowserFixture f
               <div class="gws-subnav"><div data-workspace="intel"><a class="gws-nav-link" href="#threat-intel">Threat Intelligence</a></div></div>
             </aside>
             <button type="button" class="gws-sidebar-backdrop" data-gws-sidebar-close aria-label="Close navigation"></button>
-            <div class="gws-body"><main id="gws-main-content" class="gws-content"><h1>Page</h1></main></div>
+            <div class="gws-body"><main id="gws-main-content" class="gws-content"><h1>Page</h1><input type="search" id="page-search" /></main></div>
           </div>
         </div>
         <script src="/app.js"></script>
@@ -51,7 +52,9 @@ public sealed class ShellTabletNavigationBrowserTests(PlaywrightBrowserFixture f
             await route.FulfillAsync(new() { Status = 200, ContentType = "text/html", Body = Shell });
         });
         await page.GotoAsync("http://localhost/admin/crm");
-        await page.WaitForTimeoutAsync(300);
+        // Busy machines: wait for the stylesheets and app.js's first layout pass, not a fixed delay.
+        await page.WaitForLoadStateAsync(LoadState.Load);
+        await page.WaitForFunctionAsync("() => getComputedStyle(document.querySelector('.gws-body')).marginLeft !== ''");
         return page;
     }
 
@@ -63,24 +66,35 @@ public sealed class ShellTabletNavigationBrowserTests(PlaywrightBrowserFixture f
     {
         await using var page = await OpenAsync(820, 1180);
 
-        (await ContentMarginAsync(page)).Should().BeLessThanOrEqualTo(64, "only the 60px rail takes room");
-        (await page.IsVisibleAsync(".gws-subnav")).Should().BeFalse();
+        await page.WaitForFunctionAsync("() => parseFloat(getComputedStyle(document.querySelector('.gws-body')).marginLeft) <= 64");
+        await Expect(page.Locator(".gws-subnav")).ToBeHiddenAsync();
 
         await page.ClickAsync("[data-gws-workspace='intel']");
-        (await page.IsVisibleAsync(".gws-nav-link")).Should().BeTrue("the rail opens the workspace's pages");
+        await Expect(page.Locator(".gws-nav-link")).ToBeVisibleAsync();
         (await ContentMarginAsync(page)).Should().BeLessThanOrEqualTo(64, "they open over the content, which doesn't move");
 
         await page.Keyboard.PressAsync("Escape");
-        (await page.IsVisibleAsync(".gws-subnav")).Should().BeFalse("Escape closes them");
+        await Expect(page.Locator(".gws-subnav")).ToBeHiddenAsync();
 
         await page.ClickAsync("[data-gws-workspace='intel']");
+        await Expect(page.Locator(".gws-nav-link")).ToBeVisibleAsync();
         await page.Mouse.ClickAsync(780, 600);
-        (await page.IsVisibleAsync(".gws-subnav")).Should().BeFalse("tapping outside closes them");
+        await Expect(page.Locator(".gws-subnav")).ToBeHiddenAsync();
 
         await page.ClickAsync("[data-gws-workspace='intel']");
+        await Expect(page.Locator(".gws-nav-link")).ToBeVisibleAsync();
         await page.ClickAsync(".gws-nav-link");
-        (await page.IsVisibleAsync(".gws-subnav")).Should().BeFalse("choosing a page closes them");
+        await Expect(page.Locator(".gws-subnav")).ToBeHiddenAsync();
         (await page.EvaluateAsync<string?>("() => localStorage.getItem('gws-sidebar-collapsed')")).Should().BeNull("the desktop choice isn't overwritten");
+    }
+
+    // The Mac app's Edit > Find (Cmd+F) raises gws-find: the page's own search box takes focus.
+    [Fact]
+    public async Task MacFind_ShouldFocusThePagesSearchBox()
+    {
+        await using var page = await OpenAsync(1440, 900);
+        await page.EvaluateAsync("() => window.dispatchEvent(new CustomEvent('gws-find'))");
+        (await page.EvaluateAsync<string>("() => document.activeElement.id")).Should().Be("page-search");
     }
 
     [Fact]
@@ -88,7 +102,7 @@ public sealed class ShellTabletNavigationBrowserTests(PlaywrightBrowserFixture f
     {
         await using var page = await OpenAsync(1440, 900);
 
-        (await page.IsVisibleAsync(".gws-nav-link")).Should().BeTrue();
+        await Expect(page.Locator(".gws-nav-link")).ToBeVisibleAsync();
         (await ContentMarginAsync(page)).Should().BeGreaterThan(200);
     }
 }

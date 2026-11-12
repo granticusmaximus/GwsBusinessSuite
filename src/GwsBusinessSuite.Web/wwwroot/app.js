@@ -906,6 +906,15 @@
 		});
 
 		window.addEventListener('resize', applySidebarState);
+		// The Mac app's Edit > Find (Cmd+F, 12-11-26): the page's own search box where it has one,
+		// else the command palette.
+		window.addEventListener('gws-find', function () {
+			var boxes = Array.prototype.filter.call(document.querySelectorAll('.gws-content input[type="search"]'), function (box) {
+				return box.offsetParent !== null && !box.disabled;
+			});
+			if (boxes.length > 0) { boxes[0].focus(); boxes[0].select(); }
+			else openCommand();
+		});
 	}
 
 	// Makes every modal in the admin portal draggable by its header, with zero per-modal
@@ -1109,6 +1118,11 @@
 		set: function (compact) {
 			var layout = shell();
 			if (layout) layout.classList.toggle('gws-density-compact', !!compact);
+		},
+		// Whether the compact-layout offer is on screen (it shows only on a mouse or trackpad).
+		offerVisible: function () {
+			var offer = document.querySelector('.gws-density-offer');
+			return !!offer && getComputedStyle(offer).display !== 'none';
 		}
 	};
 

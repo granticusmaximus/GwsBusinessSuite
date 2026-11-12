@@ -3,10 +3,13 @@
 @inject ICurrentUserAccessor CurrentUser
 @inject IJSRuntime JS
 @inject ILogger<DensityOffer> Logger
+@implements IDisposable
 
 @* The one-time compact-layout offer (T5, 06-11-26): compact suits a mouse or trackpad, so it's
    offered once to people who haven't chosen, and only shown on such a pointer (app.css). Either
-   answer is remembered; the account menu's switch stays the way to change it later. *@
+   answer is remembered; the account menu's switch stays the way to change it later. Since
+   12-11-26 it's a toast: closing it, or leaving it 15 seconds on screen, keeps the current
+   layout, so it no longer sits over every page until answered. *@
 @if (!_answered)
 {
     <aside class="gws-density-offer" aria-label="Compact layout">
@@ -15,6 +18,7 @@
             <strong>Try the compact layout?</strong>
             <span>With a mouse or trackpad it fits more on each screen. You can switch back any time from your account menu.</span>
         </div>
+        <button type="button" class="btn-close gws-density-offer-close" aria-label="Close, keeping the current layout" disabled="@_busy" @onclick="KeepAsync"></button>
         <div class="gws-density-offer-actions">
             <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="UseCompactAsync">Use compact</button>
             <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="KeepAsync">Keep as is</button>
@@ -25,6 +29,37 @@
 @code {
     private bool _answered;
     private bool _busy;
+    private readonly CancellationTokenSource _dismiss = new();
+    private static readonly TimeSpan ShownFor = TimeSpan.FromSeconds(15);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _answered) return;
+        try
+        {
+            // Only an offer someone could see counts as answered.
+            if (!await JS.InvokeAsync<bool>("gwsDensity.offerVisible")) return;
+            await Task.Delay(ShownFor, _dismiss.Token);
+            await InvokeAsync(async () =>
+            {
+                if (_answered || _busy) return;
+                await AnswerAsync(compact: false);
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (JSDisconnectedException)
+        {
+        }
+    }
+
+    public void Dispose()
+    {
+        _dismiss.Cancel();
+        _dismiss.Dispose();
+    }
 
     private Task UseCompactAsync() => AnswerAsync(compact: true);
 

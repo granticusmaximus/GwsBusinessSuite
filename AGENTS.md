@@ -12,8 +12,13 @@ all need to know belongs here.
   pushes by hand, sometimes in the middle of a session, so treat every edit in the working tree
   as something that could ship at any moment. Keep the tree building and the tests passing at
   every step.
-- **Before you call work done, run `./scripts/verify-release.sh`.** It runs the exact build and
-  full test suite (Playwright browser tests included) that CI runs, and takes 7-8 minutes.
+- **Before you call work done, run `./scripts/verify-release.sh`.** It runs exactly CI's deploy
+  gate (the server and shared projects, then the full test suite with Playwright browser tests)
+  and, on a Mac, a Debug build of the Mac app when your branch touches it. About 3-5 minutes
+  since 12-11-26 (the old whole-solution build is `--full`, and took 35-50 minutes cold).
+  - Don't build the Mac app in Release in its default folders while Grant may run `open gws`:
+    both write `src/GwsBusinessSuite.App/bin|obj/Release`, and a mixed bundle crashed the app at
+    launch on 12-11-26.
   `dotnet build` and `dotnet test` on their own aren't enough. Report its result. Don't hand
   back while it's still running. Nothing checks locally before a push any more, and CI only
   blocks the deploy after the commit is already on `main`.

@@ -53,10 +53,26 @@
         <div><span class="gws-eyebrow">Today</span><h2 id="attention-heading">Needs attention</h2></div>
         <span class="text-secondary small">Live operational counts</span>
     </div>
+    @if (AttentionItems.All(item => item.Count == 0))
+    {
+        @* Nothing waiting: one calm line, not a screen of zeros (12-11-26). *@
+        <div class="card gws-attention-clear">
+            <div class="card-body d-flex align-items-center gap-3">
+                <span class="gws-stat-icon bg-success-subtle text-success"><i class="bi bi-check2-circle" aria-hidden="true"></i></span>
+                <div>
+                    <div class="fw-semibold">All clear</div>
+                    <div class="text-secondary small">@AllClearLine</div>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
     <div class="row g-3">
         @foreach (var item in AttentionItems)
         {
-            <div class="col-sm-6 col-xl-3">
+            @* Two to a row on a phone, so the counts read at a glance (12-11-26). *@
+            <div class="col-6 col-xl-3">
                 <a class="card gws-attention-card h-100 text-decoration-none" href="@item.Url">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-start gap-3">
@@ -65,12 +81,13 @@
                         </div>
                         <div class="gws-attention-count">@item.Count</div>
                         <div class="fw-semibold">@item.Title</div>
-                        <div class="text-secondary small mt-1">@item.Description</div>
+                        <div class="text-secondary small mt-1 gws-attention-description">@item.Description</div>
                     </div>
                 </a>
             </div>
         }
     </div>
+    }
 </section>
 
 @if (IsAdmin && _missionControl is { } mc)
@@ -293,6 +310,17 @@
         var hour = DateTime.Now.Hour;
         if (hour < 12) return "morning";
         return hour < 18 ? "afternoon" : "evening";
+    }
+
+    // "Nothing waiting in comments, follow-ups or system alerts."
+    private string AllClearLine
+    {
+        get
+        {
+            var names = AttentionItems.Select(item => item.Title.ToLowerInvariant()).ToList();
+            var list = names.Count <= 1 ? string.Concat(names) : $"{string.Join(", ", names[..^1])} or {names[^1]}";
+            return $"Nothing waiting in {list}.";
+        }
     }
 
     private sealed record AttentionItem(string Title, string Description, int Count, string Url, string Icon, string IconClass);
