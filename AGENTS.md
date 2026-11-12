@@ -16,9 +16,10 @@ all need to know belongs here.
   gate (the server and shared projects, then the full test suite with Playwright browser tests)
   and, on a Mac, a Debug build of the Mac app when your branch touches it. About 3-5 minutes
   since 12-11-26 (the old whole-solution build is `--full`, and took 35-50 minutes cold).
-  - Don't build the Mac app in Release in its default folders while Grant may run `open gws`:
-    both write `src/GwsBusinessSuite.App/bin|obj/Release`, and a mixed bundle crashed the app at
-    launch on 12-11-26.
+  - `open gws` builds the Mac app from its own copy of the sources
+    (`~/Library/Caches/gws-business-suite-build`), so repo builds can't mix into an install. Before
+    12-11-26 it shared `src/*/bin/Release` with every Release build, and a mixed bundle crashed the
+    app at launch twice that day.
   `dotnet build` and `dotnet test` on their own aren't enough. Report its result. Don't hand
   back while it's still running. Nothing checks locally before a push any more, and CI only
   blocks the deploy after the commit is already on `main`.
@@ -152,6 +153,11 @@ Mac app (MAUI, Mac Catalyst):
     user agent or similar tricks.
   - **congress.gov** falls back to the shared `DEMO_KEY` (about 50 requests a day), and the
     Federal Civic feed slows down to fit it. `CongressApi__ApiKey` in `.env` lifts the limit.
+- **Logs** (since 12-11-26): `/admin/logs` groups warnings and errors from the server, browsers
+  and the Mac app into issues, with a trace per sighting and "Copy for Claude". On the droplet,
+  `/app/data/logs/gwssuite-*.clef` is the same log as JSON (TraceId, UserName, CircuitId, Origin,
+  Release on each event). Look there before asking Grant for screenshots or local Mac logs: the Mac
+  app's map failures and browser errors are forwarded to it.
 - **The Mac app** shows admin pages served by the server. A network connection made from one of
   those pages, such as mail or HTTP, runs on the droplet. A test from the Mac's terminal proves
   nothing about it.

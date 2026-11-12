@@ -1,0 +1,285 @@
+@page "/admin/logs"
+@rendermode InteractiveServer
+@attribute [Authorize(Policy = "AdminOnly")]
+@using Microsoft.AspNetCore.Authorization
+@using GwsBusinessSuite.Application.Diagnostics
+@using GwsBusinessSuite.Domain.Entities
+@using GwsBusinessSuite.Web.Services
+@inject ILogIssueService Issues
+@inject ILogTraceReader Traces
+@inject BuildStamp Build
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+@* Logging plan, Phase 1 (12-11-26): warnings and errors from the server, browsers and the Mac app,
+   grouped by cause, with the trace behind each sighting. *@
+
+<PageTitle>Logs</PageTitle>
+
+<PageHeader Title="Logs" Icon="bi-journal-code"
+            Description="Warnings and errors from the server, browsers and the Mac app, grouped by cause.">
+    <Actions>
+        <button type="button" class="btn btn-outline-primary d-inline-flex align-items-center gap-2" @onclick="RefreshAsync" disabled="@_busy">
+            <i class="bi bi-arrow-clockwise" aria-hidden="true"></i><span>Refresh</span>
+        </button>
+    </Actions>
+</PageHeader>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger" role="alert">@_error</div>
+}
+
+@if (!string.IsNullOrEmpty(TraceId))
+{
+    <section class="card border-0 shadow-sm mb-3 logs-trace">
+        <div class="card-header d-flex justify-content-between align-items-center gap-2">
+            <strong>Trace <code>@TraceId</code></strong>
+            <span class="d-flex align-items-center gap-3">
+                <label class="form-check m-0">
+                    <input class="form-check-input" type="checkbox" @bind="_hideDatabase" />
+                    <span class="form-check-label">Hide database commands</span>
+                </label>
+                <a class="btn btn-sm btn-outline-secondary" href="@IssueHref(IssueId)">Close</a>
+            </span>
+        </div>
+        @if (_trace is null)
+        {
+            <LoadingIndicator Message="Reading the logs…" />
+        }
+        else if (_trace.Count == 0)
+        {
+            <div class="card-body text-secondary">No lines with this trace in the latest log files.</div>
+        }
+        else
+        {
+            <ol class="logs-timeline">
+                @foreach (var line in _trace.Where(line => !_hideDatabase || line.Source != DatabaseCommands))
+                {
+                    <li class="logs-line logs-level-@line.Level.ToLowerInvariant()">
+                        <span class="logs-time">@line.At.ToLocalTime().ToString("HH:mm:ss.fff")</span>
+                        <span class="logs-origin">@line.Origin</span>
+                        <span class="logs-source">@ShortSource(line.Source)</span>
+                        <span class="logs-message">@line.Message</span>
+                        @if (line.Exception is not null) { <pre class="logs-stack">@line.Exception</pre> }
+                    </li>
+                }
+            </ol>
+        }
+    </section>
+}
+
+@if (_detail is not null)
+{
+    var issue = _detail.Issue;
+    <section class="card border-0 shadow-sm mb-3 logs-issue" aria-label="Issue">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-start gap-2">
+            <div class="logs-issue-heading">
+                <strong>@issue.Title</strong>
+                <small class="text-secondary d-block">@issue.Origin · @ShortSource(issue.Source)@(issue.ExceptionType is null ? "" : " · " + issue.ExceptionType)</small>
+            </div>
+            <a class="btn btn-sm btn-outline-secondary" href="admin/logs">Close</a>
+        </div>
+        <div class="card-body">
+            <dl class="logs-facts">
+                <div><dt>Seen</dt><dd>@issue.Count.ToString("N0") times</dd></div>
+                <div><dt>First</dt><dd>@Stamp(issue.FirstSeen) <small>(@issue.FirstRelease)</small></dd></div>
+                <div><dt>Last</dt><dd>@Stamp(issue.LastSeen) <small>(@issue.LastRelease)</small></dd></div>
+                <div><dt>Status</dt><dd><span class="logs-status logs-status-@issue.Status">@issue.Status</span> @issue.StatusNote</dd></div>
+            </dl>
+            <div class="logs-issue-actions">
+                <button type="button" class="btn btn-sm btn-primary" @onclick="CopyForClaudeAsync" disabled="@_busy">
+                    <i class="bi bi-clipboard" aria-hidden="true"></i> @(_copied ? "Copied" : "Copy for Claude")
+                </button>
+                <input class="form-control form-control-sm logs-note" placeholder="Note (optional)" @bind="_note" @bind:event="oninput" aria-label="Status note" />
+                @if (issue.Status != LogIssueStatuses.Resolved)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-success" @onclick="() => SetStatusAsync(LogIssueStatuses.Resolved)" disabled="@_busy">Mark resolved</button>
+                }
+                @if (issue.Status != LogIssueStatuses.Expected)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetStatusAsync(LogIssueStatuses.Expected)" disabled="@_busy">Mark expected</button>
+                }
+                @if (issue.Status != LogIssueStatuses.Open)
+                {
+                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => SetStatusAsync(LogIssueStatuses.Open)" disabled="@_busy">Reopen</button>
+                }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_detail.SampleStack))
+            {
+                <pre class="logs-stack">@_detail.SampleStack</pre>
+            }
+            <h3 class="logs-subtitle">Latest sightings</h3>
+            <ul class="logs-occurrences">
+                @foreach (var occurrence in _detail.Occurrences)
+                {
+                    <li>
+                        <span class="logs-time">@Stamp(occurrence.At)</span>
+                        <span class="logs-message">@occurrence.Message</span>
+                        <small class="text-secondary">
+                            @(occurrence.Page ?? "-") · @(occurrence.UserName ?? "no user") · @occurrence.Release
+                            @if (occurrence.TraceId is not null)
+                            {
+                                <text> · </text><a href="@TraceHref(issue.Id, occurrence.TraceId)">trace</a>
+                            }
+                        </small>
+                    </li>
+                }
+            </ul>
+        </div>
+    </section>
+}
+
+<section class="card border-0 shadow-sm">
+    <div class="card-body logs-filters">
+        <input class="form-control" type="search" placeholder="Search title, source or exception" @bind="_search" @bind:event="oninput" @bind:after="RefreshAsync" aria-label="Search issues" />
+        <select class="form-select" @bind="_origin" @bind:after="RefreshAsync" aria-label="Origin">
+            <option value="">Everywhere</option>
+            <option value="server">Server</option>
+            <option value="browser">Browser</option>
+            <option value="mac-app">Mac app</option>
+        </select>
+        <select class="form-select" @bind="_status" @bind:after="RefreshAsync" aria-label="Status">
+            <option value="open">Open</option>
+            <option value="expected">Expected</option>
+            <option value="resolved">Resolved</option>
+            <option value="">Any status</option>
+        </select>
+        <label class="form-check logs-new">
+            <input class="form-check-input" type="checkbox" @bind="_newInRelease" @bind:after="RefreshAsync" />
+            <span class="form-check-label">New in this release</span>
+        </label>
+    </div>
+    @if (_issues is null)
+    {
+        <LoadingIndicator Message="Loading issues…" />
+    }
+    else if (_issues.Count == 0)
+    {
+        <div class="card-body text-secondary">Nothing matches. Running release @(Build.Commit ?? "unknown").</div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 logs-table">
+                <thead><tr><th>Issue</th><th>Where</th><th class="text-end">Count</th><th>Last seen</th><th>Since</th></tr></thead>
+                <tbody>
+                    @foreach (var item in _issues)
+                    {
+                        <tr class="@(item.Id == IssueId ? "table-active" : "")">
+                            <td>
+                                <a class="logs-title logs-level-@item.Level.ToLowerInvariant()" href="@IssueHref(item.Id)">@item.Title</a>
+                                <small class="text-secondary d-block">@ShortSource(item.Source)@(item.ExceptionType is null ? "" : " · " + ShortSource(item.ExceptionType))</small>
+                            </td>
+                            <td><span class="logs-origin">@item.Origin</span></td>
+                            <td class="text-end">@item.Count.ToString("N0")</td>
+                            <td class="text-nowrap">@Stamp(item.LastSeen)</td>
+                            <td class="text-nowrap"><small>@item.FirstRelease</small></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "issue")] public Guid? IssueId { get; set; }
+    [SupplyParameterFromQuery(Name = "trace")] public string? TraceId { get; set; }
+
+    private IReadOnlyList<LogIssueSummary>? _issues;
+    private LogIssueDetail? _detail;
+    private IReadOnlyList<LogLine>? _trace;
+    private string _search = string.Empty;
+    private string _origin = string.Empty;
+    private string _status = LogIssueStatuses.Open;
+    private bool _newInRelease;
+    // EF logs every query at Information, which buries a trace's real story.
+    private bool _hideDatabase = true;
+    private const string DatabaseCommands = "Microsoft.EntityFrameworkCore.Database.Command";
+    private string _note = string.Empty;
+    private bool _busy;
+    private bool _copied;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _copied = false;
+        _detail = IssueId is { } id ? await Issues.GetAsync(id) : null;
+        _trace = null;
+        if (_issues is null) await RefreshAsync();
+        if (!string.IsNullOrEmpty(TraceId)) _trace = await Traces.ReadTraceAsync(TraceId);
+    }
+
+    private async Task RefreshAsync()
+    {
+        _busy = true;
+        try
+        {
+            _issues = await Issues.ListAsync(new LogIssueQuery(
+                Origin: _origin, Status: _status, Search: _search, Release: _newInRelease ? Build.Commit ?? "unknown" : null));
+            if (IssueId is { } id) _detail = await Issues.GetAsync(id);
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            _error = "Could not load issues: " + ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task SetStatusAsync(string status)
+    {
+        if (_detail is null) return;
+        _busy = true;
+        try
+        {
+            await Issues.SetStatusAsync(_detail.Issue.Id, status, _note);
+            _note = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _error = "Could not change the status: " + ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+        await RefreshAsync();
+    }
+
+    private async Task CopyForClaudeAsync()
+    {
+        if (_detail is null) return;
+        _busy = true;
+        try
+        {
+            var latestTrace = _detail.Occurrences.FirstOrDefault(occurrence => occurrence.TraceId is not null)?.TraceId;
+            var trace = latestTrace is null ? [] : await Traces.ReadTraceAsync(latestTrace, 200);
+            await JS.InvokeVoidAsync("gwsAssistant.copy", LogIssueBundle.ToMarkdown(_detail, trace, Build.Commit));
+            _copied = true;
+        }
+        catch (Exception ex)
+        {
+            _error = "Could not copy: " + ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private static string IssueHref(Guid? id) => id is null ? "admin/logs" : $"admin/logs?issue={id}";
+    private static string TraceHref(Guid id, string trace) => $"admin/logs?issue={id}&trace={Uri.EscapeDataString(trace)}";
+    private static string Stamp(DateTimeOffset at) => at.ToLocalTime().ToString("dd-MM-yy HH:mm");
+
+    // "GwsBusinessSuite.Infrastructure.Services.MailService" -> "MailService"
+    private static string ShortSource(string source)
+    {
+        var dot = source.LastIndexOf('.');
+        return dot < 0 || dot == source.Length - 1 ? source : source[(dot + 1)..];
+    }
+}

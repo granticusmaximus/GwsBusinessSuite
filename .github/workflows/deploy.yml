@@ -124,7 +124,7 @@ jobs:
             fi
 
             echo "Building gwssuite-web:$SHA..."
-            DOCKER_BUILDKIT=1 docker build --quiet -t "gwssuite-web:$SHA" . >/dev/null
+            DOCKER_BUILDKIT=1 docker build --quiet --build-arg SOURCE_COMMIT="$SHA" -t "gwssuite-web:$SHA" . >/dev/null
             echo "Built gwssuite-web:$SHA."
 
   deploy:

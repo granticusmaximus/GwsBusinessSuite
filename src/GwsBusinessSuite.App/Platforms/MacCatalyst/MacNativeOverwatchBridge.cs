@@ -64,7 +64,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             catch (Exception ex)
             {
                 // A bad payload must not take the app down or fail without a trace.
-                MapLog($"{operation} failed: {ex.GetType().Name}: {ex.Message}");
+                Report($"{operation} failed: {ex.GetType().Name}: {ex.Message}", ex.StackTrace);
             }
         });
     }
@@ -88,6 +88,15 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         catch (UnauthorizedAccessException)
         {
         }
+    }
+
+    // A failure worth fixing: the local log, and the server's log through the page
+    // (js/client-errors.js, Origin=mac-app), so it is seen without reading this Mac's disk.
+    private void Report(string message, string? stack = null)
+    {
+        MapLog(message);
+        var json = JsonSerializer.Serialize(new { origin = "mac-app", kind = "native", message = "Overwatch map: " + message, stack });
+        _ = SendAsync($"window.gwsClientLog && window.gwsClientLog.report({json})");
     }
 
     private void Apply(string operation, object?[] arguments)
@@ -342,7 +351,11 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             Activate(view.Annotation);
             return;
         }
-        MapLog($"click at {x:0.000},{y:0.000}: no pin within reach{NearestSkipped(point)}");
+        var (why, distance) = NearestSkipped(point);
+        var line = $"click at {x:0.000},{y:0.000}: no pin within reach{why}";
+        // A click right beside a drawn marker was almost certainly meant for it: worth the
+        // server's log. A click on open map isn't.
+        if (distance <= MissedPinReach) Report(line); else MapLog(line);
     }
 
     // The pin the user clicked: the drawn marker under the pointer (its balloon sits above the
@@ -378,7 +391,9 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 
     // For the log: the drawn marker nearest a click that opened nothing, and why it was passed
     // over, so a miss names its cause instead of needing another round trip.
-    private string NearestSkipped(CoreGraphics.CGPoint point)
+    private const double MissedPinReach = 40;
+
+    private (string Why, double Distance) NearestSkipped(CoreGraphics.CGPoint point)
     {
         MKAnnotationView? best = null;
         var bestDistance = double.PositiveInfinity;
@@ -389,12 +404,12 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             var dy = frame.Y + frame.Height / 2 - point.Y;
             if (dx * dx + dy * dy < bestDistance) { best = view; bestDistance = dx * dx + dy * dy; }
         }
-        if (best is null) return " (no markers drawn)";
+        if (best is null) return (" (no markers drawn)", double.PositiveInfinity);
         var annotation = best.Annotation;
         var native = AsNative(annotation);
-        return $" (nearest marker {Math.Sqrt(bestDistance):0}pt away: {annotation?.GetType().Name ?? "none"}, " +
+        return ($" (nearest marker {Math.Sqrt(bestDistance):0}pt away: {annotation?.GetType().Name ?? "none"}, " +
             $"native {native?.Class.Name ?? "?"}, cluster {IsCluster(annotation)}, selectable {IsSelectable(annotation)}, " +
-            $"hidden {best.Hidden}, alpha {best.Alpha:0.00})";
+            $"hidden {best.Hidden}, alpha {best.Alpha:0.00})", Math.Sqrt(bestDistance));
     }
 
     private static IEnumerable<MKAnnotationView> AnnotationViews(UIView root)
@@ -455,7 +470,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         }
         if (Resolve(target) is not { } annotation || !IsSelectable(annotation))
         {
-            MapLog($"click on a pin that opens nothing ({target?.GetType().Name ?? "none"})");
+            Report($"click on a pin that opens nothing ({target?.GetType().Name ?? "none"})");
             return;
         }
         Send(annotation);

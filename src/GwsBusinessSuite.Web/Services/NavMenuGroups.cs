@@ -29,7 +29,7 @@ public static class NavMenuGroups
         ["admin/growth", "admin/cj-ads", "admin/affiliate"];
 
     public static readonly IReadOnlyList<string> PlatformPrefixes =
-        ["admin/automation", "admin/docker", "admin/dev-tools", "admin/security-audit", "admin/privacy-operations"];
+        ["admin/automation", "admin/docker", "admin/dev-tools", "admin/logs", "admin/security-audit", "admin/privacy-operations"];
 
     public static readonly NavWorkspace Home =
         new("home", "Home", "Home", "bi-house-door-fill", false, HomePrefixes);

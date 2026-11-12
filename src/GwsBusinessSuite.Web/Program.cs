@@ -117,6 +117,12 @@ builder.Services.AddScoped<ShortcutsState>();
 builder.Services.AddScoped<ToastState>();
 builder.Services.AddScoped<RecordPreviewService>();
 builder.Services.AddSingleton(BuildStamp.For(typeof(Program).Assembly));
+// Logging plan, Phase 1 (12-11-26): warnings and errors grouped into issues, and traces read
+// back out of the JSON log, for /admin/logs.
+builder.Services.AddSingleton<GwsBusinessSuite.Application.Diagnostics.ILogIssueService, GwsBusinessSuite.Infrastructure.Diagnostics.LogIssueService>();
+builder.Services.AddSingleton<GwsBusinessSuite.Application.Diagnostics.ILogTraceReader>(new GwsBusinessSuite.Infrastructure.Diagnostics.JsonLogTraceReader(
+    Path.GetDirectoryName(Path.GetFullPath(SerilogBootstrapper.JsonLogPath(SerilogBootstrapper.LogFilePath(builder.Configuration)))) ?? "."));
+builder.Services.AddHostedService<GwsBusinessSuite.Web.Diagnostics.LogIssueIngestService>();
 builder.Services.AddScoped<ShellStatusService>();
 builder.Services.AddScoped<RightPanelState>();
 builder.Services.AddOptions<LiveShowIceOptions>()
@@ -313,6 +319,7 @@ builder.Services.AddAntiforgery(options => options.HeaderName = "X-CSRF-TOKEN");
 
 builder.Services.AddRateLimiter(options =>
 {
+    options.AddClientErrorLimit();
     options.AddPolicy("login", context =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -797,6 +804,7 @@ if (!string.IsNullOrWhiteSpace(normalizedPathBase))
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseUserLogContext();
 app.Use(async (context, next) =>
 {
     var timer = System.Diagnostics.Stopwatch.StartNew();
@@ -830,6 +838,7 @@ app.MapDeveloperApiEndpoints();
 app.MapDeveloperApiSentinelEndpoints();
 app.MapDeveloperApiBoardEndpoints();
 app.MapNativeOverwatchEndpoints();
+app.MapDiagnosticsEndpoints();
 
 // Stripe billing webhooks - anonymous but signature-verified. Stripe.Event/Stripe.EventUtility/Stripe.Invoice are referenced fully-qualified here
 // rather than via a top-level "using Stripe;" because GwsBusinessSuite.Domain.Entities already

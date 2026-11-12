@@ -160,6 +160,8 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
     public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
     public DbSet<UserNotificationState> UserNotificationStates => Set<UserNotificationState>();
     public DbSet<WebPushSubscription> WebPushSubscriptions => Set<WebPushSubscription>();
+    public DbSet<LogIssue> LogIssues => Set<LogIssue>();
+    public DbSet<LogOccurrence> LogOccurrences => Set<LogOccurrence>();
     public DbSet<WebPushKey> WebPushKeys => Set<WebPushKey>();
     public DbSet<SentinelQuestion> SentinelQuestions => Set<SentinelQuestion>();
     public DbSet<PageTag> PageTags => Set<PageTag>();
@@ -566,6 +568,28 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<WebPushSubscription>().Property(x => x.P256dh).HasMaxLength(100);
         modelBuilder.Entity<WebPushSubscription>().Property(x => x.Auth).HasMaxLength(40);
         modelBuilder.Entity<WebPushSubscription>().Property(x => x.Device).HasMaxLength(60);
+
+        modelBuilder.Entity<LogIssue>().HasIndex(x => x.Fingerprint).IsUnique();
+        modelBuilder.Entity<LogIssue>().HasIndex(x => x.LastSeenUnixMs);
+        modelBuilder.Entity<LogIssue>().Property(x => x.Fingerprint).HasMaxLength(40);
+        modelBuilder.Entity<LogIssue>().Property(x => x.Level).HasMaxLength(16);
+        modelBuilder.Entity<LogIssue>().Property(x => x.Origin).HasMaxLength(16);
+        modelBuilder.Entity<LogIssue>().Property(x => x.Source).HasMaxLength(200);
+        modelBuilder.Entity<LogIssue>().Property(x => x.Title).HasMaxLength(500);
+        modelBuilder.Entity<LogIssue>().Property(x => x.ExceptionType).HasMaxLength(200);
+        modelBuilder.Entity<LogIssue>().Property(x => x.SampleStack).HasMaxLength(8000);
+        modelBuilder.Entity<LogIssue>().Property(x => x.FirstRelease).HasMaxLength(40);
+        modelBuilder.Entity<LogIssue>().Property(x => x.LastRelease).HasMaxLength(40);
+        modelBuilder.Entity<LogIssue>().Property(x => x.Status).HasMaxLength(16);
+        modelBuilder.Entity<LogIssue>().Property(x => x.StatusNote).HasMaxLength(1000);
+        modelBuilder.Entity<LogOccurrence>().HasIndex(x => new { x.IssueId, x.AtUnixMs });
+        modelBuilder.Entity<LogOccurrence>().HasIndex(x => x.TraceId);
+        modelBuilder.Entity<LogOccurrence>().Property(x => x.Message).HasMaxLength(2000);
+        modelBuilder.Entity<LogOccurrence>().Property(x => x.TraceId).HasMaxLength(32);
+        modelBuilder.Entity<LogOccurrence>().Property(x => x.UserName).HasMaxLength(100);
+        modelBuilder.Entity<LogOccurrence>().Property(x => x.Page).HasMaxLength(300);
+        modelBuilder.Entity<LogOccurrence>().Property(x => x.CircuitId).HasMaxLength(16);
+        modelBuilder.Entity<LogOccurrence>().Property(x => x.Release).HasMaxLength(40);
         modelBuilder.Entity<WebPushKey>().Property(x => x.PublicKey).HasMaxLength(100);
         modelBuilder.Entity<WebPushKey>().Property(x => x.ProtectedPrivateKey).HasMaxLength(1000);
         modelBuilder.Entity<OverwatchMapNote>().Property(x => x.Title).HasMaxLength(80);

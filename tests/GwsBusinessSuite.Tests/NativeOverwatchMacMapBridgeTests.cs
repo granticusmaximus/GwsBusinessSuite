@@ -154,7 +154,12 @@ public sealed class NativeOverwatchMacMapBridgeTests
             // The wrapper isn't an NSObject, only a native handle: the first fix checked `is NSObject`.
             .And.Contain("annotation is ObjCRuntime.INativeObject wrapper")
             .And.Contain("ObjCRuntime.Runtime.GetNSObject(wrapper.Handle)")
-            .And.Contain("no pin within reach{NearestSkipped(point)}");
+            .And.Contain("no pin within reach{why}")
+            // A miss beside a drawn marker, and any failure, also reach the server's log through the
+            // page (logging plan, 12-11-26); a click on open map stays local.
+            .And.Contain("if (distance <= MissedPinReach) Report(line); else MapLog(line);")
+            .And.Contain("window.gwsClientLog && window.gwsClientLog.report({json})")
+            .And.Contain("origin = \"mac-app\", kind = \"native\"");
         bridge.Should().Contain("window.gwsNativeOverwatch && window.gwsNativeOverwatch.selected({json})")
             .And.Contain("mapView.DeselectAnnotation(annotation, false)")
             .And.Contain("view.CanShowCallout = false")
@@ -165,7 +170,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
             .And.Contain("native.selectedMany(group)")
             .And.Contain(".FirstOrDefault(pin => pin.Handle == handle)")
             .And.Contain("gws-overwatch-map.log")
-            .And.Contain("MapLog($\"{operation} failed:");
+            .And.Contain("Report($\"{operation} failed:");
     }
 
     [Fact]

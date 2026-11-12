@@ -5,6 +5,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <base href="/" />
+    @* The request that served this page, so js/client-errors.js links a browser error to it. *@
+    <meta name="gws-trace" content="@DiagnosticsEndpointExtensions.CurrentTraceId()" />
     <script src="js/theme-init.js"></script>
     <ResourcePreloader />
     <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
@@ -60,6 +62,7 @@
     <script src="js/sshTerminal.js"></script>
     <script src="_content/jsMind.Blazor/jsmind.min.js"></script>
     <script src="_content/jsMind.Blazor/jsmind-interop.min.js"></script>
+    <script src="js/client-errors.js"></script>
     <script src="js/connection-check.js"></script>
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     @* After Blazor: installs the app on admin pages (PWA, 07-11-26). *@

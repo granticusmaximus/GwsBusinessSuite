@@ -26,8 +26,11 @@ COPY src/GwsBusinessSuite.Infrastructure/ src/GwsBusinessSuite.Infrastructure/
 COPY src/GwsBusinessSuite.OllamaKit/ src/GwsBusinessSuite.OllamaKit/
 COPY src/GwsBusinessSuite.WorldNewsKit/ src/GwsBusinessSuite.WorldNewsKit/
 COPY src/GwsBusinessSuite.Web/ src/GwsBusinessSuite.Web/
+# The deploy passes the commit it builds (the image has no .git to read it from), so the logs'
+# Release property and the shell's status strip name it. Empty for a local build.
+ARG SOURCE_COMMIT=
 RUN dotnet publish src/GwsBusinessSuite.Web/GwsBusinessSuite.Web.csproj \
-    -c Release -o /app/publish --no-restore \
+    -c Release -o /app/publish --no-restore -p:SourceRevisionId="$SOURCE_COMMIT" \
     && grep -q '"_framework/blazor.web' /app/publish/GwsBusinessSuite.Web.staticwebassets.endpoints.json \
     || { echo "Publish has no _framework/blazor.web.js - every button would be dead. See RequiresAspNetWebAssets in GwsBusinessSuite.Web.csproj." >&2; exit 1; }
 

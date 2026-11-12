@@ -24,8 +24,13 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/local/share/dotnet:$HOME/.dot
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 CONFIGURATION="Release"
 APP_NAME="GWS Business Suite"
-APP_PROJECT_DIR="$REPO_ROOT/src/GwsBusinessSuite.App"
 MENU_PROJECT_DIR="$REPO_ROOT/src/GwsBusinessSuite.SentinelMenuBar"
+# The installer builds from its own copy of the sources, with its own bin/obj (12-11-26). Building
+# in the repo shared src/*/bin/Release with every other Release build (the release check, a manual
+# build): twice on 12-11-26 one wrote those folders mid-install and the app crashed at launch in
+# load_aot_module (mixed AOT images).
+BUILD_ROOT="$HOME/Library/Caches/gws-business-suite-build"
+BUILD_PROJECTS="GwsBusinessSuite.App GwsBusinessSuite.Application GwsBusinessSuite.Domain GwsBusinessSuite.OllamaKit GwsBusinessSuite.SentinelAgentKit GwsBusinessSuite.SentinelMenuBar"
 LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 # The helper behind the app's "Check for Updates..." (see scripts/gws-updater.applescript). It has
 # to live outside a temp folder for macOS to route its gws-update:// links to it.
@@ -55,7 +60,19 @@ esac
 if [ -w /Applications ]; then INSTALL_DIR="/Applications"; else INSTALL_DIR="$HOME/Applications"; mkdir -p "$INSTALL_DIR"; fi
 INSTALLED_APP="$INSTALL_DIR/$APP_NAME.app"
 INSTALLED_MENU="$INSTALL_DIR/Sentinel Menu Bar.app"
-BUILT_APP="$APP_PROJECT_DIR/bin/$CONFIGURATION/net10.0-maccatalyst/maccatalyst-$ARCH/$APP_NAME.app"
+BUILT_APP="$BUILD_ROOT/src/GwsBusinessSuite.App/bin/$CONFIGURATION/net10.0-maccatalyst/maccatalyst-$ARCH/$APP_NAME.app"
+
+# Copies what the Mac builds need into BUILD_ROOT. Times are kept and bin/obj are left alone, so
+# the build there stays incremental; --delete drops files removed from the repo.
+mirror_sources() {
+  mkdir -p "$BUILD_ROOT/src" "$BUILD_ROOT/ollama"
+  cp -p "$REPO_ROOT/Directory.Build.props" "$REPO_ROOT/.editorconfig" "$BUILD_ROOT/"
+  rsync -a --delete "$REPO_ROOT/ollama/" "$BUILD_ROOT/ollama/"
+  for project in $BUILD_PROJECTS; do
+    [ -d "$REPO_ROOT/src/$project" ] || continue
+    rsync -a --delete --exclude bin --exclude obj "$REPO_ROOT/src/$project/" "$BUILD_ROOT/src/$project/"
+  done
+}
 
 # Xcode 27 is newer than the .NET workload's pinned Xcode; the workload still builds with it.
 VALIDATE_XCODE="true"
@@ -71,8 +88,11 @@ sources_newer_than() {
     -type f -newer "$stamp" -print -quit | grep -q .
 }
 
+# The app and the projects it is built from: a change in Application or OllamaKit is an update too.
 app_needs_update="false"
-if sources_newer_than "$APP_PROJECT_DIR" "$INSTALLED_APP/Contents/Info.plist"; then app_needs_update="true"; fi
+for project in GwsBusinessSuite.App GwsBusinessSuite.Application GwsBusinessSuite.Domain GwsBusinessSuite.OllamaKit GwsBusinessSuite.SentinelAgentKit; do
+  if sources_newer_than "$REPO_ROOT/src/$project" "$INSTALLED_APP/Contents/Info.plist"; then app_needs_update="true"; break; fi
+done
 
 if [ "$CHECK_ONLY" = "true" ]; then
   if [ "$app_needs_update" = "true" ]; then echo "An update is waiting to be installed."; exit 10; fi
@@ -136,7 +156,8 @@ install_updater
 
 if [ "$app_needs_update" = "true" ]; then
   echo "Building $APP_NAME ($CONFIGURATION)..."
-  dotnet build "$APP_PROJECT_DIR/GwsBusinessSuite.App.csproj" \
+  mirror_sources
+  dotnet build "$BUILD_ROOT/src/GwsBusinessSuite.App/GwsBusinessSuite.App.csproj" \
     --framework net10.0-maccatalyst --configuration "$CONFIGURATION" --runtime "maccatalyst-$ARCH" \
     --nologo -v quiet -p:ValidateXcodeVersion="$VALIDATE_XCODE"
   echo "Installing to $INSTALLED_APP..."
@@ -153,9 +174,10 @@ fi
 # The menu-bar companion (optional: skipped quietly when its project or workload isn't there).
 if [ -d "$MENU_PROJECT_DIR" ] && sources_newer_than "$MENU_PROJECT_DIR" "$INSTALLED_MENU/Contents/Info.plist"; then
   echo "Building the Sentinel menu-bar companion..."
-  if dotnet build "$MENU_PROJECT_DIR/GwsBusinessSuite.SentinelMenuBar.csproj" -c "$CONFIGURATION" --nologo -v quiet \
+  mirror_sources
+  if dotnet build "$BUILD_ROOT/src/GwsBusinessSuite.SentinelMenuBar/GwsBusinessSuite.SentinelMenuBar.csproj" -c "$CONFIGURATION" --nologo -v quiet \
        -p:ValidateXcodeVersion=false -p:EnableCodeSigning=false; then
-    built_menu="$(find "$MENU_PROJECT_DIR/bin/$CONFIGURATION" -maxdepth 3 -name '*.app' -type d | head -1)"
+    built_menu="$(find "$BUILD_ROOT/src/GwsBusinessSuite.SentinelMenuBar/bin/$CONFIGURATION" -maxdepth 3 -name '*.app' -type d | head -1)"
     if [ -n "$built_menu" ]; then
       running_menu="false"
       if pgrep -f "Sentinel Menu Bar.app/Contents/MacOS" >/dev/null 2>&1 || pgrep -f "$(basename "$built_menu")/Contents/MacOS" >/dev/null 2>&1; then

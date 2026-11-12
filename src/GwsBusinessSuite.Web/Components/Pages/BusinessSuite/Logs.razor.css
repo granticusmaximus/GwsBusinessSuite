@@ -1,0 +1,83 @@
+/* /admin/logs (logging plan, Phase 1, 12-11-26). Cards come from the shared neumorphic card
+   styles; these only lay out the filters, facts and timeline. */
+.logs-filters {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)) auto;
+    gap: .75rem;
+    align-items: center;
+}
+
+.logs-new { margin: 0; white-space: nowrap; }
+
+.logs-title { font-weight: 600; text-decoration: none; color: var(--gws-text-strong); }
+.logs-title.logs-level-error,
+.logs-title.logs-level-fatal { color: var(--bs-danger); }
+
+.logs-origin {
+    display: inline-block;
+    padding: .1rem .5rem;
+    border-radius: 999px;
+    font-size: .75rem;
+    background: var(--gws-neu-inset, rgba(127, 127, 127, .12));
+    color: var(--gws-text-soft);
+    white-space: nowrap;
+}
+
+.logs-facts {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: .75rem;
+    margin: 0 0 1rem;
+}
+.logs-facts dt { font-size: .75rem; font-weight: 600; color: var(--gws-text-soft); text-transform: uppercase; letter-spacing: .04em; }
+.logs-facts dd { margin: 0; color: var(--gws-text-strong); }
+
+.logs-status { font-weight: 600; text-transform: capitalize; }
+.logs-status-open { color: var(--bs-danger); }
+.logs-status-resolved { color: var(--bs-success); }
+.logs-status-expected { color: var(--gws-text-soft); }
+
+.logs-issue-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: 1rem; }
+.logs-note { max-width: 18rem; }
+
+.logs-stack {
+    max-height: 22rem;
+    overflow: auto;
+    padding: .75rem;
+    border-radius: .75rem;
+    background: var(--gws-neu-inset, rgba(127, 127, 127, .1));
+    box-shadow: var(--gws-neu-inset-shadow, none);
+    font-size: .8rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.logs-subtitle { font-size: .95rem; font-weight: 600; margin: 1rem 0 .5rem; }
+
+.logs-occurrences,
+.logs-timeline { list-style: none; margin: 0; padding: 0; }
+.logs-occurrences li,
+.logs-timeline li { padding: .5rem 0; border-bottom: 1px solid var(--bs-border-color-translucent); }
+.logs-occurrences li:last-child,
+.logs-timeline li:last-child { border-bottom: 0; }
+
+.logs-timeline { padding: 0 1rem; }
+.logs-line { display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline; }
+.logs-line .logs-stack { flex-basis: 100%; }
+.logs-level-warning .logs-message { color: var(--bs-warning-text-emphasis); }
+.logs-level-error .logs-message,
+.logs-level-fatal .logs-message { color: var(--bs-danger); }
+
+.logs-time { font-variant-numeric: tabular-nums; color: var(--gws-text-soft); white-space: nowrap; margin-right: .5rem; }
+.logs-source { font-weight: 600; color: var(--gws-text-strong); }
+.logs-message { word-break: break-word; }
+
+@container gws-main (max-width: 767.98px) {
+    .logs-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .logs-filters input[type="search"] { grid-column: 1 / -1; }
+    .logs-facts { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+
+@container gws-main (max-width: 575.98px) {
+    .logs-note { max-width: none; flex-basis: 100%; }
+}

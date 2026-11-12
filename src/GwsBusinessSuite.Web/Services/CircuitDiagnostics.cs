@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server.Circuits;
+using LogContext = Serilog.Context.LogContext;
 
 namespace GwsBusinessSuite.Web.Services;
 
@@ -14,9 +16,36 @@ namespace GwsBusinessSuite.Web.Services;
 // A drop with no stall just before it points at the network/tunnel; a stall right before it
 // points at the server (thread-pool starvation, a long GC pause, the host swapping).
 // Search the durable logs (/app/data/logs) for "Circuit connection" and "Server stall".
-public sealed class CircuitDiagnosticsHandler(ILogger<CircuitDiagnosticsHandler> logger) : CircuitHandler
+//
+// Every line logged while a circuit handles an event, render or JS call carries CircuitId and
+// UserName (logging plan, 12-11-26), so one person's session reads as one thread in the JSON log.
+public sealed class CircuitDiagnosticsHandler(ILogger<CircuitDiagnosticsHandler> logger, AuthenticationStateProvider authentication) : CircuitHandler
 {
     private static readonly ConcurrentDictionary<string, long> DownSince = new();
+    private string? _userName;
+
+    public override async Task OnCircuitOpenedAsync(Circuit circuit, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var state = await authentication.GetAuthenticationStateAsync();
+            _userName = state.User.Identity is { IsAuthenticated: true } identity ? identity.Name : null;
+        }
+        catch (InvalidOperationException)
+        {
+            // No authentication state for this circuit (a public page): log without a name.
+        }
+    }
+
+    public override Func<CircuitInboundActivityContext, Task> CreateInboundActivityHandler(Func<CircuitInboundActivityContext, Task> next) =>
+        async context =>
+        {
+            using (LogContext.PushProperty("CircuitId", Short(context.Circuit.Id)))
+            using (_userName is null ? null : LogContext.PushProperty("UserName", _userName))
+            {
+                await next(context);
+            }
+        };
 
     public override Task OnConnectionDownAsync(Circuit circuit, CancellationToken cancellationToken)
     {
