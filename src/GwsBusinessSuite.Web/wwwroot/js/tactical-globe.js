@@ -3317,6 +3317,10 @@ window.tacticalGlobe = (function () {
         entities.suspendEvents();
         entities.removeAll();
         (cells || []).forEach(function (cell) {
+            if (cell.blackout) {
+                addReportingBlackout(entities, cell);
+                return;
+            }
             const color = Cesium.Color.fromCssColorString(convergenceColors[cell.severity] || convergenceColors.moderate);
             const square = entities.add({
                 rectangle: {
@@ -3348,6 +3352,39 @@ window.tacticalGlobe = (function () {
             marker._tacticalGlobeConvergence = cell;
         });
         entities.resumeEvents();
+    }
+
+    // A reporting blackout: a dashed perimeter with no fill, because the point is what's missing.
+    // cell: { blackout: true, south, west, north, east, lat, lon, label, kinds, reason, signals }
+    function addReportingBlackout(entities, cell) {
+        const color = Cesium.Color.fromCssColorString('#b0b8c4');
+        const perimeter = entities.add({
+            polyline: {
+                positions: Cesium.Cartesian3.fromDegreesArray([
+                    cell.west, cell.south, cell.east, cell.south, cell.east, cell.north,
+                    cell.west, cell.north, cell.west, cell.south
+                ]),
+                width: 2,
+                clampToGround: false,
+                material: new Cesium.PolylineDashMaterialProperty({ color: color, dashLength: 12 })
+            }
+        });
+        perimeter._tacticalGlobeConvergence = cell;
+        const marker = entities.add({
+            position: Cesium.Cartesian3.fromDegrees(cell.lon, cell.lat),
+            billboard: { image: pinBillboardImage, width: 16, height: 16, color: color, disableDepthTestDistance: 0 },
+            label: {
+                text: 'NO REPORTING',
+                font: '600 11px monospace',
+                fillColor: Cesium.Color.WHITE,
+                outlineColor: Cesium.Color.BLACK,
+                outlineWidth: 3,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(0, -18),
+                disableDepthTestDistance: 0
+            }
+        });
+        marker._tacticalGlobeConvergence = cell;
     }
 
     function clearConvergence(containerId) {
@@ -3505,7 +3542,32 @@ window.tacticalGlobe = (function () {
         incidentPanel = panel;
     }
 
+    function openReportingBlackoutPanel(cell) {
+        closeIncidentPanel();
+        const panel = document.createElement('div');
+        panel.className = 'tg-stream-panel tg-incident-panel';
+        const signal = (cell.signals || [])[0] || {};
+        const title = escapeHtml(cell.label || signal.title || '');
+        panel.innerHTML =
+            '<div class="tg-stream-panel-header">' +
+            '<span>REPORTING BLACKOUT - ' + title + '</span>' +
+            '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button>' +
+            '</div>' +
+            '<div class="tg-stream-panel-body">' +
+            '<dl class="tg-incident-facts"><dt>KIND</dt><dd>' + escapeHtml(String((cell.kinds || [])[0] || '').toUpperCase()) + '</dd></dl>' +
+            '<div>' + escapeHtml(cell.reason || '') + '. Silence can mean the place can\'t report, or that nobody has reported it yet. Worth a look, not proof of anything.</div>' +
+            (signal.url ? '<ul class="tg-convergence-items"><li><a href="' + escapeHtml(signal.url) + '" target="_blank" rel="noopener noreferrer">Source</a></li></ul>' : '') +
+            '</div>';
+        panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+        if (!openAsModal(panel, closeIncidentPanel)) return;
+        incidentPanel = panel;
+    }
+
     function openConvergencePanel(cell) {
+        if (cell && cell.blackout) {
+            openReportingBlackoutPanel(cell);
+            return;
+        }
         closeIncidentPanel();
         const panel = document.createElement('div');
         panel.className = 'tg-stream-panel tg-incident-panel';

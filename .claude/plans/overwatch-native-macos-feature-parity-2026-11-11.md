@@ -31,8 +31,9 @@ orchestration, while rendering the viewport with native MapKit.
 - [x] Scale the native map viewport from WebView CSS pixels into UIKit coordinates and initialize
   it at the world view; retain the page's zoom controls through the MapKit adapter.
 - [x] Build and run authenticated native acceptance on this Mac.
-- [ ] Run focused browser/PWA regression tests.
-- [ ] Run `./scripts/verify-release.sh`.
+- [x] Run focused browser/PWA regression tests (in the full suite, 12-11-26).
+- [x] Run `./scripts/verify-release.sh`.
+  (12-11-26: full default gate PASS on the Mac — restore, audit, build, full suite incl. Playwright, Docker Compose, responsive lint, whitespace; PARTIAL only for deployed-site checks.)
 
 ### Verification note (11-11-26)
 

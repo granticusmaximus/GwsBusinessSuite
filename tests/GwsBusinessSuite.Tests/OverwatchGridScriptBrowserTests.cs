@@ -462,6 +462,44 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         consoleErrors.Should().BeEmpty();
     }
 
+    // Reporting blackouts (12-11-26) ride setConvergence flagged blackout: a dashed perimeter and
+    // their own window, which says silence isn't proof.
+    [Fact]
+    public async Task Convergence_ShouldDrawAReportingBlackout_AndOpenItsWindow()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        var error = await page.EvaluateAsync<string?>("""
+            () => {
+                try {
+                    // The globe opens centred on 39.8, -98.5: this marker sits mid-canvas.
+                    window.tacticalGlobe.setConvergence([
+                        { blackout: true, south: 39.3, west: -99, north: 40.3, east: -98, lat: 39.8, lon: -98.5,
+                          label: 'M7.1 <remote> basin', kinds: ['earthquake'], severity: 'blackout',
+                          reason: 'Major earthquake hazard (M7.1 remote basin) with no news coverage',
+                          signals: [ { kind: 'earthquake', title: 'M7.1 remote basin', url: 'https://www.gdacs.org/eq', countryWide: false } ] }
+                    ]);
+                    return null;
+                } catch (e) { return String(e && e.stack || e); }
+            }
+            """);
+        error.Should().BeNull();
+        await page.WaitForTimeoutAsync(800);
+        await page.Mouse.ClickAsync(400, 300);
+        await page.WaitForSelectorAsync(".tg-incident-panel:has-text('REPORTING BLACKOUT')", new PageWaitForSelectorOptions { Timeout = 5000 });
+
+        var panel = await page.InnerTextAsync(".tg-incident-panel");
+        panel.Should().Contain("REPORTING BLACKOUT - M7.1 <remote> basin", "titles are escaped, not parsed as markup")
+            .And.Contain("EARTHQUAKE").And.Contain("with no news coverage").And.Contain("not proof of anything");
+        (await page.GetAttributeAsync(".tg-convergence-items a", "href")).Should().Be("https://www.gdacs.org/eq");
+
+        await page.ClickAsync(".tg-incident-panel .tg-stream-panel-close");
+        await page.EvaluateAsync("() => window.tacticalGlobe.clearConvergence()");
+        consoleErrors.Should().BeEmpty();
+    }
+
     // Unit 3 (06-11-26): FAA airport pins, and the aurora as two imagery layers that a clear removes.
     [Fact]
     public async Task SkyLayers_ShouldDrawAirportsAndTheAurora_AndClearThem()

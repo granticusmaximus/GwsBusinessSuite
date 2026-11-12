@@ -20,11 +20,11 @@
   - [x] 3.3 Added tests for viewport sensor facts and server-mode/model selection.
   - [x] 3.4 Focused briefing tests pass.
 
-- [ ] Unit 4: Reporting Blackout & Silence Detection (`SignalConvergenceService.cs`, `tactical-globe.js`)
-  - [ ] 4.1 Implement silence detection logic (IODA internet outages + NASA fire/conflict signals without news coverage)
-  - [ ] 4.2 Add visual dashed perimeter representation for reporting blackouts in Cesium
-  - [ ] 4.3 Add unit tests verifying reporting blackout criteria
-  - [ ] 4.4 Run tests to verify Unit 4 passes
+- [x] Unit 4: Reporting Blackout & Silence Detection (`SignalConvergenceService.cs`, `tactical-globe.js`)
+  - [x] 4.1 `SignalConvergenceService.DetectReportingBlackouts` (major hazards + IODA outages without coverage; country-code match for outages), returned by `GetViewAsync` and pushed on the Convergence layer (12-11-26; it was written but uncalled before).
+  - [x] 4.2 Dashed grey perimeter + NO REPORTING label in Cesium and its own window; native MapKit draws them as pins via the existing `setConvergence` path.
+  - [x] 4.3 `SignalConvergenceTests.ReportingBlackouts_*` and browser `Convergence_ShouldDrawAReportingBlackout_AndOpenItsWindow`.
+  - [x] 4.4 Focused tests pass.
 
 - [x] Unit 5: Multi-Sensor Correlation Dossier in Story Panel (`tactical-globe.js`, `OverwatchGrid.razor`)
   - [x] 5.1 `WorldNewsContextService` queries the existing bounded OpenSky and AIS services for city-level stories.
@@ -32,9 +32,9 @@
   - [x] 5.3 Added service tests for 25-mile filtering and result caps, plus browser-contract assertions.
   - [x] 5.4 Focused World News context tests pass; browser test source compiles but needs Playwright Chromium to execute.
 
-- [ ] Unit 6: Full Verification & Release Readiness
-  - [ ] 6.1 Run full solution test suite
-  - [ ] 6.2 Confirm all gates pass cleanly
+- [x] Unit 6: Full Verification & Release Readiness
+  - [x] 6.1 Run full solution test suite
+  - [x] 6.2 Confirm all gates pass cleanly (`verify-release.sh`, 12-11-26)
 
 ## 10-11-26 implementation note
 

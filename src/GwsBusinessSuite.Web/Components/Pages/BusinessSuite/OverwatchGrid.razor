@@ -3947,17 +3947,31 @@
     {
         try
         {
-            var cells = await SignalConvergenceService.GetAsync(_lastBbox);
-            await JS.InvokeVoidAsync("tacticalGlobe.setConvergence", cells.Select(cell => new
+            var view = await SignalConvergenceService.GetViewAsync(_lastBbox);
+            var cells = view.Cells;
+            var squares = cells.Select(cell => (object)new
             {
                 south = cell.South, west = cell.West, north = cell.North, east = cell.East,
                 lat = cell.CenterLatitude, lon = cell.CenterLongitude,
                 label = cell.Label, kinds = cell.Kinds, score = cell.Score, severity = cell.Severity,
                 signals = cell.Signals.Select(signal => new { kind = signal.Kind, title = signal.Title, url = signal.Url, countryWide = signal.CountryWide })
-            }));
-            _convergenceSummary = cells.Count == 0
+            });
+            // Reporting blackouts ride the same layer, flagged, so the Mac's native map draws them too.
+            var blackouts = view.Blackouts.Select(blackout => (object)new
+            {
+                blackout = true,
+                south = blackout.Latitude - 0.5, west = blackout.Longitude - 0.5, north = blackout.Latitude + 0.5, east = blackout.Longitude + 0.5,
+                lat = blackout.Latitude, lon = blackout.Longitude,
+                label = blackout.Title, kinds = new[] { blackout.Kind }, reason = blackout.Reason, severity = "blackout",
+                signals = new[] { new { kind = blackout.Kind, title = blackout.Title, url = blackout.Url, countryWide = false } }
+            });
+            await JS.InvokeVoidAsync("tacticalGlobe.setConvergence", squares.Concat(blackouts).ToList());
+            var meet = cells.Count == 0
                 ? "Nowhere in view do three or more kinds of signal meet right now."
                 : $"{cells.Count} {(cells.Count == 1 ? "PLACE" : "PLACES")} WHERE SIGNALS MEET · strongest: {cells[0].Label} ({string.Join(", ", cells[0].Kinds)})";
+            _convergenceSummary = view.Blackouts.Count == 0
+                ? meet
+                : $"{meet} · {view.Blackouts.Count} REPORTING {(view.Blackouts.Count == 1 ? "BLACKOUT" : "BLACKOUTS")}";
             await InvokeAsync(StateHasChanged);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

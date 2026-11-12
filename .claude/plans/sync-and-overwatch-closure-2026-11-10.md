@@ -30,8 +30,9 @@ is part of this work. Preserve the existing edit to `OverwatchPinRenderingTests.
 - [x] Run `./scripts/verify-release.sh --server-only --skip-tests`: restore, dependency audit,
   and Release build passed. Docker Compose rendering failed because Docker is unavailable, and
   responsive lint failed because Python resolves to the Microsoft Store alias.
-- [ ] Complete the full release gate on a supported environment with its required workloads,
+- [x] Complete the full release gate on a supported environment with its required workloads,
   browser, Docker Compose, and Python available. No tools were installed here.
+  (12-11-26: full default gate PASS on the Mac — restore, audit, build, full suite incl. Playwright, Docker Compose, responsive lint, whitespace; PARTIAL only for deployed-site checks.)
 
 ## Mac Overwatch failure investigation
 

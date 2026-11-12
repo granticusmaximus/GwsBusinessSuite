@@ -24,8 +24,9 @@
 - [x] Add focused service tests and browser/source-contract coverage.
 - [x] Focused service tests pass; the browser test source compiles but cannot execute here because
   Chromium is absent and Playwright's browser download failed certificate validation.
-- [ ] Run the full test suite and `./scripts/verify-release.sh` on a supported environment.
-- [ ] Update user documentation if the ignored `docs/` guide is available.
+- [x] Run the full test suite and `./scripts/verify-release.sh` on a supported environment.
+  (12-11-26: full default gate PASS on the Mac — restore, audit, build, full suite incl. Playwright, Docker Compose, responsive lint, whitespace; PARTIAL only for deployed-site checks.)
+- [x] Update user documentation if the ignored `docs/` guide is available. (done 12-11-26 in `docs/OVERWATCH_USER_GUIDE.md`)
 
 ## Runtime configuration
 

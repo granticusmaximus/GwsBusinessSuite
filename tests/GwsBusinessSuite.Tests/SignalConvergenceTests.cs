@@ -124,6 +124,40 @@ public sealed class SignalConvergenceTests
         OverwatchBriefing.PlainText(briefed).Should().Contain("2 places where several signals meet");
     }
 
+    // Reporting blackouts (12-11-26): a major hazard or an IODA outage that no story covers.
+    [Fact]
+    public void ReportingBlackouts_FlagUncoveredMajorHazardsAndIodaOutages_Only()
+    {
+        var view = new BoundingBox(30, 0, 130, 100);
+        var hazards = new[]
+        {
+            new HazardFeature("gdacs-EQ-1", HazardKinds.Earthquake, "M7.1 remote basin", "", 10, 110, "major", "https://www.gdacs.org/eq", null),
+            new HazardFeature("gdacs-TC-1", HazardKinds.Cyclone, "Cyclone near Manila", "", 14.2, 121.3, "major", "", null),
+            new HazardFeature("gdacs-DR-1", HazardKinds.Drought, "Drought", "", 20, 105, "moderate", "", null),
+            new HazardFeature("gdacs-VO-1", HazardKinds.Volcano, "Out of view", "", 45, 15, "major", "", null)
+        };
+        var internet = new[]
+        {
+            // Covered: a story names the same country, even far from the outage's centroid.
+            new HazardFeature("ioda-PH", HazardKinds.Internet, "Internet outage - Philippines", "", 12.8, 121.7, "moderate", "", null),
+            new HazardFeature("ioda-MM", HazardKinds.Internet, "Internet outage - Myanmar", "", 21, 96.5 + 5, "major", "https://ioda/MM", null),
+            // Google traffic alone is noise, as for convergence.
+            new HazardFeature("google-traffic-VN", HazardKinds.Internet, "Traffic dip - Vietnam", "", 16, 107, "moderate", "", null)
+        };
+        var news = new[]
+        {
+            Story("s1", "Storm hits Manila", new WorldNewsLocation("PH", "Philippines", "Manila", 14.6, 121.0, "city")),
+            Story("s2", "Ferry delays", new WorldNewsLocation("PH", "Philippines", null, 8, 125, "country"))
+        };
+
+        var blackouts = SignalConvergenceService.DetectReportingBlackouts(hazards, internet, news, view);
+
+        blackouts.Select(b => b.Title).Should().BeEquivalentTo("M7.1 remote basin", "Internet outage - Myanmar");
+        blackouts.Should().Contain(b => b.Kind == ConvergenceKinds.InternetOutage && b.Url == "https://ioda/MM"
+            && b.Reason == "Internet outage (Internet outage - Myanmar) with no news coverage");
+        blackouts.Should().Contain(b => b.Kind == HazardKinds.Earthquake && b.Reason.StartsWith("Major earthquake hazard", StringComparison.Ordinal));
+    }
+
     private static WorldNewsMapSignal Story(string id, string title, WorldNewsLocation location) =>
         new(id, title, title, location, 3, 5, 5, DateTimeOffset.UtcNow, null, [new WorldNewsMapSource("Outlet", title, $"https://news.example/{id}")]);
 }

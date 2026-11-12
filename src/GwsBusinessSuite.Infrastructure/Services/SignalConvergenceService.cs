@@ -24,7 +24,11 @@ public sealed class SignalConvergenceService(
     public const int MinimumCustomersOut = 1_000;
     private static readonly BoundingBox World = new(90, -90, 180, -180);
 
-    public async Task<IReadOnlyList<ConvergenceCell>> GetAsync(BoundingBox bounds, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ConvergenceCell>> GetAsync(BoundingBox bounds, CancellationToken ct = default) =>
+        (await GetViewAsync(bounds, ct)).Cells;
+
+    // The convergence squares plus the reporting blackouts, from one load of the same sources.
+    public async Task<ConvergenceView> GetViewAsync(BoundingBox bounds, CancellationToken ct = default)
     {
         var since = time.GetUtcNow() - InternetOutageService.Window;
         var hazardTask = Safely(async () => (await hazards.GetHazardsAsync(bounds, ct)).Features, "hazards");
@@ -37,10 +41,12 @@ public sealed class SignalConvergenceService(
         await Task.WhenAll(hazardTask, internetTask, powerTask, alertTask, newsTask);
 
         var signals = Signals(hazardTask.Result, internetTask.Result, powerTask.Result, alertTask.Result, newsTask.Result, bounds);
-        return SignalConvergence.Find(signals, WorldNewsPlaces.CountryAt)
+        var cells = SignalConvergence.Find(signals, WorldNewsPlaces.CountryAt)
             .Where(cell => cell.North >= bounds.South && cell.South <= bounds.North && cell.East >= bounds.West && cell.West <= bounds.East)
             .Select(cell => cell with { Label = Label(cell) })
             .ToList();
+        var blackouts = DetectReportingBlackouts(hazardTask.Result, internetTask.Result, newsTask.Result, bounds);
+        return new ConvergenceView(cells, blackouts);
     }
 
     public static IReadOnlyList<ConvergenceSignal> Signals(
@@ -111,34 +117,45 @@ public sealed class SignalConvergenceService(
         }
     }
 
-    // Reporting Blackouts & Silence Detection: detects active hazard/outage clusters with zero news coverage.
-    public static IReadOnlyList<(double Latitude, double Longitude, string Reason)> DetectReportingBlackouts(
+    // Reporting blackouts: a major hazard, or a country-level IODA internet outage, that no
+    // operational World News story covers. Silence is the signal: it can mean the place can't
+    // report (the outage) or that nobody is reporting it yet. Worth a look, not proof of anything.
+    public static IReadOnlyList<ReportingBlackout> DetectReportingBlackouts(
         IEnumerable<HazardFeature> hazardList,
         IEnumerable<HazardFeature> internetOutages,
         IEnumerable<WorldNewsMapSignal> newsList,
         BoundingBox bounds)
     {
-        var blackouts = new List<(double Latitude, double Longitude, string Reason)>();
-        var newsPoints = newsList.Select(n => (n.Latitude, n.Longitude)).ToList();
-        
-        foreach (var outage in internetOutages.Where(o => o.Severity != "minor"))
+        var news = newsList.Select(n => n.Location).ToList();
+        var blackouts = new List<ReportingBlackout>();
+
+        // Same IODA-only rule as the convergence signals: Google traffic alone is noise.
+        foreach (var outage in internetOutages.Where(o => o.Severity != "minor" && o.Id.StartsWith("ioda-", StringComparison.Ordinal)))
         {
-            bool hasNearbyNews = newsPoints.Any(p => Math.Abs(p.Latitude - outage.Latitude) < 2.0 && Math.Abs(p.Longitude - outage.Longitude) < 2.0);
-            if (!hasNearbyNews && bounds.Contains(outage.Latitude, outage.Longitude))
-            {
-                blackouts.Add((outage.Latitude, outage.Longitude, $"Internet blackout ({outage.Title}) without active news coverage"));
-            }
+            if (!bounds.Contains(outage.Latitude, outage.Longitude)) continue;
+            var country = outage.Id["ioda-".Length..];
+            var covered = news.Any(n => string.Equals(n.CountryCode, country, StringComparison.OrdinalIgnoreCase)
+                || Near(n.Latitude, n.Longitude, outage.Latitude, outage.Longitude, 2.0));
+            if (!covered)
+                blackouts.Add(new(outage.Latitude, outage.Longitude, ConvergenceKinds.InternetOutage, outage.Title,
+                    $"Internet outage ({outage.Title}) with no news coverage", outage.Url));
         }
 
         foreach (var hazard in hazardList.Where(h => h.Severity == "major"))
         {
-            bool hasNearbyNews = newsPoints.Any(p => Math.Abs(p.Latitude - hazard.Latitude) < 1.5 && Math.Abs(p.Longitude - hazard.Longitude) < 1.5);
-            if (!hasNearbyNews && bounds.Contains(hazard.Latitude, hazard.Longitude))
-            {
-                blackouts.Add((hazard.Latitude, hazard.Longitude, $"Major {hazard.Kind} hazard ({hazard.Title}) with zero reporting news"));
-            }
+            if (!bounds.Contains(hazard.Latitude, hazard.Longitude)) continue;
+            if (!news.Any(n => Near(n.Latitude, n.Longitude, hazard.Latitude, hazard.Longitude, 1.5)))
+                blackouts.Add(new(hazard.Latitude, hazard.Longitude, hazard.Kind, hazard.Title,
+                    $"Major {hazard.Kind} hazard ({hazard.Title}) with no news coverage", hazard.Url));
         }
 
         return blackouts;
     }
+
+    private static bool Near(double latA, double lonA, double latB, double lonB, double degrees) =>
+        Math.Abs(latA - latB) < degrees && Math.Abs(lonA - lonB) < degrees;
 }
+
+public sealed record ReportingBlackout(double Latitude, double Longitude, string Kind, string Title, string Reason, string? Url);
+
+public sealed record ConvergenceView(IReadOnlyList<ConvergenceCell> Cells, IReadOnlyList<ReportingBlackout> Blackouts);
