@@ -296,9 +296,18 @@ small, .small { font-size: max(.75rem, .875em); }
     }
 }
 
+/* Reduce motion (12-11-26: app-wide, not just scrolling): slides, fades and pulses finish at
+   once. Spinners and the boot screen's bar keep moving: they're the only sign work is going on. */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
         scroll-behavior: auto !important;
+    }
+    *:not(.spinner-border):not(.spinner-grow):not(.gws-boot-bar-fill),
+    *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+        transition-delay: 0s !important;
     }
 }
 
@@ -433,5 +442,31 @@ html:has(.gws-admin-bar) {
     .gws-content :is(a.breakdown-export, a.d-block) {
         min-width: 44px !important;
         min-height: 44px !important;
+    }
+}
+
+/* iPad portrait and narrow windows (12-11-26): the full sidebar took 272px of 820px, squeezing
+   every page into a column. Here the 60px rail stays and the content takes the rest; picking a
+   workspace opens its pages over the content (app.js, gws-tablet-nav-open), and choosing a page,
+   tapping outside or Escape closes them. */
+@media (min-width: 768px) and (max-width: 1023.98px) {
+    .gws-layout.gws-sidebar-collapsed:not(.gws-builder-mode) .gws-body {
+        margin-left: var(--gws-sidebar-collapsed-width);
+    }
+    .gws-layout.gws-sidebar-collapsed.gws-tablet-nav-open .gws-sidebar {
+        z-index: 40;
+        width: var(--gws-sidebar-width);
+        min-width: var(--gws-sidebar-width);
+        box-shadow: 18px 0 50px rgba(0, 0, 0, .45);
+    }
+    .gws-layout.gws-sidebar-collapsed.gws-tablet-nav-open .gws-subnav { display: block; }
+    .gws-layout.gws-sidebar-collapsed.gws-tablet-nav-open .gws-sidebar::before { width: calc(var(--gws-sidebar-width) - 2rem); }
+    .gws-layout.gws-tablet-nav-open .gws-sidebar-backdrop {
+        position: fixed;
+        inset: var(--gws-admin-bar-height) 0 0 var(--gws-sidebar-width);
+        z-index: 39;
+        display: block;
+        border: 0;
+        background: rgba(0, 0, 0, .45);
     }
 }

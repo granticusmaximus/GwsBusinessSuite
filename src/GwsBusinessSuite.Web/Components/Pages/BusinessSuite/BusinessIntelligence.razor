@@ -330,7 +330,7 @@ else
                 <div class="modal-body">
                     @if (_drillRows is null)
                     {
-                        <div class="text-secondary"><span class="spinner-border spinner-border-sm me-2"></span>Loading records…</div>
+                        <LoadingIndicator Message="Loading records…" />
                     }
                     else if (_drillRows.Count == 0)
                     {

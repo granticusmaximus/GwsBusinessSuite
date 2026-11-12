@@ -128,10 +128,7 @@
 
     @if (_loading && _snapshot is null)
     {
-        <div class="civic-loading" role="status">
-            <span class="spinner-border spinner-border-sm"></span>
-            <div><strong>Building your civic briefing</strong><small>Checking official local, state, and federal sources…</small></div>
-        </div>
+        <LoadingIndicator Message="Building your civic briefing from official local, state and federal sources…" />
     }
     else if (_snapshot is not null)
     {

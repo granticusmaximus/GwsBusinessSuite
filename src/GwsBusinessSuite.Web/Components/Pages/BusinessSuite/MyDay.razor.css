@@ -8,10 +8,11 @@
     column-gap: var(--gws-step-2);
     align-items: center;
     padding: var(--gws-step-3) var(--gws-step-4);
-    border: 1px solid var(--gws-panel-border);
+    border: 0;
+    box-shadow: var(--gws-neu-raised-shadow-sm);
     border-radius: var(--gws-radius-md, 10px);
     color: var(--gws-text-strong);
-    background: var(--gws-panel-bg);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
     text-decoration: none;
 }
 
@@ -33,9 +34,10 @@
     align-items: center;
     gap: var(--gws-step-2) var(--gws-step-3);
     padding: var(--gws-step-2) var(--gws-step-3);
-    border: 1px solid var(--gws-panel-border);
+    border: 0;
+    box-shadow: var(--gws-neu-raised-shadow-sm);
     border-radius: var(--gws-radius-sm, 8px);
-    background: var(--gws-panel-bg);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
     transition: opacity .2s ease;
 }
 

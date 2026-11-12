@@ -21,7 +21,7 @@ for path in sorted((root / "src/GwsBusinessSuite.Web").rglob("*.css")):
         continue
     relative = str(path.relative_to(root))
     accepted = allowed | set(exceptions.get(relative, []))
-    for match in re.finditer(r"@media\s+([^{}]+)\{", path.read_text()):
+    for match in re.finditer(r"@media\s*([^{}]+)\{", path.read_text()):
         for width in re.findall(r"(?:min|max)-width\s*:\s*([\d.]+(?:px|em|rem))", match[1]):
             if width not in accepted:
                 line = path.read_text()[:match.start()].count("\n") + 1

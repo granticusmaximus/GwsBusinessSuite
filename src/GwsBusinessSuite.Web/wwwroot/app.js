@@ -13,6 +13,30 @@
 		return document.querySelector('.gws-layout');
 	}
 
+	// iPad portrait and narrow windows (768-1023px): the full sidebar took 272px of 820, so the
+	// rail stays and a workspace's pages open over the content instead (12-11-26). The saved
+	// desktop choice (gws-sidebar-collapsed in localStorage) is left alone.
+	function isTablet() {
+		return window.matchMedia('(min-width: 768px) and (max-width: 1023.98px)').matches;
+	}
+
+	function setTabletNavigation(open) {
+		var layout = shell();
+		if (!layout) return;
+		layout.classList.toggle('gws-tablet-nav-open', open);
+		var backdrop = document.querySelector('.gws-sidebar-backdrop');
+		if (backdrop) {
+			backdrop.tabIndex = open ? 0 : -1;
+			backdrop.setAttribute('aria-hidden', open ? 'false' : 'true');
+		}
+		var toggle = document.querySelector('.gws-sidebar-toggle');
+		if (toggle) {
+			toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+			toggle.title = open ? 'Close navigation' : 'Open navigation';
+			toggle.setAttribute('aria-label', toggle.title);
+		}
+	}
+
 	function closeMobileNavigation() {
 		var layout = shell();
 		var toggle = document.querySelector('.gws-sidebar-toggle');
@@ -20,6 +44,7 @@
 		var backdrop = document.querySelector('.gws-sidebar-backdrop');
 		if (!layout) return;
 		layout.classList.remove('gws-mobile-nav-open');
+		if (layout.classList.contains('gws-tablet-nav-open')) setTabletNavigation(false);
 		document.body.classList.remove('gws-no-scroll');
 		if (sidebar && isMobile()) {
 			sidebar.inert = true;
@@ -57,6 +82,7 @@
 			button.setAttribute('aria-pressed', active ? 'true' : 'false');
 		});
 		var layout = shell();
+		if (layout && isTablet()) { setTabletNavigation(true); return; }
 		if (layout && !isMobile() && layout.classList.contains('gws-sidebar-collapsed')) toggleNavigation();
 	}
 
@@ -97,6 +123,12 @@
 			sidebar.inert = false;
 			sidebar.removeAttribute('aria-hidden');
 		}
+		if (isTablet()) {
+			layout.classList.add('gws-sidebar-collapsed');
+			setTabletNavigation(layout.classList.contains('gws-tablet-nav-open'));
+			return;
+		}
+		layout.classList.remove('gws-tablet-nav-open');
 		var collapsed = localStorage.getItem('gws-sidebar-collapsed') === 'true';
 		layout.classList.toggle('gws-sidebar-collapsed', collapsed);
 		toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
@@ -129,6 +161,10 @@
 					if (first) first.focus();
 				}, 80);
 			}
+			return;
+		}
+		if (isTablet()) {
+			setTabletNavigation(!layout.classList.contains('gws-tablet-nav-open'));
 			return;
 		}
 
@@ -793,7 +829,7 @@
 			if (workspaceButton) showWorkspace(workspaceButton.dataset.gwsWorkspace);
 			if (event.target.closest('.gws-sidebar-toggle, [data-gws-nav-toggle]')) toggleNavigation();
 			if (event.target.closest('[data-gws-sidebar-close]')) closeMobileNavigation();
-			if (event.target.closest('.gws-sidebar .gws-nav-link, .gws-sidebar a.gws-rail-item, .gws-bottom-bar a') && isMobile()) closeMobileNavigation();
+			if (event.target.closest('.gws-sidebar .gws-nav-link, .gws-sidebar a.gws-rail-item, .gws-bottom-bar a') && (isMobile() || isTablet())) closeMobileNavigation();
 			if (event.target.closest('[data-gws-assistant-open]')) { if (isMobile()) closeMobileNavigation(); openAssistant(); }
 			if (event.target.closest('[data-gws-command-open]')) { if (isMobile()) closeMobileNavigation(); openCommand(); }
 			if (event.target.closest('[data-gws-command-close]')) closeCommand();

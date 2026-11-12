@@ -750,7 +750,7 @@
 	}
 }
 
-@media (max-width: 767.98px) {
+@container gws-main (max-width: 767.98px) {
 	.studio-shell {
 		padding: 1rem;
 	}
@@ -901,7 +901,7 @@
 .studio-shell .btn-outline-secondary { color: #526279; border-color: #cdd6e2; }
 .studio-shell .btn-outline-secondary:hover { background: #edf3fa; color: #253349; }
 .studio-shell .text-secondary, .studio-shell .form-text { color: #617087 !important; }
-@media(max-width:1199.98px) {
+@container gws-main (max-width: 1199.98px) {
     .studio-workspace, .studio-workspace.has-inspector { grid-template-columns: 190px minmax(0, 1fr); }
     .studio-panel-right { grid-column: 1 / -1; max-height: 340px; border-top: 1px solid #dce2eb; }
     .studio-workspace.has-inspector { overflow-y: auto; grid-template-rows: minmax(400px, 1fr) auto; }
@@ -909,7 +909,7 @@
     .studio-shell { height: auto; min-height: 90dvh; }
     .studio-panel-left { max-height: 650px; }
 }
-@media(max-width:767.98px) {
+@container gws-main (max-width: 767.98px) {
     .studio-workspace, .studio-workspace.has-inspector { grid-template-columns: minmax(0, 1fr); }
     .studio-panel-left { max-height: 280px; border-bottom: 1px solid #dce2eb; }
     .studio-header { align-items: stretch; }
@@ -965,7 +965,7 @@
 }
 
 /* Grid items must stop at the panel boundary when the phone layout caps its height. */
-@media (max-width: 767.98px) {
+@container gws-main (max-width: 767.98px) {
     .studio-workspace > .studio-panel-left { overflow-y: auto; min-height: 0; }
 }
 

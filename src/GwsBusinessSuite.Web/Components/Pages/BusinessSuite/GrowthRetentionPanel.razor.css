@@ -1,10 +1,11 @@
 .retention-panel {
     margin-bottom: .9rem;
     overflow: hidden;
-    border: 1px solid rgba(255,255,255,.09);
+    border: 0;
+    box-shadow: var(--gws-neu-raised-shadow-sm);
     border-radius: .9rem;
-    background: #191714;
-    color: #f7f3ed;
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
+    color: var(--gws-text-strong);
 }
 
 .retention-panel > header {
@@ -13,7 +14,7 @@
     justify-content: space-between;
     gap: 1rem;
     padding: .9rem 1rem;
-    border-bottom: 1px solid rgba(255,255,255,.09);
+    border-bottom: 1px solid var(--gws-panel-border);
 }
 
 .retention-panel header > div:first-child span,
@@ -26,7 +27,7 @@
 .retention-panel header > div:first-child span { font-weight: 800; }
 .retention-panel header > div:first-child small,
 .retention-summary small {
-    color: #9b958e;
+    color: var(--gws-text-soft);
     font-size: .75rem;
 }
 
@@ -37,7 +38,7 @@
     text-align: right;
 }
 
-.retention-summary strong { font: 650 1.15rem/1.1 Georgia, serif; }
+.retention-summary strong { font: 650 1.15rem/1.1 var(--gws-font-sans); }
 
 .cohort-scroll { overflow-x: auto; }
 .cohort-scroll table {
@@ -57,13 +58,13 @@
 
 .cohort-scroll th:first-child { min-width: 105px; text-align: left; }
 .cohort-scroll thead th {
-    color: #9b958e;
+    color: var(--gws-text-soft);
     font-size: .75rem;
     letter-spacing: .03em;
     text-transform: uppercase;
 }
 .cohort-scroll tbody th { font-weight: 750; }
-.cohort-scroll tbody td:nth-child(2) { color: #c7c1b9; }
+.cohort-scroll tbody td:nth-child(2) { color: var(--gws-text-soft); }
 .retention-cell { font-weight: 800; }
 
 .retention-empty {
@@ -72,15 +73,15 @@
     gap: .8rem;
     padding: 1rem;
 }
-.retention-empty > i { color: #f59e0b; font-size: 1.1rem; }
+.retention-empty > i { color: var(--gws-sidebar-accent); font-size: 1.1rem; }
 .retention-empty strong, .retention-empty small { display: block; }
-.retention-empty small { margin-top: .15rem; color: #9b958e; font-size: .75rem; }
+.retention-empty small { margin-top: .15rem; color: var(--gws-text-soft); font-size: .75rem; }
 
 .retention-privacy {
     margin: 0;
     padding: .7rem 1rem;
     border-top: 1px solid rgba(255,255,255,.06);
-    color: #837d76;
+    color: var(--gws-text-soft);
     font-size: .75rem;
     line-height: 1.45;
 }

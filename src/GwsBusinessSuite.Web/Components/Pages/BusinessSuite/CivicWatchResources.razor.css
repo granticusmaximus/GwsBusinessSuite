@@ -21,7 +21,7 @@
     text-transform: uppercase;
 }
 
-.resource-panel h2 { margin: .2rem 0 0; color: var(--civic-ink); font: 700 1.25rem/1.2 Georgia, serif; }
+.resource-panel h2 { margin: .2rem 0 0; color: var(--civic-ink); font: 700 1.25rem/1.2 var(--gws-font-sans); }
 .resource-count { padding: .3rem .55rem; border-radius: 99px; background: var(--civic-accent-soft); color: var(--civic-accent-strong); font-size: .75rem; font-weight: 800; white-space: nowrap; }
 .resource-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; }
 .resource-group { min-width: 0; }

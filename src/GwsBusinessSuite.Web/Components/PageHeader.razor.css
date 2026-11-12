@@ -61,14 +61,43 @@
     margin-top: 1rem;
 }
 
-/* A narrow content area stacks the actions under the title, full width. */
+/* A phone-width content area (12-11-26): the header took 27-45% of the first screen, with the
+   pin on a full-width row of its own. Now the pin sits at the end of the breadcrumb line, the
+   description keeps to two lines, and the actions keep their own width under the title. */
 @container gws-main (max-width: 575.98px) {
-    .gws-page-header-actions {
-        width: 100%;
+    .gws-page-header {
+        position: relative;
+        margin-bottom: 1rem;
     }
 
-    .gws-page-header-actions ::deep > .btn {
-        flex: 1 1 auto;
+    .gws-breadcrumb {
+        padding-right: 3rem;
+    }
+
+    .gws-page-header-pin {
+        position: absolute;
+        top: -.5rem;
+        right: 0;
+    }
+
+    /* Only the pin: no actions row at all. */
+    .gws-page-header-actions:has(> .gws-page-header-pin:only-child) {
+        display: contents;
+    }
+
+    .gws-page-header-text > p {
+        display: -webkit-box;
+        overflow: hidden;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+    }
+
+    .gws-page-header-main {
+        gap: .5rem;
+    }
+
+    .gws-page-header-filters {
+        margin-top: .75rem;
     }
 }
 

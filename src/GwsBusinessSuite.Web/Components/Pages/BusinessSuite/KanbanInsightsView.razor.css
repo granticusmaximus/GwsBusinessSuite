@@ -30,9 +30,10 @@
     flex-direction: column;
     gap: 2px;
     padding: var(--gws-step-3) var(--gws-step-4);
-    border: 1px solid var(--gws-panel-border);
+    border: 0;
+    box-shadow: var(--gws-neu-raised-shadow-sm);
     border-radius: var(--gws-radius-md, 10px);
-    background: var(--gws-panel-bg);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
 }
 
 .kbi-tile-label { font-size: .8125rem; color: var(--gws-text-soft); }
@@ -45,9 +46,10 @@
     gap: var(--gws-step-2);
     min-width: 0;
     padding: var(--gws-step-3) var(--gws-step-4);
-    border: 1px solid var(--gws-panel-border);
+    border: 0;
+    box-shadow: var(--gws-neu-raised-shadow-sm);
     border-radius: var(--gws-radius-md, 10px);
-    background: var(--gws-panel-bg);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
 }
 
 .kbi-card-head h3 { margin: 0; font-size: .9375rem; font-weight: 650; color: var(--gws-text-strong); }

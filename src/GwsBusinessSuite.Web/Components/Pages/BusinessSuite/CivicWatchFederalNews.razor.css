@@ -3,7 +3,7 @@
 .federal-news-list > a:first-child { padding-top: 0; border-top: 0; }
 .federal-news-list > a:hover strong { color: var(--civic-accent-strong); }
 .federal-news-list .news-date { color: var(--civic-accent); font-size: .75rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
-.federal-news-list strong { font: 700 .83rem/1.35 Georgia, serif; }
+.federal-news-list strong { font: 700 .83rem/1.35 var(--gws-font-sans); }
 .federal-news-list small { display: -webkit-box; overflow: hidden; color: var(--civic-muted); font-size: .75rem; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .federal-news-list i { position: absolute; top: .85rem; right: .05rem; color: var(--civic-muted); font-size: .75rem; }
 .federal-news-list > a:first-child i { top: .1rem; }

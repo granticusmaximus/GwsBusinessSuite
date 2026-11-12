@@ -44,11 +44,11 @@
 .funnel-title span { display: block; font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .funnel-title small { display: block; }
 .funnel-completion { text-align: right; }
-.funnel-completion strong { font: 650 1.15rem/1 Georgia, serif; }
+.funnel-completion strong { font: 650 1.15rem/1 var(--gws-font-sans); }
 .funnel-steps { padding: .35rem .8rem .6rem; }
 .funnel-step { padding: .55rem 0; }
 .step-topline { display: grid; grid-template-columns: 1.35rem 1fr auto; align-items: center; gap: .45rem; font-size: .75rem; }
-.step-topline span { width: 1.25rem; height: 1.25rem; display: grid; place-items: center; color: #211707; background: var(--growth-accent); border-radius: 50%; font-weight: 850; font-size: .75rem; }
+.step-topline span { width: 1.25rem; height: 1.25rem; display: grid; place-items: center; color: #17130c; background: var(--growth-accent); border-radius: 50%; font-weight: 850; font-size: .75rem; }
 .step-topline b { font-size: .75rem; }
 .step-bar { height: .3rem; border-radius: 99px; background: rgba(255,255,255,.06); margin: .45rem 0 .35rem; overflow: hidden; }
 .step-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--growth-accent), #8f7cff); }
@@ -65,7 +65,7 @@
     width: min(430px, calc(100vw - 2rem));
     overflow: auto;
     color: var(--growth-ink);
-    background: #191714;
+    background: var(--gws-panel-bg);
     border: 1px solid var(--growth-line);
     box-shadow: 0 1.5rem 5rem rgba(0,0,0,.55);
     border-radius: 1rem;
@@ -79,7 +79,7 @@
 .funnel-drawer input, .funnel-drawer select {
     width: 100%;
     color: var(--growth-ink);
-    background: #11100e;
+    background: var(--gws-body-bg);
     border: 1px solid var(--growth-line);
     border-radius: .55rem;
     padding: .62rem .7rem;
@@ -100,8 +100,8 @@
 .funnel-help { color: var(--growth-muted); font-size: .75rem; line-height: 1.45; }
 .funnel-help code { color: var(--growth-accent); }
 .funnel-save, .funnel-delete { width: 100%; border-radius: .55rem; padding: .65rem .8rem; font-weight: 800; }
-.funnel-save { color: #1c1507; border: 1px solid #fbbf24; background: var(--growth-accent); }
-.funnel-delete { color: #fca5a5; border: 0; background: transparent; margin-top: .35rem; font-size: .75rem; }
+.funnel-save { color: #17130c; border: 1px solid var(--gws-status-warning-text); background: var(--growth-accent); }
+.funnel-delete { color: var(--gws-status-danger-text); border: 0; background: transparent; margin-top: .35rem; font-size: .75rem; }
 
 @container gws-main (max-width: 596px) {
     .funnel-grid { grid-template-columns: 1fr; }

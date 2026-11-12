@@ -12,9 +12,9 @@
     --civic-ink: #18252b;
     --civic-muted: #68757a;
     --civic-line: rgba(24, 37, 43, .12);
-    --civic-accent: #c26b3a;
-    --civic-accent-strong: #196453;
-    --civic-accent-soft: #e4f0eb;
+    --civic-accent: var(--gws-sidebar-accent);
+    --civic-accent-strong: var(--gws-sidebar-accent);
+    --civic-accent-soft: color-mix(in srgb, var(--gws-sidebar-accent) 14%, transparent);
     --civic-radius: 1rem;
     display: block;
     min-height: calc(100vh - 3.5rem);
@@ -23,7 +23,7 @@
     padding: clamp(1rem, 2.5vw, 2.5rem);
     color: var(--civic-ink);
     background:
-        radial-gradient(circle at 95% 0, rgba(194,107,58,.10), transparent 24rem),
+        radial-gradient(circle at 95% 0, rgba(245, 158, 11,.10), transparent 24rem),
         linear-gradient(180deg, #f7f5f0 0, var(--civic-bg) 22rem);
 }
 
@@ -40,9 +40,9 @@
     --civic-ink: #fafaf9;
     --civic-muted: #a8a29e;
     --civic-line: rgba(250, 250, 249, .12);
-    --civic-accent: #f59e0b;
-    --civic-accent-strong: #f59e0b;
-    --civic-accent-soft: #3a2a12;
+    --civic-accent: var(--gws-sidebar-accent);
+    --civic-accent-strong: var(--gws-sidebar-accent);
+    --civic-accent-soft: color-mix(in srgb, var(--gws-sidebar-accent) 14%, transparent);
     background:
         radial-gradient(circle at 95% 0, rgba(245,158,11,.08), transparent 24rem),
         linear-gradient(180deg, #17140f 0, var(--civic-bg) 22rem);
@@ -81,7 +81,7 @@
 .media-watch .btn-outline-primary { border-color: var(--civic-accent-strong); color: var(--civic-accent-strong); }
 .media-watch .progress { background: var(--civic-soft); }
 
-.media-watch .card a.h6, .media-watch a.text-body { color: var(--civic-ink); font: 700 .92rem/1.4 Georgia, serif; }
+.media-watch .card a.h6, .media-watch a.text-body { color: var(--civic-ink); font: 700 .92rem/1.4 var(--gws-font-sans); }
 .media-watch .card a.h6:hover, .media-watch a.text-body:hover { color: var(--civic-accent-strong); }
 
 @container gws-main (max-width: 728px) {

@@ -234,7 +234,7 @@
     border-top: 1px solid var(--gws-panel-border, #d6d3d1);
 }
 
-@media (max-width: 575.98px) {
+@container gws-main (max-width: 575.98px) {
     .wiki-db-header {
         flex-wrap: wrap;
     }

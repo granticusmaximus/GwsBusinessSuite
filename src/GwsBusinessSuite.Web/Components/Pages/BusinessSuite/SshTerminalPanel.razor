@@ -12,10 +12,7 @@
     <div class="d-flex flex-column bg-dark text-light" style="height:100vh;">
         @if (!_settingsLoaded || _isConnecting)
         {
-            <div class="d-flex align-items-center justify-content-center flex-grow-1 gap-2 text-secondary">
-                <span class="spinner-border spinner-border-sm"></span>
-                <span>@(_isConnecting ? "Connecting..." : "Loading...")</span>
-            </div>
+            <LoadingIndicator CssClass="flex-grow-1 d-flex align-items-center justify-content-center" Message="@(_isConnecting ? "Connecting…" : "Loading…")" />
         }
         else if (_session is null)
         {
@@ -70,10 +67,7 @@ else
     <div class="card-body">
         @if (!_settingsLoaded)
         {
-            <div class="d-flex align-items-center gap-2 text-secondary">
-                <span class="spinner-border spinner-border-sm"></span>
-                <span>Loading...</span>
-            </div>
+            <LoadingIndicator Message="Loading…" />
         }
         else
         {

@@ -45,9 +45,9 @@
     z-index: 20;
     width: 18rem;
     padding: 6px;
-    border: 1px solid var(--gws-panel-border);
+    border: 0;
     border-radius: var(--gws-radius-md, 10px);
-    background: var(--gws-panel-bg);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
     box-shadow: 0 14px 40px rgba(0, 0, 0, .22);
 }
 
@@ -73,7 +73,8 @@
 .kb-more-divider { height: 1px; margin: 5px 8px; background: var(--gws-panel-border); }
 
 /* Board / Insights (K5). */
-.kb-views { display: inline-flex; padding: 2px; border: 1px solid var(--gws-panel-border); border-radius: 999px; background: var(--gws-panel-bg); }
+.kb-views { display: inline-flex; padding: 2px; border: 0;
+    box-shadow: var(--gws-neu-raised-shadow-sm); border-radius: 999px; background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface)); }
 
 .kb-view {
     display: inline-flex;

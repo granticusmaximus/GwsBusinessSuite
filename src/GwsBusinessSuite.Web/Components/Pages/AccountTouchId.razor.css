@@ -23,9 +23,10 @@
 }
 .gws-touchid-ways article {
     padding: 1rem 1.1rem;
-    border: 1px solid var(--gws-panel-border);
+    border: 0;
+    box-shadow: var(--gws-neu-raised-shadow-sm);
     border-radius: 12px;
-    background: var(--gws-panel-bg);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
 }
 .gws-touchid-ways article > i { display: inline-block; margin-bottom: .45rem; color: #f59e0b; font-size: 1.35rem; }
 .gws-touchid-ways h2 { margin: 0 0 .35rem; font-size: .98rem; font-weight: 700; color: var(--gws-text-strong); }

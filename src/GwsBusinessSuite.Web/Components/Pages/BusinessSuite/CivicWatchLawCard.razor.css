@@ -1,8 +1,8 @@
 .law-card { padding: .85rem; border: 1px solid var(--civic-line); border-radius: .7rem; background: var(--civic-surface-raised); }
 .law-card > span { color: var(--civic-accent-strong); font-size: .75rem; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
-.law-card h3 { margin: .3rem 0 .55rem; color: var(--civic-ink); font: 700 .86rem/1.35 Georgia, serif; }
+.law-card h3 { margin: .3rem 0 .55rem; color: var(--civic-ink); font: 700 .86rem/1.35 var(--gws-font-sans); }
 .law-card > a { color: var(--civic-accent-strong); font-size: .75rem; font-weight: 800; text-decoration: none; }
 .law-card ::deep details > summary { color: var(--civic-accent-strong); font-size: .75rem; }
 .law-card ::deep details .bg-light { background: var(--civic-soft) !important; }
 .law-card ::deep details .bg-white { background: var(--civic-surface) !important; }
-.civic-new { display: inline-block; margin-left: .35rem; padding: .1rem .4rem; border-radius: 99px; background: var(--civic-accent-strong, #196453); color: var(--civic-surface, #fff); font-size: .7rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; vertical-align: middle; }
+.civic-new { display: inline-block; margin-left: .35rem; padding: .1rem .4rem; border-radius: 99px; background: var(--civic-accent-strong, #f59e0b); color: #17130c; font-size: .7rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; vertical-align: middle; }

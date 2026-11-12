@@ -37,13 +37,13 @@
 }
 
 .geo-status.ready {
-    color: #86efac;
+    color: var(--gws-status-success-text);
     border-color: rgba(34, 197, 94, .28);
     background: rgba(34, 197, 94, .08);
 }
 
 .geo-status.setup {
-    color: #fcd34d;
+    color: var(--gws-status-warning-text);
     border-color: rgba(245, 158, 11, .28);
     background: rgba(245, 158, 11, .08);
 }
@@ -82,7 +82,7 @@
 .geo-warning {
     margin: 0;
     padding: .7rem 1rem;
-    color: #fcd34d;
+    color: var(--gws-status-warning-text);
     border-bottom: 1px solid var(--growth-line);
     background: rgba(245, 158, 11, .04);
 }
@@ -199,7 +199,7 @@
 }
 
 .geo-panel footer i {
-    color: #86efac;
+    color: var(--gws-status-success-text);
 }
 
 @container gws-main (max-width: 588px) {

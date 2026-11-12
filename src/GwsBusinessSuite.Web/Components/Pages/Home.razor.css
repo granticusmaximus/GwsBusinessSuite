@@ -148,7 +148,7 @@
     outline-offset: 4px;
 }
 
-@media (max-width: 767.98px) {
+@container gws-main (max-width: 699.98px) {
     .gws-neu-dashboard::before {
         inset-inline: -.75rem;
     }
