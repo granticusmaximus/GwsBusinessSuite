@@ -31,10 +31,10 @@
 
 .alert-danger, .alert-success { max-width: 1380px; margin-left: auto; margin-right: auto; }
 
-.civic-briefing { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(420px, .9fr); gap: 1.5rem; max-width: 1380px; margin: 0 auto 1rem; padding: clamp(1.2rem, 2vw, 2rem); overflow: hidden; border-radius: 1.15rem; background: #183e37; color: #f7f4ed; box-shadow: 0 1rem 3rem rgba(24,37,43,.12); }
+.civic-briefing { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(420px, .9fr); gap: 1.5rem; max-width: 1380px; margin: 0 auto 1rem; padding: clamp(1.2rem, 2vw, 2rem); overflow: hidden; border-radius: 1.15rem; background: #1f1b17; color: #f7f4ed; box-shadow: 0 1rem 3rem rgba(24,37,43,.12); }
 .briefing-lead { align-self: center; }
-.briefing-label { color: #edb48e; font-size: .75rem; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
-.briefing-lead h2 { margin: .35rem 0 .4rem; font: 700 clamp(1.5rem, 2.5vw, 2.4rem)/1.05 var(--gws-font-sans); letter-spacing: -.025em; }
+.briefing-label { color: var(--gws-sidebar-accent); font-size: .75rem; font-weight: 850; letter-spacing: .12em; text-transform: uppercase; }
+.briefing-lead h2 { color: inherit; margin: .35rem 0 .4rem; font: 700 clamp(1.5rem, 2.5vw, 2.4rem)/1.05 var(--gws-font-sans); letter-spacing: -.025em; }
 .briefing-lead > p { max-width: 720px; margin: 0; color: rgba(255,255,255,.7); font-size: .82rem; line-height: 1.55; }
 .briefing-freshness { display: flex; align-items: center; flex-wrap: wrap; gap: .4rem; margin-top: 1rem; color: rgba(255,255,255,.62); font-size: .75rem; }
 .briefing-freshness > span { width: .45rem; height: .45rem; border-radius: 50%; background: #7dd3ad; box-shadow: 0 0 0 .2rem rgba(125,211,173,.13); }
@@ -135,7 +135,7 @@
         radial-gradient(circle at 95% 0, rgba(245,158,11,.08), transparent 24rem),
         linear-gradient(180deg, #17140f 0, var(--civic-bg) 22rem);
 }
-:root:not([data-theme="light"]) .civic-watch .civic-briefing { background: #26150c; }
+:root:not([data-theme="light"]) .civic-watch .civic-briefing { background: #26201a; }
 :root:not([data-theme="light"]) .civic-watch ::deep .floor-video { background: #000; }
 :root:not([data-theme="light"]) .civic-watch .scope-nav button { background: rgba(250, 250, 249, .04); }
 :root:not([data-theme="light"]) .civic-watch .source-note { background: var(--civic-accent-soft); border-color: var(--civic-line); color: var(--civic-ink); }
