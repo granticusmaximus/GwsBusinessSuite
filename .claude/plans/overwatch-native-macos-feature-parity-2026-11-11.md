@@ -54,6 +54,34 @@ orchestration, while rendering the viewport with native MapKit.
   Its test host remained active for more than six minutes without reporting a result and was
   stopped. Mac Catalyst build and authenticated acceptance remain outstanding.
 
+### Interaction pass (12-11-26)
+
+Grant reported that pin clicks on the Mac "may or may not open the correct modal", and that pan
+and zoom lag. Causes found and fixed:
+
+- [x] Hit test measured from the pin's coordinate; MapKit draws the balloon above it, so clicks
+  picked neighbours. Now hit-tests the drawn annotation views (balloon frame, then nearest within
+  24pt), clusters included.
+- [x] `SelectAnnotation` on an already-selected pin fires nothing, so a second click failed. Now
+  opens directly (`Activate`); callouts off; MapKit's own selections are deselected at once.
+- [x] Non-clickable layers (ships, AQI, coverage, alert highlights, route marks) competed in the
+  hit test and opened the hazard window. `NativeOverwatchOperations.Selectable` and the JS
+  `nativeSelectionHandlers` table now match the Cesium click handler (test keeps them equal).
+- [x] Satellites and news shading opened the hazard window; aircraft opened nothing (needed a
+  Cesium viewer). A `nativeEntry` stand-in now backs aircraft (path via `setAircraftPath`,
+  fit via `flyToBounds`) and camera select mode / watch wall.
+- [x] Any 1px move counted as a drag and ate the click. 5px threshold.
+- [x] Lag: every pointermove and wheel tick was its own message; each wheel tick an animated 2x
+  `SetRegion`. Now summed per animation frame; pan uses `SetCenterCoordinate`, wheel/pinch
+  `zoomBy` scales the camera distance around the pointer. Region reports wait for release.
+  Unchanged layers are skipped and pins are diffed by payload instead of all re-added.
+- [x] The injected bootstrap's own gesture code (and its document-wide MutationObserver) removed;
+  tactical-globe.js owns forwarding. Older app builds still set `gwsNativeAppNavigation`, and the
+  page keeps leaving those alone.
+- [x] Browser tests drive the Mac adapter in Chromium with a recording handler (`MacApp_*`);
+  Mac app Debug and Release builds clean.
+- [ ] On-screen check in the installed app after deploy + app update (not possible from here).
+
 ## Acceptance
 
 - Overwatch never leaves the Mac app.

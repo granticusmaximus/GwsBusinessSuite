@@ -1412,11 +1412,26 @@ window.tacticalGlobe = (function () {
     // speed), then fills in GetAircraftDetailAsync's lookup and draws the path. Unlike the other
     // info panels this one floats without the darkening backdrop, so the path stays visible and
     // the globe can still be panned and zoomed while it's open.
+    // On the Mac app the map is native MapKit, so there is no Cesium viewer entry. The adapter
+    // below sets this stand-in so panels and camera selection work the same there.
+    // { containerId, viewer: null, dotNetRef, selectMode, selectedCameras, cameraEntities, aircraftPath, post }
+    let nativeEntry = null;
+
+    function entryFor(containerId) {
+        const id = containerId || 'tg-viewport';
+        return viewers.get(id) || (nativeEntry && nativeEntry.containerId === id ? nativeEntry : null);
+    }
+
+    function shellFor(entry) {
+        const container = entry.viewer ? entry.viewer.container : document.getElementById(entry.containerId);
+        return container ? container.closest('.tg-shell') : null;
+    }
+
     function openAircraftPanel(containerId, plane) {
-        const entry = viewers.get(containerId || 'tg-viewport');
+        const entry = entryFor(containerId);
         if (!entry) return;
         closeAircraftPanel();
-        const shell = entry.viewer.container.closest('.tg-shell');
+        const shell = shellFor(entry);
         if (!shell) return;
         const readings = formatAircraftReadings(plane);
         const panel = document.createElement('div');
@@ -1501,6 +1516,10 @@ window.tacticalGlobe = (function () {
     function drawAircraftPath(entry) {
         const path = entry.aircraftPath;
         if (!path) return;
+        if (!entry.viewer) {
+            drawNativeAircraftPath(entry, path);
+            return;
+        }
         path.entities.forEach(function (e) { entry.viewer.entities.remove(e); });
         path.entities = [];
         const add = function (spec) { path.entities.push(entry.viewer.entities.add(spec)); };
@@ -1525,6 +1544,19 @@ window.tacticalGlobe = (function () {
                         style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(0, -16), disableDepthTestDistance: 0 }
                 });
         });
+    }
+
+    // The same path on the Mac's native map: lines and airport points through its generic layer.
+    function drawNativeAircraftPath(entry, path) {
+        if (!entry.post) return;
+        const items = [];
+        if (path.track.length > 0) items.push({ path: path.track.concat([path.current]) });
+        else if (path.origin) items.push({ path: [[path.origin.longitude, path.origin.latitude], path.current] });
+        if (path.destination) items.push({ path: [path.current, [path.destination.longitude, path.destination.latitude]] });
+        [path.origin, path.destination].filter(Boolean).forEach(function (airport) {
+            items.push({ lat: airport.latitude, lon: airport.longitude, title: airport.code });
+        });
+        entry.post('setAircraftPath', [items]);
     }
 
     // Each minute's aircraft refresh moves the selected plane: extend its path and update the readings.
@@ -1552,6 +1584,10 @@ window.tacticalGlobe = (function () {
         });
         const padLon = Math.max(0.2, (east - west) * 0.15);
         const padLat = Math.max(0.2, (north - south) * 0.15);
+        if (!entry.viewer) {
+            if (entry.post) entry.post('flyToBounds', [west - padLon, south - padLat, east + padLon, north + padLat]);
+            return;
+        }
         entry.viewer.camera.flyTo({ destination: Cesium.Rectangle.fromDegrees(west - padLon, south - padLat, east + padLon, north + padLat) });
     }
 
@@ -1559,6 +1595,10 @@ window.tacticalGlobe = (function () {
         aircraftRequestToken++;
         if (aircraftPanel && aircraftPanel.parentNode) aircraftPanel.parentNode.removeChild(aircraftPanel);
         aircraftPanel = null;
+        if (nativeEntry && nativeEntry.aircraftPath) {
+            if (nativeEntry.post) nativeEntry.post('clearAircraftPath', []);
+            nativeEntry.aircraftPath = null;
+        }
         viewers.forEach(function (entry) {
             if (!entry.aircraftPath) return;
             entry.aircraftPath.entities.forEach(function (e) { entry.viewer.entities.remove(e); });
@@ -4249,7 +4289,7 @@ window.tacticalGlobe = (function () {
     // setSelectModeEnabled/toggleCameraSelection); openWatchWallWithCameras is the lower-level
     // entry point, also reused by shareable view links to reopen a shared multi-camera view.
     function openWatchWall(containerId) {
-        const entry = viewers.get(containerId || 'tg-viewport');
+        const entry = entryFor(containerId);
         if (!entry) return;
         openWatchWallWithCameras(containerId, Array.from(entry.selectedCameras.values()));
     }
@@ -4563,6 +4603,14 @@ window.tacticalGlobe = (function () {
         let nativePickMode = false;
         let nativePointer = null;
         let nativeMoved = false;
+        // Movement under this many pixels is still a click (a trackpad press jitters a pixel or two).
+        const NATIVE_DRAG_THRESHOLD_PX = 5;
+        // Pan and wheel input is summed and sent once per frame, not once per event.
+        let nativePendingPan = null;
+        let nativePendingZoom = null;
+        let nativeFrame = 0;
+        // The page reloads layers for a new view; while a drag is under way that waits for release.
+        let nativeDeferredRegion = null;
 
         const nativeHandler = function () {
             return window.webkit && window.webkit.messageHandlers
@@ -4597,9 +4645,44 @@ window.tacticalGlobe = (function () {
             });
         };
 
+        // What a click on each layer's pin opens, matching the Cesium click handler. Layers not
+        // listed (ships, air quality, coverage, alert highlights, routes...) aren't clickable there
+        // either, so a click on one does nothing rather than opening the wrong window.
+        // NativeOverwatchOperations.Selectable lists the same keys for the Mac's hit test.
+        const nativeSelectionHandlers = {
+            setCameraPins: function (camera) {
+                if (nativeEntry && nativeEntry.selectMode) toggleCameraSelection(nativeEntry, camera);
+                else openStreamPanel(camera, nativeDotNetRef);
+            },
+            setWorldNews: function (signal) { openWorldNewsPanel(signal); },
+            setNewsShading: function (total) { openNewsCountryPanel(total); },
+            setAircraft: function (plane) { openAircraftPanel(nativeContainerId, plane); },
+            setRoadWeather: function (station) { openRoadWeatherPanel(station); },
+            setMessageSigns: function (sign) { openSignPanel(sign); },
+            setTrafficIncidents: function (incident) { openIncidentPanel(incident); },
+            setConvergence: function (cell) { openConvergencePanel(cell); },
+            setSatellites: function (sat) { openSatellitePanel(sat); },
+            setHazards: function (hazard) { openHazardPanel(hazard); },
+            setInternetOutages: function (outage) { openHazardPanel(outage); },
+            setAirportStatus: function (airport) { openHazardPanel(airport); },
+            setTravelAdvice: function (pin) { openHazardPanel(pin); },
+            setFireHotspots: function (cell) { openHazardPanel(cell); },
+            setConflict: function (event) { openHazardPanel(event); },
+            setHumanitarian: function (item) { openHazardPanel(item); },
+            setMapNotes: function (note) {
+                if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnMapNoteClicked', note);
+            }
+        };
+
+        const reportRegion = function (region) {
+            if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnGlobeViewChanged', region[0], region[1], region[2], region[3]);
+        };
+
         window.gwsNativeOverwatch = {
             regionChanged: function (north, south, east, west) {
-                if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnGlobeViewChanged', north, south, east, west);
+                const region = [north, south, east, west];
+                if (nativePointer && nativeMoved) { nativeDeferredRegion = region; return; }
+                reportRegion(region);
             },
             selected: function (selection) {
                 if (!selection) return;
@@ -4610,19 +4693,8 @@ window.tacticalGlobe = (function () {
                     nativeDotNetRef.invokeMethodAsync('OnMapPointPicked', payload.lat, payload.lon);
                     return;
                 }
-                switch (selection.operation) {
-                    case 'setCameraPins': openStreamPanel(payload, nativeDotNetRef); break;
-                    case 'setWorldNews': openWorldNewsPanel(payload); break;
-                    case 'setAircraft': openAircraftPanel(nativeContainerId, payload); break;
-                    case 'setRoadWeather': openRoadWeatherPanel(payload); break;
-                    case 'setMessageSigns': openSignPanel(payload); break;
-                    case 'setTrafficIncidents': openIncidentPanel(payload); break;
-                    case 'setConvergence': openConvergencePanel(payload); break;
-                    case 'setMapNotes':
-                        if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnMapNoteClicked', payload);
-                        break;
-                    default: openHazardPanel(payload); break;
-                }
+                const open = nativeSelectionHandlers[selection.operation];
+                if (open) open(payload);
             }
         };
 
@@ -4650,39 +4722,77 @@ window.tacticalGlobe = (function () {
         api.init = async function (containerId, dotNetRef) {
             nativeContainerId = containerId || 'tg-viewport';
             nativeDotNetRef = dotNetRef;
+            nativeEntry = {
+                containerId: nativeContainerId, viewer: null, dotNetRef: dotNetRef, selectMode: false,
+                selectedCameras: new Map(), cameraEntities: new Map(), aircraftPath: null,
+                post: function (operation, args) { postNative(operation, args); }
+            };
             const container = document.getElementById(nativeContainerId);
             if (container) {
                 container.replaceChildren();
                 if (container.dataset.gwsNativeTap !== 'true') {
                     container.dataset.gwsNativeTap = 'true';
                     container.style.touchAction = 'none';
+                    // An app build from before 12-11-26 injects its own navigation; leave it be.
                     if (container.dataset.gwsNativeAppNavigation !== 'true') {
+                        const flush = function () {
+                            nativeFrame = 0;
+                            if (nativePendingPan) {
+                                postNative('pan', [nativePendingPan.x, nativePendingPan.y]);
+                                nativePendingPan = null;
+                            }
+                            if (nativePendingZoom) {
+                                const factor = Math.min(4, Math.max(0.25, Math.exp(nativePendingZoom.amount)));
+                                postNative('zoomBy', [factor, nativePendingZoom.x, nativePendingZoom.y]);
+                                nativePendingZoom = null;
+                            }
+                        };
+                        const schedule = function () {
+                            if (!nativeFrame) nativeFrame = requestAnimationFrame(flush);
+                        };
                         container.addEventListener('pointerdown', function (event) {
                             if (event.button !== 0) return;
-                            nativePointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+                            nativePointer = { id: event.pointerId, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY };
                             nativeMoved = false;
                             container.setPointerCapture(event.pointerId);
                         });
                         container.addEventListener('pointermove', function (event) {
                             if (!nativePointer || nativePointer.id !== event.pointerId) return;
+                            if (!nativeMoved && Math.hypot(event.clientX - nativePointer.startX, event.clientY - nativePointer.startY) < NATIVE_DRAG_THRESHOLD_PX) return;
                             const bounds = container.getBoundingClientRect();
                             if (bounds.width <= 0 || bounds.height <= 0) return;
-                            const deltaX = (event.clientX - nativePointer.x) / bounds.width;
-                            const deltaY = (event.clientY - nativePointer.y) / bounds.height;
-                            if (Math.abs(deltaX) + Math.abs(deltaY) < 0.001) return;
                             nativeMoved = true;
+                            const pan = nativePendingPan || (nativePendingPan = { x: 0, y: 0 });
+                            pan.x += (event.clientX - nativePointer.x) / bounds.width;
+                            pan.y += (event.clientY - nativePointer.y) / bounds.height;
                             nativePointer.x = event.clientX;
                             nativePointer.y = event.clientY;
-                            postNative('pan', [deltaX, deltaY]);
+                            schedule();
                         });
                         const finishPan = function (event) {
-                            if (nativePointer && nativePointer.id === event.pointerId) nativePointer = null;
+                            if (!nativePointer || nativePointer.id !== event.pointerId) return;
+                            nativePointer = null;
+                            if (nativeFrame) { cancelAnimationFrame(nativeFrame); flush(); }
+                            if (nativeDeferredRegion) {
+                                const region = nativeDeferredRegion;
+                                nativeDeferredRegion = null;
+                                reportRegion(region);
+                            }
                         };
                         container.addEventListener('pointerup', finishPan);
                         container.addEventListener('pointercancel', finishPan);
+                        // Wheel and trackpad pinch (ctrlKey) zoom smoothly around the pointer. Each
+                        // event used to be a separate animated 2x zoom, which queued up and lagged.
                         container.addEventListener('wheel', function (event) {
                             event.preventDefault();
-                            postNative('zoom', [nativeContainerId, event.deltaY < 0]);
+                            const bounds = container.getBoundingClientRect();
+                            if (bounds.width <= 0 || bounds.height <= 0) return;
+                            const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? bounds.height : 1;
+                            const zoom = nativePendingZoom || (nativePendingZoom = { amount: 0, x: 0.5, y: 0.5 });
+                            zoom.amount += event.deltaY * unit * (event.ctrlKey ? 0.01 : 0.0025);
+                            zoom.x = (event.clientX - bounds.left) / bounds.width;
+                            zoom.y = (event.clientY - bounds.top) / bounds.height;
+                            schedule();
                         }, { passive: false });
                     }
                     container.addEventListener('click', function (event) {
@@ -4713,6 +4823,15 @@ window.tacticalGlobe = (function () {
         api.setThreeD = function (containerId, on) {
             postNative('setThreeD', arguments);
             return Promise.resolve(on ? 'on' : 'off');
+        };
+        api.setSelectModeEnabled = function (containerIdOrEnabled, maybeEnabled) {
+            const enabled = typeof containerIdOrEnabled === 'string' ? maybeEnabled : containerIdOrEnabled;
+            if (!nativeEntry) return;
+            nativeEntry.selectMode = !!enabled;
+            if (!nativeEntry.selectMode) {
+                nativeEntry.selectedCameras.clear();
+                updateSelectionIndicator(nativeEntry);
+            }
         };
         api.startPickPoint = function () { nativePickMode = true; postNative('startPickPoint', arguments); };
         api.cancelPickPoint = function () { nativePickMode = false; postNative('cancelPickPoint', arguments); };

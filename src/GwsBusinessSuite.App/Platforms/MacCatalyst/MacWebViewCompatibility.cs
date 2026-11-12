@@ -7,67 +7,12 @@ namespace GwsBusinessSuite.App;
 internal static class MacWebViewCompatibility
 {
     private static readonly ConditionalWeakTable<WKWebView, object> ConfiguredViews = new();
+    // Only marks the page as running in the Mac app. tactical-globe.js then hands the map to
+    // MacNativeOverwatchBridge and owns the pointer, wheel and click forwarding itself. (Until
+    // 12-11-26 this script also forwarded gestures, through a MutationObserver that ran on every
+    // DOM change of every page, posting each pointer move and wheel tick separately.)
     internal const string Script = """
         window.__gwsMacCatalystWebView = true;
-        (function () {
-            function installNativeNavigation() {
-                const container = document.getElementById('tg-viewport');
-                if (!container || container.dataset.gwsNativeAppNavigation === 'true') return;
-                container.dataset.gwsNativeAppNavigation = 'true';
-                container.style.touchAction = 'none';
-                let pointer = null;
-                container.addEventListener('click', function (event) {
-                    if (container.dataset.gwsNativeSuppressClick !== 'true') return;
-                    delete container.dataset.gwsNativeSuppressClick;
-                    event.preventDefault();
-                    event.stopImmediatePropagation();
-                });
-                function post(operation, args) {
-                    const handlers = window.webkit && window.webkit.messageHandlers;
-                    const handler = handlers && handlers.gwsNativeOverwatch;
-                    if (handler) handler.postMessage({ operation: operation, arguments: args });
-                }
-                container.addEventListener('pointerdown', function (event) {
-                    if (event.button !== 0) return;
-                    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
-                    container.setPointerCapture(event.pointerId);
-                });
-                container.addEventListener('pointermove', function (event) {
-                    if (!pointer || pointer.id !== event.pointerId) return;
-                    const bounds = container.getBoundingClientRect();
-                    if (bounds.width <= 0 || bounds.height <= 0) return;
-                    const deltaX = (event.clientX - pointer.x) / bounds.width;
-                    const deltaY = (event.clientY - pointer.y) / bounds.height;
-                    if (Math.abs(deltaX) + Math.abs(deltaY) < 0.001) return;
-                    pointer.moved = true;
-                    pointer.x = event.clientX;
-                    pointer.y = event.clientY;
-                    post('pan', [deltaX, deltaY]);
-                });
-                function finish(event) {
-                    if (!pointer || pointer.id !== event.pointerId) return;
-                    if (pointer.moved) {
-                        container.dataset.gwsNativeSuppressClick = 'true';
-                        setTimeout(function () {
-                            delete container.dataset.gwsNativeSuppressClick;
-                        }, 0);
-                    }
-                    pointer = null;
-                }
-                container.addEventListener('pointerup', finish);
-                container.addEventListener('pointercancel', finish);
-                container.addEventListener('wheel', function (event) {
-                    event.preventDefault();
-                    post('zoom', ['tg-viewport', event.deltaY < 0]);
-                }, { passive: false });
-            }
-            new MutationObserver(installNativeNavigation).observe(document.documentElement, {
-                childList: true,
-                subtree: true
-            });
-            document.addEventListener('DOMContentLoaded', installNativeNavigation);
-            installNativeNavigation();
-        })();
         """;
 
     public static void Configure(WKWebView webView)

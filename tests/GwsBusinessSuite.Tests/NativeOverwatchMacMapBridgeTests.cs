@@ -43,8 +43,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bridge.Should().Contain("case \"startPickPoint\"");
         bridge.Should().Contain("case \"mapTap\"");
         bridge.Should().Contain("_map.ConvertPoint(point, _map)");
-        bridge.Should().Contain("_map.ConvertCoordinate(annotation.Coordinate, _map)");
-        bridge.Should().Contain("SelectAnnotation");
+        bridge.Should().Contain("if (HitTest(point) is { } view) Activate(view.Annotation);");
         bridge.Should().Contain("case \"setThreeD\"");
         bridge.Should().Contain("MKMapType.HybridFlyover");
     }
@@ -99,7 +98,9 @@ public sealed class NativeOverwatchMacMapBridgeTests
         var bridge = File.ReadAllText(Path.Combine(RepoRoot,
             "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
 
-        bridge.Should().Contain("_map.AddAnnotations(annotations.ToArray())");
+        bridge.Should().Contain("_map.AddAnnotations(added.ToArray())");
+        bridge.Should().Contain("if (_signatures.TryGetValue(operation, out var last) && last == signature) return;");
+        bridge.Should().Contain("if (previous.Remove(key, out var kept))");
         bridge.Should().Contain("_map.AddOverlays(overlays.ToArray())");
         bridge.Should().NotContain("_map.AddAnnotation(annotation)");
         bridge.Should().NotContain("_map.AddOverlay(overlay)");
@@ -107,7 +108,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
     }
 
     [Fact]
-    public void NativeMap_ShouldForwardPanAndWheelGesturesThroughTheWebViewport()
+    public void NativeMap_ShouldOwnGesturesInThePage_AndApplyThemWithoutReFittingTheRegion()
     {
         var script = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
         var bridge = File.ReadAllText(Path.Combine(RepoRoot,
@@ -115,43 +116,52 @@ public sealed class NativeOverwatchMacMapBridgeTests
         var bootstrap = File.ReadAllText(Path.Combine(RepoRoot,
             "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacWebViewCompatibility.cs"));
 
-        script.Should().Contain("container.addEventListener('pointermove'");
-        script.Should().Contain("postNative('pan', [deltaX, deltaY])");
-        script.Should().Contain("container.addEventListener('wheel'");
-        script.Should().Contain("event.preventDefault()");
+        // One place forwards gestures (the page script, behaviour covered by the MacApp_ browser
+        // tests); the app's injected script only marks the page, with no document-wide observer.
+        bootstrap.Should().Contain("window.__gwsMacCatalystWebView = true;");
+        bootstrap.Should().NotContain("new MutationObserver").And.NotContain("addEventListener(");
+        script.Should().Contain("const NATIVE_DRAG_THRESHOLD_PX = 5;");
+        script.Should().Contain("requestAnimationFrame(flush)");
+        script.Should().Contain("postNative('zoomBy', [factor, nativePendingZoom.x, nativePendingZoom.y])");
+        script.Should().Contain("container.dataset.gwsNativeAppNavigation !== 'true'", "older app builds keep their own forwarding");
+
         bridge.Should().Contain("case \"pan\": Pan(arguments); return;");
-        bridge.Should().Contain("private void Pan(object?[] arguments)");
-        bridge.Should().Contain("_map.SetRegion(region, false)");
+        bridge.Should().Contain("case \"zoomBy\": ZoomBy(arguments); return;");
+        bridge.Should().Contain("_map.SetCenterCoordinate(target, false)");
+        bridge.Should().Contain("MKMapCamera.CameraLookingAtCenterCoordinate(center, distance, camera.Pitch, camera.Heading)");
         bridge.Should().Contain("Task.Delay(250, debounce.Token)");
         bridge.Should().Contain("owner.RegionDidChange(mapView.Region)");
-        bootstrap.Should().Contain("gwsNativeAppNavigation");
-        bootstrap.Should().Contain("post('pan', [deltaX, deltaY])");
-        bootstrap.Should().Contain("post('zoom', ['tg-viewport', event.deltaY < 0])");
-        bootstrap.Should().Contain("new MutationObserver(installNativeNavigation)");
-        script.Should().Contain("container.dataset.gwsNativeAppNavigation !== 'true'");
     }
 
     [Fact]
-    public void NativeMap_ShouldExpandClusters_OpenIndividualNodes_AndSuppressDragClicks()
+    public void NativeMap_ShouldHitTestDrawnMarkers_ExpandClusters_AndReopenTheSamePin()
     {
         var bridge = File.ReadAllText(Path.Combine(RepoRoot,
             "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacNativeOverwatchBridge.cs"));
-        var bootstrap = File.ReadAllText(Path.Combine(RepoRoot,
-            "src/GwsBusinessSuite.App/Platforms/MacCatalyst/MacWebViewCompatibility.cs"));
 
-        bridge.Should().Contain("var center = _map.ConvertCoordinate(region.Center, _map)")
-            .And.Contain("center.X - deltaX * _map.Bounds.Width")
-            .And.Contain("center.Y - deltaY * _map.Bounds.Height");
-        bridge.Should().Contain("var nearest = _map.Annotations")
-            .And.Contain("var view = _map.ViewForAnnotation(annotation)")
-            .And.Contain("if (view is null || view.Hidden)")
+        bridge.Should().Contain("var frame = view.ConvertRectToView(view.Bounds, _map);")
+            .And.Contain("if (frame.Contains(point))")
+            .And.Contain("NativeOverwatchOperations.Selectable.Contains(native.Operation)");
+        bridge.Should().Contain("_map.ShowAnnotations(members, true)")
             .And.Contain("annotation is MKClusterAnnotation cluster")
-            .And.Contain("mapView.ShowAnnotations(cluster.MemberAnnotations, true)")
             .And.Contain("cluster.MemberAnnotations.Length.ToString(CultureInfo.InvariantCulture)");
-        bridge.Should().Contain("if (view.Annotation is not NativeAnnotation annotation) return;")
-            .And.Contain("window.gwsNativeOverwatch && window.gwsNativeOverwatch.selected({json})");
-        bootstrap.Should().Contain("pointer.moved = true")
-            .And.Contain("gwsNativeSuppressClick")
-            .And.Contain("event.stopImmediatePropagation()");
+        bridge.Should().Contain("window.gwsNativeOverwatch && window.gwsNativeOverwatch.selected({json})")
+            .And.Contain("mapView.DeselectAnnotation(annotation, false)")
+            .And.Contain("view.CanShowCallout = false")
+            .And.NotContain("_map.SelectAnnotation(");
+    }
+
+    [Fact]
+    public void NativeSelection_ShouldRouteExactlyTheSelectableLayers()
+    {
+        var script = File.ReadAllText(Path.Combine(RepoRoot, "src/GwsBusinessSuite.Web/wwwroot/js/tactical-globe.js"));
+        var block = Regex.Match(script, @"const nativeSelectionHandlers = \{(?<body>[\s\S]*?)\n        \};");
+        block.Success.Should().BeTrue();
+        var routed = Regex.Matches(block.Groups["body"].Value, @"^\s{12}(?<operation>set[A-Z]\w*):", RegexOptions.Multiline)
+            .Select(match => match.Groups["operation"].Value)
+            .ToHashSet(StringComparer.Ordinal);
+
+        routed.Should().BeEquivalentTo(NativeOverwatchOperations.Selectable);
+        NativeOverwatchOperations.All.Should().Contain(NativeOverwatchOperations.Selectable);
     }
 }

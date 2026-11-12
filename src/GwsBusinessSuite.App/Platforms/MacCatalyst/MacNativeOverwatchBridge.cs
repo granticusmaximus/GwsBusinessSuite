@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using CoreLocation;
 using Foundation;
+using GwsBusinessSuite.Application.Overwatch;
 using MapKit;
 using UIKit;
 using WebKit;
@@ -14,7 +15,10 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private readonly WeakReference<WKWebView> _webView;
     private readonly MKMapView _map;
     private readonly MapDelegate _delegate;
-    private readonly Dictionary<string, List<IMKAnnotation>> _annotations = new(StringComparer.Ordinal);
+    // Each layer's pins keyed by their payload JSON, so a refresh with mostly the same pins only
+    // removes and adds what changed (MapKit relays out every pin on each add/remove).
+    private readonly Dictionary<string, Dictionary<string, IMKAnnotation>> _annotations = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _signatures = new(StringComparer.Ordinal);
     private readonly Dictionary<string, List<IMKOverlay>> _overlays = new(StringComparer.Ordinal);
     private CancellationTokenSource? _regionChangeDebounce;
     private bool _pickPointMode;
@@ -64,6 +68,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "flyToStreetLevel": FlyTo(arguments); return;
             case "flyToBounds": FlyToBounds(arguments); return;
             case "zoom": Zoom(arguments); return;
+            case "zoomBy": ZoomBy(arguments); return;
             case "pan": Pan(arguments); return;
             case "setThreeD": SetThreeD(arguments); return;
             case "startPickPoint": _pickPointMode = true; return;
@@ -110,21 +115,38 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 
     private void Render(string operation, object?[] arguments)
     {
-        Clear(operation);
         var payload = arguments.FirstOrDefault() is string ? arguments.ElementAtOrDefault(1) : arguments.FirstOrDefault();
-        if (payload is null) return;
-        var annotations = new List<IMKAnnotation>();
+        if (payload is null) { Clear(operation); return; }
+        var items = Items(payload).Select(item => (Key: JsonSerializer.Serialize(item), Item: item)).ToList();
+        var signature = string.Join('\n', items.Select(entry => entry.Key));
+        // The page re-sends every layer after each move; an unchanged layer costs nothing.
+        if (_signatures.TryGetValue(operation, out var last) && last == signature) return;
+        _signatures[operation] = signature;
+
+        var previous = _annotations.Remove(operation, out var existing) ? existing : new Dictionary<string, IMKAnnotation>(StringComparer.Ordinal);
+        var next = new Dictionary<string, IMKAnnotation>(StringComparer.Ordinal);
+        var added = new List<IMKAnnotation>();
         var overlays = new List<IMKOverlay>();
-        foreach (var item in Items(payload))
+        foreach (var (itemKey, item) in items)
         {
             if (TryCoordinate(item, out var coordinate))
             {
-                var annotation = new NativeAnnotation(operation, item, coordinate)
+                var key = itemKey;
+                while (next.ContainsKey(key)) key += "#";
+                if (previous.Remove(key, out var kept))
                 {
-                    Title = ReadString(item, "title", "name", "label", "callsign", "code", "id") ?? operation[3..],
-                    Subtitle = ReadString(item, "summary", "description", "status", "source", "kind")
-                };
-                annotations.Add(annotation);
+                    next[key] = kept;
+                }
+                else
+                {
+                    var annotation = new NativeAnnotation(operation, item, coordinate)
+                    {
+                        Title = ReadString(item, "title", "name", "label", "callsign", "code", "id") ?? operation[3..],
+                        Subtitle = ReadString(item, "summary", "description", "status", "source", "kind")
+                    };
+                    next[key] = annotation;
+                    added.Add(annotation);
+                }
             }
             foreach (var coordinates in Paths(item))
             {
@@ -135,15 +157,15 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
                 overlays.Add(overlay);
             }
         }
-        if (annotations.Count > 0)
-        {
-            _map.AddAnnotations(annotations.ToArray());
-            Annotations(operation).AddRange(annotations);
-        }
+        if (previous.Count > 0) _map.RemoveAnnotations(previous.Values.ToArray());
+        if (added.Count > 0) _map.AddAnnotations(added.ToArray());
+        if (next.Count > 0) _annotations[operation] = next;
+
+        if (_overlays.Remove(operation, out var oldOverlays) && oldOverlays.Count > 0) _map.RemoveOverlays(oldOverlays.ToArray());
         if (overlays.Count > 0)
         {
             _map.AddOverlays(overlays.ToArray());
-            Overlays(operation).AddRange(overlays);
+            _overlays[operation] = overlays;
         }
     }
 
@@ -209,17 +231,54 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         _map.SetRegion(region, true);
     }
 
+    // deltaX/deltaY are fractions of the viewport, summed per frame by the page. Moving the centre
+    // (not SetRegion) keeps the zoom exactly as it is; SetRegion re-fits the span on every call.
     private void Pan(object?[] arguments)
     {
         if (!AsDouble(arguments.ElementAtOrDefault(0), out var deltaX)
             || !AsDouble(arguments.ElementAtOrDefault(1), out var deltaY)) return;
-        var region = _map.Region;
-        var center = _map.ConvertCoordinate(region.Center, _map);
-        region.Center = _map.ConvertPoint(new CoreGraphics.CGPoint(
+        var center = _map.ConvertCoordinate(_map.CenterCoordinate, _map);
+        var target = _map.ConvertPoint(new CoreGraphics.CGPoint(
             center.X - deltaX * _map.Bounds.Width,
             center.Y - deltaY * _map.Bounds.Height), _map);
-        _map.SetRegion(region, false);
+        if (!IsValid(target)) return;
+        _map.SetCenterCoordinate(target, false);
     }
+
+    // Smooth wheel/pinch zoom: factor > 1 zooms out. x/y (0-1) is the pointer, which stays put
+    // when zoomed in close enough for the flat projection to hold.
+    private void ZoomBy(object?[] arguments)
+    {
+        if (!AsDouble(arguments.ElementAtOrDefault(0), out var factor) || factor <= 0) return;
+        factor = Math.Clamp(factor, 0.25, 4);
+        var camera = _map.Camera;
+        var distance = Math.Clamp(camera.CenterCoordinateDistance * factor, MinimumCameraDistance, MaximumCameraDistance);
+        var applied = distance / camera.CenterCoordinateDistance;
+        var center = _map.CenterCoordinate;
+        if (camera.CenterCoordinateDistance < 5_000_000
+            && AsDouble(arguments.ElementAtOrDefault(1), out var x) && AsDouble(arguments.ElementAtOrDefault(2), out var y))
+        {
+            var anchor = _map.ConvertPoint(new CoreGraphics.CGPoint(
+                Math.Clamp(x, 0, 1) * _map.Bounds.Width, Math.Clamp(y, 0, 1) * _map.Bounds.Height), _map);
+            if (IsValid(anchor))
+            {
+                var anchorPoint = MKMapPoint.FromCoordinate(anchor);
+                var centerPoint = MKMapPoint.FromCoordinate(center);
+                var moved = MKMapPoint.ToCoordinate(new MKMapPoint(
+                    anchorPoint.X + (centerPoint.X - anchorPoint.X) * applied,
+                    anchorPoint.Y + (centerPoint.Y - anchorPoint.Y) * applied));
+                if (IsValid(moved)) center = moved;
+            }
+        }
+        _map.SetCamera(MKMapCamera.CameraLookingAtCenterCoordinate(center, distance, camera.Pitch, camera.Heading), false);
+    }
+
+    private const double MinimumCameraDistance = 150;
+    private const double MaximumCameraDistance = 40_000_000;
+
+    private static bool IsValid(CLLocationCoordinate2D coordinate) =>
+        double.IsFinite(coordinate.Latitude) && double.IsFinite(coordinate.Longitude)
+        && coordinate.Latitude is >= -90 and <= 90 && coordinate.Longitude is >= -180 and <= 180;
 
     private void SetThreeD(object?[] arguments)
     {
@@ -246,25 +305,88 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             return;
         }
 
-        var nearest = _map.Annotations
-            .Select(annotation =>
+        if (HitTest(point) is { } view) Activate(view.Annotation);
+    }
+
+    // The pin the user clicked: the drawn marker under the pointer (its balloon sits above the
+    // coordinate, so measuring from the coordinate picked neighbours), else the nearest marker
+    // within a finger's width. Only drawn views count, so a clustered pin is reached through its
+    // cluster, and only layers that open something (NativeOverwatchOperations.Selectable).
+    private MKAnnotationView? HitTest(CoreGraphics.CGPoint point)
+    {
+        const double Reach = 24;
+        MKAnnotationView? inside = null;
+        var insideDistance = double.PositiveInfinity;
+        MKAnnotationView? near = null;
+        var nearDistance = Reach * Reach;
+        foreach (var view in AnnotationViews(_map))
+        {
+            if (view.Hidden || view.Alpha < 0.05 || !IsSelectable(view.Annotation)) continue;
+            var frame = view.ConvertRectToView(view.Bounds, _map);
+            var dx = frame.X + frame.Width / 2 - point.X;
+            var dy = frame.Y + frame.Height / 2 - point.Y;
+            var distance = dx * dx + dy * dy;
+            if (frame.Contains(point))
             {
-                var view = _map.ViewForAnnotation(annotation);
-                if (view is null || view.Hidden) return (Annotation: annotation, DistanceSquared: double.PositiveInfinity);
-                var location = _map.ConvertCoordinate(annotation.Coordinate, _map);
-                var deltaX = location.X - point.X;
-                var deltaY = location.Y - point.Y;
-                return (Annotation: annotation, DistanceSquared: deltaX * deltaX + deltaY * deltaY);
-            })
-            .Where(item => item.DistanceSquared <= 36 * 36)
-            .OrderBy(item => item.DistanceSquared)
-            .FirstOrDefault();
-        if (nearest.Annotation is not null) _map.SelectAnnotation(nearest.Annotation, true);
+                if (distance < insideDistance) { inside = view; insideDistance = distance; }
+            }
+            else if (distance < nearDistance)
+            {
+                near = view;
+                nearDistance = distance;
+            }
+        }
+        return inside ?? near;
+    }
+
+    private static IEnumerable<MKAnnotationView> AnnotationViews(UIView root)
+    {
+        foreach (var child in root.Subviews)
+        {
+            if (child is MKAnnotationView view)
+            {
+                yield return view;
+                continue;
+            }
+            foreach (var nested in AnnotationViews(child)) yield return nested;
+        }
+    }
+
+    private static bool IsSelectable(IMKAnnotation? annotation) => annotation switch
+    {
+        NativeAnnotation native => NativeOverwatchOperations.Selectable.Contains(native.Operation),
+        MKClusterAnnotation => true,
+        _ => false
+    };
+
+    // Opens a pin's window directly rather than through MapKit selection, which ignores a second
+    // click on the pin it already has selected. A cluster zooms to its members; one whose members
+    // sit on the same spot (a camera mast, say) can't be split, so it opens the first instead.
+    private void Activate(IMKAnnotation? target)
+    {
+        if (target is MKClusterAnnotation cluster)
+        {
+            var members = cluster.MemberAnnotations;
+            if (members.Length == 0) return;
+            var latitudes = members.Select(member => member.Coordinate.Latitude).ToList();
+            var longitudes = members.Select(member => member.Coordinate.Longitude).ToList();
+            var stacked = latitudes.Max() - latitudes.Min() < 0.0005 && longitudes.Max() - longitudes.Min() < 0.0005;
+            if (!stacked)
+            {
+                _map.ShowAnnotations(members, true);
+                return;
+            }
+            target = members.FirstOrDefault(member => IsSelectable(member));
+        }
+        if (target is not NativeAnnotation annotation || !IsSelectable(annotation)) return;
+        var json = JsonSerializer.Serialize(new { operation = annotation.Operation, payload = annotation.Payload });
+        _ = SendAsync($"window.gwsNativeOverwatch && window.gwsNativeOverwatch.selected({json})");
     }
 
     private void Clear(string operation)
     {
-        if (_annotations.Remove(operation, out var annotations) && annotations.Count > 0) _map.RemoveAnnotations(annotations.ToArray());
+        _signatures.Remove(operation);
+        if (_annotations.Remove(operation, out var annotations) && annotations.Count > 0) _map.RemoveAnnotations(annotations.Values.ToArray());
         if (_overlays.Remove(operation, out var overlays) && overlays.Count > 0) _map.RemoveOverlays(overlays.ToArray());
     }
 
@@ -273,10 +395,6 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         foreach (var operation in _annotations.Keys.Concat(_overlays.Keys).Distinct().ToList()) Clear(operation);
     }
 
-    private List<IMKAnnotation> Annotations(string operation) =>
-        _annotations.TryGetValue(operation, out var values) ? values : _annotations[operation] = [];
-    private List<IMKOverlay> Overlays(string operation) =>
-        _overlays.TryGetValue(operation, out var values) ? values : _overlays[operation] = [];
 
     private Task SendAsync(string script) => MainThread.InvokeOnMainThreadAsync(async () =>
     {
@@ -368,7 +486,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             }
             if (annotation is not NativeAnnotation native) return new MKMarkerAnnotationView(annotation, null);
             var view = mapView.DequeueReusableAnnotation("gws-native") as MKMarkerAnnotationView ?? new MKMarkerAnnotationView(annotation, "gws-native");
-            view.Annotation = native; view.CanShowCallout = true; view.ClusteringIdentifier = native.Operation;
+            view.Annotation = native; view.CanShowCallout = false; view.ClusteringIdentifier = native.Operation;
             view.DisplayPriority = MKFeatureDisplayPriority.DefaultLow;
             view.MarkerTintColor = native.Operation switch
             {
@@ -387,16 +505,13 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             _ => new MKOverlayRenderer(overlay)
         };
 
+        // Clicks arrive through MapTap; this covers any selection MapKit makes itself. Deselecting
+        // straight away means the same pin can be opened again.
         public override void DidSelectAnnotationView(MKMapView mapView, MKAnnotationView view)
         {
-            if (view.Annotation is MKClusterAnnotation cluster)
-            {
-                mapView.ShowAnnotations(cluster.MemberAnnotations, true);
-                return;
-            }
-            if (view.Annotation is not NativeAnnotation annotation) return;
-            var json = JsonSerializer.Serialize(new { operation = annotation.Operation, payload = annotation.Payload });
-            _ = owner.SendAsync($"window.gwsNativeOverwatch && window.gwsNativeOverwatch.selected({json})");
+            var annotation = view.Annotation;
+            if (annotation is not null) mapView.DeselectAnnotation(annotation, false);
+            owner.Activate(annotation);
         }
 
         public override void RegionChanged(MKMapView mapView, bool animated)

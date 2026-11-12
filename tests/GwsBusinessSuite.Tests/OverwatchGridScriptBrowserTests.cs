@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Playwright;
 
@@ -127,13 +128,25 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
     // file in this repo already uses `await using var page = await fixture.Browser.NewPageAsync();`
     // directly; this file can't do that inline since page creation lives in this shared helper,
     // hence the two-line pattern at each call site instead.
-    private static async Task<(IPage Page, List<string> ConsoleErrors)> OpenHarnessAsync(IBrowser browser)
+    private static async Task<(IPage Page, List<string> ConsoleErrors)> OpenHarnessAsync(IBrowser browser, bool macApp = false)
     {
         var script = await File.ReadAllTextAsync(ScriptPath);
 
         var page = await browser.NewPageAsync();
         var consoleErrors = new List<string>();
         page.Console += (_, msg) => { if (msg.Type == "error") consoleErrors.Add(msg.Text); };
+        if (macApp)
+        {
+            // What the Mac app injects (MacWebViewCompatibility), plus a stand-in for its native
+            // message handler that records each message instead of drawing MapKit.
+            await page.AddInitScriptAsync("""
+                window.__gwsMacCatalystWebView = true;
+                window.__nativeMessages = [];
+                window.webkit = { messageHandlers: { gwsNativeOverwatch: {
+                    postMessage: function (message) { window.__nativeMessages.push(JSON.parse(JSON.stringify(message))); }
+                } } };
+                """);
+        }
 
         await page.RouteAsync("http://localhost/overwatch-grid-harness", route => route.FulfillAsync(new()
         {
@@ -459,6 +472,124 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
 
         await page.ClickAsync(".tg-incident-panel .tg-stream-panel-close");
         await page.EvaluateAsync("() => { window.tacticalGlobe.clearConvergence(); window.tacticalGlobe.clearHazards(); }");
+        consoleErrors.Should().BeEmpty();
+    }
+
+    // Mac app (12-11-26): a click with a pixel or two of trackpad jitter is still a click, a drag
+    // pans once per frame, and wheel ticks become one smooth zoom instead of a queue of 2x jumps.
+    [Fact]
+    public async Task MacApp_ShouldKeepJitteryClicks_BatchPans_AndZoomSmoothly()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser, macApp: true);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        async Task<JsonElement[]> TakeAsync(string operation)
+        {
+            await page.WaitForTimeoutAsync(150);
+            var json = await page.EvaluateAsync<string>("""
+                operation => {
+                    const taken = window.__nativeMessages.filter(m => m.operation === operation);
+                    window.__nativeMessages = window.__nativeMessages.filter(m => m.operation !== operation);
+                    return JSON.stringify(taken.map(m => m.arguments));
+                }
+                """, operation);
+            return JsonDocument.Parse(json).RootElement.EnumerateArray().Select(args => args.Clone()).ToArray();
+        }
+        async Task ResetAsync() => await page.EvaluateAsync("() => { window.__nativeMessages = []; }");
+
+        (await TakeAsync("init")).Should().ContainSingle();
+
+        await ResetAsync();
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        await page.Mouse.MoveAsync(402, 301);
+        await page.Mouse.UpAsync();
+        (await TakeAsync("pan")).Should().BeEmpty("2px of jitter isn't a drag");
+        var taps = await TakeAsync("mapTap");
+        taps.Should().ContainSingle();
+        taps[0][0].GetDouble().Should().BeApproximately(402 / 800.0, 0.01);
+
+        await ResetAsync();
+        await page.Mouse.MoveAsync(400, 300);
+        await page.Mouse.DownAsync();
+        // A fast trackpad delivers several moves per frame: 20 in one burst here.
+        await page.EvaluateAsync("""
+            () => {
+                const container = document.getElementById('tg-viewport');
+                for (let i = 1; i <= 20; i++) {
+                    container.dispatchEvent(new PointerEvent('pointermove', { pointerId: 1, clientX: 400 + i * 5, clientY: 300, bubbles: true }));
+                }
+            }
+            """);
+        await page.Mouse.MoveAsync(500, 300);
+        await page.Mouse.UpAsync();
+        var pans = await TakeAsync("pan");
+        pans.Should().HaveCountLessThanOrEqualTo(2, "moves within a frame are summed into one message");
+        pans.Sum(p => p[0].GetDouble()).Should().BeApproximately(100 / 800.0, 0.002, "the whole drag is applied, threshold included");
+        (await TakeAsync("mapTap")).Should().BeEmpty("releasing a drag isn't a click");
+
+        await ResetAsync();
+        // One real tick, then a trackpad-style burst of four within a frame.
+        await page.Mouse.MoveAsync(200, 150);
+        await page.Mouse.WheelAsync(0, 100);
+        await page.EvaluateAsync("""
+            () => {
+                const container = document.getElementById('tg-viewport');
+                for (let i = 0; i < 4; i++) {
+                    container.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, clientX: 200, clientY: 150, bubbles: true, cancelable: true }));
+                }
+            }
+            """);
+        var zooms = await TakeAsync("zoomBy");
+        zooms.Should().HaveCountLessThanOrEqualTo(3, "a burst is one zoom");
+        zooms.Aggregate(1.0, (product, z) => product * z[0].GetDouble()).Should().BeApproximately(Math.Exp(500 * 0.0025), 0.03);
+        zooms[^1][1].GetDouble().Should().BeApproximately(0.25, 0.01, "zoom centres on the pointer");
+        (await TakeAsync("zoom")).Should().BeEmpty();
+        consoleErrors.Should().BeEmpty();
+    }
+
+    // Mac app (12-11-26): a native pin click opens what the same click opens on the Cesium globe.
+    // Ships aren't clickable there, so not here either; aircraft open their window (it needed a
+    // Cesium viewer before), and select mode adds cameras to the watch wall.
+    [Fact]
+    public async Task MacApp_ShouldOpenTheMatchingWindowForANativePinClick()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser, macApp: true);
+        await using var pageScope = page;
+        (await InitAsync(page)).Should().BeNull();
+
+        await page.EvaluateAsync("""
+            () => window.gwsNativeOverwatch.selected({ operation: 'setShips', payload: { id: 'ship-1', name: 'EVER GIVEN', lat: 30, lon: 32 } })
+            """);
+        await page.WaitForTimeoutAsync(200);
+        (await page.QuerySelectorAsync(".tg-incident-panel")).Should().BeNull();
+
+        await page.EvaluateAsync("""
+            () => {
+                window.__mockAircraftDetail = { use: 'PASSENGER', route: {}, track: [ { longitude: -98, latitude: 39 }, { longitude: -97, latitude: 40 } ] };
+                window.__nativeMessages = [];
+                window.gwsNativeOverwatch.selected({ operation: 'setAircraft', payload: { id: 'a1b2c3', callsign: 'UAL123', lat: 40.5, lon: -96.5, altitudeFeet: 35000 } });
+            }
+            """);
+        await page.WaitForSelectorAsync(".tg-aircraft-panel:has-text('UAL123')", new PageWaitForSelectorOptions { Timeout = 5000 });
+        await page.WaitForFunctionAsync("() => window.__nativeMessages.some(m => m.operation === 'setAircraftPath')");
+        await page.ClickAsync(".tg-aircraft-panel .tg-stream-panel-close");
+        (await page.EvaluateAsync<bool>("() => window.__nativeMessages.some(m => m.operation === 'clearAircraftPath')")).Should().BeTrue();
+
+        await page.EvaluateAsync("""
+            () => {
+                window.tacticalGlobe.setSelectModeEnabled(true);
+                window.gwsNativeOverwatch.selected({ operation: 'setCameraPins', payload: { id: 'cam-1', name: 'I-75 at Exit 1', lat: 33.7, lon: -84.4 } });
+            }
+            """);
+        await page.WaitForSelectorAsync(".tg-selection-indicator:has-text('SELECTED: 1')", new PageWaitForSelectorOptions { Timeout = 5000 });
+        (await page.QuerySelectorAsync(".tg-stream-panel:not(.tg-incident-panel)")).Should().BeNull("select mode adds the camera instead of opening it");
+
+        await page.EvaluateAsync("""
+            () => window.gwsNativeOverwatch.selected({ operation: 'setHazards', payload: { id: 'gdacs-TC-1', kind: 'cyclone', title: 'Tropical Cyclone A', detail: '', severity: 'major', url: 'https://www.gdacs.org', lat: 15.8, lon: 80.2 } })
+            """);
+        await page.WaitForSelectorAsync(".tg-incident-panel:has-text('Tropical Cyclone A')", new PageWaitForSelectorOptions { Timeout = 5000 });
         consoleErrors.Should().BeEmpty();
     }
 

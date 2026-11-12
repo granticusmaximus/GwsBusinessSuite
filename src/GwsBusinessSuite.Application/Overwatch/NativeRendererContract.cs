@@ -142,4 +142,17 @@ public static class NativeOverwatchOperations
         SetHazards, ClearHazards, SetShips, SetCoverageMarkers, ClearCoverageMarkers, SetRoute,
         ClearRoute, SetRouteHighlights, SetRouteConditions, SetStreetViewMarker, ClearStreetViewMarker
     ];
+
+    /// <summary>
+    /// Layers whose pins open a window when clicked, as on the Cesium globe. The Mac's native map
+    /// hit-tests only these, so a click near a ship or an air-quality dot can't steal the click
+    /// from the camera or incident under it. tactical-globe.js's nativeSelectionHandlers has the
+    /// same keys.
+    /// </summary>
+    public static IReadOnlySet<string> Selectable { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        SetCameraPins, SetWorldNews, SetNewsShading, SetAircraft, SetRoadWeather, SetMessageSigns,
+        SetTrafficIncidents, SetConvergence, SetSatellites, SetHazards, SetInternetOutages,
+        SetAirportStatus, SetTravelAdvice, SetFireHotspots, SetConflict, SetHumanitarian, SetMapNotes
+    };
 }
