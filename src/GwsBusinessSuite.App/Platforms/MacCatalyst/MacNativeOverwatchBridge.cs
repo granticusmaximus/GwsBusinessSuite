@@ -342,7 +342,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             Activate(view.Annotation);
             return;
         }
-        MapLog($"click at {x:0.000},{y:0.000}: no pin within reach");
+        MapLog($"click at {x:0.000},{y:0.000}: no pin within reach{NearestSkipped(point)}");
     }
 
     // The pin the user clicked: the drawn marker under the pointer (its balloon sits above the
@@ -374,6 +374,27 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             }
         }
         return inside ?? near;
+    }
+
+    // For the log: the drawn marker nearest a click that opened nothing, and why it was passed
+    // over, so a miss names its cause instead of needing another round trip.
+    private string NearestSkipped(CoreGraphics.CGPoint point)
+    {
+        MKAnnotationView? best = null;
+        var bestDistance = double.PositiveInfinity;
+        foreach (var view in AnnotationViews(_map))
+        {
+            var frame = view.ConvertRectToView(view.Bounds, _map);
+            var dx = frame.X + frame.Width / 2 - point.X;
+            var dy = frame.Y + frame.Height / 2 - point.Y;
+            if (dx * dx + dy * dy < bestDistance) { best = view; bestDistance = dx * dx + dy * dy; }
+        }
+        if (best is null) return " (no markers drawn)";
+        var annotation = best.Annotation;
+        var native = AsNative(annotation);
+        return $" (nearest marker {Math.Sqrt(bestDistance):0}pt away: {annotation?.GetType().Name ?? "none"}, " +
+            $"native {native?.Class.Name ?? "?"}, cluster {IsCluster(annotation)}, selectable {IsSelectable(annotation)}, " +
+            $"hidden {best.Hidden}, alpha {best.Alpha:0.00})";
     }
 
     private static IEnumerable<MKAnnotationView> AnnotationViews(UIView root)
@@ -461,14 +482,24 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     // Recognise it by its native class and read its members through key-value coding.
     private static readonly ObjCRuntime.Class ClusterClass = new(typeof(MKClusterAnnotation));
 
+    // The wrapper isn't an NSObject (it is a protocol wrapper holding only the native handle), so
+    // `annotation is NSObject` failed too and the first fix changed nothing; go through the handle.
+    private static NSObject? AsNative(IMKAnnotation? annotation) =>
+        annotation as NSObject
+        ?? (annotation is ObjCRuntime.INativeObject wrapper && wrapper.Handle != ObjCRuntime.NativeHandle.Zero
+            ? ObjCRuntime.Runtime.GetNSObject(wrapper.Handle) : null);
+
     internal static bool IsCluster(IMKAnnotation? annotation) =>
-        annotation is MKClusterAnnotation || (annotation is NSObject native && native.IsKindOfClass(ClusterClass));
+        annotation is MKClusterAnnotation || (AsNative(annotation) is { } native && native.IsKindOfClass(ClusterClass));
+
+    private static NSArray? MemberArray(IMKAnnotation? annotation) =>
+        AsNative(annotation)?.ValueForKey(new NSString("memberAnnotations")) as NSArray;
 
     private IMKAnnotation[]? ClusterMembers(IMKAnnotation? annotation)
     {
         if (annotation is MKClusterAnnotation cluster) return cluster.MemberAnnotations;
         if (!IsCluster(annotation)) return null;
-        if (((NSObject)annotation!).ValueForKey(new NSString("memberAnnotations")) is not NSArray array) return [];
+        if (MemberArray(annotation) is not { } array) return [];
         return (NSArray.FromArray<NSObject>(array) ?? [])
             .Select(member => member as IMKAnnotation ?? ResolveHandle(member.Handle))
             .OfType<IMKAnnotation>().ToArray();
@@ -476,7 +507,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
 
     internal static nuint ClusterCount(IMKAnnotation annotation) =>
         annotation is MKClusterAnnotation cluster ? (nuint)cluster.MemberAnnotations.Length
-        : ((NSObject)annotation).ValueForKey(new NSString("memberAnnotations")) is NSArray array ? array.Count : 0;
+        : MemberArray(annotation)?.Count ?? 0;
 
     private NativeAnnotation? ResolveHandle(ObjCRuntime.NativeHandle handle) =>
         _annotations.Values.SelectMany(pins => pins.Values).OfType<NativeAnnotation>().FirstOrDefault(pin => pin.Handle == handle);

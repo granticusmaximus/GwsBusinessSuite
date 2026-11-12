@@ -150,7 +150,11 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bridge.Should().Contain("native.IsKindOfClass(ClusterClass)")
             .And.Contain("ValueForKey(new NSString(\"memberAnnotations\"))")
             .And.Contain("if (ClusterMembers(target) is { } members)")
-            .And.Contain("if (IsCluster(annotation))");
+            .And.Contain("if (IsCluster(annotation))")
+            // The wrapper isn't an NSObject, only a native handle: the first fix checked `is NSObject`.
+            .And.Contain("annotation is ObjCRuntime.INativeObject wrapper")
+            .And.Contain("ObjCRuntime.Runtime.GetNSObject(wrapper.Handle)")
+            .And.Contain("no pin within reach{NearestSkipped(point)}");
         bridge.Should().Contain("window.gwsNativeOverwatch && window.gwsNativeOverwatch.selected({json})")
             .And.Contain("mapView.DeselectAnnotation(annotation, false)")
             .And.Contain("view.CanShowCallout = false")
