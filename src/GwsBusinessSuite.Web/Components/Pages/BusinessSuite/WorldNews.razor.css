@@ -1,34 +1,322 @@
-/* World News: the event list beside the chosen event's reports. A narrow content area stacks
-   them, showing the chosen event in place of the list with a way back. */
+/* World News (design pass 12-11-26). Built from the app's neumorphic surfaces (--gws-neu-*):
+   the list sits in an inset well, rows rise when chosen, the story is a raised panel. Spacing
+   keeps to an 8px rhythm and every count uses tabular figures so columns of numbers line up.
+   A wide content area is Mail-like: list and story scroll on their own. A narrow one shows the
+   story in place of the list, with a way back. */
+
+/* Tabular figures only on pure numbers that stack in columns: the font's tabular set also
+   widens hyphens, which spaced out headlines and dd-MM-yy dates. */
+.world-news-country-count,
+.world-news-claim-value,
+.world-news-badge {
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---- Header controls ---- */
+.world-news-updated {
+    color: var(--gws-text-soft);
+}
+
+.world-news-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: .5rem;
+    min-height: 2.5rem;
+}
+
+.world-news-spin {
+    animation: world-news-spin 1s linear infinite;
+}
+
+@keyframes world-news-spin {
+    to { transform: rotate(360deg); }
+}
+
+.world-news-tabs {
+    display: inline-flex;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 999px;
+    background: var(--gws-neu-surface);
+    box-shadow: var(--gws-neu-inset-shadow);
+}
+
+.world-news-tab {
+    min-height: 2.25rem;
+    padding: 0 1rem;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--gws-text-soft);
+    font-weight: 600;
+    transition: color .15s ease, background-color .15s ease, box-shadow .15s ease;
+}
+
+.world-news-tab:hover {
+    color: var(--gws-text-strong);
+}
+
+.world-news-tab.is-active {
+    color: var(--gws-sidebar-accent, #f59e0b);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
+    box-shadow: var(--gws-neu-raised-shadow-sm);
+}
+
+.world-news-tab:focus-visible,
+.world-news-chip:focus-visible,
+.world-news-event:focus-visible {
+    outline: 2px solid var(--gws-sidebar-accent, #f59e0b);
+    outline-offset: 2px;
+}
+
+.world-news-search-wrap {
+    position: relative;
+    flex: 1 1 16rem;
+    max-width: 24rem;
+}
+
+.world-news-search-wrap > .bi {
+    position: absolute;
+    left: .85rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--gws-text-soft);
+    pointer-events: none;
+}
+
 .world-news-search {
-    width: 16rem;
-    max-width: 100%;
+    width: 100%;
+    padding-left: 2.4rem;
 }
 
 .world-news-range {
     width: auto;
 }
 
-.world-news-report-filter {
-    width: 10rem;
-    max-width: 100%;
+.world-news-filters-toggle {
+    display: inline-flex;
+    align-items: center;
 }
 
-.world-news-view .btn {
-    min-height: 2.25rem;
+.world-news-badge {
+    display: inline-grid;
+    place-items: center;
+    min-width: 1.25rem;
+    height: 1.25rem;
+    margin-left: .5rem;
+    padding: 0 .35rem;
+    border-radius: 999px;
+    background: var(--gws-sidebar-accent, #f59e0b);
+    color: var(--gws-neu-surface);
+    font-size: .72rem;
+    font-weight: 700;
 }
 
-/* A situation's events, oldest first. */
-.world-news-timeline {
+/* ---- Kind chips, Where, filters ---- */
+.world-news-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 16px;
+}
+
+.world-news-chip {
+    min-height: 2rem;
+    padding: 0 .85rem;
+    border: 0;
+    border-radius: 999px;
+    background: var(--gws-neu-surface);
+    color: var(--gws-text-soft);
+    font-size: .85rem;
+    font-weight: 600;
+    box-shadow: var(--gws-neu-raised-shadow-sm);
+    transition: color .15s ease, box-shadow .15s ease;
+}
+
+.world-news-chip:hover {
+    color: var(--gws-text-strong);
+}
+
+.world-news-chip.is-active {
+    color: var(--gws-sidebar-accent, #f59e0b);
+    box-shadow: var(--gws-neu-inset-shadow);
+}
+
+.world-news-where {
+    width: auto;
+    min-height: 2rem;
+    margin-left: auto;
+    border-radius: 999px;
+}
+
+.world-news-filter-panel {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 16px;
+    margin: 0 0 16px;
+    padding: 16px;
+    border-radius: var(--gws-radius-md, 10px);
+    background: var(--gws-neu-surface);
+    box-shadow: var(--gws-neu-inset-shadow);
+}
+
+.world-news-filter-panel label {
     display: grid;
-    gap: .25rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
+    gap: 4px;
+    flex: 1 1 12rem;
+    max-width: 18rem;
+    font-size: .8rem;
+    font-weight: 600;
+    color: var(--gws-text-soft);
 }
 
-.world-news-timeline .world-news-event {
-    border-color: var(--gws-panel-border);
+.world-news-archive-link {
+    min-height: 2rem;
+}
+
+.world-news-active {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 16px;
+}
+
+.world-news-active-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 1.85rem;
+    padding: 0 .4rem 0 .75rem;
+    border: 1px solid color-mix(in srgb, var(--gws-sidebar-accent, #f59e0b) 45%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--gws-sidebar-accent, #f59e0b) 12%, transparent);
+    color: var(--gws-text-strong);
+    font-size: .82rem;
+}
+
+.world-news-active-chip .bi {
+    font-size: 1.05rem;
+    color: var(--gws-text-soft);
+}
+
+.world-news-clear {
+    min-height: 1.85rem;
+    padding: 0 .25rem;
+}
+
+.world-news-search-all {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    margin: 0 0 16px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: var(--gws-radius-md, 10px);
+    background: var(--gws-neu-surface);
+    box-shadow: var(--gws-neu-raised-shadow-sm);
+    color: var(--gws-text-strong);
+    text-align: left;
+}
+
+.world-news-search-all:hover {
+    color: var(--gws-sidebar-accent, #f59e0b);
+}
+
+.world-news-section-title,
+.world-news-panel-title {
+    margin: 0 0 16px;
+    font-size: .8rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--gws-text-soft);
+}
+
+/* ---- Rows ---- */
+.world-news-row-top {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    min-width: 0;
+    font-size: .75rem;
+    color: var(--gws-text-soft);
+}
+
+.world-news-kind {
+    --kind: var(--gws-status-neutral-text);
+    padding: .1rem .5rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--kind) 16%, transparent);
+    color: var(--kind);
+    font-weight: 700;
+    letter-spacing: .02em;
+}
+
+.world-news-kind[data-kind="disaster"],
+.world-news-kind[data-kind="conflict"] { --kind: var(--gws-status-danger-text); }
+.world-news-kind[data-kind="transport"] { --kind: var(--gws-status-warning-text); }
+.world-news-kind[data-kind="cyber"],
+.world-news-kind[data-kind="health"] { --kind: var(--gws-status-info-text); }
+.world-news-kind[data-kind="politics"],
+.world-news-kind[data-kind="business"] { --kind: var(--gws-status-success-text); }
+
+.world-news-place {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.world-news-time {
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+.world-news-event {
+    /* The list scrolls at a fixed height; without this the items shrink and overlap. */
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+    min-height: 44px;
+    padding: 12px 16px;
+    border-radius: var(--gws-radius-md, 10px);
+    color: var(--gws-text-strong);
+    text-decoration: none;
+    transition: background-color .15s ease, box-shadow .15s ease;
+}
+
+.world-news-event:hover {
+    color: var(--gws-text-strong);
+    background: color-mix(in srgb, var(--gws-neu-raised) 70%, transparent);
+}
+
+.world-news-event.is-selected {
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
+    box-shadow: var(--gws-neu-raised-shadow-sm), inset 3px 0 0 var(--gws-sidebar-accent, #f59e0b);
+}
+
+.world-news-event-title {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.world-news-event-meta {
+    font-size: .8rem;
+    color: var(--gws-text-soft);
 }
 
 .world-news-latest {
@@ -38,132 +326,227 @@
     -webkit-box-orient: vertical;
 }
 
+.world-news-row-bottom {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* How widely a story is covered, against the busiest row in view. */
+.world-news-reach {
+    flex: 0 0 3rem;
+    height: 4px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: var(--gws-neu-surface);
+    box-shadow: var(--gws-neu-inset-shadow);
+}
+
+.world-news-reach > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--gws-sidebar-accent, #f59e0b);
+    opacity: .85;
+}
+
+/* ---- List and story ---- */
 .world-news {
     display: grid;
     grid-template-columns: minmax(18rem, 26rem) minmax(0, 1fr);
-    gap: 1rem;
+    gap: 24px;
     align-items: start;
 }
 
 .world-news-list {
     display: flex;
     flex-direction: column;
-    gap: .25rem;
-    max-height: calc(100vh - 16rem);
+    gap: 4px;
+    max-height: calc(100dvh - 14rem);
     overflow-y: auto;
-    padding-right: .25rem;
+    overscroll-behavior: contain;
+    padding: 8px;
+    border-radius: var(--gws-radius-lg, 14px);
+    background: var(--gws-neu-surface);
+    box-shadow: var(--gws-neu-inset-shadow);
+}
+
+.world-news-list-flat {
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+}
+
+.world-news-list-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 8px 8px;
+    font-size: .8rem;
+    color: var(--gws-text-soft);
+}
+
+.world-news-surge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2rem;
+    padding: 0 .75rem;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--gws-text-soft);
+    font-size: .8rem;
+    font-weight: 600;
+}
+
+.world-news-surge.is-on {
+    color: var(--gws-sidebar-accent, #f59e0b);
+    box-shadow: var(--gws-neu-inset-shadow);
 }
 
 .world-news-more {
     flex-shrink: 0;
     align-self: center;
     min-height: 44px;
-    margin: .5rem 0;
-}
-
-.world-news-event {
-    /* The list scrolls at a fixed height; without this the items shrink and overlap. */
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: .2rem;
-    width: 100%;
-    min-height: 44px;
-    padding: .6rem .75rem;
-    text-align: left;
-    color: var(--gws-text-strong);
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: var(--gws-radius-sm, 6px);
-}
-
-.world-news-event:hover {
-    background: var(--gws-panel-bg);
-}
-
-.world-news-event.is-selected {
-    background: var(--gws-panel-bg);
-    border-color: var(--gws-sidebar-accent, #f59e0b);
-}
-
-.world-news-event-title {
-    font-weight: 600;
-    line-height: 1.3;
-}
-
-.world-news-event-meta {
-    font-size: .8rem;
-    color: var(--gws-text-soft);
+    margin: 8px 0;
 }
 
 .world-news-detail {
+    position: sticky;
+    top: 16px;
     min-width: 0;
-    padding: 1rem 1.25rem;
-    background: var(--gws-panel-bg);
-    border: 1px solid var(--gws-panel-border);
-    border-radius: var(--gws-radius-md, 10px);
+    max-height: calc(100dvh - 14rem);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 24px;
+    border-radius: var(--gws-radius-lg, 14px);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
+    box-shadow: var(--gws-neu-raised-shadow);
 }
 
 .world-news-back {
     display: none;
-    margin-bottom: .75rem;
+    margin-bottom: 16px;
 }
 
 .world-news-detail-title {
-    font-size: 1.35rem;
-    margin-bottom: .35rem;
+    margin: 8px 0;
+    font-size: 1.5rem;
+    line-height: 1.25;
+    letter-spacing: -.01em;
+}
+
+.world-news-original {
+    font-size: .85rem;
+    color: var(--gws-text-soft);
+    margin-bottom: 8px;
 }
 
 .world-news-detail-meta {
+    margin-bottom: 16px;
+    font-size: .875rem;
     color: var(--gws-text-soft);
+}
+
+.world-news-detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.world-news-detail-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.25rem;
+}
+
+/* The English summary and who wrote it. */
+.world-news-summary {
+    margin: 0 0 24px;
+    padding: 16px;
+    border-radius: var(--gws-radius-md, 10px);
+    background: var(--gws-neu-surface);
+    box-shadow: var(--gws-neu-inset-shadow);
+}
+
+.world-news-summary-text {
+    margin-bottom: 8px;
+    font-size: 1.02rem;
+    line-height: 1.6;
+}
+
+.world-news-summary-meta {
+    margin-bottom: 0;
+    font-size: .78rem;
+    color: var(--gws-text-soft);
+}
+
+/* How the coverage compares (the summary model's points, 06-11-26). */
+.world-news-comparison-heading {
+    margin: 8px 0;
+    font-size: .75rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--gws-text-soft);
+}
+
+.world-news-comparison {
+    margin: 0 0 8px;
+    padding-left: 1.1rem;
+    line-height: 1.55;
 }
 
 .world-news-claims {
-    margin-bottom: 1rem;
+    margin-bottom: 16px;
 }
 
 .world-news-claims-note {
-    color: var(--gws-text-soft);
+    margin-bottom: 8px;
     font-size: .85rem;
-    margin-bottom: .5rem;
+    color: var(--gws-text-soft);
 }
 
 .world-news-claim {
+    padding: 8px 0;
     border-top: 1px solid var(--gws-panel-border);
-    padding: .5rem 0;
 }
 
 .world-news-claim-head {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: .5rem;
-    margin-bottom: .25rem;
+    gap: 8px;
+    margin-bottom: 4px;
 }
 
 .world-news-claim-values {
-    list-style: none;
-    padding: 0;
-    margin: 0;
     display: grid;
-    gap: .25rem;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
 }
 
 .world-news-claim-values li {
     display: grid;
     grid-template-columns: minmax(6.5rem, auto) 1fr;
-    gap: .5rem;
+    gap: 8px;
 }
 
 .world-news-claim-value {
     font-weight: 600;
-    font-variant-numeric: tabular-nums;
 }
 
 .world-news-claim-sources {
     display: flex;
     flex-wrap: wrap;
-    gap: .25rem .6rem;
+    gap: 4px 10px;
     min-width: 0;
 }
 
@@ -172,50 +555,51 @@
 }
 
 .world-news-placing {
-    border: 1px solid var(--gws-panel-border);
-    border-radius: .5rem;
-    background: var(--gws-panel-bg);
-    padding: .75rem;
-    margin-bottom: 1rem;
+    margin-bottom: 16px;
+    padding: 16px;
+    border-radius: var(--gws-radius-md, 10px);
+    background: var(--gws-neu-surface);
+    box-shadow: var(--gws-neu-inset-shadow);
 }
 
 .world-news-placing-now {
+    margin-bottom: 8px;
     color: var(--gws-text-soft);
-    margin-bottom: .5rem;
 }
 
 .world-news-placing-form {
     display: flex;
     flex-wrap: wrap;
     align-items: flex-end;
-    gap: .5rem;
+    gap: 8px;
 }
 
 .world-news-placing-form label {
     display: grid;
-    gap: .2rem;
+    flex: 1 1 10rem;
+    gap: 4px;
+    min-width: 0;
     font-size: .85rem;
     color: var(--gws-text-soft);
-    min-width: 0;
-    flex: 1 1 10rem;
 }
 
 .world-news-placing-message {
-    color: var(--bs-danger, #dc3545);
+    margin: 8px 0 0;
     font-size: .85rem;
-    margin: .5rem 0 0;
+    color: var(--gws-status-danger-text);
 }
 
 .world-news-facts {
     display: grid;
     grid-template-columns: auto 1fr;
-    gap: .25rem 1rem;
-    margin-bottom: 1rem;
+    gap: 4px 16px;
+    margin-bottom: 16px;
+    font-size: .875rem;
 }
 
 .world-news-facts dt {
+    font-weight: 600;
     color: var(--gws-text-soft);
-    font-weight: 500;
 }
 
 .world-news-facts dd {
@@ -223,43 +607,55 @@
 }
 
 .world-news-language {
+    margin: 24px 0 8px;
     font-size: 1rem;
-    margin: 1.25rem 0 .5rem;
 }
 
 .world-news-language span {
-    color: var(--gws-text-soft);
     font-weight: 400;
+    color: var(--gws-text-soft);
+}
+
+/* Each language's heading stays in view while its reports scroll under it. */
+.world-news-language-sticky {
+    position: sticky;
+    top: -24px;
+    z-index: 1;
+    margin-left: -24px;
+    margin-right: -24px;
+    padding: 8px 24px;
+    background: var(--gws-neu-raised);
 }
 
 .world-news-reports {
-    list-style: none;
-    padding: 0;
-    margin: 0;
     display: flex;
     flex-direction: column;
-    gap: .15rem;
+    gap: 2px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
 }
 
 /* Each report is one link (headline + outlet), tall enough to tap. */
 .world-news-report {
     display: flex;
     flex-direction: column;
-    gap: .1rem;
+    gap: 2px;
     min-height: 44px;
-    padding: .35rem .5rem;
-    margin: 0 -.5rem;
+    margin: 0 -8px;
+    padding: 6px 8px;
     border-radius: var(--gws-radius-sm, 6px);
     text-decoration: none;
 }
 
 .world-news-report:hover {
-    background: var(--gws-body-bg);
+    background: var(--gws-neu-surface);
 }
 
 .world-news-report-title {
     text-decoration: underline;
-    text-underline-offset: 2px;
+    text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+    text-underline-offset: 3px;
 }
 
 .world-news-report-meta {
@@ -267,44 +663,240 @@
     color: var(--gws-text-soft);
 }
 
-.world-news-archive-list {
+/* A situation's events, oldest first. */
+.world-news-timeline {
     display: grid;
-    gap: .25rem;
+    gap: 4px;
     margin: 0;
     padding: 0;
     list-style: none;
 }
 
+.world-news-timeline-event {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 44px;
+    padding: 8px 12px;
+    border-radius: var(--gws-radius-md, 10px);
+    color: var(--gws-text-strong);
+    text-decoration: none;
+    box-shadow: inset 2px 0 0 var(--gws-panel-border);
+}
+
+.world-news-timeline-event:hover {
+    color: var(--gws-text-strong);
+    background: var(--gws-neu-surface);
+}
+
+/* ---- Report archive ---- */
+.world-news-archive-list {
+    display: grid;
+    gap: 4px;
+    margin: 0;
+    padding: 8px;
+    list-style: none;
+    border-radius: var(--gws-radius-lg, 14px);
+    background: var(--gws-neu-surface);
+    box-shadow: var(--gws-neu-inset-shadow);
+}
+
 .world-news-archive-report {
     display: flex;
     flex-direction: column;
-    gap: .15rem;
+    gap: 4px;
     min-width: 0;
-    padding: .65rem .75rem;
-    border-bottom: 1px solid var(--gws-panel-border);
+    padding: 12px 16px;
+    border-radius: var(--gws-radius-md, 10px);
     color: var(--gws-text-strong);
     text-decoration: none;
 }
 
 .world-news-archive-report:hover {
-    background: var(--gws-panel-bg);
+    color: var(--gws-text-strong);
+    background: color-mix(in srgb, var(--gws-neu-raised) 70%, transparent);
 }
 
 .world-news-archive-report .world-news-report-title {
     overflow-wrap: anywhere;
     font-weight: 600;
+    text-decoration: none;
 }
 
-.world-news-archive-report .world-news-report-meta {
+.world-news-archive-report .world-news-report-meta,
+.world-news-report-snippet {
     overflow-wrap: anywhere;
 }
 
+.world-news-report-snippet {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    font-size: .85rem;
+    color: var(--gws-text-soft);
+}
+
+/* ---- Today ---- */
+.world-news-lead {
+    margin-bottom: 24px;
+    padding: 32px;
+    border-radius: var(--gws-radius-lg, 14px);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
+    box-shadow: var(--gws-neu-raised-shadow);
+}
+
+.world-news-lead-label {
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--gws-sidebar-accent, #f59e0b);
+}
+
+.world-news-lead-title {
+    max-width: 48rem;
+    margin: 12px 0;
+    font-size: clamp(1.6rem, 1.1rem + 1.6vw, 2.35rem);
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -.02em;
+}
+
+.world-news-lead-summary {
+    max-width: 46rem;
+    margin-bottom: 12px;
+    font-size: 1.05rem;
+    line-height: 1.6;
+    color: var(--gws-text-strong);
+}
+
+.world-news-lead-meta {
+    margin-bottom: 24px;
+    font-size: .875rem;
+    color: var(--gws-text-soft);
+}
+
+.world-news-lead-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.world-news-lead-actions .btn {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+    padding: 0 1.25rem;
+}
+
+.world-news-today {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(15rem, 20rem);
+    gap: 24px;
+    align-items: start;
+    margin-bottom: 24px;
+}
+
+.world-news-panel,
+.world-news-country-card {
+    padding: 24px;
+    border-radius: var(--gws-radius-lg, 14px);
+    background: linear-gradient(145deg, var(--gws-neu-raised), var(--gws-neu-surface));
+    box-shadow: var(--gws-neu-raised-shadow-sm);
+}
+
+.world-news-panel .world-news-event {
+    margin: 0 -16px;
+    width: calc(100% + 32px);
+}
+
+.world-news-country-ranking {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding-left: 1.5rem;
+}
+
+.world-news-country-ranking li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    color: var(--gws-text-soft);
+}
+
+.world-news-country-name {
+    color: var(--gws-text-strong);
+    font-weight: 600;
+}
+
+.world-news-country-count {
+    font-size: .8rem;
+}
+
+.world-news-country-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+    gap: 16px;
+}
+
+.world-news-country-card h2 {
+    margin: 0 0 4px;
+    font-size: 1.05rem;
+}
+
+.world-news-country-card > p {
+    margin: 0 0 12px;
+    font-size: .8rem;
+    color: var(--gws-text-soft);
+}
+
+.world-news-country-card ol {
+    margin: 0;
+    padding-left: 1.25rem;
+}
+
+.world-news-country-card li + li {
+    margin-top: 4px;
+}
+
+.world-news-country-card a {
+    display: block;
+    min-height: 44px;
+    padding: 6px 8px;
+    border-radius: var(--gws-radius-sm, 6px);
+    color: var(--gws-text-strong);
+    text-decoration: none;
+}
+
+.world-news-country-card a:hover {
+    background: var(--gws-neu-surface);
+}
+
+.world-news-country-card a span,
+.world-news-country-card a small {
+    display: block;
+}
+
+.world-news-country-card a small {
+    margin-top: 2px;
+    color: var(--gws-text-soft);
+}
+
+/* The event document, read in a dialog (WorldNewsStoryView draws it, with its own styles). */
+.world-news-document-modal .modal-content {
+    background: var(--gws-panel-bg, var(--bs-body-bg));
+    color: var(--gws-text-strong, var(--bs-body-color));
+}
+
+/* ---- Narrower content areas ---- */
 @container gws-main (max-width: 899.98px) {
     .world-news {
         grid-template-columns: minmax(0, 1fr);
     }
 
-    .world-news-list {
+    .world-news-list,
+    .world-news-detail {
+        position: static;
         max-height: none;
         overflow: visible;
     }
@@ -322,175 +914,76 @@
         align-items: center;
         min-height: 44px;
     }
-}
 
-.world-news-original {
-    font-size: .85rem;
-    color: var(--gws-text-soft);
-    margin-bottom: .35rem;
-}
+    .world-news-language-sticky {
+        position: static;
+    }
 
-/* The English summary, with who wrote it and the document download. */
-.world-news-summary {
-    margin: .75rem 0 1rem;
-    padding: .75rem 1rem;
-    background: var(--gws-body-bg);
-    border-left: 3px solid var(--gws-sidebar-accent, #f59e0b);
-    border-radius: var(--gws-radius-sm, 6px);
-}
+    .world-news-today {
+        grid-template-columns: minmax(0, 1fr);
+    }
 
-.world-news-summary-text {
-    line-height: 1.55;
-    margin-bottom: .5rem;
-}
-
-.world-news-summary-meta {
-    font-size: .8rem;
-    color: var(--gws-text-soft);
-    margin-bottom: .5rem;
-}
-
-.world-news-summary .btn {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-}
-
-/* How the coverage compares (the summary model's points, 06-11-26). */
-.world-news-comparison-heading {
-    font-size: .8rem;
-    font-weight: 700;
-    letter-spacing: .04em;
-    text-transform: uppercase;
-    color: var(--gws-text-soft);
-    margin: .25rem 0 .35rem;
-}
-
-.world-news-comparison {
-    margin: 0 0 .6rem;
-    padding-left: 1.1rem;
-    line-height: 1.5;
-}
-
-.world-news-document-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .5rem;
-}
-
-/* The event document, read in a dialog (WorldNewsStoryView draws it, with its own styles). */
-.world-news-document-modal .modal-content {
-    background: var(--gws-panel-bg, var(--bs-body-bg));
-    color: var(--gws-text-strong, var(--bs-body-color));
-}
-
-.world-news-world {
-    display: grid;
-    grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
-    gap: 1rem;
-    margin-bottom: 1rem;
-}
-
-.world-news-world-panel,
-.world-news-country-card {
-    padding: 1rem;
-    background: var(--gws-panel-bg);
-    border: 1px solid var(--gws-panel-border);
-    border-radius: var(--gws-radius-md, 10px);
-}
-
-.world-news-world-panel h2,
-.world-news-country-card h2 {
-    margin: 0 0 .75rem;
-    font-size: 1.05rem;
-}
-
-.world-news-country-ranking {
-    display: grid;
-    gap: .45rem;
-    margin: 0;
-    padding-left: 1.75rem;
-}
-
-.world-news-country-ranking li {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: .75rem;
-    color: var(--gws-text-soft);
-}
-
-.world-news-country-name {
-    color: var(--gws-text-strong);
-    font-weight: 600;
-}
-
-.world-news-world-stories {
-    display: grid;
-    gap: .25rem;
-}
-
-.world-news-situation-tag {
-    align-self: flex-start;
-    padding: .1rem .4rem;
-    color: var(--gws-text-soft);
-    background: var(--gws-body-bg);
-    border-radius: 999px;
-    font-size: .75rem;
-}
-
-.world-news-country-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
-    gap: 1rem;
-}
-
-.world-news-country-card > p {
-    margin: -.5rem 0 .5rem;
-    color: var(--gws-text-soft);
-    font-size: .8rem;
-}
-
-.world-news-country-card ol {
-    margin: 0;
-    padding-left: 1.5rem;
-}
-
-.world-news-country-card li + li {
-    margin-top: .35rem;
-}
-
-.world-news-country-card button {
-    width: 100%;
-    min-height: 44px;
-    padding: .3rem .25rem;
-    text-align: left;
-    color: var(--gws-text-strong);
-    background: transparent;
-    border: 0;
-    border-radius: var(--gws-radius-sm, 6px);
-}
-
-.world-news-country-card button:hover {
-    background: var(--gws-body-bg);
-}
-
-.world-news-country-card button span,
-.world-news-country-card button small {
-    display: block;
-}
-
-.world-news-country-card button small {
-    margin-top: .15rem;
-    color: var(--gws-text-soft);
+    .world-news-where {
+        margin-left: 0;
+    }
 }
 
 @container gws-main (max-width: 699.98px) {
-    .world-news-world {
-        grid-template-columns: minmax(0, 1fr);
+    .world-news-refresh-text {
+        display: none;
+    }
+
+    .world-news-tabs {
+        display: flex;
+        width: 100%;
+    }
+
+    .world-news-tab {
+        flex: 1 1 0;
+        padding: 0 .5rem;
+    }
+
+    .world-news-search-wrap {
+        max-width: none;
+    }
+
+    /* Chips scroll sideways in one row rather than stacking three deep above the news. */
+    .world-news-chips {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        margin-left: calc(-1 * var(--gws-content-pad-x, 16px));
+        margin-right: calc(-1 * var(--gws-content-pad-x, 16px));
+        padding: 4px var(--gws-content-pad-x, 16px) 8px;
+        scrollbar-width: none;
+    }
+
+    .world-news-chip,
+    .world-news-where {
+        flex: 0 0 auto;
+    }
+
+    .world-news-lead {
+        padding: 24px 16px;
+    }
+
+    .world-news-detail {
+        padding: 16px;
     }
 
     .world-news-country-ranking li {
         grid-template-columns: minmax(0, 1fr);
         gap: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .world-news-spin {
+        animation: none;
+    }
+
+    .world-news-tab,
+    .world-news-chip,
+    .world-news-event {
+        transition: none;
     }
 }

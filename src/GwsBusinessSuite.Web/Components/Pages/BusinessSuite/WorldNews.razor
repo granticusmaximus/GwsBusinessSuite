@@ -1,7 +1,7 @@
 @page "/admin/world-news"
 @rendermode InteractiveServer
 @attribute [Authorize(Policy = "AdminOnly")]
-@implements IDisposable
+@implements IAsyncDisposable
 @using GwsBusinessSuite.Application.Abstractions
 @using GwsBusinessSuite.Infrastructure.Services
 @using GwsBusinessSuite.WorldNewsKit
@@ -9,87 +9,150 @@
 @inject WorldNewsService News
 @inject WorldNewsMapService WorldNewsMap
 @inject ICurrentUserAccessor CurrentUserAccessor
+@inject IJSRuntime JS
 
 <PageTitle>World News</PageTitle>
 
+@* World News (design pass 12-11-26): three tabs in the reader's words, one search box that also
+   opens the report archive, kind chips on every tab, and rows that say what, where and how widely
+   covered. State lives in the address (WorldNewsBrowse.Url), mirrored by js/world-news.js. *@
+<div class="world-news-page" @ref="_root">
 <PageHeader Title="World News" Icon="bi-globe-europe-africa"
-            Description="What newsrooms around the world are reporting, with every outlet's coverage of the same event grouped together across languages, events linked into stories that develop over days, and the biggest events summarized in English.">
+            Description="What newsrooms around the world are reporting, each story's coverage grouped across languages.">
     <Meta>
-        <p class="small text-secondary mb-0">@StatusLine</p>
+        <p class="world-news-updated small mb-0" title="@News.Status">@UpdatedLine</p>
     </Meta>
     <Actions>
-        <button type="button" class="btn btn-primary" @onclick="ReadNow" disabled="@News.IsRefreshing">
-            <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>@(News.IsRefreshing ? "Reading…" : "Read now")
+        <button type="button" class="btn btn-outline-secondary world-news-refresh" @onclick="ReadNow" disabled="@News.IsRefreshing"
+                aria-label="@(News.IsRefreshing ? "Reading the news" : "Read the news now")"
+                title="Read the news now. It also reads every 15 minutes on its own.">
+            <i class="bi bi-arrow-clockwise @(News.IsRefreshing ? "world-news-spin" : "")" aria-hidden="true"></i>
+            <span class="world-news-refresh-text">@(News.IsRefreshing ? "Reading…" : "Refresh")</span>
         </button>
     </Actions>
     <Filters>
-        <div class="btn-group world-news-view" role="group" aria-label="Show">
-            <button type="button" class="btn @(_view == WorldNewsView.Events ? "btn-primary" : "btn-outline-secondary")"
-                    aria-pressed="@(_view == WorldNewsView.Events ? "true" : "false")" @onclick="() => ShowAsync(WorldNewsView.Events)">Events</button>
-            <button type="button" class="btn @(_view == WorldNewsView.Situations ? "btn-primary" : "btn-outline-secondary")"
-                    aria-pressed="@(_view == WorldNewsView.Situations ? "true" : "false")" @onclick="() => ShowAsync(WorldNewsView.Situations)">Situations</button>
-            <button type="button" class="btn @(_view == WorldNewsView.World ? "btn-primary" : "btn-outline-secondary")"
-                    aria-pressed="@(_view == WorldNewsView.World ? "true" : "false")" @onclick="() => ShowAsync(WorldNewsView.World)">World</button>
-                <button type="button" class="btn @(_view == WorldNewsView.Reports ? "btn-primary" : "btn-outline-secondary")"
-                    aria-pressed="@(_view == WorldNewsView.Reports ? "true" : "false")" @onclick="() => ShowAsync(WorldNewsView.Reports)">Reports</button>
+        <div class="world-news-tabs" role="tablist" aria-label="World News">
+            @foreach (var tab in Tabs)
+            {
+                <button type="button" role="tab" class="world-news-tab @(_view == tab ? "is-active" : "")"
+                        aria-selected="@(_view == tab ? "true" : "false")" @onclick="() => ShowAsync(tab)">@WorldNewsBrowse.TabLabel(tab)</button>
+            }
         </div>
-        <input type="search" class="form-control world-news-search" placeholder="@($"Filter {ViewName}")" aria-label="@($"Filter {ViewName}")"
-                   @bind="_filter" @bind:event="oninput" @bind:after="ChangeTextFilterAsync" />
+        <div class="world-news-search-wrap">
+            <i class="bi bi-search" aria-hidden="true"></i>
+            <input type="search" class="form-control world-news-search" placeholder="@SearchPlaceholder" aria-label="Search stories and reports"
+                   aria-keyshortcuts="/" @bind="_filter" @bind:event="oninput" @bind:after="ChangeTextFilterAsync" />
+        </div>
         <select class="form-select world-news-range" aria-label="Time range" @bind="_rangeHours" @bind:after="ChangeRangeAsync">
-            @if (_view == WorldNewsView.World)
+            @foreach (var range in WorldNewsBrowse.Ranges(_view))
             {
-                <option value="3">Last 3 hours</option>
-                <option value="24">Last 24 hours</option>
-            }
-            else
-            {
-                <option value="24">Last 24 hours</option>
-                <option value="72">Last 3 days</option>
-                <option value="168">Last 7 days</option>
-            }
-            @if (_view == WorldNewsView.Reports)
-            {
-                <option value="720">Last 30 days</option>
+                <option value="@range.Hours">@range.Label</option>
             }
         </select>
-        @if (_view == WorldNewsView.Reports)
-        {
-            <input type="search" class="form-control world-news-report-filter" placeholder="Source country" aria-label="Filter by source country"
-                   @bind="_reportCountry" @bind:event="oninput" @bind:after="ReloadReportsAsync" />
-            <input type="search" class="form-control world-news-report-filter" placeholder="Language" aria-label="Filter by language"
-                   @bind="_reportLanguage" @bind:event="oninput" @bind:after="ReloadReportsAsync" />
-            <input type="search" class="form-control world-news-report-filter" placeholder="Outlet" aria-label="Filter by outlet"
-                   @bind="_reportOutlet" @bind:event="oninput" @bind:after="ReloadReportsAsync" />
-            <select class="form-select world-news-report-filter" aria-label="Filter by kind" @bind="_reportKind" @bind:after="ReloadReportsAsync">
-                <option value="">All kinds</option>
-                <option value="unclassified">Unclassified</option>
-                @foreach (var kind in SituationKinds.All)
-                {
-                    <option value="@kind">@SituationKinds.Label(kind)</option>
-                }
-            </select>
-        }
-        @if (_view == WorldNewsView.Situations)
-        {
-            <button type="button" class="btn @(_surgeAlerts ? "btn-primary" : "btn-outline-secondary")" aria-pressed="@(_surgeAlerts ? "true" : "false")"
-                    title="Get a notification when a disaster, transport, conflict or health story's coverage doubles within two hours"
-                    @onclick="ToggleSurgeAlertsAsync">
-                <i class="bi @(_surgeAlerts ? "bi-lightning-charge-fill" : "bi-lightning-charge") me-1" aria-hidden="true"></i>Surge alerts
-            </button>
-        }
+        <button type="button" class="btn btn-outline-secondary world-news-filters-toggle" aria-expanded="@(_filtersOpen ? "true" : "false")"
+                aria-controls="world-news-filter-panel" @onclick="() => _filtersOpen = !_filtersOpen">
+            <i class="bi bi-sliders me-1" aria-hidden="true"></i>Filters
+            @if (SourceFilterCount > 0)
+            {
+                <span class="world-news-badge" aria-label="@($"{SourceFilterCount} on")">@SourceFilterCount</span>
+            }
+        </button>
     </Filters>
 </PageHeader>
 
-@if (_view == WorldNewsView.Reports)
+<div class="world-news-chips" role="group" aria-label="Kind of story">
+    <button type="button" class="world-news-chip @(_kind.Length == 0 ? "is-active" : "")" aria-pressed="@(_kind.Length == 0 ? "true" : "false")"
+            @onclick="() => SetKindAsync(string.Empty)">All</button>
+    @foreach (var kind in ChipKinds)
+    {
+        <button type="button" class="world-news-chip @(_kind == kind ? "is-active" : "")" data-kind="@kind"
+                aria-pressed="@(_kind == kind ? "true" : "false")" @onclick="() => SetKindAsync(kind)" title="@SituationKinds.Label(kind)">@WorldNewsBrowse.ChipLabel(kind)</button>
+    }
+    @if (_view != WorldNewsTab.Reports && WhereOptions.Count > 0)
+    {
+        <select class="form-select form-select-sm world-news-where" aria-label="Where the story is" @bind="_where" @bind:after="ChangeWhereAsync">
+            <option value="">Anywhere</option>
+            @foreach (var country in WhereOptions)
+            {
+                <option value="@country">@country</option>
+            }
+        </select>
+    }
+</div>
+
+@if (_filtersOpen)
 {
+    <div class="world-news-filter-panel" id="world-news-filter-panel">
+        <label>
+            Reported from
+            <input type="search" class="form-control form-control-sm" list="world-news-countries" placeholder="Any country"
+                   @bind="_reportCountry" @bind:event="oninput" @bind:after="ChangeSourceFilterAsync" />
+        </label>
+        <label>
+            Language
+            <input type="search" class="form-control form-control-sm" list="world-news-languages" placeholder="Any language"
+                   @bind="_reportLanguage" @bind:event="oninput" @bind:after="ChangeSourceFilterAsync" />
+        </label>
+        @if (_view == WorldNewsTab.Reports)
+        {
+            <label>
+                Outlet
+                <input type="search" class="form-control form-control-sm" placeholder="Any outlet"
+                       @bind="_reportOutlet" @bind:event="oninput" @bind:after="ChangeSourceFilterAsync" />
+            </label>
+        }
+        else
+        {
+            <button type="button" class="btn btn-sm btn-link world-news-archive-link" @onclick="SearchReportsAsync">
+                Browse every report<i class="bi bi-arrow-right ms-1" aria-hidden="true"></i>
+            </button>
+        }
+        <datalist id="world-news-countries">
+            @foreach (var country in SourceCountryOptions)
+            {
+                <option value="@country"></option>
+            }
+        </datalist>
+        <datalist id="world-news-languages">
+            @foreach (var language in LanguageOptions)
+            {
+                <option value="@language"></option>
+            }
+        </datalist>
+    </div>
+}
+
+@if (ActiveFilters.Count > 0)
+{
+    <div class="world-news-active" aria-label="Active filters">
+        @foreach (var filter in ActiveFilters)
+        {
+            <button type="button" class="world-news-active-chip" @onclick="filter.Clear" aria-label="@($"Remove {filter.Label}")">
+                @filter.Label<i class="bi bi-x" aria-hidden="true"></i>
+            </button>
+        }
+        <button type="button" class="btn btn-sm btn-link world-news-clear" @onclick="ClearFiltersAsync">Clear all</button>
+    </div>
+}
+
+@if (_view != WorldNewsTab.Reports && !string.IsNullOrWhiteSpace(_filter))
+{
+    <button type="button" class="world-news-search-all" @onclick="SearchReportsAsync">
+        <i class="bi bi-archive me-2" aria-hidden="true"></i>Search every report for “@_filter.Trim()”<i class="bi bi-arrow-right ms-auto" aria-hidden="true"></i>
+    </button>
+}
+
+@if (_view == WorldNewsTab.Reports)
+{
+    <h2 class="world-news-section-title">Report archive</h2>
     @if (_reports is null)
     {
         <ListSkeleton Message="Loading reports…" />
     }
     else if (_reports.Count == 0)
     {
-        <EmptyState Icon="bi-newspaper" Title="No reports match those filters"
-                    Message="Try a wider time range or clear one of the source filters." />
+        <EmptyState Icon="bi-newspaper" Title="No reports match"
+                    Message="Try a wider time range or remove a filter." />
     }
     else
     {
@@ -101,10 +164,10 @@
                     {
                         <a class="world-news-archive-report" href="@href" target="_blank" rel="noopener noreferrer">
                             <span class="world-news-report-title">@report.Title</span>
-                            <span class="world-news-report-meta">@report.Outlet · Source: @report.Country · @report.Language · @report.SeenAt.ToLocalGwsDateTime()</span>
+                            <span class="world-news-report-meta">@report.Outlet · @report.Country · @report.Language · <time>@Time(report.SeenAt)</time></span>
                             @if (!string.IsNullOrWhiteSpace(report.Snippet))
                             {
-                                <span class="world-news-report-meta">@report.Snippet</span>
+                                <span class="world-news-report-snippet">@report.Snippet</span>
                             }
                         </a>
                     }
@@ -112,7 +175,7 @@
                     {
                         <div class="world-news-archive-report">
                             <span class="world-news-report-title">@report.Title</span>
-                            <span class="world-news-report-meta">@report.Outlet · Source: @report.Country · @report.Language · @report.SeenAt.ToLocalGwsDateTime()</span>
+                            <span class="world-news-report-meta">@report.Outlet · @report.Country · @report.Language · <time>@Time(report.SeenAt)</time></span>
                         </div>
                     }
                 </li>
@@ -124,63 +187,97 @@
         }
     }
 }
-else if (_view == WorldNewsView.World)
+else if (_view == WorldNewsTab.Today)
 {
     @if (_world is null)
     {
-        <ListSkeleton Message="Building the world view…" />
+        <ListSkeleton Message="Building today's view…" />
     }
     else if (_world.BiggestStories.Count == 0)
     {
         <EmptyState Icon="bi-globe-americas" Title="No recent world news"
-                    Message="No reports arrived in this time range. Try the last 24 hours or read the news now." />
+                    Message="Nothing arrived in this time range. Try the last 24 hours, or refresh." />
+    }
+    else if (TodayStories.Count == 0)
+    {
+        <EmptyState Icon="bi-search" Title="Nothing matches" Message="No top stories match those filters." />
     }
     else
     {
-        <div class="world-news-world">
-            <section class="world-news-world-panel" aria-labelledby="world-countries-title">
-                <h2 id="world-countries-title">Most mentioned countries</h2>
+        var lead = TodayStories[0];
+        var leadFacts = FactsFor(lead.Event);
+        <section class="world-news-lead" aria-labelledby="world-news-lead-title">
+            <div class="world-news-row-top">
+                <span class="world-news-lead-label">Lead story</span>
+                @KindTag(leadFacts)
+                @if (leadFacts.Place is not null)
+                {
+                    <span class="world-news-place"><i class="bi bi-geo-alt" aria-hidden="true"></i>@leadFacts.Place</span>
+                }
+            </div>
+            <h2 id="world-news-lead-title" class="world-news-lead-title">@(lead.Event.Headline ?? lead.Event.Title)</h2>
+            @if (_leadSummary is { EventId: var summaryId } && summaryId == lead.Event.Id)
+            {
+                <p class="world-news-lead-summary">@_leadSummary.Text</p>
+            }
+            <p class="world-news-lead-meta">
+                @WorldNewsBrowse.Seen(lead.RecentOutlets, lead.Event.Languages.Count) · from @WorldNewsBrowse.Count(lead.Event.Countries.Count, "country", "countries") in the last @WorldNewsBrowse.Count(_rangeHours, "hour")
+            </p>
+            <div class="world-news-lead-actions">
+                <a class="btn btn-primary world-news-lead-open" href="@EventHref(lead.Event)" @onclick="() => OpenEventAsync(lead.Event)" @onclick:preventDefault>
+                    Read the story<i class="bi bi-arrow-right ms-2" aria-hidden="true"></i>
+                </a>
+                @if (lead.SituationId is { } leadSituation)
+                {
+                    <a class="btn btn-outline-secondary" href="@SituationHref(leadSituation)" @onclick="() => OpenSituationAsync(leadSituation)" @onclick:preventDefault>
+                        <i class="bi bi-diagram-3 me-1" aria-hidden="true"></i>How it developed
+                    </a>
+                }
+            </div>
+        </section>
+
+        <div class="world-news-today">
+            <section class="world-news-panel" aria-labelledby="world-news-more-title">
+                <h2 id="world-news-more-title" class="world-news-panel-title">More top stories</h2>
+                <div class="world-news-list world-news-list-flat">
+                    @{ var busiest = TodayStories.Max(s => s.RecentOutlets); }
+                    @foreach (var story in TodayStories.Skip(1))
+                    {
+                        @Row(EventHref(story.Event), story.Event.Headline ?? story.Event.Title, FactsFor(story.Event),
+                            WorldNewsBrowse.Seen(story.RecentOutlets, story.Event.Languages.Count), Time(story.Event.LastSeen),
+                            WorldNewsBrowse.ReachPercent(story.RecentOutlets, busiest), false,
+                            () => OpenEventAsync(story.Event), story.SituationId is null ? null : "Developing story")
+                    }
+                </div>
+            </section>
+            <section class="world-news-panel" aria-labelledby="world-countries-title">
+                <h2 id="world-countries-title" class="world-news-panel-title">Most mentioned countries</h2>
                 <ol class="world-news-country-ranking">
-                    @foreach (var country in VisibleCountries)
+                    @foreach (var country in VisibleCountries.Take(16))
                     {
                         <li>
                             <span class="world-news-country-name">@country.Name</span>
-                            <span>@Count(country.ReportCount, "report") · @Count(country.EventCount, "event")</span>
+                            <span class="world-news-country-count">@WorldNewsBrowse.Count(country.ReportCount, "report")</span>
                         </li>
                     }
                 </ol>
             </section>
-            <section class="world-news-world-panel" aria-labelledby="world-biggest-title">
-                <h2 id="world-biggest-title">Biggest stories</h2>
-                <div class="world-news-world-stories">
-                    @foreach (var story in VisibleBiggestStories)
-                    {
-                        <button type="button" class="world-news-event" @onclick="() => OpenEventAsync(story.Event)">
-                            <span class="world-news-event-title">@(story.Event.Headline ?? story.Event.Title)</span>
-                            <span class="world-news-event-meta">@WorldStorySummary(story)</span>
-                            @if (story.SituationId is not null)
-                            {
-                                <span class="world-news-situation-tag"><i class="bi bi-diagram-3" aria-hidden="true"></i> Developing situation</span>
-                            }
-                        </button>
-                    }
-                </div>
-            </section>
         </div>
+
         <section class="world-news-country-grid" aria-label="Top stories by country">
             @foreach (var country in VisibleCountries)
             {
                 <article class="world-news-country-card">
                     <h2>@country.Name</h2>
-                    <p>@Count(country.OutletCount, "outlet") · @Count(country.ReportCount, "report")</p>
+                    <p>@WorldNewsBrowse.Count(country.OutletCount, "outlet") · @WorldNewsBrowse.Count(country.ReportCount, "report")</p>
                     <ol>
                         @foreach (var story in country.TopStories)
                         {
                             <li>
-                                <button type="button" @onclick="() => OpenEventAsync(story.Event)">
+                                <a href="@EventHref(story.Event)" @onclick="() => OpenEventAsync(story.Event)" @onclick:preventDefault>
                                     <span>@(story.Event.Headline ?? story.Event.Title)</span>
-                                    <small>@WorldStorySummary(story)</small>
-                                </button>
+                                    <small>@WorldNewsBrowse.Seen(story.RecentOutlets, story.Event.Languages.Count)</small>
+                                </a>
                             </li>
                         }
                     </ol>
@@ -189,36 +286,41 @@ else if (_view == WorldNewsView.World)
         </section>
     }
 }
-else if (_view == WorldNewsView.Situations)
+else if (_view == WorldNewsTab.Developing)
 {
     @if (_situations is null)
     {
-        <ListSkeleton Message="Loading situations…" />
+        <ListSkeleton Message="Loading developing stories…" />
     }
     else if (_situations.Count == 0)
     {
-        <EmptyState Icon="bi-diagram-3" Title="No situations yet"
-                    Message="A situation is one story developing over days: two or more events linked by what they report. They form as later reads find new events on the same story." />
+        <EmptyState Icon="bi-diagram-3" Title="No developing stories yet"
+                    Message="A developing story is one story followed over days: two or more events linked by what they report. They form as later reads find new events on the same story." />
     }
     else
     {
         <div class="world-news @(_situation is null ? "" : "has-selection")">
-            <div class="world-news-list" aria-label="Situations">
+            <div class="world-news-list" aria-label="Developing stories">
+                <div class="world-news-list-head">
+                    <span>@WorldNewsBrowse.Count(VisibleSituations.Count, "story", "stories")</span>
+                    <button type="button" class="world-news-surge @(_surgeAlerts ? "is-on" : "")" aria-pressed="@(_surgeAlerts ? "true" : "false")"
+                            title="Get a notification when a disaster, transport, conflict or health story's coverage doubles within two hours"
+                            @onclick="ToggleSurgeAlertsAsync">
+                        <i class="bi @(_surgeAlerts ? "bi-lightning-charge-fill" : "bi-lightning-charge") me-1" aria-hidden="true"></i>Surge alerts @(_surgeAlerts ? "on" : "off")
+                    </button>
+                </div>
                 @if (VisibleSituations.Count == 0)
                 {
-                    <EmptyState Icon="bi-search" Message="No situations match that filter." />
+                    <EmptyState Icon="bi-search" Message="No developing stories match those filters." />
                 }
+                @{ var busiestSituation = VisibleSituations.Count == 0 ? 0 : VisibleSituations.Max(s => s.OutletCount); }
                 @foreach (var situation in VisibleSituations.Take(_shown))
                 {
-                    <button type="button" class="world-news-event @(situation.Id == _situation?.Id ? "is-selected" : "")"
-                            aria-pressed="@(situation.Id == _situation?.Id ? "true" : "false")" @onclick="() => SelectSituationAsync(situation)">
-                        <span class="world-news-event-title">@situation.Title</span>
-                        <span class="world-news-event-meta"><StatusPill Tone="@Tone(situation)">@State(situation)</StatusPill> @SituationSummary(situation)</span>
-                        @if (situation.Latest != situation.Title)
-                        {
-                            <span class="world-news-event-meta world-news-latest">Latest: @situation.Latest</span>
-                        }
-                    </button>
+                    var latest = situation.Latest != situation.Title ? $"Latest: {situation.Latest}" : null;
+                    @Row(SituationHref(situation.Id), situation.Title, FactsFor(situation),
+                        $"{WorldNewsBrowse.Count(situation.EventCount, "event")} · {WorldNewsBrowse.Seen(situation.OutletCount, situation.Languages.Count)}",
+                        Time(situation.LastSeen), WorldNewsBrowse.ReachPercent(situation.OutletCount, busiestSituation),
+                        situation.Id == _situation?.Id, () => SelectSituationAsync(situation), latest, StateLabel(situation), Tone(situation))
                 }
                 @if (VisibleSituations.Count > _shown)
                 {
@@ -231,28 +333,46 @@ else if (_view == WorldNewsView.Situations)
             <section class="world-news-detail" aria-live="polite">
                 @if (_situation is null)
                 {
-                    <EmptyState Icon="bi-hand-index" Message="Pick a situation to see how the story developed, event by event." />
+                    <EmptyState Icon="bi-hand-index" Message="Pick a story to see how it developed, event by event." />
                 }
                 else
                 {
-                    <button type="button" class="btn btn-sm btn-outline-secondary world-news-back" @onclick="() => _situation = null">
-                        <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Situations
+                    var facts = FactsFor(_situation);
+                    <button type="button" class="btn btn-sm btn-outline-secondary world-news-back" @onclick="ClearSelection" aria-keyshortcuts="Escape">
+                        <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Developing
                     </button>
+                    <div class="world-news-row-top">
+                        <StatusPill Tone="@Tone(_situation)">@StateLabel(_situation)</StatusPill>
+                        @KindTag(facts)
+                        @if (facts.Place is not null)
+                        {
+                            <span class="world-news-place"><i class="bi bi-geo-alt" aria-hidden="true"></i>@facts.Place</span>
+                        }
+                    </div>
                     <h2 class="world-news-detail-title">@_situation.Title</h2>
-                    <button type="button" class="btn btn-sm @(_watching ? "btn-primary" : "btn-outline-primary") mb-2" @onclick="ToggleWatchAsync">
-                        <i class="bi @(_watching ? "bi-bell-fill" : "bi-bell") me-1" aria-hidden="true"></i>@(_watching ? "Watching" : "Watch situation")
-                    </button>
-                    @if (_place is { } place)
-                    {
-                        @* Overwatch is a full page load: Cesium doesn't start under enhanced navigation. *@
-                        <a class="btn btn-sm btn-outline-secondary mb-2 ms-1" href="@($"admin/osint?news={Uri.EscapeDataString(_situation.Id)}")"
-                           data-enhance-nav="false" title="See this situation on the Overwatch globe, placed at @place.Label">
-                            <i class="bi bi-globe2 me-1" aria-hidden="true"></i>Show on Overwatch
-                        </a>
-                    }
-                    <button type="button" class="btn btn-sm btn-link mb-2" aria-expanded="@(_placing ? "true" : "false")" @onclick="TogglePlacing">
-                        Wrong place?
-                    </button>
+                    <p class="world-news-detail-meta">
+                        @WorldNewsBrowse.Count(_situation.EventCount, "event") · @WorldNewsBrowse.Seen(_situation.OutletCount, _situation.Languages.Count) ·
+                        @WorldNewsBrowse.Count(_situation.ArticleCount, "report") · first @Time(_situation.FirstSeen), latest @Time(_situation.LastSeen)
+                    </p>
+                    <div class="world-news-detail-actions">
+                        <button type="button" class="btn btn-sm @(_watching ? "btn-primary" : "btn-outline-primary")" @onclick="ToggleWatchAsync">
+                            <i class="bi @(_watching ? "bi-bell-fill" : "bi-bell") me-1" aria-hidden="true"></i>@(_watching ? "Watching" : "Watch story")
+                        </button>
+                        @if (_place is { } place)
+                        {
+                            @* Overwatch is a full page load: Cesium doesn't start under enhanced navigation. *@
+                            <a class="btn btn-sm btn-outline-secondary" href="@($"admin/osint?news={Uri.EscapeDataString(_situation.Id)}")"
+                               data-enhance-nav="false" title="See this story on the Overwatch globe, placed at @place.Label">
+                                <i class="bi bi-globe2 me-1" aria-hidden="true"></i>Show on Overwatch
+                            </a>
+                        }
+                        <button type="button" class="btn btn-sm btn-outline-secondary world-news-share" @onclick="() => ShareAsync(SituationHref(_situation.Id), _situation.Title)">
+                            <i class="bi bi-box-arrow-up me-1" aria-hidden="true"></i>@(_shareNote ?? "Share")
+                        </button>
+                        <button type="button" class="btn btn-sm btn-link" aria-expanded="@(_placing ? "true" : "false")" @onclick="TogglePlacing">
+                            Wrong place?
+                        </button>
+                    </div>
                     @if (_placing)
                     {
                         <div class="world-news-placing">
@@ -285,18 +405,11 @@ else if (_view == WorldNewsView.Situations)
                             }
                         </div>
                     }
-                    <p class="world-news-detail-meta">
-                        <StatusPill Tone="@Tone(_situation)">@State(_situation)</StatusPill>
-                        @Count(_situation.EventCount, "event"), @Count(_situation.OutletCount, "outlet"), @Count(_situation.ArticleCount, "report").
-                        First seen @_situation.FirstSeen.ToLocalGwsDateTime(), latest @_situation.LastSeen.ToLocalGwsDateTime().
-                    </p>
                     <dl class="world-news-facts">
                         <dt>Languages</dt>
                         <dd>@string.Join(", ", _situation.Languages.Order())</dd>
                         <dt>Reported from</dt>
                         <dd>@string.Join(", ", _situation.Countries.Order())</dd>
-                        <dt>Kind</dt>
-                        <dd>@SituationKinds.Label(WorldNewsMapService.KindOf(_situation))</dd>
                         @if (WorldNewsMapService.KindOf(_situation) == SituationKinds.Cyber)
                         {
                             var status = CyberStatus.Of([_situation.Title, _situation.Latest, .. _situationEvents.Select(e => e.Title)]);
@@ -309,11 +422,11 @@ else if (_view == WorldNewsView.Situations)
                         @foreach (var e in _situationEvents)
                         {
                             <li>
-                                <button type="button" class="world-news-event" @onclick="() => OpenEventAsync(e)">
-                                    <span class="world-news-event-meta">@e.FirstSeen.ToLocalGwsDateTime()</span>
+                                <a class="world-news-timeline-event" href="@EventHref(e)" @onclick="() => OpenEventAsync(e)" @onclick:preventDefault>
+                                    <time class="world-news-event-meta">@Time(e.FirstSeen)</time>
                                     <span class="world-news-event-title">@(e.Headline ?? e.Title)</span>
-                                    <span class="world-news-event-meta">@Summary(e)</span>
-                                </button>
+                                    <span class="world-news-event-meta">@WorldNewsBrowse.Seen(e.OutletCount, e.Languages.Count)</span>
+                                </a>
                             </li>
                         }
                     </ol>
@@ -328,7 +441,7 @@ else if (_events is null)
 }
 else if (_events.Count == 0)
 {
-    <EmptyState Icon="bi-globe-europe-africa" Title="No events yet"
+    <EmptyState Icon="bi-globe-europe-africa" Title="No stories yet"
                 Message="The server reads the news every 15 minutes. The first read takes a few minutes while every headline is grouped.">
         <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="ReadNow" disabled="@News.IsRefreshing">
             <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Read now
@@ -338,18 +451,16 @@ else if (_events.Count == 0)
 else
 {
     <div class="world-news @(_selected is null ? "" : "has-selection")">
-        <div class="world-news-list" aria-label="Events">
+        <div class="world-news-list" aria-label="Latest stories">
             @if (VisibleEvents.Count == 0)
             {
-                <EmptyState Icon="bi-search" Message="No events match that filter." />
+                <EmptyState Icon="bi-search" Message="No stories match those filters." />
             }
+            @{ var busiestEvent = VisibleEvents.Count == 0 ? 0 : VisibleEvents.Max(e => e.OutletCount); }
             @foreach (var e in VisibleEvents.Take(_shown))
             {
-                <button type="button" class="world-news-event @(e.Id == _selected?.Id ? "is-selected" : "")"
-                        aria-pressed="@(e.Id == _selected?.Id ? "true" : "false")" @onclick="() => SelectAsync(e)">
-                    <span class="world-news-event-title">@(e.Headline ?? e.Title)</span>
-                    <span class="world-news-event-meta">@Summary(e)</span>
-                </button>
+                @Row(EventHref(e), e.Headline ?? e.Title, FactsFor(e), WorldNewsBrowse.Seen(e.OutletCount, e.Languages.Count),
+                    Time(e.LastSeen), WorldNewsBrowse.ReachPercent(e.OutletCount, busiestEvent), e.Id == _selected?.Id, () => SelectAsync(e))
             }
             @* A page of events at a time: all 300 made a 170 KB page, sent again by the live render. *@
             @if (VisibleEvents.Count > _shown)
@@ -363,22 +474,46 @@ else
         <section class="world-news-detail" aria-live="polite">
             @if (_selected is null)
             {
-                <EmptyState Icon="bi-hand-index" Message="Pick an event to see every report on it, in every language." />
+                <EmptyState Icon="bi-hand-index" Message="Pick a story to see every report on it, in every language." />
             }
             else
             {
-                <button type="button" class="btn btn-sm btn-outline-secondary world-news-back" @onclick="() => _selected = null">
-                    <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Events
+                var facts = FactsFor(_selected);
+                <button type="button" class="btn btn-sm btn-outline-secondary world-news-back" @onclick="ClearSelection" aria-keyshortcuts="Escape">
+                    <i class="bi bi-arrow-left me-1" aria-hidden="true"></i>Latest
                 </button>
+                <div class="world-news-row-top">
+                    @KindTag(facts)
+                    @if (facts.Place is not null)
+                    {
+                        <span class="world-news-place"><i class="bi bi-geo-alt" aria-hidden="true"></i>@facts.Place</span>
+                    }
+                </div>
                 <h2 class="world-news-detail-title">@(_selected.Headline ?? _selected.Title)</h2>
                 @if (_selected.Headline is not null)
                 {
                     <p class="world-news-original">Original headline: @_selected.Title</p>
                 }
                 <p class="world-news-detail-meta">
-                    @Count(_selected.OutletCount, "outlet"), @Count(_selected.ArticleCount, "report").
-                    First seen @_selected.FirstSeen.ToLocalGwsDateTime(), latest @_selected.LastSeen.ToLocalGwsDateTime().
+                    @WorldNewsBrowse.Seen(_selected.OutletCount, _selected.Languages.Count) · @WorldNewsBrowse.Count(_selected.ArticleCount, "report") ·
+                    first @Time(_selected.FirstSeen), latest @Time(_selected.LastSeen)
                 </p>
+                <div class="world-news-detail-actions">
+                    <button type="button" class="btn btn-sm btn-primary" disabled="@_documentLoading" @onclick="OpenDocumentAsync"
+                            title="The overview, how the coverage compares, and every source with its link, in a window on this page">
+                        <i class="bi bi-file-earmark-text me-1" aria-hidden="true"></i>Read document
+                    </button>
+                    <a class="btn btn-sm btn-outline-secondary" href="@PdfHref(_selected.Id)" download title="The same document as a PDF">
+                        <i class="bi bi-file-earmark-pdf me-1" aria-hidden="true"></i>PDF
+                    </a>
+                    <button type="button" class="btn btn-sm btn-outline-secondary world-news-share" @onclick="() => ShareAsync(StoryHref(_selected.Id), _selected.Headline ?? _selected.Title)">
+                        <i class="bi bi-box-arrow-up me-1" aria-hidden="true"></i>@(_shareNote ?? "Share")
+                    </button>
+                </div>
+                @if (_documentError is not null)
+                {
+                    <p class="world-news-summary-meta text-danger" role="alert">@_documentError</p>
+                }
                 <section class="world-news-summary" aria-label="Summary">
                     @if (_summary is not null)
                     {
@@ -395,20 +530,6 @@ else
                         }
                     }
                     <p class="world-news-summary-meta">@SummaryNote</p>
-                    <div class="world-news-document-actions">
-                        <button type="button" class="btn btn-sm btn-primary" disabled="@_documentLoading" @onclick="OpenDocumentAsync"
-                                title="The overview, how the coverage compares, and every source with its link, in a window on this page">
-                            <i class="bi bi-file-earmark-text me-1" aria-hidden="true"></i>Read document
-                        </button>
-                        <a class="btn btn-sm btn-outline-secondary" href="@PdfHref(_selected.Id)" download
-                           title="The same document as a PDF">
-                            <i class="bi bi-file-earmark-pdf me-1" aria-hidden="true"></i>Download PDF
-                        </a>
-                    </div>
-                    @if (_documentError is not null)
-                    {
-                        <p class="world-news-summary-meta text-danger" role="alert">@_documentError</p>
-                    }
                 </section>
                 @if (_claims.Count > 0)
                 {
@@ -432,7 +553,7 @@ else
                                     }
                                     else if (claim.Consensus)
                                     {
-                                        <StatusPill Tone="StatusTone.Success">@Count(claim.Values[0].Outlets, "outlet") agree</StatusPill>
+                                        <StatusPill Tone="StatusTone.Success">@WorldNewsBrowse.Count(claim.Values[0].Outlets, "outlet") agree</StatusPill>
                                     }
                                 </div>
                                 @if (claim.MayHaveRisen)
@@ -469,14 +590,14 @@ else
                 </dl>
                 @foreach (var language in _articles.GroupBy(a => a.Language).OrderByDescending(g => g.Count()).ThenBy(g => g.Key))
                 {
-                    <h3 class="world-news-language">@language.Key <span>(@language.Count())</span></h3>
+                    <h3 class="world-news-language world-news-language-sticky">@language.Key <span>(@language.Count())</span></h3>
                     <ul class="world-news-reports">
                         @foreach (var a in language.OrderByDescending(a => a.SeenAt))
                         {
                             <li>
                                 <a class="world-news-report" href="@a.Url" target="_blank" rel="noopener noreferrer">
                                     <span class="world-news-report-title">@a.Title</span>
-                                    <span class="world-news-report-meta">@a.Outlet · @a.Country · @a.SeenAt.ToLocalGwsDateTime()</span>
+                                    <span class="world-news-report-meta">@a.Outlet · @a.Country · <time>@Time(a.SeenAt)</time></span>
                                 </a>
                             </li>
                         }
@@ -486,6 +607,7 @@ else
         </section>
     </div>
 }
+</div>
 
 @if (_document is not null)
 {
@@ -513,9 +635,12 @@ else
 }
 
 @code {
-    private enum WorldNewsView { Events, Situations, World, Reports }
+    private static readonly WorldNewsTab[] Tabs = [WorldNewsTab.Today, WorldNewsTab.Developing, WorldNewsTab.Latest];
+    private static readonly IReadOnlyList<string> ChipKinds = SituationKinds.All.Where(kind => kind != SituationKinds.Other).ToList();
+    // The page's own two-pane breakpoint (@container gws-main 900px in WorldNews.razor.css).
+    private const int TwoPaneWidth = 900;
 
-    private WorldNewsView _view = WorldNewsView.Events;
+    private WorldNewsTab _view = WorldNewsTab.Today;
     private IReadOnlyList<SituationOverview>? _situations;
     private SituationOverview? _situation;
     private IReadOnlyList<EventOverview> _situationEvents = [];
@@ -528,23 +653,43 @@ else
     private string _reportCountry = string.Empty;
     private string _reportLanguage = string.Empty;
     private string _reportOutlet = string.Empty;
-    private string _reportKind = string.Empty;
+    private string _kind = string.Empty;
+    private string _where = string.Empty;
     private EventSummary? _summary;
+    private EventSummary? _leadSummary;
     private IReadOnlyList<CoverageClaim> _claims = [];
     private WorldSnapshot? _world;
     private string _filter = string.Empty;
-    private int _rangeHours = 24;
+    private int _rangeHours = WorldNewsBrowse.TodayRangeHours;
     private const int PageSize = 60;
     private int _shown = PageSize;
     private string _username = string.Empty;
     private bool _watching;
     private bool _placing;
     private bool _surgeAlerts;
+    private bool _filtersOpen;
     private WorldNewsLocation? _place;
     private SituationPlacement? _correction;
     private string _placeCountry = string.Empty;
     private string _placeCity = string.Empty;
     private string? _placeMessage;
+    private string? _shareNote;
+    private readonly Dictionary<string, WorldNewsRowFacts> _facts = new(StringComparer.Ordinal);
+
+    private ElementReference _root;
+    private IJSObjectReference? _module;
+    private IJSObjectReference? _keys;
+    private bool? _wide;
+    private string? _lastUrl;
+
+    [SupplyParameterFromQuery(Name = "view")] public string? ViewQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] public string? TextQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "range")] public string? RangeQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "kind")] public string? KindQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "where")] public string? WhereQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "country")] public string? CountryQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "language")] public string? LanguageQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "outlet")] public string? OutletQuery { get; set; }
 
     [SupplyParameterFromQuery(Name = "situation")]
     public string? SituationId { get; set; }
@@ -557,96 +702,242 @@ else
     [SupplyParameterFromQuery(Name = "read")]
     public string? ReadQuery { get; set; }
 
-    private IReadOnlyList<EventOverview> VisibleEvents => string.IsNullOrWhiteSpace(_filter)
-        ? _events ?? []
-        : (_events ?? []).Where(e => e.Title.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
-            || e.Headline?.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase) == true).ToList();
+    private WorldNewsBrowseState State => new(_view, _filter, _rangeHours, _kind, _where, _reportCountry, _reportLanguage, _reportOutlet,
+        _view == WorldNewsTab.Latest ? _selected?.Id : null, _view == WorldNewsTab.Developing ? _situation?.Id : null);
 
-    private string ViewName => _view switch { WorldNewsView.Situations => "situations", WorldNewsView.World => "countries and stories", WorldNewsView.Reports => "reports", _ => "events" };
+    private string EventHref(EventOverview e) => WorldNewsBrowse.Url(State with { Tab = WorldNewsTab.Latest, EventId = e.Id, SituationId = null,
+        RangeHours = _view == WorldNewsTab.Latest ? _rangeHours : WorldNewsBrowse.DefaultRangeHours });
+
+    private string SituationHref(string id) => WorldNewsBrowse.Url(State with { Tab = WorldNewsTab.Developing, SituationId = id, EventId = null,
+        RangeHours = _view == WorldNewsTab.Developing ? _rangeHours : WorldNewsBrowse.DefaultRangeHours });
+
+    private string SearchPlaceholder => _view == WorldNewsTab.Reports ? "Search every report" : "Search stories";
+
+    private string UpdatedLine => News.IsRefreshing
+        ? "Reading the news…"
+        : News.LastRefreshed is { } at ? $"Updated {Time(at)}" : "Not read yet";
+
+    private static string Time(DateTimeOffset at) => WorldNewsBrowse.TimeLabel(at, DateTimeOffset.UtcNow);
+
+    private WorldNewsRowFacts FactsFor(EventOverview e) =>
+        _facts.TryGetValue(e.Id, out var facts) ? facts : _facts[e.Id] = WorldNewsBrowse.Facts(e);
+
+    private WorldNewsRowFacts FactsFor(SituationOverview s) =>
+        _facts.TryGetValue("s:" + s.Id, out var facts) ? facts : _facts["s:" + s.Id] = WorldNewsBrowse.Facts(s);
+
+    private IReadOnlyList<EventOverview> VisibleEvents => (_events ?? [])
+        .Where(e => WorldNewsBrowse.Matches(e.Title, e.Headline, FactsFor(e), e.Countries, e.Languages, State)).ToList();
+
+    private IReadOnlyList<SituationOverview> VisibleSituations => (_situations ?? [])
+        .Where(s => WorldNewsBrowse.Matches(s.Title, s.Latest, FactsFor(s), s.Countries, s.Languages, State)).ToList();
+
+    private IReadOnlyList<WorldStory> TodayStories => (_world?.BiggestStories ?? [])
+        .Where(story => WorldNewsBrowse.Matches(story.Event.Title, story.Event.Headline, FactsFor(story.Event), story.Event.Countries, story.Event.Languages, State))
+        .ToList();
 
     private IReadOnlyList<WorldCountry> VisibleCountries => (_world?.Countries ?? []).Where(country =>
-        string.IsNullOrWhiteSpace(_filter) || country.Name.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
-        || country.TopStories.Any(story => StoryMatches(story, _filter))).ToList();
+        (string.IsNullOrWhiteSpace(_filter) || country.Name.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
+            || country.TopStories.Any(story => WorldNewsBrowse.Contains(story.Event.Headline ?? story.Event.Title, _filter)))
+        && (_where.Length == 0 || string.Equals(country.Name, _where, StringComparison.OrdinalIgnoreCase))).ToList();
 
-    private IReadOnlyList<WorldStory> VisibleBiggestStories => (_world?.BiggestStories ?? []).Where(story => StoryMatches(story, _filter)).ToList();
+    // Where options: the countries the headlines in view are placed in.
+    private IReadOnlyList<string> WhereOptions => (_view switch
+        {
+            WorldNewsTab.Today => (_world?.BiggestStories ?? []).Select(s => FactsFor(s.Event).PlaceCountry),
+            WorldNewsTab.Developing => (_situations ?? []).Select(s => FactsFor(s).PlaceCountry),
+            _ => (_events ?? []).Select(e => FactsFor(e).PlaceCountry)
+        })
+        .OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.CurrentCulture).ToList();
 
-    private IReadOnlyList<SituationOverview> VisibleSituations => string.IsNullOrWhiteSpace(_filter)
-        ? _situations ?? []
-        : (_situations ?? []).Where(s => s.Title.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
-            || s.Latest.Contains(_filter.Trim(), StringComparison.CurrentCultureIgnoreCase)).ToList();
+    private IEnumerable<(IReadOnlyList<string> Countries, IReadOnlyList<string> Languages)> Coverage => _view switch
+    {
+        WorldNewsTab.Today => (_world?.BiggestStories ?? []).Select(s => (s.Event.Countries, s.Event.Languages)),
+        WorldNewsTab.Developing => (_situations ?? []).Select(s => (s.Countries, s.Languages)),
+        WorldNewsTab.Reports => (_reports ?? []).Select(r => ((IReadOnlyList<string>)[r.Country], (IReadOnlyList<string>)[r.Language])),
+        _ => (_events ?? []).Select(e => (e.Countries, e.Languages))
+    };
+
+    private IReadOnlyList<string> SourceCountryOptions => Coverage.SelectMany(c => c.Countries).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.CurrentCulture).ToList();
+    private IReadOnlyList<string> LanguageOptions => Coverage.SelectMany(c => c.Languages).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.CurrentCulture).ToList();
+
+    private int SourceFilterCount => new[] { _reportCountry, _reportLanguage, _reportOutlet }.Count(value => !string.IsNullOrWhiteSpace(value));
+
+    private sealed record ActiveFilter(string Label, Func<Task> Clear);
+
+    private IReadOnlyList<ActiveFilter> ActiveFilters
+    {
+        get
+        {
+            var filters = new List<ActiveFilter>();
+            if (!string.IsNullOrWhiteSpace(_filter)) filters.Add(new($"“{_filter.Trim()}”", () => { _filter = string.Empty; return ChangeTextFilterAsync(); }));
+            if (_where.Length > 0) filters.Add(new($"In {_where}", () => { _where = string.Empty; return ChangeWhereAsync(); }));
+            if (!string.IsNullOrWhiteSpace(_reportCountry)) filters.Add(new($"Reported from {_reportCountry.Trim()}", () => { _reportCountry = string.Empty; return ChangeSourceFilterAsync(); }));
+            if (!string.IsNullOrWhiteSpace(_reportLanguage)) filters.Add(new($"In {_reportLanguage.Trim()}", () => { _reportLanguage = string.Empty; return ChangeSourceFilterAsync(); }));
+            if (!string.IsNullOrWhiteSpace(_reportOutlet)) filters.Add(new($"Outlet {_reportOutlet.Trim()}", () => { _reportOutlet = string.Empty; return ChangeSourceFilterAsync(); }));
+            return filters;
+        }
+    }
+
+    // One list row: kind and place, the headline, how widely it's covered, and when. A real link,
+    // so right-click Copy link and Open in new tab work; a plain click opens it in place.
+    private RenderFragment Row(string href, string title, WorldNewsRowFacts facts, string seen, string time, int reach, bool selected,
+        Func<Task> open, string? extra = null, string? state = null, StatusTone tone = StatusTone.Neutral) =>
+        @<a class="world-news-event @(selected ? "is-selected" : "")" href="@href" aria-current="@(selected ? "true" : "false")"
+            title="@title" @onclick="open" @onclick:preventDefault>
+            <span class="world-news-row-top">
+                @if (state is not null)
+                {
+                    <StatusPill Tone="@tone">@state</StatusPill>
+                }
+                @KindTag(facts)
+                @if (facts.Place is not null)
+                {
+                    <span class="world-news-place"><i class="bi bi-geo-alt" aria-hidden="true"></i>@facts.Place</span>
+                }
+                <time class="world-news-time">@time</time>
+            </span>
+            <span class="world-news-event-title">@title</span>
+            @if (extra is not null)
+            {
+                <span class="world-news-event-meta world-news-latest">@extra</span>
+            }
+            <span class="world-news-row-bottom">
+                <span class="world-news-reach" aria-hidden="true"><span style="width: @(reach)%"></span></span>
+                <span class="world-news-event-meta">@seen</span>
+            </span>
+        </a>;
+
+    private RenderFragment KindTag(WorldNewsRowFacts facts) =>
+        @<text>@if (facts.Kind != SituationKinds.Other)
+        {
+            <span class="world-news-kind" data-kind="@facts.Kind">@facts.KindLabel</span>
+        }</text>;
 
     private string SummaryNote => _summary is null
         ? "No summary yet. After each read, the busiest events covered by 3 or more outlets are summarized in English."
-        : $"Summary by {_summary.Model} from {Count(_summary.ArticleCount, "report")}, {_summary.CreatedAt.ToLocalGwsDateTime()}"
+        : $"Summary by {_summary.Model} from {WorldNewsBrowse.Count(_summary.ArticleCount, "report")}, {_summary.CreatedAt.ToLocalGwsDateTime()}"
           + (_summary.Version > 1 ? $" (version {_summary.Version}; rewritten as coverage grows)." : ".")
           + " Written by AI from headlines and outlets' descriptions"
           + (_summary.Model.EndsWith(" on the Mac", StringComparison.Ordinal)
               ? ": check the sources before relying on a detail."
               : " by the server's small model, which can mix up who did what: check the sources before relying on a detail.");
 
-    private string StatusLine => ((News.LastRefreshed is { } at ? $"Read {at.ToLocalGwsDateTime()}. " : string.Empty) + News.Status).Trim();
-
     protected override async Task OnInitializedAsync()
     {
         News.Changed += OnNewsChanged;
         _username = await CurrentUserAccessor.GetCurrentUsernameAsync();
         _surgeAlerts = !string.IsNullOrWhiteSpace(_username) && await Task.Run(() => News.Store.IsWatchingSurges(_username));
-        if (!string.IsNullOrWhiteSpace(SituationId)) _view = WorldNewsView.Situations;
+        ApplyQuery();
         await LoadAsync();
         if (!string.IsNullOrWhiteSpace(EventQuery)
             && (_events?.FirstOrDefault(e => e.Id == EventQuery) ?? await Task.Run(() => News.Store.Event(EventQuery))) is { } linked)
         {
-            await SelectAsync(linked);
+            await OpenEventAsync(linked);
             if (ReadQuery is "1" or "true") await OpenDocumentAsync();
             return;
         }
         if (!string.IsNullOrWhiteSpace(SituationId)
             && (_situations?.FirstOrDefault(s => s.Id == SituationId) ?? await Task.Run(() => News.Store.Situation(SituationId))) is { } situation)
         {
-            _view = WorldNewsView.Situations;
+            if (_view != WorldNewsTab.Developing)
+            {
+                _view = WorldNewsTab.Developing;
+                _rangeHours = WorldNewsBrowse.RangeFor(_view, _rangeHours);
+                await LoadAsync();
+            }
             await SelectSituationAsync(situation);
         }
     }
 
+    // The address the page was opened with: a shared link, a reload, or an old-style link.
+    private void ApplyQuery()
+    {
+        _view = WorldNewsBrowse.ParseTab(ViewQuery, EventQuery, SituationId);
+        _filter = TextQuery?.Trim() ?? string.Empty;
+        _rangeHours = WorldNewsBrowse.RangeFor(_view, int.TryParse(RangeQuery, out var hours) ? hours : 0);
+        _kind = KindQuery is { } kind && ChipKinds.Contains(kind) ? kind : string.Empty;
+        _where = WhereQuery?.Trim() ?? string.Empty;
+        _reportCountry = CountryQuery?.Trim() ?? string.Empty;
+        _reportLanguage = LanguageQuery?.Trim() ?? string.Empty;
+        _reportOutlet = OutletQuery?.Trim() ?? string.Empty;
+        _filtersOpen = SourceFilterCount > 0;
+    }
+
     private async Task LoadAsync()
     {
-        if (_view == WorldNewsView.Reports)
+        if (_view == WorldNewsTab.Reports)
         {
             await LoadReportsAsync(reset: true);
+            return;
+        }
+        if (_view == WorldNewsTab.Today)
+        {
+            _world = await Task.Run(() => News.World(_rangeHours));
+            var lead = TodayStories.FirstOrDefault();
+            _leadSummary = lead is null ? null : await Task.Run(() => News.Store.LatestSummary(lead.Event.Id));
+            return;
+        }
+        if (_view == WorldNewsTab.Developing)
+        {
+            _situations = await Task.Run(() => News.TopSituations(_rangeHours));
+            if (_situation is not null) _situation = _situations.FirstOrDefault(s => s.Id == _situation.Id);
+            if (_situation is not null) _situationEvents = await Task.Run(() => News.Store.EventsForSituation(_situation.Id));
+            LoadPlacement();
             return;
         }
         _events = await Task.Run(() => News.TopEvents(_rangeHours));
         if (_selected is not null) _selected = _events.FirstOrDefault(e => e.Id == _selected.Id);
         if (_selected is not null) _summary = await Task.Run(() => News.Store.LatestSummary(_selected.Id));
-        if (_view == WorldNewsView.World)
-        {
-            _world = await Task.Run(() => News.World(_rangeHours));
-            return;
-        }
-        if (_view != WorldNewsView.Situations) return;
-        _situations = await Task.Run(() => News.TopSituations(_rangeHours));
-        if (_situation is not null) _situation = _situations.FirstOrDefault(s => s.Id == _situation.Id);
-        if (_situation is not null) _situationEvents = await Task.Run(() => News.Store.EventsForSituation(_situation.Id));
-        LoadPlacement();
     }
 
-    private Task ShowAsync(WorldNewsView view)
+    private async Task ShowAsync(WorldNewsTab view)
     {
-        if (view == WorldNewsView.World) _rangeHours = 3;
-        else if (_rangeHours == 3) _rangeHours = 24;
-        else if (view != WorldNewsView.Reports && _rangeHours > 168) _rangeHours = 168;
+        // Today always opens on "right now"; the other tabs keep a range they share.
+        _rangeHours = view == WorldNewsTab.Today ? WorldNewsBrowse.TodayRangeHours : WorldNewsBrowse.RangeFor(view, _rangeHours);
         _view = view;
         _shown = PageSize;
-        return LoadAsync();
+        await LoadAsync();
+        await SelectFirstWhenWideAsync();
+    }
+
+    private Task SearchReportsAsync()
+    {
+        _filtersOpen = _filtersOpen || SourceFilterCount > 0;
+        return ShowAsync(WorldNewsTab.Reports);
+    }
+
+    private async Task SetKindAsync(string kind)
+    {
+        _kind = kind;
+        _shown = PageSize;
+        if (_view == WorldNewsTab.Reports) await LoadReportsAsync(reset: true);
+        else if (_view == WorldNewsTab.Today) await LoadAsync();
+    }
+
+    private Task ChangeWhereAsync()
+    {
+        _shown = PageSize;
+        return _view == WorldNewsTab.Today ? LoadAsync() : Task.CompletedTask;
     }
 
     private Task ChangeTextFilterAsync()
     {
         _shown = PageSize;
-        return _view == WorldNewsView.Reports ? LoadReportsAsync(reset: true) : Task.CompletedTask;
+        return _view == WorldNewsTab.Reports ? LoadReportsAsync(reset: true) : Task.CompletedTask;
     }
 
-    private Task ReloadReportsAsync() => LoadReportsAsync(reset: true);
+    private Task ChangeSourceFilterAsync()
+    {
+        _shown = PageSize;
+        return _view == WorldNewsTab.Reports ? LoadReportsAsync(reset: true) : Task.CompletedTask;
+    }
+
+    private Task ClearFiltersAsync()
+    {
+        _filter = _where = _reportCountry = _reportLanguage = _reportOutlet = string.Empty;
+        _shown = PageSize;
+        return LoadAsync();
+    }
 
     private async Task LoadReportsAsync(bool reset)
     {
@@ -657,7 +948,7 @@ else
             _hasMoreReports = false;
         }
         var page = await Task.Run(() => News.Store.RecentReports(DateTimeOffset.UtcNow.AddHours(-_rangeHours),
-            PageSize + 1, _reportOffset, _filter, _reportCountry, _reportLanguage, _reportOutlet, _reportKind));
+            PageSize + 1, _reportOffset, _filter, _reportCountry, _reportLanguage, _reportOutlet, _kind));
         var shown = page.Take(PageSize).ToArray();
         _reports = reset ? shown : [.. _reports ?? [], .. shown];
         _reportOffset += shown.Length;
@@ -673,10 +964,29 @@ else
     private async Task SelectSituationAsync(SituationOverview situation)
     {
         _situation = situation;
+        _shareNote = null;
         _situationEvents = await Task.Run(() => News.Store.EventsForSituation(situation.Id));
         _watching = await Task.Run(() => News.Store.IsWatching(_username, situation.Id));
         _placing = false;
         LoadPlacement();
+    }
+
+    private async Task OpenSituationAsync(string situationId)
+    {
+        _rangeHours = WorldNewsBrowse.DefaultRangeHours;
+        _view = WorldNewsTab.Developing;
+        _shown = PageSize;
+        await LoadAsync();
+        if ((_situations?.FirstOrDefault(s => s.Id == situationId) ?? await Task.Run(() => News.Store.Situation(situationId))) is { } situation)
+            await SelectSituationAsync(situation);
+    }
+
+    // Narrow windows show the list again; wide ones keep a story open, so this only shows there.
+    private void ClearSelection()
+    {
+        _selected = null;
+        _situation = null;
+        _shareNote = null;
     }
 
     // Where Overwatch puts the open situation, and any hand correction of it.
@@ -716,6 +1026,7 @@ else
         _placeMessage = WorldNewsMap.Correct(_situation.Id, _placeCountry, _placeCity, _username, DateTimeOffset.UtcNow);
         if (_placeMessage is not null) return;
         _placing = false;
+        _facts.Remove("s:" + _situation.Id);
         LoadPlacement();
     }
 
@@ -751,18 +1062,25 @@ else
         _watching = !_watching;
     }
 
-    // An event in a situation opens in the Events view, with all its reports.
+    // A story from Today, a situation's timeline or a country card opens in Latest, with all its reports.
     private async Task OpenEventAsync(EventOverview e)
     {
-        if (_rangeHours == 3) _rangeHours = 24;
-        _view = WorldNewsView.Events;
-        await SelectAsync(e);
+        var range = _view == WorldNewsTab.Latest ? _rangeHours : WorldNewsBrowse.DefaultRangeHours;
+        if (_view != WorldNewsTab.Latest || _events is null)
+        {
+            _view = WorldNewsTab.Latest;
+            _rangeHours = range;
+            _shown = PageSize;
+            await LoadAsync();
+        }
+        await SelectAsync(_events?.FirstOrDefault(item => item.Id == e.Id) ?? e);
     }
 
-    private Task ChangeRangeAsync()
+    private async Task ChangeRangeAsync()
     {
         _shown = PageSize;
-        return LoadAsync();
+        await LoadAsync();
+        await SelectFirstWhenWideAsync();
     }
 
     private async Task SelectAsync(EventOverview e)
@@ -771,11 +1089,35 @@ else
         _summary = null;
         _claims = [];
         _documentError = null;
+        _shareNote = null;
         (_articles, _summary, _claims) = await Task.Run(() =>
         {
             var articles = News.Store.ArticlesForEvent(e.Id);
             return (articles, News.Store.LatestSummary(e.Id), CoverageClaims.For(articles));
         });
+    }
+
+    // A wide window always has a story open beside the list (as Mail does); a narrow one shows
+    // the list first, since the story would cover it.
+    private async Task SelectFirstWhenWideAsync()
+    {
+        if (_wide != true) return;
+        if (_view == WorldNewsTab.Latest && _selected is null && VisibleEvents.FirstOrDefault() is { } first) await SelectAsync(first);
+        else if (_view == WorldNewsTab.Developing && _situation is null && VisibleSituations.FirstOrDefault() is { } top) await SelectSituationAsync(top);
+    }
+
+    private async Task ShareAsync(string href, string title)
+    {
+        if (_module is null) return;
+        try
+        {
+            var result = await _module.InvokeAsync<string>("share", href, title);
+            _shareNote = result switch { "copied" => "Link copied", "failed" => "Couldn't share", _ => null };
+        }
+        catch (JSException)
+        {
+            _shareNote = "Couldn't share";
+        }
     }
 
     private static string ValueText(ClaimValue value) => EventDocument.ValueText(value);
@@ -785,29 +1127,15 @@ else
 
     private void OnNewsChanged() => _ = InvokeAsync(async () =>
     {
+        _facts.Clear();
         await LoadAsync();
         StateHasChanged();
     });
 
-    private static string Summary(EventOverview e) =>
-        $"{Count(e.OutletCount, "outlet")} · {Count(e.Languages.Count, "language")} · {Count(e.Countries.Count, "country", "countries")} · {e.LastSeen.ToLocalGwsDateTime()}";
-
-    private static string State(SituationOverview s) => SituationLinker.IsActive(s.LastSeen, DateTimeOffset.UtcNow) ? "Active" : "Quiet";
+    private static string StateLabel(SituationOverview s) => SituationLinker.IsActive(s.LastSeen, DateTimeOffset.UtcNow) ? "Active" : "Quiet";
 
     private static StatusTone Tone(SituationOverview s) =>
         SituationLinker.IsActive(s.LastSeen, DateTimeOffset.UtcNow) ? StatusTone.Success : StatusTone.Neutral;
-
-    private static string SituationSummary(SituationOverview s) =>
-        $"{Count(s.EventCount, "event")} · {Count(s.OutletCount, "outlet")} · {Count(s.Languages.Count, "language")} · {s.LastSeen.ToLocalGwsDateTime()}";
-
-    private static string WorldStorySummary(WorldStory story) =>
-        $"{Count(story.RecentOutlets, "outlet")} · {Count(story.RecentReports, "report")} · {Count(story.Event.Countries.Count, "country", "countries")}";
-
-    private static bool StoryMatches(WorldStory story, string filter) => string.IsNullOrWhiteSpace(filter)
-        || story.Event.Title.Contains(filter.Trim(), StringComparison.CurrentCultureIgnoreCase)
-        || story.Event.Headline?.Contains(filter.Trim(), StringComparison.CurrentCultureIgnoreCase) == true;
-
-    private static string Count(int n, string one, string? many = null) => $"{n:N0} {(n == 1 ? one : many ?? one + "s")}";
 
     // The event's document in a dialog (WorldNewsStoryView, as on the story page), which writes
     // SentinelGPT's analysis when it's due.
@@ -852,9 +1180,40 @@ else
         if (e.Key == "Escape") CloseDocument();
     }
 
-    // Focus goes into the dialog when it opens, so Escape reaches it and screen readers land there.
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            try
+            {
+                _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/world-news.js");
+                _keys = await _module.InvokeAsync<IJSObjectReference>("attach", _root);
+                _wide = await _module.InvokeAsync<bool>("isWide", _root, TwoPaneWidth);
+                if (_wide == true && _selected is null && _situation is null && _view is WorldNewsTab.Latest or WorldNewsTab.Developing)
+                {
+                    await SelectFirstWhenWideAsync();
+                    StateHasChanged();
+                }
+            }
+            catch (JSDisconnectedException)
+            {
+                return;
+            }
+        }
+        // The address follows the page, so a reload or a copied link opens this same view.
+        var url = WorldNewsBrowse.Url(State);
+        if (_module is not null && url != _lastUrl)
+        {
+            _lastUrl = url;
+            try
+            {
+                await _module.InvokeVoidAsync("setUrl", url);
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+        }
+        // Focus goes into the dialog when it opens, so Escape reaches it and screen readers land there.
         if (!_focusDocument || _document is null) return;
         _focusDocument = false;
         try
@@ -867,5 +1226,21 @@ else
         }
     }
 
-    public void Dispose() => News.Changed -= OnNewsChanged;
+    public async ValueTask DisposeAsync()
+    {
+        News.Changed -= OnNewsChanged;
+        try
+        {
+            if (_keys is not null)
+            {
+                await _keys.InvokeVoidAsync("dispose");
+                await _keys.DisposeAsync();
+            }
+            if (_module is not null) await _module.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            // The circuit has gone; the browser dropped the listeners with the page.
+        }
+    }
 }
