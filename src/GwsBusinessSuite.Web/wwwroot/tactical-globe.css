@@ -333,6 +333,36 @@
     margin: 0.5rem 0 0;
 }
 
+/* The Mac map's list of pins that share one spot (12-11-26). */
+.tg-native-choices .tg-convergence-items {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    gap: 0.25rem;
+}
+
+.tg-native-choice {
+    width: 100%;
+    min-height: 44px;
+    padding: 0.45rem 0.6rem;
+    text-align: left;
+    color: inherit;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 6px;
+}
+
+.tg-native-choice:hover,
+.tg-native-choice:focus-visible {
+    border-color: currentColor;
+}
+
+.tg-native-choice-place {
+    display: block;
+    opacity: 0.7;
+    font-size: 0.85em;
+}
+
 .tg-world-news-sources {
     list-style: none;
     padding: 0;

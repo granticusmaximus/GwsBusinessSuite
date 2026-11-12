@@ -43,7 +43,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
         bridge.Should().Contain("case \"startPickPoint\"");
         bridge.Should().Contain("case \"mapTap\"");
         bridge.Should().Contain("_map.ConvertPoint(point, _map)");
-        bridge.Should().Contain("if (HitTest(point) is { } view) Activate(view.Annotation);");
+        bridge.Should().Contain("if (HitTest(point) is { } view)").And.Contain("Activate(view.Annotation);");
         bridge.Should().Contain("case \"setThreeD\"");
         bridge.Should().Contain("MKMapType.HybridFlyover");
     }
@@ -141,7 +141,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
 
         bridge.Should().Contain("var frame = view.ConvertRectToView(view.Bounds, _map);")
             .And.Contain("if (frame.Contains(point))")
-            .And.Contain("NativeOverwatchOperations.Selectable.Contains(native.Operation)");
+            .And.Contain("NativeOverwatchOperations.Selectable.Contains(pin.Operation)");
         bridge.Should().Contain("_map.ShowAnnotations(members, true)")
             .And.Contain("annotation is MKClusterAnnotation cluster")
             .And.Contain("cluster.MemberAnnotations.Length.ToString(CultureInfo.InvariantCulture)");
@@ -149,6 +149,13 @@ public sealed class NativeOverwatchMacMapBridgeTests
             .And.Contain("mapView.DeselectAnnotation(annotation, false)")
             .And.Contain("view.CanShowCallout = false")
             .And.NotContain("_map.SelectAnnotation(");
+        // A pile that zooming can't split (news at one city) goes to the page as a list, members
+        // matched to our pins by native handle; every click outcome is logged (12-11-26).
+        bridge.Should().Contain("var pins = members.Select(Resolve).OfType<NativeAnnotation>().Where(IsSelectable).ToList();")
+            .And.Contain("native.selectedMany(group)")
+            .And.Contain(".FirstOrDefault(pin => pin.Handle == handle.Handle)")
+            .And.Contain("gws-overwatch-map.log")
+            .And.Contain("MapLog($\"{operation} failed:");
     }
 
     [Fact]

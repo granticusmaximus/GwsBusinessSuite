@@ -102,6 +102,9 @@ public sealed class ReconnectModalBrowserTests(PlaywrightBrowserFixture fixture)
         }));
         await page.GotoAsync("http://localhost/harness");
         await page.AddScriptTagAsync(new PageAddScriptTagOptions { Type = "module", Url = "http://localhost/reconnect.js" });
+        // An installed clock still runs in real time. Paused, time moves only by RunForAsync, so a
+        // slow CI runner can't spend the 2.5 s grace between steps (CI failed that way, 12-11-26).
+        await page.Clock.PauseAtAsync(DateTime.UtcNow.AddMinutes(1));
         return page;
     }
 }

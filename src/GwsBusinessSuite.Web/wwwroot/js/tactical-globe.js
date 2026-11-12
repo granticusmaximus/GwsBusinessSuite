@@ -11,13 +11,16 @@
 // <script> block in the .razor page (the usual place this line lives in Cesium's own getting-
 // started docs) would simply never run.
 window.CESIUM_BASE_URL = 'https://cdn.jsdelivr.net/npm/cesium@1.144.0/Build/Cesium/';
-const cesiumVersionCacheBuster = 'v=1.144.0';
-if (window.Cesium && typeof window.Cesium.buildModuleUrl === 'function') {
+// In a block, once: this file can run twice (see the guard below), and a top-level const threw
+// "already declared" on the second run, on every Overwatch visit (found 12-11-26).
+if (window.Cesium && typeof window.Cesium.buildModuleUrl === 'function' && !window.Cesium.buildModuleUrl.__gwsVersioned) {
+    const cesiumVersionCacheBuster = 'v=1.144.0';
     const originalBuildModuleUrl = window.Cesium.buildModuleUrl.bind(window.Cesium);
     window.Cesium.buildModuleUrl = function (url) {
         const resolved = originalBuildModuleUrl(url);
         return resolved.includes('?') ? resolved : resolved + '?' + cesiumVersionCacheBuster;
     };
+    window.Cesium.buildModuleUrl.__gwsVersioned = true;
 }
 
 
@@ -4678,7 +4681,52 @@ window.tacticalGlobe = (function () {
             if (nativeDotNetRef) nativeDotNetRef.invokeMethodAsync('OnGlobeViewChanged', region[0], region[1], region[2], region[3]);
         };
 
+        // Pins the native map can't split by zooming (news stories placed at one country or city
+        // share a coordinate) arrive together; list them and open the one chosen.
+        const nativeLayerNames = {
+            setCameraPins: 'CAMERA', setWorldNews: 'NEWS', setNewsShading: 'NEWS', setAircraft: 'AIRCRAFT',
+            setRoadWeather: 'ROAD WEATHER', setMessageSigns: 'SIGN', setTrafficIncidents: 'INCIDENT',
+            setConvergence: 'SIGNALS', setSatellites: 'SATELLITE', setHazards: 'HAZARD', setInternetOutages: 'INTERNET',
+            setAirportStatus: 'AIRPORT', setTravelAdvice: 'TRAVEL', setFireHotspots: 'FIRE', setConflict: 'CONFLICT',
+            setHumanitarian: 'HUMANITARIAN', setMapNotes: 'NOTE'
+        };
+        const openNativeChoices = function (group) {
+            const items = (group && group.items) || [];
+            if (items.length === 0) return;
+            if (items.length === 1) { window.gwsNativeOverwatch.selected(items[0]); return; }
+            closeIncidentPanel();
+            const panel = document.createElement('div');
+            panel.className = 'tg-stream-panel tg-incident-panel tg-native-choices';
+            const total = group.total || items.length;
+            panel.innerHTML =
+                '<div class="tg-stream-panel-header"><span>' + escapeHtml(String(total)) + ' HERE</span>' +
+                '<button type="button" class="tg-stream-panel-close" aria-label="Close">X</button></div>' +
+                '<div class="tg-stream-panel-body"><ul class="tg-convergence-items">' +
+                items.map(function (item, index) {
+                    const p = item.payload || {};
+                    const title = p.title || p.name || p.label || p.callsign || p.code || p.id || 'Untitled';
+                    const where = p.place || p.country || '';
+                    return '<li><button type="button" class="tg-native-choice" data-index="' + index + '">' +
+                        '<strong>' + escapeHtml(nativeLayerNames[item.operation] || 'PIN') + '</strong> ' + escapeHtml(String(title)) +
+                        (where ? ' <span class="tg-native-choice-place">' + escapeHtml(String(where)) + '</span>' : '') +
+                        '</button></li>';
+                }).join('') +
+                '</ul>' + (total > items.length ? '<div class="tg-stream-panel-meta">SHOWING ' + items.length + ' OF ' + total + '. ZOOM IN FOR THE REST.</div>' : '') +
+                '</div>';
+            panel.querySelector('.tg-stream-panel-close').addEventListener('click', closeIncidentPanel);
+            panel.querySelectorAll('.tg-native-choice').forEach(function (button) {
+                button.addEventListener('click', function () {
+                    const chosen = items[Number(button.dataset.index)];
+                    closeIncidentPanel();
+                    window.gwsNativeOverwatch.selected(chosen);
+                });
+            });
+            if (!openAsModal(panel, closeIncidentPanel)) return;
+            incidentPanel = panel;
+        };
+
         window.gwsNativeOverwatch = {
+            selectedMany: function (group) { openNativeChoices(group); },
             regionChanged: function (north, south, east, west) {
                 const region = [north, south, east, west];
                 if (nativePointer && nativeMoved) { nativeDeferredRegion = region; return; }

@@ -55,7 +55,39 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         var operation = (body["operation"] as NSString)?.ToString();
         if (string.IsNullOrWhiteSpace(operation) || operation.Length > 80) return;
         var arguments = body["arguments"] is NSArray array ? array.Select(ToPlainValue).ToArray() : [];
-        MainThread.BeginInvokeOnMainThread(() => Apply(operation, arguments));
+        MainThread.BeginInvokeOnMainThread(() =>
+        {
+            try
+            {
+                Apply(operation, arguments);
+            }
+            catch (Exception ex)
+            {
+                // A bad payload must not take the app down or fail without a trace.
+                MapLog($"{operation} failed: {ex.GetType().Name}: {ex.Message}");
+            }
+        });
+    }
+
+    // What the map did with each click, and anything that failed, in the app's container
+    // (~/Library/Containers/net.gwsapp.businesssuite/Data/Library/gws-overwatch-map.log). The
+    // only way to see why a click on the native map did nothing; restarts past 256 KB.
+    private static readonly string MapLogPath = Path.Combine(FileSystem.Current.AppDataDirectory, "gws-overwatch-map.log");
+
+    private static void MapLog(string message)
+    {
+        try
+        {
+            var file = new FileInfo(MapLogPath);
+            if (file.Exists && file.Length > 256 * 1024) file.Delete();
+            File.AppendAllText(MapLogPath, $"{DateTime.Now:dd-MM-yy HH:mm:ss.fff} {message}{Environment.NewLine}");
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
     }
 
     private void Apply(string operation, object?[] arguments)
@@ -305,7 +337,12 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             return;
         }
 
-        if (HitTest(point) is { } view) Activate(view.Annotation);
+        if (HitTest(point) is { } view)
+        {
+            Activate(view.Annotation);
+            return;
+        }
+        MapLog($"click at {x:0.000},{y:0.000}: no pin within reach");
     }
 
     // The pin the user clicked: the drawn marker under the pointer (its balloon sits above the
@@ -352,16 +389,15 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         }
     }
 
-    private static bool IsSelectable(IMKAnnotation? annotation) => annotation switch
-    {
-        NativeAnnotation native => NativeOverwatchOperations.Selectable.Contains(native.Operation),
-        MKClusterAnnotation => true,
-        _ => false
-    };
+    private bool IsSelectable(IMKAnnotation? annotation) =>
+        annotation is MKClusterAnnotation
+        || (Resolve(annotation) is { } pin && NativeOverwatchOperations.Selectable.Contains(pin.Operation));
 
     // Opens a pin's window directly rather than through MapKit selection, which ignores a second
-    // click on the pin it already has selected. A cluster zooms to its members; one whose members
-    // sit on the same spot (a camera mast, say) can't be split, so it opens the first instead.
+    // click on the pin it already has selected. A cluster zooms to its members, unless they can't
+    // be split: news stories placed at the same country or city sit on one coordinate, and a
+    // cluster still there at street level won't split either. Then the page lists them all to
+    // choose from (before 12-11-26 it opened only "the first", and a news pile opened nothing).
     private void Activate(IMKAnnotation? target)
     {
         if (target is MKClusterAnnotation cluster)
@@ -370,18 +406,61 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             if (members.Length == 0) return;
             var latitudes = members.Select(member => member.Coordinate.Latitude).ToList();
             var longitudes = members.Select(member => member.Coordinate.Longitude).ToList();
-            var stacked = latitudes.Max() - latitudes.Min() < 0.0005 && longitudes.Max() - longitudes.Min() < 0.0005;
-            if (!stacked)
+            var stacked = latitudes.Max() - latitudes.Min() < StackedDegrees && longitudes.Max() - longitudes.Min() < StackedDegrees;
+            var closest = _map.Camera.CenterCoordinateDistance <= StreetLevelMetres;
+            if (!stacked && !closest)
             {
+                MapLog($"cluster of {members.Length}: zooming to its pins");
                 _map.ShowAnnotations(members, true);
                 return;
             }
-            target = members.FirstOrDefault(member => IsSelectable(member));
+            var pins = members.Select(Resolve).OfType<NativeAnnotation>().Where(IsSelectable).ToList();
+            MapLog($"cluster of {members.Length} that won't split: {pins.Count} to choose from");
+            if (pins.Count == 1)
+            {
+                Send(pins[0]);
+            }
+            else if (pins.Count > 1)
+            {
+                var json = JsonSerializer.Serialize(new
+                {
+                    items = pins.Take(MaximumChoices).Select(pin => new { operation = pin.Operation, payload = pin.Payload }),
+                    total = pins.Count
+                });
+                // A page from before 12-11-26 has no list; it opens the first, as the app did.
+                _ = SendAsync("(function (group) { const native = window.gwsNativeOverwatch; if (!native) return; " +
+                    $"if (native.selectedMany) native.selectedMany(group); else native.selected(group.items[0]); }})({json})");
+            }
+            return;
         }
-        if (target is not NativeAnnotation annotation || !IsSelectable(annotation)) return;
+        if (Resolve(target) is not { } annotation || !IsSelectable(annotation))
+        {
+            MapLog($"click on a pin that opens nothing ({target?.GetType().Name ?? "none"})");
+            return;
+        }
+        Send(annotation);
+    }
+
+    private void Send(NativeAnnotation annotation)
+    {
+        MapLog($"opening {annotation.Operation}: {annotation.Title}");
         var json = JsonSerializer.Serialize(new { operation = annotation.Operation, payload = annotation.Payload });
         _ = SendAsync($"window.gwsNativeOverwatch && window.gwsNativeOverwatch.selected({json})");
     }
+
+    // MapKit can hand an annotation back as its own wrapper rather than our NativeAnnotation
+    // (a cluster's members especially); match it to ours by its native handle.
+    private NativeAnnotation? Resolve(IMKAnnotation? annotation)
+    {
+        if (annotation is NativeAnnotation native) return native;
+        if (annotation is not NSObject handle) return null;
+        return _annotations.Values.SelectMany(pins => pins.Values).OfType<NativeAnnotation>()
+            .FirstOrDefault(pin => pin.Handle == handle.Handle);
+    }
+
+    private const double StackedDegrees = 0.0005;
+    private const double StreetLevelMetres = 1500;
+    private const int MaximumChoices = 30;
 
     private void Clear(string operation)
     {

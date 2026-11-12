@@ -475,6 +475,24 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
         consoleErrors.Should().BeEmpty();
     }
 
+    // Blazor can run this page's <script> tag a second time when the circuit takes over (see the
+    // guard at the top of tactical-globe.js). The second run must be silent: a top-level const
+    // threw "already declared" on every Overwatch visit until 12-11-26.
+    [Fact]
+    public async Task Script_ShouldRunASecondTimeWithoutAnError()
+    {
+        var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
+        await using var pageScope = page;
+        var pageErrors = new List<string>();
+        page.PageError += (_, error) => pageErrors.Add(error);
+
+        await page.AddScriptTagAsync(new PageAddScriptTagOptions { Url = "http://localhost/js/tactical-globe.js" });
+        await page.WaitForTimeoutAsync(300);
+
+        pageErrors.Should().BeEmpty();
+        consoleErrors.Should().BeEmpty();
+    }
+
     // Mac app (12-11-26): a click with a pixel or two of trackpad jitter is still a click, a drag
     // pans once per frame, and wheel ticks become one smooth zoom instead of a queue of 2x jumps.
     [Fact]
@@ -585,6 +603,34 @@ public sealed class OverwatchGridScriptBrowserTests(PlaywrightBrowserFixture fix
             """);
         await page.WaitForSelectorAsync(".tg-selection-indicator:has-text('SELECTED: 1')", new PageWaitForSelectorOptions { Timeout = 5000 });
         (await page.QuerySelectorAsync(".tg-stream-panel:not(.tg-incident-panel)")).Should().BeNull("select mode adds the camera instead of opening it");
+
+        // A news pin as it comes back from the native map: nulls kept, numbers as numbers.
+        await page.EvaluateAsync("""
+            () => window.gwsNativeOverwatch.selected({ operation: 'setWorldNews', payload: {
+                id: 's-1', title: 'Floods hit Valencia', latest: 'Floods hit Valencia', country: 'Spain', place: 'Valencia, Spain',
+                precision: 'city', kind: 'disaster', kindLabel: 'Disasters', status: null, statusMeaning: null, active: true, surge: null,
+                lat: 39.47, lon: -0.38, eventCount: 3, outletCount: 12, reportCount: 20, lastSeen: '12-11-26 09:00', summary: null,
+                href: '/admin/world-news?situation=s-1', sources: [ { outlet: 'El País', title: 'Inundaciones', url: 'https://elpais.com/x' } ] } })
+            """);
+        await page.WaitForSelectorAsync(".tg-incident-panel:has-text('Floods hit Valencia')", new PageWaitForSelectorOptions { Timeout = 5000 });
+        (await page.InnerTextAsync(".tg-incident-panel")).Should().Contain("REPORTED NEWS").And.Contain("El País: Inundaciones");
+        await page.ClickAsync(".tg-incident-panel .tg-stream-panel-close");
+
+        // News stories placed at the same city share a coordinate, so the native map can't split
+        // them by zooming: it sends them together and the page lists them to choose from.
+        await page.EvaluateAsync("""
+            () => window.gwsNativeOverwatch.selectedMany({ total: 3, items: [
+                { operation: 'setWorldNews', payload: { id: 'n1', title: 'Story one', latest: 'Story one', place: 'Madrid, Spain', sources: [] } },
+                { operation: 'setWorldNews', payload: { id: 'n2', title: 'Story <two>', latest: 'Story <two>', place: 'Madrid, Spain', sources: [] } },
+                { operation: 'setWorldNews', payload: { id: 'n3', title: 'Story three', latest: 'Story three', place: 'Madrid, Spain', sources: [] } } ] })
+            """);
+        await page.WaitForSelectorAsync(".tg-native-choices:has-text('3 HERE')", new PageWaitForSelectorOptions { Timeout = 5000 });
+        (await page.Locator(".tg-native-choice").CountAsync()).Should().Be(3);
+        (await page.InnerTextAsync(".tg-native-choices")).Should().Contain("Story <two>", "titles are escaped, not parsed");
+        await page.ClickAsync(".tg-native-choice >> nth=1");
+        await page.WaitForSelectorAsync(".tg-incident-panel:has-text('REPORTED NEWS'):has-text('Story <two>')", new PageWaitForSelectorOptions { Timeout = 5000 });
+        (await page.QuerySelectorAsync(".tg-native-choices")).Should().BeNull("choosing closes the list");
+        await page.ClickAsync(".tg-incident-panel .tg-stream-panel-close");
 
         await page.EvaluateAsync("""
             () => window.gwsNativeOverwatch.selected({ operation: 'setHazards', payload: { id: 'gdacs-TC-1', kind: 'cyclone', title: 'Tropical Cyclone A', detail: '', severity: 'major', url: 'https://www.gdacs.org', lat: 15.8, lon: 80.2 } })
