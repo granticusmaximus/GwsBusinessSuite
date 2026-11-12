@@ -144,7 +144,13 @@ public sealed class NativeOverwatchMacMapBridgeTests
             .And.Contain("NativeOverwatchOperations.Selectable.Contains(pin.Operation)");
         bridge.Should().Contain("_map.ShowAnnotations(members, true)")
             .And.Contain("annotation is MKClusterAnnotation cluster")
-            .And.Contain("cluster.MemberAnnotations.Length.ToString(CultureInfo.InvariantCulture)");
+            .And.Contain("ClusterCount(annotation).ToString(CultureInfo.InvariantCulture)");
+        // MapKit can hand a cluster over as a plain IMKAnnotation wrapper; a bare type check missed
+        // it, so clusters drew red ("7", "+6 more") and ignored clicks (12-11-26).
+        bridge.Should().Contain("native.IsKindOfClass(ClusterClass)")
+            .And.Contain("ValueForKey(new NSString(\"memberAnnotations\"))")
+            .And.Contain("if (ClusterMembers(target) is { } members)")
+            .And.Contain("if (IsCluster(annotation))");
         bridge.Should().Contain("window.gwsNativeOverwatch && window.gwsNativeOverwatch.selected({json})")
             .And.Contain("mapView.DeselectAnnotation(annotation, false)")
             .And.Contain("view.CanShowCallout = false")
@@ -153,7 +159,7 @@ public sealed class NativeOverwatchMacMapBridgeTests
         // matched to our pins by native handle; every click outcome is logged (12-11-26).
         bridge.Should().Contain("var pins = members.Select(Resolve).OfType<NativeAnnotation>().Where(IsSelectable).ToList();")
             .And.Contain("native.selectedMany(group)")
-            .And.Contain(".FirstOrDefault(pin => pin.Handle == handle.Handle)")
+            .And.Contain(".FirstOrDefault(pin => pin.Handle == handle)")
             .And.Contain("gws-overwatch-map.log")
             .And.Contain("MapLog($\"{operation} failed:");
     }

@@ -390,7 +390,7 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     }
 
     private bool IsSelectable(IMKAnnotation? annotation) =>
-        annotation is MKClusterAnnotation
+        IsCluster(annotation)
         || (Resolve(annotation) is { } pin && NativeOverwatchOperations.Selectable.Contains(pin.Operation));
 
     // Opens a pin's window directly rather than through MapKit selection, which ignores a second
@@ -400,9 +400,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     // choose from (before 12-11-26 it opened only "the first", and a news pile opened nothing).
     private void Activate(IMKAnnotation? target)
     {
-        if (target is MKClusterAnnotation cluster)
+        if (ClusterMembers(target) is { } members)
         {
-            var members = cluster.MemberAnnotations;
             if (members.Length == 0) return;
             var latitudes = members.Select(member => member.Coordinate.Latitude).ToList();
             var longitudes = members.Select(member => member.Coordinate.Longitude).ToList();
@@ -453,10 +452,34 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     private NativeAnnotation? Resolve(IMKAnnotation? annotation)
     {
         if (annotation is NativeAnnotation native) return native;
-        if (annotation is not NSObject handle) return null;
-        return _annotations.Values.SelectMany(pins => pins.Values).OfType<NativeAnnotation>()
-            .FirstOrDefault(pin => pin.Handle == handle.Handle);
+        return annotation is NSObject handle ? ResolveHandle(handle.Handle) : null;
     }
+
+    // MapKit's cluster as ours to act on. Since macOS 27 it can reach managed code as a plain
+    // IMKAnnotation wrapper rather than MKClusterAnnotation (12-11-26): the type check failed, so
+    // clusters drew in MapKit's default red ("7", "+6 more") and a click on one did nothing.
+    // Recognise it by its native class and read its members through key-value coding.
+    private static readonly ObjCRuntime.Class ClusterClass = new(typeof(MKClusterAnnotation));
+
+    internal static bool IsCluster(IMKAnnotation? annotation) =>
+        annotation is MKClusterAnnotation || (annotation is NSObject native && native.IsKindOfClass(ClusterClass));
+
+    private IMKAnnotation[]? ClusterMembers(IMKAnnotation? annotation)
+    {
+        if (annotation is MKClusterAnnotation cluster) return cluster.MemberAnnotations;
+        if (!IsCluster(annotation)) return null;
+        if (((NSObject)annotation!).ValueForKey(new NSString("memberAnnotations")) is not NSArray array) return [];
+        return (NSArray.FromArray<NSObject>(array) ?? [])
+            .Select(member => member as IMKAnnotation ?? ResolveHandle(member.Handle))
+            .OfType<IMKAnnotation>().ToArray();
+    }
+
+    internal static nuint ClusterCount(IMKAnnotation annotation) =>
+        annotation is MKClusterAnnotation cluster ? (nuint)cluster.MemberAnnotations.Length
+        : ((NSObject)annotation).ValueForKey(new NSString("memberAnnotations")) is NSArray array ? array.Count : 0;
+
+    private NativeAnnotation? ResolveHandle(ObjCRuntime.NativeHandle handle) =>
+        _annotations.Values.SelectMany(pins => pins.Values).OfType<NativeAnnotation>().FirstOrDefault(pin => pin.Handle == handle);
 
     private const double StackedDegrees = 0.0005;
     private const double StreetLevelMetres = 1500;
@@ -553,14 +576,14 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
     {
         public override MKAnnotationView GetViewForAnnotation(MKMapView mapView, IMKAnnotation annotation)
         {
-            if (annotation is MKClusterAnnotation cluster)
+            if (IsCluster(annotation))
             {
                 var clusterView = mapView.DequeueReusableAnnotation("gws-cluster") as MKMarkerAnnotationView
                     ?? new MKMarkerAnnotationView(annotation, "gws-cluster");
-                clusterView.Annotation = cluster;
+                clusterView.Annotation = annotation;
                 clusterView.CanShowCallout = false;
                 clusterView.MarkerTintColor = UIColor.SystemGreen;
-                clusterView.GlyphText = cluster.MemberAnnotations.Length.ToString(CultureInfo.InvariantCulture);
+                clusterView.GlyphText = ClusterCount(annotation).ToString(CultureInfo.InvariantCulture);
                 return clusterView;
             }
             if (annotation is not NativeAnnotation native) return new MKMarkerAnnotationView(annotation, null);
