@@ -40,7 +40,7 @@ AI droplet:
 | --- | --- | --- |
 | 1 | Time slider for every layer (72 h replay + what changed) | |
 | 2 | Layer health panel | |
-| 3 | Satellite scenes on click (Earth Search STAC, before/after) | |
+| 3 | Satellite scenes on click (Earth Search STAC, before/after) | done via Planetary Computer (STAC + tiles, CORS); GIBS HLS too coarse in 3857 |
 | 4 | Night lights (NASA Black Marble via GIBS) | done (web + Mac map) |
 | 5 | Chokepoints and ports (IMF PortWatch) | done (ChokepointService, SEA group, Mac map) |
 | 6 | Flight anomalies (emergency squawks, holding, diversions) | squawks done; holding/diversions need track history (not kept) |

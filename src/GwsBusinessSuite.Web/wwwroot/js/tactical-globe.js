@@ -3370,6 +3370,42 @@ window.tacticalGlobe = (function () {
         entry.viewer.scene.requestRender();
     }
 
+    // Satellite scenes (13-11-26): a Sentinel-2 scene ("after") over the globe, and optionally an
+    // earlier one ("before") on the left of a split the slider moves (Cesium's splitDirection).
+    function sceneLayer(entry, template) {
+        const provider = new Cesium.UrlTemplateImageryProvider({ url: template, maximumLevel: 18, credit: 'Sentinel-2 (ESA Copernicus) via Microsoft Planetary Computer' });
+        return entry.viewer.imageryLayers.addImageryProvider(provider);
+    }
+
+    function setSatelliteScene(containerId, spec) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        (entry.satelliteScenes || []).forEach(function (layer) { entry.viewer.imageryLayers.remove(layer, true); });
+        entry.satelliteScenes = [];
+        if (spec && spec.after) {
+            const after = sceneLayer(entry, spec.after);
+            entry.satelliteScenes.push(after);
+            if (spec.before) {
+                const before = sceneLayer(entry, spec.before);
+                before.splitDirection = Cesium.SplitDirection.LEFT;
+                after.splitDirection = Cesium.SplitDirection.RIGHT;
+                entry.satelliteScenes.push(before);
+                entry.viewer.scene.splitPosition = typeof spec.split === 'number' ? spec.split : 0.5;
+            }
+        }
+        entry.viewer.scene.requestRender();
+    }
+
+    function clearSatelliteScene(containerId) { setSatelliteScene(containerId, null); }
+
+    // Moves the before/after split (0 = all after, 1 = all before).
+    function splitSatelliteScene(containerId, position) {
+        const entry = viewers.get(containerId || 'tg-viewport');
+        if (!entry) return;
+        entry.viewer.scene.splitPosition = Math.min(1, Math.max(0, Number(position) || 0));
+        entry.viewer.scene.requestRender();
+    }
+
     function hideSatelliteImagery(entry) {
         if (!entry || !entry.satelliteImagery) return;
         entry.viewer.imageryLayers.remove(entry.satelliteImagery.layer, true);
@@ -4651,6 +4687,9 @@ window.tacticalGlobe = (function () {
         enableStreetViewDrop: enableStreetViewDrop,
         flyToBounds: flyToBounds,
         setNightLights: setNightLights,
+        setSatelliteScene: setSatelliteScene,
+        clearSatelliteScene: clearSatelliteScene,
+        splitSatelliteScene: splitSatelliteScene,
         setCameraPins: setCameraPins,
         setSelectModeEnabled: setSelectModeEnabled,
         openWatchWall: openWatchWall,
@@ -4871,7 +4910,7 @@ window.tacticalGlobe = (function () {
 
         const nativeOperations = new Set([
             'flyTo', 'flyToBounds', 'flyToStreetLevel', 'zoom', 'home', 'dispose',
-            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setNightLights', 'setAircraft', 'setShips',
+            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setNightLights', 'setSatelliteScene', 'clearSatelliteScene', 'setAircraft', 'setShips',
             'setAirQuality', 'setPowerOutages', 'setRoadTraffic', 'setTrafficFlow', 'setDriveFollow',
             'setStreetViewMarker', 'clearStreetViewMarker', 'setCameraPins', 'setSelectModeEnabled',
             'setRadarVisible', 'setRadarTimeline', 'setHourlyForecast', 'setWeatherAlerts',

@@ -44,6 +44,7 @@
 @inject GwsBusinessSuite.Infrastructure.Services.SignalConvergenceService SignalConvergenceService
 @inject GwsBusinessSuite.Application.LiveLayers.AirportStatusService AirportStatusService
 @inject GwsBusinessSuite.Application.LiveLayers.ChokepointService ChokepointService
+@inject GwsBusinessSuite.Application.Overwatch.SatelliteSceneService SatelliteSceneService
 @inject GwsBusinessSuite.Application.LiveLayers.SpaceWeatherService SpaceWeatherService
 @inject GwsBusinessSuite.Infrastructure.Services.SatelliteService SatelliteService
 @inject GwsBusinessSuite.Infrastructure.Services.TravelAdvisoryService TravelAdvisoryService
@@ -416,7 +417,40 @@
                         title="Where the sun is and which way shadows fall at the centre of the view, for a time you choose: check when a photo was taken" @onclick="ToggleSunTool">
                     SUN &amp; SHADOW [@(_sunToolOn ? "ON" : "OFF")]
                 </button>
+                <button type="button" data-tg-toggle="satellite-scenes" class="tg-toggle @(_scenesOn ? "tg-toggle-on" : "")"
+                        title="The recent clear-sky Sentinel-2 passes (10 m) over the centre of the view; lay one over the globe, or compare two with a slider" @onclick="ToggleScenesAsync">
+                    SATELLITE SCENES [@(_scenesOn ? "ON" : "OFF")]
+                </button>
             </div>
+            @if (_scenesOn)
+            {
+                <div class="tg-sun-tool">
+                    @if (_scenes is null) { <div class="tg-favorites-empty" role="status">LOOKING FOR CLEAR PASSES HERE...</div> }
+                    else if (_scenes.Count == 0) { <div class="tg-favorites-empty">No clear Sentinel-2 pass here in the last 90 days.</div> }
+                    else
+                    {
+                        <div class="tg-favorites-empty">SHOW (click), then BEFORE to compare:</div>
+                        @foreach (var pass in _scenes)
+                        {
+                            <div class="tg-layer-buttons">
+                                <button type="button" class="tg-toggle @(_sceneAfter == pass.Id ? "tg-toggle-on" : "")" @onclick="() => ShowSceneAsync(pass.Id, _sceneBefore == pass.Id ? null : _sceneBefore)">
+                                    @pass.At.ToLocalGwsDateTime() · @(pass.CloudPercent.ToString("0"))% CLOUD
+                                </button>
+                                @if (_sceneAfter is not null && _sceneAfter != pass.Id)
+                                {
+                                    <button type="button" class="tg-toggle @(_sceneBefore == pass.Id ? "tg-toggle-on" : "")" @onclick="() => ShowSceneAsync(_sceneAfter, _sceneBefore == pass.Id ? null : pass.Id)">BEFORE</button>
+                                }
+                            </div>
+                        }
+                        @if (_sceneBefore is not null)
+                        {
+                            <label class="tg-favorites-empty" for="tg-scene-split">BEFORE ◀ SLIDE ▶ AFTER</label>
+                            <input id="tg-scene-split" type="range" min="0" max="100" value="50" @oninput="SplitSceneAsync" />
+                        }
+                        <div class="tg-favorites-empty">Sentinel-2 (ESA Copernicus) via Microsoft Planetary Computer. Zoom in: 10 m detail.</div>
+                    }
+                </div>
+            }
             @if (_sunToolOn)
             {
                 <div class="tg-sun-tool">
@@ -4080,6 +4114,42 @@
             Logger.LogWarning(ex, "Overwatch airport status layer failed");
             _airportSummary = "Airport status couldn't be shown just now.";
         }
+    }
+
+    // ---- Satellite scenes (13-11-26): Sentinel-2 passes over the view's centre. ----
+    private bool _scenesOn;
+    private IReadOnlyList<GwsBusinessSuite.Application.Overwatch.SatelliteScene>? _scenes;
+    private string? _sceneAfter;
+    private string? _sceneBefore;
+
+    private async Task ToggleScenesAsync()
+    {
+        _scenesOn = !_scenesOn;
+        _sceneAfter = _sceneBefore = null;
+        if (!_scenesOn)
+        {
+            _scenes = null;
+            await JS.InvokeVoidAsync("tacticalGlobe.clearSatelliteScene", "tg-viewport");
+            return;
+        }
+        _scenes = null;
+        StateHasChanged();
+        _scenes = await SatelliteSceneService.NearAsync((_lastBbox.North + _lastBbox.South) / 2, (_lastBbox.East + _lastBbox.West) / 2);
+    }
+
+    private async Task ShowSceneAsync(string? after, string? before)
+    {
+        _sceneAfter = after;
+        _sceneBefore = before;
+        var scenes = _scenes ?? [];
+        string? Template(string? id) => scenes.FirstOrDefault(scene => scene.Id == id)?.TileUrlTemplate;
+        await JS.InvokeVoidAsync("tacticalGlobe.setSatelliteScene", "tg-viewport", new { after = Template(after), before = Template(before), split = 0.5 });
+    }
+
+    private async Task SplitSceneAsync(ChangeEventArgs change)
+    {
+        if (double.TryParse(change.Value?.ToString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var percent))
+            await JS.InvokeVoidAsync("tacticalGlobe.splitSatelliteScene", "tg-viewport", percent / 100);
     }
 
     // ---- Sun and shadow (13-11-26): at the centre of the view, for a chosen local time. ----

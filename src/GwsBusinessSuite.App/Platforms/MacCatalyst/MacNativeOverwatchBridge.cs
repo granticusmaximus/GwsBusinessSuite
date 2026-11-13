@@ -114,6 +114,8 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
             case "pan": Pan(arguments); return;
             case "setThreeD": SetThreeD(arguments); return;
             case "setNightLights": SetNightLights(arguments); return;
+            case "setSatelliteScene": SetSatelliteScene(arguments); return;
+            case "clearSatelliteScene": SetSatelliteScene([]); return;
             case "startPickPoint": _pickPointMode = true; return;
             case "cancelPickPoint": _pickPointMode = false; return;
             case "mapTap": MapTap(arguments); return;
@@ -593,6 +595,21 @@ internal sealed class MacNativeOverwatchBridge : WKScriptMessageHandler
         _nightLights = new StretchedTileOverlay(
             $"https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/{layer}/default/{time}/{matrix}/{{z}}/{{y}}/{{x}}.png", (int)maxLevel);
         _map.AddOverlay(_nightLights, MKOverlayLevel.AboveRoads);
+    }
+
+    // Satellite scenes (13-11-26): the chosen Sentinel-2 scene as tiles; the web globe's
+    // before/after wipe isn't drawn here, only the scene chosen.
+    private MKTileOverlay? _satelliteScene;
+
+    private void SetSatelliteScene(object?[] arguments)
+    {
+        if (_satelliteScene is not null) _map.RemoveOverlay(_satelliteScene);
+        _satelliteScene = null;
+        var payload = arguments.FirstOrDefault() is string ? arguments.ElementAtOrDefault(1) : arguments.FirstOrDefault();
+        if (payload is not Dictionary<string, object?> spec || TileTemplate(spec.GetValueOrDefault("after")) is not { } template
+            || !template.StartsWith("https://planetarycomputer.microsoft.com/", StringComparison.Ordinal)) return;
+        _satelliteScene = new StretchedTileOverlay(template, 18);
+        _map.AddOverlay(_satelliteScene, MKOverlayLevel.AboveRoads);
     }
 
     private void RefreshRadar()

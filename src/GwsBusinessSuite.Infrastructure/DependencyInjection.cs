@@ -1105,6 +1105,12 @@ public static class DependencyInjection
         }).AddHttpMessageHandler<RefusedHostPauseHandler>();
         services.AddScoped<SignalConvergenceService>();
         // FAA airport status and NOAA SWPC aurora/Kp for the AIR and SPACE groups (05-11-26), key-less.
+        // Satellite scenes on click (Planetary Computer, key-less), 13-11-26.
+        services.AddHttpClient<GwsBusinessSuite.Application.Overwatch.SatelliteSceneService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-Overwatch/1.0 (+https://www.gwsapp.net)");
+        }).AddHttpMessageHandler<RefusedHostPauseHandler>();
         // Chokepoints and ports (IMF PortWatch, key-less), 13-11-26.
         services.AddHttpClient<GwsBusinessSuite.Application.LiveLayers.ChokepointService>(client =>
         {

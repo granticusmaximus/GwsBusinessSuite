@@ -86,6 +86,8 @@ public static class NativeOverwatchOperations
     public const string SetMapNotes = "setMapNotes";
     public const string SetThreeD = "setThreeD";
     public const string SetNightLights = "setNightLights";
+    public const string SetSatelliteScene = "setSatelliteScene";
+    public const string ClearSatelliteScene = "clearSatelliteScene";
     public const string SetDriveFollow = "setDriveFollow";
     public const string SetSelectModeEnabled = "setSelectModeEnabled";
     public const string SetTimeMachine = "setTimeMachine";
@@ -136,7 +138,7 @@ public static class NativeOverwatchOperations
         SetCameraPins, SetWeatherSnapshot, SetRadarVisible, SetRadarTimeline, SetHourlyForecast,
         SetWeatherAlerts, ClearWeatherAlerts, SetCameraAlertHighlights, SetTrafficIncidents,
         ClearTrafficIncidents, SetWorldNews, ClearWorldNews, SetNewsShading, ClearNewsShading,
-        SetMapNotes, SetThreeD, SetNightLights, SetDriveFollow, SetSelectModeEnabled, SetTimeMachine, ClearTimeMachine, SetRoadWeather, ClearRoadWeather,
+        SetMapNotes, SetThreeD, SetNightLights, SetSatelliteScene, ClearSatelliteScene, SetDriveFollow, SetSelectModeEnabled, SetTimeMachine, ClearTimeMachine, SetRoadWeather, ClearRoadWeather,
         SetMessageSigns, ClearMessageSigns, SetRoadTraffic, SetTrafficFlow, SetAircraft,
         SetAirQuality, SetPowerOutages, SetInternetOutages, ClearInternetOutages, SetConvergence,
         ClearConvergence, SetAirportStatus, ClearAirportStatus, SetChokepoints, ClearChokepoints, SetAurora, ClearAurora,
