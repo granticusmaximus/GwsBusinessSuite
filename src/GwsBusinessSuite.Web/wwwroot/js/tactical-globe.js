@@ -4852,7 +4852,7 @@ window.tacticalGlobe = (function () {
 
         const nativeOperations = new Set([
             'flyTo', 'flyToBounds', 'flyToStreetLevel', 'zoom', 'home', 'dispose',
-            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setAircraft', 'setShips',
+            'setTimeMachine', 'clearTimeMachine', 'setMapNotes', 'setThreeD', 'setNightLights', 'setAircraft', 'setShips',
             'setAirQuality', 'setPowerOutages', 'setRoadTraffic', 'setTrafficFlow', 'setDriveFollow',
             'setStreetViewMarker', 'clearStreetViewMarker', 'setCameraPins', 'setSelectModeEnabled',
             'setRadarVisible', 'setRadarTimeline', 'setHourlyForecast', 'setWeatherAlerts',
