@@ -1965,20 +1965,79 @@ window.tacticalGlobe = (function () {
 
     // 3D cities: Cesium World Terrain (ion asset 1) and Cesium OSM Buildings (ion asset 96188),
     // streamed with the server's scoped ion token. Loaded on first use and kept, so switching
-    // off and on again doesn't re-download. Returns 'on', 'off', 'no-token' or 'failed: ...'.
+    // off and on again doesn't re-download. Returns 'on', 'off' or 'failed: ...'. Without an ion token
+    // (13-11-26) it's terrain only, from the open Terrain Tiles on AWS through the server's proxy.
     const ION_TERRAIN_ASSET = 1;
     const ION_OSM_BUILDINGS_ASSET = 96188;
+
+    // Terrarium tiles: height in metres = R * 256 + G + B / 256 - 32768. Each Cesium tile (Web
+    // Mercator, the same grid) samples its own tile, or the zoom-14 tile it lies inside, on a 65 x 65
+    // grid whose edges fall on the tile edges, so neighbouring tiles meet without seams.
+    const TERRAIN_SIZE = 65;
+    const TERRAIN_MAX_ZOOM = 14;
+    const terrainImages = new Map();
+
+    function terrainPixels(z, x, y) {
+        const key = z + '/' + x + '/' + y;
+        if (!terrainImages.has(key)) {
+            if (terrainImages.size > 256) terrainImages.delete(terrainImages.keys().next().value);
+            terrainImages.set(key, fetch('admin/api/overwatch/terrain/' + key, { credentials: 'same-origin' })
+                .then(function (response) { if (!response.ok) throw new Error('terrain ' + response.status); return response.blob(); })
+                .then(function (blob) { return createImageBitmap(blob); })
+                .then(function (bitmap) {
+                    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+                    const context = canvas.getContext('2d', { willReadFrequently: true });
+                    context.drawImage(bitmap, 0, 0);
+                    return { width: bitmap.width, height: bitmap.height, data: context.getImageData(0, 0, bitmap.width, bitmap.height).data };
+                })
+                .catch(function (error) { terrainImages.delete(key); throw error; }));
+        }
+        return terrainImages.get(key);
+    }
+
+    function keylessTerrain() {
+        return new Cesium.CustomHeightmapTerrainProvider({
+            width: TERRAIN_SIZE,
+            height: TERRAIN_SIZE,
+            tilingScheme: new Cesium.WebMercatorTilingScheme(),
+            callback: function (x, y, level) {
+                const z = Math.min(level, TERRAIN_MAX_ZOOM);
+                const scale = Math.pow(2, level - z);
+                const sourceX = Math.floor(x / scale);
+                const sourceY = Math.floor(y / scale);
+                return terrainPixels(z, sourceX, sourceY).then(function (image) {
+                    const heights = new Float32Array(TERRAIN_SIZE * TERRAIN_SIZE);
+                    const span = 1 / scale;
+                    const offsetX = (x - sourceX * scale) * span;
+                    const offsetY = (y - sourceY * scale) * span;
+                    for (let row = 0; row < TERRAIN_SIZE; row++) {
+                        const v = offsetY + span * row / (TERRAIN_SIZE - 1);
+                        const py = Math.min(image.height - 1, Math.round(v * (image.height - 1)));
+                        for (let column = 0; column < TERRAIN_SIZE; column++) {
+                            const u = offsetX + span * column / (TERRAIN_SIZE - 1);
+                            const px = Math.min(image.width - 1, Math.round(u * (image.width - 1)));
+                            const i = (py * image.width + px) * 4;
+                            heights[row * TERRAIN_SIZE + column] = image.data[i] * 256 + image.data[i + 1] + image.data[i + 2] / 256 - 32768;
+                        }
+                    }
+                    return heights;
+                }).catch(function () { return undefined; });
+            }
+        });
+    }
 
     async function setThreeD(containerId, on) {
         const entry = viewers.get(containerId || 'tg-viewport');
         if (!entry) return 'failed: no globe';
-        if (!entry.ionToken) return 'no-token';
         const viewer = entry.viewer;
         try {
             if (!on) {
                 viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
-                if (entry.threeD) entry.threeD.buildings.show = false;
+                if (entry.threeD && entry.threeD.buildings) entry.threeD.buildings.show = false;
                 return 'off';
+            }
+            if (!entry.threeD && !entry.ionToken) {
+                entry.threeD = { terrain: keylessTerrain(), buildings: null };
             }
             if (!entry.threeD) {
                 Cesium.Ion.defaultAccessToken = entry.ionToken;
@@ -1990,7 +2049,7 @@ window.tacticalGlobe = (function () {
                 entry.threeD = { terrain: terrain, buildings: buildings };
             }
             viewer.terrainProvider = entry.threeD.terrain;
-            entry.threeD.buildings.show = true;
+            if (entry.threeD.buildings) entry.threeD.buildings.show = true;
             return 'on';
         } catch (error) {
             viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();

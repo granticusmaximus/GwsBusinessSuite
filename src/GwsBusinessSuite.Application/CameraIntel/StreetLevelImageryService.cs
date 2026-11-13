@@ -40,10 +40,10 @@ public sealed record StreetPanoramaLink(string Id, double Bearing, double Distan
 // Where you're standing in Overwatch's own street view, and where you can walk to.
 public sealed record StreetViewScene(StreetPanorama Current, IReadOnlyList<StreetPanoramaLink> Links);
 
-// Overwatch's own street view ("drop the person"). The viewer is Overwatch's (street-view.js); the
-// imagery is Mapillary's openly-licensed 360° panoramas (needs the free
-// CameraIntel:MapillaryAccessToken), fetched by the server so the token never reaches the browser.
-// Where there's no 360° imagery, flat photos from Mapillary or KartaView (no key) are offered.
+// Overwatch's own street view ("drop the person"). The viewer is Overwatch's (street-view.js). The
+// 360° imagery is Panoramax's (open, CC-BY-SA, no key; the default since 13-11-26), or Mapillary's
+// when CameraIntel:MapillaryAccessToken is set, fetched by the server so a token never reaches the
+// browser. Where there's no 360° imagery, flat photos from Mapillary, Panoramax or KartaView are offered.
 public sealed class StreetLevelImageryService(
     HttpClient httpClient,
     IOptions<CameraIntelOptions> options,
@@ -59,14 +59,21 @@ public sealed class StreetLevelImageryService(
     private const double MaxLinkMeters = 40;
     private static readonly double[] PanoramaSearchRadiiMeters = [60, 250];
 
-    public bool HasPanoramaSource => !string.IsNullOrWhiteSpace(options.Value.MapillaryAccessToken);
+    public const string PanoramaxPrefix = "px-";
+    private const string PanoramaxSearch = "https://api.panoramax.xyz/api/search";
+
+    private bool HasMapillary => !string.IsNullOrWhiteSpace(options.Value.MapillaryAccessToken);
+
+    // A Mapillary id (digits) or a Panoramax one ("px-" + its UUID): the only ids the image endpoint serves.
+    public static bool IsPanoramaId(string? id) =>
+        id is { Length: > 0 and <= 40 }
+        && (id.All(char.IsAsciiDigit) || id.StartsWith(PanoramaxPrefix, StringComparison.Ordinal) && Guid.TryParseExact(id[PanoramaxPrefix.Length..], "D", out _));
 
     // The nearest 360° panorama to a point (or the one asked for), plus the neighbours you can
-    // walk to. Null when there's no panorama within 250 m (or no Mapillary token).
+    // walk to. Null when there's no panorama within 250 m.
     public async Task<StreetViewScene?> GetSceneAsync(double latitude, double longitude, string? panoramaId = null,
         CancellationToken cancellationToken = default)
     {
-        if (!HasPanoramaSource) return null;
         StreetPanorama? current = null;
         foreach (var radius in PanoramaSearchRadiiMeters)
         {
@@ -97,6 +104,11 @@ public sealed class StreetLevelImageryService(
     private async Task<IReadOnlyList<StreetPanorama>> FindPanoramasAsync(double lat, double lon, double radius, CancellationToken cancellationToken)
     {
         var (south, west, north, east) = Box(lat, lon, radius);
+        if (!HasMapillary)
+        {
+            var panoramax = await GetAsync(PanoramaxUrl(south, west, north, east), "Panoramax panoramas", TimeSpan.FromSeconds(12), cancellationToken);
+            return panoramax is null ? [] : ParsePanoramaxPanoramas(panoramax, lat, lon, radius);
+        }
         var url = string.Create(CultureInfo.InvariantCulture,
             $"https://graph.mapillary.com/images?fields=id,geometry,computed_geometry,compass_angle,computed_compass_angle,captured_at,is_pano&is_pano=true&bbox={west},{south},{east},{north}&limit=100&access_token={Uri.EscapeDataString(options.Value.MapillaryAccessToken)}");
         var json = await GetAsync(url, "Mapillary panoramas", TimeSpan.FromSeconds(12), cancellationToken);
@@ -134,18 +146,27 @@ public sealed class StreetLevelImageryService(
     // Null if the id is unknown or Mapillary can't be reached.
     public async Task<(byte[] Content, string ContentType)?> GetPanoramaImageAsync(string panoramaId, CancellationToken cancellationToken = default)
     {
-        if (!HasPanoramaSource || string.IsNullOrEmpty(panoramaId) || !panoramaId.All(char.IsAsciiDigit)) return null;
-        var json = await GetAsync(
-            $"https://graph.mapillary.com/{panoramaId}?fields=thumb_2048_url&access_token={Uri.EscapeDataString(options.Value.MapillaryAccessToken)}",
-            "Mapillary image", TimeSpan.FromSeconds(12), cancellationToken);
-        if (json is null) return null;
+        if (!IsPanoramaId(panoramaId)) return null;
         string? imageUrl;
-        try
+        if (panoramaId.StartsWith(PanoramaxPrefix, StringComparison.Ordinal))
         {
-            using var doc = JsonDocument.Parse(json);
-            imageUrl = String(doc.RootElement, "thumb_2048_url");
+            var found = await GetAsync($"{PanoramaxSearch}?ids={panoramaId[PanoramaxPrefix.Length..]}", "Panoramax image", TimeSpan.FromSeconds(12), cancellationToken);
+            imageUrl = found is null ? null : PanoramaxImageUrl(found);
         }
-        catch (JsonException) { return null; }
+        else
+        {
+            if (!HasMapillary) return null;
+            var json = await GetAsync(
+                $"https://graph.mapillary.com/{panoramaId}?fields=thumb_2048_url&access_token={Uri.EscapeDataString(options.Value.MapillaryAccessToken)}",
+                "Mapillary image", TimeSpan.FromSeconds(12), cancellationToken);
+            if (json is null) return null;
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                imageUrl = String(doc.RootElement, "thumb_2048_url");
+            }
+            catch (JsonException) { return null; }
+        }
         if (imageUrl is null || !imageUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return null;
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -188,6 +209,7 @@ public sealed class StreetLevelImageryService(
         foreach (var radius in SearchRadiiMeters)
         {
             images.AddRange(await MapillaryAsync(latitude, longitude, radius, cancellationToken));
+            if (images.Count == 0) images.AddRange(await PanoramaxPhotosAsync(latitude, longitude, radius, cancellationToken));
             if (images.Count == 0) images.AddRange(await KartaViewAsync(latitude, longitude, radius, cancellationToken));
             if (images.Count > 0) break;
         }
@@ -205,6 +227,68 @@ public sealed class StreetLevelImageryService(
             $"https://graph.mapillary.com/images?fields=id,thumb_1024_url,captured_at,compass_angle,geometry&bbox={west},{south},{east},{north}&limit=50&access_token={Uri.EscapeDataString(token)}");
         var json = await GetAsync(url, "Mapillary", TimeSpan.FromSeconds(12), cancellationToken);
         return json is null ? [] : ParseMapillary(json, lat, lon, radius);
+    }
+
+    private async Task<IReadOnlyList<StreetImage>> PanoramaxPhotosAsync(double lat, double lon, double radius, CancellationToken cancellationToken)
+    {
+        var (south, west, north, east) = Box(lat, lon, radius);
+        var json = await GetAsync(PanoramaxUrl(south, west, north, east), "Panoramax", TimeSpan.FromSeconds(10), cancellationToken);
+        return json is null ? [] : ParsePanoramaxPhotos(json, lat, lon, radius);
+    }
+
+    private static string PanoramaxUrl(double south, double west, double north, double east) =>
+        string.Create(CultureInfo.InvariantCulture, $"{PanoramaxSearch}?bbox={west},{south},{east},{north}&limit=100");
+
+    // Panoramax search (STAC GeoJSON): {"features":[{"id":uuid,"geometry":{"coordinates":[lon,lat]},
+    // "properties":{"datetime","view:azimuth","pers:interior_orientation":{"field_of_view":360}},
+    // "assets":{"sd":{"href"},"thumb":{"href"}}}]}. Only 360° pictures are panoramas.
+    public static IReadOnlyList<StreetPanorama> ParsePanoramaxPanoramas(string json, double lat, double lon, double maxMeters) =>
+        PanoramaxFeatures(json, lat, lon, maxMeters)
+            .Where(f => f.Is360)
+            .Select(f => new StreetPanorama(PanoramaxPrefix + f.Id, f.Lat, f.Lon, f.Azimuth ?? 0, f.CapturedAt, f.Distance))
+            .OrderBy(p => p.DistanceMeters)
+            .ToList();
+
+    public static IReadOnlyList<StreetImage> ParsePanoramaxPhotos(string json, double lat, double lon, double maxMeters) =>
+        PanoramaxFeatures(json, lat, lon, maxMeters)
+            .Where(f => f.Image is not null)
+            .Select(f => new StreetImage("Panoramax", f.Image!, f.Lat, f.Lon, f.Distance, f.CapturedAt, f.Azimuth, f.Image!))
+            .OrderBy(image => image.DistanceMeters)
+            .ToList();
+
+    // The picture to show for one Panoramax result (its "sd" size, about 2048 wide), https only.
+    public static string? PanoramaxImageUrl(string json) =>
+        PanoramaxFeatures(json, 0, 0, double.MaxValue).Select(f => f.Image).FirstOrDefault(url => url is not null);
+
+    private sealed record PanoramaxFeature(string Id, double Lat, double Lon, double Distance, DateTimeOffset? CapturedAt, double? Azimuth, bool Is360, string? Image);
+
+    private static List<PanoramaxFeature> PanoramaxFeatures(string json, double lat, double lon, double maxMeters)
+    {
+        var features = new List<PanoramaxFeature>();
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("features", out var items) || items.ValueKind != JsonValueKind.Array) return features;
+            foreach (var item in items.EnumerateArray())
+            {
+                if (String(item, "id") is not { } id || !Guid.TryParseExact(id, "D", out _) || Coordinates(item, "geometry") is not { } p) continue;
+                var distance = maxMeters == double.MaxValue ? 0 : DistanceMeters(lat, lon, p.Lat, p.Lon);
+                if (distance > maxMeters) continue;
+                var props = item.TryGetProperty("properties", out var pr) && pr.ValueKind == JsonValueKind.Object ? pr : default;
+                DateTimeOffset? captured = props.ValueKind == JsonValueKind.Object && String(props, "datetime") is { } d
+                    && DateTimeOffset.TryParse(d, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at) ? at : null;
+                var azimuth = props.ValueKind == JsonValueKind.Object ? Number(props, "view:azimuth") : null;
+                var is360 = props.ValueKind == JsonValueKind.Object && props.TryGetProperty("pers:interior_orientation", out var orientation)
+                    && orientation.ValueKind == JsonValueKind.Object && Number(orientation, "field_of_view") >= 359;
+                string? image = null;
+                if (item.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Object)
+                    image = new[] { "sd", "thumb" }.Select(name => assets.TryGetProperty(name, out var a) && a.ValueKind == JsonValueKind.Object ? String(a, "href") : null)
+                        .FirstOrDefault(url => url is not null && url.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+                features.Add(new PanoramaxFeature(id, p.Lat, p.Lon, distance, captured, azimuth, is360, image));
+            }
+        }
+        catch (JsonException) { }
+        return features;
     }
 
     private async Task<IReadOnlyList<StreetImage>> KartaViewAsync(double lat, double lon, double radius, CancellationToken cancellationToken)

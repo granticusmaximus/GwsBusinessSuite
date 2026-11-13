@@ -200,6 +200,19 @@ public static class DependencyInjection
                 : options.BaseUrl);
             client.Timeout = TimeSpan.FromSeconds(45);
         });
+        // Pages SentinelGPT reads when search is key-less (SearXNG): public addresses only, checked on
+        // every connection like automation's HTTP client.
+        services.AddHttpClient(OllamaWebSearchService.FetchClientName, client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(25);
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("GwsBusinessSuite-SentinelGPT/1.0 (+https://grantwatson.dev)");
+        }).ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+        {
+            ConnectCallback = AutomationDestinationValidator.ConnectAsync,
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 5,
+            AutomaticDecompression = System.Net.DecompressionMethods.All,
+        });
         services.AddMemoryCache();
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<NewsRefreshState>();
@@ -990,12 +1003,19 @@ public static class DependencyInjection
         services.AddSingleton<WorldNewsService>();
         services.AddSingleton<GwsBusinessSuite.Application.NewsIntelligence.IWorldNewsSearch, WorldNewsAssistantSearch>();
         services.AddHostedService<WorldNewsBackgroundService>();
-        // Ships (aisstream.io): one shared WebSocket for the whole app, so a singleton. Its key
-        // (OVERWATCH_AISSTREAM_API_KEY) stays server-side; without one the layer just says so.
+        // Ships: a singleton (one shared aisstream WebSocket when OVERWATCH_AISSTREAM_API_KEY is set;
+        // otherwise Finland's key-less open AIS for the Baltic, read through the "open-ais" client).
+        services.AddHttpClient("open-ais", client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(20);
+            // Digitraffic asks callers to name themselves.
+            client.DefaultRequestHeaders.Add("Digitraffic-User", "GwsBusinessSuite/Overwatch");
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AutomaticDecompression = System.Net.DecompressionMethods.All });
         services.AddSingleton(provider => new GwsBusinessSuite.Application.LiveLayers.ShipService(
             configuration["Overwatch:AisStreamApiKey"]?.Trim(),
             provider.GetRequiredService<ILogger<GwsBusinessSuite.Application.LiveLayers.ShipService>>(),
-            TimeProvider.System));
+            TimeProvider.System,
+            provider.GetRequiredService<IHttpClientFactory>().CreateClient("open-ais")));
         services.AddHttpClient<GwsBusinessSuite.Application.LiveLayers.AirQualityService>(client =>
         {
             client.Timeout = TimeSpan.FromSeconds(15);

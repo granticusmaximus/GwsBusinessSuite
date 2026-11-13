@@ -138,16 +138,13 @@
                 <button type="button" data-tg-toggle="alerts" class="tg-toggle @(_alertsOn ? "tg-toggle-on" : "")" title="Toggle NWS severe weather alerts (A)" @onclick="ToggleAlertsAsync">
                     ALERTS [@(_alertsOn ? "ON" : "OFF")]
                 </button>
-                @if (IonToken is not null)
+                <button type="button" data-tg-toggle="threed" class="tg-toggle @(_threeDOn ? "tg-toggle-on" : "")"
+                        title="@(IonToken is null ? "3D terrain (open elevation tiles, no key)" : "3D buildings and terrain (Cesium ion)")" @onclick="ToggleThreeDAsync">
+                    @(IonToken is null ? "3D TERRAIN" : "3D CITIES") [@(_threeDOn ? "ON" : "OFF")]
+                </button>
+                @if (_threeDError is not null)
                 {
-                    <button type="button" data-tg-toggle="threed" class="tg-toggle @(_threeDOn ? "tg-toggle-on" : "")"
-                            title="3D buildings and terrain (Cesium ion)" @onclick="ToggleThreeDAsync">
-                        3D CITIES [@(_threeDOn ? "ON" : "OFF")]
-                    </button>
-                    @if (_threeDError is not null)
-                    {
-                        <div class="tg-favorites-empty" role="status">@_threeDError</div>
-                    }
+                    <div class="tg-favorites-empty" role="status">@_threeDError</div>
                 }
                 <button type="button" data-tg-toggle="roadtemps" class="tg-toggle @(_roadWeatherOn ? "tg-toggle-on" : "")"
                         title="Road surface temperature and ice risk from roadside weather stations (Montana, South Dakota)" @onclick="ToggleRoadWeatherAsync">
@@ -380,7 +377,7 @@
             <div class="tg-layer-group-title">SEA</div>
             <div class="tg-layer-buttons">
                 <button type="button" data-tg-toggle="ships" class="tg-toggle @(_shipsOn ? "tg-toggle-on" : "")"
-                        title="Ships broadcasting AIS (aisstream.io), refreshed every 30 seconds" @onclick="ToggleShipsAsync">
+                        title="Ships broadcasting AIS: the Baltic from Finland's open AIS, worldwide with an aisstream.io key; refreshed every 30 seconds" @onclick="ToggleShipsAsync">
                     SHIPS [@(_shipsOn ? "ON" : "OFF")]
                 </button>
             </div>
@@ -682,14 +679,7 @@
             else if (_streetView is { } view)
             {
                 <div class="tg-streetview-where">@view.Latitude.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture), @view.Longitude.ToString("0.#####", System.Globalization.CultureInfo.InvariantCulture)</div>
-                @if (!StreetLevelImagery.HasPanoramaSource)
-                {
-                    <div class="tg-favorites-empty">360° street view needs the Mapillary access token (CameraIntel:MapillaryAccessToken).</div>
-                }
-                else
-                {
-                    <div class="tg-favorites-empty">No 360° street view within 250 m of this spot.@(view.Images.Count > 0 ? " The nearest street photos:" : " There are no street photos here either - try a busier street.")</div>
-                }
+                <div class="tg-favorites-empty">No 360° street view within 250 m of this spot.@(view.Images.Count > 0 ? " The nearest street photos:" : " There are no street photos here either - try a busier street.")</div>
                 @if (view.Images.Count > 0)
                 {
                     var image = view.Images[_streetIndex];
@@ -3508,7 +3498,8 @@
         var status = await JS.InvokeAsync<string>("tacticalGlobe.setThreeD", "tg-viewport", on);
         _threeDOn = status == "on";
         _threeDError = status.StartsWith("failed", StringComparison.Ordinal)
-            ? "3D cities couldn't load (check the Cesium ion token and its allowed URLs). The flat globe is still working."
+            ? (IonToken is null ? "3D terrain couldn't load. The flat globe is still working."
+                : "3D cities couldn't load (check the Cesium ion token and its allowed URLs). The flat globe is still working.")
             : null;
         if (_threeDError is not null) Logger.LogWarning("Overwatch 3D cities failed to load: {Status}", status);
     }

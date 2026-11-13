@@ -12,14 +12,28 @@ public sealed record Ship(long Mmsi, string Name, double Latitude, double Longit
 
 public sealed record ShipResult(IReadOnlyList<Ship> Ships, string? Note);
 
-// Live ships for the Overwatch globe from aisstream.io (free, needs Overwatch:AisStreamApiKey).
+// Live ships for the Overwatch globe. Key-less by default (13-11-26): Finland's open AIS (Fintraffic
+// Digitraffic, CC BY 4.0) covers the Baltic, read as a snapshot at most once a minute. With
+// Overwatch:AisStreamApiKey set, aisstream.io adds the rest of the world as below.
 // aisstream is a push-only WebSocket, not a request/response API, so this is a singleton holding one
 // shared connection: subscribed to the areas the page has asked about in the last few minutes, it
 // keeps each vessel's last known position. Anchored ships only report every few minutes, so a
 // snapshot connection per request would miss most of them. The connection closes after a few idle
 // minutes and the key never leaves the server.
-public sealed class ShipService(string? apiKey, ILogger<ShipService> logger, TimeProvider timeProvider) : IDisposable
+public sealed class ShipService(string? apiKey, ILogger<ShipService> logger, TimeProvider timeProvider, HttpClient? openAis = null) : IDisposable
 {
+    // Fintraffic's open AIS: where it reports (the Baltic and the Gulfs of Finland and Bothnia).
+    public static readonly BoundingBox OpenAisCoverage = new(North: 66.5, South: 53.0, East: 33.0, West: 9.0);
+    private const string OpenAisLocations = "https://meri.digitraffic.fi/api/ais/v1/locations";
+    private const string OpenAisVessels = "https://meri.digitraffic.fi/api/ais/v1/vessels";
+    private static readonly TimeSpan OpenAisRefresh = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan OpenAisVesselRefresh = TimeSpan.FromHours(1);
+    private readonly SemaphoreSlim _openAisGate = new(1, 1);
+    private IReadOnlyList<Ship> _openAisShips = [];
+    private DateTimeOffset _openAisAt = DateTimeOffset.MinValue;
+    private IReadOnlyDictionary<long, (string? Name, string? Type, string? Destination)> _openAisVessels = new Dictionary<long, (string?, string?, string?)>();
+    private DateTimeOffset _openAisVesselsAt = DateTimeOffset.MinValue;
+
     private const string StreamUrl = "wss://stream.aisstream.io/v0/stream";
     public const double MaxSquareDegrees = 100;
     public const int MaxShips = 500;
@@ -42,10 +56,9 @@ public sealed class ShipService(string? apiKey, ILogger<ShipService> logger, Tim
 
     public async Task<ShipResult> GetAsync(BoundingBox bounds, CancellationToken ct = default)
     {
-        if (!IsConfigured)
-            return new ShipResult([], "Ships need an aisstream.io key (OVERWATCH_AISSTREAM_API_KEY in the server's .env).");
         if ((bounds.North - bounds.South) * (bounds.East - bounds.West) > MaxSquareDegrees)
             return new ShipResult([], "Zoom in to see ships (about 10° × 10° at a time).");
+        if (!IsConfigured) return await OpenAisAsync(bounds, ct);
 
         var isNewArea = TrackArea(bounds);
         EnsureRunning();
@@ -60,6 +73,93 @@ public sealed class ShipService(string? apiKey, ILogger<ShipService> logger, Tim
             ? _connectionProblem ?? "No ships reporting here yet (positions arrive over the next few minutes)."
             : null;
         return new ShipResult(ships, note);
+    }
+
+    // Without a key: Finland's open AIS, for the Baltic only.
+    private async Task<ShipResult> OpenAisAsync(BoundingBox bounds, CancellationToken ct)
+    {
+        if (openAis is null || !Overlaps(bounds, OpenAisCoverage))
+            return new ShipResult([], "Ships are shown in the Baltic from Finland's open AIS. Worldwide ships need an aisstream.io key (optional).");
+        await _openAisGate.WaitAsync(ct);
+        try
+        {
+            var now = timeProvider.GetUtcNow();
+            if (now - _openAisVesselsAt > OpenAisVesselRefresh)
+            {
+                try
+                {
+                    _openAisVessels = ParseOpenAisVessels(await openAis.GetStringAsync(OpenAisVessels, ct));
+                    _openAisVesselsAt = now;
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
+                {
+                    logger.LogDebug(ex, "Open AIS vessel names couldn't be read");
+                }
+            }
+            if (now - _openAisAt > OpenAisRefresh)
+            {
+                try
+                {
+                    _openAisShips = ParseOpenAisLocations(await openAis.GetStringAsync(OpenAisLocations, ct), _openAisVessels, now - ShipStale);
+                    _openAisAt = now;
+                }
+                catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException && !ct.IsCancellationRequested)
+                {
+                    logger.LogWarning(ex, "Open AIS (Digitraffic) couldn't be read");
+                    if (_openAisShips.Count == 0) return new ShipResult([], "Finland's open AIS couldn't be reached; trying again shortly.");
+                }
+            }
+        }
+        finally { _openAisGate.Release(); }
+        var ships = _openAisShips.Where(ship => ship.Latitude <= bounds.North && ship.Latitude >= bounds.South
+                && ship.Longitude <= bounds.East && ship.Longitude >= bounds.West)
+            .OrderByDescending(ship => ship.SeenAt).Take(MaxShips).ToList();
+        return new ShipResult(ships, ships.Count == 0 ? "No ships reporting here in Finland's open AIS." : null);
+    }
+
+    private static bool Overlaps(BoundingBox a, BoundingBox b) =>
+        a.South <= b.North && a.North >= b.South && a.West <= b.East && a.East >= b.West;
+
+    // Digitraffic /api/ais/v1/locations (GeoJSON): {"features":[{"mmsi","geometry":{"coordinates":[lon,lat]},
+    // "properties":{"sog","cog","heading","timestampExternal"(ms)}}]}. 102.3 knots, 360° course and
+    // 511° heading mean "not available".
+    public static IReadOnlyList<Ship> ParseOpenAisLocations(string json,
+        IReadOnlyDictionary<long, (string? Name, string? Type, string? Destination)> vessels, DateTimeOffset notBefore)
+    {
+        var ships = new List<Ship>();
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("features", out var features) || features.ValueKind != JsonValueKind.Array) return ships;
+        foreach (var feature in features.EnumerateArray())
+        {
+            if (Prop(feature, "properties") is not { } props || Num(props, "mmsi") is not { } mmsiValue
+                || Prop(feature, "geometry") is not { } geometry || Prop(geometry, "coordinates") is not { ValueKind: JsonValueKind.Array } coordinates
+                || coordinates.GetArrayLength() < 2) continue;
+            var mmsi = (long)mmsiValue;
+            var seen = Num(props, "timestampExternal") is { } ms ? DateTimeOffset.FromUnixTimeMilliseconds((long)ms) : notBefore;
+            if (seen < notBefore) continue;
+            vessels.TryGetValue(mmsi, out var details);
+            ships.Add(new Ship(mmsi, details.Name ?? mmsi.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                coordinates[1].GetDouble(), coordinates[0].GetDouble(),
+                Num(props, "sog") is { } sog and < 102.2 ? sog : null,
+                Num(props, "cog") is { } cog and < 360 ? cog : null,
+                Num(props, "heading") is { } heading and < 360 ? heading : null,
+                details.Type, details.Destination, seen));
+        }
+        return ships;
+    }
+
+    // Digitraffic /api/ais/v1/vessels: [{"mmsi","name","shipType","destination"}].
+    public static IReadOnlyDictionary<long, (string? Name, string? Type, string? Destination)> ParseOpenAisVessels(string json)
+    {
+        var vessels = new Dictionary<long, (string?, string?, string?)>();
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != JsonValueKind.Array) return vessels;
+        foreach (var vessel in doc.RootElement.EnumerateArray())
+        {
+            if (Num(vessel, "mmsi") is not { } mmsi) continue;
+            vessels[(long)mmsi] = (Clean(Str(vessel, "name")), Num(vessel, "shipType") is { } type ? ShipTypeName((int)type) : null, Clean(Str(vessel, "destination")));
+        }
+        return vessels;
     }
 
     // Adds or refreshes an area of interest; true when the subscription has to change.
@@ -358,6 +458,7 @@ public sealed class ShipService(string? apiKey, ILogger<ShipService> logger, Tim
 
     public void Dispose()
     {
+        _openAisGate.Dispose();
         lock (_gate)
         {
             _runCts?.Cancel();

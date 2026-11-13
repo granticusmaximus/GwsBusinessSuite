@@ -448,13 +448,22 @@ public sealed class OverwatchGridScriptBrowserTestsB(PlaywrightBrowserFixture fi
     }
 
     [Fact]
-    public async Task ThreeD_WithoutAToken_ShouldStayOff_AndTheStreetLevelFlightShouldFinish()
+    public async Task ThreeD_WithoutAToken_ShouldShowKeylessTerrain_AndTheStreetLevelFlightShouldFinish()
     {
         var (page, consoleErrors) = await OpenHarnessAsync(fixture.Browser);
         await using var pageScope = page;
+        // The server's terrain proxy, answered here with a 1 x 1 Terrarium tile at sea level.
+        var terrainTiles = 0;
+        await page.RouteAsync("**/admin/api/overwatch/terrain/**", route =>
+        {
+            Interlocked.Increment(ref terrainTiles);
+            return route.FulfillAsync(new() { ContentType = "image/png",
+                BodyBytes = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNoYGAAAAGEAIH5/mWIAAAAAElFTkSuQmCC") });
+        });
         (await InitAsync(page)).Should().BeNull();
 
-        (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setThreeD('tg-viewport', true)")).Should().Be("no-token");
+        // No ion token (13-11-26): terrain only, from the open elevation tiles through the server.
+        (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setThreeD('tg-viewport', true)")).Should().Be("on");
         var flight = await page.EvaluateAsync<double>("""
             async () => {
                 const started = performance.now();
@@ -463,6 +472,8 @@ public sealed class OverwatchGridScriptBrowserTestsB(PlaywrightBrowserFixture fi
             }
             """);
         flight.Should().BeLessThan(8000, "street view waits for this flight, so it must always finish");
+        terrainTiles.Should().BePositive("terrain comes from the server's proxy");
+        (await page.EvaluateAsync<string>("() => window.tacticalGlobe.setThreeD('tg-viewport', false)")).Should().Be("off");
         consoleErrors.Should().BeEmpty();
     }
 

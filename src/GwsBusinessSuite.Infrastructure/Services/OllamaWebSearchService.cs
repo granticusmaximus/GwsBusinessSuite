@@ -8,13 +8,27 @@ using Microsoft.Extensions.Options;
 
 namespace GwsBusinessSuite.Infrastructure.Services;
 
+// SentinelGPT's web search and page fetch. With OllamaWeb:ApiKey it uses Ollama's web search; without
+// one (the default since 13-11-26) it searches a self-hosted SearXNG (OllamaWeb:SearxngUrl) and fetches
+// pages itself through the "web-fetch" client, whose ConnectCallback refuses private addresses on every
+// connection (redirects and DNS rebinding included).
 public sealed class OllamaWebSearchService(
     HttpClient http,
-    IOptions<OllamaWebOptions> options) : IOllamaWebSearchService
+    IOptions<OllamaWebOptions> options,
+    IHttpClientFactory? clients = null) : IOllamaWebSearchService
 {
+    public const string FetchClientName = "web-fetch";
+    private const int MaxPageBytes = 3_000_000;
+    private const string NotConfigured =
+        "SentinelGPT internet access is not configured. Set OllamaWeb__SearxngUrl (key-less) or OllamaWeb__ApiKey.";
+
     private readonly OllamaWebOptions _options = options.Value;
 
-    public bool IsConfigured => !string.IsNullOrWhiteSpace(_options.ApiKey);
+    private bool UsesOllama => !string.IsNullOrWhiteSpace(_options.ApiKey);
+
+    private bool UsesSearxng => !UsesOllama && !string.IsNullOrWhiteSpace(_options.SearxngUrl);
+
+    public bool IsConfigured => UsesOllama || UsesSearxng;
 
     public async Task<IReadOnlyList<OllamaWebSearchResult>> SearchAsync(
         string query,
@@ -23,8 +37,7 @@ public sealed class OllamaWebSearchService(
     {
         if (!IsConfigured)
         {
-            throw new InvalidOperationException(
-                "SentinelGPT internet access is not configured. Set OllamaWeb:ApiKey in user secrets or the OllamaWeb__ApiKey environment variable.");
+            throw new InvalidOperationException(NotConfigured);
         }
 
         var normalizedQuery = query.Trim();
@@ -32,6 +45,8 @@ public sealed class OllamaWebSearchService(
         {
             throw new ArgumentException("A web search query must be between 2 and 500 characters.", nameof(query));
         }
+
+        if (UsesSearxng) return await SearchSearxngAsync(normalizedQuery, Math.Clamp(maxResults ?? _options.MaxResults, 1, 10), ct);
 
         using var request = CreateRequest(
             HttpMethod.Post,
@@ -59,14 +74,15 @@ public sealed class OllamaWebSearchService(
     {
         if (!IsConfigured)
         {
-            throw new InvalidOperationException(
-                "SentinelGPT internet access is not configured. Set OllamaWeb:ApiKey in user secrets or the OllamaWeb__ApiKey environment variable.");
+            throw new InvalidOperationException(NotConfigured);
         }
 
         if (!IsSafePublicHttpsUrl(url))
         {
             throw new ArgumentException("Only public HTTPS URLs can be fetched.", nameof(url));
         }
+
+        if (UsesSearxng) return await FetchDirectAsync(url, ct);
 
         using var request = CreateRequest(HttpMethod.Post, "/api/web_fetch", new { url });
         using var response = await http.SendAsync(request, ct);
@@ -80,6 +96,58 @@ public sealed class OllamaWebSearchService(
             Limit(result.Content, 12_000));
     }
 
+    private async Task<IReadOnlyList<OllamaWebSearchResult>> SearchSearxngAsync(string query, int maxResults, CancellationToken ct)
+    {
+        var url = $"{_options.SearxngUrl.TrimEnd('/')}/search?format=json&safesearch=1&q={Uri.EscapeDataString(query)}";
+        using var response = await http.GetAsync(url, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<WebSearchResponse>(cancellationToken: ct);
+        return SearxngResults(result?.Results, maxResults);
+    }
+
+    // SearXNG's JSON uses the same title/url/content fields; only public HTTPS results are kept.
+    public static IReadOnlyList<OllamaWebSearchResult> SearxngResults(IEnumerable<WebSearchItem>? items, int maxResults) =>
+        (items ?? [])
+            .Where(item => IsSafePublicHttpsUrl(item.Url))
+            .DistinctBy(item => item.Url, StringComparer.OrdinalIgnoreCase)
+            .Take(maxResults)
+            .Select(item => new OllamaWebSearchResult(Limit(item.Title, 240), item.Url, Limit(item.Content, 4_000)))
+            .ToList();
+
+    private async Task<OllamaWebSearchResult> FetchDirectAsync(string url, CancellationToken ct)
+    {
+        var client = clients?.CreateClient(FetchClientName) ?? throw new InvalidOperationException(NotConfigured);
+        using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+        if ((int)response.StatusCode is 403 or 405 or 429)
+            throw new InvalidOperationException($"{new Uri(url).Host} refused this server ({(int)response.StatusCode}); it isn't asked again.");
+        response.EnsureSuccessStatusCode();
+        var type = response.Content.Headers.ContentType?.MediaType ?? string.Empty;
+        if (!type.Contains("html", StringComparison.OrdinalIgnoreCase) && !type.StartsWith("text/", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"That page isn't text ({type}).");
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        var buffer = new byte[MaxPageBytes];
+        var read = 0;
+        int n;
+        while (read < buffer.Length && (n = await stream.ReadAsync(buffer.AsMemory(read), ct)) > 0) read += n;
+        var html = System.Text.Encoding.UTF8.GetString(buffer, 0, read);
+        var (title, text) = PageText(html);
+        return new OllamaWebSearchResult(Limit(title, 240), url, Limit(text, 12_000));
+    }
+
+    // The readable text of a page: title, then the body without scripts, styles and site chrome.
+    public static (string Title, string Text) PageText(string html)
+    {
+        var document = new AngleSharp.Html.Parser.HtmlParser().ParseDocument(html);
+        var title = document.Title?.Trim() ?? string.Empty;
+        var root = (AngleSharp.Dom.IElement?)document.QuerySelector("article") ?? document.QuerySelector("main") ?? document.Body;
+        if (root is null) return (title, string.Empty);
+        foreach (var junk in root.QuerySelectorAll("script, style, noscript, nav, footer, header, aside, form, svg, iframe").ToList()) junk.Remove();
+        foreach (var block in root.QuerySelectorAll("p, div, li, h1, h2, h3, h4, tr, br")) block.Append(document.CreateTextNode("\n"));
+        var text = System.Text.RegularExpressions.Regex.Replace(root.TextContent, @"[ \t\u00a0]+", " ");
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"\s*\n\s*(\n\s*)+", "\n\n").Trim();
+        return (title, text);
+    }
+
     private HttpRequestMessage CreateRequest(HttpMethod method, string path, object payload)
     {
         var request = new HttpRequestMessage(method, path)
@@ -90,7 +158,7 @@ public sealed class OllamaWebSearchService(
         return request;
     }
 
-    private static bool IsSafePublicHttpsUrl(string? value)
+    public static bool IsSafePublicHttpsUrl(string? value)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
             || uri.Scheme != Uri.UriSchemeHttps
@@ -137,10 +205,10 @@ public sealed class OllamaWebSearchService(
         return normalized.Length <= maxLength ? normalized : normalized[..maxLength];
     }
 
-    private sealed record WebSearchResponse(
+    public sealed record WebSearchResponse(
         [property: JsonPropertyName("results")] WebSearchItem[]? Results);
 
-    private sealed record WebSearchItem(
+    public sealed record WebSearchItem(
         [property: JsonPropertyName("title")] string Title,
         [property: JsonPropertyName("url")] string Url,
         [property: JsonPropertyName("content")] string Content);

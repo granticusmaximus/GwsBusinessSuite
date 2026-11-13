@@ -74,18 +74,22 @@ public sealed class StreetLevelImageryServiceTests
     }
 
     [Fact]
-    public async Task FindNearAsync_WithoutAToken_ShouldTryKartaViewAndWidenTheSearch()
+    public async Task FindNearAsync_WithoutAToken_ShouldTryPanoramaxThenKartaViewAndWidenTheSearch()
     {
         var radii = new List<string>();
+        var hosts = new List<string>();
         var service = Create("", request =>
         {
-            request.RequestUri!.Host.Should().Be("api.openstreetcam.org");
+            hosts.Add(request.RequestUri!.Host);
+            if (request.RequestUri.Host == "api.panoramax.xyz") return Json("""{"features":[]}""");
+            request.RequestUri.Host.Should().Be("api.openstreetcam.org");
             radii.Add(System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query)["radius"]!);
             return Json("""{"result":{"data":[]}}""");
         });
 
         var result = await service.FindNearAsync(Lat, Lon);
 
+        hosts.Should().Equal("api.panoramax.xyz", "api.openstreetcam.org", "api.panoramax.xyz", "api.openstreetcam.org");
         radii.Should().Equal("60", "250");
         result.Images.Should().BeEmpty();
     }
@@ -174,13 +178,61 @@ public sealed class StreetLevelImageryServiceTests
         (await service.GetSceneAsync(Lat, Lon, "1002"))!.Current.Id.Should().Be("1002");
     }
 
-    [Fact]
-    public async Task GetSceneAsync_WithoutAToken_ShouldReturnNothing_WithoutCallingOut()
-    {
-        var service = Create("", _ => throw new InvalidOperationException("no request expected"));
+    // Panoramax (key-less, 13-11-26): 360° pictures only, ids prefixed "px-", the "sd" picture served.
+    private const string PanoramaxPano = "11111111-2222-3333-4444-555555555555";
+    private const string PanoramaxFlat = "66666666-7777-8888-9999-000000000000";
 
-        (await service.GetSceneAsync(Lat, Lon)).Should().BeNull();
-        service.HasPanoramaSource.Should().BeFalse();
+    private static string PanoramaxJson(double lat, double lon) =>
+        "{\"features\":[" +
+        "{\"id\":\"" + PanoramaxPano + "\",\"geometry\":{\"coordinates\":[" + Inv(lon) + "," + Inv(lat) + "]},\"properties\":{\"datetime\":\"2025-07-25T09:04:14+00:00\",\"view:azimuth\":123,\"pers:interior_orientation\":{\"field_of_view\":360}},\"assets\":{\"sd\":{\"href\":\"https://panoramax.example/sd.jpg\"}}}," +
+        "{\"id\":\"" + PanoramaxFlat + "\",\"geometry\":{\"coordinates\":[" + Inv(lon) + "," + Inv(lat + 0.0001) + "]},\"properties\":{\"pers:interior_orientation\":{\"field_of_view\":70}},\"assets\":{\"thumb\":{\"href\":\"https://panoramax.example/thumb.jpg\"}}}" +
+        "]}";
+
+    private static string Inv(double value) => value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    [Fact]
+    public async Task GetSceneAsync_WithoutAToken_ShouldUsePanoramax()
+    {
+        var service = Create("", request => request.RequestUri!.Host == "api.panoramax.xyz"
+            ? Json(PanoramaxJson(Lat, Lon))
+            : throw new InvalidOperationException("only Panoramax expected"));
+
+        var scene = await service.GetSceneAsync(Lat, Lon);
+
+        scene!.Current.Id.Should().Be("px-" + PanoramaxPano);
+        scene.Current.CompassAngle.Should().Be(123);
+        scene.Current.CapturedAt.Should().Be(new DateTimeOffset(2025, 7, 25, 9, 4, 14, TimeSpan.Zero));
+    }
+
+    [Fact]
+    public void Panoramax_ShouldKeepOnly360PicturesAsPanoramas_ButOfferEveryPictureAsAPhoto()
+    {
+        StreetLevelImageryService.ParsePanoramaxPanoramas(PanoramaxJson(Lat, Lon), Lat, Lon, 250).Should().ContainSingle();
+        StreetLevelImageryService.ParsePanoramaxPhotos(PanoramaxJson(Lat, Lon), Lat, Lon, 250).Select(p => p.ImageUrl)
+            .Should().Equal("https://panoramax.example/sd.jpg", "https://panoramax.example/thumb.jpg");
+        StreetLevelImageryService.PanoramaxImageUrl(PanoramaxJson(Lat, Lon)).Should().Be("https://panoramax.example/sd.jpg");
+    }
+
+    [Theory]
+    [InlineData("1001", true)]
+    [InlineData("px-" + PanoramaxPano, true)]
+    [InlineData("px-not-a-guid", false)]
+    [InlineData("../etc", false)]
+    [InlineData("", false)]
+    public void IsPanoramaId_ShouldAcceptOnlyMapillaryAndPanoramaxIds(string id, bool ok) =>
+        StreetLevelImageryService.IsPanoramaId(id).Should().Be(ok);
+
+    [Fact]
+    public async Task GetPanoramaImageAsync_ShouldFetchAPanoramaxPictureWithoutAToken()
+    {
+        var service = Create("", request => request.RequestUri!.Host switch
+        {
+            "api.panoramax.xyz" => Json(PanoramaxJson(Lat, Lon)),
+            _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([7]) { Headers = { ContentType = new("image/jpeg") } } }
+        });
+
+        (await service.GetPanoramaImageAsync("px-" + PanoramaxPano))!.Value.Content.Should().Equal(7);
+        (await service.GetPanoramaImageAsync("1001")).Should().BeNull("Mapillary ids need its token");
     }
 
     [Fact]

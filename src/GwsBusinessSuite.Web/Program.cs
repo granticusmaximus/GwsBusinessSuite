@@ -72,6 +72,8 @@ SerilogBootstrapper.Configure(builder);
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.Configure<TurnstileOptions>(builder.Configuration.GetSection(TurnstileOptions.SectionName));
 builder.Services.AddHttpClient<TurnstileService>(client => client.Timeout = TimeSpan.FromSeconds(10));
+// Overwatch's key-less terrain tiles (OverwatchTerrain).
+builder.Services.AddHttpClient("terrain-tiles", client => client.Timeout = TimeSpan.FromSeconds(15));
 
 builder.Services.AddOptions<DatabaseBackupOptions>()
     .Bind(builder.Configuration.GetSection(DatabaseBackupOptions.SectionName));
@@ -3832,15 +3834,28 @@ app.MapGet("/admin/api/cms/{siteSlug}/export.zip", async (
 // page itself; the store only resolves exact frame file names, and the bytes are served only when
 // they really are a raster image (some cameras send PNG under the .jpg name), never as anything a
 // browser could execute.
-// Overwatch's own street view: one 360° panorama picture, fetched from Mapillary by the server so
-// the access token stays here. Same-origin, so the WebGL viewer can use it as a texture.
+// Overwatch's key-less 3D terrain (13-11-26): one elevation tile from the open Terrain Tiles on AWS
+// (Terrarium PNGs, free, no key). Proxied because that bucket sends no CORS headers, so the globe
+// couldn't read the pixels otherwise. Only whole tile coordinates up to zoom 14 are passed on.
+app.MapGet("/admin/api/overwatch/terrain/{z:int}/{x:int}/{y:int}", async (int z, int x, int y,
+    IHttpClientFactory clients, HttpContext context, CancellationToken cancellationToken) =>
+{
+    if (!GwsBusinessSuite.Web.OverwatchTerrain.IsTile(z, x, y)) return Results.NotFound();
+    using var response = await clients.CreateClient("terrain-tiles").GetAsync(GwsBusinessSuite.Web.OverwatchTerrain.TileUrl(z, x, y), cancellationToken);
+    if (!response.IsSuccessStatusCode || response.Content.Headers.ContentType?.MediaType != "image/png") return Results.NotFound();
+    context.Response.Headers.CacheControl = "private, max-age=2592000";
+    return Results.File(await response.Content.ReadAsByteArrayAsync(cancellationToken), "image/png");
+}).RequireAuthorization("AdminOnly");
+
+// Overwatch's own street view: one 360° panorama picture, fetched from Panoramax (or Mapillary, with
+// its token) by the server so any token stays here. Same-origin, so the WebGL viewer can use it as a texture.
 app.MapGet("/admin/api/overwatch/streetview/{panoramaId}", async (
     string panoramaId,
     GwsBusinessSuite.Application.CameraIntel.StreetLevelImageryService streetView,
     HttpContext context,
     CancellationToken cancellationToken) =>
 {
-    if (panoramaId.Length is 0 or > 32 || !panoramaId.All(char.IsAsciiDigit)) return Results.NotFound();
+    if (!GwsBusinessSuite.Application.CameraIntel.StreetLevelImageryService.IsPanoramaId(panoramaId)) return Results.NotFound();
     var image = await streetView.GetPanoramaImageAsync(panoramaId, cancellationToken);
     if (image is not { } found) return Results.NotFound();
     context.Response.Headers.CacheControl = "private, max-age=86400";

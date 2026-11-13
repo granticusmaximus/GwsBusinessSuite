@@ -38,6 +38,9 @@ services:
       # Optional live internet research for SentinelGPT. Keep the actual key in the
       # gitignored .env file as OLLAMA_WEB_API_KEY, never in this Compose file.
       OllamaWeb__ApiKey: ${OLLAMA_WEB_API_KEY:-}
+      # Key-less web search for SentinelGPT (13-11-26): a self-hosted SearXNG on the AI droplet's
+      # private address (scripts/setup-searxng.sh), set as SEARXNG_URL in the gitignored .env.
+      OllamaWeb__SearxngUrl: ${SEARXNG_URL:-}
       # SentinelGPT reach (05-11-26), all optional: each unlocks more on one channel (ReachOptions).
       # Kept as GitHub secrets and written to .env by the "Sync droplet .env keys" workflow.
       Reach__GitHubToken: ${REACH_GITHUB_TOKEN:-}

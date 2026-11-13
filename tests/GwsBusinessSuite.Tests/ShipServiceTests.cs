@@ -106,4 +106,65 @@ public sealed class ShipServiceTests
         public void Advance(TimeSpan by) => now += by;
         public override DateTimeOffset GetUtcNow() => now;
     }
+
+    // Key-less ships (13-11-26): Finland's open AIS for the Baltic.
+    private const string OpenAisLocations = """
+        {"type":"FeatureCollection","features":[
+          {"mmsi":230938570,"type":"Feature","geometry":{"type":"Point","coordinates":[22.166663,60.4406]},
+           "properties":{"mmsi":230938570,"sog":12.5,"cog":191.6,"heading":511,"timestampExternal":1794583015720}},
+          {"mmsi":230000001,"type":"Feature","geometry":{"type":"Point","coordinates":[24.9,60.1]},
+           "properties":{"mmsi":230000001,"sog":102.3,"cog":360,"heading":90,"timestampExternal":1794583015720}}
+        ]}
+        """;
+
+    private const string OpenAisVessels = """[{"mmsi":230938570,"name":"VIKING GRACE   ","shipType":60,"destination":"TURKU"}]""";
+
+    [Fact]
+    public void OpenAis_ShouldReadPositionsWithNamesAndDropNotAvailableValues()
+    {
+        var vessels = ShipService.ParseOpenAisVessels(OpenAisVessels);
+        var ships = ShipService.ParseOpenAisLocations(OpenAisLocations, vessels, DateTimeOffset.FromUnixTimeMilliseconds(1794583015720).AddMinutes(-30));
+
+        ships.Should().HaveCount(2);
+        var viking = ships.Single(ship => ship.Mmsi == 230938570);
+        viking.Name.Should().Be("VIKING GRACE");
+        viking.Destination.Should().Be("TURKU");
+        viking.Latitude.Should().Be(60.4406);
+        viking.SpeedKnots.Should().Be(12.5);
+        viking.HeadingDegrees.Should().BeNull("511 means no heading");
+        var unnamed = ships.Single(ship => ship.Mmsi == 230000001);
+        unnamed.Name.Should().Be("230000001");
+        unnamed.SpeedKnots.Should().BeNull("102.3 knots means not available");
+        unnamed.CourseDegrees.Should().BeNull("360 means not available");
+    }
+
+    [Fact]
+    public async Task WithoutAKey_ShouldShowBalticShipsFromOpenAis_AndExplainElsewhere()
+    {
+        var asked = new List<string>();
+        var http = new HttpClient(new StubHandler(request =>
+        {
+            asked.Add(request.RequestUri!.AbsolutePath);
+            var body = request.RequestUri.AbsolutePath.EndsWith("/vessels", StringComparison.Ordinal) ? OpenAisVessels : OpenAisLocations;
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(body) };
+        }));
+        var clock = new ManualClock(DateTimeOffset.FromUnixTimeMilliseconds(1794583015720).AddMinutes(1));
+        using var service = new ShipService(null, NullLogger<ShipService>.Instance, clock, http);
+
+        var baltic = await service.GetAsync(new BoundingBox(North: 61, South: 59, East: 26, West: 21));
+        baltic.Ships.Select(ship => ship.Name).Should().BeEquivalentTo("VIKING GRACE", "230000001");
+        baltic.Note.Should().BeNull();
+        (await service.GetAsync(new BoundingBox(North: 61, South: 59, East: 26, West: 21))).Ships.Should().HaveCount(2);
+        asked.Should().HaveCount(2, "the snapshot is reused within a minute");
+
+        var elsewhere = await service.GetAsync(new BoundingBox(North: 33, South: 31, East: -80, West: -82));
+        elsewhere.Ships.Should().BeEmpty();
+        elsewhere.Note.Should().Contain("Baltic");
+    }
+
+    private sealed class StubHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(respond(request));
+    }
 }
